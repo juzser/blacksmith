@@ -1,0 +1,26 @@
+{
+  "name": "__PROJECT_NAME__",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scaffolded from black-smith's stack standard (docs/standards/stack.md).",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check ."
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@types/node": "26.1.2",
+    "@vitest/coverage-v8": "4.1.10",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

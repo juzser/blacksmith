@@ -1,0 +1,23 @@
+{
+  "$schema": "https://black-smith.dev/schema/mcp-manifest.schema.json",
+  "name": "__PROJECT_NAME__",
+  "version": "0.0.0",
+  "protocolRevision": "2025-11-25",
+  "transport": {
+    "kind": "stdio"
+  },
+  "tools": [
+    {
+      "name": "project_health",
+      "title": "Project health",
+      "description": "Report this project's MCP surface: server name, version, pinned protocol revision, and — with verbose — the declared tool surface. Reads no project state and no credentials.",
+      "mutation": "read-only",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

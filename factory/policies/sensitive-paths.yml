@@ -1,0 +1,148 @@
+# Sensitive claim paths — the security-reviewer's dispatch trigger.
+#
+# The security-reviewer is conditional dispatch only (agent-constraints.md:
+# security-reviewer). Trigger 1 of its three is "the task's claims intersect
+# sensitive paths", and until this file existed that intersection was a
+# judgment call made fresh on every dispatch — which is the same as saying
+# some tasks got a security review because the dispatcher happened to
+# recognise the path, and others did not (agent-interviews.md N-7).
+#
+# Scope note: this file is about *paths*. crosscheck.yml's `security_keywords`
+# is about *nonfunctional clause text* and gates plan quorum, not
+# security-reviewer dispatch. Two different questions, deliberately two lists —
+# a task can claim `src/auth/**` without writing the word "auth" anywhere in
+# its clauses, and that is exactly the task worth catching.
+#
+# HOST: `smith security triggers --task <spec.json>` reads this file and
+# returns the triggers that fired, with the claim and the glob that fired each
+# one (factory/orchestrator/src/security.ts, punch list P9-4). The dispatcher
+# in `.claude/skills/bs/SKILL.md` runs that verb rather than eyeballing the
+# list. Match semantics live with the host; the two rules worth knowing before
+# editing globs below are stated inline.
+
+version: 1
+
+# Matched against a task spec's `claims[]` globs, not against the diff: the
+# review is dispatched before the diff is judged, and a claim is the earliest
+# honest signal that a task is allowed to touch one of these paths.
+#
+# Match semantics: a task fires the trigger when any of its claims *overlaps*
+# any glob here — not when it is contained by one. A claim of `src/**` overlaps
+# `src/auth/**` and must fire, even though it is the wider pattern.
+# Containment-only matching is the failure mode where a broadly scoped task
+# escapes the review that a narrowly scoped one gets. The direct consequence:
+# an open-ended `<dir>/**` claim fires most of the directory globs below,
+# because such a task really could add `<dir>/auth/session.ts` tomorrow.
+#
+# Every directory entry (`**/auth/**`) needs a file-level sibling
+# (`**/*auth*.{ts,...}`), because half the real world puts the whole concern in
+# one file: `src/parse.ts`, not `src/parse/index.ts`. Measured on a real epic,
+# the directory-only version of this list scored one hit for six tasks, and the
+# one hit was the wrong one (dogfood-envkit-findings.md D-25).
+globs:
+  # Authentication, authorization, session handling. `*auth*` also catches
+  # `oauth`, and `authors.ts` in a blog — firing on a false friend costs one
+  # review; missing `src/auth.ts` costs the review that mattered.
+  - "**/auth/**"
+  - "**/authn/**"
+  - "**/authz/**"
+  - "**/*auth*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/session/**"
+  - "**/*session*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/middleware/**"
+  - "**/*middleware*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/guard*/**"
+  - "**/*guard*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/permission*/**"
+  - "**/*permission*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/*rbac*"
+
+  # Secrets, keys, credentials, and the config surfaces that carry them.
+  - "**/secret*/**"
+  - "**/*secret*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/credential*/**"
+  - "**/*credential*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/*.env*" # matched with dot:true, so a bare `.env` fires
+  - "**/config/secrets*"
+  - "**/keys/**"
+  - "**/*keystore*"
+
+  # Cryptography — including "helpers" wrapping a library, which is where the
+  # mistakes actually live.
+  - "**/crypto/**"
+  - "**/*crypt*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/*hash*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/*signature*"
+  - "**/*jwt*"
+
+  # Input parsing and deserialization — the untrusted-data boundary.
+  # `*parse*`, not `*parser*`: the file that exists is `src/parse.ts`.
+  - "**/parse*/**"
+  - "**/*parse*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/serializ*/**"
+  - "**/deserializ*/**"
+  - "**/*serializ*.{ts,tsx,js,jsx,py,go,rs,rb,java}" # also catches deserialize*
+  - "**/upload*/**"
+  - "**/*upload*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/sanitiz*/**"
+  - "**/*sanitiz*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/validat*/**"
+  - "**/*validat*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+
+  # Network boundary — anything that accepts or originates a request.
+  - "**/api/**"
+  - "**/routes/**"
+  - "**/*route*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/handlers/**"
+  - "**/*handler*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/controllers/**"
+  - "**/*controller*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/graphql/**"
+  - "**/*graphql*"
+  - "**/webhook*/**"
+  - "**/*webhook*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/cors*"
+
+  # Data access — injection surface and the blast radius of a bad query.
+  - "**/migrations/**"
+  - "**/*migration*.{ts,tsx,js,jsx,py,go,rs,rb,java,sql}"
+  - "**/*.sql"
+  - "**/db/**"
+  - "**/repositor*/**"
+  - "**/*repositor*.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+
+  # Process and supply-chain boundary. Lockfiles are listed three ways because
+  # `**/*.lock` alone misses `pnpm-lock.yaml` and `package-lock.json` — the
+  # lockfiles a JS project actually has.
+  - "**/Dockerfile*"
+  - "**/.github/workflows/**"
+  - "**/*.lock"
+  - "**/*.lockb"
+  - "**/*lock*.{yaml,json}"
+  - "**/package.json" # a dependency bump is a supply-chain event; kept whole until a host can read the diff
+  - "**/scripts/**"
+
+# Paths that match a glob above but are not worth a security review. Kept
+# short on purpose: every entry here is a hole, and a long exclusion list is
+# how a trigger quietly stops firing.
+#
+# Exclusions are checked after globs and are *containment*, not overlap: a
+# claim is silenced only when it lies entirely inside one of these. Overlap
+# would let `**/*.test.ts` silence `src/**`, which is the same escape hatch the
+# match semantics above exist to close.
+exclude:
+  - "**/*.test.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/*.spec.{ts,tsx,js,jsx,py,go,rs,rb,java}"
+  - "**/__tests__/**"
+  - "**/*.md"
+  - "**/*.snap"
+
+# The other two triggers, recorded here so the whole dispatch condition reads
+# from one file even though only the first is path-based.
+other_triggers:
+  # taxonomy.yml `case` vocabulary, matched against the task spec's own `case`
+  # — the only place a case is recorded today. Read under the older
+  # `epic_cases` spelling too.
+  cases: [infra]
+  epic_tags: [security] # a security-tagged epic reviews every task; operator-supplied, nothing in the schema carries tags yet
+  scheduled_recheck: true # scheduler.yml may re-open a sensitive claim path

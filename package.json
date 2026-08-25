@@ -1,0 +1,58 @@
+{
+  "name": "black-smith",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Autonomous agent factory — loop runner and worktree engine.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "smith": "factory/orchestrator/dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "biome check .",
+    "build:server": "pnpm build && tsc -p ui/server/tsconfig.json",
+    "typecheck:server": "tsc -p ui/server/tsconfig.test.json",
+    "test:server": "pnpm build:server && vitest run --config ui/server/vitest.config.ts",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "dev:ui": "vite --config ui/vite.config.ts",
+    "typecheck:ui": "tsc -p ui/tsconfig.json",
+    "typecheck:ui:test": "tsc -p ui/tsconfig.test.json",
+    "test:ui": "vitest run --config ui/vitest.config.ts",
+    "test:e2e": "pnpm build:server && pnpm build:ui && playwright test --config ui/playwright.config.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.0.12",
+    "@vue-flow/core": "1.48.2",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "better-sqlite3": "13.0.2",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.12.34",
+    "picomatch": "4.0.5",
+    "vue": "3.5.40",
+    "vue-router": "5.2.0",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.6",
+    "@playwright/test": "1.62.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "26.1.2",
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vitest/coverage-v8": "4.1.10",
+    "drizzle-kit": "0.31.10",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.2.0",
+    "vitest": "4.1.10"
+  }
+}

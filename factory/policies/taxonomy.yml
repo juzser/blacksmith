@@ -1,0 +1,311 @@
+# Black Smith — controlled vocabulary (taxonomy)
+#
+# Machine-readable source of truth. Mirrors docs/specs/black-smith-architecture.md
+# §8 value-for-value; if they diverge, that is a bug — fix both in the same PR.
+#
+# Closed, versioned, multi-dimension controlled vocabulary. Every event, task,
+# error, finding, and lesson carries tags from these dimensions; the event
+# logger rejects unknown tags at write time so analytics stay aggregatable
+# across months of runs. Changing the taxonomy is a PR that bumps `version` —
+# never a runtime write. Analytics may group only by taxonomy dimensions.
+
+version: 5
+
+# ── Work classification ─────────────────────────────────────────────
+case:      [feature, bugfix, refactor, research, spec-review, recheck,
+            chore, infra]
+origin:    [user, inferred, recheck, lesson, escalation]
+            # user      — operator asked for it
+            # inferred  — planner added it to protect acceptance criteria
+            # recheck   — scheduler re-opened a completed feature
+            # lesson    — an approved lesson demanded follow-up work
+            # escalation— created by the escalation ladder (e.g. re-scope)
+
+# ── Actors ──────────────────────────────────────────────────────────
+agent:     [planner, spec-reviewer, researcher, coder, tester, grader,
+            reviewer, verifier, security-reviewer, merger, scribe, uiux]
+provider:  [claude, codex, deepseek]
+model_tier: [frontier, mid, small]        # fable/opus · sonnet · haiku
+
+# ── Lifecycle (three distinct state machines — never conflated) ─────
+task_status: [todo, ready, in-progress, grading, reviewing, merging,
+              blocked, completed, waived, failed, escalated, superseded]
+              # superseded — replaced by a task in a newer plan version
+plan_status: [draft, in-review, active, superseded]   # plans are immutable
+run_status:  [queued, running, done, dead]            # one worker run
+
+# ── Graph (event-log first-class, §7) ───────────────────────────────
+edge_type:       [artifact, claim-order, spec-clause, regression-test,
+                  research-brief]
+                  # artifact       — T consumes an output S produced
+                  # claim-order    — serialized because claims overlapped
+                  # spec-clause    — T implements a specific spec clause
+                  # regression-test— T must keep S's tests green
+                  # research-brief — T depends on a researcher brief
+edge_provenance: [observed, declared, inferred]
+                  # observed — runner saw the handoff happen
+                  # declared — spec stated it up front
+                  # inferred — reconstructed after the fact (lowest trust)
+graph_event:     [plan-version-created, plan-version-superseded,
+                  task-added, task-split, task-superseded, edge-recorded,
+                  wave-admitted, wave-merged]
+
+# ── Gates (event-log first-class, §11 — added Phase 4) ───────────────
+gate_event:      [schema-check-result, artifact-check-result,
+                  commit-check-result, deps-check-result,
+                  judges-outstanding, grader-verdict, budget-check-result,
+                  testgate-result, coverage-evidence, integration-check,
+                  spec-review-recorded, quorum-decision, finding-raised,
+                  finding-reverified, finding-suppressed, finding-transitioned,
+                  finding-reattributed, severity-decisions, waiver-granted,
+                  waiver-denied, gate-outcome]
+                  # schema-check-result — task Result vs result.schema.json
+                  # artifact-check-result — every artifacts[].path in that
+                  #                       Result, resolved against the task's
+                  #                       home under state/artifacts/ and
+                  #                       checked to exist. Emitted even when
+                  #                       the task declared none: a check that
+                  #                       only speaks up when it has something
+                  #                       to say is indistinguishable, later,
+                  #                       from a check that never ran (P9-22)
+                  # commit-check-result — is there a commit here to score? the
+                  #                       worktree is clean and its branch is
+                  #                       ahead of the base (D-30, P9-8)
+                  # deps-check-result   — the worktree owns the toolchain its
+                  #                       checks are about to run (P9-16d);
+                  #                       always logged, including when the
+                  #                       project declares nothing to install
+                  # judges-outstanding  — a judge this task dispatched through
+                  #                       `smith judge dispatch` never reported
+                  #                       back, so the gate refuses to score an
+                  #                       unknown: a missing `--evidence` reads
+                  #                       identically whether the judge found
+                  #                       nothing or died mid-turn. Names each
+                  #                       owed role/round. A task that
+                  #                       dispatched no judges is unaffected —
+                  #                       this refuses only where there is a
+                  #                       promise on record (D-31/D-20, P9-11)
+                  # grader-verdict      — the grader's rubric result vs
+                  #                       grader-verdict.schema.json, and
+                  #                       whether the acceptance criteria were
+                  #                       met. Runs BEFORE the test gate: a
+                  #                       not-met rubric bounces the diff
+                  #                       whatever the suite says (D-34)
+                  # budget-check-result — declared caps vs measured spend:
+                  #                       token_usage off the Result, authored
+                  #                       diff lines off git. Recorded, never
+                  #                       blocking, and emitted even when the
+                  #                       plan declared no budget or the diff
+                  #                       could not be measured — "not-declared"
+                  #                       and "unmeasurable" are outcomes, not
+                  #                       silence (P9-18). "unmeasuredFiles"
+                  #                       names the counted paths git gave no
+                  #                       lines for, so a cap that passed on a
+                  #                       binary file's zero is auditable
+                  #                       (D-157)
+                  # testgate-result     — check-command run (test gate)
+                  # coverage-evidence   — the numbers behind the green: which
+                  #                       subject files the coverage summary
+                  #                       actually measured, and whether it is
+                  #                       complete. Emitted after the tests
+                  #                       pass and before the findings are
+                  #                       judged, because a green run that
+                  #                       cannot name a number for the file the
+                  #                       acceptance criterion is about has not
+                  #                       answered it (D-40, P9-25)
+                  # integration-check   — the check suite run at the PROJECT
+                  #                       ROOT against smith/<epic>/integration,
+                  #                       pinned to the head sha it covers.
+                  #                       Every other gate event above is a
+                  #                       claim about a task worktree; this is
+                  #                       the only one about the assembled
+                  #                       branch, and epic verdict holds
+                  #                       without a current passing one (D-42)
+                  # spec-review-recorded— a spec-reviewer dispatch finished,
+                  #                       pinned to the head sha it read.
+                  #                       Recorded even when it found nothing,
+                  #                       so "ran and was clean" is
+                  #                       distinguishable from "never ran"
+                  # quorum-decision     — one cross-provider quorum case closed:
+                  #                       who voted, on what, and whether the
+                  #                       finding survived. Emitted exactly once
+                  #                       per case, including when the case
+                  #                       could not be decided — an
+                  #                       `insufficient-providers` outcome is a
+                  #                       recorded fact, not an absent one. Runs
+                  #                       over findings at the task gate
+                  #                       (gate.ts) and over plan-cut and
+                  #                       epic-close verdicts (planQuorum.ts,
+                  #                       epic.ts)
+                  # finding-raised      — a new finding entered the log
+                  # finding-reverified  — a human re-read an open finding
+                  #                       against the current code. Not a
+                  #                       finding_status change: `confirmed`
+                  #                       cannot be re-entered and `refuted`
+                  #                       means the finding was wrong, so
+                  #                       "still reproduces" needs an event of
+                  #                       its own. It re-dates the finding's
+                  #                       evidence, which is what clears the
+                  #                       stale-evidence bar on a waiver grant
+                  #                       once a wave has merged over its file
+                  #                       (P9-15)
+                  # finding-suppressed  — raise attempt matched a waived
+                  #                       fingerprint; logged, not appended
+                  #                       as a duplicate raised finding
+                  # finding-transitioned— finding_status state change
+                  # finding-reattributed— the finding moved to the task that
+                  #                       owns the file, or to a follow-up task
+                  #                       minted for it when nobody open could
+                  #                       take it. Without this event the log
+                  #                       shows a finding sitting under a task
+                  #                       that was never gated, and no trace of
+                  #                       how it got there (attribution.ts)
+                  # severity-decisions  — gate.ts's per-finding severity
+                  #                       verdicts for one task (block /
+                  #                       waiver-batch / log-only)
+                  # waiver-granted/-denied — operator waiver-batch answer,
+                  #                       keyed by finding fingerprint
+                  # gate-outcome        — the composed gate pipeline's
+                  #                       final structured result
+
+# ── Errors: grouped two-level classes (always logged as group.class) ─
+error:
+  spec:         [spec-gap, spec-ambiguity, spec-conflict,
+                 missing-nonfunctional]
+                 # missing-nonfunctional — security/validation/authz clause
+                 # absent from the contract (implicit clauses get dropped)
+  contract:     [schema-violation, claim-violation, constraint-decay,
+                 write-root-violation, judge-mutation, uncited-claim,
+                 unsourced-recommendation, uncommitted-work]
+                 # constraint-decay — agent stopped honoring a standing
+                 # architectural constraint mid-epic
+                 # write-root-violation — a role that works outside a worktree
+                 # (planner, scribe) wrote outside its declared write root
+                 # (P9-3); shipped as a code before it was a class
+                 # judge-mutation — a read-only judge moved the worktree it
+                 # was judging (P9-5, `smith worktree verify`)
+                 # uncited-claim — a researcher finding with no citation, or a
+                 # citation that is neither a repo path with a line number nor
+                 # a URL actually fetched (P9-6, `smith research check`)
+                 # unsourced-recommendation — a brief's recommendation names no
+                 # finding, or names one the brief does not carry, so what came
+                 # from fetched text is invisible (P9-6)
+                 # uncommitted-work — a task reported done with work still in
+                 # the working tree, or with a branch head no further along
+                 # than the base it was cut from; the gate scored a worktree
+                 # the queue would have merged as a no-op (D-30, P9-8)
+  execution:    [test-failure, regression, flaky-test, tool-failure,
+                 env-failure]
+                 # regression — previously-passing behavior broken (the
+                 # dominant multi-round failure mode)
+  integration:  [merge-conflict-textual, merge-conflict-semantic,
+                 stack-misorder]
+                 # semantic — textually clean merge, broken behavior
+  economy:      [budget-exceeded, diff-cap-exceeded, over-engineering,
+                 context-overrun]
+  judgment:     [hallucination, false-positive-finding, missed-finding,
+                 reward-hacking, same-mistake, provider-disagreement]
+                 # reward-hacking — letter of the tests, spirit of nothing
+  coordination: [deadlock, livelock, starvation]
+  memory:       [lesson-contamination, lesson-stale, poisoning-suspected]
+
+# ── Review ──────────────────────────────────────────────────────────
+finding_category: [correctness, security, a11y, performance, visual-hds,
+                   behavioral-drift, test-coverage, over-engineering,
+                   maintainability]
+                   # behavioral-drift — changed input validation / error
+                   # handling relative to surrounding code; invisible to
+                   # static metrics, the measured driver of agent-code debt
+finding_scope:    [diff, spec]
+                   # diff — the code is wrong; the fix belongs in a task diff
+                   # spec — the code is right and the PLAN is wrong. Routed to
+                   # the planner and the operator, never to the task gate:
+                   # blocking a diff that cannot legally contain the fix is
+                   # the D-33 deadlock. A finding written before this
+                   # dimension existed carries no scope and reads as `diff`.
+finding_status:   [raised, refuted, confirmed, fix-pending, fix-landed,
+                   fix-verified, waived, expired, amend-pending, amended]
+                   # closes only at fix-verified, waived or amended — a review
+                   # that fired without uptake is not a closed finding
+                   # amended — a spec finding whose criterion moved in a new
+                   # plan version. Spec-scoped only, and the one exit for an
+                   # S1/S2 spec finding, which is categorically unwaivable
+                   # amend-pending — that plan version has been cut and cites
+                   # the finding, but the task ids the amendment added or
+                   # superseded have not landed yet. A spec finding's
+                   # `fix-pending`, and reachable only from raised/confirmed.
+                   # Without it `amended` was reachable at plan-write time, so
+                   # the unwaivable class closed on a sentence (D-127)
+severity:         [S1-stop-the-line, S2-major, S3-minor, S4-nit]
+                   # S1 — repo corruption, secret leak, guardrail breach
+                   # S2 — blocks merge (security/data-loss, broken core
+                   #      flow, a11y AA failure, new flaky test)
+                   # S3 — real but waivable; batched to operator at epic end
+                   # S4 — nits below Biome's radar; logged, never asked
+
+# ── Lessons / memory (typed — one type per entry, never mixed) ──────
+lesson_type:   [fact, event, rule]
+                # fact  — stable truth about a repo/stack ("D1 lacks X")
+                # event — dated occurrence ("epic-7 hit deadlock via Y")
+                # rule  — imperative, checkable principle ("never edit
+                #         lockfiles in workers")
+lesson_level:  [principle]     # instance-level (transcript) entries are
+                               # rejected at the gate — they cause
+                               # capability collapse when accumulated
+lesson_status: [candidate, novelty-rejected, pending-approval, approved,
+                superseded, invalidated]
+lesson_scope:  [agent-role, claim-path, case-type, stack-wide, security]
+                               # `security` cuts across roles: coder, reviewer
+                               # and security-reviewer all want the same auth
+                               # lesson, so it is not an agent-role lesson
+
+# ── Dimension rules (§8 "Dimension rules", normative) ────────────────
+# 1. Required dimensions per record type (validated at write):
+#      task     -> case + origin + task_status
+#      dispatch -> agent + provider + model_tier + model
+#                  `model` is the concrete model id, presence-checked only,
+#                  NOT a closed dimension: model names change monthly and a
+#                  frozen enum would reject next month's model or, worse,
+#                  get the field dropped instead. The tier alone can't
+#                  answer "did the critic run on the finder's model?" —
+#                  opus and fable are both `frontier` (P9-23).
+#      error    -> error(group.class) + severity + task ref
+#      finding  -> finding_category + severity + finding_status
+#      lesson   -> lesson_type + lesson_level + lesson_status + lesson_scope
+#                  + provenance event ids
+#      edge     -> edge_type + edge_provenance
+# 2. One value per dimension — a record needing two values is two records
+#    or a wrongly-cut dimension; fix the taxonomy by PR, don't overload tags.
+# 3. Renames are supersessions — a value is never deleted or renamed in
+#    place; it's marked deprecated in this file with a `superseded_by`, so
+#    old events stay queryable.
+rules:
+  required_dimensions:
+    task:
+      - case
+      - origin
+      - task_status
+    dispatch:
+      - agent
+      - provider
+      - model_tier
+      - model
+    error:
+      - error
+      - severity
+      - task_ref
+    finding:
+      - finding_category
+      - severity
+      - finding_status
+    lesson:
+      - lesson_type
+      - lesson_level
+      - lesson_status
+      - lesson_scope
+      - provenance_event_ids
+    edge:
+      - edge_type
+      - edge_provenance
+  one_value_per_dimension: true
+  renames_are_supersessions: true

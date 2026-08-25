@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/mcp-manifest.schema.json",
+  "$comment": "Shape contract for a project's mcp.manifest.json. The verdict that gates epic close comes from checkManifest() in factory/orchestrator/src/mcp.ts, which reports stable rule ids (MCP-P1, MCP-T4, ...) from the numbered baseline in docs/standards/mcp.md; this schema is the shape half of the same contract and its descriptions name the rule each field serves. Rules that are not decidable from a declaration (MCP-P3 session independence, MCP-S1 output redaction, MCP-X5 state-handle binding, MCP-X6 SSRF blocks) are enforced in code, not here.",
+  "title": "MCP Manifest",
+  "description": "The single declaration of what a project's MCP surface exposes: its identity, its wire revision, its transport, and every tool with its mutation class, annotations, and operator sign-off. This file is the one place an operator reads to know what an agent can do with this project.",
+  "type": "object",
+  "required": ["name", "version", "protocolRevision", "transport", "tools"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MCP-P2. Server identity as reported in the initialize result; conventionally the project name."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+      "description": "MCP-P2. Semver. A client caches a tool surface against this, so bump it when the surface changes."
+    },
+    "protocolRevision": {
+      "type": "string",
+      "const": "2025-11-25",
+      "description": "MCP-P1. The pinned wire revision — what the Tier-1 TypeScript SDK actually negotiates, not the newest revision on paper. Moves to 2026-07-28 when the SDK ships it; see docs/standards/mcp.md 'Forward compatibility'."
+    },
+    "transport": {
+      "$ref": "#/$defs/transport"
+    },
+    "tools": {
+      "type": "array",
+      "description": "MCP-T5. Every tool the server registers, and nothing it does not. A server that can do more than this array admits makes the manifest a lie.",
+      "items": { "$ref": "#/$defs/tool" }
+    }
+  },
+  "$defs": {
+    "transport": {
+      "description": "MCP-X1. stdio is the default and opens no port; http is a deliberate opt-in that must carry its own preconditions.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "stdio" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "access", "resourceServer"],
+          "properties": {
+            "kind": { "const": "http" },
+            "access": {
+              "type": "object",
+              "required": ["cloudflareAccess"],
+              "properties": {
+                "cloudflareAccess": {
+                  "const": true,
+                  "description": "MCP-X2. Cloudflare Access in front, per stack.md: nothing is exposed beyond localhost without it."
+                }
+              }
+            },
+            "resourceServer": {
+              "type": "object",
+              "description": "MCP-X3/X4. The server is an OAuth 2.0 protected resource, and says so precisely enough to be checkable.",
+              "required": [
+                "canonicalUri",
+                "authorizationServers",
+                "resourceIndicators",
+                "tokenPassthrough"
+              ],
+              "properties": {
+                "canonicalUri": {
+                  "type": "string",
+                  "pattern": "^https://",
+                  "description": "MCP-X3. The canonical resource URI. This is the token audience — every accepted token must name it."
+                },
+                "authorizationServers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string", "pattern": "^https://" },
+                  "description": "MCP-X3. Issuers this resource trusts. Validate the returned `iss` against these (RFC 9207) to close the mix-up attack."
+                },
+                "resourceIndicators": {
+                  "const": true,
+                  "description": "MCP-X3. RFC 8707 resource indicators are mandatory: they are what binds an issued token to this server rather than to whoever asks next."
+                },
+                "tokenPassthrough": {
+                  "const": false,
+                  "description": "MCP-X4. Never allowed. The server MUST NOT accept any token that was not explicitly issued for it."
+                },
+                "scopes": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Least privilege. Wildcards ('*', 'all', 'full-access') defeat the point of asking."
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "required": ["name", "title", "description", "mutation", "annotations"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,63}$",
+          "description": "MCP-T5. snake_case, unique within the manifest. This is what an agent types."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-facing label, shown in consent prompts."
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the tool does, written for the agent deciding whether to call it."
+        },
+        "mutation": {
+          "enum": ["read-only", "write", "destructive", "outbound"],
+          "description": "MCP-T2. What this tool actually does to the world. read-only is the default and the only class that needs no sign-off. The implementation passes this same class to requireDeclaredTool(), so a tool that quietly starts writing fails to boot instead of shipping under its old declaration."
+        },
+        "annotations": {
+          "type": "object",
+          "description": "MCP-T1/T2/T3. The hints an agent reads to decide whether a call is safe. They must agree with `mutation` — a read-only tool with destructiveHint true is a contradiction, not a nuance.",
+          "required": [
+            "readOnlyHint",
+            "destructiveHint",
+            "idempotentHint",
+            "openWorldHint"
+          ],
+          "properties": {
+            "readOnlyHint": { "type": "boolean" },
+            "destructiveHint": { "type": "boolean" },
+            "idempotentHint": { "type": "boolean" },
+            "openWorldHint": {
+              "type": "boolean",
+              "description": "MCP-T3. True when the tool reaches something outside this project's own state. Every outbound tool sets it."
+            }
+          }
+        },
+        "approval": {
+          "type": "object",
+          "description": "MCP-T4. Operator sign-off, required for every tool that is not read-only. A person decided, at the mcp surface milestone, that an agent may do this unattended.",
+          "required": ["operator", "date", "milestone"],
+          "properties": {
+            "operator": { "type": "string", "minLength": 1 },
+            "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+            "milestone": { "type": "string", "minLength": 1 }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "MCP-T1. read-only implies its own annotations.",
+          "if": {
+            "properties": { "mutation": { "const": "read-only" } },
+            "required": ["mutation"]
+          },
+          "then": {
+            "properties": {
+              "annotations": {
+                "properties": {
+                  "readOnlyHint": { "const": true },
+                  "destructiveHint": { "const": false },
+                  "openWorldHint": { "const": false }
+                }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "MCP-T4. Anything that is not read-only carries a sign-off.",
+          "if": {
+            "properties": { "mutation": { "not": { "const": "read-only" } } },
+            "required": ["mutation"]
+          },
+          "then": { "required": ["approval"] }
+        },
+        {
+          "$comment": "MCP-T2. A mutating tool must not advertise itself as safe.",
+          "if": {
+            "properties": {
+              "mutation": { "enum": ["write", "destructive", "outbound"] }
+            },
+            "required": ["mutation"]
+          },
+          "then": {
+            "properties": {
+              "annotations": {
+                "properties": { "readOnlyHint": { "const": false } }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "MCP-T2. destructive means destructive.",
+          "if": {
+            "properties": { "mutation": { "const": "destructive" } },
+            "required": ["mutation"]
+          },
+          "then": {
+            "properties": {
+              "annotations": {
+                "properties": { "destructiveHint": { "const": true } }
+              }
+            }
+          }
+        },
+        {
+          "$comment": "MCP-T3. outbound reaches beyond this project.",
+          "if": {
+            "properties": { "mutation": { "const": "outbound" } },
+            "required": ["mutation"]
+          },
+          "then": {
+            "properties": {
+              "annotations": {
+                "properties": { "openWorldHint": { "const": true } }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

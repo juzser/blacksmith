@@ -1,0 +1,2479 @@
+#!/usr/bin/env node
+// Thin CLI router: one subcommand per orchestrator module operation. No
+// framework — plain argv parsing. Logic lives in the modules; this file only
+// wires stdin/argv to them and prints JSON.
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { type ParsedArgs, parseArgs } from './args.js';
+import { recordReattribution, routeFindings } from './attribution.js';
+import { checkBudgetAlarm } from './budgetAlarm.js';
+import type { TaskBudget } from './budgets.js';
+import { loadBudgetPolicy } from './budgets.js';
+import {
+  type ClaimedTask,
+  loadWorktreePolicy,
+  type ProposedWaveTask,
+  postRunCheck,
+  validateWave,
+  writeRootCheck,
+} from './claims.js';
+import { collectCoverageEvidence } from './coverage.js';
+import { loadCrosscheckPolicy } from './crosscheck.js';
+import { apply as applyDb, type DbOpts, openDb, rebuild as rebuildDb } from './db/projector.js';
+import {
+  analytics,
+  errorsPage,
+  kanban,
+  lessonsPage,
+  overview,
+  providerAgreement,
+  roadmapPage,
+  taskDetail,
+  timeline,
+  timelineEventTypes,
+} from './db/queries.js';
+import { checkDispatchAsymmetry } from './dispatchAudit.js';
+import { loadEffortPolicy, resolveEffort } from './effort.js';
+import { closeEpic, runEpicVerdict } from './epic.js';
+import { SmithError } from './errors.js';
+import { checkEscalationLadder } from './escalation.js';
+import {
+  appendEvent,
+  type EventOpts,
+  filterEvents,
+  readLineageEvents,
+  requireSession,
+  sessionLineage,
+  tailEvents,
+} from './events.js';
+import { findingsForDispatch } from './findingContext.js';
+import type { EventContext, FindingEvidence, MintContext, RaiseFindingInput } from './findings.js';
+import {
+  AMEND_PENDING_STATUS,
+  AMENDED_STATUS,
+  findingScope,
+  listFindings,
+  mintFindings,
+  raiseFinding,
+  repairObligation,
+  reverifyFinding,
+  SPEC_FINDING_SCOPE,
+  transition as transitionFinding,
+} from './findings.js';
+import { runGate } from './gate.js';
+import {
+  checkWorktreeImmutable,
+  fingerprintWorktree,
+  type WorktreeFingerprint,
+} from './immutability.js';
+import { integrationHeadSha, runIntegrationCheck } from './integration.js';
+import {
+  outstandingJudges,
+  readJudgeTurns,
+  recordJudgeDispatch,
+  recordJudgeReport,
+} from './judges.js';
+import {
+  compileLessons,
+  dream,
+  lessonsForDispatch,
+  raiseLessonCandidate,
+  transitionLesson,
+} from './lessons.js';
+import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
+import { LESSONS_MD_PATH, REPO_ROOT, STATE_DB_PATH } from './paths.js';
+import {
+  diffPlans,
+  type PlanChanges,
+  type PlanFile,
+  type PlanOpts,
+  resolveTaskId,
+  validatePlan,
+} from './plan.js';
+import { runPlanQuorum } from './planQuorum.js';
+import { recordUserPrompt } from './prompts.js';
+import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
+import { runJudge } from './providers/index.js';
+import type { JudgeRequest } from './providers/types.js';
+import { admit, adopt, step } from './queue.js';
+import { stampResultEnvelope } from './results.js';
+import { checkRuntime } from './runtime.js';
+import { checkSameMistakeKpi } from './sameMistakeKpi.js';
+import { registerProjectInRoadmap, scaffoldProject } from './scaffold.js';
+import { computeProposals, loadSchedulerPolicy, runScheduler } from './scheduler.js';
+import {
+  loadSensitivePathsPolicy,
+  type SecurityTriggerTask,
+  securityTriggers,
+} from './security.js';
+import { parseLessons } from './severity.js';
+import { amendPlan, recordSpecReview } from './spec.js';
+import {
+  emitEdgesRecorded,
+  emitTasksAdded,
+  emitWaveAdmitted,
+  readAddedTasks,
+} from './taskEvents.js';
+import type { CheckCommand } from './testgate.js';
+import {
+  COMMANDS,
+  type CommandDoc,
+  flagSpecFor,
+  helpText,
+  isDocumented,
+  positionalNames,
+  usageFor,
+  usageLine,
+  usageText,
+} from './usage.js';
+import { applyBatch, pendingBatch, type WaiverBatchDecision } from './waivers.js';
+import {
+  createTaskWorktree,
+  listStale,
+  RESERVED_TASK_ID,
+  removeTaskWorktree,
+  taskBranchName,
+} from './worktree.js';
+
+function printJson(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value)}\n`);
+}
+
+function readJsonFile<T>(filePath: string): T {
+  return JSON.parse(readFileSync(filePath, 'utf8')) as T;
+}
+
+function requireFlag(flags: Record<string, string>, name: string): string {
+  const value = flags[name];
+  if (value === undefined) {
+    throw new SmithError('cli.missing-flag', `Missing required flag --${name}.`, { flag: name });
+  }
+  return value;
+}
+
+/**
+ * requireFlag for a flag that must parse as a number, so `--input-tokens abc`
+ * is named here rather than travelling as NaN into a token_usage the schema
+ * then rejects for the wrong reason.
+ */
+function requireIntFlag(flags: Record<string, string>, name: string): number {
+  const raw = requireFlag(flags, name);
+  const value = Number(raw);
+  if (!Number.isInteger(value)) {
+    throw new SmithError('cli.non-numeric-flag', `--${name} must be an integer, got "${raw}".`, {
+      flag: name,
+      value: raw,
+    });
+  }
+  return value;
+}
+
+/**
+ * requireIntFlag's optional twin, for a count that also has to be in range.
+ *
+ * D-210. `event tail --n` read its count with a bare Number.parseInt and
+ * checked nothing, which fails in both directions at once: `--n abc` is NaN,
+ * and `all.slice(Math.max(0, len - NaN))` is `slice(0)` -- the WHOLE log, from
+ * the verb whose usage line promises "the last n records" -- while `--n 0` and
+ * `--n -5` make the offset larger and print nothing, which is exactly the
+ * "your session is empty" answer P9-28 built requireSession to prevent.
+ *
+ * Number(), not parseInt(), for the reason `plan quorum --confidence` already
+ * documents for parseFloat: parseInt stops at the first character it cannot
+ * use and returns the prefix, so `--n 1e2` is 1 rather than 100, `--n 0x10` is
+ * 0, and `--port 8080abc` is 8080. Every one of those is a typo answered
+ * confidently with the wrong number instead of being named.
+ */
+function boundedIntFlag(
+  flags: Record<string, string>,
+  name: string,
+  range: { min: number; max?: number },
+): number | undefined {
+  const raw = flags[name];
+  if (raw === undefined) return undefined;
+  const value = Number(raw.trim() === '' ? Number.NaN : raw);
+  const max = range.max;
+  if (!Number.isInteger(value) || value < range.min || (max !== undefined && value > max)) {
+    const bound = max === undefined ? `at least ${range.min}` : `${range.min}-${max}`;
+    throw new SmithError(
+      'cli.invalid-flag',
+      `--${name} must be a whole number ${bound}, got "${raw}".`,
+      { flag: name, value: raw },
+    );
+  }
+  return value;
+}
+
+/**
+ * requireFlag's twin for positional arguments (P9-28).
+ *
+ * Every verb below used to take its positionals as `positional[0] as string` —
+ * a cast, which checks nothing. The `undefined` then travelled: into
+ * readFileSync, which blames a path argument rather than the argument you
+ * forgot; into git, run in an undefined directory; and worst, into a log read
+ * that returned `[]` and exited 0, so `smith event tail` with no session id
+ * reported success and an empty session. Flags have been checked since the
+ * first commit; positionals were not checked at all.
+ *
+ * The names come out of the command's documented positionals, so the error can
+ * name the argument that is missing AND print the line that would have worked,
+ * with no second list to drift out of sync. Since P9-21 that line comes from
+ * usage.ts rather than a literal typed here, which is what lets `--help` print
+ * the same text a mistake earns you.
+ *
+ * `required` is passed only where a verb needs fewer positionals than it
+ * documents — after P9-21 that is `wave check <plan.json> <task-id>...` alone,
+ * which checks the plan path here and keeps its own, better `cli.empty-wave`
+ * message for the variadic tail. The two other overrides died with the split:
+ * `worktree verify --before <fingerprint.json>` needed one because its flag's
+ * placeholder used to sit in the counted string.
+ *
+ * Surplus positionals stay accepted on purpose: `wave check` is variadic and
+ * `smith new` spends its first token on the project name, so an arity check
+ * would reject valid lines. Rejecting *unexpected* arguments is a different
+ * question from this one, and this is not it.
+ *
+ * An empty-string argument counts as missing: `smith gate run ""` is the same
+ * mistake as `smith gate run`, usually an unset shell variable, and the empty
+ * id would otherwise travel exactly as far as `undefined` did.
+ */
+function requirePositionals(positional: string[], doc: CommandDoc, required?: number): string[] {
+  const usage = usageLine(doc);
+  const names = positionalNames(doc);
+  const missing = names.slice(0, required ?? names.length).filter((_, i) => !positional[i]);
+  if (missing.length > 0) {
+    const which = missing.map((name) => `<${name}>`).join(' ');
+    throw new SmithError(
+      'cli.missing-positional',
+      `Missing required argument${missing.length > 1 ? 's' : ''} ${which}. Usage: ${usage}`,
+      { missing, usage },
+    );
+  }
+  return positional;
+}
+
+/**
+ * Every gate/findings/waivers command writes to the same session log, so they
+ * share this shape.
+ *
+ * `--plan-version` goes through boundedIntFlag (D-210's class): the bare
+ * `Number.parseInt` this replaced stamped `--plan-version 2.9` into the
+ * persisted envelope as plan 2, `9e9` as 9 and `3x` as 3, and the truthiness
+ * test in front of it turned an explicitly empty `--plan-version ""` into the
+ * default 1. Only `abc` ever reached the event schema, which then blamed the
+ * record for a malformed field rather than the flag that malformed it. This is
+ * the shared envelope for twenty-odd verbs and the number outlives the typo, so
+ * a fence read back tomorrow is the first place anyone would notice.
+ */
+function eventContextFromFlags(flags: Record<string, string>): EventContext {
+  return {
+    sessionId: requireFlag(flags, 'session'),
+    planVersion: boundedIntFlag(flags, 'plan-version', { min: 1 }) ?? 1,
+    causalParent: requireFlag(flags, 'causal-parent'),
+    actor: flags.actor,
+  };
+}
+
+/**
+ * `--state-dir` overrides the events log directory (defaults to the real
+ * state/events/ dir, unchanged, when the flag is absent) — lets tests
+ * exercise `event append`/`event tail` without littering the real state/
+ * dir across runs.
+ */
+function eventOptsFromFlags(flags: Record<string, string>): EventOpts {
+  return flags['state-dir'] ? { stateDir: flags['state-dir'] } : {};
+}
+
+/** Where plan version files are read from and written to; defaults to factory/specs/active. */
+function planOptsFromFlags(flags: Record<string, string>): PlanOpts {
+  return flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {};
+}
+
+/**
+ * The one reader for every flag usage.ts documents as `<iso>` (D-209).
+ *
+ * usage.ts states of its flag column: "Documentation only -- never parsed."
+ * That was true of the value as well. `scheduler run --now`, `dream --since`
+ * and `stats providers --since` each took the operator's string and handed it
+ * straight to a Date or to a SQL comparison, so a typo did not fail -- it
+ * changed the answer, in a different direction at each of the three:
+ *
+ *   --now: `new Date('now')` is Invalid Date, and every comparison against
+ *   the NaN behind it is false. proposeRechecks never pushes `time-elapsed`
+ *   (fails CLOSED -- the operator asks what is due and a typo answers
+ *   "nothing"), while proposeGrowthReview never returns null (fails OPEN --
+ *   the review fires on every run regardless of cadence). Worse, the recheck
+ *   proposal object IS the payload runScheduler persists, and Math.floor(NaN)
+ *   serialises to null, so `daysElapsed: null` outlives the typo in an
+ *   append-only log that event.schema.json accepts as-is (`payload` is an
+ *   unconstrained object).
+ *
+ *   dream --since: `Date.parse(ts) < NaN` is false, so no event is ever
+ *   skipped and the whole log is distilled instead of the window asked for.
+ *
+ *   stats providers --since: the value goes into `gte(eventsRaw.ts, since)`,
+ *   a LEXICAL comparison. Every stored ts starts with a digit, so any word
+ *   sorts above all of them and the report is silently empty.
+ *
+ * Strict ISO 8601, not "whatever Date accepts", because the parseable inputs
+ * are the dangerous ones: V8 reads '01/10/2026' as a US M/D/Y date, so the
+ * dd/mm/yyyy operator gets January 10 with no error and no way to see it. A
+ * shape check is the only thing that separates that from the date they meant.
+ *
+ * Returns a Date so the one caller needing an instant gets one; the two
+ * comparing against stored timestamps take .toISOString(), which also
+ * normalises an offset like +07:00 to the Z form those timestamps are in --
+ * the lexical comparison above is only meaningful between like forms.
+ */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+function isoDateFlag(flags: Record<string, string>, name: string): Date | undefined {
+  const raw = flags[name];
+  if (raw === undefined) return undefined;
+  const trimmed = raw.trim();
+  const parsed = ISO_INSTANT.test(trimmed) ? new Date(trimmed) : new Date(Number.NaN);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      `--${name} must be an ISO 8601 instant, got "${raw}". The form is ` +
+        '2026-08-20 or 2026-08-20T14:30:00Z. Words like "now" are not dates, and ' +
+        'a slashed date is read as US month/day/year, so 01/10/2026 is January ' +
+        '10 -- both change the result silently instead of failing.',
+      { flag: name, value: raw },
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Same override, for `db rebuild`/`db apply` — they read the same events log
+ * `event append` writes.
+ *
+ * `--roadmap-path` belongs here too: both verbs rebuild the whole milestones
+ * table from a roadmap file, and unset it falls back to black-smith's own
+ * factory/specs/roadmap.md. Dropping the flag therefore did not mean "keep the
+ * existing milestones" — it meant "replace this db's milestones with
+ * black-smith's", which is a silent data swap for any db but this repo's.
+ *
+ * `--specs-dir` travels for the same reason and is the same flag `plan`
+ * already takes: the projector reads an epic's plan file to answer what
+ * project its pre-D-232 events never stamped (D-246), and unset it reads this
+ * repo's factory/specs/active — another tree's epics, and no answer.
+ */
+function dbOptsFromFlags(flags: Record<string, string>): DbOpts {
+  return {
+    ...(flags['state-dir'] ? { stateDir: flags['state-dir'] } : {}),
+    ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
+    ...(flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {}),
+  };
+}
+
+/**
+ * The novelty gate's two numbers (D-159). architecture §9.3 documents them as
+ * living in factory/policies/scheduler.yml, and `LessonsSchedulerPolicy` calls
+ * that file the single source of truth — but every path into the gate used to
+ * fall back to lessons.ts's own constants, so the file was a knob wired to
+ * nothing. `--policy` overrides the path the same way it does on `dispatch
+ * check` and friends; unguarded like `computeProposals`, because a missing or
+ * malformed policy is a loud `scheduler.invalid-policy`, not a default.
+ *
+ * `--novelty-threshold` still wins where it is accepted: a one-run override of
+ * the standing policy is exactly what an operator reaches for mid-review. It is
+ * folded in here rather than spread over the result at each call site (D-208),
+ * so one place answers "what threshold is in effect" and no later caller can
+ * take the override without its check. `dream` accepts no such flag, and D-132's
+ * unknown-flag guard throws in main() before any handler runs, so reading it
+ * here cannot smuggle the flag into a command that does not advertise it.
+ */
+function noveltyOptsFromFlags(flags: Record<string, string>): {
+  noveltyThreshold: number;
+  shingleSize: number;
+} {
+  const override = noveltyThresholdOverride(flags);
+  const { noveltyJaccardThreshold, shingleSize } = loadSchedulerPolicy(flags.policy).lessons;
+  return { noveltyThreshold: override ?? noveltyJaccardThreshold, shingleSize };
+}
+
+/**
+ * The override held to the range its own source of truth is held to (D-208).
+ * parseSchedulerPolicy refuses a novelty_jaccard_threshold outside (0, 1] and
+ * says why -- "the novelty gate reads this directly and a degenerate value
+ * voids it silently" -- but `--novelty-threshold`, which replaces that exact
+ * number, went through a bare Number.parseFloat and was checked by nothing, so
+ * the flag could express precisely the values the file may not hold.
+ *
+ * Both ends are silent. No Jaccard score can reach 80, so the percent-for-
+ * fraction typo fails OPEN: the duplicate gate never fires, a verbatim
+ * re-statement is logged as a `candidate` with exit 0 and no novelty-rejected
+ * event, and once approved it joins the corpus every later check scores
+ * against. A 0 -- what parseFloat('0,7') silently returns -- fails closed and
+ * rejects unrelated lessons as duplicates.
+ *
+ * Number(), not parseFloat(), for the reason `plan quorum --confidence`
+ * already documents: parseFloat stops at the first bad character, so '80%'
+ * and '0,7' are accepted as numbers instead of being named as typos.
+ */
+function noveltyThresholdOverride(flags: Record<string, string>): number | undefined {
+  const raw = flags['novelty-threshold'];
+  if (raw === undefined) return undefined;
+  const value = Number(raw.trim());
+  if (!Number.isFinite(value) || value <= 0 || value > 1) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      `--novelty-threshold must be a number in (0, 1], got "${raw}". It overrides ` +
+        'scheduler.yml lessons.novelty_jaccard_threshold, which is held to the same ' +
+        'range: a Jaccard score never exceeds 1, so a larger value passes every ' +
+        'duplicate and a zero rejects every candidate.',
+      { flag: 'novelty-threshold', value: raw },
+    );
+  }
+  return value;
+}
+
+/**
+ * The plan's claims map, as the ownership input routeFindings takes (D-41/P9-24).
+ * `TaskSpecRecord.claims` is `unknown` — the plan's own schema is what
+ * guarantees it is a string array, so validating it a second time here would
+ * only add a second opinion. A task without claims owns no file, and is
+ * dropped rather than defaulted to owning everything.
+ */
+function ownershipFromPlan(plan: PlanFile): ClaimedTask[] {
+  return plan.tasks
+    .filter((task) => Array.isArray(task.claims))
+    .map((task) => ({ task_id: task.task_id, claims: task.claims as string[] }));
+}
+
+/** `--plan <file>` is optional everywhere findings are raised; without it, ownership is unknown. */
+function ownershipFromFlags(flags: Record<string, string>): ClaimedTask[] | undefined {
+  return flags.plan ? ownershipFromPlan(readJsonFile<PlanFile>(flags.plan)) : undefined;
+}
+
+/** One `--evidence` file with the judge it is attributed to. */
+interface EvidenceSource {
+  file: string;
+  foundBy: string;
+  foundByProvider?: string;
+}
+
+/**
+ * Pair every `--evidence <file>` with the `--found-by`/`--found-by-provider`
+ * written after it (D-32/P9-13).
+ *
+ * A task normally has several judges. `task-3-validate` came back with a test
+ * gap from the reviewer and a totality violation from the security-reviewer,
+ * and the old single-valued read (`flags.evidence` + `requireFlag(flags,
+ * 'found-by')`) could only file both under one name — so one of the two
+ * attributions was false. That is not a label: `found_by` feeds the
+ * same-mistake quorum trigger and every "which role catches what" question the
+ * factory asks of its own log.
+ *
+ * Positional pairing, not a parallel-arrays convention: `--evidence a --evidence
+ * b --found-by x --found-by y` reads as two lists that happen to be the same
+ * length until the day one of them is not, and then it silently swaps two
+ * judges' names.
+ *
+ * A `--found-by` seen BEFORE any `--evidence` is the default for the sources
+ * that name no judge of their own. That is exactly the pre-P9-13 line
+ * (`--found-by reviewer --evidence file.json`), which the skill, the operator
+ * guide and every existing caller write, and flags were order-independent when
+ * they wrote it — a strict "role must follow evidence" rule would turn all of
+ * them into errors overnight.
+ *
+ * An evidence file with neither is refused, naming the file. Falling back to
+ * the nearest judge is the misattribution this whole item exists to remove, and
+ * it would be silent.
+ */
+function evidenceSources(args: ParsedArgs): EvidenceSource[] {
+  const drafts: { file: string; foundBy?: string; foundByProvider?: string }[] = [];
+  let defaultFoundBy: string | undefined;
+  let defaultProvider: string | undefined;
+
+  for (const { key, value } of args.ordered) {
+    if (key === 'evidence') {
+      drafts.push({ file: value });
+      continue;
+    }
+    if (key !== 'found-by' && key !== 'found-by-provider') continue;
+    // Attaches to the evidence file it follows; before the first one, it is the
+    // default. Last occurrence wins within a source, as it does everywhere else
+    // in this parser.
+    const open = drafts.at(-1);
+    if (key === 'found-by') {
+      if (open) open.foundBy = value;
+      else defaultFoundBy = value;
+    } else if (open) open.foundByProvider = value;
+    else defaultProvider = value;
+  }
+
+  return drafts.map((draft) => {
+    const foundBy = draft.foundBy ?? defaultFoundBy;
+    if (foundBy === undefined) {
+      throw new SmithError(
+        'cli.missing-flag',
+        `--evidence ${draft.file} has no --found-by. Each evidence file needs the judge role that produced it, written after it: --evidence <file> --found-by <role>.`,
+        { flag: 'found-by', evidence: draft.file },
+      );
+    }
+    const foundByProvider = draft.foundByProvider ?? defaultProvider;
+    return { file: draft.file, foundBy, ...(foundByProvider ? { foundByProvider } : {}) };
+  });
+}
+
+/**
+ * Mint every `--evidence` file's findings under its own judge. Shared by `gate
+ * run` and `findings raise` because they have the same judges — fixing one and
+ * not the other would leave the misattribution wherever the operator happened
+ * to be standing when they recorded the finding.
+ */
+function mintFromEvidence(
+  args: ParsedArgs,
+  taskId: string,
+  scope: Pick<MintContext, 'spec'> = {},
+): RaiseFindingInput[] {
+  return evidenceSources(args).flatMap((source) =>
+    mintFindings(readJsonFile<FindingEvidence[]>(source.file), {
+      taskId,
+      foundBy: source.foundBy,
+      ...(source.foundByProvider ? { foundByProvider: source.foundByProvider } : {}),
+      ...scope,
+    }),
+  );
+}
+
+/**
+ * The gated task's declared caps, read off the same `--plan` the gate already
+ * takes for ownership (D-41/P9-24) — no new flag, because a budget the gate can
+ * check is by definition one the plan already stated.
+ *
+ * A task the plan does not name gets `undefined` rather than an error: a
+ * follow-up minted by `findings raise` (D-48/P9-31) is real, gateable work that
+ * no plan version has been cut for yet, and refusing to gate it would be a
+ * worse answer than reporting its budget as not-declared. Ambiguity still
+ * throws — two tasks the id could equally mean is a question, not an absence.
+ */
+function budgetFromFlags(flags: Record<string, string>, taskId: string): TaskBudget | undefined {
+  if (!flags.plan) return undefined;
+  const plan = readJsonFile<PlanFile>(flags.plan);
+  let resolved: string;
+  try {
+    resolved = resolveTaskId(plan, taskId);
+  } catch (err) {
+    if (err instanceof SmithError && err.code === 'plan.unknown-task') return undefined;
+    throw err;
+  }
+  const budget = plan.tasks.find((t) => t.task_id === resolved)?.budget;
+  return typeof budget === 'object' && budget !== null ? (budget as TaskBudget) : undefined;
+}
+
+/**
+ * The claim globs one dispatch is scoped to, read off the plan (P9-2). Only
+ * claim-path-scoped lessons use them, so a role that declares no such scope
+ * may omit `--plan` entirely; a `--plan` that names a task it does not contain
+ * is an error rather than an empty claims list, which would silently drop
+ * every claim-path lesson the task was supposed to see.
+ */
+function claimsForDispatch(flags: Record<string, string>): string[] {
+  if (!flags.plan) return [];
+  const taskId = requireFlag(flags, 'task');
+  const owner = ownershipFromPlan(readJsonFile<PlanFile>(flags.plan)).find(
+    (t) => t.task_id === taskId,
+  );
+  if (!owner) {
+    throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
+      taskId,
+      plan: flags.plan,
+    });
+  }
+  return owner.claims;
+}
+
+/**
+ * The taxonomy `case` one dispatch is scoped to (D-129) — the selector a
+ * `case-type` lesson is filtered by, read off the same immutable plan the
+ * claims come from so the two cannot disagree. `--case-type` overrides it for
+ * a dispatch that has no plan file to point at.
+ *
+ * Absent both, this returns '' and `lessonsForDispatch` warns rather than
+ * injecting every case's lessons — an unknown case is not a wildcard.
+ */
+function caseForDispatch(flags: Record<string, string>): string {
+  if (flags['case-type']) return flags['case-type'];
+  if (!flags.plan) return '';
+  const taskId = requireFlag(flags, 'task');
+  const task = readJsonFile<PlanFile>(flags.plan).tasks.find((t) => t.task_id === taskId);
+  if (!task) {
+    throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
+      taskId,
+      plan: flags.plan,
+    });
+  }
+  return typeof task.case === 'string' ? task.case : '';
+}
+
+/**
+ * The MCP half of the epic gate (docs/standards/mcp.md step 4). Kept here
+ * rather than inside epic.ts for the same reason integrationHeadSha is: epic.ts
+ * is a fold over events and stays filesystem-free, so the caller reads the
+ * roadmap and the manifest and states the result.
+ */
+function mcpSurfaceFor(epicId: string, projectDir: string, flags: Record<string, string>) {
+  return resolveMcpSurface({
+    epicId,
+    projectDir,
+    ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
+  });
+}
+
+/**
+ * Most commands are `smith <namespace> <action> ...` (`plan validate`, `wave
+ * check`, ...). A few Phase-7 commands are `smith <namespace> <positional>
+ * [--flags]` with no action word at all (`smith new <project> [--ui]`,
+ * `smith dream [--since ...]`) — telling the two apart on a flag-shaped
+ * second token (starts with `--`) keeps every existing two-word command's
+ * parsing byte-identical while letting the one-word commands' first
+ * positional/flag land in `rest` instead of being swallowed as `action`.
+ */
+/**
+ * The spellings that mean "tell me what this does" rather than "do it". `help`
+ * has to be in the namespace slot's vocabulary because `smith --help` parses as
+ * a namespace: splitNamespaceAction treats the first token as the namespace
+ * whatever it looks like, and asking it to special-case flags would change how
+ * every other command parses.
+ */
+const HELP_WORDS = new Set(['help', '--help', '-h']);
+
+function splitNamespaceAction(argv: string[]): {
+  namespace: string | undefined;
+  action: string | undefined;
+  rest: string[];
+} {
+  const [namespace, ...restAll] = argv;
+  const second = restAll[0];
+  if (second !== undefined && !second.startsWith('--')) {
+    return { namespace, action: second, rest: restAll.slice(1) };
+  }
+  return { namespace, action: undefined, rest: restAll };
+}
+
+async function main(): Promise<number> {
+  // Refuse an unsupported runtime before anything opens the database. The
+  // native binding crashes lazily — `new Database()`, not import — so a check
+  // here still runs, and a subcommand that happens to avoid SQLite must not
+  // be allowed to "work" on a runtime where the rest of the CLI segfaults:
+  // partial support is exactly how D-47 stayed hidden.
+  const runtime = checkRuntime();
+  if (!runtime.supported) {
+    // Prose on stderr so a human sees it even when stdout is piped into a
+    // JSON parser; the structured form still goes to stdout for callers.
+    process.stderr.write(`smith: unsupported runtime\n${runtime.reason ?? ''}\n`);
+    printJson({ error: { code: 'unsupported-runtime', message: runtime.reason } });
+    return 1;
+  }
+
+  const { namespace, action, rest } = splitNamespaceAction(process.argv.slice(2));
+  // Parse against what this command declares, not against "anything starting
+  // with --" (D-131/D-132). A documented command gets a spec; an undocumented
+  // one gets `undefined` and the old permissive parse, because its argv has to
+  // survive long enough to print `Unknown command` rather than a flag error
+  // about a command that does not exist.
+  const args = parseArgs(rest, flagSpecFor(namespace, action));
+  const { positional, flags, repeated } = args;
+
+  // `smith help gate run` and `smith gate run --help` ask the same question, so
+  // they get the same answer: `help` in the namespace slot shifts the topic one
+  // token right, and every other form is the `--help` flag parseArgs already saw.
+  const helpWord = namespace !== undefined && HELP_WORDS.has(namespace);
+  const topic = helpText(
+    helpWord ? action : namespace,
+    helpWord ? (action === undefined ? undefined : rest[0]) : action,
+  );
+  if ((helpWord || flags.help === 'true') && topic !== undefined) {
+    process.stdout.write(topic);
+    return 0;
+  }
+
+  // Refuse before dispatch what usage.ts does not describe. This is the half of
+  // "the table and the dispatcher agree" that a test cannot enforce — a command
+  // added below without a line above cannot run at all, so the help can never
+  // be silently incomplete. (test/usage.test.ts enforces the other half.)
+  if (!isDocumented(namespace, action)) {
+    // Prose on stderr, structured error on stdout — same split as the runtime
+    // check above, so a `| jq` pipeline still parses while a human still reads.
+    process.stderr.write(topic ?? usageText());
+    const given = [namespace, action].filter(Boolean).join(' ');
+    printJson({
+      error: { message: given === '' ? 'No command given.' : `Unknown command: ${given}` },
+    });
+    return 1;
+  }
+
+  // Same two-step resolution as flagSpecFor, so the usage line printed is the
+  // one whose flags were actually enforced. Shared by both refusals below.
+  const doc =
+    COMMANDS.find((d) => d.command === `${namespace} ${action}`) ??
+    COMMANDS.find((d) => d.command === namespace);
+
+  // D-132. Before this, every `--`-prefixed token went into a bag and each call
+  // site reached in for the keys it knew; nothing asked whether a key had been
+  // understood by anyone. A typo, a flag borrowed from another subcommand and a
+  // correct flag were the same observable event — exit 0, and the default
+  // quietly used. It is also what made D-131 dangerous rather than annoying:
+  // `--target-dir=<path>` degraded into an unknown flag named
+  // `target-dir=<path>`, and this is the check that was not there to catch it.
+  if (args.unknown.length > 0) {
+    const named = args.unknown.map((f) => `--${f}`).join(', ');
+    throw new SmithError(
+      'cli.unknown-flag',
+      `Unknown flag${args.unknown.length > 1 ? 's' : ''} for "${[namespace, action].filter(Boolean).join(' ')}": ${named}.`,
+      {
+        flag: args.unknown[0],
+        flags: args.unknown,
+        ...(doc ? { usage: usageLine(doc) } : {}),
+      },
+    );
+  }
+
+  // The other half of D-132. That check asks whether a flag was declared; this
+  // one asks whether the declaration was honoured. A flag documented `--task
+  // <task-id>` and written bare parsed as the string 'true', and 'true' is a
+  // legal value for every flag whose value is a bare string — so the failure
+  // was not an error but an answer: an actor named "true" in the append-only
+  // log, a session filed under `true.jsonl`, an empty timeline that read as
+  // "this task did nothing". cli.ts already carried one hand-written guard
+  // against this shape, for `--no-findings`; eighty value-taking flags across
+  // sixty-seven commands had none.
+  if (args.missingValue.length > 0) {
+    const named = args.missingValue.map((f) => `--${f}`).join(', ');
+    throw new SmithError(
+      'cli.missing-flag-value',
+      `${named} ${args.missingValue.length > 1 ? 'each take a value' : 'takes a value'} and ` +
+        `${args.missingValue.length > 1 ? 'were' : 'was'} given none.`,
+      {
+        flag: args.missingValue[0],
+        flags: args.missingValue,
+        ...(doc ? { usage: usageLine(doc) } : {}),
+      },
+    );
+  }
+
+  if (namespace === 'plan' && action === 'validate') {
+    // The cast is unchanged everywhere below, but it is no longer load-bearing:
+    // requirePositionals is what makes it true, and it runs first.
+    const [planFile] = requirePositionals(positional, usageFor('plan validate')) as [string];
+    const plan = readJsonFile<PlanFile>(planFile);
+    const result = validatePlan(plan);
+    printJson(result);
+    return result.valid ? 0 : 1;
+  }
+
+  if (namespace === 'plan' && action === 'diff') {
+    const [fileA, fileB] = requirePositionals(positional, usageFor('plan diff')) as [
+      string,
+      string,
+    ];
+    const vA = readJsonFile<PlanFile>(fileA);
+    const vB = readJsonFile<PlanFile>(fileB);
+    printJson(diffPlans(vA, vB));
+    return 0;
+  }
+
+  if (namespace === 'plan' && action === 'quorum') {
+    // Critique-only (planQuorum.ts module header): exit 0 means nothing
+    // needs the operator (no trigger fired, or endorsed); exit 1 means the
+    // operator must look (critiqued or escalated) before approving the plan.
+    const epicId = requireFlag(flags, 'epic');
+    // Required for this verb, unlike the shared envelope where it defaults to
+    // 1: a quorum is a critique of one specific plan version.
+    requireFlag(flags, 'plan-version');
+    // Number(), not parseFloat(): both are validated, but parseFloat() would
+    // silently accept a garbage suffix — parseFloat('0,7') is 0, not NaN, so a
+    // European-decimal typo would read as "zero confidence" and fire trigger 3
+    // on every plan. Number('0,7') is NaN and is rejected below. A bare NaN
+    // must never reach runPlanQuorum() either: `NaN < threshold` is false, so
+    // an unparseable value would fail OPEN — trigger 3's planner arm just never
+    // fires and the plan sails through uncritiqued. A gate trigger must be
+    // neither disabled nor pinned on by a typo.
+    const rawConfidence = flags.confidence?.trim();
+    const plannerConfidence = rawConfidence ? Number(rawConfidence) : undefined;
+    if (
+      (flags.confidence !== undefined && !rawConfidence) ||
+      (plannerConfidence !== undefined &&
+        (!Number.isFinite(plannerConfidence) || plannerConfidence < 0 || plannerConfidence > 1))
+    ) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--confidence must be a number in [0, 1], got "${flags.confidence}".`,
+        { flag: 'confidence', value: flags.confidence },
+      );
+    }
+    const ctx = eventContextFromFlags(flags);
+    // D-211: the version comes off `ctx`, not off a second read of the flag.
+    // This verb used to parse `--plan-version` twice with two parsers that
+    // disagree — a bare `Number.parseInt` chose the plan FILE to critique,
+    // while boundedIntFlag inside eventContextFromFlags chose the plan_version
+    // stamped on every event the run appends. D-210 settled the notation:
+    // `1e2` is an unambiguous numeric literal for 100, and answering with the
+    // 1 of its first character is the defect. So `--plan-version 1e2`
+    // critiqued v1 and logged v100, with no error anywhere — and
+    // planQuorum.ts's `inputRefs.plan_version`, which reads the version out of
+    // the loaded FILE, then disagreed with the envelope around it. A record
+    // that names two different plans is worse than one that fails: reading it
+    // back, neither number can be trusted. One read, one number.
+    const version = ctx.planVersion;
+    const outcome = await runPlanQuorum(
+      { epicId, version, ...(plannerConfidence !== undefined ? { plannerConfidence } : {}) },
+      ctx,
+      eventOptsFromFlags(flags),
+    );
+    printJson(outcome);
+    return outcome.outcome === 'endorsed' ? 0 : 1;
+  }
+
+  if (namespace === 'plan' && action === 'ingest') {
+    // D-46/P9-29: where a task starts existing as far as the log — and so
+    // the DB, the kanban and every dashboard number — is concerned. Before
+    // this, a task row only sprang into being as a side effect of whatever
+    // wave or gate event first happened to name an id, with no epic, no
+    // claims and no budget. Idempotent, because ingesting the plan again
+    // (a resumed session, a v(n+1) that carries tasks forward) is normal.
+    const [planFile] = requirePositionals(positional, usageFor('plan ingest')) as [string];
+    const plan = readJsonFile<PlanFile>(planFile);
+    const ctx = eventContextFromFlags(flags);
+    const opts = eventOptsFromFlags(flags);
+    const written = await emitTasksAdded(plan, ctx, opts);
+    // D-254: the arrows, after the nodes. The plan declares a DAG and the
+    // scheduler has always read it off the file, but nothing wrote it to the
+    // log -- so the db's `edges` table was empty and every operator-facing
+    // view of the graph showed a flat list. Counted in the output for the
+    // same reason `added` is: an ingest that silently wrote none is exactly
+    // what went unnoticed.
+    const edges = await emitEdgesRecorded(plan, ctx, opts);
+    const added = written.filter((e) => e.record.event_type === 'task-added').length;
+    printJson({
+      epic: plan.epic_id,
+      version: plan.version,
+      added,
+      superseded: written.length - added,
+      skipped: plan.tasks.length - added,
+      edges: edges.length,
+    });
+    return 0;
+  }
+
+  // P9-9/D-33: the one legitimate way to change an immutable plan. It refuses
+  // to cut a version that cites no spec finding, so "the plan changed" is
+  // always answerable with "which finding said it was wrong".
+  if (namespace === 'plan' && action === 'amend') {
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    // Comma-split, not repeated: a finding id has no commas, and an amendment
+    // routinely cites several at once.
+    const findingIds = requireFlag(flags, 'findings')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id !== '');
+    // Same comma split, for the same reason: a path has no commas either, and
+    // the whole point of D-123 is that this list is routinely longer than one.
+    const sites = requireFlag(flags, 'sites')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s !== '');
+    const changes = flags.changes ? readJsonFile<PlanChanges>(flags.changes) : undefined;
+    const result = await amendPlan(
+      {
+        plan,
+        findingIds,
+        rationale: requireFlag(flags, 'rationale'),
+        sites,
+        ...(changes ? { changes } : {}),
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    // No no-op warning here any more. A pure carry-forward used to be legal
+    // and merely suspicious — the shape a forgotten --changes takes — so the
+    // CLI printed a warning and cut the version anyway. Since D-127 an
+    // amendment that adds and supersedes nothing is refused by `amendPlan`
+    // itself, before the version exists: the cited finding would have had
+    // nothing to wait on. The check belongs there and not here, because the
+    // library is where the finding is transitioned; a guard living only in
+    // the CLI would let any other caller close an unwaivable finding with an
+    // identical plan version.
+    printJson({
+      epic: result.plan.epic_id,
+      version: result.plan.version,
+      previousVersion: plan.version,
+      findingIds,
+      sites,
+      // Printed at authorship, not only recorded for the close: the operator
+      // who just named these is the one best placed to say whether a site with
+      // no task behind it is a deliberate call or a forgotten one.
+      sitesUnclaimed: result.sitesUnclaimed,
+      diff: result.diff,
+    });
+    return 0;
+  }
+
+  if (namespace === 'wave' && action === 'check') {
+    // `required: 1` — the variadic tail has its own, better message below.
+    const [planFile] = requirePositionals(positional, usageFor('wave check'), 1) as [string];
+    const plan = readJsonFile<PlanFile>(planFile);
+    // D-46/P9-29: every id is minted from the plan, not taken as typed. The
+    // old code filtered the plan's tasks by `taskIds.includes(t.task_id)`,
+    // so a wave named in the other id convention matched NOTHING and
+    // validateWave([]) pronounced the empty set admissible — a wave could
+    // pass this check without a single one of its tasks having been looked
+    // at. resolveTaskId turns that silence into a named error.
+    const typedIds = positional.slice(1);
+    if (typedIds.length === 0) {
+      throw new SmithError(
+        'cli.empty-wave',
+        'Usage: smith wave check <plan.json> <task-id>... — a wave with no tasks is not a wave.',
+        { plan: plan.epic_id },
+      );
+    }
+    // D-48/P9-31: a follow-up task exists only in the log, so the log is the
+    // second register an id may be found in — and the place its claims come
+    // from. Read only when there is a session to read; the plan wins for an
+    // id both know, since a re-cut plan is the newer statement of its claims.
+    const logged = flags.session
+      ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
+      : [];
+    const taskIds = typedIds.map((typed) =>
+      resolveTaskId(
+        plan,
+        typed,
+        logged.map((t) => t.taskId),
+      ),
+    );
+    // Neither register is narrowed on the way in. `?? []` used to stand here
+    // and on the line above, and it fires on a missing claims field but not on
+    // a claims field holding the wrong thing: a plan writing `"claims":
+    // "src/api/**"` reached the comparison as a string and was iterated by
+    // character. Both defaults said "claims nothing", which validateWave read
+    // as "disjoint from everyone" — the answer that admits the wave. The shape
+    // is that function's to judge, once, where the comparison happens.
+    const claimsById = new Map<string, unknown>(logged.map((t) => [t.taskId, t.claims]));
+    for (const t of plan.tasks) {
+      claimsById.set(t.task_id, t.claims);
+    }
+    const tasks: ProposedWaveTask[] = taskIds.map((id) => ({
+      task_id: id,
+      claims: claimsById.get(id),
+    }));
+    const policy = loadWorktreePolicy();
+    // D-212: the plan has been in hand since the top of this verb, and it is
+    // the register that says which of these tasks may not run beside which.
+    const result = validateWave(tasks, policy, plan.edges);
+    // Log only an admissible wave, and only after it is known to be one:
+    // `wave-admitted` is what moves a task to `ready`, so writing it for a
+    // wave that just failed its claim-disjointness check would record an
+    // admission that never happened. `--dry` asks the question without
+    // answering it in the log.
+    if (result.valid && flags.dry !== 'true') {
+      await emitWaveAdmitted(
+        plan,
+        taskIds,
+        eventContextFromFlags(flags),
+        eventOptsFromFlags(flags),
+      );
+    }
+    printJson(result);
+    return result.valid ? 0 : 1;
+  }
+
+  if (namespace === 'new') {
+    // `smith new <project> [--ui]` — action doubles as the positional
+    // project name here (splitNamespaceAction), never a subcommand word.
+    // `--target-dir`/`--roadmap-path` override the real workspaces/ and
+    // factory/specs/roadmap.md paths (same override pattern as
+    // `--state-dir` elsewhere in this file) so tests never touch either.
+    if (!action) {
+      // Checked all along, but filed under the flag code; one kind of mistake,
+      // one code (P9-28). The project name cannot go through
+      // requirePositionals because splitNamespaceAction spends it on `action`.
+      const usage = usageLine(usageFor('new'));
+      throw new SmithError(
+        'cli.missing-positional',
+        `Missing required argument <project>. Usage: ${usage}`,
+        { missing: ['project'], usage },
+      );
+    }
+    const result = scaffoldProject({
+      projectName: action,
+      ui: flags.ui === 'true',
+      ...(flags['target-dir'] ? { targetDir: flags['target-dir'] } : {}),
+      // P9-19: `smith new` installs the toolchain and runs the project's own
+      // gates before it commits, so the first epic planned here starts against
+      // a repo whose checks are known to pass. --skip-toolchain is for an
+      // offline operator; the report then says `skipped`, never a green.
+      ...(flags['skip-toolchain'] === 'true' ? { skipToolchain: true } : {}),
+    });
+    registerProjectInRoadmap(action, flags['roadmap-path']);
+    printJson(result);
+    // Red gates are reported, not hidden: the tree stays for the operator to
+    // fix, and the exit code says the toolchain was not proven.
+    return result.toolchain.status === 'failed' ? 1 : 0;
+  }
+
+  if (namespace === 'mcp' && action === 'init') {
+    // Deliberately not folded into `smith new`: the MCP surface is due at the
+    // END of a project, when the tools it should expose are known, and the
+    // milestone this registers is what makes that due date real. Scaffolding it
+    // on day one would ship a manifest declaring nothing, which is exactly the
+    // rubber-stamp the standard exists to prevent.
+    const [projectName] = requirePositionals(positional, usageFor('mcp init')) as [string];
+    const result = addMcpSurface({
+      projectName,
+      ...(flags['target-dir'] ? { targetDir: flags['target-dir'] } : {}),
+      ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
+    });
+    printJson(result);
+    return 0;
+  }
+
+  // The verdict `smith epic close` gates on, rendered on its own so it can be
+  // read before the gate refuses. Exit 1 on red — same convention as `plan
+  // validate` and `gate run`, so CI needs no output parsing.
+  if (namespace === 'mcp' && action === 'check') {
+    const [projectName] = requirePositionals(positional, usageFor('mcp check')) as [string];
+    const report = runMcpCheck({
+      projectName,
+      ...(flags['target-dir'] ? { targetDir: flags['target-dir'] } : {}),
+      ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
+    });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'scheduler' && action === 'run') {
+    const sessionId = requireFlag(flags, 'session');
+    const dry = flags.dry === 'true';
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // The lineage (D-119). The scheduler's idempotency is positional — a
+    // proposal counts as resolved when the events resolving it appear LATER in
+    // the log — so a session-scoped read from a continuation finds none of the
+    // parent's proposals and re-proposes every recheck the epic already ran.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const now = isoDateFlag(flags, 'now') ?? new Date();
+    const input = { events, now, ...(flags.project ? { projectDir: flags.project } : {}) };
+
+    if (dry) {
+      printJson({ proposals: computeProposals(input) });
+      return 0;
+    }
+
+    const ctx = eventContextFromFlags(flags);
+    const result = await runScheduler(
+      input,
+      {
+        sessionId: ctx.sessionId,
+        planVersion: ctx.planVersion,
+        causalParent: ctx.causalParent as string,
+        actor: ctx.actor,
+      },
+      eventOptsFromFlags(flags),
+      false,
+    );
+    printJson(result);
+    return 0;
+  }
+
+  if (namespace === 'worktree' && action === 'create') {
+    const [projectDir, epic, taskId] = requirePositionals(
+      positional,
+      usageFor('worktree create'),
+    ) as [string, string, string];
+    printJson(createTaskWorktree(projectDir, epic, taskId));
+    return 0;
+  }
+
+  if (namespace === 'worktree' && action === 'rm') {
+    const [projectDir, epic, taskId] = requirePositionals(positional, usageFor('worktree rm')) as [
+      string,
+      string,
+      string,
+    ];
+    removeTaskWorktree(projectDir, epic, taskId);
+    printJson({ removed: true, epic, taskId });
+    return 0;
+  }
+
+  // The judge-immutability guard (P9-5): fingerprint before the judge runs,
+  // verify after. Six judge roles are read-only in prose and hold `Bash` in
+  // fact (agent-interviews.md N-10) — this turns the sentence into a check.
+  if (namespace === 'worktree' && action === 'fingerprint') {
+    const [worktreeDir] = requirePositionals(positional, usageFor('worktree fingerprint')) as [
+      string,
+    ];
+    printJson(fingerprintWorktree(worktreeDir));
+    return 0;
+  }
+
+  if (namespace === 'worktree' && action === 'verify') {
+    // No `required` override any more: `--before <fingerprint.json>` is a flag,
+    // and since P9-21 flags live outside the counted string.
+    const [worktreeDir] = requirePositionals(positional, usageFor('worktree verify')) as [string];
+    const before = readJsonFile<WorktreeFingerprint>(requireFlag(flags, 'before'));
+    const result = checkWorktreeImmutable(worktreeDir, before);
+    printJson(result);
+    // Unlike `security triggers`, drift is a violation, not an instruction:
+    // the judge's result is not trustworthy once it moved what it judged.
+    return result.unchanged ? 0 : 1;
+  }
+
+  if (namespace === 'worktree' && action === 'stale') {
+    const [projectDir, epic] = requirePositionals(positional, usageFor('worktree stale')) as [
+      string,
+      string,
+    ];
+    printJson(listStale(projectDir, epic));
+    return 0;
+  }
+
+  // P9-6: the two ends of ingested text. `prompt wrap` fences a payload before
+  // it enters a prompt; `research check` keeps a brief's citations separable
+  // from its recommendation on the way back out.
+  if (namespace === 'prompt' && action === 'wrap') {
+    const [file] = requirePositionals(positional, usageFor('prompt wrap'), 1) as [string];
+    const block = wrapIngested({
+      // `-` reads stdin's usual role here: the payload is often a fetch that
+      // was never a file. Kept explicit rather than implicit so a file named
+      // `-` is a caller error, not a silent stdin read.
+      text: file === '-' ? readFileSync(0, 'utf8') : readFileSync(file, 'utf8'),
+      kind: requireFlag(flags, 'kind') as IngestKind,
+      source: requireFlag(flags, 'source'),
+    });
+    if (flags.json) {
+      printJson(block);
+    } else {
+      // The default output is the block itself, because the caller is composing
+      // a prompt: piping JSON into one would fence the escaping in quotes.
+      process.stdout.write(`${block.text}\n`);
+    }
+    return 0;
+  }
+
+  // D-142: the writer `user_prompt` never had. Five readers folded the type —
+  // the prompts table, the Decisions lens, the escalation window, the UI's
+  // Prompts filter — and the only way one reached a log was a person hand-
+  // writing `smith event append`, which nobody did. It sits beside `prompt
+  // wrap` because both are about what enters a prompt honestly: wrap labels
+  // borrowed text, record puts the operator's own on the record.
+  if (namespace === 'prompt' && action === 'record') {
+    const [file] = requirePositionals(positional, usageFor('prompt record'), 1) as [string];
+    // Same `-` convention as `prompt wrap`, and for a stronger reason: an
+    // operator turn is typed, not filed, so stdin is the ordinary case here
+    // and a heredoc is how it arrives.
+    const text = file === '-' ? readFileSync(0, 'utf8') : readFileSync(file, 'utf8');
+    const stored = await recordUserPrompt(
+      text,
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    // The event id, not the record: what the caller does next is pass it as
+    // `--causal-parent` to the dispatch this prompt caused, which is the edge
+    // that makes the interleaved timeline (architecture §7) real rather than
+    // inferred from timestamps.
+    printJson({ event_id: stored.event_id, record: stored.record });
+    return 0;
+  }
+
+  if (namespace === 'research' && action === 'check') {
+    const result = checkBrief(readJsonFile<unknown>(requireFlag(flags, 'brief')));
+    printJson(result);
+    // A brief whose claims are uncited, or whose recommendation rests on
+    // nothing in it, is a contract violation like a failed claims check —
+    // not a dispatch instruction, so the exit code is the verdict.
+    return result.ok ? 0 : 1;
+  }
+
+  if (namespace === 'queue' && action === 'run') {
+    const [epic] = requirePositionals(positional, usageFor('queue run')) as [string];
+    // Same disease as the positionals, on the flag side, in the one verb that
+    // runs git: `flags.project as string` put an undefined cwd into every
+    // command step() shells out to.
+    const projectDir = requireFlag(flags, 'project');
+    const testCmd = requireFlag(flags, 'test-cmd');
+    const tasksFile = requireFlag(flags, 'tasks');
+    const tasks =
+      readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
+    // D-46/P9-29: the queue is the only component that knows a branch landed,
+    // and it used to say so to stdout and nowhere else — which is why the
+    // projector's `completed` column was unreachable by machine. `--session`
+    // is what turns the run into a fact; without it the queue still runs, and
+    // still tells nobody.
+    const events = flags.session
+      ? { ctx: eventContextFromFlags(flags), ...eventOptsFromFlags(flags) }
+      : undefined;
+    // `--tasks` is hand-written, so its ids are whatever was typed. Minting
+    // them from the plan before any git runs is the whole point of P9-29: a
+    // bare id here would put `wave-merged` in the log under a spelling the
+    // plan never used, which is how the dogfood epic folded one task instead
+    // of six. Refuse the run whole rather than merge some and mislabel them.
+    if (events && !flags.plan) {
+      throw new SmithError(
+        'cli.missing-flag',
+        'queue run --session also needs --plan <plan.json>: a merge may only be logged under the task id the plan declares.',
+        { epic },
+      );
+    }
+    if (flags.plan) {
+      const plan = readJsonFile<PlanFile>(flags.plan as string);
+      // …and the plan is not the only register: a follow-up minted by
+      // `findings raise` is in the log alone, and refusing it here is what
+      // left D-41's own follow-up unmergeable (D-48/P9-31).
+      const logged = flags.session
+        ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
+        : [];
+      const loggedIds = logged.map((t) => t.taskId);
+      for (const task of tasks) task.taskId = resolveTaskId(plan, task.taskId, loggedIds);
+      // D-186: the ids are the plan's now, so the order can be too. `--tasks`
+      // is hand-written, and merging in the order someone typed lets a task
+      // land before the task it declares `depends_on` — the epic's cumulative
+      // gate then runs against an integration branch missing the prerequisite,
+      // and blames the wrong branch when it goes red. `admit()` exists for
+      // exactly this and had no caller until here; a follow-up the plan never
+      // declared carries no edges, so it just sorts by id among its peers.
+      const order = admit(
+        tasks.map((t) => ({ task_id: t.taskId })),
+        plan.edges.map((e) => ({ task: e.task, dependsOn: e.dependsOn })),
+      );
+      // Stable: two tasks the plan does not order keep the order admit gave
+      // them, and a duplicated id is still run twice rather than dropped.
+      tasks.sort((a, b) => order.indexOf(a.taskId) - order.indexOf(b.taskId));
+    }
+    const outcomes = [];
+    let allMerged = true;
+    for (const task of tasks) {
+      const outcome = await step(task, {
+        projectDir,
+        epic,
+        testCmd,
+        ...(events ? { events } : {}),
+      });
+      outcomes.push(outcome);
+      if (outcome.outcome !== 'merged') {
+        allMerged = false;
+        break;
+      }
+    }
+    printJson(outcomes);
+    return allMerged ? 0 : 1;
+  }
+
+  if (namespace === 'queue' && action === 'adopt') {
+    const [typedTaskId] = requirePositionals(positional, usageFor('queue adopt')) as [string];
+    const projectDir = requireFlag(flags, 'project');
+    const mergeCommit = requireFlag(flags, 'merge-commit');
+    // Every flag here is required, unlike `queue run`'s optional session: this
+    // verb's entire output is one `wave-merged`, so a run without a session to
+    // write it into has done nothing, and a run without a plan would write it
+    // under whatever id was typed — the D-46/P9-29 mislabelling, reintroduced
+    // by the command that exists to repair its aftermath.
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const sessionId = requireFlag(flags, 'session');
+    const logged = await readAddedTasks({ sessionId }, eventOptsFromFlags(flags));
+    const taskId = resolveTaskId(
+      plan,
+      typedTaskId,
+      logged.map((t) => t.taskId),
+    );
+    const outcome = await adopt(
+      // The branch is derived, never typed. A `--branch` override would let the
+      // operator hand this the OTHER task's branch — which really is a parent of
+      // the merge — and adopt any task with it, which is the forgery the whole
+      // verb exists to prevent. Deriving it from the plan-resolved id means the
+      // branch and the id it is logged under cannot disagree.
+      { taskId, branch: taskBranchName(plan.epic_id, taskId) },
+      {
+        projectDir,
+        epic: plan.epic_id,
+        mergeCommit,
+        events: { ctx: eventContextFromFlags(flags), ...eventOptsFromFlags(flags) },
+      },
+    );
+    printJson(outcome);
+    return 0;
+  }
+
+  if (namespace === 'event' && action === 'append') {
+    const [json] = requirePositionals(positional, usageFor('event append')) as [string];
+    const input = JSON.parse(json);
+    const result = await appendEvent(input, eventOptsFromFlags(flags));
+    // D-163. `event_type` is open here and closed in timeline(): the schema
+    // keeps the write side free so an unknown type is never rejected and lost,
+    // and the read side filters to timelineEventTypes() so the operator's
+    // screen stays a timeline rather than a firehose. Both are deliberate.
+    // What was missing is any word to the writer that they had landed on the
+    // far side of that line — this command accepted nineteen improvised types
+    // from the factory's own operator skill, receipted every one as success,
+    // and none of the 25 records ever reached the screen. Exit stays 0: the
+    // write worked, and refusing it is precisely what the open side prevents.
+    const onTimeline = timelineEventTypes().includes(result.record.event_type);
+    if (!onTimeline) {
+      process.stderr.write(
+        `warning: event_type "${result.record.event_type}" is not read by the operator timeline. ` +
+          `${result.event_id} is written and durable, but timeline() filters it out under every ` +
+          'filter. Use a gate_event/graph_event value from factory/policies/taxonomy.yml, or add ' +
+          'the type to FREE_TIMELINE_EVENT_TYPES in factory/orchestrator/src/db/queries.ts.\n',
+      );
+    }
+    // D-245. The same shape of receipt, for the other half of the record the
+    // writer can get silently wrong. `task_id` is read at the top level, beside
+    // `session_id`; SKILL.md used to list the dispatch payload's fields and say
+    // nothing about where the task id went, so 29 hand-written dispatches
+    // across two dogfood sessions put it inside `payload` instead. Every
+    // reader now takes it from either level, but only the top-level field is a
+    // column, so a payload-only id answers no task-scoped query typed against
+    // the DB. Exit stays 0: the write is valid and durable, and the id is not
+    // lost -- it is just in the slower place.
+    const payloadTaskId = (result.record.payload as Record<string, unknown> | undefined)?.task_id;
+    const envelopeTaskId = result.record.task_id;
+    if (
+      typeof payloadTaskId === 'string' &&
+      payloadTaskId.length > 0 &&
+      (typeof envelopeTaskId !== 'string' || envelopeTaskId.length === 0)
+    ) {
+      process.stderr.write(
+        `warning: "${payloadTaskId}" names a task from inside the payload, and the event's own ` +
+          `task_id is empty. ${result.event_id} is written and durable, and the folds read both ` +
+          'levels, but only the top-level field is indexed. Put task_id beside session_id, at the ' +
+          'top level of the JSON.\n',
+      );
+    }
+    printJson({ ...result, on_timeline: onTimeline });
+    return 0;
+  }
+
+  if (namespace === 'event' && action === 'tail') {
+    const [sessionId] = requirePositionals(positional, usageFor('event tail')) as [string];
+    const n = boundedIntFlag(flags, 'n', { min: 1 }) ?? 20;
+    const opts = eventOptsFromFlags(flags);
+    // P9-28: and the id has to name a session that exists. This is the verb an
+    // operator reaches for when they are not sure what the log holds, so "your
+    // session is empty" was the one wrong answer it could give to a typo.
+    requireSession(sessionId, opts);
+    // P9-7: --lineage reads the epic rather than the session. An epic split
+    // across operator sessions has its recent history in whichever session ran
+    // last, and the plain tail would show only that one.
+    //
+    // Through readLineageEvents since D-119, which merges the logs by `ts`
+    // rather than concatenating them root-first. On a tail that matters: the
+    // last n events of a concatenation are the last n of the LAST session, so
+    // an operator resuming an epic saw its newest events padded with nothing
+    // from before the split. Now `--lineage` tails the epic in time order.
+    let events = flags.lineage
+      ? (await readLineageEvents(sessionId, opts)).slice(-n)
+      : await tailEvents(sessionId, n, opts);
+    if (flags.task) events = filterEvents(events, { taskId: flags.task });
+    printJson(events);
+    return 0;
+  }
+
+  if (namespace === 'event' && action === 'lineage') {
+    const [sessionId] = requirePositionals(positional, usageFor('event lineage')) as [string];
+    const lineage = await sessionLineage(sessionId, eventOptsFromFlags(flags));
+    printJson({ session: sessionId, lineage, depth: lineage.length, root: lineage[0] });
+    return 0;
+  }
+
+  if (namespace === 'dispatch' && action === 'check') {
+    // P9-23: crosscheck.yml's finder_ne_critic, asserted against the log
+    // instead of trusted. Fail-closed — `unverifiable` exits 1 exactly like a
+    // violation, because a check that cannot answer must not read as a pass;
+    // see dispatchAudit.ts for why each status means what it means.
+    // required: 1 — `<id>` and `<path>` in the usage line are flag values,
+    // and requirePositionals reads every `<placeholder>` positionally.
+    const [sessionId] = requirePositionals(positional, usageFor('dispatch check'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119): a finder dispatched before the session split and
+    // its critic after it is precisely the pairing this check exists to catch,
+    // and one session's log holds half of it.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const pairs = loadCrosscheckPolicy(flags.policy).asymmetricRoles.pairs;
+    const report = checkDispatchAsymmetry(events, pairs, {
+      sessionId,
+      ...(flags.task ? { taskId: flags.task } : {}),
+    });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'escalation' && action === 'check') {
+    // P9-32: budgets.yml's escalation_ladder, asserted against the log instead
+    // of trusted. Same fail-closed contract as `dispatch check` — see
+    // escalation.ts, including what the rung-3 check does and does not claim.
+    // required: 1 — `<id>` and `<path>` in the usage line are flag values.
+    const [sessionId] = requirePositionals(positional, usageFor('escalation check'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119), for `dispatch check`'s reason: a ladder is climbed
+    // rung by rung over an epic, and reading one session shows a run that
+    // started at rung 2 as one that skipped rung 1.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const ladder = loadBudgetPolicy(flags.policy).escalationLadder;
+    const report = checkEscalationLadder(events, ladder, {
+      sessionId,
+      ...(flags.task ? { taskId: flags.task } : {}),
+    });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'claims' && action === 'check') {
+    // Two populations, one classifier (P9-3). `--roots` is the write-root
+    // mode: a role that works outside a worktree — the planner
+    // (factory/specs/active/<epic-id>/**) and the scribe (state/lessons/**) —
+    // has no claims to read from a spec, no task branch to diff, and hands its
+    // output back uncommitted. `--since <ref>` widens the window to what the
+    // role committed itself; the planner holds Bash, so it can.
+    const roots = repeated.roots;
+    if (roots !== undefined) {
+      const [rootDir] = requirePositionals(positional, usageFor('claims check --roots')) as [
+        string,
+      ];
+      const result = writeRootCheck(rootDir, roots, flags.since ? { since: flags.since } : {});
+      printJson(result);
+      return result.violation ? 1 : 0;
+    }
+
+    const [worktreeDir, specFile] = requirePositionals(
+      positional,
+      usageFor('claims check spec'),
+    ) as [string, string];
+    const spec = readJsonFile<ClaimedTask>(specFile);
+    const result = postRunCheck(worktreeDir, spec.claims);
+    printJson(result);
+    return result.violation ? 1 : 0;
+  }
+
+  if (namespace === 'effort' && action === 'show') {
+    // How much judgment this epic buys, computed instead of remembered — the
+    // same "ask, do not recall" contract `security triggers` above has. Always
+    // exits 0 when it can answer: a tier is a plan for the run, not a verdict
+    // on it. `--effort` answers for a tier the plan does not carry yet, which
+    // is the case `/bs plan` is in when it picks one.
+    const policy = loadEffortPolicy(flags.policy);
+    const securityPolicy = loadCrosscheckPolicy(flags.crosscheck).planQuorum;
+    const planFile = flags.plan;
+    printJson(
+      resolveEffort(policy, securityPolicy, {
+        ...(planFile ? { plan: readJsonFile<PlanFile>(planFile) } : {}),
+        ...(flags.effort !== undefined ? { override: flags.effort } : {}),
+      }),
+    );
+    return 0;
+  }
+
+  if (namespace === 'security' && action === 'triggers') {
+    // The security-reviewer's dispatch condition, computed instead of
+    // remembered (P9-4). Always exits 0 when it can answer: a fired trigger is
+    // a dispatch instruction, not a violation — read `dispatchSecurityReviewer`.
+    const spec = readJsonFile<SecurityTriggerTask>(requireFlag(flags, 'task'));
+    const result = securityTriggers(spec, loadSensitivePathsPolicy(flags.policy), {
+      case: flags.case,
+      epicTags: repeated['epic-tag'],
+      scheduledRecheck: flags.recheck === 'true',
+    });
+    printJson(result);
+    return 0;
+  }
+
+  if (namespace === 'gate' && action === 'run') {
+    const [taskId] = requirePositionals(positional, usageFor('gate run')) as [string];
+    const worktreeDir = requireFlag(flags, 'worktree');
+    const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
+    // The result file has the same two intake shapes as findings below, and for
+    // the same reason. With `--agent`, `--result` is the worker's half —
+    // run_status/structured_output/artifacts — and the dispatcher stamps the
+    // five fields it owns, token_usage included: an agent cannot read its own
+    // meter, so a token count it writes is invented (D-18/P9-17). Without
+    // `--agent` the file is taken as a complete document, which is what a
+    // replay or a fixture hands over.
+    const resultFile = readJsonFile<unknown>(requireFlag(flags, 'result'));
+    const result = flags.agent
+      ? stampResultEnvelope(resultFile, {
+          taskId,
+          agent: flags.agent,
+          provider: requireFlag(flags, 'provider'),
+          modelTier: requireFlag(flags, 'model-tier'),
+          inputTokens: requireIntFlag(flags, 'input-tokens'),
+          outputTokens: requireIntFlag(flags, 'output-tokens'),
+        })
+      : resultFile;
+    // Two intake shapes. `--evidence` is what judges actually produce
+    // (interview N-2): evidence only, with the orchestrator minting
+    // finding_id/task_id/found_by/finding_status here. It repeats, once per
+    // judge at this gate (D-32/P9-13). `--findings` stays for already-minted
+    // records (replays, fixtures, cross-check re-runs).
+    const findingsInput = [
+      ...(flags.findings ? readJsonFile<RaiseFindingInput[]>(flags.findings) : []),
+      ...mintFromEvidence(args, taskId),
+    ];
+    const lessons = flags.lessons ? parseLessons(readFileSync(flags.lessons, 'utf8')) : [];
+    const ctx = eventContextFromFlags(flags);
+
+    // --plan is what lets the gate answer "whose finding is this" from the
+    // file rather than from who happened to be at the gate (D-41/P9-24).
+    // Optional: a gate run without a plan keeps every finding on --task, which
+    // is the pre-P9-24 behaviour, not a silent misattribution.
+    const ownership = ownershipFromFlags(flags);
+    // P9-18: the same file also carries what the task said it would cost, so
+    // the gate can compare the declaration against the measurement. `--base`
+    // is for callers that know the exact base they branched from (the merge
+    // queue does); without it the diff is measured against the integration
+    // branch the task-branch name implies.
+    const budget = budgetFromFlags(flags, taskId);
+
+    // P9-11: handing the gate a judge's evidence IS that judge reporting.
+    // Doing it here means the common path — dispatch, judge writes its file,
+    // `gate run --evidence` — closes the turn in one command instead of two,
+    // and forgetting the second one can no longer block a task whose judge
+    // did everything right. A `--found-by` role with no dispatch behind it
+    // has no turn to close and takes the pre-P9-11 path untouched.
+    //
+    // D-158: the turns to close are the paired sources, not `flags.evidence`
+    // and `flags['found-by']`. Those are last-occurrence-wins, so a gate run
+    // carrying two judges' files — the shape D-32/P9-13 taught the minting
+    // path — closed the second judge's turn and left the first outstanding,
+    // blocking the gate on a judge that had just handed in its evidence. One
+    // close per role: a judge that splits its findings across two files still
+    // owes one turn, and a second report against it would be a duplicate.
+    const evidenceGiven = evidenceSources(args);
+    if (evidenceGiven.length > 0) {
+      const turns = await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags));
+      const closed = new Set<string>();
+      for (const { foundBy, file } of evidenceGiven) {
+        if (closed.has(foundBy)) continue;
+        if (!turns.some((t) => t.role === foundBy && !t.reported)) continue;
+        closed.add(foundBy);
+        await recordJudgeReport(
+          { taskId, role: foundBy, artifactPath: file },
+          ctx,
+          eventOptsFromFlags(flags),
+        );
+      }
+    }
+
+    // P9-11: the genuinely clean case, said out loud. A judge that found
+    // nothing writes `[]` and reports through `smith judge report`; this flag
+    // is for the operator who ran one outside the factory, and it records an
+    // attestation as an attestation — artifact_path null, attested_by
+    // operator — rather than dressing it up as a file that was never written.
+    for (const role of repeated['no-findings'] ?? []) {
+      // `parseArgs` renders a valueless flag as the string 'true'. Attesting a
+      // role called "true" would close nothing (no such dispatch exists) and
+      // say so nowhere, so a bare --no-findings is a usage error instead.
+      if (role === 'true') {
+        throw new SmithError(
+          'cli.no-findings-needs-role',
+          '--no-findings names the judge role it attests for, e.g. --no-findings security-reviewer.',
+          { usage: 'smith gate run <task-id> --no-findings <role>' },
+        );
+      }
+      await recordJudgeReport({ taskId, role, noFindings: true }, ctx, eventOptsFromFlags(flags));
+    }
+
+    // --grader is the grader's own result file (state/results/<task-id>
+    // .grader-r<round>.json). Optional for the same reason as --plan: an ad-hoc
+    // gate run has no rubric result to hand over, and inventing one would be
+    // worse than skipping the stage (D-34/P9-14).
+    const graderVerdict = flags.grader ? readJsonFile<unknown>(flags.grader) : undefined;
+
+    const outcome = await runGate(
+      {
+        taskId,
+        result,
+        worktreeDir,
+        checks,
+        findingsInput,
+        lessons,
+        runAll: flags['run-all'] === 'true',
+        ...(ownership ? { ownership } : {}),
+        // --base is the ref the queue would merge into, normally
+        // smith/<epic>/integration. One flag, two readers: the commit
+        // certificate asks whether the branch carries commits the base does
+        // not (D-30/P9-8), the budget check measures the diff against it
+        // (P9-18). Optional like --plan — without it the gate still refuses an
+        // uncommitted worktree and still measures the diff, it just falls back
+        // to the base the task-branch name implies.
+        ...(flags.base ? { baseRef: flags.base } : {}),
+        ...(graderVerdict !== undefined ? { graderVerdict } : {}),
+        ...(budget ? { budget } : {}),
+        ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+      },
+      ctx,
+      eventOptsFromFlags(flags),
+    );
+    printJson(outcome);
+    return outcome.outcome === 'blocked' ? 1 : 0;
+  }
+
+  // D-40/P9-25: the gate's coverage evidence, without staging a gate run.
+  // This is the verb the D-40 investigation wanted and did not have — it took
+  // a coverage re-run on the pre-task-4 integration branch to establish what
+  // one lookup in coverage-summary.json says outright.
+  if (namespace === 'coverage' && action === 'check') {
+    const [worktreeDir] = requirePositionals(positional, usageFor('coverage check')) as [string];
+    // Whose claims to judge is a question with no safe default: judging the
+    // whole plan's claims at one task's gate is D-41 again, and judging none
+    // silently would report `complete: true` on no evidence at all. So --plan
+    // demands --task, and neither means "the total, and no subjects".
+    const claims = flags.plan ? claimsForDispatch(flags) : [];
+    const evidence = await collectCoverageEvidence({
+      worktreeDir,
+      claims,
+      ...(flags.summary ? { summaryPath: flags.summary } : {}),
+    });
+    printJson({
+      summary_path: evidence.summaryPath,
+      present: evidence.present,
+      complete: evidence.complete,
+      files_measured: evidence.filesMeasured,
+      total: evidence.total,
+      subjects: evidence.subjects.map((s) => ({
+        path: s.path,
+        status: s.status,
+        lines_pct: s.coverage?.lines.pct ?? null,
+        statements_pct: s.coverage?.statements.pct ?? null,
+        functions_pct: s.coverage?.functions.pct ?? null,
+        branches_pct: s.coverage?.branches.pct ?? null,
+      })),
+      detail: evidence.detail,
+    });
+    return evidence.complete ? 0 : 1;
+  }
+
+  // P9-33: the consumer `epic.alarm_ratio` never had. Read-only over the log —
+  // it reports where spend stands, it does not stop anything. Exit 1 on a
+  // crossing OR on a record too holey to prove there wasn't one.
+  if (namespace === 'budget' && action === 'alarm') {
+    // required: 1 — `<id>` and `<path>` in the usage line are flag values, and
+    // requirePositionals reads every `<placeholder>` positionally.
+    const [sessionId] = requirePositionals(positional, usageFor('budget alarm'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119). Spend is an epic's, not a session's: reading one
+    // session reports half an epic's cost as the whole of it, and reports it
+    // under an alarm threshold it may already have crossed.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const report = checkBudgetAlarm(events, loadBudgetPolicy(flags.policy), {
+      sessionId,
+      ...(flags.epic ? { epicId: flags.epic } : {}),
+    });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
+  // The consumer architecture §9.7's "monotonically decreasing same-mistake
+  // rate" never had. Read-only over the log, like `budget alarm` — and like it,
+  // exit 1 both on a rate that rose and on a record that cannot show it didn't.
+  // `--lessons` defaults to the committed corpus because the corpus IS half the
+  // measurement: a rate of zero against lessons that can escalate nothing is a
+  // fact about the corpus, not about the work.
+  if (namespace === 'kpi' && action === 'same-mistake') {
+    const [sessionId] = requirePositionals(positional, usageFor('kpi same-mistake'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119): a same-mistake RATE measured over half the work is
+    // a different number, and the half it drops is the earlier one — the half
+    // that holds the first occurrence every repeat is counted against.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const lessons = parseLessons(readFileSync(flags.lessons ?? LESSONS_MD_PATH, 'utf8'));
+    const report = checkSameMistakeKpi(events, lessons, { sessionId });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
+  // D-42/P9-26: the one command that runs against the ASSEMBLED branch rather
+  // than a task worktree. Every other gate in this CLI runs inside a worktree,
+  // so without this every quality claim the factory makes is a claim about a
+  // worktree — and the epic gate below now refuses to ship until this has run.
+  if (namespace === 'integration' && action === 'check') {
+    const epicId = requireFlag(flags, 'epic');
+    const projectDir = requireFlag(flags, 'project');
+    const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
+    const ctx = eventContextFromFlags(flags);
+    const record = await runIntegrationCheck(
+      {
+        epicId,
+        projectDir,
+        checks,
+        // Unlike the per-task gate, the default here is the whole picture:
+        // --run-all false opts back into short-circuiting.
+        runAll: flags['run-all'] !== 'false',
+      },
+      ctx,
+      eventOptsFromFlags(flags),
+    );
+    printJson(record);
+    return record.pass ? 0 : 1;
+  }
+
+  if (namespace === 'epic' && action === 'verdict') {
+    const epicId = requireFlag(flags, 'epic');
+    // --project is required (D-42/P9-26): the verdict cannot be rendered
+    // without knowing where the integration branch actually is, and an
+    // optional flag would silently mean "no check needed".
+    const projectDir = requireFlag(flags, 'project');
+    const ctx = eventContextFromFlags(flags);
+    const outcome = await runEpicVerdict(
+      {
+        epicId,
+        integrationHeadSha: integrationHeadSha(projectDir, epicId),
+        mcp: mcpSurfaceFor(epicId, projectDir, flags),
+        // D-126: the live plan is a voter. Without this the roster is the
+        // event-log fold alone, and a task an amendment added but nobody
+        // dispatched is invisible rather than unfinished.
+        planOpts: planOptsFromFlags(flags),
+      },
+      ctx,
+      eventOptsFromFlags(flags),
+    );
+    printJson(outcome);
+    return outcome.outcome === 'hold' ? 1 : 0;
+  }
+
+  // D-43/P9-27: `epic verdict` above stays the free read-only probe; this is
+  // the verb that writes the close down. A hold closes only with
+  // --override-rationale, and then the log carries the machine's verdict, the
+  // blockers overridden, and the human's reason.
+  if (namespace === 'epic' && action === 'close') {
+    const epicId = requireFlag(flags, 'epic');
+    const projectDir = requireFlag(flags, 'project');
+    const ctx = eventContextFromFlags(flags);
+    const record = await closeEpic(
+      {
+        epicId,
+        integrationHeadSha: integrationHeadSha(projectDir, epicId),
+        mcp: mcpSurfaceFor(epicId, projectDir, flags),
+        planOpts: planOptsFromFlags(flags),
+        ...(flags['override-rationale'] !== undefined
+          ? { overrideRationale: flags['override-rationale'] }
+          : {}),
+      },
+      ctx,
+      eventOptsFromFlags(flags),
+    );
+    printJson(record);
+    return 0;
+  }
+
+  // P9-9/D-33: the closing spec review. The pre-code review reads a plan
+  // against nothing; this one reads it against the code that now exists, which
+  // is the only reading that can see the defects the code reveals. It is
+  // pinned to the integration head so `epic verdict` can tell a review of this
+  // branch from a review of an older one.
+  if (namespace === 'epic' && action === 'spec-review') {
+    const epicId = requireFlag(flags, 'epic');
+    const projectDir = requireFlag(flags, 'project');
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    // Evidence, not identity (interview N-2): the reviewer reports what it
+    // read; the plan version and the head it was read at come from here.
+    const evidence = flags.evidence ? readJsonFile<FindingEvidence[]>(flags.evidence) : [];
+    // No branch, no review. The whole point of this dispatch is that it reads
+    // the code that now exists; recording one against a head that could not be
+    // read would produce a review nothing can be shown to cover.
+    const headSha = integrationHeadSha(projectDir, epicId);
+    if (headSha === null) {
+      throw new SmithError(
+        'cli.no-integration-branch',
+        `Could not read the head of smith/${epicId}/integration in ${projectDir}. The closing spec review reads the assembled branch, so there is nothing to review yet.`,
+        { epicId, projectDir },
+      );
+    }
+    const record = await recordSpecReview(
+      {
+        epicId,
+        planVersion: plan.version,
+        headSha,
+        reviewedBy: requireFlag(flags, 'reviewed-by'),
+        ...(flags['reviewed-by-provider']
+          ? { reviewedByProvider: flags['reviewed-by-provider'] }
+          : {}),
+        evidence,
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(record);
+    // Exit 0 even when it found something: the review ran, and a spec finding
+    // blocks the plan, not this command. `plan amend` is what answers it.
+    return 0;
+  }
+
+  // D-41/P9-24: a finding can exist without a gate run. The wave-4 security
+  // reviewer's S2 was about a file nobody at that gate could touch, and the
+  // only verb that could record it was `gate run` — so recording it at all
+  // meant blocking a diff that could not contain the fix. This raises the
+  // finding on its own, routed to whoever claims the file.
+  if (namespace === 'findings' && action === 'raise') {
+    const plan = flags.plan ? readJsonFile<PlanFile>(flags.plan) : undefined;
+    // Ownership has to come from somewhere. --task names it outright; --plan
+    // makes the epic the fallback owner, which resolveFindingOwner can only
+    // improve on. With neither, there is no honest task_id to stamp.
+    // The epic is a fallback, never a real owner: decideFindingAttribution
+    // returns `gated` only when the owner equals this id, and an epic id never
+    // equals a task id — so a plan-only raise always resolves or escalates.
+    const defaultTaskId = flags.task ?? plan?.epic_id;
+    if (defaultTaskId === undefined) {
+      throw new SmithError(
+        'cli.missing-flag',
+        'findings raise needs --task, --plan, or both to attribute the finding.',
+        { flag: 'task' },
+      );
+    }
+    const ownership = plan ? ownershipFromPlan(plan) : undefined;
+    const ctx = eventContextFromFlags(flags);
+    const opts = eventOptsFromFlags(flags);
+
+    // P9-9/D-33. Scope is a property of the dispatch, not of each item: one
+    // review reads one thing. --plan is required for a spec raise because the
+    // version reviewed is read from the plan file rather than typed — a spec
+    // finding against the wrong version points at a criterion that never moved.
+    if (flags.scope !== undefined && flags.scope !== 'spec' && flags.scope !== 'diff') {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--scope must be "diff" or "spec", got "${flags.scope}".`,
+        { flag: 'scope', value: flags.scope },
+      );
+    }
+    const specDispatch = flags.scope === 'spec';
+    if (specDispatch && plan === undefined) {
+      throw new SmithError(
+        'cli.missing-flag',
+        'findings raise --scope spec needs --plan: a spec finding names the plan version whose criterion it read.',
+        { flag: 'plan' },
+      );
+    }
+    // Scope is decided by the dispatch, and a pre-built draft was minted by
+    // some other dispatch. Accepting one here would put a diff finding into a
+    // spec batch and report it as spec-scoped when it is not.
+    if (specDispatch && flags.findings) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        'findings raise --scope spec takes --evidence, not --findings: scope belongs to the dispatch, and a pre-built draft was minted under a different one.',
+        { flag: 'findings' },
+      );
+    }
+
+    // A spec finding is owned by the epic, not by whoever claims the file it
+    // cites — same id recordSpecReview stamps, so the two routes into the log
+    // are indistinguishable to everything downstream.
+    const mintTaskId = specDispatch && plan ? `${plan.epic_id}/${RESERVED_TASK_ID}` : defaultTaskId;
+
+    const findingsInput = [
+      ...(flags.findings ? readJsonFile<RaiseFindingInput[]>(flags.findings) : []),
+      // The mint id, not the default one: a spec finding belongs to the epic
+      // (D-33), and the dispatch's scope rides along with it so every finding
+      // in the batch is spec-scoped by construction.
+      ...mintFromEvidence(
+        args,
+        mintTaskId,
+        specDispatch && plan ? { spec: { planVersion: plan.version } } : {},
+      ),
+    ];
+
+    // A spec dispatch never enters the routing. routeFindings would rewrite
+    // task_id to whoever claims the file the finding happens to cite — and a
+    // plan defect attributed to a task is exactly the deadlock D-33 exists to
+    // end. gate.ts diverts for the same reason; this diverts one step earlier,
+    // before attribution rather than after it.
+    const routings = specDispatch
+      ? findingsInput.map((input) => ({
+          input,
+          attribution: 'gated' as const,
+          taskId: mintTaskId,
+          epicId: plan?.epic_id ?? mintTaskId,
+          fromTaskId: mintTaskId,
+          reason: '',
+          claims: [],
+        }))
+      : await routeFindings(
+          findingsInput,
+          {
+            defaultTaskId,
+            // The plan states the epic outright, so nothing has to read it back
+            // out of `defaultTaskId` — which on a plan-only raise IS the epic id
+            // and names no epic of its own (D-49/P9-10).
+            ...(plan?.epic_id ? { epicId: plan.epic_id } : {}),
+            ...(ownership ? { ownership } : {}),
+          },
+          ctx,
+          opts,
+        );
+    const raised = [];
+    for (const routing of routings) {
+      const result = await raiseFinding(routing.input, ctx, opts);
+      // A waived fingerprint is already settled, so it mints no follow-up
+      // task — same rule the gate applies, for the same reason. A spec finding
+      // is skipped for the other half of that rule (gate.ts's divert): no task
+      // can hold the fix, because the fix is a plan amendment.
+      const isSpec = !result.suppressed && findingScope(result.finding) === SPEC_FINDING_SCOPE;
+      if (!result.suppressed && !isSpec) {
+        await recordReattribution(routing, result.finding, ctx, opts);
+      }
+      raised.push({
+        findingId: result.suppressed ? null : result.finding.finding_id,
+        filePath: routing.input.filePath,
+        taskId: routing.taskId,
+        attribution: isSpec ? SPEC_FINDING_SCOPE : routing.attribution,
+        suppressed: result.suppressed,
+        reason: routing.reason,
+      });
+    }
+    printJson(raised);
+    return 0;
+  }
+
+  // `--state-dir` is threaded through every findings/waivers verb below.
+  // It used to be parsed and dropped here, so `findings list --state-dir X`
+  // answered about the real state/events/ log instead — an answer about a
+  // different session, which is worse than an error (P9-15).
+  if (namespace === 'findings' && action === 'list') {
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    // An empty list is an answer about the findings; it must not also be the
+    // answer about the session (P9-28).
+    requireSession(sessionId, eventOpts);
+    const findings = await listFindings(
+      sessionId,
+      {
+        taskId: flags.task,
+        epic: flags.epic,
+        status: flags.status,
+        severity: flags.severity,
+        category: flags.category,
+      },
+      eventOpts,
+    );
+    printJson(findings);
+    return 0;
+  }
+
+  if (namespace === 'findings' && action === 'transition') {
+    // Positionals first, then flags: argument order is the reading order, and
+    // a usage error should name the first thing wrong on the line.
+    const [findingId, newStatus] = requirePositionals(
+      positional,
+      usageFor('findings transition'),
+    ) as [string, string];
+    // D-136. Both amendment edges are gated on evidence this command line has
+    // no way to carry: `amendsTaskIds` comes off a plan diff and
+    // `amendsSatisfiedBy` off the task fold, and neither has a flag — by
+    // design, since a hand-typed obligation is exactly the unchecked claim
+    // D-127 closed. So every invocation naming them already fails; what it
+    // failed with was a message about task ids the operator was never offered,
+    // five guards into a log fold, which reads as a bug in their command line.
+    // Refusing here, on the status alone, keeps argument order as the reading
+    // order and lets the error name the verb that CAN take the edge.
+    const AMENDMENT_ROUTES: Readonly<Record<string, string>> = {
+      [AMEND_PENDING_STATUS]:
+        '`smith plan amend` puts every finding it cites into "amend-pending", with the task ids the new plan version added or superseded as the obligation',
+      [AMENDED_STATUS]:
+        '`smith epic close` computes which of those tasks actually landed and discharges the finding with that evidence',
+    };
+    if (newStatus in AMENDMENT_ROUTES) {
+      throw new SmithError(
+        'cli.amendment-edge-unreachable',
+        `"${newStatus}" is not reachable through "smith findings transition": the amendment path is entered and closed by the commands that can compute its evidence, never by hand. ${AMENDMENT_ROUTES[newStatus]}.`,
+        { status: newStatus, findingId },
+      );
+    }
+    const ctx = eventContextFromFlags(flags);
+    const finding = await transitionFinding(findingId, newStatus, ctx, eventOptsFromFlags(flags));
+    printJson(finding);
+    return 0;
+  }
+
+  // The dispatch-time half of P9-15, shaped exactly like `lessons
+  // for-dispatch`: the caller composing a task prompt asks for the block and
+  // splices it. `--plan` is required rather than optional here — without it
+  // the claims list is empty, every finding fails the join, and the command
+  // would answer "nothing is open in your files" when it never looked.
+  if (namespace === 'findings' && action === 'for-dispatch') {
+    const usage =
+      'smith findings for-dispatch --session ... --plan plan.json --task task-id [--state-dir dir]';
+    requireFlag(flags, 'plan');
+    const taskId = requireFlag(flags, 'task');
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    if (positional.length > 0) {
+      throw new SmithError('cli.usage', `Unexpected argument. Usage: ${usage}`, { positional });
+    }
+    printJson(
+      await findingsForDispatch({ sessionId, taskId, claims: claimsForDispatch(flags) }, eventOpts),
+    );
+    return 0;
+  }
+
+  // Re-dating a finding's evidence (P9-15). Deliberately its own verb and not
+  // a `transition`: re-verification does not change finding_status, and the
+  // two statuses it could be confused with mean something else entirely
+  // (`confirmed` cannot be re-entered, `refuted` says the finding was wrong).
+  if (namespace === 'findings' && action === 'reverify') {
+    const [findingId] = requirePositionals(positional, usageFor('findings reverify')) as [string];
+    const ctx = eventContextFromFlags(flags);
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(ctx.sessionId, eventOpts);
+    await reverifyFinding(findingId, flags.note ?? '', ctx, eventOpts);
+    printJson({ findingId, note: flags.note ?? '' });
+    return 0;
+  }
+
+  // D-21 Part 4. Corrects a malformed amends_task_ids entry on a finding
+  // parked at amend-pending -- the shape a malformed "plan amend" --changes
+  // file can write (parts 1-3 of D-21 now refuse that at the source, but the
+  // log is append-only). Never a hand-typed obligation: repairObligation's own
+  // guards refuse anything this verb is not meant to do.
+  if (namespace === 'findings' && action === 'repair-obligation') {
+    const [findingId] = requirePositionals(positional, usageFor('findings repair-obligation')) as [
+      string,
+    ];
+    // Comma-split, not repeated: a task id has no commas, and a repaired
+    // obligation routinely names more than one (D-136's --findings precedent).
+    //
+    // Unlike --findings/--sites, a stray empty SEGMENT is not filtered out
+    // here (D-21 Part 4 review, S4 behavioral-drift): "a,,b" used to filter
+    // down to ['a', 'b'], so repairObligation's guard 6 -- every replacement
+    // id must be a non-empty string -- was implemented and unit-tested but
+    // unreachable through this command line; an operator's typo'd double
+    // comma was silently corrected instead of refused. Only the flag's own
+    // value being entirely blank (nothing typed at all, the one shape a
+    // string flag can use to mean "zero entries") maps to an empty list, so
+    // guard 3 (cannot empty) stays reachable too.
+    const replaceWithRaw = requireFlag(flags, 'replace-with');
+    const replaceWith =
+      replaceWithRaw.trim() === '' ? [] : replaceWithRaw.split(',').map((id) => id.trim());
+    const ctx = eventContextFromFlags(flags);
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(ctx.sessionId, eventOpts);
+    const finding = await repairObligation(
+      { findingId, replaceWith, reason: requireFlag(flags, 'reason') },
+      ctx,
+      eventOpts,
+    );
+    printJson(finding);
+    return 0;
+  }
+
+  if (namespace === 'waivers' && action === 'pending') {
+    const [epic] = requirePositionals(positional, usageFor('waivers pending')) as [string];
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    const pending = await pendingBatch(epic, { sessionId }, eventOpts);
+    printJson(pending);
+    return 0;
+  }
+
+  if (namespace === 'waivers' && action === 'apply') {
+    const [decisionsFile] = requirePositionals(positional, usageFor('waivers apply')) as [string];
+    const decisions = readJsonFile<WaiverBatchDecision[]>(decisionsFile);
+    const ctx = eventContextFromFlags(flags);
+    const results = await applyBatch(decisions, ctx, eventOptsFromFlags(flags));
+    printJson(results);
+    return 0;
+  }
+
+  if (namespace === 'lessons' && action === 'candidates') {
+    const dbPath = flags.db ?? STATE_DB_PATH;
+    const handle = openDb(dbPath);
+    try {
+      const scope = flags.session ? { sessionId: flags.session } : {};
+      printJson(lessonsPage(handle.db, scope).pending);
+      return 0;
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  // The hand-authored entrance to the pipeline (P9-34). `smith dream` only
+  // ever sees four checkpoint shapes in a log, so a rule derived by reading a
+  // whole run had no way in except `smith event append`, which applies no
+  // novelty check at all. Exit 1 on a novelty rejection: the candidate is
+  // logged either way, but the operator must look before assuming it landed.
+  if (namespace === 'lessons' && action === 'raise') {
+    const eventOpts = eventOptsFromFlags(flags);
+    const ctx = eventContextFromFlags(flags);
+    requireSession(ctx.sessionId, eventOpts);
+    const result = await raiseLessonCandidate(
+      {
+        statement: requireFlag(flags, 'statement'),
+        lessonType: requireFlag(flags, 'lesson-type'),
+        lessonScope: requireFlag(flags, 'lesson-scope'),
+        provenanceEventIds: requireFlag(flags, 'provenance')
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+        provenanceSessionId: flags['provenance-session'],
+        evidence: flags.evidence,
+        findingCategory: flags['finding-category'],
+        claimPath: flags['claim-path'],
+        agentRole: flags['agent-role'],
+        caseType: flags['case-type'],
+        lessonId: flags['lesson-id'],
+      },
+      ctx,
+      eventOpts,
+      noveltyOptsFromFlags(flags),
+    );
+    printJson(result);
+    return result.novel ? 0 : 1;
+  }
+
+  // `approve` and `reject` are the same verb with the destination fixed
+  // (P9-1): reject maps to `invalidated`, the status ui/server's reject route
+  // already writes. Both refuse a transition LEGAL_LESSON_TRANSITIONS does
+  // not allow rather than letting a hand-typed envelope poison the memory.
+  //
+  // P9-34/P9-35: an approval also carries the novelty review — `--statement`
+  // is scored by the same gate `raise` uses, and even an unedited approval
+  // reports what the text most resembles, because the gate only catches a
+  // near-verbatim re-statement and the operator is the rest of the check.
+  // Exit 1 when the text that just landed in memory is not novel: it landed
+  // either way, but that is a "look at this", not a clean run.
+  if (namespace === 'lessons' && (action === 'approve' || action === 'reject')) {
+    const [lessonId] = requirePositionals(positional, usageFor(`lessons ${action}`)) as [string];
+    const eventOpts = eventOptsFromFlags(flags);
+    const ctx = eventContextFromFlags(flags);
+    requireSession(ctx.sessionId, eventOpts);
+    const row = await transitionLesson(
+      lessonId,
+      action === 'approve' ? 'approved' : 'invalidated',
+      ctx,
+      eventOpts,
+      {
+        note: flags.note,
+        edit: {
+          statement: flags.statement,
+          lessonType: flags['lesson-type'],
+          lessonScope: flags['lesson-scope'],
+          agentRole: flags['agent-role'],
+          caseType: flags['case-type'],
+        },
+        acceptDuplicate: flags['accept-duplicate'] === 'true',
+        ...noveltyOptsFromFlags(flags),
+      },
+    );
+    printJson(row);
+    return row.novelty && !row.novelty.novel ? 1 : 0;
+  }
+
+  if (namespace === 'lessons' && action === 'compile') {
+    const dbPath = flags.db ?? STATE_DB_PATH;
+    const outPath = flags.out ?? LESSONS_MD_PATH;
+    const handle = openDb(dbPath);
+    try {
+      const scope = flags.session ? { sessionId: flags.session } : {};
+      const approved = lessonsPage(handle.db, scope).approved;
+      const markdown = compileLessons(
+        approved.map((l) => ({
+          lessonId: l.lessonId,
+          lessonScope: l.lessonScope,
+          statement: l.statement,
+          findingCategory: l.findingCategory,
+          claimPath: l.claimPath,
+          agentRole: l.agentRole,
+          caseType: l.caseType,
+        })),
+      );
+      writeFileSync(outPath, markdown, 'utf8');
+      printJson({ outPath, lessonsCompiled: approved.length });
+      return 0;
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  // The dispatch-time half of the lessons loop (P9-2): the caller composing a
+  // role prompt asks for the block and splices it. Claims come from the
+  // immutable plan rather than a repeated `--claim` flag — parseArgs keeps one
+  // value per flag, and a claim glob may itself contain a comma (`src/{a,b}/**`),
+  // so neither repetition nor splitting can carry a claims list faithfully.
+  if (namespace === 'lessons' && action === 'for-dispatch') {
+    const [role] = requirePositionals(positional, usageFor('lessons for-dispatch')) as [string];
+    printJson(
+      lessonsForDispatch(role, claimsForDispatch(flags), {
+        ...(flags['agents-dir'] ? { agentsDir: flags['agents-dir'] } : {}),
+        ...(flags.lessons ? { lessonsPath: flags.lessons } : {}),
+        caseType: caseForDispatch(flags),
+      }),
+    );
+    return 0;
+  }
+
+  if (namespace === 'dream') {
+    const sessionId = requireFlag(flags, 'session');
+    // Before the lineage read, so a typo costs a message and not a full log walk.
+    const since = isoDateFlag(flags, 'since')?.toISOString();
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    // Lineage-wide (D-119). Dreaming is the pass that distils what went wrong
+    // into lessons, and what went wrong belongs to the epic: an error logged
+    // before a session split, and the retry that fixed it after, are one story
+    // that a session-scoped read tells in halves. `--since` still bounds it.
+    const events = await readLineageEvents(sessionId, eventOpts);
+    const ctx = eventContextFromFlags(flags);
+
+    const result = await dream(
+      events,
+      {
+        sessionId: ctx.sessionId,
+        planVersion: ctx.planVersion,
+        causalParent: ctx.causalParent as string,
+        actor: ctx.actor,
+      },
+      eventOpts,
+      { since, ...noveltyOptsFromFlags(flags) },
+    );
+    printJson(result);
+    return 0;
+  }
+
+  // D-31, D-20 / P9-11. The two halves of a judge turn and the gap between
+  // them. Dispatch declares the file; report proves it exists and parses;
+  // outstanding is the difference, and exits non-zero while it is non-empty so
+  // a re-poke loop can branch on the status instead of parsing stdout.
+  if (namespace === 'judge' && action === 'dispatch') {
+    const stored = await recordJudgeDispatch(
+      {
+        taskId: requireFlag(flags, 'task'),
+        role: requireFlag(flags, 'role'),
+        round: boundedIntFlag(flags, 'round', { min: 1 }) ?? 1,
+        artifactPath: requireFlag(flags, 'artifact'),
+        // Required, unlike --provider/--model-tier below: P9-23's dispatch
+        // asymmetry audit compares model ids, and this verb records one half of
+        // the reviewer/verifier pair it checks.
+        model: requireFlag(flags, 'model'),
+        ...(flags.provider ? { provider: flags.provider } : {}),
+        ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(stored);
+    return 0;
+  }
+
+  if (namespace === 'judge' && action === 'report') {
+    // Optional here, unlike on dispatch, so an absent --round must stay absent
+    // rather than defaulting: recordJudgeReport reads the dispatched round when
+    // the caller names none. A present one is still a count (D-210's class) --
+    // `--round abc` used to reach the reporter as NaN and come back as "is on
+    // round 1, not round NaN", which blames the round for what the flag did.
+    const reportRound = boundedIntFlag(flags, 'round', { min: 1 });
+    const report = await recordJudgeReport(
+      {
+        taskId: requireFlag(flags, 'task'),
+        role: requireFlag(flags, 'role'),
+        ...(reportRound === undefined ? {} : { round: reportRound }),
+        ...(flags.artifact ? { artifactPath: flags.artifact } : {}),
+        // Here the role is already named by --role, so the valueless spelling
+        // is the right one and 'true' means what it says.
+        ...(flags['no-findings'] === 'true' ? { noFindings: true } : {}),
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(report);
+    return 0;
+  }
+
+  if (namespace === 'judge' && action === 'outstanding') {
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    const open = outstandingJudges(
+      await readJudgeTurns(requireFlag(flags, 'task'), { sessionId }, eventOpts),
+    );
+    printJson(open);
+    return open.length > 0 ? 1 : 0;
+  }
+
+  if (namespace === 'judge' && action === 'run') {
+    // Manual invocation for calibration (docs/runbooks/providers.md) — never
+    // touches the event log or quorum.ts; `--shadow` is an output-only note
+    // for the operator's own bookkeeping (crosscheck.yml's provider `mode`
+    // is the only thing that ever grants real gating power).
+    const providerName = requireFlag(flags, 'provider');
+    const request = readJsonFile<JudgeRequest>(requireFlag(flags, 'request'));
+    const result = await runJudge(providerName, request);
+    printJson({ ...result, shadow: flags.shadow === 'true' });
+    return 0;
+  }
+
+  if (namespace === 'ui' && action === 'serve') {
+    // Before the dynamic import below, so a mistyped port costs a message and
+    // not a build: unbuilt, ui.not-built preempted the parse and the operator
+    // was told to run pnpm build:server for a typo that would still be there
+    // afterwards. Built, listen() threw ERR_SOCKET_BAD_PORT -- exit 1, but a
+    // Node stack trace on stdout with no error.code, the one shape every other
+    // error from this CLI has.
+    const port = boundedIntFlag(flags, 'port', { min: 1, max: 65535 }) ?? 4680;
+    // ui/server is a separate TS project (ui/server/tsconfig.json) built to
+    // ui/server/dist/index.js — dynamically imported here (via a computed,
+    // non-literal specifier, so tsc never tries to fold it into THIS
+    // project's rootDir) rather than statically imported, so `smith`'s own
+    // build/bin contract (factory/orchestrator/dist/cli.js) stays untouched
+    // whether or not the UI has been built. See ui/server/src/app.ts's
+    // header comment for why ui/server depends on the BUILT orchestrator
+    // dist/, not this file's src/ tree.
+    const serverEntry = path.join(REPO_ROOT, 'ui', 'server', 'dist', 'index.js');
+    let mod: {
+      serve: (opts: {
+        port: number;
+        dbPath: string;
+        stateDir?: string;
+        roadmapPath?: string;
+        specsDir?: string;
+      }) => {
+        close: () => void;
+      };
+    };
+    try {
+      mod = await import(pathToFileURL(serverEntry).href);
+    } catch (err) {
+      throw new SmithError(
+        'ui.not-built',
+        `ui/server is not built (expected ${serverEntry}). Run "pnpm build:server" first.`,
+        { cause: err instanceof Error ? err.message : String(err) },
+      );
+    }
+    const dbPath = flags.db ?? STATE_DB_PATH;
+    const stateDir = flags['state-dir'];
+    // --roadmap-path travels with --db/--state-dir, and dropping it was not a
+    // missing feature but a silent data swap: the read path re-projects each
+    // session on the first request (app.ts's createRefresher), and apply()
+    // rebuilds the whole milestones table from a roadmap file while it is
+    // there. Unset, that file falls back to black-smith's own
+    // factory/specs/roadmap.md — so serving another project's db showed this
+    // repo's roadmap from the first page load onward.
+    const roadmapPath = flags['roadmap-path'];
+    // Same argument for --specs-dir: createRefresher re-projects on every
+    // request, and the plan files it consults to place an unstamped epic
+    // (D-246) must be the served db's, not this repo's.
+    const specsDir = flags['specs-dir'];
+    mod.serve({
+      port,
+      dbPath,
+      ...(stateDir ? { stateDir } : {}),
+      ...(roadmapPath ? { roadmapPath } : {}),
+      ...(specsDir ? { specsDir } : {}),
+    });
+    return 0;
+  }
+
+  if (namespace === 'db' && action === 'rebuild') {
+    const dbPath = flags.db ?? STATE_DB_PATH;
+    const sessions = flags.session ? [flags.session] : 'all';
+    // A named session must exist; `all` legitimately finds nothing (P9-28).
+    if (flags.session) requireSession(flags.session, eventOptsFromFlags(flags));
+    const result = await rebuildDb(dbPath, sessions, dbOptsFromFlags(flags));
+    printJson(result);
+    return 0;
+  }
+
+  if (namespace === 'db' && action === 'apply') {
+    const dbPath = flags.db ?? STATE_DB_PATH;
+    const sessionId = requireFlag(flags, 'session');
+    // Applying a session that has no log would report 0 events applied and
+    // exit 0 — a successful-looking no-op is the worst possible answer for a
+    // command whose whole job is "make the DB match the log" (P9-28).
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    const result = await applyDb(dbPath, sessionId, dbOptsFromFlags(flags));
+    printJson(result);
+    return 0;
+  }
+
+  if (namespace === 'stats') {
+    const dbPath = flags.db ?? STATE_DB_PATH;
+    const handle = openDb(dbPath);
+    try {
+      const scope = flags.session ? { sessionId: flags.session } : {};
+      if (action === 'overview') {
+        printJson(overview(handle.db, scope));
+        return 0;
+      }
+      if (action === 'timeline') {
+        printJson(
+          timeline(handle.db, {
+            ...scope,
+            taskId: flags.task,
+            epicId: flags.epic,
+            causalChainFor: flags['causal-chain-for'],
+          }),
+        );
+        return 0;
+      }
+      if (action === 'kanban') {
+        const epic = requireFlag(flags, 'epic');
+        printJson(kanban(handle.db, epic, scope));
+        return 0;
+      }
+      if (action === 'task') {
+        const taskId = requireFlag(flags, 'task');
+        const detail = taskDetail(handle.db, taskId);
+        printJson(detail);
+        return detail ? 0 : 1;
+      }
+      if (action === 'lessons') {
+        printJson(lessonsPage(handle.db, scope));
+        return 0;
+      }
+      if (action === 'errors') {
+        printJson(errorsPage(handle.db, scope));
+        return 0;
+      }
+      if (action === 'analytics') {
+        printJson(analytics(handle.db, scope));
+        return 0;
+      }
+      if (action === 'roadmap') {
+        printJson(roadmapPage(handle.db, scope));
+        return 0;
+      }
+      if (action === 'providers') {
+        const since = isoDateFlag(flags, 'since')?.toISOString();
+        printJson(providerAgreement(handle.db, scope, { since }));
+        return 0;
+      }
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  // Unreachable while usage.ts and the branches above agree, because
+  // isDocumented rejected everything they do not both name — but a function
+  // returning `Promise<number>` has to return on every path, and an
+  // unreachable `throw` would be a worse answer than the honest one. What
+  // keeps the two in agreement is test/usage.test.ts, not this line.
+  printJson({
+    error: {
+      message: `Unknown command: ${[namespace, action].filter(Boolean).join(' ')}`,
+    },
+  });
+  return 1;
+}
+
+main()
+  .then((code) => {
+    process.exitCode = code;
+  })
+  .catch((err: unknown) => {
+    // A SmithError is a designed answer: its code names the failure and its
+    // details name the record, so a stack would only add noise. Anything else
+    // is a bug, and D-135 is what that costs — `{"message":"Cannot read
+    // properties of undefined (reading 'indexOf')"}` was the entire output of
+    // a failed `smith findings list`, with no file, no line and no clue which
+    // of the three helpers that call `.indexOf` had thrown. The stack is the
+    // only part of an unexpected error worth having.
+    const details =
+      err instanceof SmithError
+        ? { code: err.code, message: err.message, details: err.details }
+        : {
+            message: err instanceof Error ? err.message : String(err),
+            ...(err instanceof Error && err.stack ? { stack: err.stack.split('\n') } : {}),
+          };
+    printJson({ error: details });
+    process.exitCode = 1;
+  });

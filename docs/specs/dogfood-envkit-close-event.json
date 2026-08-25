@@ -1,0 +1,51 @@
+{
+  "session_id": "dogfood-envkit-1",
+  "actor": "operator",
+  "event_type": "epic-closed",
+  "task_id": "envkit-config-loader/epic",
+  "plan_version": 1,
+  "causal_parent": "dogfood-envkit-1#68",
+  "payload": {
+    "epic_id": "envkit-config-loader",
+    "closed_by": "operator-override",
+    "machine_verdict": "hold",
+    "machine_reason": "mechanical-blockers",
+    "override_rationale": "smith epic verdict cannot see this epic. The plan declares qualified task ids (envkit-config-loader/task-N) while every execution was recorded under a bare id (task-N), so the verdict folds one task instead of six and reports nonTerminalTaskCount 1 with openFindings []. Known defect D-28, predicted before the run and confirmed by it. Closed by hand because fixing the id convention is a schema-boundary change plus a migration for the existing log, which is Phase 9 work rather than a patch applied mid-run.",
+    "tasks_merged": [
+      "task-0-toolchain",
+      "task-1a-parse-core",
+      "task-1b-parse-quotes",
+      "task-2-coerce",
+      "task-3-validate",
+      "task-4-api"
+    ],
+    "integration_branch": "smith/envkit-config-loader/integration",
+    "integration_head": "8962df9",
+    "integration_checks": {
+      "typecheck": 0,
+      "test": 0,
+      "build": 0,
+      "lint": 1,
+      "test_files": 4,
+      "test_count": 159,
+      "lint_note": "Exit 1 from nested-root biome config discovery across the six task worktrees under the project root, not from any source file. Identical command exits 0 with wt/ moved aside. Finding D-42."
+    },
+    "carry_forward_defects": [
+      {
+        "ref": "D-41",
+        "severity": "S2-major",
+        "file": "src/parse.ts",
+        "summary": "Bare CR is not treated as a line separator, so a CR-delimited assignment is silently swallowed into the preceding value and the swallowed key falls back to its schema default with ok:true and zero issues. Reproduced independently. Unfixed: raised while gating task-4, whose claims forbid it to touch parse.ts, and intakeAndDecide applies no claims-scoping, so the finding has no task that may legally remedy it."
+      },
+      {
+        "ref": "D-42",
+        "severity": "S3-minor",
+        "file": "factory/orchestrator/src/worktree.ts",
+        "summary": "Task worktrees are created inside the project root, so the assembled branch cannot run a root-walking lint even though every per-task lint gate passed. Local-only: wt/ is untracked, so CI is unaffected."
+      }
+    ],
+    "findings_open": 0,
+    "dogfood_findings_recorded": 43,
+    "note": "This event exists because the epic's own close verb could not emit one: runEpicVerdict returns on mechanical blockers before its only appendEvent, by design (epic.ts:263, 'zero events (read-only projection)'). Without this record the terminal decision that stopped the epic would be absent from the log, the projector and the UI."
+  }
+}

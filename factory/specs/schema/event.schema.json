@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/event.schema.json",
+  "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
+  "title": "Event",
+  "description": "One record in state/events/*.jsonl, the factory's durable execution substrate (architecture §7). Field names follow §7's record shape exactly: {ts, session_id, actor, event_type, task_id?, agent_id?, plan_version, causal_parent, payload}.",
+  "type": "object",
+  "required": [
+    "ts",
+    "session_id",
+    "actor",
+    "event_type",
+    "plan_version",
+    "causal_parent",
+    "payload"
+  ],
+  "properties": {
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "string",
+      "description": "Who emitted the event: 'user', 'system', an agent role, or a concrete agent_id."
+    },
+    "event_type": {
+      "type": "string",
+      "description": "Free string, not an enum — a closed list here would reject a new event type at write time and lose the record. e.g. user_prompt, dispatch_decision, error-logged, or one of the gate_event / graph_event taxonomy values (taxonomy.yml)."
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional — absent for session-level or epic-level events. Absence is the whole signal (agents-registry.ts folds a dispatch with no task id as epic-level), so \"\" is not a way to say it: minLength 1 keeps the field to two states instead of three (D-244)."
+    },
+    "agent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional — concrete instance id (e.g. coder-142), not a taxonomy role. Present means it names an instance; \"\" names none, so it is refused rather than written (D-244)."
+    },
+    "plan_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "causal_parent": {
+      "type": ["string", "null"],
+      "description": "Event id of the event that caused this one; null only for session-root events."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event-type-specific body."
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional plain-string project identifier (Phase 6b, architecture §8) — NOT a closed taxonomy.yml vocabulary value, so no x-taxonomy annotation here. Absent on every event logged before Phase 6b; db/queries.ts's read helpers treat an absent/null project as the default 'black-smith'. That default is reached by absence, so \"\" would slip past it and name a project called nothing (D-244)."
+    },
+    "edge": {
+      "type": "object",
+      "description": "Present only on edge-recorded events (architecture §7).",
+      "required": ["edge_type", "edge_provenance"],
+      "properties": {
+        "edge_type": {
+          "type": "string",
+          "x-taxonomy": "edge_type"
+        },
+        "edge_provenance": {
+          "type": "string",
+          "x-taxonomy": "edge_provenance"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

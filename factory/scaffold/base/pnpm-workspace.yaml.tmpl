@@ -1,0 +1,18 @@
+# This project is its own pnpm workspace root, and says so on purpose.
+#
+# pnpm finds a workspace by walking UP from the current directory until it
+# hits a `pnpm-workspace.yaml`. A project scaffolded into `workspaces/<name>`
+# sits inside black-smith's tree, so without this file `pnpm install` here
+# would resolve to whatever workspace root stands above it: the factory's
+# lockfile gets rewritten, the project's dependencies get linked into the
+# factory's `node_modules`, and every gate afterwards measures a toolchain the
+# project does not own (P9-16c). While the factory declared a root of its own
+# with no `packages`, that same walk killed `pnpm install` outright with
+# ERR_PNPM_INVALID_WORKSPACE_CONFIGURATION before it resolved a single
+# dependency (P9-19).
+#
+# `.` is the whole list: one package, this one. It stays correct once the
+# project moves to its own remote, where there is nothing above it to find.
+# Add entries here if this project ever grows a monorepo of its own.
+packages:
+  - '.'

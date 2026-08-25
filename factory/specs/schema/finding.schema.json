@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/finding.schema.json",
+  "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
+  "title": "Review Finding",
+  "description": "One reviewer/verifier finding. Verifier's mandate is to refute, not confirm (architecture §6); a finding survives only with a concrete failure scenario (agent-interviews.md V-2).",
+  "type": "object",
+  "required": [
+    "finding_id",
+    "task_id",
+    "fingerprint",
+    "file_path",
+    "finding_category",
+    "severity",
+    "finding_status",
+    "summary",
+    "failure_scenario",
+    "found_by"
+  ],
+  "properties": {
+    "finding_id": { "type": "string" },
+    "task_id": { "type": "string" },
+    "epic_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The epic this finding belongs to. Optional, not required: findings raised before this field existed carry the epic in the task_id prefix instead, and a task_id that names no epic yields no epic_id rather than a guessed one (D-49/P9-10)."
+    },
+    "fingerprint": {
+      "type": "string",
+      "description": "Stable hash identifying this finding for dedup and waiver lookup; waived findings are suppressed in future reviews of the same code by fingerprint match."
+    },
+    "file_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repo-relative path the finding is anchored to, normalized (forward slashes, no leading ./). The fingerprint's first component, kept as a field because a hash cannot be joined against a task's claims: dispatch-time context and the stale-evidence check both need the path itself (P9-15)."
+    },
+    "finding_category": {
+      "type": "string",
+      "x-taxonomy": "finding_category"
+    },
+    "severity": {
+      "type": "string",
+      "x-taxonomy": "severity"
+    },
+    "finding_status": {
+      "type": "string",
+      "x-taxonomy": "finding_status"
+    },
+    "finding_scope": {
+      "type": "string",
+      "x-taxonomy": "finding_scope",
+      "description": "Absent means `diff` — findings written before the dimension existed carry no scope. `spec` says the code is right and the plan is wrong; such a finding blocks the plan, never the diff (P9-9/D-33), and requires spec_ref."
+    },
+    "spec_ref": {
+      "type": "object",
+      "description": "Which criterion of which plan version the spec finding is against. Required when finding_scope is `spec` and forbidden otherwise — enforced in findings.ts, not here, because a JSON-Schema `if/then` would have to inline the taxonomy value `spec` (see $comment).",
+      "required": ["plan_version", "criterion_ref"],
+      "properties": {
+        "plan_version": { "type": "integer", "minimum": 1 },
+        "criterion_ref": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "failure_scenario": {
+      "type": "object",
+      "description": "Concrete inputs -> wrong output. A finding without one dies at verify (agent-interviews.md V-2).",
+      "required": ["inputs", "expected", "actual"],
+      "properties": {
+        "inputs": { "type": "string" },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "found_by": {
+      "type": "string",
+      "x-taxonomy": "agent"
+    },
+    "found_by_provider": {
+      "type": "string",
+      "x-taxonomy": "provider"
+    },
+    "verified_by": {
+      "type": "string",
+      "x-taxonomy": "agent"
+    },
+    "verified_by_provider": {
+      "type": "string",
+      "x-taxonomy": "provider"
+    },
+    "same_mistake_of_lesson_id": {
+      "type": ["string", "null"],
+      "description": "Set when this finding matches an approved lesson; auto-escalates one severity level (architecture §9.7)."
+    },
+    "waiver_id": {
+      "type": ["string", "null"],
+      "description": "Set once an S3/S4 finding has been waived by the operator; keyed by fingerprint, never re-asked."
+    },
+    "amends_task_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Set once an amendment took this finding to `amend-pending`: the task ids that amendment added or superseded. They are the finding's discharge condition — until they land it cannot reach `amended`. Without them an amendment closes an unwaivable S1/S2 spec finding at plan-write time, naming no task outcome at all (D-127)."
+    },
+    "amends_plan_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The plan version that amendment cut, so `amends_task_ids` can be resolved against the version that defines them (D-127)."
+    }
+  },
+  "additionalProperties": false
+}

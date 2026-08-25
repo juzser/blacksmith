@@ -1,0 +1,286 @@
+{
+  "epic_id": "envkit-mcp-followup",
+  "version": 2,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "envkit-mcp-followup/task-1-key-shape-module",
+      "epic_id": "envkit-mcp-followup",
+      "plan_version": 2,
+      "objective": "Give the MCP surface one definition of what a key name is, and construct the redactor's assignment rule from it, so that every name a tool is allowed to echo is a name the redactor would scrub the value of — by construction, not by comment. This is the half of finding f-envkit-mcp-surface/integration-97825fcf that lives below the tools: src/mcp/redact.ts's ENV_KEY ((?:export )?[A-Za-z_][A-Za-z0-9_]{0,127}=) refuses a leading digit and src/mcp/tools/*'s ECHOABLE_KEY (/^[A-Za-z0-9_]{1,128}$/) admits one, so the echo bound is NOT a subset of the redaction rule and the sentence in env-diff-keys.ts claiming the two modules agree is false. The repair direction is WIDEN, not narrow, and the reason is on the record: redact.ts's own docblock says 'Do not narrow the key pattern … either change reopens the hole this rule exists to close', over-redaction is its declared accepted failure direction, and narrowing ECHOABLE_KEY would make the comment true while leaving redactText blind to 9SECRET=hunter2 for every OTHER caller — redactError() is applied to arbitrary thrown messages, not only to .env documents. The hole is in the net, so the net is what widens. Scope is one new module, one existing module and their tests; neither tool file and not the manifest.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/mcp/keys.ts is new and holds the definition exactly once, as a character-class-and-bound fragment that both consumers derive from rather than two regexes that happen to look alike: a module-private KEY_BODY string (`[A-Za-z0-9_]{1,128}`), an exported anchored ECHOABLE_KEY built as new RegExp(`^${KEY_BODY}$`) for membership tests, and an exported ENV_KEY string fragment built as `(?:export )?${KEY_BODY}=` for embedding in an assignment pattern. Two literals that must stay identical is the shape that produced this epic; one literal that both forms are computed from is the shape that cannot drift.",
+        "src/mcp/redact.ts defines no key pattern of its own. Its local ENV_KEY constant is deleted and the name is imported from './keys.js'; ENV_ASSIGNMENT is otherwise unchanged, including the whitespace-then-assignment boundary lookahead, which continues to embed the same fragment on both sides. The docblock paragraph beginning 'Over-redaction is deliberate' keeps its 'Do not narrow the key pattern' sentence verbatim and gains one sentence recording that the pattern was WIDENED to admit a leading digit, that the definition now lives in ./keys.ts, and that the reason is the subset invariant AC[3] grades.",
+        "The behaviour change is asserted, with the null measured rather than assumed: redactText('9SECRET=hunter2') returns '9SECRET=[redacted]' and redactText('1_TOKEN=abc') returns '1_TOKEN=[redacted]'. Under the null — the shipped src/mcp/redact.ts at integration head 049765c, re-measured in-session against dist/mcp/redact.js, whose ENV_KEY line is byte-identical to the source — both calls return the input byte-identical: '9SECRET=hunter2' -> '9SECRET=hunter2' and '1_TOKEN=abc' -> '1_TOKEN=abc'. That is the finding, reproduced as a failing test before the fix exists.",
+        "The subset invariant is proven mechanically and never again stated in prose alone, because prose is precisely what failed here. A test iterates a fixed corpus of candidate key names — at minimum 'A', '_', 'A0', '_0', '9SECRET', '1_TOKEN', '0', a 128-character name and a 129-character name, all drawn from [A-Za-z0-9_] — and for every name k asserts: if ECHOABLE_KEY.test(k) is true then redactText(`${k}=hunter2`) !== `${k}=hunter2`. The implication is one-directional on purpose: the redactor is allowed to scrub more than the tools may echo (that is the accepted over-redaction), and is never allowed to scrub less. The 129-character name is in the corpus as the control — it is not echoable, so the implication is vacuous for it, and a test that passed only because the corpus was all-echoable would be indistinguishable from one that works.",
+        "Every existing behaviour of redact.ts survives the widening, asserted rather than argued. test/mcp/redact.test.ts is extended and never weakened: no test in it is deleted, skipped, renamed, or has an expected value changed. In particular the named residual in the docblock still holds and gains a test if it lacks one — redactText('NOTE=alpha FOO=beta') returns 'NOTE=[redacted] FOO=[redacted]', measured in-session at head 049765c, so the literal FOO still stands as if it were a key and every value run is still gone. If widening the pattern changes the expected value of an existing assertion, that is a finding and not an edit: record the failing test name and its actual/expected verbatim in the result's structured output and report error spec.spec-gap to the planner rather than adjusting the assertion.",
+        "ECHOABLE_KEY is exercised by this task even though its importers arrive in task-2-tools-share-key-bound, so it does not land as an unreferenced export nobody has run: test/mcp/keys.test.ts asserts the membership rule directly on the corpus above, and src/mcp/keys.ts's module docblock names src/mcp/tools/env-lint.ts and src/mcp/tools/env-diff-keys.ts as the importers task-2 attaches, with the finding id f-envkit-mcp-surface/integration-9b8279e9 as the reason.",
+        "pnpm lint, pnpm typecheck, pnpm test and pnpm build each exit 0. pnpm test reports zero failures and a passing-test count strictly greater than the count observed on this task's own base branch before the diff; both numbers are recorded verbatim in the result's structured output.",
+        "pnpm test:coverage is run and its exit code plus the per-file numbers for src/mcp/keys.ts and src/mcp/redact.ts are recorded verbatim in the result's structured output. Both files must be at or above 80% lines, statements, functions and branches. If the run is red, the result must name every file the reporter failed and none of them may be a file this task touched.",
+        "The post-run claim check is clean: the only changed files are src/mcp/keys.ts, src/mcp/redact.ts, test/mcp/keys.test.ts and test/mcp/redact.test.ts. Neither tool file is touched and mcp.manifest.json is not touched — those are task-2's and task-3's claims, and the split is deliberate rather than tidy: it leaves the widened rule in the tree, already tested, before any surface imports it, which is what lets task-2's pair-level test grade an invariant that exists rather than one it is simultaneously creating.",
+        "The stdout ban is graded, not merely promised: `grep -rnE \"console\\.(log|info|warn|error|debug)\\(|process\\.stdout\\.write\\(\" src/mcp/` is run from the envkit repo root and its output — empty — is recorded verbatim in the result's structured output together with the command's exit code (1, grep's no-match code). Recording the exit code is part of the criterion: a grep that fails to run prints nothing either and exits 2. Any printed line naming a file this task claims fails this criterion. If a printed line names a file this task does not claim, do not edit that file to silence the grep — record the output and exit code verbatim and report error spec.spec-gap."
+      ],
+      "claims": [
+        "src/mcp/keys.ts",
+        "src/mcp/redact.ts",
+        "test/mcp/keys.test.ts",
+        "test/mcp/redact.test.ts"
+      ],
+      "budget": {
+        "tokens": 70000,
+        "diff_lines": 200
+      },
+      "contract": {
+        "functional_clauses": [
+          "The invariant, stated once and graded by AC[3]: the set of names ECHOABLE_KEY admits is a SUBSET of the set of keys the redactor's assignment rule recognises. Anything a tool may echo as a name is something whose value redact scrubs. The reverse containment is not required and must not be added — the redactor scrubbing more than the tools echo is the accepted direction.",
+          "Widen the redactor; do not narrow the echo bound. Both edits would make the two rules agree, and only one closes anything. ECHOABLE_KEY's character class is not touched by this task and must be byte-identical after it: the tools' echo behaviour does not change, so no report a client already relies on changes shape.",
+          "Do not add a second net. This task moves the definition of a key and admits a leading digit; it does not touch SECRET_KEY, SECRET_SHAPED, MAX_DEPTH, redact()'s recursion, redactError(), or the boundary rule's structure. A change to what counts as a credential SHAPE is a different question with different evidence and belongs to a different task.",
+          "The widening has a cost and it is accepted, not hidden: a diagnostic line like `2=3` or `1024=x` is now redacted where it was not before. That is over-redaction on text the surface was never obliged to echo, and it is the direction redact.ts's docblock already commits to. Do not add a heuristic to tell a 'real' digit-leading key from an incidental one — nothing in the text distinguishes them and the guess would guess toward under-redaction, which is the failure this module exists to prevent.",
+          "src/mcp/keys.ts imports nothing from the tools and nothing from redact.ts. It is the lowest module in this group precisely so both consumers can depend on it without either depending on the other; a keys module that imported a tool would recreate the cycle the copy was avoiding.",
+          "Do not touch src/parse.ts. The library parser has callers with other needs, it is claimed by no task in this plan, and the key shape being defined here is a property of the MCP surface, not of .env syntax."
+        ],
+        "nonfunctional_clauses": [
+          "MCP-S1: every result and every error string still leaves through redact() or redactError(). No path added by this task writes to stdout or stderr directly.",
+          "MCP-S2 is unaffected and must stay that way: this task adds no tool, no parameter, and no path by which a document's text could arrive as a tool argument.",
+          "No task in this epic may reduce envkit's existing gates. Deleting, skipping or weakening an existing test — including any test in test/mcp/ — to get green is a failed task.",
+          "stdout belongs to the protocol: no console.log, console.info, console.warn, console.error, console.debug or process.stdout.write anywhere under src/mcp/.",
+          "Test fixtures, if any file fixture is needed at all, are created under a fresh fs.mkdtempSync directory and removed in a cleanup hook. No fixture is committed, and no file named .env or .env.* is added to the repo — .gitignore ignores both patterns, so such a fixture would be green locally and absent in CI.",
+          "Fixture secrets are obviously fake and never a real credential shape: 'sk-live-0123456789abcdef' and 'hunter2' are the tokens this epic's criteria name. A test value used to probe the KEY rule must not itself be secret-SHAPED, or SECRET_SHAPED redacts it first and the test stops measuring the key rule.",
+          "Determinism: redactText is a pure function of its input and stays one. No state, no caching keyed on anything, identical output for identical input across two calls.",
+          "Totality: redactText must not throw for any string, including empty input, 1 MiB of text, CRLF endings, lone CR, invalid UTF-16 surrogates and text of 50,000 lines. Catastrophic backtracking is a failure mode of this diff specifically: the boundary lookahead embeds the key fragment twice, so a widened class must be measured against a pathological input — a test asserts redactText completes on 100,000 characters of 'A'*128 + '=' repeated, and on 100,000 characters with no '=' at all.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error, no type assertion used to silence a real error. Compiles under strict and noUncheckedIndexedAccess; pnpm build emits declarations without error.",
+          "TDD is gate-enforced: the failing test exists before the implementation that makes it pass, and the failure observed is the one AC[2] describes — redactText('9SECRET=hunter2') returning its input — not a compile error and not a missing-module error.",
+          "English-only code, comments and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions.",
+          "Do not create, modify or delete any file outside this task's four claims — in particular not src/mcp/tools/env-lint.ts, src/mcp/tools/env-diff-keys.ts, mcp.manifest.json, src/mcp/server.ts, src/mcp/paths.ts, src/parse.ts, test/mcp/surface.test.ts, package.json or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-mcp-followup/task-2-tools-share-key-bound",
+      "epic_id": "envkit-mcp-followup",
+      "plan_version": 2,
+      "objective": "Delete both copies of ECHOABLE_KEY, delete the comment that justified the duplication and the sentence inside it that is false, and add the pair-level test the duplication made impossible. This discharges f-envkit-mcp-surface/integration-9b8279e9, which was granted as the priced cost of a claim boundary rather than as an acceptable state: `grep -rn 'ECHOABLE' src/ test/` returns five hits, all in src/, zero in test/ — re-measured in-session at head 049765c — so editing one literal alone leaves lint, typecheck, test, build and coverage green with the two client-facing surfaces disagreeing about what may be echoed. The waiver named the remedy exactly: 'a test that grades both files must claim both, which no task under v5 does'. This task claims both. It also finishes f-envkit-mcp-surface/integration-97825fcf's second half — the false equivalence sentence lives in env-diff-keys.ts's docblock and is deleted here, now that task-1 has made the claim it makes true.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/mcp/tools/env-lint.ts and src/mcp/tools/env-diff-keys.ts each import ECHOABLE_KEY from '../keys.js' and define no local key pattern. `grep -rn 'ECHOABLE' src/ test/` is run from the envkit repo root and its full output plus exit code are recorded verbatim in the result's structured output; the output must show the definition in src/mcp/keys.ts, an import line and a use site in each tool file, and at least one hit under test/. Under the null, re-measured in-session at head 049765c, the same command returns exactly five hits — env-lint.ts:18, env-lint.ts:33, env-lint.ts:61, env-diff-keys.ts:42, env-diff-keys.ts:53 — all in src/ and none in test/, which is the finding stated as a command.",
+        "The false sentence is gone. env-diff-keys.ts's docblock currently reads '128 matches the .env-assignment rule task-1 already uses ([A-Za-z_][A-Za-z0-9_]{0,127}), so both modules agree on what a key looks like'; that sentence and its inline pattern are deleted, not edited around. What replaces it states the relationship that is now true and testable: the shape is defined once in src/mcp/keys.ts, src/mcp/redact.ts builds its assignment rule from the same fragment, so every echoable name is one whose value redact scrubs, and the invariant is graded by test/mcp/keys.test.ts rather than asserted here.",
+        "The stale reason is gone too. env-lint.ts's docblock currently explains that the constant is 'copied rather than imported because that file is out of claim for this task and a shared constant needs an amendment that claims it; this comment is what makes the duplication findable instead of accidental'. That paragraph is deleted: it explains a duplication that no longer exists, and a comment describing a structure the file no longer has is worse than no comment. Do not replace it with a new paragraph about the copy — the import statement is the whole story now.",
+        "The pair-level test exists and grades BOTH surfaces against one fixture in one file. test/mcp/key-bound.test.ts is new. It builds a fixture directory containing one file whose keys are 'API_TOKEN=sk-live-0123456789abcdef', '9SECRET=hunter2', 'MY.KEY=one', a key of exactly 128 characters drawn from [A-Za-z0-9_], and a key of exactly 129 characters drawn from [A-Za-z0-9_]. It calls env_lint on that file AND env_diff_keys with that file on the left and an empty in-root file on the right, both through a real MCP client over the in-memory transport, and asserts: (i) the set of names env_lint echoes in `keys` equals the set env_diff_keys echoes for the left side across `missingFromRight` and any shared listing, (ii) env_lint's oversizedKeyCount equals env_diff_keys' oversizedLeftKeyCount, and (iii) both sets are exactly { API_TOKEN, 9SECRET, the 128-character key } with a count of 2 excluded. A test that drives only one tool and reasons about the other is not this criterion.",
+        "The drift the pair-level test exists to catch is demonstrated, not just guarded against: the result's structured output records the outcome of temporarily changing the character class in src/mcp/keys.ts to [A-Za-z_][A-Za-z0-9_]{0,127} and running pnpm test — test/mcp/key-bound.test.ts must go red. Revert the change before committing; the diff must not contain it. This is the criterion the epic did not have, and the reason the S4 was priced rather than dismissed: a test suite that stays green when the rule changes is grading nothing.",
+        "Echo behaviour is byte-identical to what shipped. This task moves where the rule lives, not what it is: ECHOABLE_KEY's pattern is unchanged, so every existing test in test/mcp/env-lint.test.ts and test/mcp/env-diff-keys.test.ts passes unmodified. No test in either file is deleted, skipped, renamed or has an expected value changed. If any existing assertion changes value, that is a finding and not an edit — record the failing test name with actual and expected verbatim and report error spec.spec-gap to the planner.",
+        "Task-1's widening is visible from the tools' side and asserted there rather than trusted: the same fixture's '9SECRET=hunter2' line is echoed by both tools as the NAME 9SECRET, and neither response's full text contains 'hunter2'. Under the null at head 049765c the name is echoed and the value is only absent because the tools never compose a value into a payload at all — after task-1 it is also absent from anything redact sees. Assert the absence of 'sk-live-0123456789abcdef' in both responses in the same test, so the epic's standing secret criterion is carried rather than dropped.",
+        "pnpm lint, pnpm typecheck, pnpm test and pnpm build each exit 0. pnpm test reports zero failures and a passing-test count strictly greater than the count observed on this task's own base branch before the diff; both numbers are recorded verbatim in the result's structured output.",
+        "pnpm test:coverage is run and its exit code plus the per-file numbers for src/mcp/tools/env-lint.ts and src/mcp/tools/env-diff-keys.ts are recorded verbatim in the result's structured output. Both files must be at or above 80% lines, statements, functions and branches. If the run is red, the result must name every file the reporter failed and none of them may be a file this task touched.",
+        "The post-run claim check is clean: the only changed files are src/mcp/tools/env-lint.ts, src/mcp/tools/env-diff-keys.ts, test/mcp/env-lint.test.ts, test/mcp/env-diff-keys.test.ts and test/mcp/key-bound.test.ts. In particular src/mcp/keys.ts is NOT modified — it arrives from task-1 and this task only imports it — and mcp.manifest.json is not touched and its version stays '0.2.0'. The manifest is task-3's claim; a version bump made here would carry a description change nobody wrote.",
+        "The stdout ban is graded, not merely promised: `grep -rnE \"console\\.(log|info|warn|error|debug)\\(|process\\.stdout\\.write\\(\" src/mcp/` is run from the envkit repo root and its output — empty — is recorded verbatim in the result's structured output together with the command's exit code (1, grep's no-match code). Any printed line naming a file this task claims fails this criterion. If a printed line names a file this task does not claim, record the output and exit code verbatim and report error spec.spec-gap rather than editing it."
+      ],
+      "claims": [
+        "src/mcp/tools/env-lint.ts",
+        "src/mcp/tools/env-diff-keys.ts",
+        "test/mcp/env-lint.test.ts",
+        "test/mcp/env-diff-keys.test.ts",
+        "test/mcp/key-bound.test.ts"
+      ],
+      "budget": {
+        "tokens": 65000,
+        "diff_lines": 200
+      },
+      "contract": {
+        "functional_clauses": [
+          "One definition, two importers, zero copies. After this task the string '[A-Za-z0-9_]{1,128}' appears in src/ exactly once, in src/mcp/keys.ts. A grep for it is the cheapest form of this criterion and AC[0] is the graded form.",
+          "The rule itself does not change: a key parsed by parseEnv is echoed only when ECHOABLE_KEY admits it, every other key is excluded from `keys`/the diff listings and from the counts of names, and the number excluded is reported as a count. No message, no truncation, no prefix, no hash and no length of any excluded key appears anywhere in either response.",
+          "Both payload shapes are unchanged: env_lint returns exactly { path, keys, keyCount, oversizedKeyCount, issues } and env_diff_keys returns exactly { left, right, missingFromRight, missingFromLeft, sharedCount, leftIssueCount, rightIssueCount, oversizedLeftKeyCount, oversizedRightKeyCount }. A client that upgrades across this task sees no field appear, disappear or change meaning.",
+          "Over-exclusion remains the accepted failure direction and remains documented in whichever file the reader lands in: the sentence survives in src/mcp/keys.ts, where the rule now is, and is not duplicated back into the tools.",
+          "Do not move the bound's ENFORCEMENT into src/mcp/keys.ts or into src/parse.ts. Each tool still applies the test between parseEnv and payload composition, at its own client-facing surface. What is shared is the definition of the shape, not the decision about what a given tool echoes — those are the same today and may not be tomorrow, and a shared enforcement helper would hide that.",
+          "Extend test/mcp/env-lint.test.ts and test/mcp/env-diff-keys.test.ts; do not delete, skip, rename or weaken a test already in either. Those cases are the regression evidence that the shared constant left both ordinary paths alone, and they are worth more after this diff than before it."
+        ],
+        "nonfunctional_clauses": [
+          "MCP-S2 remains the reason these tools have the shape they have: no parameter of either tool accepts a credential, a token, a password, or a document that might contain one. This task adds no parameter at all.",
+          "MCP-S1: every result and every error string still leaves through redact() or redactError(). Both error branches keep their current shape — a SurfaceError's code and message through redactText, anything else through redactError — and every SurfaceError message stays a fixed literal with no file content interpolated into it.",
+          "No task in this epic may reduce envkit's existing gates. Deleting, skipping or weakening an existing test — including any test in test/mcp/ — to get green is a failed task.",
+          "stdout belongs to the protocol: no console.log, console.info, console.warn, console.error, console.debug or process.stdout.write anywhere under src/mcp/.",
+          "Test fixtures are created under a fresh fs.mkdtempSync directory and removed in a cleanup hook. No fixture is committed, and no file named .env or .env.* is added to the repo — .gitignore ignores both patterns, so such a fixture would be green locally and absent in CI.",
+          "Fixture secrets are obviously fake and never a real credential shape: 'sk-live-0123456789abcdef' and 'hunter2' are the tokens this epic's criteria name. The 128- and 129-character keys are arbitrary filler drawn from [A-Za-z0-9_] and must not be secret-shaped, or the criterion stops distinguishing the bound from the redactor.",
+          "Determinism: for the same file, two calls return identical payloads, including key order (parseEnv's document order), issue order and every count.",
+          "Totality: neither handler may throw for any argument value its input schema admits, nor for any file content, including binary bytes, a 1 MiB file, a file of 50,000 lines, and a file with CRLF endings.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error, no type assertion used to silence a real error. Compiles under strict and noUncheckedIndexedAccess; pnpm build emits declarations without error.",
+          "TDD is gate-enforced: test/mcp/key-bound.test.ts exists and fails before the imports replace the copies, and the failure observed is a real assertion failure or a missing-module error for '../keys.js' — not a syntax error in the new test.",
+          "English-only code, comments and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions.",
+          "Do not create, modify or delete any file outside this task's five claims — in particular not src/mcp/keys.ts, src/mcp/redact.ts, mcp.manifest.json, src/mcp/server.ts, src/mcp/paths.ts, src/parse.ts, test/mcp/surface.test.ts, package.json or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-mcp-followup/task-3-manifest-truth",
+      "epic_id": "envkit-mcp-followup",
+      "plan_version": 2,
+      "objective": "Make mcp.manifest.json describe the tools that actually shipped, and carry the change with the version bump MCP-P2 requires. This discharges f-envkit-mcp-surface/integration-c721a990: the manifest still describes env_lint as reporting 'the key names it defines and any parse issues' and env_diff_keys as reporting 'which keys are missing on each side', both unconditional, while both tools have excluded out-of-bound key names since v4/v5 and report only a count. Verified at head 049765c3 through a real MCP client: a file whose one line is a key containing '.' returns keys [], keyCount 0, oversizedKeyCount 1 — a client trusting the declared description reads 'this file defines nothing'. The manifest version stayed 0.2.0 across both narrowings. The descriptions are not documentation: src/mcp/server.ts loads the manifest at runtime and src/mcp/tools/health.ts takes title, description and annotations FROM it, so the false sentence is what a client's tools/list returns. Scope is the manifest and the surface test that pins it; no handler changes.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "env_lint's description no longer promises an unconditional listing. It states, in the manifest's existing register: the key names the file defines that fall inside a published bound, a count of the names excluded by that bound, and any parse issues — and repeats that no value is ever returned and that the tool takes a path rather than document text. The sentence 'the key names it defines' must not survive in any form that reads as a complete listing.",
+        "env_diff_keys' description gets the same treatment: which of the in-bound keys are missing on each side, how many are shared, and how many names on each side the bound excluded. 'which keys are missing on each side' must not survive as an unconditional claim.",
+        "Both new descriptions name the bound in a way a client can act on rather than gesturing at one: each states that a key name is reported only when it matches [A-Za-z0-9_] and is at most 128 characters, and that anything else is counted and not named. A description that says 'some keys may be excluded' without saying which is a weaker false claim, not a repair.",
+        "The manifest version goes 0.2.0 -> 0.3.0. Minor, not patch: MCP-P2 bumps the declared surface, the declared surface is what a client reads from tools/list, and two tool descriptions changing meaning is not a patch. The task's result records the reason in one sentence, because task-5 of the previous epic recorded the opposite decision for the opposite case (its AC[8] declined a bump for a payload-shape change the manifest never described) and the two decisions must be legible together.",
+        "test/mcp/surface.test.ts is updated where it pins the old value and extended where it pinned nothing. Its existing assertion `expect(manifest.version).toBe('0.2.0')` becomes '0.3.0' and the semver-shape assertion beside it is kept; the test's title, which currently reads 'bumps the manifest version to valid semver 0.2.0', is updated to match. Its existing assertion that project_health's payload.version equals manifest.version is left untouched — it is what proves the bump reaches a client.",
+        "The truth of each description is graded mechanically, not by review: test/mcp/surface.test.ts asserts, for both env_lint and env_diff_keys, that the declared description does NOT match /the key names it defines|which keys are missing on each side/ and DOES match /exclud/i and /128/. Under the null — the manifest at head 049765c — the first assertion fails on both tools, which is the finding stated as a test.",
+        "The description is checked against the behaviour it describes, in the same run and through a real MCP client rather than by reading the JSON. A test writes an in-root file whose one line is 'MY.KEY=one', calls env_lint on it, and asserts keys is [], keyCount is 0 and oversizedKeyCount is 1 — the exact measurement the finding recorded at 049765c3 — and asserts in the same test that the description declared for env_lint names both the bound and the count. Pinning the description text alone would let the two drift apart again with the test still green.",
+        "`node factory/orchestrator/dist/cli.js mcp check envkit` is run from the black-smith repo root and its full JSON output plus exit code are recorded verbatim in the result's structured output. It must report ok true with an empty violations array. Under the null, re-measured in-session before this epic started, it already returns ok true, violations [] and exit 0 — so this criterion is a regression check on the manifest edit, not a repair, and a red run means the edit broke a manifest rule rather than that the rule was already broken.",
+        "pnpm lint, pnpm typecheck, pnpm test and pnpm build each exit 0. pnpm test reports zero failures and a passing-test count strictly greater than the count observed on this task's own base branch before the diff; both numbers are recorded verbatim in the result's structured output.",
+        "The post-run claim check is clean: the only changed files are mcp.manifest.json and test/mcp/surface.test.ts. No handler, no schema, no src file at all — the descriptions live in the manifest and are read from it at registration, so a repair that edited a handler would mean the manifest was not the source of what a client sees, which is a different and larger finding.",
+        "The stdout ban is graded, not merely promised: `grep -rnE \"console\\.(log|info|warn|error|debug)\\(|process\\.stdout\\.write\\(\" src/mcp/` is run from the envkit repo root and its output — empty — is recorded verbatim in the result's structured output together with the command's exit code (1, grep's no-match code). This task changes no file under src/, so any printed line is a pre-existing condition: record it verbatim and report error spec.spec-gap rather than editing it."
+      ],
+      "claims": [
+        "mcp.manifest.json",
+        "test/mcp/surface.test.ts"
+      ],
+      "budget": {
+        "tokens": 45000,
+        "diff_lines": 110
+      },
+      "contract": {
+        "functional_clauses": [
+          "A declared description is a claim a client is entitled to act on. The standard this task is graded against is not 'the description is nicer' but 'no true sentence about a response contradicts the description', and the bound is the one thing that made the old descriptions false.",
+          "Change descriptions and version only. Tool names, titles, mutation values, annotations, $schema, protocolRevision and transport are untouched: a name or annotation change is a different compatibility question and would need its own evidence.",
+          "The version bump is part of the same commit as the description change, never a follow-up. A manifest whose descriptions changed and whose version did not is precisely the state this finding names, and shipping the two separately reproduces it for the length of one commit.",
+          "protocolRevision stays '2025-11-25'. The pinned MCP protocol revision is not what changed; the server's own declared version is.",
+          "Do not touch package.json's version field. It is 0.0.0 and unrelated: nothing reads it as the MCP surface version, and surface.test.ts asserts project_health's payload.version against the MANIFEST, not the package.",
+          "Extend test/mcp/surface.test.ts; do not delete, skip, rename or weaken a test already in it beyond the single version literal AC[4] names."
+        ],
+        "nonfunctional_clauses": [
+          "MCP-P2 is the rule being satisfied, and the result must cite it by name in the sentence recording the bump.",
+          "MCP-S1 and MCP-S2 are unaffected and must stay that way: no description added here may invite a client to pass document text, a value, or a credential to either tool. Each description keeps the sentence stating that it takes a path and never the document text.",
+          "No task in this epic may reduce envkit's existing gates. Deleting, skipping or weakening an existing test — including any test in test/mcp/ — to get green is a failed task.",
+          "Test fixtures are created under a fresh fs.mkdtempSync directory and removed in a cleanup hook. No fixture is committed, and no file named .env or .env.* is added to the repo.",
+          "Determinism: the manifest is static JSON and every assertion against it must be exact-match or explicit regex, never a snapshot that a future edit silently re-records.",
+          "Strict TypeScript in the test file: no any, no non-null assertions, no @ts-expect-error. Compiles under strict and noUncheckedIndexedAccess.",
+          "TDD is gate-enforced: the description assertions in AC[5] exist and fail against the shipped manifest before it is edited, and the failure observed is the regex assertion failing — not a missing-property error.",
+          "English-only content; the manifest is formatted exactly as the committed Biome config produces, with zero rule suppressions.",
+          "Do not create, modify or delete any file outside this task's two claims — in particular not src/mcp/server.ts, src/mcp/tools/health.ts, either tool handler, src/mcp/keys.ts, src/mcp/redact.ts, package.json or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-mcp-followup/task-4-redaction-boundary-repair",
+      "epic_id": "envkit-mcp-followup",
+      "plan_version": 2,
+      "objective": "Close the two leak directions the closing spec review of v1 found in the redactor, give the echo bound the rationale v1 asserted but never assigned to a task, and replace three criteria that could not fail with assertions that can. Ground truth measured at e22cb5f by running node against the built dist: (a) redactText('PASSWORD=my secret 2024=phrase here') returns 'PASSWORD=[redacted] 2024=[redacted]', where '2024' is a fragment of the secret VALUE and was scrubbed at the epic base 049765c — this epic's widening of the key fragment shipped a new under-redaction, which task-1 functional_clauses[0] ('never allowed to scrub less') and [3] ('the cost is over-redaction') both forbid; (b) ECHOABLE_KEY.test('AKIA0123456789ABCDEF') is true and redactText('AKIA0123456789ABCDEF=hunter2') returns '[redacted]=hunter2' — the VALUE survives, so the epic's headline subset invariant is false for every echoable name that is itself credential-shaped, because SECRET_SHAPED rewrites the key first and the injected bracket breaks ENV_ASSIGNMENT's boundary anchor; (c) src/mcp/keys.ts carries no over-exclusion rationale anywhere, which task-2 functional_clauses[3] asserts it does. The shipped manifest descriptions are already true and are not edited here; what is missing is a test that pins them, because task-3 AC[7] delegated that grading to a command that never reads a description. Scope is the redactor, the key module, and four test files.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "The under-redaction regression is gone and pinned by exact-match assertion in test/mcp/redact.test.ts: redactText('PASSWORD=my secret 2024=phrase here') === 'PASSWORD=[redacted]'. The whole value run, including the embedded digit-initial token, is scrubbed. An assertion of the form not.toContain('2024') alone does not satisfy this criterion — the criterion this task exists to replace was weak in exactly that way, and the expected string is short enough to write out.",
+        "The pre-existing letter-initial residual is unchanged and is pinned as such in the same file: redactText('NOTE=alpha FOO=beta') === 'NOTE=[redacted] FOO=[redacted]'. It predates the epic base 049765c and is out of scope. A change that also closes it is a change to the boundary rule this task did not ask for; a change that widens it is a regression. The test comment states which of the two directions is accepted here and why, in one sentence.",
+        "The subset invariant is true and is graded on the VALUE, not on the key. test/mcp/redact.test.ts asserts, for every name k in a corpus, that ECHOABLE_KEY.test(k) implies redactText(`${k}=hunter2`) does not contain the substring 'hunter2'. The corpus contains, at minimum: 'A', '_', 'A0', '_0', '9SECRET', '1_TOKEN', '0', a 128-character name, 'AKIA0123456789ABCDEF' and 'ghp_ABCDEFGHIJKLMNOP'. The last two are the point: v1's criterion compared the whole output to the whole input, which a key-only rewrite satisfies while the value leaks, and its corpus held no credential-shaped name, so it was vacuous on the only class that broke it.",
+        "The carve-out at test/mcp/redact.test.ts:252-265 ('known gap: a secret-shaped key breaks the invariant (pre-existing, not fixed here)') is deleted rather than edited, because the gap it names is closed by AC[2]. Deleting a test is otherwise a failed task under this epic's standing clause; this is the single named exception, and the result records it in one sentence naming this criterion.",
+        "src/mcp/keys.ts gains a comment paragraph stating the accepted failure direction of the echo bound and why it was chosen: a key name outside [A-Za-z0-9_]{1,128} is counted and never named, so a legitimate but unusual name (one containing a dot, or longer than the bound) is over-EXCLUDED from every listing rather than risked in an output. The paragraph is graded mechanically: `grep -ci 'over-exclu' src/mcp/keys.ts` returns at least 1, and the paragraph names the opposite direction it rejects (naming a key the redactor would not scrub) in the same breath. It does not claim over-redaction is the only failure direction of the redaction rule — AC[0] is the counter-example, and the false half of that sentence is why v1's version of it could not simply be restored.",
+        "test/mcp/key-bound.test.ts's set-equality case stops being degenerate. Its right-hand fixture is non-empty and shares at least one in-bound key with the left, so missingFromRight is a proper non-empty subset of the left listing and sharedCount is at least 1. The assertion states both expected sets by literal value. v1's version wrote an empty right side, where missingFromRight trivially equals the whole left listing and the interesting case — a name both files define, echoed by env_lint and correctly absent from missingFromRight — was never exercised.",
+        "test/mcp/surface.test.ts pins both tool descriptions against BOTH reasons a defined key goes unnamed, read through the manifest the server actually loads rather than through a CLI check that never inspects a description. For env_lint and env_diff_keys alike, the assertions require the description to state (i) the [A-Za-z0-9_] / 128-character bound and that anything outside it is counted and not named, and (ii) that an in-bound name which itself looks like a credential comes back as the redaction marker and still counts as in-bound. Regexes or exact substrings, never a snapshot. The shipped descriptions at e22cb5f already satisfy both; this criterion makes that non-regressible, which is what task-3 AC[7] was reaching for and could not do.",
+        "The two mis-qualified citations at test/mcp/redact.test.ts:203 and :228 read 'plan v5 AC[2]' and 'plan v5 AC[3]'; both are replaced by the fully-qualified form this repo uses elsewhere in the same file (compare src/mcp/redact.ts:46, 'AC[3] of envkit-mcp-followup/task-1-key-shape-module'). 'plan v5' in test/mcp/ denotes the PREVIOUS epic, envkit-mcp-surface — the same file cites 'plan v4 AC[3]' at :92 and 'plan v4 AC[6](b)' at :146 meaning exactly that — so the labels currently resolve to unrelated criteria.",
+        "The two bare citations in test/mcp/key-bound.test.ts ('AC[3](i-iii),[6]' and 'AC[6]') are qualified the same way. Bare AC[n] already means envkit-mcp-surface in this directory (test/mcp/env-lint.test.ts:71), so bare AC[3] currently names two unrelated criteria one directory apart. Scope is the citations this epic added; the citations that predate 049765c are not touched.",
+        "`git diff --stat 049765c..HEAD -- test/mcp/` shows env-lint.test.ts and env-diff-keys.test.ts still untouched by this epic, and the full suite passes at 299 tests or more with no test skipped, renamed away or weakened beyond the single deletion AC[3] authorises."
+      ],
+      "claims": [
+        "src/mcp/keys.ts",
+        "src/mcp/redact.ts",
+        "test/mcp/redact.test.ts",
+        "test/mcp/keys.test.ts",
+        "test/mcp/key-bound.test.ts",
+        "test/mcp/surface.test.ts"
+      ],
+      "budget": {
+        "tokens": 60000,
+        "diff_lines": 180
+      },
+      "contract": {
+        "functional_clauses": [
+          "The redactor is never allowed to scrub less than it did at the epic base 049765c. That is the clause this task exists to restore, and it is the one clause a fix here can violate while every existing test stays green — the suite at e22cb5f passes with the leak in place.",
+          "Do not narrow ECHOABLE_KEY or the outer key fragment. The echo bound stays [A-Za-z0-9_]{1,128}: narrowing it would restore the redactor's behaviour by shrinking the set of names a tool may echo, which trades a leak for silent under-reporting and undoes task-1 and task-2 in the same stroke.",
+          "Do not weaken SECRET_SHAPED, remove a pattern from it, or make any credential shape conditional. It is the net that catches tokens with no key to hang them on.",
+          "If the evaluation order of the two nets changes, the change is justified in the result against a worked counter-example, because order is load-bearing: SECRET_SHAPED currently runs first so that a bearer token containing '=' is caught whole, and an assignment pass running first would leave its prefix standing. A fix that reorders without pinning that case is incomplete.",
+          "The docblock in src/mcp/redact.ts is updated to match the behaviour that ships. Its paragraph beginning 'This residual cuts BOTH ways' currently documents the digit-initial leak as accepted; after this task that sentence is false and a false comment in the file whose whole job is truth-in-redaction is worse than none.",
+          "No handler, manifest, server or config file is edited. mcp.manifest.json is deliberately NOT claimed: its descriptions are already true at e22cb5f and this task adds the test that keeps them true.",
+          "Extend the four claimed test files; do not delete, skip, rename or weaken any test in them beyond the single deletion AC[3] names."
+        ],
+        "nonfunctional_clauses": [
+          "MCP-S1 and guardrails.md 'No secrets in outputs' are the standards being satisfied; the result cites them by name.",
+          "No task in this epic may reduce envkit's existing gates. Deleting, skipping or weakening an existing test to get green is a failed task — the one exception is the carve-out AC[3] names, and only because the criterion it documents as unreachable is reached by AC[2].",
+          "Test fixtures are created under a fresh fs.mkdtempSync directory and removed in a cleanup hook. No fixture is committed, and no file named .env or .env.* is added to the repo — .gitignore ignores both patterns, so such a fixture would be green locally and absent in CI.",
+          "No real credential appears in any fixture or assertion. Every credential-shaped string in this task is synthetic and obviously so ('AKIA0123456789ABCDEF', 'ghp_ABCDEFGHIJKLMNOP', 'hunter2').",
+          "stdout belongs to the protocol: no console.log, console.info, console.warn, console.error, console.debug or process.stdout.write anywhere under src/mcp/.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error. Compiles under strict and noUncheckedIndexedAccess.",
+          "Every regex added or changed under src/mcp/ is checked for catastrophic backtracking against a pathological input, and the check is a test with a wall-clock bound rather than an assertion that the call returned.",
+          "TDD is gate-enforced: the assertions in AC[0], AC[2] and AC[5] exist and are observed FAILING against the code at e22cb5f before any source file is edited, and the failure observed is the value assertion failing — not a missing export or a type error.",
+          "Every AC citation this task writes or rewrites is fully qualified as epic/task:AC[n]. A task whose job includes deleting false cross-references does not get to add one.",
+          "English-only content, formatted exactly as the committed Biome config produces, with zero rule suppressions.",
+          "Do not create, modify or delete any file outside this task's six claims — in particular not mcp.manifest.json, src/mcp/server.ts, either tool handler, package.json or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "bugfix",
+      "origin": "escalation",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    }
+  ],
+  "edges": [
+    {
+      "task": "envkit-mcp-followup/task-2-tools-share-key-bound",
+      "dependsOn": "envkit-mcp-followup/task-1-key-shape-module",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-mcp-followup/task-3-manifest-truth",
+      "dependsOn": "envkit-mcp-followup/task-2-tools-share-key-bound",
+      "edge_type": "spec-clause",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "envkit"
+}

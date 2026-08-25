@@ -1,0 +1,133 @@
+name: CI
+
+# Until this file existed, every "green" in this repo meant green on one
+# laptop. guardrails.md already assumed otherwise: "Gate parity: CI re-runs
+# lint + typecheck + tests; a local-green/CI-red divergence blocks the queue
+# until explained (error class `env-failure`)."
+#
+# `push: main` as well as `pull_request` — a merge produces a commit no PR
+# run ever tested, and `main` is the branch the operator merges into.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per branch: a second push supersedes the first instead of queueing
+# behind it. A landed commit is exempt — but exempting it takes a group of its
+# own, not just `cancel-in-progress: false`. Under one group per ref, GitHub
+# keeps at most one *pending* run: with `main`'s group busy, four merges inside
+# a minute left three commits cancelled before a job ever started (34a0246,
+# 9c30dad, 1e4f6dc on 2026-08-17 — zero jobs each). Keying push runs by sha is
+# what actually gives every landed commit its own verdict. See D-145.
+concurrency:
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: gate (scripts/check.sh)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # package.json has no `packageManager` field, so `action-setup` has
+          # nothing to read and the version has to be named here. 9.3.0 is
+          # what this repo's lockfile (v9.0) was written by and what local
+          # development runs; pnpm 10 would also block better-sqlite3's
+          # postinstall, which the native binding needs.
+          version: 9.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # check.sh's first half (policy YAML, schema x-taxonomy, agent
+      # frontmatter) imports yaml. Pinned for the same reason the lockfile is
+      # frozen: CI never resolves a version.
+      - name: Install PyYAML (check.sh's policy/schema half)
+        run: python -m pip install --disable-pip-version-check pyyaml==6.0.2
+
+      # guardrails.md: "CI never resolves new dependency versions."
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The gate itself, not a transcription of it. `scripts/check.sh` is what
+      # runs locally, so there is no second list here to drift out of sync:
+      # policy YAML, JSON schemas, x-taxonomy, agent frontmatter, `bash -n` on
+      # the hooks, then lint, three typechecks, three test suites, the UI
+      # build, and the four design-system gates. It prints OK/FAIL per gate and
+      # ends in `== PASS ==` / `== FAIL ==`.
+      #
+      # CI=true also turns check.sh's "pnpm not on PATH" SKIP into a failure:
+      # a job that quietly skipped the whole TypeScript half must not report
+      # green. `pnpm test:e2e` still skips here (no Chromium at
+      # /opt/pw-browsers) and runs in the `e2e` job below instead.
+      - name: Run the gate
+        run: bash scripts/check.sh
+
+  e2e:
+    name: e2e (Playwright, Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.3.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The dev container preinstalled a Chromium at /opt/pw-browsers and set
+      # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1; a runner has neither, so it
+      # downloads the revision @playwright/test 1.62.1 pins. --with-deps pulls
+      # the shared libraries headless Chromium needs on ubuntu-latest.
+      # Bounded because --with-deps shells out to apt, and apt on an
+      # unreachable mirror does not fail, it waits. Twice on 2026-08-19 this
+      # step sat for 30m05s with no output after the InRelease fetches, ate
+      # the whole job budget, and reported as a plain red e2e check — the
+      # same red a broken dashboard produces (D-190). Healthy: 37s.
+      - name: Install Chromium
+        timeout-minutes: 5
+        run: pnpm exec playwright install --with-deps chromium
+
+      # 11 specs across every page, against a scratch DB seeded from the same
+      # fixtures the db tests use (ui/e2e/global-setup.ts). This job is the
+      # only place in the project where a browser has ever rendered these
+      # pages; before it, "the dashboard works" rested on unit tests plus
+      # reading the markup.
+      - name: Run e2e
+        id: e2e
+        timeout-minutes: 10
+        run: pnpm test:e2e
+
+      # The specs capture per-page screenshots at several viewports and both
+      # themes. Uploaded even on failure: a red run is exactly when the
+      # picture is worth having. Not when the step never ran, though — the
+      # baseline PNGs are committed, so uploading after a skipped e2e
+      # publishes the repo's own pictures under this run's name (D-190).
+      - name: Upload screenshots
+        if: always() && steps.e2e.conclusion != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: ui/e2e/__screenshots__/
+          if-no-files-found: warn
+          retention-days: 14

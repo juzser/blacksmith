@@ -1,0 +1,40 @@
+# Black Smith — scheduler policy
+#
+# Knobs for `factory/orchestrator/src/scheduler.ts` (architecture §12
+# "Recheck scheduling" + "Scheduled growth passes"; `smith scheduler run`).
+# A deterministic pass over the event log that only ever emits PROPOSAL
+# events — it never dispatches an agent or widens scope on its own.
+
+recheck:
+  # architecture §12: "re-open a recheck task when (a) N later merges touch
+  # its claim paths, (b) T days elapse, or (c) its confidence score at
+  # completion was below a threshold."
+  merge_threshold: 5 # (a) N later merges touching the same claim paths
+  days_elapsed: 14 # (b) T days since the feature completed
+  confidence_threshold: 0.6 # (c) completion confidence below this triggers a recheck
+
+maintenance:
+  # agent-constraints.md "planner / Growth passes": maintenance-pass
+  # proposals may auto-schedule at high confidence; product-growth never
+  # does. Confidence here is scheduler.ts's own deterministic heuristic
+  # (major-version bumps present -> lower confidence), not a model verdict.
+  auto_schedule_confidence: 0.8
+  major_bump_confidence: 0.5
+  minor_or_patch_confidence: 0.9
+
+growth:
+  # architecture §12 "product-growth pass": the scheduler only emits the
+  # growth-review-due TRIGGER event on this cadence — the planner session
+  # is the one that reads the living spec/analytics and proposes scope, and
+  # that proposal always waits for an operator tick regardless of confidence.
+  cadence_days: 30
+
+lessons:
+  # architecture §9.3 novelty gate: cheap deterministic similarity
+  # (normalized word-shingle Jaccard) against existing candidate + approved
+  # lesson statements. >= this score is "clearly redundant" -> auto
+  # novelty-rejected, no LLM call. Below it, Phase 7 queues the candidate as
+  # novel; the "uncertain -> one LLM merge step" middle tier architecture §9
+  # describes (SAGE) is a documented future upgrade, not built here.
+  novelty_jaccard_threshold: 0.8
+  shingle_size: 3

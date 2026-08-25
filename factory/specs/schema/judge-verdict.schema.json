@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/judge-verdict.schema.json",
+  "title": "Judge Verdict",
+  "description": "Generic binary verdict returned by an external judge for a 'verify' or 'plan-critique' JudgeRequest (architecture §6, Phase 8): does this provider agree with the native claim under judgment (a blocking finding, an epic-final verdict, ...)? A 'review' JudgeRequest validates against finding.schema.json instead (an array of findings), not this schema. `verdict` is a plain structural enum, not a taxonomy dimension — it describes a judge's agree/disagree stance, not a controlled-vocabulary tag (architecture §8 draws that line at classification fields only).",
+  "type": "object",
+  "required": ["verdict", "rationale"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["confirm", "refute"]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

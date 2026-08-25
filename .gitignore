@@ -1,0 +1,26 @@
+# runtime state (declarations are committed; state is not)
+state/
+workspaces/
+.agents/generated/
+agents.lock
+
+# dependencies / build
+node_modules/
+dist/
+.wrangler/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# local env + editor
+.env
+.env.*
+# guardrails.md: ".env.example is the only committed env file" — `.env.*` above
+# would otherwise ignore it too, making that rule unenforceable.
+!.env.example
+.DS_Store
+*.log
+# Per-project canvas state for a local editor: viewport, sticky notes, node
+# coordinates. One developer's window, not a fact about the repo.
+.nodeterm/

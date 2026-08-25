@@ -1,0 +1,426 @@
+{
+  "epic_id": "envkit-config-loader",
+  "version": 1,
+  "status": "active",
+  "project": "envkit",
+  "tasks": [
+    {
+      "task_id": "envkit-config-loader/task-0-toolchain",
+      "epic_id": "envkit-config-loader",
+      "plan_version": 1,
+      "objective": "Make the freshly scaffolded envkit repo executable for every downstream task in this epic: run pnpm install, commit the generated pnpm-lock.yaml, add the Vitest v8 coverage provider to devDependencies, add a single test:coverage script, and switch vitest.config.ts's coverage thresholds to per-file enforcement so the epic's 80% coverage floor binds each module individually instead of as a global aggregate over src/**/*.ts. This task writes no src/ or test/ code and leaves the scaffold's ping() stub and its test untouched and green. It exists as a separate serial task because pnpm-lock.yaml is a serialize-always hotspot in factory/policies/worktree.yml: if four concurrent coder worktrees each ran pnpm install, each would generate the lockfile out of claim and the merge queue would face four conflicting versions of a regenerable file. vitest.config.ts is edited here for the same reason — once, by the epic's only solo serial task, so no concurrent worktree ever contends for it.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "pnpm install completes and pnpm-lock.yaml exists at the repo root and is committed.",
+        "package.json devDependencies include @vitest/coverage-v8 pinned to an exact version compatible with the installed vitest 4.1.10; the dependencies object remains empty.",
+        "package.json gains exactly one new script, \"test:coverage\": \"vitest run --coverage\", and no other script is added, removed, or reworded.",
+        "pnpm lint, pnpm typecheck, pnpm test, and pnpm build each exit 0 against the untouched scaffold.",
+        "vitest.config.ts sets coverage.thresholds.perFile to true, so the 80% floor is enforced on each file matched by the coverage include glob individually rather than as a global aggregate.",
+        "pnpm test:coverage exits 0 with per-file enforcement on — the scaffold's single ping test covers src/index.ts to at least 80% lines, statements, functions and branches, proving the coverage provider is wired. A green run alone does NOT prove the perFile key is honoured: at this task's time src/**/*.ts matches exactly one file, and over one file the per-file and global-aggregate thresholds compute identically, so a misspelled or version-wrong perFile key would still exit 0 and this criterion would still pass. The differential proof below is what makes it non-vacuous.",
+        "A differential proof of per-file enforcement is recorded: with a deliberately uncovered temporary file present under src/, pnpm test:coverage is observed to FAIL and to name that temporary file by path in its output, and that failure output is captured verbatim into the result's structured output. A pass-only transcript fails this criterion.",
+        "After the differential proof the temporary file is deleted and pnpm test:coverage is re-run and observed to exit 0 again; both observations are reported in the result's structured output.",
+        "If the differential probe does not fail — perFile is not a valid or not an honoured key for the installed vitest 4.1.10, or vitest warns about it as an unknown option — the task stops and reports error execution.env-failure with the observed output instead of leaving the global-aggregate behaviour in place. Shipping aggregate thresholds silently is a failed task, not a partial success.",
+        "No file under src/ or test/ is created, modified, or deleted in the task's final state, and no config file (tsconfig.json, biome.json, .github/workflows/ci.yml, .gitignore) is touched; vitest.config.ts is changed only by the addition of coverage.thresholds.perFile: true, with its provider, reporter list, include glob and four 80% threshold numbers left exactly as they are. The transient coverage-probe file required by the differential proof is created and deleted inside the run. Its removal needs two distinct pieces of evidence, because neither is sufficient alone: the post-run claim check below shows the probe is absent from the committed tree at HEAD, and an explicit filesystem check — recorded per the next criterion — shows it is absent from the working directory after deletion.",
+        "The post-run claim check is clean: the only changed files are package.json, pnpm-lock.yaml and vitest.config.ts. Be precise about what that proves: the claim check is a diff between two committed refs (git diff --name-only <integration-branch>...HEAD), so it proves only that the coverage-probe file is absent from the committed tree at HEAD — a file created on disk and never staged is invisible to it. Removal from the worktree is therefore evidenced separately: after deleting the probe, the task runs an explicit filesystem check that its path no longer exists (for example `test ! -e src/__coverage-probe.ts` or an `ls src/` listing) and records that check, its command and its outcome in the result's structured output, alongside the two pnpm test:coverage observations the criteria above already require. A result carrying no such filesystem check fails this criterion."
+      ],
+      "claims": ["package.json", "pnpm-lock.yaml", "vitest.config.ts"],
+      "budget": {
+        "tokens": 40000,
+        "diff_lines": 90,
+        "max_turns": 15
+      },
+      "contract": {
+        "functional_clauses": [
+          "Run pnpm install at the repo root and commit the generated pnpm-lock.yaml.",
+          "Add @vitest/coverage-v8 to devDependencies at a version matching the installed vitest major (4.x). Do not upgrade, downgrade, add, or remove any other dependency.",
+          "Add exactly one script entry: \"test:coverage\": \"vitest run --coverage\".",
+          "Set coverage.thresholds.perFile to true in vitest.config.ts and change nothing else in that file: without it the four 80% numbers are a global aggregate over src/**/*.ts, so a well-covered module can carry an under-tested one over the bar and no downstream task's per-file coverage criterion is checkable.",
+          "Do not change the four 80% threshold numbers, the coverage provider, the reporter list, or the include glob in vitest.config.ts — adding perFile is the only edit that file may receive in this task.",
+          "Prove per-file enforcement differentially, because the obvious proof is vacuous: with exactly one file matched by the coverage include glob, per-file and global-aggregate thresholds are numerically identical, so a green pnpm test:coverage says nothing about whether perFile took effect. Do this instead: (a) temporarily create a second file under src/ — e.g. src/__coverage-probe.ts — exporting one function that no test imports, so its coverage is 0%; (b) run pnpm test:coverage and observe that it now FAILS and that the failure output names that file specifically; (c) copy that failure output verbatim into the result's structured output; (d) delete the temporary file and re-run pnpm test:coverage, observing that it exits 0 again.",
+          "If step (b) does not fail — the run stays green with an uncovered file present, or vitest reports coverage.thresholds.perFile as an unknown option — stop immediately, delete the probe file, and report error execution.env-failure with the observed output. Do not fall back to global-aggregate thresholds and do not report the task as done: every downstream task in this epic carries an acceptance criterion that assumes per-file enforcement, and all of them become unverifiable if this key is silently inert.",
+          "Report in the result's structured output the exact @vitest/coverage-v8 version installed, the observed coverage percentages from the passing pnpm test:coverage run, and the verbatim failure output from the differential probe run, so downstream tasks and the epic verdict can cite a real number and a real proof."
+        ],
+        "nonfunctional_clauses": [
+          "Zero runtime dependencies is a hard product constraint for envkit: the dependencies object in package.json must remain {} — every addition goes to devDependencies. A runtime dependency is an operator question, never a coder decision.",
+          "No dependency addition beyond @vitest/coverage-v8. A second addition is an operator question.",
+          "Supply chain: pin exact versions (no ^ or ~ ranges), matching the scaffold's existing pinning style, so pnpm install --frozen-lockfile in CI is reproducible.",
+          "Do not hand-edit pnpm-lock.yaml — it is generated by pnpm install only (worktree.yml: regenerable files are never hand-edited by workers).",
+          "The differential-proof file is scratch, never a deliverable: it must be deleted before the task ends and must never be committed or appear in the final diff. It is not one of this task's three claims, so committing it is a claim violation (contract.claim-violation), and an uncovered file left under src/ would break the 80% per-file floor for every downstream task in the epic. Create it, observe the failure, delete it — in that order, within the same run.",
+          "Do not add postinstall, prepare, preinstall, or any lifecycle script; no script may execute network or shell side effects at install time.",
+          "The 90-line diff cap excludes pnpm-lock.yaml, which is a generated file per budgets.yml; the hand-written portion of the diff (package.json plus the single-line perFile addition to vitest.config.ts) must stay well inside it.",
+          "Do not touch main or the integration branch directly; all work happens in this task's assigned worktree.",
+          "English-only code, comments, and commit messages; commit subject <= 72 chars, imperative."
+        ],
+        "tool_allowlist": ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+      },
+      "case": "infra",
+      "origin": "inferred",
+      "task_status": "ready",
+      "agent_role": "coder",
+      "confidence": 0.95,
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-config-loader/task-1a-parse-core",
+      "epic_id": "envkit-config-loader",
+      "plan_version": 1,
+      "objective": "Implement the unquoted core of src/parse.ts — a pure .env text parser that turns a document into raw string key/value pairs plus a list of reported issues — and cover it with test/parse.test.ts. This task owns KEY=value, full-line and trailing # comments, blank and whitespace-only lines, the optional export prefix, duplicate keys where the last assignment wins, malformed-line and empty-key detection, and the 1-based line-number contract. It defines and exports the module's whole public surface (parseEnv, ParseResult, ParseIssue, ParseIssueCode) so task-1b-parse-quotes adds behaviour without widening a type. Quoting is deliberately NOT implemented here: a value whose first character is a quote is an explicit, tested malformed-line issue until task-1b-parse-quotes replaces that branch. This task and task-1b-parse-quotes are the split of what was originally one task-1-parse; both estimates landed at 450-570 lines against the flat 400-line coder diff cap in budgets.yml, and work that does not fit is split at spec time rather than silently extended. They claim the same two files, so they are serialized by a claim-order edge and are never co-scheduled.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/parse.ts exports parseEnv(text: string): ParseResult plus the exported types ParseResult, ParseIssue and ParseIssueCode.",
+        "ParseResult is { values: Record<string, string>; issues: ParseIssue[] }; ParseIssue is { code: ParseIssueCode; message: string; line: number } with line 1-based; ParseIssueCode is a string-literal union declaring at least 'malformed-line' and 'unterminated-quote'. 'unterminated-quote' is declared here even though no code path in this task emits it, so task-1b-parse-quotes extends behaviour without widening the exported type surface.",
+        "A dedicated test exists for each of: plain KEY=value; a full-line # comment; a trailing # comment on an unquoted value; blank and whitespace-only lines; export KEY=value; duplicate keys where the last assignment wins.",
+        "Malformed-input tests: a line with no equals sign and a line with an empty key (=value) each produce exactly one issue with the correct 1-based line number, and parsing continues for the remaining lines (asserted by checking a later valid key is still present in values).",
+        "Interim quoting behaviour is explicit and tested, not left undefined: a value whose first non-whitespace character after the equals sign is a single or double quote yields exactly one malformed-line issue carrying that line's 1-based number and records no key. A dedicated test asserts this for both KEY='a' and KEY=\"a\". The same test asserts the other side of the first-position rule this task implements — that a quote NOT in first position is an ordinary character, so KEY=ab\"cd\" yields the literal value ab\"cd\" with no issue — otherwise the discrimination between the two cases would be untested. This interim rule is replaced wholesale by task-1b-parse-quotes.",
+        "parseEnv('') returns { values: {}, issues: [] }.",
+        "parseEnv never throws for any string input — a test feeds a table of at least eight hostile inputs (empty string, lone equals sign, unterminated single and double quotes, CRLF line endings, no trailing newline, a NUL character, a lone surrogate) and asserts no throw and a well-formed ParseResult each time.",
+        "parseEnv('__proto__=x') does not mutate Object.prototype — a test asserts that ({} as Record<string, unknown>).x is still undefined afterwards.",
+        "A test asserts that parsing a malformed line containing the token s3cr3t-value produces an issue whose message does not contain that token (secret hygiene).",
+        "A test parses a generated document of at least 10,000 lines and completes within Vitest's default timeout (linear-time parsing).",
+        "pnpm lint, pnpm typecheck and pnpm test exit 0, and pnpm test:coverage exits 0 — with the per-file thresholds task-0 enabled, that means src/parse.ts on its own is at or above 80% lines, statements, functions and branches. This task must be independently green on every one of those gates: it may not leave src/parse.ts in a state that only compiles, only lints or only passes once task-1b-parse-quotes lands.",
+        "The post-run claim check is clean: the only changed files are src/parse.ts and test/parse.test.ts."
+      ],
+      "claims": ["src/parse.ts", "test/parse.test.ts"],
+      "budget": {
+        "tokens": 100000,
+        "diff_lines": 270,
+        "max_turns": 30
+      },
+      "contract": {
+        "functional_clauses": [
+          "Unquoted values are trimmed of surrounding whitespace. A trailing # comment is stripped from an unquoted value only when the # is preceded by whitespace or begins the value; a # embedded in a bare token (e.g. KEY=a#b) stays part of the value.",
+          "Blank and whitespace-only lines are skipped and produce neither a key nor an issue. A line whose first non-whitespace character is # is a full-line comment and is likewise skipped.",
+          "A value is quoted only when its first character, after trimming the whitespace that follows the equals sign, is a single or double quote. A quote occurring anywhere later in the value is an ordinary literal character and never triggers quote parsing: KEY=ab\"cd\" yields the literal value ab\"cd\" with both quote characters retained.",
+          "Interim quoting rule, for this task only: quoting is not implemented here. A value whose first character (after the trim above) is a single or double quote produces exactly one malformed-line issue carrying that line's 1-based number, records no key, and parsing continues on the next line. This is a real, tested behaviour — not a stub, not a TODO, not an untested assumption — so task-1b-parse-quotes's diff visibly deletes this branch and its test rather than filling a hole.",
+          "An export prefix (the literal word export followed by at least one space or tab) is stripped before the key is read. exportFOO=1 yields the key exportFOO, not FOO.",
+          "Duplicate keys: the last assignment in document order wins and earlier assignments are discarded without reporting an issue.",
+          "Every line the parser cannot interpret produces exactly one ParseIssue and parsing continues with the next line — never abort, never drop a malformed line silently.",
+          "The line field is the 1-based index of the physical line on which the reported problem occurs. Every issue this task can emit is confined to a single physical line, so line is always that line's own number. Issues arising from a value that spans several physical lines do not exist in this task's scope; task-1b-parse-quotes states the two rules that govern them.",
+          "Keys are the text between the optional export prefix and the first equals sign, trimmed. An empty key after trimming is a malformed-line issue.",
+          "Both LF and CRLF line endings are accepted; a trailing carriage return never leaks into a key or an unquoted value.",
+          "Declare ParseIssueCode with both 'malformed-line' and 'unterminated-quote' members even though only 'malformed-line' is emitted here. Fixing the public union in this task is what lets task-1b-parse-quotes be a behaviour change rather than a breaking type change."
+        ],
+        "nonfunctional_clauses": [
+          "Zero runtime dependencies: src/parse.ts imports nothing — no npm package, no Node builtin, no other project module. Do not modify package.json or any config file.",
+          "Totality: parseEnv must not throw for any string input, including empty strings, lone equals signs, unterminated quotes, CRLF endings, input with no trailing newline, and input containing NUL characters or lone surrogates. This is enforced by a hostile-input table test, not by inspection.",
+          "Prototype-pollution safety: build the values map with Object.create(null) (or a Map converted with Object.fromEntries) so a key of __proto__, constructor or prototype is recorded as ordinary data and can never mutate Object.prototype or the result's prototype chain. Asserted by test.",
+          "Secret hygiene: envkit parses files that routinely hold credentials. A ParseIssue message must never echo the offending value — it may name the issue, the 1-based line number and, where known, the key, and nothing else. A test asserts that parsing a malformed line containing the token s3cr3t-value produces an issue whose message does not contain that token.",
+          "No eval, no new Function, no dynamic import(), no filesystem access, no child processes. The parser never reads process.env and never writes to it — it is a pure function of its string argument.",
+          "Linear-time parsing: a single forward pass over the input with no backtracking regex containing nested quantifiers (ReDoS risk). A test parses a generated document of at least 10,000 lines and completes within Vitest's default timeout.",
+          "Determinism: identical input always yields identical values key order and identical issues order (document order); no reliance on iteration order of a polluted object or on locale-sensitive APIs.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error, no type assertions used to silence a real error. Code compiles under strict and noUncheckedIndexedAccess as configured in tsconfig.json.",
+          "TDD is gate-enforced: a failing test exists before the implementation that makes it pass. Tests assert observable behaviour (returned values and issues), never internal helper names.",
+          "Independently shippable: this task's contract is a complete, coherent parser for unquoted .env documents, not half of a parser. Every gate — pnpm lint, pnpm typecheck, pnpm test and per-file coverage on src/parse.ts — must pass on this task's diff alone, with no reference to, import of, or placeholder for anything task-1b-parse-quotes will add.",
+          "Strict YAGNI: implement exactly the clauses above and no part of task-1b-parse-quotes's scope. Do not pre-build a quote scanner, an escape decoder, a multiline continuation buffer, or an options seam for them; do not leave commented-out or dead code anticipating them. No interpolation or variable-expansion feature, no file loading, no process.env merging, no plugin seam.",
+          "English-only code, comments, and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions and no biome-ignore comments.",
+          "Do not create, modify, or delete any file outside src/parse.ts and test/parse.test.ts — in particular not src/index.ts, src/coerce.ts, package.json, or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-config-loader/task-1b-parse-quotes",
+      "epic_id": "envkit-config-loader",
+      "plan_version": 1,
+      "objective": "Extend the same src/parse.ts and test/parse.test.ts that task-1a-parse-core created with the complete quoting layer: single-quoted literal values confined to one physical line, double-quoted values decoding exactly three escapes and passing every other backslash sequence through verbatim, multiline double-quoted continuation, uniform CRLF-to-LF normalization including inside quoted values, the closing-quote trailer rule with its explicit line-number resolution, the first-position-only quote-detection rule, and unterminated-quote issues. It replaces task-1a-parse-core's interim rule (first-position quote is a malformed line) outright — that branch and its test are deleted in this diff, not supplemented. Because it claims the same two files as task-1a-parse-core, the two are serialized by a claim-order edge and are never scheduled in the same wave. After this task src/parse.ts is the complete parser task-4-api consumes.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/parse.ts's exported surface is unchanged from task-1a-parse-core: parseEnv, ParseResult, ParseIssue and ParseIssueCode keep the same signatures and shapes, and ParseIssueCode gains no new member. What changes is behaviour, not types.",
+        "task-1a-parse-core's interim quoting rule is removed: the assertion that KEY='a' and KEY=\"a\" produce malformed-line issues is deleted in this task's diff and replaced by the quoting tests below. Deleting it is required — leaving both would make the suite self-contradictory, and a suite that still asserts the interim rule is a failed task.",
+        "A dedicated test exists for each of: a # inside a quoted value kept literally; a single-quoted value where backslash-n stays two literal characters; a double-quoted value where backslash-n, backslash-t and double-backslash decode to newline, tab and a single backslash; a double-quoted value spanning at least two physical lines.",
+        "A dedicated test asserts that a backslash sequence other than the three decoded escapes is preserved verbatim as backslash plus the following character (e.g. backslash-q stays two characters).",
+        "A dedicated test asserts that KEY=\"value\" # comment yields the value `value` for KEY and reports no issue.",
+        "A dedicated test asserts that KEY=\"value\"x yields exactly one malformed-line issue carrying that line's 1-based number, and that no KEY entry is recorded in values for it.",
+        "A dedicated test pins the unconditional closing-quote scan on the input line KEY=\"a\\\"b\" — that is: K, E, Y, equals, double quote, a, backslash, double quote, b, double quote. The scan closes the value at the double quote immediately following the backslash, so the quoted span is the two characters a-then-backslash and the two characters b and double quote remain on the line; that trailing double quote is ordinary trailer content, since the parser does not re-enter quote scanning after a closing quote. Those remaining characters are non-whitespace, non-comment content after a closing quote, so by the closing-quote-trailer rule the whole line yields exactly one malformed-line issue whose line is the 1-based number of the physical line carrying that closing quote (line-number rule (b)), and NO KEY entry is recorded in values — the span's decoded text never surfaces at all. The test asserts all three: exactly one issue, code malformed-line with that line number, and the absence of KEY from values. A test that instead expects the value a-backslash-quote-b, or that expects an unterminated-quote issue, fails this criterion.",
+        "A dedicated test asserts the multiline closing-quote-trailer line number: a double-quoted value spanning at least two physical lines with non-whitespace, non-comment content after its closing quote yields exactly one malformed-line issue whose line is the 1-based number of the physical line carrying the CLOSING quote, not the opening-quote line, and no key is recorded for it. The fixture must place the opening and closing quotes on different physical lines so the two candidate line numbers differ and the assertion can actually tell them apart.",
+        "A dedicated test asserts that a double-quoted value spanning at least two physical lines authored with CRLF line endings decodes to LF-only content: the decoded value contains no carriage return.",
+        "A dedicated test asserts that a double quote opened and never closed before the end of the document yields exactly one unterminated-quote issue whose line is the 1-based number of the OPENING-quote line.",
+        "A dedicated test asserts that a line whose value opens with a single quote never closed on that line (KEY='unterminated) yields exactly one unterminated-quote issue with that line's 1-based number, does not consume the following line, and that a valid key declared on the next line is still present in values.",
+        "A dedicated test asserts that KEY=ab\"cd\" yields the literal value ab\"cd\" with both quote characters retained and reports no issue — the first-position rule survives the quoting implementation.",
+        "The hostile-input table test inherited from task-1a-parse-core stays green and is extended with at least two quoted hostile inputs (a lone double quote as the entire value, and an opening double quote followed by at least 10,000 characters with no closing quote); parseEnv still never throws and still returns a well-formed ParseResult for each.",
+        "Every test task-1a-parse-core landed — other than the interim-quoting assertion this task deliberately replaces — is still present and still green, including the prototype-pollution, secret-hygiene and 10,000-line linear-time tests.",
+        "pnpm lint, pnpm typecheck and pnpm test exit 0, and pnpm test:coverage exits 0 — with the per-file thresholds task-0 enabled, that means src/parse.ts on its own is at or above 80% lines, statements, functions and branches.",
+        "The post-run claim check is clean: the only changed files are src/parse.ts and test/parse.test.ts."
+      ],
+      "claims": ["src/parse.ts", "test/parse.test.ts"],
+      "budget": {
+        "tokens": 100000,
+        "diff_lines": 290,
+        "max_turns": 30
+      },
+      "contract": {
+        "functional_clauses": [
+          "Replace task-1a-parse-core's interim quoting rule outright: a first-position quote must no longer produce a malformed-line issue. Delete that branch and the test asserting it; do not add a second branch beside it and do not leave the old code reachable behind a condition.",
+          "A value is quoted only when its first character, after trimming the whitespace that follows the equals sign, is a single or double quote — task-1a-parse-core's first-position rule is preserved exactly. A quote occurring later in an unquoted value stays an ordinary literal character: KEY=ab\"cd\" yields the literal value ab\"cd\" with both quote characters retained.",
+          "Single-quoted values are literal: no escape sequence is decoded and a # inside them belongs to the value.",
+          "A single-quoted value never spans physical lines. A single quote left open at end of line is always an unterminated-quote issue for that line — the parser does not scan forward for a closing quote — and parsing continues on the next line.",
+          "Double-quoted values decode exactly three escapes — backslash-n to newline, backslash-t to tab, double-backslash to a single backslash. Any other backslash sequence is preserved verbatim as backslash plus the following character, and a test asserts this.",
+          "The closing-quote scan is unconditional: the first double-quote character after the opening double quote closes the value, regardless of any character preceding it. A backslash immediately before a quote is NOT an escape for scanning purposes, so backslash-quote is not a way to embed a double quote in a value, and values containing a double-quote character are out of scope for this epic. This is deliberate and is stated here so a later reader does not \"fix\" it: making backslash-quote suppress termination would require either decoding it to a bare quote — a fourth decoded escape, which the nonfunctional clause forbidding additional escape sequences rules out — or retaining both characters in the output, which would mean the escape suppresses termination yet still cannot produce a quote, a wart with no upside. Keeping the scanner dumb is exactly what keeps the decode table closed at three escapes. The single-quote scan is unconditional in the same way, trivially so, since single-quoted values decode no escapes at all.",
+          "A double-quoted value may span multiple physical lines; the newlines between the opening and closing quote are preserved in the value, normalized as the line-ending clause below requires. A double quote opened and never closed before the end of the document is an unterminated-quote issue.",
+          "Line-ending normalization is uniform across the whole document, including inside quoted values: any CRLF between the opening and closing quote of a multiline double-quoted value decodes to a single LF in the value, never a literal carriage return followed by a line feed.",
+          "After a closing quote (single or double), only optional trailing whitespace followed by an optional trailing # comment may appear before the end of the line. Any other non-whitespace content after the closing quote makes the whole line a malformed-line issue and no key is recorded for it.",
+          "Line numbers for issues involving a quoted span, stated exhaustively so the two rules cannot conflict. (a) Unterminated quote — no closing quote found before the end of the line (single-quoted) or the end of the document (double-quoted): the issue's line is the 1-based number of the physical line carrying the OPENING quote, because that is where the problem starts and there is no closing quote to point at. (b) Closing-quote trailer — a closing quote was found and non-whitespace, non-comment content follows it: the issue's line is ALWAYS the 1-based number of the physical line carrying the CLOSING quote, even when the value spanned several physical lines and the opening quote sat on an earlier line. Rule (b) is the explicit exception to task-1a-parse-core's single-line default and takes precedence over rule (a) whenever a closing quote was found. No issue reports a line outside the span.",
+          "Do not change any behaviour task-1a-parse-core established for unquoted values, trailing and full-line comments, blank lines, the export prefix, duplicate keys, empty keys, or the 1-based line contract for single-line issues. That behaviour is settled and its tests must stay green unedited; touch it only where the quoting branch is threaded in."
+        ],
+        "nonfunctional_clauses": [
+          "Zero runtime dependencies: src/parse.ts imports nothing — no npm package, no Node builtin, no other project module. Do not modify package.json or any config file.",
+          "Totality: parseEnv must not throw for any string input, including unterminated single and double quotes, a quote as the entire value, a very long unterminated quoted span, CRLF endings, input with no trailing newline, and input containing NUL characters or lone surrogates. Enforced by the extended hostile-input table test, not by inspection.",
+          "Prototype-pollution safety, secret hygiene, determinism and the Object.create(null) values map established by task-1a-parse-core continue to hold and their tests stay green. A ParseIssue message must never echo the offending value — including the contents of an unterminated or trailer-bearing quoted span, which is exactly where a credential is most likely to sit.",
+          "No eval, no new Function, no dynamic import(), no filesystem access, no child processes. The parser never reads process.env and never writes to it — it is a pure function of its string argument.",
+          "Linear-time parsing is preserved: quoting is implemented as part of the same single forward pass, with no backtracking regex containing nested quantifiers (ReDoS risk) and no rescanning of a span per candidate closing quote. The 10,000-line test from task-1a-parse-core stays green and the added long-unterminated-quote hostile input must not make it superlinear.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error, no type assertions used to silence a real error. Code compiles under strict and noUncheckedIndexedAccess as configured in tsconfig.json.",
+          "TDD is gate-enforced: a failing test exists before the implementation that makes it pass. Tests assert observable behaviour (returned values and issues), never internal helper names.",
+          "Regression duty: this task must leave every test task-1a-parse-core landed green, except the single interim-quoting assertion it is contracted to delete. Deleting or weakening any other inherited assertion to make an implementation pass is reward-hacking and fails the gate.",
+          "Strict YAGNI: implement exactly the clauses above. No interpolation or variable-expansion feature, no additional escape sequences (no backslash-r, no backslash-uXXXX, no backslash-xNN), no heredoc or backtick quoting, no file loading, no process.env merging, no options object, no plugin seam — none of those are in this epic's scope.",
+          "English-only code, comments, and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions and no biome-ignore comments.",
+          "Do not create, modify, or delete any file outside src/parse.ts and test/parse.test.ts — in particular not src/index.ts, src/coerce.ts, package.json, or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-config-loader/task-2-coerce",
+      "epic_id": "envkit-config-loader",
+      "plan_version": 1,
+      "objective": "Implement src/coerce.ts, which converts one raw .env string into a typed value — string, number, boolean or string[] — returning a discriminated success/failure result rather than a silently wrong value, and cover it with test/coerce.test.ts. No NaN may ever escape as a success and Boolean('false') must never be true. The module is a leaf that imports nothing, so it can be built concurrently with src/parse.ts, and it is the single type authority for FieldType: src/validate.ts and src/index.ts import that union from here rather than redeclaring it, which is why this epic needs no shared hub types file.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/coerce.ts exports coerceValue(raw: string, type: FieldType): CoerceResult, the runtime value exports FIELD_TYPES and isFieldType, and the exported types FieldType, CoercedValue, CoerceResult and CoerceIssueCode.",
+        "FieldType is exactly the string-literal union 'string' | 'number' | 'boolean' | 'string[]', and it is DERIVED from the runtime constant rather than hand-written: FIELD_TYPES is a readonly tuple of exactly those four strings in that order and FieldType is (typeof FIELD_TYPES)[number], so the runtime list and the compile-time union can never drift.",
+        "src/coerce.ts exports isFieldType(x: unknown): x is FieldType — the epic's only runtime FieldType membership check. FieldType is type-only and has no runtime representation, so without this export task-4-api's 'throws TypeError when a field type is outside the FieldType union' criterion would be unimplementable; task-4-api imports isFieldType for that guard instead of re-listing the strings.",
+        "A test asserts isFieldType returns true for every member of FIELD_TYPES and false for each of 'String', 'int', '', 'string[] ' (trailing space), 'number ' (trailing space), null, undefined, 42, {} and [] — non-string inputs included, since callers pass unknown.",
+        "A test asserts FIELD_TYPES has exactly four members and that coerceValue returns ok: true for a representative valid raw value for each member, so a member added to FIELD_TYPES without a matching coercion branch fails the suite.",
+        "CoercedValue is string | number | boolean | string[]; CoerceResult is { ok: true; value: CoercedValue } | { ok: false; code: CoerceIssueCode; message: string }; CoerceIssueCode includes at least 'invalid-number', 'invalid-boolean' and 'unknown-type'.",
+        "coerceValue('abc', 'number') returns { ok: false, code: 'invalid-number' } — a test asserts the result is not ok and that no success result ever carries NaN.",
+        "coerceValue('false', 'boolean') returns { ok: true, value: false } — a test asserts strict equality to false, guarding against Boolean('false') === true.",
+        "Numbers: '42', '-3.5', '0', '1e3', '+7' and ' 7 ' succeed with the correct numeric value; '', '   ', '12abc', 'abc', 'NaN', 'Infinity', '-Infinity' and '0x1f' are explicit failures — every case asserted in a table test.",
+        "Booleans: 'true', '1', 'yes', 'on' coerce to true and 'false', '0', 'no', 'off' coerce to false, case-insensitively after trimming; '', 'maybe', '2' and 'TRUEISH' are explicit invalid-boolean failures — every case asserted.",
+        "string[]: 'a,b,c' yields ['a','b','c']; ' a , b ' yields ['a','b']; '' yields []; 'a,,b' yields ['a','','b'] with the empty segment preserved — every case asserted.",
+        "string: the raw value is returned unchanged, including surrounding whitespace and the empty string — asserted.",
+        "An unrecognised type at runtime returns { ok: false, code: 'unknown-type' } rather than throwing — asserted via a deliberately widened cast in the test.",
+        "coerceValue never throws for any pair of string arguments — asserted by a hostile-input table test.",
+        "pnpm lint, pnpm typecheck and pnpm test exit 0, and pnpm test:coverage exits 0 — with the per-file thresholds task-0 enabled, that means src/coerce.ts on its own is at or above 80% lines, statements, functions and branches.",
+        "The post-run claim check is clean: the only changed files are src/coerce.ts and test/coerce.test.ts."
+      ],
+      "claims": ["src/coerce.ts", "test/coerce.test.ts"],
+      "budget": {
+        "tokens": 95000,
+        "diff_lines": 270,
+        "max_turns": 30
+      },
+      "contract": {
+        "functional_clauses": [
+          "number: after trimming, the raw string must match /^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$/ and Number.isFinite of the parsed value must be true. Anything else — including hex/octal/binary literals, 'NaN', 'Infinity', the empty string and whitespace-only strings — is an invalid-number failure. Never use a bare Number() or parseFloat() result without this guard.",
+          "boolean: trim, lowercase with toLowerCase (not toLocaleLowerCase), then match the closed sets { true, 1, yes, on } and { false, 0, no, off }. Anything outside both sets is an invalid-boolean failure; never fall back to JavaScript truthiness.",
+          "string[]: split the raw value on commas, trim each segment, and keep empty segments as empty strings. The one special case is that a raw value that is empty or whitespace-only yields the empty array [] rather than [''].",
+          "string: return the raw value byte-for-byte unchanged — no trimming, no unquoting, no case folding.",
+          "An unhandled type value reaches the function only through a widened cast (the union makes it unreachable in typed code); handle it defensively with an unknown-type failure result instead of throwing, so the module stays total.",
+          "Declare the type list exactly once, at runtime, and derive the type from it: `export const FIELD_TYPES = ['string', 'number', 'boolean', 'string[]'] as const;` then `export type FieldType = (typeof FIELD_TYPES)[number];`. Never hand-write the union a second time — a hand-authored union sitting beside a runtime array is precisely the drift this clause exists to prevent.",
+          "Export `isFieldType(x: unknown): x is FieldType`, implemented as a membership test over FIELD_TYPES. Its parameter must be `unknown`, not `string`, and it must return false for every non-member including non-string values such as null, undefined, numbers, arrays and objects — its caller in src/index.ts receives untrusted schema data, not typed data.",
+          "Export FieldType, CoercedValue, FIELD_TYPES and isFieldType from this module as the epic's single definition of the field-type vocabulary; downstream modules import them from './coerce.js' and never restate the list."
+        ],
+        "nonfunctional_clauses": [
+          "Zero runtime dependencies: src/coerce.ts imports nothing — no npm package, no Node builtin, no other project module. Do not modify package.json or any config file.",
+          "Totality: coerceValue must not throw for any (string, string) argument pair, including empty strings, extremely long strings, and strings containing NUL or lone surrogates. Enforced by a hostile-input table test.",
+          "No silent success: a success result may never carry NaN, Infinity or -Infinity. A test asserts Number.isFinite over every numeric success in the table.",
+          "Secret hygiene: envkit coerces values that routinely hold credentials. A failure message must state only the expected type and the failure code — it must never echo the raw value. A test asserts that coercing the string s3cr3t-value as a number produces a message that does not contain that token.",
+          "No locale dependence: use toLowerCase, not toLocaleLowerCase, and no Intl APIs — coercion results must not vary with the host locale.",
+          "No eval, no new Function, no dynamic import(), no filesystem access, no child processes, no reads or writes of process.env — coerceValue is a pure function of its two arguments.",
+          "No ReDoS: the numeric regex above is anchored and free of nested quantifiers; do not replace it with a backtracking-prone alternative.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error outside the one deliberate widened-cast test, and no type assertion used to silence a real error. Code compiles under strict and noUncheckedIndexedAccess.",
+          "TDD is gate-enforced: a failing test exists before the implementation that makes it pass. Tests assert observable behaviour, never internal helper names.",
+          "Strict YAGNI: implement exactly the four field types. No custom-type registry, no options object, no per-call formatting hooks, no Date or JSON types — they are not in this epic's scope.",
+          "English-only code, comments, and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions and no biome-ignore comments.",
+          "Do not create, modify, or delete any file outside src/coerce.ts and test/coerce.test.ts — in particular not src/index.ts, src/parse.ts, package.json, or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-config-loader/task-3-validate",
+      "epic_id": "envkit-config-loader",
+      "plan_version": 1,
+      "objective": "Implement src/validate.ts, which takes the raw string map produced by the parser plus a declared schema of fields (type, required, optional default) and returns either a fully typed config object or the complete list of validation errors — every error at once, never just the first. It delegates every string-to-typed conversion to coerceValue from src/coerce.ts and imports FieldType from there rather than redeclaring it, which is the reason this task runs after task-2-coerce instead of beside it. Cover it with test/validate.test.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/validate.ts exports validateConfig(raw: Record<string, string>, schema: ConfigSchema): ValidateResult plus the exported types FieldSpec, ConfigSchema, ValidatedConfig, ValidationIssue and ValidationIssueCode.",
+        "FieldSpec is { type: FieldType; required?: boolean; default?: string } with FieldType imported from './coerce.js'; ConfigSchema is Record<string, FieldSpec>; ValidatedConfig is Record<string, CoercedValue>.",
+        "ValidationIssue is { code: ValidationIssueCode; key: string; message: string }; ValidationIssueCode includes at least 'missing-required' and 'invalid-value'.",
+        "ValidateResult is { ok: true; config: ValidatedConfig } | { ok: false; issues: ValidationIssue[] }.",
+        "All errors at once: a schema with three simultaneously-failing fields yields exactly three issues from a single call, ordered by schema declaration order — asserted on the full issues array, not just its length.",
+        "A required field absent from raw with no default yields a missing-required issue naming that key — asserted.",
+        "A required field absent from raw but carrying a default succeeds using the coerced default — asserted, including that the default goes through coerceValue rather than being passed through as a raw string.",
+        "An optional field absent from raw with no default is omitted from config entirely (the key is not present, not set to undefined) — asserted.",
+        "A default that itself fails coercion yields an invalid-value issue naming that key — asserted.",
+        "Keys present in raw but absent from schema are ignored and never appear in config — asserted.",
+        "An empty schema yields { ok: true, config: {} } for any raw — asserted.",
+        "A field whose type is not a member of FieldType (reachable only via a widened cast) surfaces as an invalid-value issue rather than a throw — asserted.",
+        "validateConfig never throws for any (object, schema) pair — asserted by a hostile-input table test.",
+        "src/validate.ts imports only from './coerce.js' — no npm package, no Node builtin, no other project module.",
+        "src/validate.ts's module doc comment states that ConfigSchema keys must be non-integer-like strings and that integer-like keys fall outside this epic's declaration-order guarantee. No test is required for this: it is a documented scope boundary, not a behaviour.",
+        "pnpm lint, pnpm typecheck and pnpm test exit 0, and pnpm test:coverage exits 0 — with the per-file thresholds task-0 enabled, that means src/validate.ts on its own is at or above 80% lines, statements, functions and branches, and no already-merged module has dropped below the floor.",
+        "The post-run claim check is clean: the only changed files are src/validate.ts and test/validate.test.ts."
+      ],
+      "claims": ["src/validate.ts", "test/validate.test.ts"],
+      "budget": {
+        "tokens": 100000,
+        "diff_lines": 260,
+        "max_turns": 30
+      },
+      "contract": {
+        "functional_clauses": [
+          "Iterate the schema's own keys in declaration order (Object.keys of the schema object), never the raw map's keys — the schema is the authority on what the config contains. Object.keys reports source declaration order only for non-integer-like keys, which the scope clause below requires.",
+          "ConfigSchema keys must be non-integer-like identifier strings — they name environment variables (PORT, DATABASE_URL, LOG_LEVEL). Integer-like keys ('0', '42', '007' used as property names) are out of scope for this epic's ordering guarantee: JavaScript orders integer-like own keys numerically ahead of all string keys, so Object.keys would not report source declaration order for them. Do not add code to detect, reject or re-sort such keys, and do not weaken the ordering guarantee to accommodate them; state the restriction in src/validate.ts's module doc comment so a future caller is not surprised.",
+          "For each field: if the key exists in raw, coerce that raw value; otherwise if a default is declared, coerce the default; otherwise if required is true, record a missing-required issue; otherwise omit the key from the output entirely.",
+          "Accumulate every issue across every field and return them all together. Never return early on the first failure and never throw to signal a validation problem.",
+          "A coercion failure becomes an invalid-value issue whose key is the field name and whose message states the expected type; the underlying coerce failure code may be folded into the message text but the issue's own code stays invalid-value.",
+          "A field spec that is not an object, or whose type is not a member of FieldType, surfaces as an invalid-value issue for that key — validateConfig stays total as defence in depth even though src/index.ts rejects such schemas earlier with a TypeError.",
+          "Return { ok: true, config } only when the issues list is empty; when it is non-empty return { ok: false, issues } and no partial config.",
+          "Re-export nothing from './coerce.js' beyond what this module's own public types require — src/index.ts owns the package's public re-export surface."
+        ],
+        "nonfunctional_clauses": [
+          "Zero runtime dependencies: src/validate.ts imports only './coerce.js' — no npm package, no Node builtin, no other project module. Do not modify package.json or any config file.",
+          "Totality: validateConfig must not throw for any argument pair, including an empty raw map, an empty schema, a schema with a null or non-object field spec, and a schema whose type is an arbitrary string. Enforced by a hostile-input table test.",
+          "Prototype-pollution safety: build the output config with Object.create(null) or Object.fromEntries so a schema key of __proto__, constructor or prototype is stored as ordinary data and never mutates Object.prototype. Read raw values with Object.prototype.hasOwnProperty.call (or Object.hasOwn), never a bare `in` or a bare property read, so an inherited property can never masquerade as a supplied value. Asserted by test.",
+          "Secret hygiene: an issue message must name only the key and the expected type — it must never echo the offending raw value or the declared default. A test asserts that validating a field whose raw value is s3cr3t-value against type number produces a message not containing that token.",
+          "No eval, no new Function, no dynamic import(), no filesystem access, no child processes, no reads or writes of process.env — validateConfig is a pure function of its two arguments.",
+          "Determinism: issue order is always schema declaration order and config key order is always schema declaration order, for identical inputs.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error outside the deliberate widened-cast tests, and no type assertion used to silence a real error. Code compiles under strict and noUncheckedIndexedAccess.",
+          "TDD is gate-enforced: a failing test exists before the implementation that makes it pass. Tests assert observable behaviour, never internal helper names.",
+          "Regression duty: this task must leave src/parse.ts's and src/coerce.ts's existing tests green; the merge queue re-runs every previously merged task's tests before admitting this one.",
+          "Strict YAGNI: implement exactly the clauses above. No cross-field validation, no custom validator callbacks, no min/max/pattern constraints, no unknown-key strictness option — none are in this epic's scope.",
+          "English-only code, comments, and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions and no biome-ignore comments.",
+          "Do not create, modify, or delete any file outside src/validate.ts and test/validate.test.ts — in particular not src/coerce.ts (import from it, never edit it), src/index.ts, package.json, or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    },
+    {
+      "task_id": "envkit-config-loader/task-4-api",
+      "epic_id": "envkit-config-loader",
+      "plan_version": 1,
+      "objective": "Replace the scaffold stub in src/index.ts with envkit's public API: loadConfig(text, schema), wiring parse and validate (which itself coerces) into one discriminated result, plus the type re-exports that make the package usable from a single import. Rewrite test/index.test.ts to cover the wired behaviour end to end. loadConfig never throws on bad input — a malformed document is data, and every parse and validation problem is aggregated into one errors array — while throwing TypeError is reserved for programmer error in the arguments themselves. This task runs last because it is the only task allowed to claim src/index.ts.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "src/index.ts exports loadConfig(text: string, schema: ConfigSchema): LoadResult, and the scaffold's ping() function is gone from src/index.ts and no longer referenced anywhere in test/.",
+        "LoadResult is { ok: true; config: ValidatedConfig } | { ok: false; errors: ConfigError[] }; ConfigError is { stage: 'parse' | 'validate'; code: string; message: string; key?: string; line?: number }.",
+        "src/index.ts re-exports the public types FieldType, CoercedValue, FieldSpec, ConfigSchema, ValidatedConfig, LoadResult and ConfigError, so a consumer needs only one import from the package entry point.",
+        "Happy path: a document exercising an export prefix, a full-line comment, a trailing comment, a single-quoted value, a double-quoted value with escapes and all four field types returns { ok: true } with config deep-equal to the expected typed object — asserted.",
+        "Errors are aggregated across stages: a document with one malformed line and two failing fields returns ok: false with exactly three errors — one carrying stage 'parse' and a line number, two carrying stage 'validate' and a key — asserted on the full errors array, not just its length.",
+        "Parse issues never abort validation: when parse reports issues, validation still runs over the successfully parsed keys and its issues appear in the same errors array — asserted.",
+        "A document that parses cleanly but fails validation returns only stage 'validate' errors; a document that fails parsing but whose parsed subset satisfies the schema still returns ok: false because the parse issue is an error — both asserted.",
+        "loadConfig never throws for any string text: a test feeds at least eight hostile documents (empty string, comments only, lone equals sign, unterminated double quote, CRLF endings, a NUL character, a single character, no trailing newline) against a real schema and asserts no throw and a well-formed LoadResult each time.",
+        "loadConfig throws TypeError for programmer error and only for that: non-string text, null or non-object schema, a field spec that is not an object, and a field type outside the FieldType union — each asserted with expect(() => ...).toThrow(TypeError). The out-of-union case is asserted both for a plausible near-miss ('int') and for a non-string type (42, via a widened cast), so a guard that only compares string values is caught.",
+        "The field-type membership check in src/index.ts is the isFieldType function imported from './coerce.js', and src/index.ts contains no second copy of the FieldType vocabulary — no local array, tuple, switch, if-chain or regex enumerating 'string', 'number', 'boolean' or 'string[]'. Mechanically checkable on the diff: the literals 'number', 'boolean' and 'string[]' occur zero times in src/index.ts, and 'string' occurs only as the right-hand operand of a typeof comparison — the `typeof text !== 'string'` argument guard that functional_clauses mandates, which is the sole reason that one literal is permitted at all. Every other occurrence of 'string' fails this criterion, as does any array, tuple, switch, if-chain or regex enumerating two or more FieldType members in any form — plain literals, a chain of typeof comparisons, or a mix of the two. A typeof-shaped enumeration of the vocabulary is not a loophole: it is the same second copy of the list, spelled differently, and fails this criterion.",
+        "pnpm build exits 0 and dist/index.d.ts declares loadConfig.",
+        "pnpm lint, pnpm typecheck and pnpm test exit 0, and pnpm test:coverage exits 0 — with the per-file thresholds task-0 enabled, that means every file under src/**/*.ts, src/index.ts included, is individually at or above vitest.config.ts's 80% lines, statements, functions and branches.",
+        "src/index.ts imports only from './parse.js', './coerce.js' and './validate.js' — the './coerce.js' import includes the runtime value isFieldType alongside its type imports.",
+        "The post-run claim check is clean: the only changed files are src/index.ts and test/index.test.ts."
+      ],
+      "claims": ["src/index.ts", "test/index.test.ts"],
+      "budget": {
+        "tokens": 110000,
+        "diff_lines": 300,
+        "max_turns": 32
+      },
+      "contract": {
+        "functional_clauses": [
+          "loadConfig first guards its arguments for programmer error and throws TypeError with a short English message when text is not a string, when schema is null or not a plain object, when any field spec is not an object, or when any field spec's `type` fails isFieldType imported from './coerce.js'. These guards run before any parsing.",
+          "The field-type guard must be the imported isFieldType and nothing else. Do not re-derive, hardcode or re-list the FieldType strings in src/index.ts: no local array of the four literals, no switch or if-chain over them, no regular expression matching them, no second `as const` tuple. A second copy of the list is a contract violation even when it behaves identically today — FIELD_TYPES in src/coerce.ts is the single source of truth and task-2-coerce exports isFieldType specifically so this file never needs one. The `typeof text !== 'string'` argument guard mandated by the clause above is not a re-listing of the vocabulary and is expressly permitted; what this clause forbids is a second enumeration of two or more FieldType members, in any spelling.",
+          "Do not add FIELD_TYPES or isFieldType to the package's public re-export surface. They are imported for this guard only; the package's public surface stays loadConfig plus the type re-exports listed in the acceptance criteria.",
+          "After the guards, loadConfig calls parseEnv(text), then validateConfig(parseResult.values, schema), and merges both problem lists into a single errors array: parse issues map to { stage: 'parse', code, message, line } and validation issues map to { stage: 'validate', code, key, message }.",
+          "Parse issues are non-fatal to the pipeline: validation always runs over whatever keys parsed successfully, so a single call reports parse and validation problems together rather than one stage at a time.",
+          "Order the errors array parse-stage-first (in document line order) then validate-stage (in schema declaration order), deterministically.",
+          "Return { ok: true, config } only when the merged errors array is empty; otherwise return { ok: false, errors } with no partial config.",
+          "Remove the scaffold's ping() function from src/index.ts and remove its test from test/index.test.ts — the epic's public surface is loadConfig and the re-exported types, nothing else.",
+          "Re-export the public types listed in the acceptance criteria with `export type` so the declaration emit stays clean under isolatedModules-style consumption; do not re-export parseEnv, coerceValue or validateConfig as public API."
+        ],
+        "nonfunctional_clauses": [
+          "Zero runtime dependencies: src/index.ts imports only './parse.js', './coerce.js' and './validate.js' — no npm package, no Node builtin. Do not modify package.json or any config file.",
+          "Totality on input: loadConfig must not throw for any string text paired with a well-formed schema, whatever the document contains. Bad input is data and is returned as errors; only malformed arguments raise TypeError. Enforced by a hostile-document table test.",
+          "The TypeError guards must be exhaustive and must not double as input validation — a syntactically valid schema paired with a garbage document never throws. A test asserts both directions.",
+          "Prototype-pollution safety: the returned config must not expose an inherited or polluted prototype; a document declaring __proto__ must not mutate Object.prototype. Asserted by test.",
+          "Secret hygiene: ConfigError messages must never echo a raw value from the document — only stage, code, key, line and the expected type. A test loads a document whose failing value is s3cr3t-value and asserts no error message contains that token. This is the clause that keeps credentials out of a consumer's logs.",
+          "No eval, no new Function, no dynamic import(), no filesystem access, no child processes, and no reads or writes of process.env — loadConfig takes text, it does not find it. Reading .env files from disk is deliberately out of scope for this epic.",
+          "Determinism: identical (text, schema) inputs always produce identical config key order and identical errors order.",
+          "Strict TypeScript: no any, no non-null assertions, no @ts-expect-error outside the deliberate widened-cast TypeError tests, and no type assertion used to silence a real error. Code compiles under strict and noUncheckedIndexedAccess, and pnpm build emits declarations without error.",
+          "TDD is gate-enforced: a failing test exists before the implementation that makes it pass. Tests assert observable behaviour of loadConfig, never internal helper names.",
+          "Regression duty: this task must leave src/parse.ts's, src/coerce.ts's and src/validate.ts's existing tests green; the merge queue re-runs every previously merged task's tests before admitting this one.",
+          "Strict YAGNI: implement exactly loadConfig plus the type re-exports. No file loading, no process.env merging, no variable interpolation, no options object, no default export, no schema builder DSL — none are in this epic's scope.",
+          "English-only code, comments, and commit messages; formatting is exactly what the committed Biome config produces, with zero rule suppressions and no biome-ignore comments.",
+          "Do not create, modify, or delete any file outside src/index.ts and test/index.test.ts — in particular not src/parse.ts, src/coerce.ts or src/validate.ts (import from them, never edit them), package.json, or any config file. Out-of-claim edits fail the gate."
+        ],
+        "tool_allowlist": ["Read", "Edit", "Write", "Bash", "Grep", "Glob"]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "envkit"
+    }
+  ],
+  "edges": [
+    {
+      "task": "envkit-config-loader/task-1a-parse-core",
+      "dependsOn": "envkit-config-loader/task-0-toolchain",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-config-loader/task-2-coerce",
+      "dependsOn": "envkit-config-loader/task-0-toolchain",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-config-loader/task-1b-parse-quotes",
+      "dependsOn": "envkit-config-loader/task-1a-parse-core",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-config-loader/task-3-validate",
+      "dependsOn": "envkit-config-loader/task-2-coerce",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-config-loader/task-4-api",
+      "dependsOn": "envkit-config-loader/task-1b-parse-quotes",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-config-loader/task-4-api",
+      "dependsOn": "envkit-config-loader/task-2-coerce",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "envkit-config-loader/task-4-api",
+      "dependsOn": "envkit-config-loader/task-3-validate",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    }
+  ]
+}

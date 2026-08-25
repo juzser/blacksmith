@@ -1,0 +1,83 @@
+# Black Smith — severity policy
+#
+# S1..S4 gate rules (architecture §11, agent-constraints.md "reviewer /
+# verifier", guardrails.md). Severity values themselves are taxonomy-owned
+# (factory/policies/taxonomy.yml: severity) — this file defines what each
+# value *does* at the gate, not the vocabulary.
+
+levels:
+  S1-stop-the-line:
+    blocks_merge: true
+    semantics: stop-the-line
+    classes:
+      # guardrails.md: violations are S1 unless stated otherwise
+      - repo corruption
+      - secret leak
+      - guardrail breach (push to main/master, force-push, history rewrite
+        on a shared branch, merge to main by the factory, destructive git ops
+        outside a worktree, deploy without operator approval, autonomous
+        outbound send)
+      - out-of-claim edit that touches a guardrail-protected file
+    on_trigger: >
+      stop the run immediately; no bounded retry; operator notified
+      synchronously (not batched).
+
+  S2-major:
+    blocks_merge: true
+    semantics: hard block, bounce to coder on the same branch
+    classes:
+      - security / data-loss
+      - broken core flow
+      - a11y WCAG AA failure
+      - new flaky test introduced by the task
+      - behavioral-drift touching a core flow
+    on_trigger: >
+      bounce to coder on the same branch; after 2 failed rounds, escalate
+      model tier (sonnet -> opus, budgets.yml); after 3, escalate to
+      operator.
+
+  S3-minor:
+    blocks_merge: false
+    semantics: waivable — batched to operator at epic end
+    classes:
+      - visual regression vs HDS
+      - performance regression > 20%
+      - over-engineering (default severity — see rule below)
+      - behavioral-drift not touching a core flow
+      - everything minor-but-real that doesn't meet an S2 class
+    on_trigger: >
+      does not block; queued into a single batched waiver question at epic
+      end ("ignore these?"). Waiver answers are stored by finding
+      fingerprint, keyed for reuse — the same finding is never asked twice,
+      and waived findings are suppressed in future reviews of the same code.
+
+  S4-nit:
+    blocks_merge: false
+    semantics: logged, never asked
+    classes:
+      - style/naming nits not caught by Biome
+    on_trigger: log only; no operator interaction.
+
+rules:
+  over_engineering_default: S3
+  over_engineering_note: >
+    Enforced by the reviewer's over-engineering lens per agent-constraints.md
+    coder effort discipline (YAGNI). Findings surface as S3 with a proposed
+    simplification, waiver-batched like any other S3.
+  same_mistake_escalation: >
+    A finding matching an approved lesson (finding_status match against
+    factory/policies/lessons.md by claim path / case type) is auto-escalated
+    one severity level and tagged judgment.same-mistake — including
+    over-engineering S3 -> S2 once a matching lesson is approved.
+  waiver_semantics: >
+    Only S3/S4 findings are ever waived. S1/S2 cannot be waived; they must be
+    fixed or the task returns through the escalation ladder
+    (budgets.yml: escalation_ladder). A waiver is keyed by finding
+    fingerprint (finding.schema.json) and, once granted, suppresses that
+    exact fingerprint in future reviews of the same code — it is never
+    re-asked.
+  block_semantics: >
+    "Blocks merge" means the merge-queue gate rejects the task's admission
+    into smith/<epic>/integration until the finding's finding_status reaches
+    fix-verified (fix landed and re-passed the gate) or, for S3/S4, waived.
+    A review firing without uptake is not a closed finding.

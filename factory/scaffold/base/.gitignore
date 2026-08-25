@@ -1,0 +1,11 @@
+# dependencies / build
+node_modules/
+dist/
+.wrangler/
+coverage/
+
+# local env + editor
+.env
+.env.*
+.DS_Store
+*.log

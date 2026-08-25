@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/lesson.schema.json",
+  "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
+  "title": "Lesson",
+  "description": "A typed, principle-level memory entry (architecture §9). Instance-level transcripts are rejected at the gate. Bi-temporal supersession with provenance: nothing self-modifies without operator approval.",
+  "type": "object",
+  "required": [
+    "lesson_id",
+    "lesson_type",
+    "lesson_level",
+    "lesson_status",
+    "lesson_scope",
+    "statement",
+    "valid_from",
+    "superseded_by",
+    "provenance_event_ids"
+  ],
+  "properties": {
+    "lesson_id": { "type": "string" },
+    "lesson_type": {
+      "type": "string",
+      "x-taxonomy": "lesson_type"
+    },
+    "lesson_level": {
+      "type": "string",
+      "x-taxonomy": "lesson_level"
+    },
+    "lesson_status": {
+      "type": "string",
+      "x-taxonomy": "lesson_status"
+    },
+    "lesson_scope": {
+      "type": "string",
+      "x-taxonomy": "lesson_scope"
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Abstract, transferable, checkable principle — never an instance-level transcript."
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "superseded_by": {
+      "type": ["string", "null"],
+      "description": "lesson_id of the lesson that superseded this one, or null."
+    },
+    "invalidated_by_event_id": {
+      "type": ["string", "null"],
+      "description": "Set when a later run contradicts this lesson (lesson_status: invalidated)."
+    },
+    "provenance_event_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Event-log entries that produced this lesson (traceable, never silent deletion)."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Short excerpt/summary of the error or decision checkpoint that generated this candidate."
+    },
+    "finding_category": {
+      "type": "string",
+      "x-taxonomy": "finding_category",
+      "description": "Phase 7 (lessons.ts): optional — only meaningful for a `rule`-typed, claim-path/stack-wide-scoped entry. Compiled into lessons.md's same-mistake entry format so severity.ts can match a new finding's category against it (architecture §9.7). Not required at write time — agent-role/case-type-scoped entries never carry one (lessons.md: \"do not participate in this per-file match\")."
+    },
+    "claim_path": {
+      "type": "string",
+      "description": "Phase 7 (lessons.ts): optional glob (picomatch), meaningful only for claim-path/stack-wide-scoped entries — the file pattern this lesson's same-mistake match applies to. Omitted/treated as \"**\" for stack-wide entries (lessons.md convention)."
+    },
+    "agent_role": {
+      "type": "string",
+      "x-taxonomy": "agent",
+      "description": "D-129: the selector an agent-role-scoped entry is filtered by at dispatch — required for that scope and ignored for every other. Without it the entry reaches no role at all, because the three selector scopes (claim-path/agent-role/case-type) each filter on exactly one field and a missing selector matches nothing rather than everything."
+    },
+    "case_type": {
+      "type": "string",
+      "x-taxonomy": "case",
+      "description": "D-129: the selector a case-type-scoped entry is filtered by at dispatch — the taxonomy `case` of the dispatching task, read off the immutable plan. Required for that scope, ignored for every other."
+    }
+  },
+  "additionalProperties": false
+}

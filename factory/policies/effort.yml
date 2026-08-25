@@ -1,0 +1,142 @@
+# Effort tiers — how much judgment an epic buys.
+#
+# An internal tool and a payments rewrite do not deserve the same number of
+# judge calls, but until this file existed the factory had exactly one flow and
+# the only way to make a small epic cheap was to skip steps by hand and
+# remember which ones. That is the same failure mode sensitive-paths.yml was
+# written for: a decision made fresh every time is a decision made differently
+# every time. So the tiers are declared here and asked for, never recalled.
+#
+# HOST: `smith effort show --plan <plan.json>` reads this file plus the plan's
+# own `effort` field and returns the profile for that epic
+# (factory/orchestrator/src/effort.ts). `.claude/skills/bs/SKILL.md` runs that
+# verb at the top of `/bs plan` and `/bs run` and obeys the answer, rather than
+# eyeballing the table below.
+#
+# Scope note: the tier is per EPIC, not per project. It is chosen at `/bs plan`
+# time and stored on the plan file, so one project can run a `small` epic in
+# the morning and a `huge` one in the afternoon. `budgets.yml`'s
+# `effort_scaling:` block is the prose sibling of this file — it says fan-out
+# is a wall-clock optimisation; this says how much judgment each epic buys.
+#
+# THE INVARIANT THAT MAKES THIS SAFE: a tier scales judgment steps only. It
+# never touches a mechanical oracle or a guardrail — see `invariants:` at the
+# bottom, which the host returns alongside every profile so the list cannot be
+# quietly forgotten. A `small` tier that skipped tests would not be cheap, it
+# would be unverified, and the two are not the same thing.
+
+version: 1
+
+# The tier an epic gets when its plan file names none. `medium` and not `huge`:
+# an unstated tier is an unconsidered one, and the default should be the
+# ordinary case rather than the most expensive one. An epic that wants the full
+# flow says so.
+default_tier: medium
+
+# The lowest tier an epic may run at once its live tasks fire crosscheck.yml's
+# `plan_quorum` security triggers (`case: infra`, a security-sensitive
+# `agent_role`, or a `security_keywords` hit in a nonfunctional clause). An
+# internal tool that touches auth is not a small epic — the operator's tier is
+# a request, and this is the floor it is answered against. Raising a tier is
+# always allowed; the floor only ever raises.
+security_floor: medium
+
+# ── The tiers ───────────────────────────────────────────────────────
+#
+# Read top to bottom as a subtraction: `huge` is the flow as
+# `.claude/skills/bs/SKILL.md` writes it today, unchanged; `medium` drops the
+# judgment steps that pay off least per call; `small` drops the pre-code
+# deliberation as well. Every knob below names a step that is a *judgment* —
+# an agent forming an opinion. Nothing mechanical appears here by construction.
+tiers:
+  huge:
+    summary: >
+      The full flow, exactly as SKILL.md writes it. Large or important
+      projects, anything user-facing, anything whose failure is expensive.
+    # /bs run step 3 — dispatch `researcher` for a pre-code unknown.
+    pre_code_research: when-needed
+    # /bs run step 3 — dispatch `uiux` for a UI-affecting acceptance criterion.
+    # Already conditional today at every tier; stated at all three so the knob
+    # reads as a fact about the flow rather than an omission.
+    pre_code_uiux: when-ui-criterion
+    # /bs plan steps 3-4 — planner <-> spec-reviewer until nothing S1/S2 is left.
+    spec_review_rounds: until-clean
+    # /bs plan step 4 — `smith plan quorum` before operator sign-off.
+    plan_quorum: always
+    # /bs run step 6 — the grader's bounded rubric loop (agent-constraints.md
+    # caps it at 2; a tier may lower that number, never raise it).
+    grader_rounds: 2
+    # /bs run step 7 — which reviewer findings get the adversarial verifier
+    # pass before they cost the coder a round trip.
+    verifier_severities: [S1-stop-the-line, S2-major]
+    # ...plus this share of S3-minor findings, sampled. The 20% spot-check is
+    # what today's flow does; the lower tiers drop the sample, not the S1/S2
+    # mandate.
+    verifier_s3_spot_check_ratio: 0.2
+    # /bs run step 13 — the closing spec-reviewer against the assembled branch.
+    closing_spec_review: always
+
+  medium:
+    summary: >
+      The default. Ordinary product work: the adversarial passes that catch
+      real defects stay, the deliberation that mostly confirms is dropped.
+    pre_code_research: when-needed
+    pre_code_uiux: when-ui-criterion
+    spec_review_rounds: until-clean
+    # Down from `always`: the quorum computes its own triggers, so running it
+    # unconditionally buys an answer of "nothing fired" most of the time. At
+    # this tier it runs when crosscheck.yml says something fired.
+    plan_quorum: when-triggered
+    # Down from 2: round 2 exists for the rubric that moved. Below `huge`,
+    # one round scores and a second one is the coder's bounce instead.
+    grader_rounds: 1
+    verifier_severities: [S1-stop-the-line, S2-major]
+    # Down from 0.2: the S3 sample is a calibration measurement on the
+    # reviewer, not a defence of this epic's diff.
+    verifier_s3_spot_check_ratio: 0
+    closing_spec_review: always
+
+  small:
+    summary: >
+      Internal tools, scripts, one-file chores — work whose blast radius is
+      the operator's own afternoon. Fast, and still gated.
+    # Down from when-needed: at this size the coder reading the repo is the
+    # research brief. An epic that genuinely needs one is not a small epic.
+    pre_code_research: never
+    pre_code_uiux: when-ui-criterion
+    # Down from until-clean: one spec-review pass, findings surfaced to the
+    # operator with the spec at sign-off rather than looped on first.
+    spec_review_rounds: single-pass
+    plan_quorum: when-triggered
+    grader_rounds: 1
+    # Down from [S1, S2]: only a stop-the-line finding is worth an
+    # adversarial refute pass before it reaches the coder.
+    verifier_severities: [S1-stop-the-line]
+    verifier_s3_spot_check_ratio: 0
+    # Down from always: a closing spec review reads the spec against the code
+    # that now exists, which is worth a call when the spec moved. If the epic
+    # ran its whole plan without an amendment, it did not move.
+    closing_spec_review: when-plan-amended
+
+# ── What no tier may touch ──────────────────────────────────────────
+#
+# Returned verbatim by `smith effort show` next to every profile. These are
+# mechanical oracles and guardrails, not judgments: their cost is a command
+# exiting, not an agent thinking, so scaling them saves nothing and buys
+# nothing but a weaker claim about the result.
+invariants:
+  - the gate pipeline — schema check, grader verdict, tests, coverage
+    evidence, findings intake, severity decision (`smith gate run`)
+  - the root-level integration check on the assembled branch
+    (`smith integration check`)
+  - claim disjointness and worktree isolation (`smith wave check`,
+    `smith worktree create/fingerprint/verify`)
+  - the security-reviewer's conditional dispatch
+    (`smith security triggers`) — sensitive-paths.yml decides it, not a tier
+  - the operator's plan sign-off, which no tier may skip or infer
+  - the epic-final verdict and its mechanical holds (`smith epic verdict`,
+    `smith epic close`)
+  - the event log — every dispatch is still a `dispatch_decision` with a
+    causal parent, at every tier
+  - the escalation ladder after a blocked round (budgets.yml
+    `escalation_ladder`) — a cheap epic that fails twice still climbs

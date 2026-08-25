@@ -1,0 +1,198 @@
+# Black Smith — budget policy
+#
+# Token/turn caps per tier (architecture §2, §4, agent-constraints.md
+# "budgets (factory-wide)").
+#
+# What is mechanical, and what is a request (P9-18, 2026-08-08; `failed_rounds`
+# added P9-32 and `alarm_ratio` P9-33, both 2026-08-10). Exactly five numbers
+# here reach a runtime host:
+#
+#   * `epic.cap_tokens` — two readers. planQuorum's budget trigger sums
+#     *declared* task budgets against it, never actual spend; `smith budget
+#     alarm` compares it against spend counted from the event log.
+#   * `epic.alarm_ratio` — `smith budget alarm` (src/budgetAlarm.ts), which
+#     reports each epic's measured and projected spend against
+#     `alarm_ratio * cap_tokens` and exits 1 on a crossing. Measured spend is a
+#     floor, not a total: a judge returns findings rather than a Result, so its
+#     tokens are in no `task-result-recorded` event and are priced from the
+#     caps below instead. A role with no cap here cannot be priced at all, and
+#     the epic is reported unverifiable rather than under — which is why the
+#     `task:` block's coverage of the roles the factory actually dispatches is
+#     load-bearing and not merely documentary.
+#   * a task's `tokens` — compared at the gate against the result's
+#     `token_usage.total_tokens`.
+#   * a task's `diff_lines` — compared at the gate against a real
+#     `git diff --numstat` (src/diffstat.ts), lockfiles and generated output
+#     excluded.
+#   * `escalation_ladder.rungs[].failed_rounds` — counted from `gate-outcome`
+#     events by `smith escalation check` (src/escalation.ts), which asserts the
+#     rung's `enforce` obligation against what the log shows happened next.
+#
+# The gate records an overrun and reports it; it does not block on one. An
+# overrun is as often evidence the plan under-estimated the task as evidence
+# the task overran, and a cap the worker polices itself becomes a pressure on
+# the work (D-29: a coder spent its tail shaving lines to land exactly on
+# `diff_lines`, stopping mid-procedure to do it).
+#
+# Every other number below is prompt-level: read by agents from their own
+# template and by the operator from the /bs playbook. They are requests, not
+# limits, and the sections that follow say which is which. `max_turns` is no
+# longer among them at all — no dispatch harness can enforce a turn limit
+# (agent-interviews.md M-4), so plan validation now rejects it as a task budget
+# field and the number belongs in the dispatch prompt.
+#
+# No concurrency cap, by design (removed 2026-08-05). Workers run in isolated
+# worktrees on disjoint path claims, so parallelism is bounded by the claim
+# graph, not by a worker count — and fan-out buys wall-clock without buying
+# extra tokens (architecture §15.3). Hundreds of concurrent subagents is a
+# supported shape. Cost is bounded by the token cap, not by a worker count.
+
+epic:
+  cap_tokens: 4000000        # planner + all workers + judges, one epic.
+                              # Raised from 2,000,000 by operator decision on
+                              # 2026-08-11 (dogfood-mcp-1), which is the
+                              # operator answer the `alarm_ratio` note below
+                              # requires — an extension, not a silent widening.
+                              # The number the envkit-mcp-surface dogfood
+                              # measured: 1,529,963 tokens for two of four
+                              # tasks, both of them the two smallest in the
+                              # plan. The old cap could not have carried that
+                              # epic to close, and the alarm said so at 109%
+                              # before the third task was ever dispatched.
+                              # Two things this does NOT fix, both worth a
+                              # follow-up: (1) there is no per-epic override,
+                              # so a number raised for one epic is raised for
+                              # every epic black-smith will ever run; (2) a
+                              # large share of that 1.5M was rework — stopped
+                              # dispatches and re-dispatches that `smith
+                              # escalation check` recorded as ladder
+                              # violations — so this cap now accommodates
+                              # waste as well as work. A cap sized from a
+                              # badly-run epic is a ceiling measured at the
+                              # wrong place.
+  alarm_ratio: 0.7           # at 2.8M tokens: planner must re-plan remaining
+                              # work to fit, or ask the operator. Epics that
+                              # cannot fit are split at spec time, never
+                              # silently extended (extension is always an
+                              # operator question). Checked by `smith budget
+                              # alarm <session>`, which the /bs run loop runs at
+                              # each wave merge — before P9-33 this number's
+                              # only reader was a human remembering to look.
+
+task:
+  # Defaults a planner sizes a task's own `budget` block against. The task's
+  # declared numbers are what the gate checks; these are the shape of a
+  # reasonable declaration, not a second cap applied on top.
+  coder:
+    cap_tokens: 150000
+    cap_diff_lines: 400      # excludes lockfiles/generated files
+  researcher:
+    cap_tokens: 60000
+  judges:                    # spec-reviewer, reviewer, verifier, grader
+    cap_tokens: 40000
+  # Not priced here, and dispatched anyway: security-reviewer, merger, tester,
+  # uiux, planner, scribe. `smith budget alarm` cannot put a number on those
+  # dispatches, so an epic that used one is reported unverifiable rather than
+  # under — the omission is visible instead of free. Left unpriced on purpose
+  # until there is real spend data to size them from; inventing a cap would
+  # make the projection look complete without making it true.
+
+pre_code_budget:
+  # researcher + uiux together, before any code is written for the epic
+  share_of_epic_budget_max: 0.15
+
+context_window:
+  # Working-memory discipline (agent-constraints.md "context window
+  # (factory-wide)"). Distinct from the caps above: those are about cost, this
+  # is about the quality of what a session still holds. Prompt-level today
+  # (baked into .claude/agents/*); mechanical with the phase-9 loop daemon.
+  auto_compact_ratio: 0.6      # compact at 60% of the model's context window.
+                               # The other 40% is the room needed to ACT on the
+                               # summary: a session that compacts at 90% knows
+                               # what to do and has no budget left to do it,
+                               # which is what produces re-read loops, dropped
+                               # constraints and half-applied edits.
+  max_compactions_per_task: 1  # a second one means the task is over-scoped:
+                               # stop and return economy.budget-exceeded to the
+                               # planner for splitting, exactly as a token-cap
+                               # hit does. Chained compactions are how a session
+                               # quietly loses the contract it was given.
+  counts_against_budget: true  # tokens spent before a compaction still count
+                               # against the caps above — compacting is not a
+                               # way around the 150k coder cap.
+  compacting_roles: [planner, coder, tester, researcher, uiux, scribe]
+  narrowing_roles: [reviewer, verifier, grader, spec-reviewer, security-reviewer, merger]
+  # narrowing_roles hold evidence rather than build on it: a judge that compacts
+  # summarizes away the diff it is judging, and a merger that compacts loses one
+  # side of the conflict. At 60% they narrow scope and return a verdict on what
+  # they hold (judges) or escalate to the operator (merger) — they never compact.
+  keep:
+    - epic/task ids and the live plan version
+    - claimed globs
+    - decisions taken and why
+    - what is done vs. what remains
+    - open questions and blocking unknowns
+  drop:
+    - raw file contents
+    - raw tool/command output
+    - superseded reasoning
+  note: >
+    Durable state belongs in the event log, not the context window
+    (architecture §7). Anything that must survive a compaction is an event or a
+    result artifact; the window is working memory, the log is memory.
+
+escalation_ladder:
+  # architecture §12, agent-constraints.md "budgets (factory-wide)"
+  #
+  # `failed_rounds` and `enforce` are the machine-readable half, added P9-32.
+  # src/escalation.ts reads them and `smith escalation check` asserts them
+  # against the log; `trigger`/`action` stay as the human contract and must say
+  # the same thing. A failed round is one `gate-outcome` with outcome
+  # `blocked` for the task.
+  #
+  # enforce values (closed set — an unrecognised one is reported unverifiable,
+  # never skipped):
+  #   model-tier — the next builder dispatch for the task must be a strictly
+  #                higher model_tier than the one that failed.
+  #   operator   — the ladder stops here: no further builder dispatch until the
+  #                operator has answered (a `user_prompt`, or a waiver granted
+  #                or denied for the task).
+  # A rung with no `action` declares no obligation and asserts nothing; a rung
+  # with an `action` and no `enforce` is a rule nothing can check, and the
+  # audit says so rather than passing it.
+  rungs:
+    - rung: 1
+      trigger: bounded retry on the same contract
+      failed_rounds: 1
+    - rung: 2
+      trigger: 2 failed rounds on the same task
+      failed_rounds: 2
+      enforce: model-tier
+      action: escalate model tier automatically (sonnet -> opus), logged
+    - rung: 3
+      trigger: 3 failed rounds on the same task
+      failed_rounds: 3
+      enforce: operator
+      action: escalate to operator
+  note: >
+    Rungs are never skipped and never looped past their bound; doing so is a
+    coordination error (deadlock/livelock/starvation, taxonomy.yml).
+
+effort_scaling:
+  # architecture §15.3, §17 (equal-budget study: extra agents buy wall-clock
+  # + isolation, not reasoning)
+  #
+  # How many agents a step gets. *Which steps run at all* is the other half,
+  # and it lives in `factory/policies/effort.yml`: a per-epic tier
+  # (small/medium/huge) that scales the deliberation steps — pre-code briefs,
+  # spec-review rounds, the plan quorum, grader rounds, verifier severities,
+  # the closing spec review — and nothing else. Ask `smith effort show`; the
+  # two files do not overlap, and neither may touch a mechanical gate.
+  - rule: small fixes get a single coder, not a fan-out.
+  - rule: >
+      wave fan-out (concurrent dispatch of multiple coder/tester pairs) only
+      when claims are disjoint per static analysis (architecture §5); claims
+      that overlap get a dependency edge and run serially instead.
+  - rule: >
+      the scheduler prefers the cheapest shape that meets the acceptance
+      criteria — fan-out is a wall-clock optimization, not a default.

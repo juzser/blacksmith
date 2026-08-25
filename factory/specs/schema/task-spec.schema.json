@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/task-spec.schema.json",
+  "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
+  "title": "Task Spec",
+  "description": "A dispatchable task contract: the unit the planner emits and a worker executes. Specs are contracts (architecture §1, §3) — no dispatch without objective, output schema, acceptance criteria, claims, and budget.",
+  "type": "object",
+  "required": [
+    "task_id",
+    "epic_id",
+    "plan_version",
+    "objective",
+    "output_schema_ref",
+    "acceptance_criteria",
+    "claims",
+    "budget",
+    "contract",
+    "case",
+    "origin",
+    "task_status"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "Stable identifier, e.g. epic-7/task-142."
+    },
+    "epic_id": {
+      "type": "string"
+    },
+    "plan_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Immutable plan version this task was cut under (architecture §12); never mutated in place."
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-paragraph statement of what the task must accomplish."
+    },
+    "output_schema_ref": {
+      "type": "string",
+      "description": "Path or $id of the JSON Schema the task's result.structured_output must validate against."
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "claims": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "File globs this task may touch, computed from static analysis over the target repo (architecture §5). Out-of-claim edits fail the gate."
+    },
+    "budget": {
+      "type": "object",
+      "description": "Declared caps for this task. Only fields something can mechanically read belong here — plan validation rejects the rest (src/budgets.ts TASK_BUDGET_FIELD_READERS).",
+      "required": ["tokens", "diff_lines"],
+      "properties": {
+        "tokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Compared at the gate against the result's token_usage.total_tokens."
+        },
+        "diff_lines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Compared at the gate against the measured git diff, excluding lockfiles and generated files."
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Still schema-valid so plans written before 2026-08-08 load, but plan validation now rejects it: no dispatch harness can enforce a turn limit (agent-interviews.md M-4). The number belongs in the dispatch prompt, where it is a request."
+        }
+      },
+      "additionalProperties": false
+    },
+    "contract": {
+      "type": "object",
+      "description": "Explicit clauses the worker must satisfy. Nonfunctional/security clauses are always spelled out here — implicit clauses get dropped (error.spec.missing-nonfunctional).",
+      "required": ["functional_clauses", "nonfunctional_clauses"],
+      "properties": {
+        "functional_clauses": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "nonfunctional_clauses": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Explicit security/validation/authz/performance/a11y clauses, even when they seem implied by the objective."
+        },
+        "tool_allowlist": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "case": {
+      "type": "string",
+      "x-taxonomy": "case"
+    },
+    "origin": {
+      "type": "string",
+      "x-taxonomy": "origin"
+    },
+    "task_status": {
+      "type": "string",
+      "x-taxonomy": "task_status"
+    },
+    "agent_role": {
+      "type": "string",
+      "x-taxonomy": "agent",
+      "description": "Role of the agent this task is scoped to be dispatched to."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Set only for origin: inferred tasks (architecture §12); >=0.8 auto-schedules."
+    },
+    "dependency_edge_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs of edge-recorded events this task depends on (architecture §7)."
+    },
+    "project": {
+      "type": "string",
+      "description": "Optional plain-string project identifier (Phase 6b, architecture §8) — NOT a closed taxonomy.yml vocabulary value (projects open/close far more often than any §8 dimension). Absent tasks default to 'black-smith' in the projection layer."
+    }
+  },
+  "additionalProperties": false
+}

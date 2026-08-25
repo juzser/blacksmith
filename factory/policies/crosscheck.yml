@@ -1,0 +1,155 @@
+# Black Smith — multi-provider cross-check policy
+#
+# architecture §6 "Multi-provider cross-check (anti tunnel vision)". The
+# judge tier is provider-agnostic by contract; the config seam has existed
+# since Phase 1, and Phase 8 (`factory/orchestrator/src/providers/`,
+# `src/quorum.ts`) wires it up for real: `transport` selects which
+# transport module runs a provider (cli-transport.ts / api-transport.ts),
+# `mode` gates how much power its verdict has (see below). `enabled: false`
+# means never invoked at all, regardless of `mode`; both external providers
+# shipped that way and are now `enabled: true` in `mode: shadow`, so their
+# verdicts are recorded and gate nothing — see each one's PRECONDITION note.
+# Full setup/calibration/promotion procedure: docs/runbooks/providers.md.
+#
+# Shadow mode (Phase 8 design decision): `mode: shadow` means a provider's
+# verdicts are RECORDED (judge-verdict events, `smith stats providers`) but
+# have ZERO gating power — quorum.ts falls back to the native verdict alone
+# whenever no provider in a case is `mode: active`. Flipping a provider to
+# `mode: active` in this file (an operator edit, never a runtime write) is
+# the entire promotion step; `mode: shadow` or `enabled: false` is the
+# entire rollback step.
+
+providers:
+  claude:
+    kind: native
+    enabled: true
+  codex:
+    kind: api
+    transport: cli          # `codex exec` headless — ChatGPT-subscription auth (`codex login` once), no API key spend. See docs/runbooks/providers.md.
+    command: codex
+    # NOT `--json` (D-118): that wraps the verdict as an escaped string inside
+    # an `item.completed` event, where no JSON scanner can reach it, and puts a
+    # `thread.started` banner ahead of it. Plain `exec` writes the agent's final
+    # message — and only that — to stdout.
+    #
+    # Re-derived against the live binary on 2026-08-17, codex-cli 0.147.0, on a
+    # subscribed account (D-118 was originally derived from two calls made while
+    # the account was near its quota limit). Both layers still hold, unchanged:
+    # `--json` still nests the verdict in `item.completed.item.text`, and plain
+    # `exec` still echoes the whole prompt to stderr — which the transport merges
+    # into its extraction buffer by design — so a prompt containing `[]` or `{}`
+    # still plants decoy JSON ahead of the answer. Over that real buffer the two
+    # extractor generations diverge exactly as D-118 claimed: first-parseable
+    # returns `[]`, first-validating returns the verdict. If you change these
+    # args, re-run that comparison rather than reasoning about it.
+    args: ["exec", "--color", "never"]
+    model_tier: mid          # taxonomy.yml model_tier — judge tier, architecture §4
+    # PRECONDITION: `codex login` must have run on every machine that dispatches
+    # a quorum trigger. Without it the CLI transport still spawns, fails, and
+    # quorum.ts records a provider error per trigger — caught, so nothing gates
+    # on it, but it is latency and noise. Set back to `false` to roll that back.
+    enabled: true
+    mode: shadow       # flip to `active` only after a calibration pass (docs/runbooks/providers.md)
+  deepseek:
+    kind: api
+    transport: api
+    base_url: https://api.deepseek.com
+    model: deepseek-reasoner
+    response_format_json_object: true
+    api_key_env: DEEPSEEK_API_KEY
+    model_tier: mid
+    # PRECONDITION: DEEPSEEK_API_KEY must be set in the dispatching environment.
+    # Without it api-transport.ts throws `Environment variable "DEEPSEEK_API_KEY"
+    # is not set` on every quorum trigger; quorum.ts catches it, so the gate
+    # holds on the native verdict alone, but each trigger records a provider
+    # error. Set back to `false` on any runner that has no key.
+    enabled: true
+    mode: shadow       # flip to `active` only after a calibration pass (docs/runbooks/providers.md)
+
+quorum_triggers:
+  # architecture §6, agent-constraints.md "cross-check (phase 8)" — all four,
+  # nothing more.
+  - any S1/S2 finding, before it blocks a task
+  - epic-level final verdict, before the integration PR opens
+  - same-mistake findings (judgment.same-mistake)
+  - planner verdicts below the confidence threshold
+
+plan_quorum:
+  # architecture §6 "Plan quorum" — critique-only, never committee writes.
+  triggers:
+    - epic budget ≥ 50% of budgets.yml per-epic cap
+    - epic case is infra, or carries a security-sensitive tag
+    - planner verdict confidence below threshold
+  judges: 2 providers distinct from the planner's
+  on_disagreement: surface both rationales to the operator with the plan
+  # Machine-readable form of the three triggers above, read by
+  # src/crosscheck.ts's parsePlanQuorum() -> src/planQuorum.ts's
+  # evaluatePlanQuorumTriggers(). The prose above is the human contract;
+  # these fields are what the code actually gates on.
+  budget_ratio: 0.5 # trigger 1: sum(plan.tasks[].budget.tokens) >= this * budgets.yml epic.cap_tokens
+  # Same line task-spec.schema.json's `confidence` field and scheduler.yml's
+  # maintenance.auto_schedule_confidence both draw (>=0.8 auto-schedules).
+  # Repeated here (not imported) because this is a crosscheck trigger, not a
+  # scheduling decision — the two policies are allowed to diverge later.
+  confidence_threshold: 0.8 # trigger 3
+  security_cases: [infra] # trigger 2, taxonomy.yml `case` vocabulary
+  security_roles: [security-reviewer] # trigger 2, taxonomy.yml `agent` vocabulary
+  # trigger 2's third arm: contract.nonfunctional_clauses text matched
+  # case-insensitively as a substring (task-spec.schema.json has no `tags`
+  # field to check instead).
+  security_keywords:
+    - auth
+    - authz
+    - authentication
+    - authorization
+    - credential
+    - secret
+    - token
+    - password
+    - crypto
+    - encryption
+    - tls
+    - injection
+    - xss
+    - csrf
+    - sandbox
+    - permission
+    - privilege
+    - sanitize
+    - escalation
+
+quorum_rule:
+  agreement: "2-of-3"
+  min_providers: 2
+  tie_break: a third provider breaks the tie, or the case escalates to the
+    operator with both rationales side by side.
+
+asymmetric_roles:
+  finder_ne_critic: true
+  critic_mandate: refute, not confirm
+  # The machine-readable form of finder_ne_critic (P9-23). Each pair says
+  # "this critic must not run on that finder's own model"; `smith dispatch
+  # check <session>` asserts it against the event log after the fact, using
+  # the `model` field every dispatch_decision now carries. Without this list
+  # the rule was unenforceable prose: it named no roles.
+  pairs:
+    - finder: planner
+      critic: spec-reviewer
+    - finder: reviewer
+      critic: verifier
+  note: >
+    adversarial stage-gating is expected to kill most candidate findings
+    before they cost a round-trip (Refute-or-Promote, §17); reviewer quality
+    is tracked as kill-rate (findings that survive verification and land as
+    verified fixes), never findings volume.
+
+mechanical_oracles_first: >
+  wherever a deterministic check exists (schema validation, mutation
+  testing, coverage, type checks), it runs first and its verdict is final —
+  LLM judgment, cross-provider or not, is reserved for what machines can't
+  decide.
+
+trust_boundary: >
+  external providers judge; they never gain write access to worktrees or the
+  factory. Their findings are data, not commands. All external calls go
+  through the same event log and budget accounting as native dispatches.
