@@ -20,6 +20,8 @@ export class BudgetError extends SmithError {}
 export interface EpicBudgetPolicy {
   capTokens: number;
   alarmRatio: number;
+  /** `epic.max_in_flight_tasks`, or null when the policy declares no cap. */
+  maxInFlightTasks: number | null;
 }
 
 export interface RoleBudgetPolicy {
@@ -82,7 +84,7 @@ interface RawEscalationRung {
 }
 
 interface RawBudgetsYaml {
-  epic?: { cap_tokens?: number; alarm_ratio?: number };
+  epic?: { cap_tokens?: number; alarm_ratio?: number; max_in_flight_tasks?: number | null };
   task?: {
     coder?: { cap_tokens?: number; cap_diff_lines?: number };
     researcher?: { cap_tokens?: number };
@@ -183,12 +185,37 @@ function capNumber(field: string, value: number): number {
   return value;
 }
 
+/**
+ * Same guard as capNumber, for the one field allowed to say "no cap" rather
+ * than declare a number: `epic.max_in_flight_tasks` is null by default (see
+ * budgets.yml's own comment on the field), and null has to reach
+ * checkWaveBudget as the deliberate "no fan-out limit" it is, not as a value
+ * that failed capNumber's finite-number check. Anything else that is not a
+ * finite number — `"none"`, `80%`, a typo'd string — is the same "no cap at
+ * all" failure capNumber guards against, so it throws the same way.
+ */
+function capNumberOrNull(field: string, value: number | null): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new BudgetError(
+      'budgets.invalid-policy',
+      `budgets.yml ${field} must be a finite number or null; got ${JSON.stringify(value)}. ${NO_CAP_AT_ALL}`,
+      { field, value },
+    );
+  }
+  return value;
+}
+
 export function parseBudgetPolicy(yamlText: string): BudgetPolicy {
   const doc = (parseYaml(yamlText) ?? {}) as RawBudgetsYaml;
   return {
     epic: {
       capTokens: capNumber('epic.cap_tokens', doc.epic?.cap_tokens ?? DEFAULT_EPIC_CAP_TOKENS),
       alarmRatio: capNumber('epic.alarm_ratio', doc.epic?.alarm_ratio ?? DEFAULT_EPIC_ALARM_RATIO),
+      maxInFlightTasks: capNumberOrNull(
+        'epic.max_in_flight_tasks',
+        doc.epic?.max_in_flight_tasks ?? null,
+      ),
     },
     task: {
       coder: {

@@ -4,12 +4,24 @@
 # "budgets (factory-wide)").
 #
 # What is mechanical, and what is a request (P9-18, 2026-08-08; `failed_rounds`
-# added P9-32 and `alarm_ratio` P9-33, both 2026-08-10). Exactly five numbers
-# here reach a runtime host:
+# added P9-32 and `alarm_ratio` P9-33, both 2026-08-10; `max_in_flight_tasks`
+# added 2026-08-26, the same day `epic.cap_tokens` grew a reader that actually
+# blocks). Exactly six numbers here reach a runtime host:
 #
-#   * `epic.cap_tokens` — two readers. planQuorum's budget trigger sums
-#     *declared* task budgets against it, never actual spend; `smith budget
-#     alarm` compares it against spend counted from the event log.
+#   * `epic.cap_tokens` — three readers now, and only the newest of them
+#     blocks. planQuorum's budget trigger sums *declared* task budgets against
+#     it before any dispatch and only ever surfaces the finding for a human to
+#     act on; `smith budget alarm` compares it against spend counted from the
+#     event log, after wave merge, and also stops nothing itself. `smith wave
+#     check` (src/waveBudget.ts) is the reader that blocks: at wave admission —
+#     before any task in the wave has been dispatched — it sums the wave's
+#     declared task budgets against headroom under the cap (measured spend plus
+#     a declared price for every dispatch nothing has measured yet, the same
+#     projection `smith budget alarm` computes) and refuses to admit a wave
+#     that would cross it. It is not a stricter version of the other two
+#     readers' advice; it is the only one of the three standing upstream of the
+#     spend it is judging, so it is the only one that can refuse the spend
+#     instead of merely describing it afterward.
 #   * `epic.alarm_ratio` — `smith budget alarm` (src/budgetAlarm.ts), which
 #     reports each epic's measured and projected spend against
 #     `alarm_ratio * cap_tokens` and exits 1 on a crossing. Measured spend is a
@@ -27,12 +39,25 @@
 #   * `escalation_ladder.rungs[].failed_rounds` — counted from `gate-outcome`
 #     events by `smith escalation check` (src/escalation.ts), which asserts the
 #     rung's `enforce` obligation against what the log shows happened next.
+#   * `epic.max_in_flight_tasks` — `smith wave check`, which refuses to admit a
+#     wave that would put more of the epic's tasks in flight at once (admitted,
+#     not yet merged) than this. Null by default; see the field's own comment
+#     below for why it is not the mechanism that bounds cost.
 #
-# The gate records an overrun and reports it; it does not block on one. An
-# overrun is as often evidence the plan under-estimated the task as evidence
-# the task overran, and a cap the worker polices itself becomes a pressure on
-# the work (D-29: a coder spent its tail shaving lines to land exactly on
+# The task gate still only records an overrun and reports it; it still does
+# not block on one. An overrun there is as often evidence the plan
+# under-estimated the task as evidence the task overran, and a cap the worker
+# polices itself becomes a pressure on the very work it is supposed to be
+# measuring (D-29: a coder spent its tail shaving lines to land exactly on
 # `diff_lines`, stopping mid-procedure to do it).
+#
+# The epic cap no longer works that way: `smith wave check` blocks on one.
+# The difference is not that an epic overrun matters more than a task overrun
+# — it is *when* each is checked. The task gate polices work already
+# underway, so refusing there distorts the work it is judging. Wave admission
+# asks its question before any task in the wave has started, when there is
+# nothing in flight yet for a refusal to put pressure on. A decision made
+# before the work exists cannot become pressure on the work.
 #
 # Every other number below is prompt-level: read by agents from their own
 # template and by the operator from the /bs playbook. They are requests, not
@@ -41,11 +66,18 @@
 # (agent-interviews.md M-4), so plan validation now rejects it as a task budget
 # field and the number belongs in the dispatch prompt.
 #
-# No concurrency cap, by design (removed 2026-08-05). Workers run in isolated
-# worktrees on disjoint path claims, so parallelism is bounded by the claim
-# graph, not by a worker count — and fan-out buys wall-clock without buying
-# extra tokens (architecture §15.3). Hundreds of concurrent subagents is a
-# supported shape. Cost is bounded by the token cap, not by a worker count.
+# No concurrency cap on cost grounds, by design (removed 2026-08-05). Workers
+# run in isolated worktrees on disjoint path claims, so parallelism is bounded
+# by the claim graph, not by a worker count — and fan-out buys wall-clock
+# without buying extra tokens (architecture §15.3). Hundreds of concurrent
+# subagents is a supported shape. That reasoning holds only as long as the
+# token cap it leans on actually binds, which — before `smith wave check` —
+# `epic.cap_tokens` did not. `epic.max_in_flight_tasks` below is not that
+# removed cap come back: it defaults to null, and cost stays bounded by
+# `cap_tokens`, not by a worker count. It exists for an operator who wants a
+# wall-clock or rate-limit bound for a reason of their own — a provider's
+# concurrent-request limit, a laptop's CPU count — and setting it changes
+# nothing about what bounds spend.
 
 epic:
   cap_tokens: 4000000        # planner + all workers + judges, one epic.
@@ -78,6 +110,21 @@ epic:
                               # alarm <session>`, which the /bs run loop runs at
                               # each wave merge — before P9-33 this number's
                               # only reader was a human remembering to look.
+  max_in_flight_tasks: null  # Off by default. "Fan-out buys wall-clock
+                              # without buying extra tokens" above is the
+                              # standing decision, and it only holds while the
+                              # token cap actually binds — which `smith wave
+                              # check` now makes true. So this is NOT the
+                              # mechanism that bounds cost; `cap_tokens` is,
+                              # and it is checked regardless of how this field
+                              # is set. This knob exists for an operator who
+                              # wants a wall-clock or rate-limit bound for a
+                              # reason of their own — a provider's
+                              # concurrent-request limit, a laptop's CPU count
+                              # — and setting it makes `smith wave check`
+                              # refuse to admit a wave that would put more of
+                              # the epic's tasks in flight (admitted, not yet
+                              # merged) than this number at once.
 
 task:
   # Defaults a planner sizes a task's own `budget` block against. The task's
