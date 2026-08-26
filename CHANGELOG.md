@@ -27,12 +27,40 @@ than appearing in it.
   a pull-request template, and this changelog.
 - A Quickstart in the README, plus a docs index covering
   `docs/standards/mcp.md` and `docs/runbooks/providers.md`.
+- `INSTALL.md` — the install detail lifted out of the README as an executable
+  runbook, written so a Claude Code session can work through it end to end
+  when the operator says *"install Blacksmith"*. `CLAUDE.md` declares it.
+- A **Cross-provider checks** section in the README: the four quorum triggers
+  and the fact that nothing polls for two of them, the `enabled`/`mode` dials,
+  how to read `smith stats providers` before a promotion, why one active
+  provider still changes no outcome, and what a judge is shown — a finding's
+  claim, never the file contents and never the diff.
 
 ### Changed
 
 - Demo project fixtures, screenshots and compiled lessons use neutral names
   (`demo-rpg`, `demo-hub`). Provider credentials are environment-only, named
   in `.env.example` and never committed.
+- **Both external judges are now `enabled: true` in `mode: shadow`**, where
+  Phase 8 shipped them `enabled: false`. Their verdicts are recorded and gate
+  nothing until an operator promotes one to `mode: active`. The practical
+  difference: with no credentials configured, each quorum case now records a
+  caught transport failure instead of making no call at all, which reads as a
+  `transportFailureRate` of 1.0 in `smith stats providers`. `README.md`,
+  `INSTALL.md`, `docs/guide/operator-guide.md` and `factory/specs/roadmap.md`
+  had all kept describing the old default.
+- The product's name is written **Blacksmith**, one word, everywhere it is
+  prose — 62 occurrences that read "Black Smith", including the dashboard's
+  sidebar and `<title>`, so the committed e2e screenshots regenerated.
+  Identifiers deliberately keep their hyphenated slug: the
+  `docs/specs/black-smith-*.md` filenames, the `black-smith.dev/schema/*`
+  `$id` URIs, `ui/src/assets/brand/black-smith.png`, the `package.json` name,
+  and the project slug recorded in existing event logs are paths, contracts or
+  data rather than prose.
+- The README leads with the mark, a one-line claim and the dashboard
+  screenshots; `## Installation` is two bullets — self-install or run the
+  runbook yourself — instead of two prose paragraphs. The heading is unchanged
+  because `CONTRIBUTING.md` links `README.md#installation`.
 
 ### Known gaps
 
@@ -76,8 +104,9 @@ Provider adapters (Codex CLI, DeepSeek API), quorum policy, disagreement
 analytics, and shadow-mode calibration. All four `crosscheck.yml` quorum
 triggers have a host: blocking-finding and same-mistake fire automatically
 from the gate; `smith epic verdict` and `smith plan quorum` are
-operator-invoked. Both providers ship `enabled: false` — opting in is
-documented in `docs/runbooks/providers.md`.
+operator-invoked. Both providers shipped `enabled: false` in this phase;
+they are `enabled: true` in `mode: shadow` today — see **Unreleased**, and
+`docs/runbooks/providers.md` for the promotion procedure.
 
 ## Phase 7 — Self-extension — 2026-08-05
 
