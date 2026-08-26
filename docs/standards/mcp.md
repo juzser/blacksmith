@@ -1,6 +1,6 @@
 # MCP Surface Standard
 
-> Every project Black Smith ships exposes an MCP surface, declared at a
+> Every project Blacksmith ships exposes an MCP surface, declared at a
 > mandatory `<project> — mcp surface` milestone near the end of the roadmap.
 > Compiled from the operator decisions of 2026-08-07: **stdio by default,
 > HTTP a declared opt-in**; **hard gate at epic close**, with an operator

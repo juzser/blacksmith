@@ -1,9 +1,9 @@
 ---
 name: bs
-description: Operator console for the Black Smith factory — invoke as `/bs <subcommand>` (new, plan, run, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. Use this whenever the operator wants to interact with Black Smith itself, from a Claude Code session inside this repo.
+description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. Use this whenever the operator wants to interact with Blacksmith itself, from a Claude Code session inside this repo.
 ---
 
-# /bs — Black Smith operator console
+# /bs — Blacksmith operator console
 
 You (the orchestrator session running this skill) are the human's one interface
 to the factory. Every subcommand below is a **playbook**, not a script: the

@@ -1,6 +1,6 @@
-# Contributing to Black Smith
+# Contributing to Blacksmith
 
-Thanks for looking at this. Black Smith is an autonomous agent factory that
+Thanks for looking at this. Blacksmith is an autonomous agent factory that
 is built by its own agents, so "contributing" here means two slightly
 different things depending on who you are:
 
@@ -14,8 +14,8 @@ Both paths end at the same gate.
 
 ## Before you start
 
-Read [`README.md § Installation`](README.md#installation) for the full
-requirement list. The short version:
+Read [`INSTALL.md`](INSTALL.md) for the full requirement list, per-platform
+setup and troubleshooting. The short version:
 
 ```bash
 git clone https://github.com/juzser/blacksmith.git && cd blacksmith

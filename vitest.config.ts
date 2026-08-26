@@ -7,7 +7,7 @@ export default defineConfig({
     setupFiles: ['factory/orchestrator/test/setup.ts'],
     coverage: {
       provider: 'v8',
-      // Black-smith had the same gap it ships to its scaffolds: no per-file
+      // Blacksmith had the same gap it ships to its scaffolds: no per-file
       // machine-readable coverage, so `smith coverage check` had nothing to
       // read here either (D-40/P9-25).
       reporter: ['text', 'text-summary', 'json-summary'],

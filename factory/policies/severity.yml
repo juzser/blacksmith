@@ -1,4 +1,4 @@
-# Black Smith — severity policy
+# Blacksmith — severity policy
 #
 # S1..S4 gate rules (architecture §11, agent-constraints.md "reviewer /
 # verifier", guardrails.md). Severity values themselves are taxonomy-owned

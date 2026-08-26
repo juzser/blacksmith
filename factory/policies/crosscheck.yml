@@ -1,4 +1,4 @@
-# Black Smith — multi-provider cross-check policy
+# Blacksmith — multi-provider cross-check policy
 #
 # architecture §6 "Multi-provider cross-check (anti tunnel vision)". The
 # judge tier is provider-agnostic by contract; the config seam has existed

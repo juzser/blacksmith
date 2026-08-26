@@ -1,4 +1,4 @@
-# Black Smith — worktree + merge-queue policy
+# Blacksmith — worktree + merge-queue policy
 #
 # architecture §5 "Worktree partitioning (no overlap, no conflicts)".
 # Conflicts are prevented at planning time, not resolved at merge time.

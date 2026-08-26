@@ -1,4 +1,4 @@
-# Black Smith — Operator Interview
+# Blacksmith — Operator Interview
 
 > **Recorded answers — 2026-08-03** (compiled into `docs/standards/stack.md`
 > and `docs/standards/agent-constraints.md`):
@@ -36,7 +36,7 @@ Recommended: pick the one you already ship at work — consistency beats taste.
 **A3. Styling.**
 Recommended: HDS tokens + adoption kit for every UI project; Tailwind (or
 vanilla-extract) as the utility layer under HDS. Confirm HDS is mandatory for
-all Black Smith projects or only operator-facing ones.
+all Blacksmith projects or only operator-facing ones.
 > Answer:
 
 **A4. Backend/runtime.**

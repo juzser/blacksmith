@@ -2,7 +2,7 @@
 
 > Compiled from the operator interview on 2026-08-03 (answers: frontend,
 > tooling, S2 calibration, epic budget; all other questions accepted the
-> recommended defaults). Every project Black Smith scaffolds uses this stack.
+> recommended defaults). Every project Blacksmith scaffolds uses this stack.
 > The planner may deviate only with a written justification attached to the
 > epic spec. Re-run the interview to change anything here.
 

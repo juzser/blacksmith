@@ -1,4 +1,4 @@
-# Black Smith — Agent Router
+# Blacksmith — Agent Router
 
 Autonomous agent factory: a planner on a top-tier model turns goals into spec
 contracts; the factory instantiates workers on cheap fast models from
@@ -11,6 +11,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 
 | Need | Read |
 |---|---|
+| Install / bootstrap / verify this repo (executable runbook) | `INSTALL.md` |
 | Full architecture | `docs/specs/black-smith-architecture.md` |
 | Operator interview (Phase 1) | `docs/specs/black-smith-interview.md` |
 | Per-agent interviews (constraints per role) | `docs/specs/agent-interviews.md` |

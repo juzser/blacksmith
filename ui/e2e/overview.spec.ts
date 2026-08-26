@@ -56,7 +56,7 @@ test.describe('Overview', () => {
     await page.goto('/overview');
     const mark = page.locator('.hds-side__mark img');
     await expect(mark).toBeVisible();
-    await expect(mark).toHaveAttribute('alt', 'Black Smith');
+    await expect(mark).toHaveAttribute('alt', 'Blacksmith');
 
     // toBeVisible() passes on a broken <img> too — the element is there, the
     // box has size, and nothing errors. naturalWidth is the only check that

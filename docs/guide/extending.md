@@ -1,4 +1,4 @@
-# Extending Black Smith
+# Extending Blacksmith
 
 Contributor guide: how to add an agent template, change the taxonomy, add a
 policy, and what invariants `scripts/check.sh` enforces so a docs/code

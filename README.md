@@ -1,19 +1,57 @@
-# Black Smith
+<div align="center">
 
-Black Smith is an autonomous agent factory: a planner on a frontier model
-turns a goal into spec contracts, template-instantiated workers on cheap
-models execute each contract in an isolated git worktree, and deterministic
-gates — schema check, tests, fresh-context review, adversarial verify —
-decide what merges. The operator's job shrinks to two touchpoints: co-plan
-the epic spec, then review outcomes (PRs with screenshots, waiver batches,
-lesson candidates). Everything else — decomposition, coding, testing,
-review, merging into an integration branch — runs unattended inside
-enforced budgets and gates.
+<img src="ui/src/assets/brand/black-smith.png" alt="Blacksmith" width="170" />
 
-This repo is self-governing: its own rules live in [`AGENTS.md`](AGENTS.md),
-not in any other repo.
+# Blacksmith
+
+**An autonomous agent factory.**
+
+You co-plan the spec. It decomposes, codes, tests, reviews, refutes itself —<br />
+and hands you exactly one pull request.
+
+[![CI](https://github.com/juzser/blacksmith/actions/workflows/ci.yml/badge.svg)](https://github.com/juzser/blacksmith/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-MIT-1f1f1f)
+![Node](https://img.shields.io/badge/node-%E2%89%A5%2022-1f1f1f)
+![TypeScript](https://img.shields.io/badge/TypeScript-1f1f1f)
+
+</div>
+
+---
+
+**One goal in. One integration PR out.**
+
+A planner on a frontier model turns your goal into **spec contracts** —
+objective, output schema, acceptance criteria, tool allowlist, budget. Nothing
+is ever dispatched without one. Template-instantiated workers on cheap models
+then execute each contract inside its own git worktree, so work with disjoint
+path claims runs in parallel and physically cannot collide.
+
+What merges is not decided by an agent's confidence. It is decided by gates:
+schema check → tests → a fresh-context reviewer that never sees the coder's
+session → an adversarial verifier whose only job is to refute the reviewer.
+S1 stops the line, S2 bounces back to the coder, S3 queues into a single
+batched question at the end of the epic.
+
+Your job shrinks to two touchpoints: **co-plan the epic spec**, then **review
+outcomes** — the integration PR with screenshots, the waiver batch, the lesson
+candidates the factory distilled from its own errors. Decomposition, coding,
+testing, review, merging into the integration branch: unattended, inside
+declared budgets and enforced gates.
+
+**No agent pushes to `main`.** You merge, or nothing merges.
+
+This repo is self-governing and dogfooded — Blacksmith is run on Blacksmith,
+and its own rules live in [`AGENTS.md`](AGENTS.md), not in any other repo.
 
 MIT licensed · Node ≥ 22 · TypeScript · runs from a clone, not from npm.
+
+<div align="center">
+
+<img src="ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="900" alt="Blacksmith Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" />
+
+<sub>The one screen that asks something of you. The rest is the factory reporting in.</sub>
+
+</div>
 
 ## Quickstart
 
@@ -25,17 +63,20 @@ node factory/orchestrator/dist/cli.js --help
 ```
 
 That gets you the CLI. To run the composite gate this repo holds itself to,
-you also need `python3` + PyYAML (see [What it needs](#what-it-needs)):
+you also need `python3` + PyYAML:
 
 ```bash
 bash scripts/check.sh                   # ends in `== PASS ==` on a good install
 ```
 
-To drive an actual epic you need the **Claude Code CLI** as well — the
-planner and every worker run as Claude Code sessions. Full requirements,
-per-platform setup, and the known gaps are in
-[Installation](#installation); the operator loop is in
-[Usage guide](#usage-guide-the-operator-loop).
+To drive an actual epic you need the **Claude Code CLI** as well — the planner
+and every worker run as Claude Code sessions.
+
+Rather not do this by hand? Open a Claude Code session in the clone and say
+*"install Blacksmith"* — it walks [`INSTALL.md`](INSTALL.md) with you, asking
+before it touches anything outside the clone. That file also carries the full
+requirements, per-platform setup, troubleshooting and the known gaps; the
+operator loop is in [Usage guide](#usage-guide-the-operator-loop).
 
 ## How it works
 
@@ -83,6 +124,51 @@ Each pillar has a deep doc:
   path-claim graph, cost by the token cap.
   [`factory/policies/budgets.yml`](factory/policies/budgets.yml)
 
+## The dashboard
+
+The factory writes an append-only event log, and the dashboard is a projection
+of it — `smith db rebuild` reconstructs the whole thing from the log alone. It
+is read-only on purpose: nothing you click here dispatches an agent.
+
+```bash
+pnpm build:server && pnpm build:ui   # ui/server/dist + ui/dist
+smith ui serve                       # http://127.0.0.1:4680
+```
+
+From a Claude Code session, `/bs ui` does the same and prints the URL.
+
+<table>
+<tr>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/flow-desktop-dark.png" width="100%" alt="Flow page: task cards arranged in three columns labelled Wave 0 (6 tasks), Wave 1 (2 tasks) and Wave 2 (1 task), joined by dashed dependency edges" /></td>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns; cards carry severity chips such as S2-major and agent chips such as coder - mid" /></td>
+</tr>
+<tr valign="top">
+<td><b>Flow</b> — the plan as waves. Waves are layers of the dependency graph; a
+wave is only admitted once its tasks' path claims are pairwise disjoint, which
+is what lets everything in a column run at the same time.</td>
+<td><b>Kanban</b> — where every task sits, what severity it carries, and which
+model tier drew it. <code>Blocked</code> and <code>Reviewing</code> are the two
+columns that can end up waiting on you.</td>
+</tr>
+<tr>
+<td><img src="ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for epic-9/task-3 showing a Spec contract card with case, origin, epic, plan version and claims, and an Attempts list naming each agent, provider and outcome" /></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Analytics page with throughput, cost-per-task, same-mistake-rate and recheck-pass-rate cards, bar charts of cost by model tier and by provider, and a cross-check quorum panel" /></td>
+</tr>
+<tr valign="top">
+<td><b>Task detail</b> — the contract a worker was actually handed: its case,
+its plan version, and the exact paths it was allowed to touch. Under it, every
+attempt, with the provider that ran it and how it ended.</td>
+<td><b>Analytics</b> — cost per task by tier and by provider, plus the
+same-mistake rate: the number that says whether the lessons loop is teaching it
+anything.</td>
+</tr>
+</table>
+
+Those are the committed e2e fixtures under
+[`ui/e2e/__screenshots__/`](ui/e2e/__screenshots__), rendered and diffed by
+`pnpm test:e2e` on every gate run. The data in them is synthetic; the pixels are
+not a mockup.
+
 ## Status
 
 | Phase | What | Status |
@@ -99,167 +185,48 @@ Each pillar has a deep doc:
 | 10. Deployment + ops | Runbooks beyond providers, the Cloudflare port of the UI, an always-on dispatch daemon | Planned, unspecced |
 
 > Phase 8 ships both judge transports, the quorum engine and all four
-> trigger hosts, but both providers are `enabled: false` in
-> [`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml) —
-> nothing calls an external model until an operator opts in
-> ([`docs/runbooks/providers.md`](docs/runbooks/providers.md)). Two triggers
-> fire automatically from the gate (*blocking S1/S2 finding*,
-> *same-mistake finding*); the other two are commands you run —
-> `smith epic verdict` before an integration PR and `smith plan quorum` on a
-> plan — and nothing invokes them for you. What is and
-> isn't real is tracked in
+> trigger hosts. Both external providers are `enabled: true` in
+> [`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml) but
+> still `mode: shadow` — recorded, gating nothing, until an operator
+> promotes one ([Cross-provider checks](#cross-provider-checks)). What is
+> and isn't real is tracked in
 > [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md#limitations-today).
 
 ## Installation
 
-Black Smith runs **from a clone**, not as a globally installed package. The
-event log (`state/events/`), the SQLite projection (`state/smith.db`), and
-every worker worktree (`workspaces/`) live inside the checkout —
-`factory/orchestrator/src/paths.ts` resolves all of them relative to the
-repo root — so put the clone somewhere you're happy to keep it.
+Two ways in, both ending in the same place:
 
-### What it needs
+- **Let Blacksmith install itself.** Clone the repo, open a Claude Code
+  session inside it, and say *"install Blacksmith"*. The session picks up
+  [`CLAUDE.md`](CLAUDE.md), works through the runbook in
+  [`INSTALL.md`](INSTALL.md) step by step, and stops to ask you before
+  anything touches your machine outside the clone.
+- **Or run it yourself.** [`INSTALL.md`](INSTALL.md) is that same runbook,
+  written to be read by a person too: per-platform prerequisites (macOS,
+  Debian/Ubuntu, Fedora, Alpine, WSL2), the optional extras, a
+  troubleshooting table, and the known platform gaps stated rather than
+  papered over.
 
-| Requirement | Why | Needed for |
-|---|---|---|
-| **Node ≥ 22** | `engines` in `package.json`; ESM + `node:` builtins throughout | everything |
-| **pnpm 9.3.0** (lockfile v9 — the version local development runs and CI pins) | install and every `pnpm run` script | everything |
-| **git ≥ 2.17** | `worktree add` / `remove` / `list --porcelain` *is* the isolation mechanism | running epics |
-| **bash** | `scripts/check.sh` and `.claude/hooks/*.sh` | the check gate + guard hook |
-| **python3 + PyYAML** | `check.sh` parses the policy YAML and resolves every schema's `x-taxonomy` reference | the check gate |
-| **Claude Code CLI** | the planner and every worker run as Claude Code sessions/subagents | running epics |
-| Codex CLI *(optional)* | Phase 8 cross-provider judge — `codex exec --json`, ChatGPT-subscription auth, no API key | only if you enable `codex` |
-| `DEEPSEEK_API_KEY` in `.env` *(optional)* | Phase 8 API judge | only if you enable `deepseek` |
-| Chromium for Playwright *(optional)* | `pnpm test:e2e` | UI e2e only — see the gap below |
+Five things worth knowing before you start:
 
-**No C/C++ toolchain is required.** The one native dependency,
-`better-sqlite3` (13.0.2), declares no `install`/`postinstall` script at
-all: it ships prebuilt binaries for `darwin-{arm64,x64}`,
-`linux-{arm64,x64}`, `linuxmusl-{arm64,x64}` and `win32-{arm64,x64}` and
-picks one at `require` time (verified in
-`node_modules/better-sqlite3/prebuilds/` after a clean
-`pnpm install --frozen-lockfile` that took 1.6s — nothing compiles).
-`@playwright/test` likewise has no postinstall, which is why installing
-does not pull down browsers; `playwright install chromium` is an explicit,
-separate step.
-
-There is deliberately **no `pnpm-workspace.yaml`**. This is a single-package
-repo (the lockfile has one importer, `.`), and pnpm 9 rejects a workspace
-file that has no `packages:` key — which is exactly how the first CI run
-failed, a week after such a file was committed carrying only build-script
-settings. If you switch to pnpm 10+, which blocks dependency build scripts
-by default, check `pnpm install`'s output rather than assuming this repo
-still needs none.
-
-### macOS (Apple Silicon and Intel)
-
-```bash
-brew install node@22 git          # or: nvm install 22
-corepack enable                   # bundled with Node 22/24 → provides pnpm
-                                  # (or: npm i -g pnpm@9.3.0)
-
-# macOS ships python3 with the Xcode command line tools, but not PyYAML,
-# and the system interpreter is PEP 668 "externally managed" — use a venv:
-python3 -m venv .venv && .venv/bin/pip install pyyaml
-source .venv/bin/activate         # check.sh calls plain `python3`
-```
-
-### Linux — glibc (Debian/Ubuntu, Fedora)
-
-```bash
-sudo apt install -y git bash python3 python3-yaml     # Debian/Ubuntu
-# sudo dnf install git bash python3 python3-pyyaml    # Fedora/RHEL
-# Node 22 via nvm or NodeSource, then:
-corepack enable
-```
-
-### Linux — musl (Alpine)
-
-```bash
-apk add --no-cache nodejs npm git bash python3 py3-yaml
-corepack enable
-```
-
-`bash` is not in a base Alpine image and `check.sh` genuinely needs it
-(`BASH_SOURCE`, `set -o pipefail`, heredocs) — `sh` will not do. The musl
-`better-sqlite3` prebuilds mean the rest still installs without a compiler.
-
-### Windows
-
-Use **WSL2** and follow the Linux instructions inside it. Native Windows is
-not supported today, for three reasons that are in the code rather than in
-a support policy:
-
-- `scripts/check.sh` and `.claude/hooks/guard.sh` are bash scripts, and the
-  guard hook is wired into Claude Code as
-  `$CLAUDE_PROJECT_DIR/.claude/hooks/guard.sh` (`.claude/settings.json`) —
-  with no bash on `PATH` the safety hook cannot run at all.
-- The test gate spawns each check `detached: true` and kills the whole
-  **POSIX process group** on timeout (`testgate.ts` `runOne()`, which exists
-  precisely because a per-child kill leaked grandchildren). Windows has no
-  equivalent, so a timed-out check would leak processes.
-- Target-project test commands are run through `spawn(..., { shell: true })`,
-  which on native Windows means `cmd.exe`, not the POSIX shell every policy
-  and template assumes.
-
-`better-sqlite3` itself is fine on Windows (prebuilt `win32-x64`/
-`win32-arm64`) — the blockers are the shell scripts and process-group
-handling, not the native module.
-
-### Install and verify
-
-```bash
-git clone https://github.com/juzser/blacksmith.git && cd blacksmith
-pnpm install --frozen-lockfile
-bash scripts/check.sh      # policy YAML, JSON Schemas, agent template
-                           # frontmatter, guard hooks, lint, typecheck, tests
-pnpm run build             # tsc -> factory/orchestrator/dist/
-```
-
-`check.sh` ends with `== PASS ==` on a good install. It is the composite
-gate: every policy YAML parses, every JSON Schema's `x-taxonomy`
-annotations resolve against `taxonomy.yml`, every agent template has valid
-frontmatter matching the taxonomy's `agent` dimension, every
-`.claude/hooks/*.sh` passes `bash -n`, and — when `pnpm` is on `PATH` —
-Biome, `tsc --noEmit`, the Vitest suite, the server/UI typechecks, the UI
-build, and the design-system gates (hardcoded values, emoji, contrast,
-token resolution). A green run today is **2,122 tests across 71 files** in
-the orchestrator suite, plus **32** server and **331** UI tests — and, in a
-separate Playwright job, **130** e2e tests across 11 specs.
-Every step degrades to a printed `SKIP` rather than a false `OK`
-when its tool is missing, so read the tail of the output, not just the exit
-code.
-
-`.github/workflows/ci.yml` runs this same script on every pull request and
-every push to `main` — the file, not a copy of its command list, so the two
-cannot drift. Two differences hold in CI: `PyYAML` is installed (the
-policy/schema half needs it), and `CI=true` turns the "pnpm not on `PATH`"
-`SKIP` into a failure, because a run that quietly skipped the whole
-TypeScript half must not report green. A second job installs Chromium and
-runs `pnpm test:e2e`, uploading the screenshots as a build artifact.
-
-### Known platform gaps
-
-Stated rather than papered over, in this repo's usual style:
-
-- **`check.sh` still skips `pnpm test:e2e` locally.** Its guard looks for
-  `${PLAYWRIGHT_BROWSERS_PATH:-/opt/pw-browsers}/chromium`, the container
-  the UI was built in, and prints `SKIP pnpm test:e2e` when that file is
-  absent. Running the specs directly does work now: after
-  `pnpm exec playwright install chromium`, `pnpm test:e2e` picks up the
-  per-user cache, because `ui/playwright.config.ts` only pins an
-  `executablePath` when that path exists (override it with
-  `PLAYWRIGHT_CHROMIUM_PATH`). CI takes the second route in its own job.
-- **pnpm is not pinned for local development.** There is no
-  `packageManager` field, so `corepack enable` gives you whatever pnpm your
-  Node bundles. The lockfile is v9 and was written by pnpm 9.3.0, which is
-  what CI pins; pnpm 10 blocks `better-sqlite3`'s postinstall unless you
-  allow it explicitly.
-- **CI is one Linux runner, not a matrix.** `.github/workflows/ci.yml`
-  covers `ubuntu-latest` on the `.nvmrc` Node only. Every platform claim
-  above still comes from reading the code plus a real install on macOS 26 /
-  arm64; Linux is now tested for *this* repo's gate, and WSL2 remains
-  reasoned rather than certified.
+- **It runs from a clone, not from npm.** The event log (`state/events/`), the
+  SQLite projection (`state/smith.db`) and every worker worktree
+  (`workspaces/`) live inside the checkout — `factory/orchestrator/src/paths.ts`
+  resolves all of them relative to the repo root — so put the clone somewhere
+  you're happy to keep it.
+- **Nothing compiles.** The one native dependency, `better-sqlite3`, declares
+  no install script and ships prebuilds for macOS, Linux (glibc + musl) and
+  Windows. No C/C++ toolchain required.
+- **`bash scripts/check.sh` is the real proof of a good install.** It is the
+  same script CI runs, and it degrades to a printed `SKIP` rather than a false
+  `OK` when a tool is missing — so read the tail of the output, not just the
+  exit code.
+- **To drive an actual epic you also need the Claude Code CLI** — the planner
+  and every worker run as Claude Code sessions. The CLI and the gate work
+  without it; you just can't dispatch the agents that do the work.
+- **On Windows, use WSL2.** Native Windows is blocked by the bash safety hooks
+  and by POSIX process-group handling in the test gate, not by the native
+  module — the three specific reasons are in [`INSTALL.md`](INSTALL.md).
 
 ## First commands
 
@@ -317,55 +284,162 @@ check ...`, etc.
 
 ## Usage guide (the operator loop)
 
-1. **Plan an epic.** Drive this from a Claude Code session in this repo
-   using the `/bs` operator skill
-   ([`.claude/skills/bs/SKILL.md`](.claude/skills/bs/SKILL.md), Phase 7):
-   `/bs plan <goal>` dispatches the `planner` template
-   ([`.claude/agents/planner.md`](.claude/agents/planner.md)) to draft
-   an epic spec + task specs, a spec-reviewer hunts deficiencies, you sign
-   off.
+Day to day you do two things: **agree on the spec**, then **review what came
+back**. Everything in between is the factory's job. Here is the whole loop, in
+the order you actually meet it.
 
-   | Command | Purpose |
-   |---|---|
-   | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
-   | `/bs plan <goal>` | Draft/re-plan an epic with the planner |
-   | `/bs run <epic>` | Admit a wave and drive it through the loop |
-   | `/bs status` | Live agent count, budget burn, epic phase |
-   | `/bs ui` | Serve the local HDS dashboard |
-   | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic |
-   | `/bs lessons` | Review pending lesson candidates |
-   | `/bs report` | Render/send the scribe's progress digest |
+It all happens in a Claude Code session opened in this repo, where the `/bs`
+skill ([`.claude/skills/bs/SKILL.md`](.claude/skills/bs/SKILL.md)) is your
+console:
 
-   The skill's playbooks are dispatch instructions for the orchestrator
-   session, not a background daemon — see `docs/guide/operator-guide.md`'s
-   "Limitations today".
+| Command | What it does |
+|---|---|
+| `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
+| `/bs plan <goal>` | Draft or re-plan an epic with the planner |
+| `/bs run <epic>` | Admit a wave and drive it through the loop |
+| `/bs status` | Live agent count, budget burn, epic phase |
+| `/bs ui` | Serve the local HDS dashboard |
+| `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic |
+| `/bs lessons` | Review pending lesson candidates |
+| `/bs report` | Render or send the scribe's progress digest |
 
-2. **Spec sign-off.** Once the planner and spec-reviewer converge, the epic
-   spec becomes `PLAN v1` — immutable. Nothing executes before you approve
-   it (`agent-constraints.md`: planner autonomy is "sign-off per epic, then
-   free within budget").
-3. **Waves + gates.** The scheduler admits a wave of claim-disjoint,
-   dependency-satisfied tasks; each runs coder → tester → grader → gate
-   pipeline (schema check, cumulative tests, reviewer, verifier) inside its
-   own worktree. Passing tasks enter the serial merge queue into
-   `smith/<epic>/integration`.
-4. **Answering waiver batches.** S3 findings never block; they queue into
-   one batched question per epic ("ignore these?"). Your answer is stored
-   by finding fingerprint and never re-asked.
-5. **Reviewing the integration PR.** One PR per epic, `smith/<epic>/integration`
-   → target repo `main`, with the acceptance-criteria checklist,
-   screenshots (desktop + mobile 390px, light + dark, ≤4 per feature — see
-   `docs/standards/stack.md`), test results, and waivers granted. You merge
-   it; Black Smith never does.
-6. **Lessons review.** Approve, edit, or reject candidates — in the UI's
-   Lessons page or with `smith lessons approve|reject` — before
-   `smith lessons compile` writes them into
-   [`factory/policies/lessons.md`](factory/policies/lessons.md), from where
-   they are injected step-wise into the matching agent's dispatch. The
-   review surface is built; the *cadence* is yours to set, nothing prompts
-   you on a schedule.
+One thing to know up front: those playbooks are dispatch instructions for your
+orchestrator session, **not a background daemon**. Nothing advances while the
+session is closed — see the operator guide's "Limitations today".
 
-Full walkthrough with real commands: [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md).
+### 1. Say what you want — `/bs plan <goal>`
+
+Describe the goal in plain language. The planner
+([`.claude/agents/planner.md`](.claude/agents/planner.md)) turns it into an
+epic spec plus task specs, and a spec-reviewer goes hunting for holes in it
+before you ever look. You get something concrete to react to instead of a
+blank page.
+
+### 2. Sign off — and the spec freezes
+
+When the planner and spec-reviewer converge, you approve. That approval turns
+the spec into **PLAN v1, immutable**. Nothing executes before it
+(`agent-constraints.md`: planner autonomy is "sign-off per epic, then free
+within budget"). This is the most leveraged minute in the loop — the spec is
+what every worker is held to for the rest of the epic.
+
+### 3. Let it run — `/bs run <epic>`
+
+You are out of the per-step loop from here (keep the session open, though —
+there is no daemon). The scheduler admits a **wave**: tasks whose path claims
+are disjoint and whose dependencies are satisfied. Each gets its own worktree
+and runs coder → tester → grader → the gate pipeline (schema check, cumulative
+tests, reviewer, verifier). Whatever passes joins the serial merge queue into
+`smith/<epic>/integration`.
+
+Want to look in? `/bs status` gives you live agent count, budget burn and epic
+phase; `/bs ui` serves the dashboard if you would rather watch it.
+
+### 4. Answer one batch of questions — `/bs waivers`
+
+S3 findings never block the line. They pile up into a **single batched
+question per epic** — "ignore these?" — that you answer once. Your answer is
+stored by finding fingerprint, so the same nit is never put to you twice.
+
+### 5. Review the PR — the one thing you must read
+
+One PR per epic, `smith/<epic>/integration` → your target repo's `main`. It
+arrives with the acceptance-criteria checklist, screenshots (desktop + mobile
+390px, light + dark, ≤4 per feature — `docs/standards/stack.md`), test results
+and any waivers granted. **You merge it. Blacksmith never does.**
+
+### 6. Teach it — `/bs lessons`
+
+Errors and decision checkpoints become lesson candidates. Approve, edit or
+reject them — in the UI's Lessons page or with `smith lessons approve|reject`
+— then `smith lessons compile` writes the approved ones into
+[`factory/policies/lessons.md`](factory/policies/lessons.md), from where they
+are injected into the matching agent's next dispatch. That is the loop that
+closes: a mistake made once becomes a constraint the next worker is handed.
+
+The review surface is built; the *cadence* is yours to set — nothing prompts
+you on a schedule.
+
+---
+
+**Want the same walkthrough with real commands and real output?**
+[`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) goes deep: gate
+outcomes, severity and waiver semantics, the budget escalation ladder, lesson
+approval, and an honest "what is and isn't real today".
+
+## Cross-provider checks
+
+The factory grades its own judgment calls with a second opinion from a
+different vendor's model — the anti-tunnel-vision rule in
+[`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md)
+§6. Three judges are configured in
+[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml): the
+native Claude judge, **Codex** over its CLI (ChatGPT-subscription auth, no
+API key) and **DeepSeek** over its API (`DEEPSEEK_API_KEY`). Getting the
+credentials in place is [`INSTALL.md`](INSTALL.md); what follows is what they
+do once they are.
+
+**Four triggers, no more.** Two fire on their own from the gate — any S1/S2
+finding *before* it blocks a task, and any same-mistake finding. The other
+two are commands you run: `smith epic verdict` before an integration PR
+opens, and `smith plan quorum` on a plan (critique-only — it never rewrites
+one). Nothing polls for those two, so a clean provider report means "no
+disagreement in the cases that ran", not "every epic was cross-checked".
+
+**Two dials per provider**, both operator edits to that file, never a runtime
+write:
+
+- `enabled` — whether the provider is invoked at all.
+- `mode` — `shadow` records the verdict and gates nothing; `active` puts it
+  in the voting pool for real.
+
+**Where they ship: `enabled: true`, `mode: shadow`** — live and deliberately
+powerless. `quorum.ts` records every verdict as a `judge-verdict` event, with
+its agreement-with-native flag and its latency, and then decides on the
+native verdict alone because no provider in the case is `active`. With no
+credentials configured, each run instead records a caught transport failure;
+nothing blocks, and it shows up as a `transportFailureRate` of 1.0. To stop
+the attempts entirely, set both providers to `enabled: false`, or pass
+`SMITH_CROSSCHECK_OFFLINE=1` on a single command — the kill switch that
+needs no edit to revert afterwards.
+
+**Promotion is a calibration, not a toggle.** Run epics with the provider in
+shadow for as long as your risk appetite wants, then read the numbers:
+
+```bash
+smith stats providers          # runs, agreementRate, failure rates, latency
+```
+
+Check `transportFailureRate` first — 1.0 is the signature of a judge that has
+been dead since the day it was enabled, and says nothing about how it judges.
+Then `schemaFailureRate` (it answered, the answer was unusable) and
+`meanLatencyMs` against your gate's timeout budget. `agreementRate` is the
+headline but not a score to maximise: disagreement is the whole point of
+having it. When you are satisfied, flip `mode: shadow` → `mode: active` and
+commit. Rollback is that edit backwards, and it takes effect on the next
+case.
+
+**One promoted provider changes nothing, by design.** A critic never votes on
+its own side's finding (`asymmetric_roles.finder_ne_critic`), and today's
+findings are raised by the native reviewer — so a single active external
+leaves the pool below `min_providers: 2`, every case returns
+`insufficient-providers`, and the finding still blocks. That is fail-closed
+on purpose. It takes two active externals before a quorum can overturn
+anything.
+
+**What a judge may see, and may do.** The prompt carries a finding's summary,
+category, severity, file path and claimed failure scenario — never the file
+contents, never the diff. Shipping worktree source to a third-party API stays
+your decision rather than the gate's, which is also why a critic can only
+tell you whether a claimed failure is coherent. Judges never get write access
+to a worktree or to the factory: their verdicts are data, not commands, and
+every external call goes through the same event log and budget accounting as
+a native dispatch. The one power an active quorum has is subtractive — a
+decided `refute` retires the finding; everything else leaves the severity
+decision exactly as it was.
+
+Setup, the full calibration loop, cost, and the security notes:
+[`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ## Safety model (summary)
 
@@ -394,6 +468,8 @@ GitHub branch protection, not by trust:
 | Doc | Description |
 |---|---|
 | [`docs/README.md`](docs/README.md) | Full docs index with audience tags |
+| [`INSTALL.md`](INSTALL.md) | Install runbook — requirements, per-platform setup, verification, troubleshooting, known gaps |
+| [`CLAUDE.md`](CLAUDE.md) | Claude Code entry point — routes to `AGENTS.md` and the self-install runbook |
 | [`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md) | The architecture spec (v3, 17 sections) — start here for depth |
 | [`docs/specs/black-smith-interview.md`](docs/specs/black-smith-interview.md) | Recorded operator interview → stack + budgets |
 | [`docs/specs/agent-interviews.md`](docs/specs/agent-interviews.md) | Per-agent interview → constraint blocks |
@@ -407,7 +483,7 @@ GitHub branch protection, not by trust:
 | [`AGENTS.md`](AGENTS.md) | This repo's own thin router (progressive disclosure) |
 
 `docs/specs/` also carries the dogfooding record — the defect logs and punch
-lists from running Black Smith on Black Smith
+lists from running Blacksmith on Blacksmith
 (`dogfood-4-findings.md`, `dogfood-envkit-findings.md`,
 `phase-9-punch-list.md`). They are large, internal, and kept deliberately:
 most of what the gates and policies do exists because one of those entries

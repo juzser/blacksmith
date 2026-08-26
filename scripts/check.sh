@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Black Smith — Phase-2 sanity gate.
+# Blacksmith — Phase-2 sanity gate.
 # Validates: every policy YAML parses; every schema JSON parses and its
 # x-taxonomy annotations reference real taxonomy.yml dimensions; every
 # agent template has valid frontmatter; every hook passes `bash -n`.
@@ -12,7 +12,7 @@ cd "$REPO_ROOT"
 
 FAIL=0
 
-echo "== Black Smith Phase-2 check =="
+echo "== Blacksmith Phase-2 check =="
 
 # Three of the checks below are python + PyYAML. Without it they each die on
 # the same ModuleNotFoundError traceback and the run ends in a FAIL whose
