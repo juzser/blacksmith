@@ -11,7 +11,7 @@ withDefaults(
     collapsed?: boolean;
     brand?: string;
   }>(),
-  { brand: 'Black Smith', collapsed: false },
+  { brand: 'Blacksmith', collapsed: false },
 );
 const emit = defineEmits<{ select: [id: string] }>();
 </script>

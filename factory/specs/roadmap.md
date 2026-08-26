@@ -1,4 +1,4 @@
-# Black Smith — Roadmap
+# Blacksmith — Roadmap
 
 Source of truth for the Overview/Roadmap dashboard pages' milestone
 progress (`docs/specs/black-smith-architecture.md` §10, §16 "Build order").

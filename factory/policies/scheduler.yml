@@ -1,4 +1,4 @@
-# Black Smith — scheduler policy
+# Blacksmith — scheduler policy
 #
 # Knobs for `factory/orchestrator/src/scheduler.ts` (architecture §12
 # "Recheck scheduling" + "Scheduled growth passes"; `smith scheduler run`).

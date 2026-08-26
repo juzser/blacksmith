@@ -1,6 +1,6 @@
 # Changelog
 
-Black Smith has **no versioned releases**. It runs from a clone, not from a
+Blacksmith has **no versioned releases**. It runs from a clone, not from a
 registry: `package.json` is `version: 0.0.0`, there are no git tags, and the
 only supported revision is `main`. So this file is not a list of releases —
 it is a list of what landed, in the order it landed, keyed to the milestones
@@ -16,7 +16,7 @@ newest first.
 
 ## Unreleased
 
-This repository is the public release of Black Smith. The work was done in a
+This repository is the public release of Blacksmith. The work was done in a
 private repository and published here as a single initial commit, so the phase
 entries below record development that predates this repo's git history rather
 than appearing in it.
@@ -117,7 +117,7 @@ blocks, and the pinned scaffold.
 
 ## Dogfooding
 
-Running Black Smith on Black Smith produced most of what the gates and
+Running Blacksmith on Blacksmith produced most of what the gates and
 policies now enforce. Those defect logs are kept in `docs/specs/`
 (`dogfood-4-findings.md`, `dogfood-envkit-findings.md`,
 `phase-9-punch-list.md`) and are referenced by id (D-###, P9-##) from commit

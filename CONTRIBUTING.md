@@ -1,6 +1,6 @@
-# Contributing to Black Smith
+# Contributing to Blacksmith
 
-Thanks for looking at this. Black Smith is an autonomous agent factory that
+Thanks for looking at this. Blacksmith is an autonomous agent factory that
 is built by its own agents, so "contributing" here means two slightly
 different things depending on who you are:
 

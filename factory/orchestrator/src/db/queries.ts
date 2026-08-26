@@ -1,7 +1,7 @@
 // The §10 HDS dashboard page queries, each a typed function over the
 // projection tables in db/schema.ts. Every function accepts a `SmithDb`
 // (see db/projector.ts's openDb()) plus an optional session scope — when
-// omitted, a query spans every projected session (a single Black Smith
+// omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
 import { and, eq, gte, inArray, lte } from 'drizzle-orm';

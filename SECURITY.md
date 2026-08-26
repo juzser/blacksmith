@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Black Smith has no released versions. It runs **from a clone** and the only
+Blacksmith has no released versions. It runs **from a clone** and the only
 supported code is the current `main`. Fixes land on `main`; there are no
 backport branches.
 
@@ -68,7 +68,7 @@ text* and *things that execute*:
 - **Anything requiring an operator to approve it.** Deploys, outbound sends,
   and merges to `main` are deliberately gated on a human. "The operator could
   approve something bad" is the design, not a flaw.
-- **Running the factory against a repository you do not trust.** Black Smith
+- **Running the factory against a repository you do not trust.** Blacksmith
   executes that repository's own test commands.
 
 ## Known gaps, stated rather than papered over

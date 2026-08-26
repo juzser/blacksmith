@@ -1,4 +1,4 @@
-# Black Smith — Autonomous Agent Factory Architecture
+# Blacksmith — Autonomous Agent Factory Architecture
 
 > Status: DRAFT v3 — architecture spec for the standalone repo `black-smith`.
 > Owner: Ser. Orchestration design derived from the dotagents ecosystem survey
@@ -22,7 +22,7 @@
 
 ## 1. Purpose and operating model
 
-Black Smith is a factory that develops tools and projects autonomously. The
+Blacksmith is a factory that develops tools and projects autonomously. The
 human's role is reduced to two touchpoints:
 
 1. **Planning** — co-plan with the main planner agent until a spec is approved.
@@ -111,7 +111,7 @@ black-smith/
 ```
 
 Target projects live under `workspaces/<project>/` as clones of their own
-repos; Black Smith never develops inside its own repo tree. Committed files
+repos; Blacksmith never develops inside its own repo tree. Committed files
 are declarations; everything generated at runtime is gitignored (dotagents
 convention: tool-native/generated dirs are build outputs).
 
@@ -931,13 +931,13 @@ mutating the live graph:
    - **screenshots / short capture of the feature** (tester's Playwright
      artifacts; before/after for changes),
    - test results, reviewer verdict, cross-check quorum result, waivers granted,
-   - links to the timeline slice and task list in the Black Smith UI.
-3. The operator reviews on GitHub and merges. Black Smith never merges to
+   - links to the timeline slice and task list in the Blacksmith UI.
+3. The operator reviews on GitHub and merges. Blacksmith never merges to
    `main`.
 
 ## 14. Unified stack standard + operator interview
 
-Every project Black Smith creates uses **one stack**, fixed at repo-creation
+Every project Blacksmith creates uses **one stack**, fixed at repo-creation
 time — consistency is what lets small models work reliably across projects
 (lessons, claims, and scaffolds transfer; nothing is relearned per repo).
 
@@ -968,10 +968,10 @@ time — consistency is what lets small models work reliably across projects
 
 Distilled from *Building Effective Agents*, the multi-agent research system
 write-up, Claude Code best-practice docs, and *Writing Tools for Agents* —
-each mapped to a Black Smith mechanism:
+each mapped to a Blacksmith mechanism:
 
 1. **Simplest pattern that works; add autonomy only when measured better.**
-   Black Smith is deliberately a *workflow* (orchestrator-workers +
+   Blacksmith is deliberately a *workflow* (orchestrator-workers +
    evaluator-optimizer), not a free-running agent swarm: deterministic loop
    runner, bounded gates, model-driven steps only where judgment is needed.
 2. **Orchestrator-workers with explicit delegation contracts.** The research
@@ -1041,7 +1041,7 @@ each mapped to a Black Smith mechanism:
 9. **Hardening** — escalation ladders, budget alarms, same-mistake KPI,
    runbooks, Cloudflare deployment (Workers/Pages + D1 + Access).
 
-Each phase is itself an epic Black Smith can eventually run on its own
+Each phase is itself an epic Blacksmith can eventually run on its own
 codebase — the factory bootstraps itself from phase 3 onward.
 
 ## 17. Evidence base (Apr–Aug 2026 research window)

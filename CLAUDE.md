@@ -1,4 +1,4 @@
-# Black Smith — Claude Code entry point
+# Blacksmith — Claude Code entry point
 
 Thin on purpose. This repo practises progressive disclosure: nothing here is
 restated from another file, because a second copy is a copy that drifts.
@@ -11,11 +11,11 @@ which decisions stop for the operator. Read it before you act on this repo,
 and follow its "Read on demand" table for anything deeper. **The rules live
 there, not here.**
 
-## Installing Black Smith — the self-install runbook
+## Installing Blacksmith — the self-install runbook
 
 [`INSTALL.md`](INSTALL.md) is an executable runbook, not prose. When the
 operator asks you to **install, set up, bootstrap, or verify** this repo —
-including a bare *"install Black Smith"* — read that file and work through
+including a bare *"install Blacksmith"* — read that file and work through
 Part 2 step by step, in order.
 
 `INSTALL.md` Part 0 states the rules that bind you while you run it. The two

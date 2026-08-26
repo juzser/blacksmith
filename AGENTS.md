@@ -1,4 +1,4 @@
-# Black Smith — Agent Router
+# Blacksmith — Agent Router
 
 Autonomous agent factory: a planner on a top-tier model turns goals into spec
 contracts; the factory instantiates workers on cheap fast models from

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Black Smith — PreToolUse guard hook (guardrails.md, S1 unless stated
+# Blacksmith — PreToolUse guard hook (guardrails.md, S1 unless stated
 # otherwise). Reads a Claude Code PreToolUse hook payload from stdin,
 # inspects Bash tool calls, and denies anything guardrails.md forbids.
 #

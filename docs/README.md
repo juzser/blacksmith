@@ -35,7 +35,7 @@ Read on demand — nothing here is meant to be preloaded (`AGENTS.md`
 
 | File | Description | Audience |
 |---|---|---|
-| [`../README.md`](../README.md) | What Black Smith is, quickstart, the operator loop, and the docs map | everyone |
+| [`../README.md`](../README.md) | What Blacksmith is, quickstart, the operator loop, and the docs map | everyone |
 | [`../INSTALL.md`](../INSTALL.md) | Executable install runbook: requirements, per-platform setup, verification, optional extras, troubleshooting, known platform gaps — written so a Claude Code session can run it end to end | operator, contributor, agent |
 | [`../AGENTS.md`](../AGENTS.md) | The router and operating rules agents read first | agent |
 | [`../CLAUDE.md`](../CLAUDE.md) | Claude Code entry point: routes to `AGENTS.md` for rules and to `INSTALL.md` for the self-install runbook — declares nothing of its own | agent |

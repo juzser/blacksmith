@@ -1,4 +1,4 @@
-# Black Smith Dashboard — UI/UX Design Spec
+# Blacksmith Dashboard — UI/UX Design Spec
 
 ## 0. Scope-gate note and spec gaps (read first)
 

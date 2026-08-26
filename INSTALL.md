@@ -1,16 +1,16 @@
-# Installing Black Smith
+# Installing Blacksmith
 
 **This file is a runbook, not a description.** Every step below is a command
 with an expected result and a failure branch, so it can be executed top to
 bottom — by you, or by a Claude Code session on your behalf.
 
-**To have Black Smith install itself:** open a Claude Code session in the
-clone and say *"install Black Smith"*. The session reads
+**To have Blacksmith install itself:** open a Claude Code session in the
+clone and say *"install Blacksmith"*. The session reads
 [`CLAUDE.md`](CLAUDE.md), which points it here, and works through
 [Part 2](#part-2--the-install-run) step by step. It will stop and ask you
 before anything that touches the machine outside the clone.
 
-Black Smith runs **from a clone**, not as a globally installed package. The
+Blacksmith runs **from a clone**, not as a globally installed package. The
 event log (`state/events/`), the SQLite projection (`state/smith.db`), and
 every worker worktree (`workspaces/`) live inside the checkout —
 `factory/orchestrator/src/paths.ts` resolves all of them relative to the repo
@@ -256,17 +256,24 @@ See the first entry under [Known gaps](#known-platform-gaps) for why
 
 ### Cross-provider judges (Phase 8)
 
-Both providers ship `enabled: false` in
-[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml) —
-**nothing calls an external model until you opt in.** The full procedure,
-including shadow-mode calibration before promotion, is
-[`docs/runbooks/providers.md`](docs/runbooks/providers.md).
+Both external providers ship `enabled: true` but `mode: shadow` in
+[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml): their
+verdicts are recorded and **gate nothing** until an operator promotes one to
+`mode: active`. Credentials decide only whether they answer — without them,
+every quorum case records a caught transport failure and the gate holds on
+the native verdict alone.
 
-- **Codex** — install the Codex CLI; auth is a ChatGPT subscription, no API
-  key.
+- **Codex** — install the Codex CLI and run `codex login` once on this
+  machine; auth is a ChatGPT subscription, no API key.
 - **DeepSeek** — put `DEEPSEEK_API_KEY` in `.env`. Copy `.env.example` as the
   starting point. `.env` is gitignored and the event logger redacts
   credential-shaped values before write; never commit a key.
+- **Skipping this is a supported choice.** To stop the failed attempts as
+  well, set both providers to `enabled: false` in that file, or pass
+  `SMITH_CROSSCHECK_OFFLINE=1` on the command you are running.
+
+The full procedure — setup, shadow-mode calibration, promotion, rollback — is
+[`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ---
 

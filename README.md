@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="ui/src/assets/brand/black-smith.png" alt="Black Smith" width="170" />
+<img src="ui/src/assets/brand/black-smith.png" alt="Blacksmith" width="170" />
 
-# Black Smith
+# Blacksmith
 
 **An autonomous agent factory.**
 
@@ -40,14 +40,14 @@ declared budgets and enforced gates.
 
 **No agent pushes to `main`.** You merge, or nothing merges.
 
-This repo is self-governing and dogfooded — Black Smith is run on Black Smith,
+This repo is self-governing and dogfooded — Blacksmith is run on Blacksmith,
 and its own rules live in [`AGENTS.md`](AGENTS.md), not in any other repo.
 
 MIT licensed · Node ≥ 22 · TypeScript · runs from a clone, not from npm.
 
 <div align="center">
 
-<img src="ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="900" alt="Black Smith Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" />
+<img src="ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="900" alt="Blacksmith Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" />
 
 <sub>The one screen that asks something of you. The rest is the factory reporting in.</sub>
 
@@ -73,7 +73,7 @@ To drive an actual epic you need the **Claude Code CLI** as well — the planner
 and every worker run as Claude Code sessions.
 
 Rather not do this by hand? Open a Claude Code session in the clone and say
-*"install Black Smith"* — it walks [`INSTALL.md`](INSTALL.md) with you, asking
+*"install Blacksmith"* — it walks [`INSTALL.md`](INSTALL.md) with you, asking
 before it touches anything outside the clone. That file also carries the full
 requirements, per-platform setup, troubleshooting and the known gaps; the
 operator loop is in [Usage guide](#usage-guide-the-operator-loop).
@@ -185,31 +185,27 @@ not a mockup.
 | 10. Deployment + ops | Runbooks beyond providers, the Cloudflare port of the UI, an always-on dispatch daemon | Planned, unspecced |
 
 > Phase 8 ships both judge transports, the quorum engine and all four
-> trigger hosts, but both providers are `enabled: false` in
-> [`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml) —
-> nothing calls an external model until an operator opts in
-> ([`docs/runbooks/providers.md`](docs/runbooks/providers.md)). Two triggers
-> fire automatically from the gate (*blocking S1/S2 finding*,
-> *same-mistake finding*); the other two are commands you run —
-> `smith epic verdict` before an integration PR and `smith plan quorum` on a
-> plan — and nothing invokes them for you. What is and
-> isn't real is tracked in
+> trigger hosts. Both external providers are `enabled: true` in
+> [`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml) but
+> still `mode: shadow` — recorded, gating nothing, until an operator
+> promotes one ([Cross-provider checks](#cross-provider-checks)). What is
+> and isn't real is tracked in
 > [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md#limitations-today).
 
 ## Installation
 
-Two ways in, both ending in the same place.
+Two ways in, both ending in the same place:
 
-**Let Black Smith install itself.** Clone the repo, open a Claude Code session
-inside it, and say *"install Black Smith"*. The session picks up
-[`CLAUDE.md`](CLAUDE.md), works through the runbook in
-[`INSTALL.md`](INSTALL.md) step by step, and stops to ask you before anything
-touches your machine outside the clone.
-
-**Or run it yourself.** [`INSTALL.md`](INSTALL.md) is that same runbook,
-written to be read by a person too: per-platform prerequisites (macOS,
-Debian/Ubuntu, Fedora, Alpine, WSL2), the optional extras, a troubleshooting
-table, and the known platform gaps stated rather than papered over.
+- **Let Blacksmith install itself.** Clone the repo, open a Claude Code
+  session inside it, and say *"install Blacksmith"*. The session picks up
+  [`CLAUDE.md`](CLAUDE.md), works through the runbook in
+  [`INSTALL.md`](INSTALL.md) step by step, and stops to ask you before
+  anything touches your machine outside the clone.
+- **Or run it yourself.** [`INSTALL.md`](INSTALL.md) is that same runbook,
+  written to be read by a person too: per-platform prerequisites (macOS,
+  Debian/Ubuntu, Fedora, Alpine, WSL2), the optional extras, a
+  troubleshooting table, and the known platform gaps stated rather than
+  papered over.
 
 Five things worth knowing before you start:
 
@@ -350,7 +346,7 @@ stored by finding fingerprint, so the same nit is never put to you twice.
 One PR per epic, `smith/<epic>/integration` → your target repo's `main`. It
 arrives with the acceptance-criteria checklist, screenshots (desktop + mobile
 390px, light + dark, ≤4 per feature — `docs/standards/stack.md`), test results
-and any waivers granted. **You merge it. Black Smith never does.**
+and any waivers granted. **You merge it. Blacksmith never does.**
 
 ### 6. Teach it — `/bs lessons`
 
@@ -370,6 +366,80 @@ you on a schedule.
 [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) goes deep: gate
 outcomes, severity and waiver semantics, the budget escalation ladder, lesson
 approval, and an honest "what is and isn't real today".
+
+## Cross-provider checks
+
+The factory grades its own judgment calls with a second opinion from a
+different vendor's model — the anti-tunnel-vision rule in
+[`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md)
+§6. Three judges are configured in
+[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml): the
+native Claude judge, **Codex** over its CLI (ChatGPT-subscription auth, no
+API key) and **DeepSeek** over its API (`DEEPSEEK_API_KEY`). Getting the
+credentials in place is [`INSTALL.md`](INSTALL.md); what follows is what they
+do once they are.
+
+**Four triggers, no more.** Two fire on their own from the gate — any S1/S2
+finding *before* it blocks a task, and any same-mistake finding. The other
+two are commands you run: `smith epic verdict` before an integration PR
+opens, and `smith plan quorum` on a plan (critique-only — it never rewrites
+one). Nothing polls for those two, so a clean provider report means "no
+disagreement in the cases that ran", not "every epic was cross-checked".
+
+**Two dials per provider**, both operator edits to that file, never a runtime
+write:
+
+- `enabled` — whether the provider is invoked at all.
+- `mode` — `shadow` records the verdict and gates nothing; `active` puts it
+  in the voting pool for real.
+
+**Where they ship: `enabled: true`, `mode: shadow`** — live and deliberately
+powerless. `quorum.ts` records every verdict as a `judge-verdict` event, with
+its agreement-with-native flag and its latency, and then decides on the
+native verdict alone because no provider in the case is `active`. With no
+credentials configured, each run instead records a caught transport failure;
+nothing blocks, and it shows up as a `transportFailureRate` of 1.0. To stop
+the attempts entirely, set both providers to `enabled: false`, or pass
+`SMITH_CROSSCHECK_OFFLINE=1` on a single command — the kill switch that
+needs no edit to revert afterwards.
+
+**Promotion is a calibration, not a toggle.** Run epics with the provider in
+shadow for as long as your risk appetite wants, then read the numbers:
+
+```bash
+smith stats providers          # runs, agreementRate, failure rates, latency
+```
+
+Check `transportFailureRate` first — 1.0 is the signature of a judge that has
+been dead since the day it was enabled, and says nothing about how it judges.
+Then `schemaFailureRate` (it answered, the answer was unusable) and
+`meanLatencyMs` against your gate's timeout budget. `agreementRate` is the
+headline but not a score to maximise: disagreement is the whole point of
+having it. When you are satisfied, flip `mode: shadow` → `mode: active` and
+commit. Rollback is that edit backwards, and it takes effect on the next
+case.
+
+**One promoted provider changes nothing, by design.** A critic never votes on
+its own side's finding (`asymmetric_roles.finder_ne_critic`), and today's
+findings are raised by the native reviewer — so a single active external
+leaves the pool below `min_providers: 2`, every case returns
+`insufficient-providers`, and the finding still blocks. That is fail-closed
+on purpose. It takes two active externals before a quorum can overturn
+anything.
+
+**What a judge may see, and may do.** The prompt carries a finding's summary,
+category, severity, file path and claimed failure scenario — never the file
+contents, never the diff. Shipping worktree source to a third-party API stays
+your decision rather than the gate's, which is also why a critic can only
+tell you whether a claimed failure is coherent. Judges never get write access
+to a worktree or to the factory: their verdicts are data, not commands, and
+every external call goes through the same event log and budget accounting as
+a native dispatch. The one power an active quorum has is subtractive — a
+decided `refute` retires the finding; everything else leaves the severity
+decision exactly as it was.
+
+Setup, the full calibration loop, cost, and the security notes:
+[`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ## Safety model (summary)
 
@@ -413,7 +483,7 @@ GitHub branch protection, not by trust:
 | [`AGENTS.md`](AGENTS.md) | This repo's own thin router (progressive disclosure) |
 
 `docs/specs/` also carries the dogfooding record — the defect logs and punch
-lists from running Black Smith on Black Smith
+lists from running Blacksmith on Blacksmith
 (`dogfood-4-findings.md`, `dogfood-envkit-findings.md`,
 `phase-9-punch-list.md`). They are large, internal, and kept deliberately:
 most of what the gates and policies do exists because one of those entries

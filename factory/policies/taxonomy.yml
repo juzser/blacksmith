@@ -1,4 +1,4 @@
-# Black Smith — controlled vocabulary (taxonomy)
+# Blacksmith — controlled vocabulary (taxonomy)
 #
 # Machine-readable source of truth. Mirrors docs/specs/black-smith-architecture.md
 # §8 value-for-value; if they diverge, that is a bug — fix both in the same PR.
