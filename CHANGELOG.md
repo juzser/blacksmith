@@ -147,7 +147,7 @@ than appearing in it.
   than waived; a task the *plan* declares with no `budget.tokens` is a
   different silence and is still refused.
 - Tests for all three, and a build step that stops mis-reporting what ran.
-  `factory/orchestrator/test/policy.test.ts` (68), `test/sandbox.test.ts`
+  `factory/orchestrator/test/policy.test.ts` (71), `test/sandbox.test.ts`
   (19), `test/guardHook.test.ts` (14) and 20 more in `test/waveBudget.test.ts`.
   The hook tests drive the real script the way Claude Code does — payload on
   stdin, decision on stdout — over real leases opened through the built binary
