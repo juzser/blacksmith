@@ -14,8 +14,8 @@ Both paths end at the same gate.
 
 ## Before you start
 
-Read [`README.md § Installation`](README.md#installation) for the full
-requirement list. The short version:
+Read [`INSTALL.md`](INSTALL.md) for the full requirement list, per-platform
+setup and troubleshooting. The short version:
 
 ```bash
 git clone https://github.com/juzser/blacksmith.git && cd blacksmith
