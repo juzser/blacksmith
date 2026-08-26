@@ -32,21 +32,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No `version:` — package.json's `packageManager` field pins pnpm@9.3.0
       # and `action-setup` reads it. One source, so CI cannot drift from the
       # lockfile (v9.0, written by 9.3.0) or from local development. It also
       # keeps pnpm 10 out, which would block better-sqlite3's postinstall and
       # with it the native binding.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -104,11 +104,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -146,7 +146,7 @@ jobs:
       # publishes the repo's own pictures under this run's name (D-190).
       - name: Upload screenshots
         if: always() && steps.e2e.conclusion != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots
           path: ui/e2e/__screenshots__/
