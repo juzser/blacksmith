@@ -300,9 +300,23 @@ function escapeRegExp(text: string): string {
  * word appearing elsewhere in the same segment (e.g. a commit message), but
  * it never under-matches on global-flag placement, which is the
  * security-relevant direction for a deny gate.
+ *
+ * The one place it is deliberately tight is the hyphen. `\b` treats `-` as a
+ * boundary, so a bare `\bmerge\b` matches `git merge-base` — a read-only
+ * plumbing command that cannot merge anything, and one this repo's own tooling
+ * runs constantly. Every hyphenated `<subcommand>-*` in git is a separate
+ * command from `<subcommand>`, so requiring the word to be neither preceded
+ * nor followed by a hyphen costs no coverage on `push`, `merge` or `rebase`
+ * and removes a class of false deny that teaches operators to route around
+ * the gate.
  */
 function isGitSubcommand(command: string, subcommand: string): boolean {
-  return new RegExp(`\\bgit\\b[^;&|]*\\b${subcommand}\\b`, 'i').test(command);
+  return new RegExp(`\\bgit\\b[^;&|]*${bareWord(subcommand)}`, 'i').test(command);
+}
+
+/** `subcommand` as a whole word, excluding a hyphenated neighbour — see `isGitSubcommand`. */
+function bareWord(word: string): string {
+  return `(?<!-)\\b${word}\\b(?!-)`;
 }
 
 /**
@@ -316,7 +330,7 @@ function isGitSubcommand(command: string, subcommand: string): boolean {
  * inspected.
  */
 function gitSegmentsFor(command: string, word: string): string[] {
-  const re = new RegExp(`\\bgit\\b.*\\b${word}\\b`, 'i');
+  const re = new RegExp(`\\bgit\\b.*${bareWord(word)}`, 'i');
   return command.split(/[;&|]/).filter((s) => re.test(s));
 }
 
@@ -471,7 +485,10 @@ function checkMergeIntoProtected(
   if (!isGitSubcommand(command, 'merge')) return null;
   const rule = requireRule(policy, 'merge-into-protected');
   const namesAlt = policy.protectedBranchNames.map(escapeRegExp).join('|');
-  const destRe = new RegExp(`\\bmerge\\b.*\\b(${namesAlt})\\b`, 'i');
+  // Anchored the same way as the gate above, so a chained
+  // `git merge-base HEAD origin/main; git merge some-feature` does not read
+  // the plumbing call's argument as the real merge's destination.
+  const destRe = new RegExp(`${bareWord('merge')}.*\\b(${namesAlt})\\b`, 'i');
   if (destRe.test(command)) {
     return violation(rule);
   }

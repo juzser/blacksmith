@@ -315,6 +315,16 @@ than appearing in it.
   a chain is one tool call and every command in it runs.
 - Path comparisons normalise Windows separators before testing a path against
   the allowed roots, closing a gap the bash version had in the same place.
+- **`git merge-base` is not `git merge`.** A regex word boundary treats a
+  hyphen as a boundary, so the merge rule fired on every hyphenated plumbing
+  command whose name begins with a subcommand it watches — `git merge-base`
+  above all, which is read-only, cannot merge anything, and is exactly what a
+  script reaches for to ask how far a branch has diverged. The bash version
+  had the same hole and never fired at all; this one refused a legitimate
+  command the first time it was used. A subcommand now has to be a bare word
+  with no hyphen on either side, which costs no coverage on `push`, `merge`
+  or `rebase` and removes a class of false deny that teaches operators to
+  route around the gate rather than trust it.
 
 ### Known gaps
 

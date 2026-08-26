@@ -356,6 +356,30 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
     );
     expect(d.allowed).toBe(true);
   });
+
+  it('allows read-only merge-* plumbing naming a protected branch', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git merge-base HEAD origin/main', branch: 'feature-x' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows merge-* plumbing while checked out on a protected branch', () => {
+    const d = evaluateCommand(ctx({ command: 'git merge-tree main HEAD', branch: 'main' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('does not read a chained merge-base argument as the destination of a real merge', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git merge-base HEAD origin/main; git merge some-feature',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
 });
 
 describe('evaluateCommand — rule 4: deploy-command', () => {
