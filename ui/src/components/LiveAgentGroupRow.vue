@@ -27,10 +27,15 @@
 // warning-tone dot, and motion is never its only signal: the elapsed column
 // beside it already reads "4h 12m".
 import { computed } from 'vue';
-import type { LiveAgentEntry } from '../lib/api.js';
 import { agentScopeLabel } from '../lib/agentScope.js';
+import type { LiveAgentEntry } from '../lib/api.js';
 import { formatDateTime, formatElapsed } from '../lib/format.js';
-import { agentActivity, byRuntimeDesc, longestRunningSince, workingCount } from '../lib/liveness.js';
+import {
+  agentActivity,
+  byRuntimeDesc,
+  longestRunningSince,
+  workingCount,
+} from '../lib/liveness.js';
 import Icon from './hds/Icon.vue';
 import Lozenge from './hds/Lozenge.vue';
 import IdentityChip from './IdentityChip.vue';

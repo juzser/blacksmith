@@ -12,12 +12,7 @@
 // per-kind JSON, not a queryable top-level field. Recorded in DESIGN.md.
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { fetchTimeline, type TimelineEntry } from '../lib/api.js';
-import { useBreadcrumb } from '../composables/useBreadcrumb.js';
-import { useProjectContext } from '../composables/useProjectContext.js';
-import { usePoll } from '../composables/usePoll.js';
-import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { KIND_OPTIONS, matchesKind, titleFor } from '../lib/timelineDisplay.js';
+import CausalTimelineList from '../components/CausalTimelineList.vue';
 import Banner from '../components/hds/Banner.vue';
 import Button from '../components/hds/Button.vue';
 import EmptyState from '../components/hds/EmptyState.vue';
@@ -26,7 +21,12 @@ import Icon from '../components/hds/Icon.vue';
 import PageHeader from '../components/hds/PageHeader.vue';
 import Skeleton from '../components/hds/Skeleton.vue';
 import Toolbar from '../components/hds/Toolbar.vue';
-import CausalTimelineList from '../components/CausalTimelineList.vue';
+import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
+import { useProjectContext } from '../composables/useProjectContext.js';
+import { fetchTimeline, type TimelineEntry } from '../lib/api.js';
+import { canClaimEmpty } from '../lib/emptyClaim.js';
+import { KIND_OPTIONS, matchesKind, titleFor } from '../lib/timelineDisplay.js';
 
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();

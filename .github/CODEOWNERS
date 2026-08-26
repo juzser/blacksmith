@@ -1,0 +1,30 @@
+# Review routing for the files where a wrong merge is not a bug but a
+# loophole. Everything else in this repo is reviewable by anyone; these are
+# the paths whose whole purpose is to constrain what agents may do, so a
+# change to them cannot be self-approved by the change that needs it.
+#
+# CODEOWNERS is advisory until branch protection requires owner review. It is
+# checked in first so the requirement has something to point at.
+
+# Default: everything has an owner, so nothing lands unlooked-at.
+*                               @juzser
+
+# The severity ladder, budget caps, crosscheck quorum. Editing these changes
+# what stops the line and what merges — for every epic, retroactively.
+/factory/policies/               @juzser
+
+# The mechanical half of the safety model (README § Safety model): the hook
+# that blocks pushes to main and the settings that decide which tools an
+# agent may call at all. guardrails.md is the prose; this is the enforcement.
+/.claude/hooks/                  @juzser
+/.claude/settings.json           @juzser
+
+# Spec contracts are the dispatch precondition — "no contract, no dispatch".
+# A loosened schema is a task spec that no longer has to say what it claims.
+/factory/specs/schema/           @juzser
+
+# The gate itself, and the workflow that runs it. If check.sh can be edited
+# as freely as the code it checks, it is not a gate.
+/scripts/check.sh                @juzser
+/.github/workflows/              @juzser
+/.gitleaks.toml                  @juzser

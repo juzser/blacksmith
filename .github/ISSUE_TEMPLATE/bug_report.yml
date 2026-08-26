@@ -1,0 +1,97 @@
+name: Bug report
+description: Something in the factory, the CLI, the gate or the dashboard behaves wrong.
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Blacksmith runs from a clone, so a report is only reproducible if it
+        names the commit and what the gate said. The gate output below is the
+        single most useful field in this form — it is the same script CI runs.
+
+        **Do not paste a credential.** If a value matters, describe its shape
+        (`sk-` + 32 chars), never the value. Security bugs are private, not
+        here: see [SECURITY.md](https://github.com/juzser/blacksmith/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+      placeholder: |
+        `smith wave admit epic-3` reported OK, but no worktree was created.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >-
+        The shortest path from a fresh clone. Commands, and the spec or event
+        payload if one is involved.
+      placeholder: |
+        1. pnpm install --frozen-lockfile && pnpm run build
+        2. node factory/orchestrator/dist/cli.js plan validate factory/specs/active/…
+        3. …
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Commit SHA
+      description: '`git rev-parse --short HEAD` — a branch name is not enough.'
+      placeholder: f131265
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Platform
+      description: >-
+        Windows is supported through WSL2 only; a native-Windows report is
+        expected to fail and INSTALL.md says why.
+      options:
+        - macOS
+        - Linux
+        - WSL2
+        - Other / native Windows
+    validations:
+      required: true
+
+  - type: textarea
+    id: gate
+    attributes:
+      label: Tail of `bash scripts/check.sh`
+      description: >-
+        The last ~30 lines, ending in `== PASS ==` or `== FAIL ==`. Include
+        the SKIP lines — a step that never ran is often the answer, and the
+        exit code alone cannot tell you which.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: e2e
+    attributes:
+      label: Did the e2e step run?
+      description: >-
+        `check.sh` SKIPs Playwright when no Chromium is installed. If your
+        report is about the dashboard, this changes what the gate proved.
+      options:
+        - 'Ran (the gate printed OK or FAIL for pnpm test:e2e)'
+        - 'SKIPped (no Chromium)'
+        - 'Not applicable / did not run the gate'
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >-
+        Relevant event-log lines from `state/events/`, `smith status` output,
+        or a screenshot. Redact anything credential-shaped first.

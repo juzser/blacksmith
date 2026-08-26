@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { loadTaxonomy } from '../../factory/orchestrator/src/taxonomy.js';
+import { ICON_PATHS } from '../src/icons.js';
 import type { TimelineEntry } from '../src/lib/api.js';
 import {
   buildCausalTree,
@@ -292,6 +294,76 @@ describe('lib/timelineDisplay.ts', () => {
     });
   });
 
+  /**
+   * The scheduler's three proposals — the same defect as the block above, one
+   * writer further out, and the one the P9-37 lint could not see: they are
+   * written as `event_type: eventTypeFor(proposal)`, a helper's return value,
+   * so they were undeclared, unlisted on the timeline and untitled here while
+   * every check stayed green. A row that reads `recheck-proposed` and names no
+   * task asks the operator a question they cannot answer from the row.
+   */
+  describe('the scheduler proposals', () => {
+    it('names the task a recheck is proposed for, and why', () => {
+      const e = entry({
+        eventType: 'recheck-proposed',
+        payload: {
+          kind: 'recheck',
+          taskId: 'epic-9/task-3',
+          epicId: 'epic-9',
+          reasons: ['merge-threshold', 'low-confidence'],
+        },
+      });
+      expect(iconFor(e)).toBe('rotate-cw');
+      expect(titleFor(e)).toBe(
+        'Recheck proposed — epic-9/task-3 (merge-threshold, low-confidence)',
+      );
+    });
+
+    it('counts the outdated packages and names the first few', () => {
+      const packages = ['vite', 'vitest', 'hono', 'ajv'].map((name) => ({
+        name,
+        current: '1.0.0',
+        wanted: '1.1.0',
+        latest: '2.0.0',
+      }));
+      const e = entry({
+        eventType: 'maintenance-proposed',
+        payload: { kind: 'maintenance', packages },
+      });
+      expect(iconFor(e)).toBe('refresh-cw');
+      expect(titleFor(e)).toBe('Maintenance proposed — 4 outdated (vite, vitest, hono +1)');
+      expect(
+        titleFor(entry({ eventType: 'maintenance-proposed', payload: { packages: [] } })),
+      ).toBe('Maintenance proposed — 0 outdated (none)');
+    });
+
+    it('gives the growth review its cadence, and degrades without a last review', () => {
+      const e = entry({
+        eventType: 'growth-review-due',
+        payload: { kind: 'growth-review', cadenceDays: 14, lastReviewAt: '2026-08-01T09:00:00Z' },
+      });
+      expect(iconFor(e)).toBe('map');
+      expect(titleFor(e)).toBe('Growth review due — every 14 days, last 2026-08-01');
+      expect(titleFor(entry({ eventType: 'growth-review-due', payload: {} }))).toBe(
+        'Growth review due — every ? days',
+      );
+    });
+
+    /**
+     * The guard, not the examples. An icon name with no entry in ICON_PATHS
+     * renders nothing at all — Icon.vue is `v-if="path"` — so a typo here is a
+     * blank cell, not a broken build, and no assertion above would catch it.
+     */
+    it('gives every proposal an icon the registry actually has', () => {
+      const types = ['recheck-proposed', 'maintenance-proposed', 'growth-review-due'];
+      const missing = types
+        .map((eventType) => iconFor(entry({ eventType })))
+        .filter((name) => !(name in ICON_PATHS));
+      expect(missing).toEqual([]);
+      expect(types.filter((eventType) => titleFor(entry({ eventType })) === eventType)).toEqual([]);
+    });
+  });
+
   // D-153. The same defect one type further out, and the loudest instance of
   // it: `operator-note` ties for third most common in the factory's own logs
   // (57 of 668) and is the only one carrying the operator's reasoning in their
@@ -398,6 +470,27 @@ describe('lib/timelineDisplay.ts', () => {
       const chip = KIND_OPTIONS.find((option) => option.value === 'gate')?.types ?? [];
       expect(dimension.length).toBeGreaterThan(0);
       expect([...chip].sort()).toEqual([...dimension].sort());
+    });
+
+    // The scheduler's three event types are free strings (like
+    // dispatch_decision), so no taxonomy dimension lists them and the
+    // gate-chip test above cannot catch their absence. It went unnoticed for
+    // that reason: `smith scheduler run` is the one writer in the factory
+    // whose output no chip could select, so a proposal an operator was meant
+    // to answer was reachable only by scrolling the unfiltered log. Derived
+    // from scheduler.ts's eventTypeFor(), which is the whole closed set.
+    it('gives the scheduler chip every event type eventTypeFor() can return', () => {
+      const src = readFileSync(
+        new URL('../../factory/orchestrator/src/scheduler.ts', import.meta.url),
+        'utf8',
+      );
+      const body = src.slice(src.indexOf('function eventTypeFor'));
+      const emitted = [...body.slice(0, body.indexOf('\n}')).matchAll(/return '([^']+)'/g)].map(
+        (m) => m[1],
+      );
+      const chip = KIND_OPTIONS.find((option) => option.value === 'scheduler')?.types ?? [];
+      expect(emitted.length).toBe(3);
+      expect([...chip].sort()).toEqual([...emitted].sort());
     });
 
     // A type claimed by two chips renders under two labels, so deselecting the

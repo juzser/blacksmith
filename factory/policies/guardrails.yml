@@ -1,0 +1,209 @@
+# Blacksmith — guardrail enforcement policy
+#
+# docs/standards/guardrails.md is the contract; this file is the data half of
+# what enforces it. HOST: `smith policy check`/`smith policy hook`
+# (factory/orchestrator/src/policy.ts), and — via `policy hook` —
+# `.claude/hooks/guard.sh`, the PreToolUse gate on every Bash tool call an
+# agent session makes.
+#
+# What this file is NOT: a place for matchers. Deciding whether a command
+# trips a rule is deliberately NOT expressed here as regex-in-YAML — the
+# matchers live in policy.ts, in TypeScript, where they have unit tests
+# (test/policy.test.ts). A rule whose matching logic is data instead of code
+# is a rule nobody can write a test against, and this is a deny gate: the one
+# place in the factory where "we changed it and nothing checked" is not an
+# acceptable failure mode. What belongs here is what an operator would
+# legitimately want to change without touching a matcher: branch names,
+# allowed roots, which commands count as a deploy, and the message an agent
+# sees when a rule fires.
+#
+# Every rule is S1 ("stop the line") per guardrails.md's preamble: these are
+# hard rules the factory enforces mechanically, not policy questions for the
+# gate to weigh. `reason` is the exact string `guard.sh` has printed since
+# Phase 2 — changing it here changes what an agent sees at the moment a
+# command is denied, so treat it as user-facing copy, not an internal note.
+# `reason_on_current_branch` exists only on the two rules (push, merge) that
+# have a second trigger — a *bare* `git push`/`git merge` while already
+# checked out on a protected branch, where the bash's message named the
+# branch the agent was standing on rather than the ref it typed. `{branch}`
+# in either reason is substituted with the branch policy.ts resolved, not
+# rendered literally.
+
+protected_branches:
+  # Literal branch names `push`/`merge` refuse as a destination or as the
+  # branch checked out for a bare push/merge (rule 1, rule 3). `patterns` is
+  # the shared per-epic integration branch shape, added to `names` for the
+  # history-rewrite rule only (rule 5) — worktree.yml's
+  # `integration_branch.pattern`: a leaf ref "smith/<epic>" cannot coexist
+  # with "smith/<epic>/<task-id>" refs in real git (D/F ref conflict), so the
+  # shape is "smith/<epic>/integration", never a bare "smith/<epic>".
+  names: [main, master]
+  patterns: ["smith/*/integration"]
+
+destructive_removal:
+  # rule 6: `rm -rf`/equivalents are allowed only under one of these
+  # repo-root-relative directories (guardrails.md "Filesystem").
+  allowed_roots: [workspaces, state]
+
+deploy_commands:
+  # rule 4: command + subcommand pairs that require per-invocation operator
+  # approval (guardrails.md "Deploy + outbound"). Matched as `\b<command>\b
+  # .* \b<subcommand>\b` (any one of `subcommands`), the same looseness as
+  # every other rule here — see policy.ts's `checkDeployCommand`.
+  - { command: wrangler, subcommands: [deploy, publish] }
+  - { command: pages, subcommands: [publish] }
+
+rules:
+  - id: push-to-protected
+    severity: S1
+    reason: >-
+      push to main/master is never allowed from an agent session. Push a
+      side branch and open a PR.
+    reason_on_current_branch: >-
+      push to main/master is never allowed from an agent session (checked
+      out on {branch}).
+
+  - id: force-push
+    severity: S1
+    reason: >-
+      force-push (--force/-f/--force-with-lease) is never allowed from an
+      agent session.
+
+  - id: merge-into-protected
+    severity: S1
+    reason: >-
+      merging into main/master is never allowed from an agent session; the
+      operator merges integration PRs.
+    reason_on_current_branch: >-
+      git merge while checked out on {branch} is never allowed from an agent
+      session.
+
+  - id: deploy-command
+    severity: S1
+    reason: >-
+      deploy/publish commands require explicit operator approval; never
+      autonomous.
+
+  - id: history-rewrite-on-protected
+    severity: S1
+    reason: >-
+      history rewrite (rebase/amend/filter-branch) on protected branch
+      '{branch}' is never allowed.
+
+  - id: unbounded-rm
+    severity: S1
+    reason: >-
+      rm -rf is only allowed inside workspaces/ or state/.
+
+# ---------------------------------------------------------------------------
+# The judge sandbox
+# ---------------------------------------------------------------------------
+#
+# Everything above applies to every agent session. This block applies to one
+# additional condition: a `smith sandbox open` lease is active over the
+# directory the command will run in (factory/orchestrator/src/sandbox.ts).
+# The orchestrator opens a lease before handing a worktree to one of the six
+# read-only judge roles and closes it after.
+#
+# Why it exists: "judges are read-only" was, until now, a sentence in
+# .claude/agents/*.md plus a fingerprint comparison after the fact
+# (immutability.ts). The prose is not enforcement, and the fingerprint is a
+# detector — by the time it fires the write has already landed and the
+# verdict is already untrustworthy. It also cannot see the two things that
+# leave no git trace at all: a judge reaching the network, and a judge
+# writing outside its worktree. Judge roles hold `Read, Grep, Glob, Bash` and
+# no `Edit`/`Write`, so Bash is the only write path a judge has, and the
+# PreToolUse hook already sits on every Bash call — which is what makes
+# refusing up front possible rather than aspirational.
+#
+# What it is not: a container, a seccomp profile, or a read-only mount. A
+# command that writes through an interpreter (`python3 -c "open(...,'w')"`)
+# is invisible to a matcher, and always will be. `smith worktree verify`
+# stays in the pipeline behind this for exactly that reason. Both halves are
+# stated in docs/standards/guardrails.md; neither is sold as the other.
+#
+# The bias here is the opposite of the guard shim's. `guard.sh` answers `ask`
+# rather than `deny` when it cannot decide, because a hook that dead-ends
+# leaves the factory unrepairable from inside. A sandbox rule that
+# over-refuses costs a judge one command and shows the operator exactly which
+# one — nothing deadlocks, because the orchestrator holds the lease and the
+# work continues the moment it closes. So these matchers lean towards
+# refusing, and the lists below are deliberately generous.
+judge_sandbox:
+  # The only paths a judge may write, repo-root-relative. Both are the
+  # judge's own output: `state/results/<task-id>.<role>.json` is the verdict
+  # artifact every judge template already names, and `state/artifacts/` is
+  # where a task's declared evidence lives (P9-22).
+  write_roots: [state/results, state/artifacts]
+
+  # Bare command words that reach the network. Matched in command position
+  # (start of a chain segment, or after whitespace) and followed by
+  # whitespace or end-of-segment, so `grep -r x src/nc/` does not read as
+  # `nc` — see policy.ts's `hasCommandWord`.
+  network_commands:
+    [curl, wget, nc, ncat, netcat, telnet, ssh, scp, sftp, rsync, ftp, gh, glab, http, httpie,
+     aria2c, npx, bunx, pnpx]
+
+  # Command + subcommand pairs that reach the network. `git fetch`/`remote`
+  # are here rather than under writes because their side effect is outbound,
+  # and an install subcommand is both a fetch and a mutation of the tree.
+  network_subcommands:
+    - { command: git, subcommands: [push, pull, fetch, clone, remote, submodule] }
+    - { command: npm, subcommands: [install, i, add, ci, update, publish, exec, link] }
+    - { command: pnpm, subcommands: [install, i, add, update, publish, dlx, link] }
+    - { command: yarn, subcommands: [install, add, upgrade, publish] }
+    - { command: bun, subcommands: [install, add, update, publish] }
+    - { command: pip, subcommands: [install, download, uninstall] }
+    - { command: pip3, subcommands: [install, download, uninstall] }
+    - { command: uv, subcommands: [add, sync, pip] }
+    - { command: brew, subcommands: [install, upgrade, update, tap] }
+    - { command: cargo, subcommands: [install, publish, add] }
+    - { command: go, subcommands: [get, install] }
+
+  # Write verbs whose arguments are all targets. Allowed when every non-flag
+  # argument resolves under a `write_roots` entry — `mkdir -p state/results`
+  # is a judge preparing to write its own verdict, and refusing it would
+  # refuse the one thing a judge is supposed to do.
+  target_write_commands: [tee, mkdir, touch]
+
+  # Write verbs refused outright inside a sandbox, no path check. A judge
+  # writes its verdict by redirecting into a write root; it has no business
+  # moving, copying, deleting, patching or chmod-ing anything, and the
+  # allowlist that would make `cp a b` decidable (which token is the target?)
+  # is more machinery than the single legitimate case is worth. `rm` is here
+  # even though the `unbounded-rm` rule above would permit `rm state/...`:
+  # inside a sandbox, `state/` holds other judges' verdicts and this judge's
+  # own lease.
+  refused_write_commands:
+    [rm, rmdir, mv, cp, ln, dd, truncate, shred, install, patch, chmod, chown, chgrp,
+     vi, vim, nano, emacs, ed, pico]
+
+  # git subcommands that mutate a worktree, the index, refs, or config.
+  # `git add`/`commit`/`checkout`/`stash`/`restore` are the five
+  # .claude/agents/reviewer.md already names in prose; the rest close the
+  # same door from the other side.
+  git_write_subcommands:
+    [add, commit, checkout, switch, restore, stash, apply, am, reset, clean, rm, mv,
+     cherry-pick, revert, rebase, merge, config, tag, worktree, notes, update-ref,
+     update-index, gc, prune]
+
+  rules:
+    - id: judge-network
+      severity: S1
+      reason: >-
+        a {role} judge session has no outbound access — no fetch, no remote
+        git, no package install. Judge what is in the worktree, and record
+        what you could not verify as a finding rather than going to get it.
+
+    - id: judge-write
+      severity: S1
+      reason: >-
+        a {role} judge session writes nothing but its own verdict. Redirect
+        into {write_roots}; every other write is refused while the sandbox is
+        open. If the code needs changing, that is a finding, not an edit.
+
+    - id: judge-sandbox-escape
+      severity: S1
+      reason: >-
+        a {role} judge cannot open, close or inspect its own sandbox lease —
+        the orchestrator that opened it closes it when the verdict is in.

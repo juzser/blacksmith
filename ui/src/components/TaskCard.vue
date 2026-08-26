@@ -12,13 +12,15 @@
 import { computed } from 'vue';
 import type { KanbanTask } from '../lib/api.js';
 import { severityTone } from '../lib/taxonomy.js';
-import IdentityChip from './IdentityChip.vue';
 import Lozenge from './hds/Lozenge.vue';
+import IdentityChip from './IdentityChip.vue';
 
 const props = defineProps<{ task: KanbanTask }>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
-const sev = computed(() => (props.task.tags.severity ? severityTone(props.task.tags.severity) : null));
+const sev = computed(() =>
+  props.task.tags.severity ? severityTone(props.task.tags.severity) : null,
+);
 const agentLabel = computed(() =>
   props.task.agentRole
     ? `${props.task.agentRole}${props.task.agentModelTier ? ` · ${props.task.agentModelTier}` : ''}`

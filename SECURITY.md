@@ -46,15 +46,25 @@ text* and *things that execute*:
 - **Bypassing a gate.** Anything that lets a task reach the merge queue with
   a failing schema check, a failing test gate, or an unresolved S1/S2 finding.
 - **Judge integrity.** A read-only judge that can mutate the tree it is
-  judging, or influence its own verdict. `smith worktree fingerprint` /
-  `verify` bracket this deliberately.
+  judging, reach the network, or influence its own verdict. The judge sandbox
+  (`smith sandbox`, plus the `judge-*` rules in
+  [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml))
+  refuses those commands up front, and `smith worktree fingerprint` / `verify`
+  bracket the run to catch what a text matcher cannot see. Both halves are
+  stated in
+  [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "The judge
+  sandbox"; a way past *both* is in scope.
 - **Secret leakage.** A credential value reaching the event log, a projection,
   a PR body, a screenshot, or a judge prompt. See
   [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "No secrets
   in outputs".
-- **The guard hook.** `.claude/hooks/guard.sh` and the deny list in
-  `.claude/settings.json` block `push origin main`, force-pushes,
-  history rewriting, and unbounded `rm -rf`. A bypass is in scope.
+- **The guard hook.** `.claude/hooks/guard.sh` — a transport shim over
+  `smith policy hook` — and the deny list in `.claude/settings.json` block
+  pushes to `main`, force-pushes, history rewriting, and unbounded deletion.
+  A bypass is in scope, and so is a shim that fails *open*: when the policy
+  layer cannot answer, the hook escalates to the operator and never emits an
+  `allow` envelope, because a hook's `allow` outranks the operator's own deny
+  list.
 - **The local dashboard.** `smith ui serve` binds a local HTTP server with
   write routes (waivers, lesson approve/reject). Anything that turns it into
   a remote-write surface is in scope.
@@ -73,17 +83,20 @@ text* and *things that execute*:
 
 ## Known gaps, stated rather than papered over
 
-- **Secret scanning is not wired into CI.**
-  [`docs/standards/guardrails.md`](docs/standards/guardrails.md) § CI
-  describes a gitleaks gate on every PR; `.github/workflows/ci.yml` does not
-  run one today. Treat that line as intent, not as an enforced control, and
-  check your own diffs.
+- **`.vue` single-file components are neither type-checked nor fully linted.**
+  `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
+  and this repo runs TypeScript 7's native port, which does not expose one.
+  A template referencing something that does not exist is caught by e2e or
+  not at all. The mitigation is structural: UI logic lives in
+  `ui/src/lib/*.ts`, which is type-checked, linted and unit-tested, and the
+  SFCs stay thin. It still means the dashboard has a lint-shaped hole the
+  orchestrator does not.
 - **Budget caps are prompt-level.** The per-epic and per-task token caps in
   [`factory/policies/budgets.yml`](factory/policies/budgets.yml) are stated to
   agents and counted after the fact; the loop runner does not hard-stop a
   session at the cap.
-- **CI is one Linux runner.** No matrix — see `README.md § Known platform
-  gaps`.
+- **CI is one Linux runner.** No matrix — see
+  [`INSTALL.md`](INSTALL.md#known-platform-gaps) § Known platform gaps.
 
 ## Handling secrets in this repo
 

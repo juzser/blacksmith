@@ -9,10 +9,13 @@ import type { KanbanColumn } from '../lib/api.js';
 import { foldIntoColumns, subStatusSummary } from '../lib/kanban.js';
 import TaskCard from './TaskCard.vue';
 
-const props = withDefaults(defineProps<{ columns: KanbanColumn[]; showAll?: boolean; laneLabel?: string }>(), {
-  showAll: false,
-  laneLabel: 'Tasks',
-});
+const props = withDefaults(
+  defineProps<{ columns: KanbanColumn[]; showAll?: boolean; laneLabel?: string }>(),
+  {
+    showAll: false,
+    laneLabel: 'Tasks',
+  },
+);
 const emit = defineEmits<{ select: [taskId: string] }>();
 
 const flatTasks = computed(() => props.columns.flatMap((c) => c.tasks));

@@ -9,7 +9,7 @@
 // on a screen. Group ids share the one `expanded` Set with row ids — they are
 // namespaced (`dispatch-group-…`) so the two can't collide.
 import { computed } from 'vue';
-import { timelineItems, type TimelineNode } from '../lib/timelineDisplay.js';
+import { type TimelineNode, timelineItems } from '../lib/timelineDisplay.js';
 import TimelineDispatchGroupRow from './TimelineDispatchGroupRow.vue';
 import TimelineRow from './TimelineRow.vue';
 

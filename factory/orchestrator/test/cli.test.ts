@@ -3,6 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+// The one src import in a file that otherwise drives only the built binary,
+// and it is a policy READER rather than anything under test: an assertion
+// about the coder cap that reads budgets.yml through the same loader the
+// binary uses cannot drift away from the file when the cap is retuned.
+import { loadBudgetPolicy } from '../src/budgets.js';
 import { assertExited, runOrThrow, runProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
@@ -35,10 +40,12 @@ function runCli(
 describe('cli.ts (built binary)', () => {
   let scratchDir: string;
 
+  // dist/ is built once for the whole run by test/globalSetup.ts, not here:
+  // guardHook.test.ts execs the same binary, and two parallel vitest workers
+  // emitting into one dist/ while a third reads it is a race.
   beforeAll(async () => {
-    runOrThrow('pnpm', ['build'], { cwd: REPO_ROOT });
     scratchDir = await mkdtemp(path.join(tmpdir(), 'smith-cli-'));
-  }, 60_000);
+  });
 
   afterAll(async () => {
     if (scratchDir) await rm(scratchDir, { recursive: true, force: true });
@@ -3163,6 +3170,391 @@ describe('cli.ts (built binary)', () => {
       expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
         [],
       );
+    });
+
+    // The epic token cap has been declared in budgets.yml since 2026-08-11 and
+    // read since P9-33 — by planQuorum's budget trigger and by `smith budget
+    // alarm`, both of which stand downstream of the spend they report and can
+    // only describe a bill after it is run up. `wave check` is the one moment
+    // upstream of it: before any task in the wave has been dispatched, when
+    // there is nothing in flight for a refusal to distort (D-29 draws exactly
+    // this line for the task cap). budgets.yml's own comment on
+    // `max_in_flight_tasks` already told its reader that "setting it makes
+    // `smith wave check` refuse to admit a wave" — and until these tests,
+    // nothing in the CLI called checkWaveBudget at all, so that sentence
+    // described a gate that did not exist.
+    describe('wave check: the epic budget gate', () => {
+      /** A budgets.yml with only the fields this gate reads; the rest default. */
+      async function policyFile(
+        name: string,
+        epic: { cap_tokens: number; max_in_flight_tasks?: number },
+      ): Promise<string> {
+        const policyPath = path.join(scratchDir, `${name}-budgets.yml`);
+        const maxInFlight = epic.max_in_flight_tasks ?? null;
+        await writeFile(
+          policyPath,
+          `epic:\n  cap_tokens: ${epic.cap_tokens}\n  alarm_ratio: 0.7\n` +
+            `  max_in_flight_tasks: ${maxInFlight === null ? 'null' : maxInFlight}\n`,
+        );
+        return policyPath;
+      }
+
+      /** The two-task fixture plan, repriced so its declared cost is the variable. */
+      async function pricedPlan(name: string, tokens: number): Promise<string> {
+        const planPath = path.join(scratchDir, `${name}-priced.json`);
+        await writeFile(
+          planPath,
+          JSON.stringify({
+            ...PLAN,
+            tasks: PLAN.tasks.map((task) => ({ ...task, budget: { tokens, diff_lines: 100 } })),
+          }),
+        );
+        return planPath;
+      }
+
+      it('refuses a wave whose own declared cost would cross the epic cap', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = await pricedPlan(sessionId, 3000);
+        const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+          '--budget-policy',
+          budgetPolicy,
+        ]);
+
+        expect(result.status).toBe(1);
+        const parsed = JSON.parse(result.stdout);
+        // Named apart from an id failure, as the dependency-order test above
+        // is: exit 1 here means "checked, and it does not fit".
+        expect(parsed.error).toBeUndefined();
+        expect(parsed.valid).toBe(true);
+        expect(parsed.budget).toMatchObject({
+          status: 'refused',
+          capTokens: 5000,
+          waveTokens: 6000,
+          waveTaskCount: 2,
+        });
+        expect(parsed.budget.detail).toContain('5,000');
+        // The whole point of refusing at admission: nothing moves to ready.
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      // Same shape as `epic close` (D-43/P9-27): a machine refusal a human may
+      // override, and the log then carries the machine's verdict AND the
+      // human's reason — not a silently admitted wave that reads afterward as
+      // if it had been within budget all along.
+      it('admits a refused wave under --override-rationale and logs both', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = await pricedPlan(sessionId, 3000);
+        const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+          '--budget-policy',
+          budgetPolicy,
+          '--override-rationale',
+          'Operator: the cap moves next epic; this wave finishes the migration.',
+        ]);
+
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).budget.status).toBe('refused');
+
+        const admitted = tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted');
+        expect(admitted).toHaveLength(1);
+        expect(admitted[0]?.payload.budget).toMatchObject({
+          status: 'refused',
+          cap_tokens: 5000,
+          wave_tokens: 6000,
+          override_rationale:
+            'Operator: the cap moves next epic; this wave finishes the migration.',
+        });
+      });
+
+      it('refuses a blank --override-rationale rather than recording an empty reason', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = await pricedPlan(sessionId, 3000);
+        const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+          '--budget-policy',
+          budgetPolicy,
+          '--override-rationale',
+          '   ',
+        ]);
+
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.blank-override-rationale');
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      // `epic.max_in_flight_tasks` reached budgets.yml as the operator's own
+      // wall-clock/rate-limit bound — null by default, because fan-out is
+      // bounded by the claim graph and cost by the token cap. Set, it has to
+      // mean something.
+      it('refuses a wave that would put more tasks in flight than the fan-out cap allows', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = await pricedPlan(sessionId, 1000);
+        const budgetPolicy = await policyFile(sessionId, {
+          cap_tokens: 4_000_000,
+          max_in_flight_tasks: 1,
+        });
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+          '--budget-policy',
+          budgetPolicy,
+        ]);
+
+        expect(result.status).toBe(1);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.valid).toBe(true);
+        expect(parsed.budget).toMatchObject({
+          status: 'over-fan-out',
+          inFlightTasks: 0,
+          maxInFlightTasks: 1,
+          waveTaskCount: 2,
+        });
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      /** Put a log-only task in the register, the way `findings raise` does. */
+      async function logOnlyTask(sessionId: string, eventsDir: string, taskId: string) {
+        const append = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-added',
+            task_id: taskId,
+            plan_version: 1,
+            causal_parent: `${sessionId}#0`,
+            payload: { epic_id: 'epic-1', claims: ['src/baz/*.ts'] },
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(append.status).toBe(0);
+      }
+
+      // Two silences that look alike in a sum and are not alike at all, so the
+      // pair is asserted together: what the plan left blank, and what no plan
+      // ever had a field for.
+
+      // D-48/P9-31: a follow-up minted by `findings raise` exists only in the
+      // log, and the log records its claims, never its budget — there was no
+      // field to leave blank. Refusing it would make the factory's own repair
+      // path reachable only by hand-editing the plan the follow-up exists to
+      // avoid, which is guard.sh's deny-on-unavailable trap again: not safe,
+      // stuck. The policy prices it at the coder cap instead — the most it may
+      // spend — so the cap is enforced against a real number.
+      it('prices a log-only follow-up at the coder cap rather than refusing it', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        await logOnlyTask(sessionId, eventsDir, 'epic-1/followup-cd34');
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'epic-1/followup-cd34',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+
+        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.valid).toBe(true);
+        expect(parsed.budget.status).toBe('ok');
+        expect(parsed.budget.unpricedTasks).toEqual([]);
+        // 1000 from the fixture plan's task-1, plus the coder cap for the one
+        // nothing declared. Read off the policy so the assertion cannot drift
+        // from budgets.yml, but pinned as a sum so a silent 0 would fail.
+        const coderCap = loadBudgetPolicy().task.coder.capTokens;
+        expect(parsed.budget.waveTokens).toBe(1000 + coderCap);
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted'),
+        ).toHaveLength(1);
+      });
+
+      // The same wave, against a cap the coder-cap price cannot fit under: the
+      // pricing above is a real charge, not a way past the gate.
+      it('refuses that same follow-up when the coder cap will not fit under the epic cap', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        await logOnlyTask(sessionId, eventsDir, 'epic-1/followup-cd34');
+        const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'epic-1/followup-cd34',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+          '--budget-policy',
+          budgetPolicy,
+        ]);
+
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).budget.status).toBe('refused');
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      // The other silence. `task-spec.schema.json` requires `budget.tokens`,
+      // so a plan reaching this gate without one never passed `smith plan
+      // validate` — and `wave check` reads its plan with a bare cast rather
+      // than re-validating it. An unpriced spec is a plan defect one edit
+      // fixes, so refusing names it where it can be acted on.
+      it('refuses a wave whose plan declares a task with no budget at all', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = path.join(scratchDir, `${sessionId}-unpriced.json`);
+        const [first, second] = PLAN.tasks;
+        await writeFile(
+          planPath,
+          JSON.stringify({
+            ...PLAN,
+            tasks: [first, { ...second, budget: { diff_lines: 100 } }],
+          }),
+        );
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+
+        expect(result.status).toBe(1);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.error).toBeUndefined();
+        expect(parsed.valid).toBe(true);
+        expect(parsed.budget.status).toBe('unverifiable');
+        expect(parsed.budget.unpricedTasks).toEqual(['epic-1/task-2']);
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      // F0's lesson, applied to this gate: one silent yes for both "checked,
+      // and it fits" and "could not check" is the failure mode, not the
+      // convenience. Without --session there is no log to read the epic's
+      // spend from, so `ok` would be an answer the gate never reached.
+      it('reports a session-less check as unchecked rather than ok', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const result = runCli(['wave', 'check', planPath, 'task-1', '--dry']);
+
+        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.valid).toBe(true);
+        expect(parsed.budget.status).toBe('unchecked');
+        expect(parsed.budget.detail).toMatch(/--session/);
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      // An admission that passed the gate has to be as readable afterward as
+      // one that was overridden — otherwise the log records only refusals,
+      // and "was this ever checked?" has no answer for the waves that were.
+      it('records what the gate saw on an admission that fits', async () => {
+        const { sessionId, eventsDir } = await session();
+        const planPath = await pricedPlan(sessionId, 1000);
+        const budgetPolicy = await policyFile(sessionId, { cap_tokens: 4_000_000 });
+
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+          '--budget-policy',
+          budgetPolicy,
+        ]);
+
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).budget.status).toBe('ok');
+
+        const admitted = tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted');
+        expect(admitted).toHaveLength(1);
+        expect(admitted[0]?.payload.budget).toEqual({
+          status: 'ok',
+          cap_tokens: 4_000_000,
+          projected_tokens: 0,
+          wave_tokens: 2000,
+          headroom_tokens: 4_000_000,
+        });
+      });
     });
 
     // The last id-minting hole: `--tasks` is a hand-written file, so a bare
@@ -6418,6 +6810,311 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('cli.missing-flag');
       expect(parsed.error.message).toContain('--task');
+    });
+  });
+
+  describe('sandbox open/close/status', () => {
+    // The orchestrator's half of the judge sandbox: it opens a lease before
+    // handing a worktree to a judge and closes it when the verdict is in.
+    // While one is open, `policy hook` evaluates guardrails.yml's judge-*
+    // rules on top of the six that always apply. The judge itself is refused
+    // all three of these verbs by `judge-sandbox-escape`, which is the only
+    // reason a lease it could lift would mean anything.
+    const openArgs = (worktree: string, leaseDir: string, overrides: string[] = []): string[] => [
+      'sandbox',
+      'open',
+      worktree,
+      '--role',
+      'reviewer',
+      '--task',
+      'epic-1/task-1',
+      '--session',
+      'sess-1',
+      '--at',
+      '2026-08-26T00:00:00.000Z',
+      '--lease-dir',
+      leaseDir,
+      ...overrides,
+    ];
+
+    const worktreeAt = (name: string): string => {
+      const dir = path.join(scratchDir, name);
+      mkdirSync(dir, { recursive: true });
+      return dir;
+    };
+
+    it('opens a lease, prints it, and refuses a second one on the same worktree', () => {
+      const leaseDir = path.join(scratchDir, 'leases-open');
+      const worktree = worktreeAt('sandbox-open-wt');
+
+      const first = runCli(openArgs(worktree, leaseDir));
+      expect(first.status).toBe(0);
+      expect(JSON.parse(first.stdout)).toEqual({
+        worktreeDir: worktree,
+        role: 'reviewer',
+        taskId: 'epic-1/task-1',
+        sessionId: 'sess-1',
+        openedAt: '2026-08-26T00:00:00.000Z',
+      });
+
+      // Two judges in one worktree means the second one's writes land inside
+      // the first one's lease and neither verdict can be trusted; the
+      // orchestrator's answer is a second worktree, so this is an error.
+      const second = runCli(openArgs(worktree, leaseDir, ['--role', 'verifier']));
+      expect(second.status).toBe(1);
+      const failure = JSON.parse(second.stdout);
+      expect(failure.error.code).toBe('sandbox.already-open');
+      expect(failure.error.message).toContain('reviewer');
+    });
+
+    it('requires the role, task and session a denial has to be able to name', () => {
+      const leaseDir = path.join(scratchDir, 'leases-flags');
+      const worktree = worktreeAt('sandbox-flags-wt');
+      const { stdout, status } = runCli(['sandbox', 'open', worktree, '--lease-dir', leaseDir]);
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.error.code).toBe('cli.missing-flag');
+      expect(parsed.error.message).toContain('--role');
+    });
+
+    it('lists every open lease, and resolves the one covering a subdirectory', () => {
+      const leaseDir = path.join(scratchDir, 'leases-status');
+      const worktree = worktreeAt('sandbox-status-wt');
+      const deep = path.join(worktree, 'factory', 'orchestrator');
+      mkdirSync(deep, { recursive: true });
+      runCli(openArgs(worktree, leaseDir));
+
+      const all = JSON.parse(runCli(['sandbox', 'status', '--lease-dir', leaseDir]).stdout);
+      expect(all.sandboxes).toHaveLength(1);
+      expect(all.sandboxes[0].taskId).toBe('epic-1/task-1');
+
+      // The question the hook actually asks: not "is this exact path leased"
+      // but "would a command run here be judged", which a `cd` must not change.
+      const scoped = JSON.parse(
+        runCli(['sandbox', 'status', '--worktree', deep, '--lease-dir', leaseDir]).stdout,
+      );
+      expect(scoped.sandbox.worktreeDir).toBe(worktree);
+    });
+
+    it('reports no lease, rather than failing, for a worktree nobody is judging', () => {
+      const leaseDir = path.join(scratchDir, 'leases-empty');
+      const { stdout, status } = runCli([
+        'sandbox',
+        'status',
+        '--worktree',
+        worktreeAt('sandbox-unleased-wt'),
+        '--lease-dir',
+        leaseDir,
+      ]);
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout).sandbox).toBeNull();
+    });
+
+    it('closes a lease, and closing one that is already closed is not a failure', () => {
+      // Cleanup runs after a judge that crashed just as much as after one that
+      // finished; making "already closed" an error would turn tidying up into
+      // a second failure to handle.
+      const leaseDir = path.join(scratchDir, 'leases-close');
+      const worktree = worktreeAt('sandbox-close-wt');
+      runCli(openArgs(worktree, leaseDir));
+
+      const first = runCli(['sandbox', 'close', worktree, '--lease-dir', leaseDir]);
+      expect(first.status).toBe(0);
+      expect(JSON.parse(first.stdout).closed).toBe(true);
+
+      const second = runCli(['sandbox', 'close', worktree, '--lease-dir', leaseDir]);
+      expect(second.status).toBe(0);
+      expect(JSON.parse(second.stdout).closed).toBe(false);
+    });
+  });
+
+  describe('policy check', () => {
+    // The operator-facing half of the same rules the hook applies: it answers
+    // "would this be refused, and why" without having to stage a judge and
+    // trip the guard for real.
+    it('reports a command that trips no rule as allowed', () => {
+      const { stdout, status } = runCli(['policy', 'check', '--command', 'echo hi']);
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout).allowed).toBe(true);
+    });
+
+    it('names the rule and exits 1 for a command a rule denies', () => {
+      const { stdout, status } = runCli([
+        'policy',
+        'check',
+        '--command',
+        'wrangler deploy',
+        '--branch',
+        'feature',
+      ]);
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.allowed).toBe(false);
+      expect(parsed.violations[0].ruleId).toBe('deploy-command');
+    });
+
+    it('applies the judge rules under a hypothetical --sandbox role, and not without one', () => {
+      const denied = runCli([
+        'policy',
+        'check',
+        '--command',
+        'curl https://example.com',
+        '--sandbox',
+        'reviewer',
+        '--branch',
+        'feature',
+      ]);
+      expect(denied.status).toBe(1);
+      const parsed = JSON.parse(denied.stdout);
+      expect(parsed.violations[0].ruleId).toBe('judge-network');
+      expect(parsed.violations[0].reason).toContain('reviewer');
+
+      // The property that matters is not "a judge is refused" but "only a
+      // judge is refused": the same command from a coder session is ordinary.
+      const allowed = runCli([
+        'policy',
+        'check',
+        '--command',
+        'curl https://example.com',
+        '--branch',
+        'feature',
+      ]);
+      expect(allowed.status).toBe(0);
+      expect(JSON.parse(allowed.stdout).allowed).toBe(true);
+    });
+
+    it('picks up a real lease over its own cwd from the lease directory', () => {
+      // Without --sandbox the lease is resolved the way the hook resolves it,
+      // so `policy check` from a judge's worktree answers what that judge would
+      // actually be told. The test process stands at the repo root, so a lease
+      // opened there is the one covering this call.
+      const leaseDir = path.join(scratchDir, 'leases-policy-check');
+      runCli([
+        'sandbox',
+        'open',
+        REPO_ROOT,
+        '--role',
+        'verifier',
+        '--task',
+        'epic-1/task-9',
+        '--session',
+        'sess-9',
+        '--lease-dir',
+        leaseDir,
+      ]);
+      try {
+        const { stdout, status } = runCli([
+          'policy',
+          'check',
+          '--command',
+          'git add -A',
+          '--branch',
+          'feature',
+          '--lease-dir',
+          leaseDir,
+        ]);
+        expect(status).toBe(1);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.violations[0].ruleId).toBe('judge-write');
+        expect(parsed.violations[0].reason).toContain('verifier');
+      } finally {
+        runCli(['sandbox', 'close', REPO_ROOT, '--lease-dir', leaseDir]);
+      }
+    });
+  });
+
+  describe('policy hook', () => {
+    // `policy hook` is what `.claude/hooks/guard.sh` execs into for every
+    // PreToolUse call. Its contract with the shim is exit-code-driven: exit 0
+    // means a decision was reached, carrying a deny envelope on stdout or
+    // nothing at all, and anything the shim must treat as "could not evaluate
+    // this, fail closed" — a payload that does not even parse as JSON, here —
+    // has to leave via a non-zero exit instead. This is the regression test for
+    // that split: guard.sh's own predecessor (`extract_field`, BSD-sed-broken
+    // — see guard.sh's header) read an unparseable/unmatched payload as "no
+    // tool_name", which was indistinguishable from "nothing to inspect", and
+    // silently allowed. This must never look like an allow again.
+    it('fails the process, not the decision, on a payload that does not parse as JSON', () => {
+      const { stdout, status } = runCli(['policy', 'hook'], undefined, 'not json at all');
+      expect(status).not.toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.error).toBeDefined();
+      expect(stdout).not.toContain('"permissionDecision"');
+    });
+
+    // An explicit `permissionDecision: "allow"` from a PreToolUse hook tells
+    // Claude Code to skip the permission system for that call — it outranks
+    // the operator's own `permissions.deny` globs and suppresses the approval
+    // prompt. Emitting one for every command guardrails.yml does not match
+    // would hand out a far wider grant than the hook this replaces ever had,
+    // so "no rule fired" must leave stdout empty: the protocol's "no opinion,
+    // use the normal permission flow". Asserted here rather than filtered in
+    // guard.sh so a regression fails a test instead of being absorbed by
+    // plumbing.
+    it('stays silent, granting nothing, for a well-formed payload that trips no rule', () => {
+      const payload = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo hi' } });
+      const { stdout, status } = runCli(['policy', 'hook'], undefined, payload);
+      expect(status).toBe(0);
+      expect(stdout.trim()).toBe('');
+    });
+
+    // guard.sh always execs the MAIN clone's dist/cli.js, but the session
+    // issuing the command is routinely inside a per-task git worktree on a
+    // different branch. Resolving the branch from this binary's own checkout
+    // would therefore judge the wrong ref — and the case that hurts is a real
+    // one: the merge queue rebases from a worktree standing on
+    // smith/<epic>/integration, a protected branch under rule 5, while the
+    // main clone stands on something else entirely. The payload's `cwd` is
+    // the answer; these two cases differ ONLY in it, so a regression to
+    // checkout-relative detection makes the first one stop denying.
+    // The commit is not incidental: `git rev-parse --abbrev-ref HEAD` fails on
+    // an unborn branch, so a freshly-init'd repo resolves to '' and matches no
+    // protected name — the deny case below would pass for the wrong reason.
+    const initRepoOnBranch = (dir: string, branch: string): string => {
+      mkdirSync(dir, { recursive: true });
+      runOrThrow('git', ['init', '-q', '-b', branch, dir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: dir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: dir });
+      runOrThrow('git', ['commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
+      return dir;
+    };
+
+    it('judges the branch from the payload cwd, not from its own checkout', () => {
+      const dir = initRepoOnBranch(path.join(scratchDir, 'policy-cwd-protected'), 'main');
+      const payload = JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'git push' },
+        cwd: dir,
+      });
+      const { stdout, status } = runCli(['policy', 'hook'], undefined, payload);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('main');
+    });
+
+    it('leaves the same bare push alone when the payload cwd is on a side branch', () => {
+      const dir = initRepoOnBranch(path.join(scratchDir, 'policy-cwd-side'), 'smith/e1/t1');
+      const payload = JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'git push' },
+        cwd: dir,
+      });
+      const { stdout, status } = runCli(['policy', 'hook'], undefined, payload);
+      expect(status).toBe(0);
+      expect(stdout.trim()).toBe('');
+    });
+
+    it('returns a clean deny decision for a well-formed payload that trips a rule', () => {
+      const payload = JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'git push origin main' },
+      });
+      const { stdout, status } = runCli(['policy', 'hook'], undefined, payload);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('BLOCKED');
     });
   });
 });

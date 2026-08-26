@@ -38,7 +38,7 @@
 // instead by the project IdentityChip that every node already carries, which
 // stays correct under pan and zoom.
 import '@vue-flow/core/dist/style.css';
-import { Panel, VueFlow, useVueFlow } from '@vue-flow/core';
+import { Panel, useVueFlow, VueFlow } from '@vue-flow/core';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import Banner from '../components/hds/Banner.vue';

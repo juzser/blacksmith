@@ -15,7 +15,11 @@ describe('budgets.ts', () => {
     const policy = loadBudgetPolicy();
     // Raised from 2,000,000 by operator decision 2026-08-11; see the comment
     // on budgets.yml's `epic.cap_tokens` for the measurement behind it.
-    expect(policy.epic).toEqual({ capTokens: 4_000_000, alarmRatio: 0.7 });
+    expect(policy.epic).toEqual({
+      capTokens: 4_000_000,
+      alarmRatio: 0.7,
+      maxInFlightTasks: null,
+    });
   });
 
   it('loadBudgetPolicy() reads the same file BUDGETS_POLICY_PATH points to', () => {
@@ -29,8 +33,42 @@ describe('budgets.ts', () => {
     // serves a project that shipped no policy, and it should alarm early
     // rather than inherit a ceiling this repo raised for its own reasons.
     // The divergence is documented at DEFAULT_EPIC_CAP_TOKENS. Not a bug.
-    expect(policy.epic).toEqual({ capTokens: 2_000_000, alarmRatio: 0.7 });
+    expect(policy.epic).toEqual({
+      capTokens: 2_000_000,
+      alarmRatio: 0.7,
+      maxInFlightTasks: null,
+    });
     expect(loadBudgetPolicy().epic.capTokens).not.toEqual(policy.epic.capTokens);
+  });
+});
+
+describe('epic.max_in_flight_tasks', () => {
+  // The one field allowed to say "no cap" rather than declare a number, so it
+  // is the one field where an unreadable value could pass for the deliberate
+  // null and silently switch `smith wave check`'s fan-out gate off.
+
+  it('reads a declared number', () => {
+    expect(parseBudgetPolicy('epic:\n  max_in_flight_tasks: 6\n').epic.maxInFlightTasks).toBe(6);
+  });
+
+  it('keeps an explicit null as null, the documented "no fan-out limit"', () => {
+    expect(
+      parseBudgetPolicy('epic:\n  max_in_flight_tasks: null\n').epic.maxInFlightTasks,
+    ).toBeNull();
+  });
+
+  it('treats an absent field as null too, so a policy predating it still parses', () => {
+    expect(parseBudgetPolicy('epic:\n  cap_tokens: 10\n').epic.maxInFlightTasks).toBeNull();
+  });
+
+  it('rejects a value that is neither a number nor null, rather than reading it as null', () => {
+    // `'none'` and `'6'` are both how a human writes this by hand. Read as
+    // null, either would turn the fan-out gate off while the file says it is
+    // on -- the failure mode the other cap fields throw to avoid.
+    expect(() => parseBudgetPolicy('epic:\n  max_in_flight_tasks: none\n')).toThrow(BudgetError);
+    expect(() => parseBudgetPolicy("epic:\n  max_in_flight_tasks: '6'\n")).toThrow(
+      /epic\.max_in_flight_tasks.*"6"/s,
+    );
   });
 });
 

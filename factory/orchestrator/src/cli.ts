@@ -9,7 +9,7 @@ import { type ParsedArgs, parseArgs } from './args.js';
 import { recordReattribution, routeFindings } from './attribution.js';
 import { checkBudgetAlarm } from './budgetAlarm.js';
 import type { TaskBudget } from './budgets.js';
-import { loadBudgetPolicy } from './budgets.js';
+import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import {
   type ClaimedTask,
   loadWorktreePolicy,
@@ -82,9 +82,10 @@ import {
   transitionLesson,
 } from './lessons.js';
 import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
-import { LESSONS_MD_PATH, REPO_ROOT, STATE_DB_PATH } from './paths.js';
+import { LESSONS_MD_PATH, REPO_ROOT, SANDBOX_LEASE_DIR, STATE_DB_PATH } from './paths.js';
 import {
   diffPlans,
+  livePlanTasks,
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
@@ -92,6 +93,13 @@ import {
   validatePlan,
 } from './plan.js';
 import { runPlanQuorum } from './planQuorum.js';
+import {
+  detectCurrentBranch,
+  detectRepoRoot,
+  evaluateCommand,
+  loadGuardrailPolicy,
+  type PolicyContext,
+} from './policy.js';
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
@@ -100,6 +108,13 @@ import { admit, adopt, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { checkRuntime } from './runtime.js';
 import { checkSameMistakeKpi } from './sameMistakeKpi.js';
+import {
+  activeSandboxFor,
+  closeSandbox,
+  listSandboxes,
+  openSandbox,
+  type SandboxLease,
+} from './sandbox.js';
 import { registerProjectInRoadmap, scaffoldProject } from './scaffold.js';
 import { computeProposals, loadSchedulerPolicy, runScheduler } from './scheduler.js';
 import {
@@ -114,6 +129,7 @@ import {
   emitTasksAdded,
   emitWaveAdmitted,
   readAddedTasks,
+  type WaveAdmissionBudget,
 } from './taskEvents.js';
 import type { CheckCommand } from './testgate.js';
 import {
@@ -129,6 +145,12 @@ import {
 } from './usage.js';
 import { applyBatch, pendingBatch, type WaiverBatchDecision } from './waivers.js';
 import {
+  blocksAdmission,
+  checkWaveBudget,
+  type ProposedWaveBudget,
+  type WaveBudgetCheck,
+} from './waveBudget.js';
+import {
   createTaskWorktree,
   listStale,
   RESERVED_TASK_ID,
@@ -142,6 +164,79 @@ function printJson(value: unknown): void {
 
 function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, 'utf8')) as T;
+}
+
+/** A task spec's `budget.tokens` when it is a usable positive number, else null. */
+function declaredTokens(budget: unknown): number | null {
+  if (typeof budget !== 'object' || budget === null) return null;
+  const tokens = (budget as { tokens?: unknown }).tokens;
+  return typeof tokens === 'number' && Number.isFinite(tokens) && tokens > 0 ? tokens : null;
+}
+
+/**
+ * What this wave will cost, task by task, priced from what declared it.
+ *
+ * Plan-declared tasks are priced from livePlanTasks, never `plan.tasks`
+ * (D-126/D-184): a superseded spec lives on in the array under the same
+ * `task_id`, so pricing off the raw list would read whichever copy came first
+ * rather than the one that is in force.
+ *
+ * Two different silences, and they get two different answers.
+ *
+ * A task the plan declares but leaves unpriced comes back `null` — not 0,
+ * because those are opposite claims (0 says "this costs nothing", null says
+ * "nobody said"), and only null makes the wave unverifiable. That refusal is
+ * safe to make because it is also cheap to fix: `task-spec.schema.json`
+ * REQUIRES `budget.tokens`, so a plan reaching here without one never passed
+ * `smith plan validate`, and `wave check` reads its plan with a bare cast
+ * (see claims.ts's `ProposedWaveTask`) rather than re-validating it. The
+ * unpriced spec is the finding.
+ *
+ * A task NO plan declares is the other silence. A follow-up minted by
+ * `findings raise` exists only in the log, which records its claims but never
+ * its budget (D-48/P9-31) — there was never a field for anyone to fill in.
+ * Refusing it would close the factory's own repair path: the follow-up would
+ * be admissible only by hand-editing a plan it was invented precisely to
+ * avoid, which is the same shape of failure as guard.sh's `deny`-on-
+ * unavailable — not safe, only stuck. So the policy prices it instead, at the
+ * coder task cap, which is the most such a task is permitted to spend before
+ * D-29's overrun record fires. That is a real number checked against a real
+ * cap, not a waiver: a wave of ten follow-ups is ten coder caps, and it is
+ * refused when ten of them will not fit.
+ */
+function declaredWaveBudgets(
+  plan: PlanFile,
+  taskIds: readonly string[],
+  policy: BudgetPolicy,
+): ProposedWaveBudget[] {
+  const priced = new Map<string, number | null>(
+    livePlanTasks(plan).map((spec) => [spec.task_id, declaredTokens(spec.budget)]),
+  );
+  // `has` rather than `??`: an id the plan declares at null is unpriced, an id
+  // the plan never mentions at all is log-only. Collapsing them would make the
+  // plan defect above unreportable.
+  return taskIds.map((taskId) => ({
+    taskId,
+    tokens: priced.has(taskId) ? (priced.get(taskId) ?? null) : policy.task.coder.capTokens,
+  }));
+}
+
+/**
+ * The gate's verdict in the log's snake_case shape, written on every admission.
+ *
+ * `override_rationale` is passed only when a human actually overrode a
+ * blocking status, so an admission that simply fit is never recorded as a
+ * decision somebody had to make.
+ */
+function admissionBudget(check: WaveBudgetCheck, rationale?: string): WaveAdmissionBudget {
+  return {
+    status: check.status,
+    cap_tokens: check.capTokens,
+    projected_tokens: check.projectedTokens,
+    wave_tokens: check.waveTokens,
+    headroom_tokens: check.headroomTokens,
+    ...(rationale !== undefined ? { override_rationale: rationale } : {}),
+  };
 }
 
 function requireFlag(flags: Record<string, string>, name: string): string {
@@ -965,21 +1060,63 @@ async function main(): Promise<number> {
     // D-212: the plan has been in hand since the top of this verb, and it is
     // the register that says which of these tasks may not run beside which.
     const result = validateWave(tasks, policy, plan.edges);
+
+    // The epic budget gate, checked after the claim check so a wave that fails
+    // both is still named by the failure an operator can act on first — and so
+    // the claim errors above keep their exact wording. Two separate questions:
+    // `valid` answers "may these run beside each other", `budget` answers "can
+    // this epic afford to start them", and the JSON carries both because a
+    // wave refused for cost is not an invalid wave.
+    //
+    // Upstream of every dispatch on purpose. D-29 rules that the *task* cap
+    // must only record an overrun, because a self-policed cap on work already
+    // running becomes pressure on the work being measured. Wave admission is
+    // the other side of that line: nothing in the wave has been dispatched
+    // yet, so refusing here distorts no work — it decides whether the work
+    // begins.
+    const rationaleFlag = flags['override-rationale'];
+    const rationale = rationaleFlag?.trim() ?? '';
+    if (rationaleFlag !== undefined && rationale === '') {
+      // Mirrors epic.ts's close-refused check (D-43/P9-27): the reason is the
+      // whole point of recording an override, and a blank one would leave the
+      // log saying a human decided this with nothing to say what they decided.
+      throw new SmithError(
+        'cli.blank-override-rationale',
+        'Refusing to admit this wave with a blank --override-rationale: the reason is the whole point of recording the override.',
+        { plan: plan.epic_id },
+      );
+    }
+    const budgetEvents = flags.session
+      ? // D-119: lineage-wide, not this session's own log — an epic's spend is
+        // the sum of every session that worked on it.
+        await readLineageEvents(flags.session as string, eventOptsFromFlags(flags))
+      : [];
+    const budgetPolicy = loadBudgetPolicy(flags['budget-policy']);
+    const budget = checkWaveBudget(
+      budgetEvents,
+      budgetPolicy,
+      declaredWaveBudgets(plan, taskIds, budgetPolicy),
+      { sessionId: flags.session ?? '', epicId: plan.epic_id },
+    );
+    const overridden = rationale !== '' && blocksAdmission(budget.status);
+    const blocked = blocksAdmission(budget.status) && !overridden;
+
     // Log only an admissible wave, and only after it is known to be one:
     // `wave-admitted` is what moves a task to `ready`, so writing it for a
     // wave that just failed its claim-disjointness check would record an
     // admission that never happened. `--dry` asks the question without
     // answering it in the log.
-    if (result.valid && flags.dry !== 'true') {
+    if (result.valid && !blocked && flags.dry !== 'true') {
       await emitWaveAdmitted(
         plan,
         taskIds,
         eventContextFromFlags(flags),
         eventOptsFromFlags(flags),
+        admissionBudget(budget, overridden ? rationale : undefined),
       );
     }
-    printJson(result);
-    return result.valid ? 0 : 1;
+    printJson({ ...result, budget });
+    return result.valid && !blocked ? 0 : 1;
   }
 
   if (namespace === 'new') {
@@ -1476,6 +1613,183 @@ async function main(): Promise<number> {
       scheduledRecheck: flags.recheck === 'true',
     });
     printJson(result);
+    return 0;
+  }
+
+  // The judge sandbox (A3). `worktree fingerprint`/`verify` above detect a
+  // judge that wrote; these three refuse it up front. The orchestrator opens a
+  // lease before handing a worktree to a judge and closes it when the verdict
+  // is in; while one is open, `policy hook` adds guardrails.yml's three
+  // `judge-*` rules to the six that always apply. The judge itself is refused
+  // all three of these verbs by `judge-sandbox-escape` — they are the
+  // orchestrator's, which is the only reason the lease means anything.
+  if (namespace === 'sandbox' && action === 'open') {
+    const [worktreeDir] = requirePositionals(positional, usageFor('sandbox open')) as [string];
+    const lease = openSandbox(
+      {
+        worktreeDir,
+        role: requireFlag(flags, 'role'),
+        taskId: requireFlag(flags, 'task'),
+        sessionId: requireFlag(flags, 'session'),
+        // The clock is read here rather than inside sandbox.ts so the module
+        // stays pinnable by a test — the same reason `openedAt` is an input.
+        openedAt: flags.at ?? new Date().toISOString(),
+      },
+      flags['lease-dir'] ?? SANDBOX_LEASE_DIR,
+    );
+    printJson(lease);
+    return 0;
+  }
+
+  if (namespace === 'sandbox' && action === 'close') {
+    // Exit 0 whether or not a lease was there. Closing is the orchestrator's
+    // cleanup path, and it runs after a judge that crashed just as much as
+    // after one that finished; making "already closed" an error would turn
+    // tidying up into a second failure to handle.
+    const [worktreeDir] = requirePositionals(positional, usageFor('sandbox close')) as [string];
+    const closed = closeSandbox(worktreeDir, flags['lease-dir'] ?? SANDBOX_LEASE_DIR);
+    printJson({ closed, worktreeDir });
+    return 0;
+  }
+
+  if (namespace === 'sandbox' && action === 'status') {
+    // With --worktree: the lease that would bind a command run there, which is
+    // the question the hook asks. Without: every open lease, which is the
+    // question an operator asks when a judge is stuck or a wave died holding
+    // one.
+    const leaseDir = flags['lease-dir'] ?? SANDBOX_LEASE_DIR;
+    if (flags.worktree) {
+      const lease = activeSandboxFor(flags.worktree, leaseDir);
+      printJson({ worktree: flags.worktree, sandbox: lease });
+      return 0;
+    }
+    printJson({ sandboxes: listSandboxes(leaseDir) });
+    return 0;
+  }
+
+  if (namespace === 'policy' && action === 'check') {
+    // Dry run of the guard hook (`policy hook`, below) against one command
+    // line instead of a live PreToolUse payload — "would this be blocked?"
+    // before an agent or operator actually runs it. Branch/repoRoot default
+    // to what the checkout actually is, same as the hook itself resolves
+    // them, so a caller only needs --branch/--tool to ask a hypothetical
+    // ("what if I were on main") rather than the real one.
+    const command = requireFlag(flags, 'command');
+    const toolName = flags.tool ?? 'Bash';
+    // Resolved from the caller's cwd, not from the checkout this binary was
+    // built in: an operator asking "would this be denied?" means from where
+    // they are standing, and in this repo that is routinely a worktree on a
+    // different branch than the main clone. Same reason as `policy hook`
+    // below, which has the stricter version of the problem.
+    const repoRoot = detectRepoRoot(process.cwd());
+    const branch = flags.branch ?? detectCurrentBranch(process.cwd());
+    // Same shape as --branch: without it, the real lease over the caller's cwd,
+    // so `policy check` answers what the hook would actually answer from here.
+    // With it, a hypothetical — "what would a reviewer session be refused?" —
+    // which is how an operator reads the judge rules without having to stage a
+    // judge to read them.
+    const sandbox: SandboxLease | null = flags.sandbox
+      ? {
+          worktreeDir: repoRoot ?? process.cwd(),
+          role: flags.sandbox,
+          taskId: '(hypothetical)',
+          sessionId: '(hypothetical)',
+          openedAt: new Date().toISOString(),
+        }
+      : activeSandboxFor(process.cwd(), flags['lease-dir'] ?? SANDBOX_LEASE_DIR);
+    const decision = evaluateCommand(
+      { toolName, command, branch, repoRoot, sandbox },
+      loadGuardrailPolicy(),
+    );
+    printJson(decision);
+    return decision.allowed ? 0 : 1;
+  }
+
+  if (namespace === 'policy' && action === 'hook') {
+    // The PreToolUse hook body `.claude/hooks/guard.sh` execs into. This
+    // command signals its outcome one of two ways, and the shim (guard.sh)
+    // tells them apart by exit code:
+    //   - a reachable decision: exit 0, one JSON hookSpecificOutput object
+    //     on stdout, `permissionDecision` either "deny" or "allow".
+    //   - could not reach a decision at all: an uncaught throw, left to
+    //     propagate to main()'s top-level catch (exitCode 1).
+    // A malformed payload takes the second path on purpose. guard.sh's own
+    // `extract_field` used to return '' on anything it could not parse,
+    // which read as "no tool_name" and let every rule fall through as a
+    // silent allow — invisibly, since a BSD-vs-GNU `sed` incompatibility
+    // meant this had been happening on every macOS run since Phase 2 (see
+    // guard.sh's header). "cannot parse the input" and "nothing to inspect"
+    // must never look the same again: the first is failure, the second is a
+    // real allow, and only guard.sh's fail-closed handling of a non-zero
+    // exit is allowed to turn "failure" into a denial.
+    const raw = readFileSync(0, 'utf8');
+    const payload = JSON.parse(raw) as {
+      tool_name?: unknown;
+      tool_input?: { command?: unknown };
+      cwd?: unknown;
+    };
+    const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
+    const command =
+      typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '';
+    // Branch and repo root come from where the command would actually run,
+    // which the PreToolUse payload carries as `cwd`. Resolving them from this
+    // binary's own checkout instead would be wrong in the case this factory
+    // spends most of its time in: guard.sh always execs the main clone's
+    // dist/cli.js, while the session issuing the command is usually inside a
+    // per-task git worktree on a different branch. That gap is not academic —
+    // `git rebase` on smith/<epic>/integration is a rule-5 denial, and the
+    // merge queue performs rebases from a worktree standing on exactly that
+    // branch while the main clone stands elsewhere. The old bash hook got
+    // this right for free by running `git rev-parse` in its own inherited
+    // cwd; the port has to ask for it. process.cwd() is the fallback for a
+    // payload without the field (a hand-driven invocation, or an older
+    // client), and a cwd outside any repo resolves to ''/null, which denies
+    // an out-of-bounds `rm` rather than allowing it.
+    const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : process.cwd();
+    const context: PolicyContext = {
+      toolName,
+      command,
+      branch: detectCurrentBranch(cwd),
+      repoRoot: detectRepoRoot(cwd),
+      // Resolved from the same `cwd`, and for the same reason: the lease is
+      // keyed by the worktree a judge was handed, and `cwd` is the only thing
+      // in a PreToolUse payload that says where the command will run. No lease
+      // is the ordinary case and costs one directory read.
+      sandbox: activeSandboxFor(cwd),
+    };
+    const decision = evaluateCommand(context, loadGuardrailPolicy());
+    if (!decision.allowed) {
+      // guard.sh only ever surfaced one reason: each rule below block()ed and
+      // exited immediately on its own match, sequentially, so the first rule
+      // in guard.sh's 1-6 order to fire is the only one an agent ever saw.
+      // evaluateCommand's checks array preserves that same order, so
+      // violations[0] reproduces guard.sh's exact visible behaviour even
+      // though evaluateCommand (policy check's diagnostic output) reports
+      // every rule that tripped, not just the first.
+      const first = decision.violations[0];
+      const reason = first ? first.reason : 'guardrails.yml denied this command.';
+      printJson({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: `BLOCKED: ${reason}`,
+        },
+      });
+      return 0;
+    }
+    // Allow prints NOTHING, on purpose, and this is not a cosmetic choice.
+    // Claude Code reads an explicit `permissionDecision: "allow"` from a hook
+    // as "skip the permission system for this call" — it outranks the
+    // operator's own `permissions.deny` list and suppresses the approval
+    // prompt. A guard hook that emitted it on every command it did not
+    // recognise would therefore not be a guard at all: it would be a blanket
+    // auto-approver for everything outside guardrails.yml's six rules, which
+    // is a strictly wider grant than the hook it replaces ever had. Empty
+    // stdout is the protocol's "no opinion, carry on with the normal
+    // permission flow", which is exactly what this layer means when no rule
+    // fires. The exit code still separates "no opinion" (0, silent) from
+    // "could not decide" (non-zero, and guard.sh turns that into a deny), so
+    // silence here is never load-bearing the way the old hook's was.
     return 0;
   }
 

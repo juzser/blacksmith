@@ -17,7 +17,7 @@ import type { StoredEvent } from '../src/events.js';
 // ---------------------------------------------------------------------------
 
 const POLICY: BudgetPolicy = {
-  epic: { capTokens: 1_000_000, alarmRatio: 0.7 },
+  epic: { capTokens: 1_000_000, alarmRatio: 0.7, maxInFlightTasks: null },
   task: {
     coder: { capTokens: 150_000, capDiffLines: 400 },
     researcher: { capTokens: 60_000 },

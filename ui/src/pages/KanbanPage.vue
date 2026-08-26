@@ -11,18 +11,6 @@
 // (either the selected epic, or "All epics" when chosen from the picker).
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { fetchKanban, fetchOverview, type KanbanColumn, selectableEpics } from '../lib/api.js';
-import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { visibleTaskCount } from '../lib/kanban.js';
-import {
-  ALL_EPICS,
-  EPIC_LIST_UNAVAILABLE,
-  epicOptions,
-  retainedEpic,
-} from '../lib/epicPicker.js';
-import { useBreadcrumb } from '../composables/useBreadcrumb.js';
-import { useProjectContext } from '../composables/useProjectContext.js';
-import { usePoll } from '../composables/usePoll.js';
 import Banner from '../components/hds/Banner.vue';
 import Button from '../components/hds/Button.vue';
 import EmptyState from '../components/hds/EmptyState.vue';
@@ -31,6 +19,13 @@ import Select from '../components/hds/Select.vue';
 import Skeleton from '../components/hds/Skeleton.vue';
 import Toolbar from '../components/hds/Toolbar.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
+import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
+import { useProjectContext } from '../composables/useProjectContext.js';
+import { fetchKanban, fetchOverview, type KanbanColumn, selectableEpics } from '../lib/api.js';
+import { canClaimEmpty } from '../lib/emptyClaim.js';
+import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
+import { visibleTaskCount } from '../lib/kanban.js';
 
 const router = useRouter();
 const route = useRoute();

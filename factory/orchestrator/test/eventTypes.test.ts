@@ -120,6 +120,66 @@ describe('event type lint (P9-37)', () => {
   });
 
   /**
+   * Rule D, and the shape that got past this lint in the factory's own source.
+   * scheduler.ts writes `event_type: eventTypeFor(proposal)` — a call, which
+   * the test above deliberately reads as a runtime string. The difference is
+   * that eventTypeFor's body is right there in the scanned tree, so the three
+   * literals it can return are as fixed as a literal at the property itself.
+   * Treating them as unknowable left them undeclared, apparently unemitted and
+   * missing from the operator's timeline, with every check here green.
+   *
+   * The line reported is the `return`, in the file that defines the helper —
+   * not the call site. That is where a typo would be written, and the helper
+   * is often imported from somewhere else entirely.
+   */
+  it('follows a helper that returns the event type, back to its own return', () => {
+    const dir = fixtureDir({
+      'scheduler.ts': [
+        'function eventTypeFor(proposal: Proposal): string {',
+        "  if (proposal.kind === 'recheck') return 'recheck-proposed';",
+        "  return 'growth-review-due';",
+        '}',
+        '',
+        'export async function run(proposal: Proposal) {',
+        '  await appendEvent({ event_type: eventTypeFor(proposal), payload: {} });',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(scanEventTypeLiterals(dir)).toEqual([
+      { eventType: 'recheck-proposed', file: 'scheduler.ts', line: 2, via: 'eventTypeFor()' },
+      { eventType: 'growth-review-due', file: 'scheduler.ts', line: 3, via: 'eventTypeFor()' },
+    ]);
+  });
+
+  /**
+   * The bound on Rule D. A callback's `return` inside a helper is the
+   * callback's, and a lint that reported it would be answered by writing a
+   * false reason into FREE_EVENT_TYPES — worse than the miss it prevents.
+   */
+  it('does not read a nested callback\u2019s return as the helper\u2019s', () => {
+    const dir = fixtureDir({
+      'nested.ts': [
+        'function kindFor(rows: Row[]): string {',
+        "  const first = rows.find((row) => { return row.state === 'ready'; });",
+        "  return first === undefined ? 'edge-recorded' : 'task-result-recorded';",
+        '}',
+        '',
+        'export async function run(rows: Row[]) {',
+        '  await appendEvent({ event_type: kindFor(rows), payload: {} });',
+        '}',
+        '',
+      ].join('\n'),
+    });
+
+    expect(scanEventTypeLiterals(dir).map((use) => use.eventType)).toEqual([
+      'edge-recorded',
+      'task-result-recorded',
+    ]);
+  });
+
+  /**
    * The assertion that matters. Every literal event type this orchestrator
    * writes is either a taxonomy value or one of the free types named in
    * FREE_EVENT_TYPES with a reason.
@@ -144,6 +204,10 @@ describe('event type lint (P9-37)', () => {
     expect(new Set(uses.map((use) => use.eventType)).size).toBeGreaterThanOrEqual(25);
     expect(uses.some((use) => use.via === 'event_type')).toBe(true);
     expect(uses.some((use) => use.via !== 'event_type')).toBe(true);
+    // P9-22: a rule that finds nothing is indistinguishable from one that
+    // never ran. Rule D is the newest and the most easily broken — its body
+    // spans are found textually — so it says out loud that it still fires.
+    expect(uses.some((use) => use.via.endsWith('()'))).toBe(true);
   });
 
   /**

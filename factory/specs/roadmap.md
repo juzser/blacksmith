@@ -59,7 +59,7 @@ until an epic is tagged here).
 - id: phase-8
 - status: completed
 - epics: []
-- goal: Provider adapters (codex CLI, deepseek API), quorum policy, disagreement analytics, shadow-mode calibration. All four crosscheck.yml quorum_triggers have a host: blocking-finding and same-mistake fire automatically from gate.ts; epic-final-verdict (`smith epic verdict`) and plan-quorum (`smith plan quorum`, critique-only) are operator-invoked. Both providers ship `enabled: false` — opt in per docs/runbooks/providers.md.
+- goal: Provider adapters (codex CLI, deepseek API), quorum policy, disagreement analytics, shadow-mode calibration. All four crosscheck.yml quorum_triggers have a host: blocking-finding and same-mistake fire automatically from gate.ts; epic-final-verdict (`smith epic verdict`) and plan-quorum (`smith plan quorum`, critique-only) are operator-invoked. Both external providers ship `enabled: true` in `mode: shadow` — recorded, gating nothing until an operator promotes one per docs/runbooks/providers.md.
 
 ## Phase 9 — Hardening
 - id: phase-9

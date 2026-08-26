@@ -1079,6 +1079,15 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   // -- hiding the repair itself from the timeline would be the same failure
   // one layer out.
   'finding-obligation-repaired',
+  // The scheduler's three proposals. Architecture §12 has the scheduler
+  // propose and the operator dispose, so the timeline is the only place the
+  // offer is ever made -- drop the row and the proposal is never put to
+  // anyone. They arrive through scheduler.ts eventTypeFor(), a helper return
+  // rather than a literal at the `event_type:` position, which is how all
+  // three stayed off this list without failing the P9-37 lint (Rule D).
+  'recheck-proposed',
+  'maintenance-proposed',
+  'growth-review-due',
 ];
 
 let cachedTaxonomy: Taxonomy | undefined;

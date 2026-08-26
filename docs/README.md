@@ -13,7 +13,10 @@ Read on demand — nothing here is meant to be preloaded (`AGENTS.md`
 | [`standards/agent-constraints.md`](standards/agent-constraints.md) | Per-agent constraint blocks (TDD strictness, coverage floor, severity calibration, budgets, context-window compaction) — source of truth until fully baked into templates | contributor, agent |
 | [`standards/guardrails.md`](standards/guardrails.md) | Hard rules the factory enforces mechanically (secrets, git actions, filesystem, deploy/outbound, CI) — violations are S1 unless stated otherwise | operator, contributor, agent |
 | [`standards/mcp.md`](standards/mcp.md) | The MCP surface every shipped project must declare — stdio by default, read-only tools by default, hard-gated at epic close; rule ids MCP-P1, MCP-T4, … are the contract | operator, contributor, agent |
+| [`guide/operator-loop.md`](guide/operator-loop.md) | The six steps of the operator loop, in the order you meet them: plan, sign off, run, waivers, review the PR, lessons — with the S1–S4 severity contract | operator |
 | [`guide/operator-guide.md`](guide/operator-guide.md) | Deep operator walkthrough: real `smith` commands end to end, gate outcomes, severity/waiver semantics, budget escalation ladder, lesson approval, current limitations | operator |
+| [`guide/dashboard.md`](guide/dashboard.md) | Dashboard tour: the eleven pages and what each answers, how to serve it, why the screenshots are committed e2e fixtures, rebuilding the projection | operator |
+| [`guide/status.md`](guide/status.md) | What is built vs. planned, phase by phase, and the four caveats that matter before you rely on it (no daemon, operator-invoked checks, shadow judges, prompt-level budgets) | operator |
 | [`guide/extending.md`](guide/extending.md) | Contributor guide: add an agent template, change the taxonomy, add a policy, docs-mirror invariants, event-log vs projections, test conventions | contributor |
 | [`runbooks/providers.md`](runbooks/providers.md) | Phase 8 cross-provider judges: Codex/DeepSeek key + auth setup, enabling, shadow-mode calibration procedure, promotion, rollback, cost, security | operator |
 
@@ -35,7 +38,7 @@ Read on demand — nothing here is meant to be preloaded (`AGENTS.md`
 
 | File | Description | Audience |
 |---|---|---|
-| [`../README.md`](../README.md) | What Blacksmith is, quickstart, the operator loop, and the docs map | everyone |
+| [`../README.md`](../README.md) | The landing page: why it exists, the features with screenshots, install, and the `/bs` commands — everything past that is a link, because details that live in two files drift | everyone |
 | [`../INSTALL.md`](../INSTALL.md) | Executable install runbook: requirements, per-platform setup, verification, optional extras, troubleshooting, known platform gaps — written so a Claude Code session can run it end to end | operator, contributor, agent |
 | [`../AGENTS.md`](../AGENTS.md) | The router and operating rules agents read first | agent |
 | [`../CLAUDE.md`](../CLAUDE.md) | Claude Code entry point: routes to `AGENTS.md` for rules and to `INSTALL.md` for the self-install runbook — declares nothing of its own | agent |

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Analytics — design-spec.md §5.8. MetricGrid + 3 charts + rail cards.
 import { computed, onMounted, ref, watch } from 'vue';
-import BarChart from '../components/hds/BarChart.vue';
 import Banner from '../components/hds/Banner.vue';
+import BarChart from '../components/hds/BarChart.vue';
 import Button from '../components/hds/Button.vue';
 import Card from '../components/hds/Card.vue';
 import EmptyState from '../components/hds/EmptyState.vue';
@@ -55,7 +55,9 @@ async function load() {
 onMounted(load);
 watch(project, load);
 
-const throughputTotal = computed(() => (data.value?.throughput ?? []).reduce((s, d) => s + d.completed, 0));
+const throughputTotal = computed(() =>
+  (data.value?.throughput ?? []).reduce((s, d) => s + d.completed, 0),
+);
 const costBuckets = computed(() => data.value?.costByModelTierAndProvider ?? []);
 const avgCostPerTask = computed(() => costPerTask(costBuckets.value));
 const avgCostHint = computed(() =>
@@ -79,7 +81,9 @@ const costByProviderData = computed(() => costPerTaskBy(costBuckets.value, 'prov
 // the card's one claim an operator acts on -- whether a provider agreed --
 // stays inside the layer tsc and vitest actually read (D-255).
 const quorum = computed(() => quorumRows(data.value?.providerAgreement ?? []));
-const throughputLine = computed(() => (data.value?.throughput ?? []).map((d) => ({ label: d.day, value: d.completed })));
+const throughputLine = computed(() =>
+  (data.value?.throughput ?? []).map((d) => ({ label: d.day, value: d.completed })),
+);
 </script>
 
 <template>

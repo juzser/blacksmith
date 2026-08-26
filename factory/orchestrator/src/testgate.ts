@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 import { constants as osConstants } from 'node:os';
-import { SmithError } from './errors.js';
 
-export class TestGateError extends SmithError {}
+// No TestGateError: a command that fails, times out or is killed is a
+// CheckResult with the exit code and the output in it. Throwing would lose
+// exactly the evidence the gate exists to collect.
 
 export interface CheckCommand {
   name: string;

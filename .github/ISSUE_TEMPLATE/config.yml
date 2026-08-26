@@ -1,0 +1,24 @@
+# Two report types must never land in a public issue, and both say so in
+# their own file: SECURITY.md ("Do not open a public issue") and
+# CODE_OF_CONDUCT.md ("Do not report a Code of Conduct concern in a public
+# issue"). Saying it there and nowhere else leaves the one place a reporter
+# actually stands — the issue chooser — silent. These links are that rule,
+# enforced where the decision gets made.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/juzser/blacksmith/security/advisories/new
+    about: >-
+      Opens a private advisory visible only to you and the maintainers. Never
+      a public issue, and never with a credential in it — see SECURITY.md.
+  - name: Report a Code of Conduct concern (private)
+    url: https://github.com/juzser/blacksmith/security/advisories/new
+    about: >-
+      Use the same private channel. A public issue is the wrong place, for
+      the reporter's sake as much as anyone's — see CODE_OF_CONDUCT.md.
+  - name: Read the docs first
+    url: https://github.com/juzser/blacksmith/blob/main/docs/README.md
+    about: >-
+      Every doc in the repo, one line each — including what is built vs. what
+      is Phase 10. If it does not answer you, a feature request is the right
+      form for a question too.

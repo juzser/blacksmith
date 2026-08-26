@@ -1,0 +1,57 @@
+name: Feature request
+description: Propose a capability, a policy change, or a new gate.
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: [`docs/guide/status.md`](https://github.com/juzser/blacksmith/blob/main/docs/guide/status.md)
+        lists what is built and what is Phase 10, and
+        [`docs/guide/extending.md`](https://github.com/juzser/blacksmith/blob/main/docs/guide/extending.md)
+        covers adding agents, policies and taxonomy values — several requests
+        are already a supported extension point rather than a change to the
+        factory.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What goes wrong today, in terms of an operator's actual loop. Not the
+        solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+      description: >-
+        If it touches dispatch, gates or severity, say which contract changes.
+        A change to `factory/policies/*.yml` or `factory/specs/schema/` is a
+        change to what every agent is held to.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Orchestrator / CLI (`smith`)
+        - Gates, severity or waivers
+        - Agent templates or prompts
+        - Dashboard (ui/)
+        - Cross-provider judges
+        - Docs / install
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried or ruled out
+      description: >-
+        Including "this is possible today but awkward, here is how" — that is
+        a useful answer, not a disqualifying one.

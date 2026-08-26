@@ -1,9 +1,9 @@
 # Operator guide
 
-The deep version of the README's usage guide: a full walkthrough with real
-`smith` commands, what each gate outcome means, severity/waiver semantics
-from the operator's chair, budget alarms and the escalation ladder, how
-lessons get approved, and today's limitations.
+The deep version of [the operator loop](operator-loop.md): a full walkthrough
+with real `smith` commands, what each gate outcome means, severity/waiver
+semantics from the operator's chair, budget alarms and the escalation ladder,
+how lessons get approved, and today's limitations.
 
 Every command below was run against a built `factory/orchestrator/dist/cli.js`
 on `main` while writing this doc; flag names and output shapes are copied
@@ -1156,9 +1156,14 @@ rather than silently cutting an identical version.
 ## 7. `smith plan quorum` + `smith epic verdict`
 
 The gate raises its own quorum cases; these two are the ones you invoke.
-Both are no-ops when `crosscheck.yml` has every external provider at
-`enabled: false` (the shipped default) — they cost nothing and decide
-nothing until you opt in (`docs/runbooks/providers.md`).
+Both decide nothing until a provider is promoted: `crosscheck.yml` ships
+`codex` and `deepseek` at `enabled: true` but `mode: shadow`, so each one runs,
+records a `judge-verdict`, and leaves the outcome resting on the native verdict
+alone (`docs/runbooks/providers.md`). They are not free, though: with no
+credentials configured they still run and each records a caught transport
+failure, so a `transportFailureRate` of 1.0 here means "never authenticated",
+not "never invoked". To make them true no-ops, set `enabled: false` in that
+file or pass `SMITH_CROSSCHECK_OFFLINE=1` on the command.
 
 ```bash
 smith plan quorum --epic epic-1 --plan-version 1 \
@@ -1426,19 +1431,25 @@ quality KPI: same-mistake rate should trend to zero.
 
 ## 9. Budget alarms + the escalation ladder
 
-- **Per-epic cap: 2,000,000 tokens** (planner + all workers + judges).
-  Alarm at 70% (1.4M): the planner must re-plan remaining work to fit, or
-  ask you. Epics that can't fit are split into multiple epics at spec time
-  — the cap is never silently extended. Checked by `smith budget alarm`
-  (§9a); until 2026-08-10 nothing checked it at all.
+- **Per-epic cap: 4,000,000 tokens** (planner + all workers + judges),
+  raised from 2,000,000 on 2026-08-11 after the `envkit-mcp-surface` dogfood
+  measured 1,529,963 tokens for its two *smallest* tasks. That raise was an
+  operator decision, recorded beside the number in `budgets.yml` along with
+  what it does not fix. Alarm at 70% (2.8M): the planner must re-plan
+  remaining work to fit, or ask you. Epics that can't fit are split into
+  multiple epics at spec time — the cap is never silently extended. Checked
+  by `smith budget alarm` (§9a); until 2026-08-10 nothing checked it at all.
 - **Per-task caps (coder): 150,000 tokens, ≤400 changed diff lines**
   (excluding lockfiles/generated files). Hitting either is not a failure —
   the coder stops, reports what's done, and the task returns to the planner
   for re-scoping (`budget-exceeded`, no retry at the same scope).
-- **Concurrency: uncapped.** Fan-out is limited by the path-claim graph, not
-  by a worker count: disjoint claims run in parallel, overlapping claims get a
-  dependency edge and run serially. Hundreds of concurrent workers is a
-  supported shape — what bounds cost is the per-epic token cap, not headcount.
+- **Concurrency: uncapped by default.** Fan-out is limited by the path-claim
+  graph, not by a worker count: disjoint claims run in parallel, overlapping
+  claims get a dependency edge and run serially. Hundreds of concurrent workers
+  is a supported shape — what bounds cost is the per-epic token cap, not
+  headcount. Set `epic.max_in_flight_tasks` if you want a wall-clock or
+  rate-limit ceiling of your own (a provider's concurrent-request limit, your
+  laptop's CPU count); it is `null` — off — unless you set it.
 - **Escalation ladder** (never skipped, never looped past its bound):
   1. Bounded retry on the same contract.
   2. 2 failed rounds → escalate model tier automatically (sonnet → opus),
@@ -1892,14 +1903,17 @@ That is the false clean this command exists to refuse.
   events tagged `needs_distillation: true`; turning one into a checkable,
   principle-level statement means dispatching a `scribe` session by hand
   today (`/bs lessons`'s playbook), not an automatic pass.
-- **Cross-provider judges are built but off by default, and two of the
-  four triggers only fire when you run a command.** Phase 8 ships both
+- **Cross-provider judges are built but powerless by default, and two of
+  the four triggers only fire when you run a command.** Phase 8 ships both
   transports (Codex via `codex exec`, DeepSeek via its
   OpenAI-compatible API), the quorum engine, `smith judge run`, and `smith
-  stats providers`. What ships *enabled* is nothing: `crosscheck.yml` still
-  has `codex`/`deepseek` at `enabled: false`, so the factory makes zero
-  external judge calls and judges Claude-only until an operator edits that
-  file (`docs/runbooks/providers.md`). All four `quorum_triggers` now have a
+  stats providers`. What ships with *gating power* is nothing:
+  `crosscheck.yml` has `codex`/`deepseek` at `enabled: true` but
+  `mode: shadow`, so their verdicts are recorded and the factory still
+  decides Claude-only until an operator promotes one to `mode: active`
+  (`docs/runbooks/providers.md`). Enabled is not the same as harmless: with
+  no credentials each case records a caught transport failure rather than
+  making no call at all. All four `quorum_triggers` now have a
   host, but only two are automatic: an S1/S2 finding before it blocks and a
   same-mistake finding, both from `gate.ts`'s `intakeAndDecide()`. The other
   two are operator-invoked — `smith epic verdict` (`epic.ts`) before an

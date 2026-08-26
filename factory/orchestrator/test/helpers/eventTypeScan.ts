@@ -11,9 +11,11 @@
  *   Rule B  a call to a helper whose parameter is named `eventType`, at that
  *           parameter's position (gate.ts's emit(), taskEvents.ts's envelope())
  *   Rule C  either of the above naming a module-level `const X = '...'`
+ *   Rule D  either of the above *calling* a helper, in which case the literals
+ *           that helper's body returns (scheduler.ts's eventTypeFor())
  *
- * Everything else — a variable, a call, a template string — is reported as
- * nothing at all. That is deliberate: `event_type` is a free string at write
+ * Everything else — a variable, a template string, a call to something whose
+ * body is not in the scanned tree — is reported as nothing at all. That is deliberate: `event_type` is a free string at write
  * time on purpose (events.ts:24, projector.ts:23), and this lint only claims
  * the literals, where a typo is both possible and cheap to catch.
  */
@@ -27,7 +29,10 @@ export interface EventTypeUse {
   file: string;
   /** 1-based line of the call site. */
   line: number;
-  /** `event_type` for a property write, otherwise the helper's name. */
+  /**
+   * `event_type` for a property write, a helper's name for a literal passed to
+   * it (Rule B), or `name()` for one returned by it (Rule D).
+   */
   via: string;
 }
 
@@ -127,6 +132,24 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
     writtenBy: 'src',
     reason:
       'D-21 Part 4: repairObligation (findings.ts) correcting a malformed amends_task_ids entry on an amend-pending finding. Not a finding-transitioned event because a repair changes no status, so no finding_status dimension value applies to it; the payload carries its own from_obligation/to_obligation/reason rather than a taxonomy-tagged field.',
+  },
+  {
+    eventType: 'recheck-proposed',
+    writtenBy: 'src',
+    reason:
+      "A scheduler proposal that a merged task be re-checked, from scheduler.ts eventTypeFor(). No dimension declares it because a proposal is not a factory action: architecture \u00a712 has the scheduler propose and the operator dispose, so nothing has happened yet that a gate_event or an error category could describe. It is also the type that proved Rule D was missing \u2014 written through a helper's return value, it was invisible to all three directions of this lint at once.",
+  },
+  {
+    eventType: 'maintenance-proposed',
+    writtenBy: 'src',
+    reason:
+      'A scheduler proposal to bump outdated dependencies, from scheduler.ts eventTypeFor(). Undeclared for the same reason as recheck-proposed: architecture \u00a712 makes proposals wait for an operator tick, so the event records an offer rather than a change. Its payload carries the package list, which is what the timeline row names.',
+  },
+  {
+    eventType: 'growth-review-due',
+    writtenBy: 'src',
+    reason:
+      'The scheduler noting that the growth-review cadence has elapsed, from scheduler.ts eventTypeFor(). Not a gate outcome and not an error \u2014 a clock reached a number \u2014 so no dimension declares it, and per architecture \u00a712 it waits for the operator like the other two proposals.',
   },
 ];
 
@@ -434,6 +457,17 @@ interface Writers {
 }
 
 /**
+ * A named function or arrow, capturing its name and leaving `match.index +
+ * match[0].length - 1` on the `(` of its parameter list. Shared by the two
+ * collectors below so that Rule B and Rule D recognise exactly the same set of
+ * definitions: a shape one of them understood and the other did not would be a
+ * blind spot with no reason behind it, which is the failure this whole file is
+ * about.
+ */
+const FUNCTION_HEADS =
+  /(?:\bfunction\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^>()]*>\s*)?\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;]+?)?=\s*(?:async\s+)?(?:<[^>()]*>\s*)?\()/g;
+
+/**
  * Helpers that take the event type positionally, derived from the source being
  * scanned rather than hand-listed here — a hand-listed set of writers is the
  * same drift this lint exists to catch, one level down.
@@ -449,8 +483,7 @@ function collectWriters(files: ParsedFile[]): Writers {
   const byFile = new Map<string, Map<string, number | null>>();
   const exported = new Map<string, number>();
   const sites = new Set<string>();
-  const heads =
-    /(?:\bfunction\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^>()]*>\s*)?\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;]+?)?=\s*(?:async\s+)?(?:<[^>()]*>\s*)?\()/g;
+  const heads = FUNCTION_HEADS;
 
   for (const { file, tokens } of files) {
     const local = new Map<string, number | null>();
@@ -480,6 +513,231 @@ function collectWriters(files: ParsedFile[]): Writers {
   return { byFile, exported, sites };
 }
 
+interface ReturnedLiteral {
+  eventType: string;
+  /**
+   * The DEFINING file and the line of the `return` — not the call site. That
+   * is where the typo would be, and the helper may be imported from elsewhere.
+   */
+  file: string;
+  line: number;
+}
+
+interface Returners {
+  /** Per file: every helper defined there, `null` when it returns no literal. */
+  byFile: Map<string, Map<string, ReturnedLiteral[] | null>>;
+  /** Exported helpers, visible to the files that import them. */
+  exported: Map<string, ReturnedLiteral[]>;
+}
+
+/** A half-open `[start, end)` slice of a file's code. */
+interface Range {
+  start: number;
+  end: number;
+}
+
+/** A function head with the span of its body, or `null` for a bodiless head. */
+interface HeadSpan {
+  name: string;
+  exported: boolean;
+  body: (Range & { kind: 'block' | 'expression' }) | null;
+}
+
+/**
+ * Where a head's body begins, given the offset of its parameter list's `)`.
+ *
+ * Angle depth is tracked because the return-type annotation sits between the
+ * two, and `Promise<{ proposals: SchedulerProposal[] }>` puts a `{` in front
+ * of the real one. A concise arrow (`=> expr`) has no brace at all, so its
+ * whole expression is the return.
+ */
+function bodyStart(
+  { code, masked }: Tokenized,
+  close: number,
+): { kind: 'block' | 'expression'; at: number } | null {
+  let angle = 0;
+  for (let i = close + 1; i < code.length; i += 1) {
+    if (masked[i]) continue;
+    const ch = code.charAt(i);
+    if (ch === '=' && code.charAt(i + 1) === '>') {
+      let j = i + 2;
+      while (j < code.length && /\s/.test(code.charAt(j))) j += 1;
+      return { kind: code.charAt(j) === '{' ? 'block' : 'expression', at: j };
+    }
+    if (ch === '<') angle += 1;
+    else if (ch === '>') angle = Math.max(0, angle - 1);
+    else if (ch === '{' && angle === 0) return { kind: 'block', at: i };
+    // An overload signature or an interface member: declared, never a body.
+    else if (ch === ';' && angle === 0) return null;
+  }
+  return null;
+}
+
+/** Every function head in one file, with the span of its body. */
+function headSpans({ tokens }: ParsedFile): HeadSpan[] {
+  const spans: HeadSpan[] = [];
+  for (const match of tokens.code.matchAll(FUNCTION_HEADS)) {
+    if (tokens.masked[match.index]) continue;
+    const name = match[1] ?? match[2];
+    if (name === undefined) continue;
+    const open = match.index + match[0].length - 1;
+    const close = matchDelimiter(tokens, open);
+    const start = close === -1 ? null : bodyStart(tokens, close);
+    const exported = /\bexport\s+$/.test(
+      tokens.code.slice(Math.max(0, match.index - 16), match.index),
+    );
+    if (start === null) {
+      spans.push({ name, exported, body: null });
+      continue;
+    }
+    const end =
+      start.kind === 'block' ? matchDelimiter(tokens, start.at) : expressionEnd(tokens, start.at);
+    spans.push({
+      name,
+      exported,
+      body:
+        end === -1
+          ? null
+          : { kind: start.kind, start: start.kind === 'block' ? start.at + 1 : start.at, end },
+    });
+  }
+  return spans;
+}
+
+/**
+ * A function head of ANY kind, named or not: `=>` and the `(` of a `function`
+ * expression's parameter list. FUNCTION_HEADS deliberately requires a name,
+ * because Rule B needs one to match a call site against; the bodies Rule D has
+ * to step over have no such luxury — `rows.find((row) => …)` is the ordinary
+ * shape of a callback, and it is anonymous.
+ */
+const NESTED_HEADS = /=>|\bfunction\b\s*\*?\s*(?:[A-Za-z_$][\w$]*\s*)?(?:<[^>()]*>\s*)?\(/g;
+
+/**
+ * Every nested function body inside `[start, end)`, outermost only.
+ *
+ * A `return` inside a callback is the callback's, not the enclosing helper's.
+ * Harvesting it would report `rows.find((row) => { return row.ready; })`'s
+ * literals as event types, and the way that gets answered under deadline is a
+ * false reason written into FREE_EVENT_TYPES — which is worse than the miss,
+ * because a reason is how this file distinguishes a decision from a bug.
+ */
+function nestedBodies(tokens: Tokenized, start: number, end: number): Range[] {
+  const { code, masked } = tokens;
+  const ranges: Range[] = [];
+
+  for (const match of code.slice(start, end).matchAll(NESTED_HEADS)) {
+    const at = start + match.index;
+    if (masked[at]) continue;
+    if (ranges.some((range) => at >= range.start && at < range.end)) continue;
+
+    let body: { kind: 'block' | 'expression'; at: number } | null;
+    if (match[0] === '=>') {
+      let j = at + 2;
+      while (j < end && /\s/.test(code.charAt(j))) j += 1;
+      body = { kind: code.charAt(j) === '{' ? 'block' : 'expression', at: j };
+    } else {
+      body = bodyStart(tokens, at + match[0].length - 1);
+    }
+    if (body === null) continue;
+
+    const close =
+      body.kind === 'block' ? matchDelimiter(tokens, body.at) : expressionEnd(tokens, body.at);
+    if (close !== -1) ranges.push({ start: at, end: close });
+  }
+  return ranges;
+}
+
+/**
+ * Rule D's source: helpers whose body RETURNS an event-type literal.
+ *
+ * Rule B follows a literal handed *to* a helper. This is the mirror shape — a
+ * helper handing one *back* — and it is the one that got past this lint in the
+ * factory's own source. scheduler.ts writes `event_type: eventTypeFor(proposal)`,
+ * a call expression, which Rule A reads as a runtime string and reports as
+ * nothing; its three literals were therefore undeclared, unemitted as far as
+ * every check here could see, and missing from the operator's timeline, while
+ * this file's own "actually sees the writes it claims to lint" test stayed
+ * green. A lint's escape hatch is the first place to look for what it missed.
+ *
+ * Returns nested inside another function are excluded: a callback returning
+ * `'ok'` inside a helper that returns event types is not an event type, and a
+ * lint that reports it would be answered by writing a false reason into
+ * FREE_EVENT_TYPES — a worse outcome than the miss.
+ */
+function collectReturners(files: ParsedFile[], constants: Map<string, string>): Returners {
+  const byFile = new Map<string, Map<string, ReturnedLiteral[] | null>>();
+  const exported = new Map<string, ReturnedLiteral[]>();
+
+  for (const parsed of files) {
+    const { file, tokens, starts } = parsed;
+    const local = new Map<string, ReturnedLiteral[] | null>();
+    byFile.set(file, local);
+    const spans = headSpans(parsed);
+
+    for (const span of spans) {
+      if (span.body === null) {
+        if (!local.has(span.name)) local.set(span.name, null);
+        continue;
+      }
+      const { kind, start, end } = span.body;
+      const nested = nestedBodies(tokens, start, end);
+      const inNested = (offset: number): boolean =>
+        nested.some((range) => offset >= range.start && offset < range.end);
+
+      const literals: ReturnedLiteral[] = [];
+      const scanExpression = (from: number): void => {
+        const expression = tokens.code.slice(from, expressionEnd(tokens, from));
+        for (const eventType of literalsIn(expression, constants)) {
+          literals.push({ eventType, file, line: lineAt(starts, from) });
+        }
+      };
+      // A concise arrow's whole body IS its return, and it owns no `return`
+      // keyword to find. A block body's returns are the ones it owns directly.
+      if (kind === 'expression') {
+        scanExpression(start);
+      } else {
+        for (const match of tokens.code.slice(start, end).matchAll(/\breturn\b/g)) {
+          const at = start + match.index;
+          if (tokens.masked[at] || inNested(at)) continue;
+          scanExpression(at + match[0].length);
+        }
+      }
+
+      local.set(span.name, literals.length > 0 ? literals : null);
+      if (span.exported && literals.length > 0) exported.set(span.name, literals);
+    }
+  }
+  return { byFile, exported };
+}
+
+/** The returning helpers a single file can reach — local shadows imported, as in writersFor. */
+function returnersFor(
+  file: string,
+  { byFile, exported }: Returners,
+): Map<string, ReturnedLiteral[]> {
+  const local = byFile.get(file) ?? new Map<string, ReturnedLiteral[] | null>();
+  const visible = new Map<string, ReturnedLiteral[]>();
+  for (const [name, literals] of exported) if (!local.has(name)) visible.set(name, literals);
+  for (const [name, literals] of local) if (literals !== null) visible.set(name, literals);
+  return visible;
+}
+
+/** Rule D applied to one expression: what the helpers it calls can return. */
+function returnedLiteralsIn(
+  expression: string,
+  returners: Map<string, ReturnedLiteral[]>,
+): { literal: ReturnedLiteral; via: string }[] {
+  const found: { literal: ReturnedLiteral; via: string }[] = [];
+  for (const match of expression.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const name = match[1];
+    const literals = name === undefined ? undefined : returners.get(name);
+    if (literals === undefined) continue;
+    for (const literal of literals) found.push({ literal, via: `${name}()` });
+  }
+  return found;
+}
+
 /** The helpers a single file can reach: its own, then whatever it imports. */
 function writersFor(file: string, { byFile, exported }: Writers): Map<string, number> {
   const local = byFile.get(file) ?? new Map<string, number | null>();
@@ -504,10 +762,12 @@ export function scanEventTypeLiterals(rootDir: string): EventTypeUse[] {
 
   const constants = collectConstants(files);
   const writers = collectWriters(files);
+  const returners = collectReturners(files, constants);
   const uses: EventTypeUse[] = [];
 
   for (const { file, tokens, starts } of files) {
     const { code, masked } = tokens;
+    const returning = returnersFor(file, returners);
 
     // Rule A + C — `event_type: <expression>`.
     for (const match of code.matchAll(/\bevent_type\s*:/g)) {
@@ -516,6 +776,10 @@ export function scanEventTypeLiterals(rootDir: string): EventTypeUse[] {
       const expression = code.slice(from, expressionEnd(tokens, from));
       for (const eventType of literalsIn(expression, constants)) {
         uses.push({ eventType, file, line: lineAt(starts, match.index), via: 'event_type' });
+      }
+      // Rule D — `event_type: helper(...)`, credited to the helper's own line.
+      for (const { literal, via } of returnedLiteralsIn(expression, returning)) {
+        uses.push({ eventType: literal.eventType, file: literal.file, line: literal.line, via });
       }
     }
 
@@ -532,6 +796,10 @@ export function scanEventTypeLiterals(rootDir: string): EventTypeUse[] {
         if (argument === undefined) continue;
         for (const eventType of literalsIn(argument.text, constants)) {
           uses.push({ eventType, file, line: lineAt(starts, argument.start), via: name });
+        }
+        // Rule D through Rule B — `emit(helper(...))` is the same write.
+        for (const { literal, via } of returnedLiteralsIn(argument.text, returning)) {
+          uses.push({ eventType: literal.eventType, file: literal.file, line: literal.line, via });
         }
       }
     }

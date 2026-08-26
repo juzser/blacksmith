@@ -22,7 +22,9 @@ import type { EventContext } from './findings.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeKind, JudgeRequest, JudgeResult } from './providers/types.js';
 
-export class QuorumError extends SmithError {}
+// No QuorumError: a provider blowing up is a recorded verdict of its own
+// (see the catch below), not an exception that takes the quorum with it.
+// SmithError is still imported -- it is what that catch reads a code from.
 
 export type VerdictValue = 'confirm' | 'refute';
 

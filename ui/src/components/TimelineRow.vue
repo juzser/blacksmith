@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { TimelineEntry } from '../lib/api.js';
-import { iconFor, metaFor, tintFor, titleFor } from '../lib/timelineDisplay.js';
-import { findingStatusTone, severityTone } from '../lib/taxonomy.js';
 import { formatDateTime } from '../lib/format.js';
+import { findingStatusTone, severityTone } from '../lib/taxonomy.js';
+import { iconFor, metaFor, tintFor, titleFor } from '../lib/timelineDisplay.js';
 import Icon from './hds/Icon.vue';
 import Lozenge from './hds/Lozenge.vue';
 import IdentityChip from './IdentityChip.vue';
@@ -40,7 +40,11 @@ const severity = computed(() => {
 });
 const findingStatus = computed(() => {
   const p = props.entry.payload as { finding_status?: string; to_status?: string };
-  return p.finding_status ?? (props.entry.eventType === 'finding-transitioned' ? p.to_status : null) ?? null;
+  return (
+    p.finding_status ??
+    (props.entry.eventType === 'finding-transitioned' ? p.to_status : null) ??
+    null
+  );
 });
 
 // Operator directive 5 (Phase 6b round 3): dispatch_decision is the one
@@ -50,7 +54,10 @@ const dispatchAgent = computed(() => {
   if (props.entry.eventType !== 'dispatch_decision') return null;
   const p = props.entry.payload as { agent_role?: string; model_tier?: string };
   if (!p.agent_role) return null;
-  return { role: p.agent_role, label: p.model_tier ? `${p.agent_role} · ${p.model_tier}` : p.agent_role };
+  return {
+    role: p.agent_role,
+    label: p.model_tier ? `${p.agent_role} · ${p.model_tier}` : p.agent_role,
+  };
 });
 
 // A title is a button only when clicking it can actually take the operator
@@ -59,8 +66,7 @@ const dispatchAgent = computed(() => {
 // route already on screen: the push was a duplicated navigation vue-router
 // discards, under a pointer cursor promising otherwise (D-231).
 const clickable = computed(
-  () =>
-    props.selectable && Boolean(props.entry.taskId) && props.entry.eventType !== 'user_prompt',
+  () => props.selectable && Boolean(props.entry.taskId) && props.entry.eventType !== 'user_prompt',
 );
 </script>
 

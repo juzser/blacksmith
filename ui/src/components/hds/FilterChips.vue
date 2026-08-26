@@ -13,7 +13,10 @@ const emit = defineEmits<{ 'update:modelValue': [string[]]; clear: [] }>();
 
 function toggle(value: string) {
   const on = props.modelValue.includes(value);
-  emit('update:modelValue', on ? props.modelValue.filter((v) => v !== value) : [...props.modelValue, value]);
+  emit(
+    'update:modelValue',
+    on ? props.modelValue.filter((v) => v !== value) : [...props.modelValue, value],
+  );
 }
 </script>
 

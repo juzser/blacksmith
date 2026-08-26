@@ -32,3 +32,16 @@ export const SENSITIVE_PATHS_POLICY_PATH = path.join(
   'policies',
   'sensitive-paths.yml',
 );
+
+/** The guard hook's rule data — read by `smith policy check`/`smith policy hook` (policy.ts). */
+export const GUARDRAILS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'guardrails.yml');
+
+/**
+ * Open judge sandbox leases, one file per worktree (sandbox.ts).
+ *
+ * Under `state/` because a lease is state, not a declaration — and in the
+ * main clone rather than the judge's own worktree, which is the point: a
+ * judge cannot revoke its own guard by deleting a file it is not allowed to
+ * reach.
+ */
+export const SANDBOX_LEASE_DIR = path.join(REPO_ROOT, 'state', 'sandboxes');

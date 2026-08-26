@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import Icon from './Icon.vue';
 import Button from './Button.vue';
+import Icon from './Icon.vue';
 
 const props = withDefaults(
   defineProps<{

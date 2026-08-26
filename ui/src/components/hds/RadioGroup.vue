@@ -4,7 +4,12 @@ export interface RadioOption {
   label: string;
 }
 
-const props = defineProps<{ modelValue: string; options: RadioOption[]; name: string; ariaLabel: string }>();
+const props = defineProps<{
+  modelValue: string;
+  options: RadioOption[];
+  name: string;
+  ariaLabel: string;
+}>();
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 </script>
 

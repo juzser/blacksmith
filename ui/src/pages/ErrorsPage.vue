@@ -4,8 +4,8 @@
 // Dialog, cursor Load more (client-side page-through — errorsPage() has no
 // server cursor yet, flagged in ui/docs/DESIGN.md).
 import { computed, onMounted, ref, watch } from 'vue';
-import BarChart from '../components/hds/BarChart.vue';
 import Banner from '../components/hds/Banner.vue';
+import BarChart from '../components/hds/BarChart.vue';
 import Button from '../components/hds/Button.vue';
 import Card from '../components/hds/Card.vue';
 import Dialog from '../components/hds/Dialog.vue';
@@ -19,7 +19,7 @@ import Skeleton from '../components/hds/Skeleton.vue';
 import Table from '../components/hds/Table.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
-import { fetchErrors, type ErrorsResult } from '../lib/api.js';
+import { type ErrorsResult, fetchErrors } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { errorGroupIcon, severityTone } from '../lib/taxonomy.js';
 
@@ -55,7 +55,9 @@ watch(project, load);
 /** The fetch's own verdict. `!loading` is not it: loading goes false on failure too. */
 const loaded = computed(() => data.value !== null);
 
-const lineData = computed(() => (data.value?.byDay ?? []).map((d) => ({ label: d.day, value: d.count })));
+const lineData = computed(() =>
+  (data.value?.byDay ?? []).map((d) => ({ label: d.day, value: d.count })),
+);
 const barData = computed(() =>
   (data.value?.byClass ?? [])
     .reduce<{ label: string; value: number }[]>((acc, c) => {
@@ -68,7 +70,9 @@ const barData = computed(() =>
 );
 const rows = computed(() => (data.value?.byClass ?? []).slice(0, visibleCount.value));
 const providerDisagreement = computed(() =>
-  (data.value?.byClass ?? []).filter((c) => c.errorGroup === 'judgment' && c.errorClass === 'provider-disagreement'),
+  (data.value?.byClass ?? []).filter(
+    (c) => c.errorGroup === 'judgment' && c.errorClass === 'provider-disagreement',
+  ),
 );
 
 const detailRow = ref<ErrorsResult['byClass'][number] | null>(null);
