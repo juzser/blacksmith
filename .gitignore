@@ -3,6 +3,10 @@ state/
 workspaces/
 .agents/generated/
 agents.lock
+# Scratch git worktrees a subagent creates to work in isolation. They are
+# checkouts of this repo living inside it: tracked, they would commit a copy
+# of the tree into the tree.
+.claude/worktrees/
 
 # dependencies / build
 node_modules/
