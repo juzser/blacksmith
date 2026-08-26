@@ -296,10 +296,11 @@ policy/schema half needs it), and `CI=true` turns the "pnpm not on `PATH`"
 half must not report green. A second job installs Chromium and runs
 `pnpm test:e2e`, uploading the screenshots as a build artifact.
 
-Then take the CLI for a walk — [`README.md`](README.md#first-commands) has
-real, verified `smith` invocations, and
+Then take the CLI for a walk. `smith --help` lists every command and
+namespace; [`docs/guide/operator-loop.md`](docs/guide/operator-loop.md) is the
+short version of what you actually do, and
 [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) is the deep
-walkthrough.
+walkthrough with real invocations and real output.
 
 ---
 

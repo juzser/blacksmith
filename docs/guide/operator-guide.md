@@ -1,9 +1,9 @@
 # Operator guide
 
-The deep version of the README's usage guide: a full walkthrough with real
-`smith` commands, what each gate outcome means, severity/waiver semantics
-from the operator's chair, budget alarms and the escalation ladder, how
-lessons get approved, and today's limitations.
+The deep version of [the operator loop](operator-loop.md): a full walkthrough
+with real `smith` commands, what each gate outcome means, severity/waiver
+semantics from the operator's chair, budget alarms and the escalation ladder,
+how lessons get approved, and today's limitations.
 
 Every command below was run against a built `factory/orchestrator/dist/cli.js`
 on `main` while writing this doc; flag names and output shapes are copied

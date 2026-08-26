@@ -30,11 +30,19 @@ than appearing in it.
 - `INSTALL.md` — the install detail lifted out of the README as an executable
   runbook, written so a Claude Code session can work through it end to end
   when the operator says *"install Blacksmith"*. `CLAUDE.md` declares it.
-- A **Cross-provider checks** section in the README: the four quorum triggers
-  and the fact that nothing polls for two of them, the `enabled`/`mode` dials,
-  how to read `smith stats providers` before a promotion, why one active
-  provider still changes no outcome, and what a judge is shown — a finding's
-  claim, never the file contents and never the diff.
+- Three operator guides carved out of the README, so each one can go deeper
+  than a landing page should: `docs/guide/operator-loop.md` (the six steps you
+  actually perform, plus the S1–S4 severity contract),
+  `docs/guide/dashboard.md` (the eleven pages, what each answers, and why the
+  screenshots are committed e2e fixtures) and `docs/guide/status.md` (built vs.
+  planned per phase, and the four caveats that matter before relying on it).
+  `docs/README.md` indexes all three.
+- The cross-provider judges documented for an operator rather than an
+  implementer, in `docs/runbooks/providers.md`: the four quorum triggers and
+  the fact that nothing polls for two of them, the `enabled`/`mode` dials, how
+  to read `smith stats providers` before a promotion, why one active provider
+  still changes no outcome, and what a judge is shown — a finding's claim,
+  never the file contents and never the diff.
 
 ### Changed
 
@@ -57,10 +65,22 @@ than appearing in it.
   `$id` URIs, `ui/src/assets/brand/black-smith.png`, the `package.json` name,
   and the project slug recorded in existing event logs are paths, contracts or
   data rather than prose.
-- The README leads with the mark, a one-line claim and the dashboard
-  screenshots; `## Installation` is two bullets — self-install or run the
-  runbook yourself — instead of two prose paragraphs. The heading is unchanged
-  because `CONTRIBUTING.md` links `README.md#installation`.
+- **The README is now a landing page, not a manual.** It went from 510 lines
+  to ~220 by moving whole sections into files of their own rather than
+  summarising them twice: the operator loop, the dashboard tour and the phase
+  table each became a guide (see **Added**), the install detail was already in
+  `INSTALL.md`, the cross-provider detail was already in
+  `docs/runbooks/providers.md`, and the safety rules were already in
+  `docs/standards/guardrails.md`. What stayed is what a first-time reader
+  needs: what it is, why it is shaped this way, how to get it running, one
+  screenshot, and a link per topic. The `## First commands` section was
+  dropped outright — `smith --help` is generated from the same `COMMANDS`
+  table the CLI dispatches on, so a hand-copied command list could only drift
+  away from it.
+- Cross-references that pointed into README sections which no longer exist
+  now point at the file that owns the content: `SECURITY.md` → `INSTALL.md`
+  § Known platform gaps, `INSTALL.md` → `smith --help` and the operator
+  guides, `docs/guide/operator-guide.md` → `docs/guide/operator-loop.md`.
 
 ### Known gaps
 

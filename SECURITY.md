@@ -82,8 +82,8 @@ text* and *things that execute*:
   [`factory/policies/budgets.yml`](factory/policies/budgets.yml) are stated to
   agents and counted after the fact; the loop runner does not hard-stop a
   session at the cap.
-- **CI is one Linux runner.** No matrix — see `README.md § Known platform
-  gaps`.
+- **CI is one Linux runner.** No matrix — see
+  [`INSTALL.md`](INSTALL.md#known-platform-gaps) § Known platform gaps.
 
 ## Handling secrets in this repo
 
