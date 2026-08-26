@@ -131,7 +131,24 @@ task:
   # declared numbers are what the gate checks; these are the shape of a
   # reasonable declaration, not a second cap applied on top.
   coder:
-    cap_tokens: 150000
+    cap_tokens: 150000       # Second reader, added 2026-08-26: `smith wave
+                             # check` prices a task that exists only in the
+                             # event log at this number. A follow-up minted by
+                             # `findings raise` has claims but no declared
+                             # budget (D-48/P9-31) — no plan ever had a field
+                             # for one — so the wave's sum would otherwise be
+                             # unverifiable and the follow-up inadmissible,
+                             # which would leave the factory's own repair path
+                             # reachable only by hand-editing the plan the
+                             # follow-up exists to avoid. This is a charge,
+                             # not a waiver: it is the most such a task may
+                             # spend, and a wave of follow-ups is refused when
+                             # that many coder caps will not fit under the
+                             # epic headroom. A task the PLAN declares with no
+                             # `budget.tokens` is a different silence and is
+                             # still refused — the schema requires that field,
+                             # so its absence is a plan that never passed
+                             # `smith plan validate`.
     cap_diff_lines: 400      # excludes lockfiles/generated files
   researcher:
     cap_tokens: 60000

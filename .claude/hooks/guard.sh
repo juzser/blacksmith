@@ -1,174 +1,119 @@
 #!/usr/bin/env bash
-# Blacksmith — PreToolUse guard hook (guardrails.md, S1 unless stated
-# otherwise). Reads a Claude Code PreToolUse hook payload from stdin,
-# inspects Bash tool calls, and denies anything guardrails.md forbids.
+# Blacksmith — PreToolUse guard hook, transport shim.
 #
-# Deliberately pure/portable bash + sed/grep — no external JSON parser
-# dependency, so it runs the same everywhere the hook itself runs.
+# This script is no longer where the guardrails live. It used to be 174
+# lines of bash+sed+grep implementing all six guard-hook rules directly —
+# and, it turns out, doing so unreliably: `extract_field` used a `\|`
+# alternation inside a basic regular expression, a GNU-sed extension that
+# BSD/macOS `sed` (the only `sed` on a stock Mac, no `gsed`) does not
+# support. The substitution silently never matched, `tool_name` extracted as
+# `''`, and every rule below fell through as an allow — on every macOS run,
+# since Phase 2, with no error of any kind. `permissions.deny` in
+# `.claude/settings.json` was the only guard that was ever actually live on
+# this platform. That bug is exactly why the rules were moved off bash and
+# onto data (factory/policies/guardrails.yml) plus tested TypeScript
+# (factory/orchestrator/src/policy.ts,
+# factory/orchestrator/test/policy.test.ts) — not fixed in place, ported.
+#
+# This file is what is left: plumbing. It reads the PreToolUse payload from
+# stdin, hands it to `node dist/cli.js policy hook` unchanged, and relays
+# that command's decision. The one piece of judgment still made here is
+# deliberate and load-bearing: this shim tells apart three outcomes where the
+# old one had two. The bug above got its blast radius from a hook that had
+# exactly one failure mode — quietly allow — for every reason it could fail,
+# from "a rule didn't match" (fine) all the way to "the extractor is broken"
+# (not fine, and indistinguishable from the first at the call site). Here
+# "the policy layer answered allow" (silent), "the policy layer answered
+# deny" (relayed verbatim) and "the policy layer could not answer at all"
+# (escalated to the operator — see `unavailable` below) are three separate
+# code paths, and only the first is silent.
+#
+# Kept in plain, POSIX-portable bash on purpose, and only the constructs
+# actually run and verified on this machine (bash 3.2.57 / BSD userland) — no
+# `\|` inside a basic regex, no GNU-only grep/sed flags, no `realpath`. It no
+# longer inspects the payload or the decision at all, which is the strongest
+# version of that rule: a transport shim that cannot parse its own output
+# correctly is the exact failure this rewrite exists to remove, and this one
+# never parses anything.
 
 set -u
 set -o pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CLI="$REPO_ROOT/factory/orchestrator/dist/cli.js"
+
+# Emits a decision envelope and exits 0 — Claude Code's PreToolUse hook
+# protocol has no separate "error" outcome, only allow/deny/ask, and a
+# decision is expressed on stdout, not via a nonzero exit (block() in the old
+# guard.sh worked the same way).
+decide() {
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$1" "$2"
+  exit 0
+}
+
+# For the three ways the policy layer can be *unavailable* rather than
+# unhappy: dist/cli.js not built, node not on PATH, or the CLI exiting
+# without a decision. None of these is a rule violation — nothing has judged
+# the command either way — so the honest answer is neither "allow" (which is
+# F0's bug exactly: one indistinguishable silent yes for both "no rule
+# matched" and "the matcher is broken") nor "deny".
+#
+# "deny" was what this did first, and it is wrong for a load-bearing reason.
+# A fresh clone has no dist/ at all, so the very first command of INSTALL.md's
+# self-install runbook — `pnpm install` — came back denied, and the runbook
+# could not execute at all. The same trap closes on any `git pull` that
+# touches src/ before a rebuild, because the remedy (`pnpm run build`) is
+# itself a Bash call the hook has just refused. A guard whose failure mode is
+# "the factory cannot start, and cannot be repaired from inside" is not safe,
+# only stuck.
+#
+# "ask" routes to Claude Code's normal permission prompt instead, which keeps
+# every property that matters: nothing is auto-allowed, a human sees each
+# command for as long as the policy layer is down, and an unattended run is no
+# worse off than it was under the hard deny. Rule violations decided by
+# policy.ts are untouched and still hard denies — they are relayed at the
+# bottom of this file and never come through here.
+unavailable() {
+  decide ask "$1"
+}
+
 INPUT="$(cat)"
 
-# --- minimal JSON string-field extractor (no jq/python dependency) --------
-# Pulls the first `"field":"value"` occurrence, unescaping \" -> " and
-# \\ -> \. Good enough for the flat fields this hook reads; it is not a
-# general JSON parser.
-extract_field() {
-  local field="$1"
-  printf '%s' "$INPUT" \
-    | sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\(\(\\\\.\|[^\"\\\\]\)*\)\".*/\1/p" \
-    | head -n1 \
-    | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g'
-}
-
-TOOL_NAME="$(extract_field tool_name)"
-
-# Only Bash tool calls are in scope for this hook.
-if [ "$TOOL_NAME" != "Bash" ]; then
-  exit 0
+if [ ! -f "$CLI" ]; then
+  # dist/cli.js missing means "nobody has run `pnpm run build` yet" (a fresh
+  # clone, or a pull that touched src/ without a rebuild) — the policy layer
+  # cannot be consulted at all, so this escalates rather than guessing.
+  unavailable "Blacksmith's guard hook cannot check this command: its policy layer is not built ($CLI missing). Run 'pnpm run build' to restore automatic checking; until then every command needs your approval."
 fi
 
-COMMAND="$(extract_field command)"
-
-if [ -z "$COMMAND" ]; then
-  exit 0
+if ! command -v node >/dev/null 2>&1; then
+  unavailable "Blacksmith's guard hook cannot check this command: node is not on PATH, so its policy layer cannot run. Until it can, every command needs your approval."
 fi
 
-block() {
-  reason="BLOCKED: $1"
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s"}}\n' "$reason"
-  exit 0
-}
+OUTPUT="$(printf '%s' "$INPUT" | node "$CLI" policy hook)"
+STATUS=$?
 
-current_branch() {
-  git rev-parse --abbrev-ref HEAD 2>/dev/null || printf ''
-}
-
-# Chain-aware subcommand detector. Global flags (including value-taking ones
-# like `-C <path>`) sit between `git` and the subcommand, so we don't try to
-# match position — we require `git` and the subcommand word to appear in the
-# same chain segment (no `;`, `&`, `|` between them). This is intentionally
-# loose (same trade-off as the rm -rf detector below): it can over-match a
-# subcommand word appearing elsewhere in the same segment (e.g. a commit
-# message), but it never under-matches on global-flag placement, which is
-# the security-relevant direction for a deny gate.
-is_git_subcmd() {
-  # $1: subcommand regex (e.g. push, merge, rebase)
-  printf '%s' "$COMMAND" | grep -Eiq "\bgit\b[^;&|]*\b$1\b"
-}
-
-# Chain segment containing `git ... <word>`, used to inspect the destination
-# ref precisely instead of loose substring matching.
-git_segment_for() {
-  printf '%s' "$COMMAND" | tr ';&|' '\n\n\n' | grep -Ei "\bgit\b.*\b$1\b" | head -n1
-}
-
-# Last whitespace-separated token of a command segment, quotes stripped —
-# used to read the destination ref/refspec of a push precisely (last token,
-# or the right-hand side of a <local>:<remote> refspec) rather than a loose
-# substring match that would false-block e.g. `git push origin fix-main-config`.
-last_token() {
-  printf '%s' "$1" | sed -E 's/[[:space:]]+$//' | awk '{print $NF}' | sed -E "s/^[\"']//; s/[\"']\$//"
-}
-
-is_main_or_master_ref() {
-  case "$1" in
-    main|master) return 0 ;;
-    *:main|*:master|*:refs/heads/main|*:refs/heads/master) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-# 1. Push to main/master — destination ref, checked precisely.
-if is_git_subcmd 'push'; then
-  push_seg="$(git_segment_for push)"
-  dest="$(last_token "$push_seg")"
-  if is_main_or_master_ref "$dest"; then
-    block "push to main/master is never allowed from an agent session. Push a side branch and open a PR."
-  fi
-  branch="$(current_branch)"
-  if { [ "$branch" = "main" ] || [ "$branch" = "master" ]; } \
-     && printf '%s' "$push_seg" | grep -Eq 'push([[:space:]]+(origin|upstream))?[[:space:]]*$'; then
-    block "push to main/master is never allowed from an agent session (checked out on $branch)."
-  fi
+if [ "$STATUS" -ne 0 ]; then
+  # `smith policy hook` (cli.ts) always exits 0 when it reaches a decision,
+  # allow or deny — it only exits non-zero when it could not reach one at
+  # all (an unparseable payload, or an unexpected error while evaluating).
+  # That is precisely the case this hook must not treat as "nothing to
+  # inspect, therefore fine": escalate, name the fix, and let a human or a
+  # rebuild resolve it.
+  unavailable "Blacksmith's guard hook cannot check this command: its policy layer exited ${STATUS} instead of returning a decision (dist/ may be stale, or the payload could not be evaluated). Run 'pnpm run build'; if that does not fix it, investigate. Until then every command needs your approval."
 fi
 
-# 2. Force push (--force / --force-with-lease / -f).
-if is_git_subcmd 'push' && printf '%s' "$COMMAND" | grep -Eq -- '(--force(-with-lease)?\b|(^|[[:space:]])-[a-zA-Z]*f[a-zA-Z]*([[:space:]]|$))'; then
-  block "force-push (--force/-f/--force-with-lease) is never allowed from an agent session."
-fi
-
-# 3. Merge into main/master.
-if is_git_subcmd 'merge'; then
-  if printf '%s' "$COMMAND" | grep -Eiq '\bmerge\b.*\b(main|master)\b'; then
-    block "merging into main/master is never allowed from an agent session; the operator merges integration PRs."
-  fi
-  branch="$(current_branch)"
-  if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
-    block "git merge while checked out on $branch is never allowed from an agent session."
-  fi
-fi
-
-# 4. Deploy commands (wrangler deploy/publish, pages publish).
-if printf '%s' "$COMMAND" | grep -Eiq '\bwrangler\b.*\b(deploy|publish)\b' \
-   || printf '%s' "$COMMAND" | grep -Eiq '\bpages\b.*\bpublish\b'; then
-  block "deploy/publish commands require explicit operator approval; never autonomous."
-fi
-
-# 5. History rewrite on a protected branch: main/master, or a shared
-#    smith/<epic>/integration branch (task branches smith/<epic>/<task-id>
-#    with task-id != "integration" are exempt — rebase/amend there is the
-#    sanctioned pre-merge-queue flow, worktree.yml). Branch shape is
-#    smith/<epic>/integration, not bare smith/<epic>: a leaf ref
-#    "smith/<epic>" cannot coexist with "smith/<epic>/<task-id>" refs in
-#    real git (D/F ref conflict) — worktree.yml integration_branch.pattern.
-branch="$(current_branch)"
-if printf '%s' "$branch" | grep -Eq '^smith/[^/]+/integration$|^(main|master)$'; then
-  if is_git_subcmd 'rebase' \
-     || printf '%s' "$COMMAND" | grep -Eiq '\bcommit\b.*--amend\b' \
-     || printf '%s' "$COMMAND" | grep -Eiq '\bfilter-(branch|repo)\b'; then
-    block "history rewrite (rebase/amend/filter-branch) on protected branch '$branch' is never allowed."
-  fi
-fi
-
-# 6. rm -rf (and equivalents) outside workspaces/ or state/ (guardrails.md).
-#    Paths are normalized (repo-root-relative, symlink/`..`-resolved via
-#    `realpath -m` when available) before the prefix check, so both
-#    `rm -rf workspaces/x` and `rm -rf <repo-root>/workspaces/x` pass.
-if printf '%s' "$COMMAND" | grep -Eq '(^|[;&|]|[[:space:]])rm[[:space:]]+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive[[:space:]]+--force|--force[[:space:]]+--recursive)\b'; then
-  REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || printf '')"
-
-  normalize_path() {
-    local p="$1"
-    if command -v realpath >/dev/null 2>&1; then
-      p="$(realpath -m -- "$p" 2>/dev/null || printf '%s' "$p")"
-    fi
-    if [ -n "$REPO_ROOT" ]; then
-      case "$p" in
-        "$REPO_ROOT"/*) p="${p#"$REPO_ROOT"/}" ;;
-        "$REPO_ROOT") p="." ;;
-      esac
-    fi
-    printf '%s' "${p#./}"
-  }
-
-  out_of_bounds=0
-  rm_args="$(printf '%s' "$COMMAND" | grep -Eo 'rm[[:space:]]+[^;&|]*' | head -n1 | sed -E 's/^rm[[:space:]]+//')"
-  for tok in $rm_args; do
-    case "$tok" in
-      -*) continue ;;
-    esac
-    path="$(normalize_path "$tok")"
-    case "$path" in
-      workspaces/*|workspaces|state/*|state) ;;
-      *) out_of_bounds=1 ;;
-    esac
-  done
-  if [ "$out_of_bounds" -eq 1 ]; then
-    block "rm -rf is only allowed inside workspaces/ or state/."
-  fi
+# Relay verbatim. `smith policy hook` prints a deny envelope, or nothing at
+# all when no rule fires — never an allow envelope, because Claude Code reads
+# an explicit allow as "bypass the permission system", which would make this
+# hook a blanket auto-approver for every command outside guardrails.yml (see
+# cli.ts's `policy hook` for the full reasoning). So there is nothing to
+# filter here and this shim does not second-guess the layer that owns the
+# decision: a filter would only hide a regression in it. test/cli.test.ts
+# asserts the silent allow directly, where breaking it fails a test instead
+# of being quietly absorbed by plumbing.
+if [ -n "$OUTPUT" ]; then
+  printf '%s\n' "$OUTPUT"
 fi
 
 exit 0

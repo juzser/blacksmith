@@ -3,6 +3,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['factory/orchestrator/test/**/*.test.ts'],
+    // Builds dist/ once for the whole run — see the file's note for why this
+    // is not a per-file beforeAll any more.
+    globalSetup: ['factory/orchestrator/test/globalSetup.ts'],
     // Refuses an unsupported Node before any test runs — see the file's note.
     setupFiles: ['factory/orchestrator/test/setup.ts'],
     coverage: {

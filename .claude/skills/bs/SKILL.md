@@ -788,7 +788,7 @@ field for field — never invent numbers the query didn't return:
 - **Live agents**: `liveAgents` grouped by role/model/provider,
   `liveAgentCount` as the headline (with `liveAgentCountDelta5m` as a
   ▲/▼ note).
-- **Budget**: `tokensByEpic`, called out as "X% of the 2,000,000-token epic
+- **Budget**: `tokensByEpic`, called out as "X% of the 4,000,000-token epic
   cap" (`budgets.yml`) — flag any epic ≥70% (`budgets.yml` `alarm_ratio`).
   `tokensByEpic` counts recorded spend only, so it is a floor: say "at least
   X%", and run `smith budget alarm <session>` for the projection that prices

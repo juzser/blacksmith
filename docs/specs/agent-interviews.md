@@ -524,6 +524,12 @@ phase-9 daemon?
 > cannot run `git diff` is useless); the wording changes from "read-only
 > tools" to "you never modify the worktree", which is the property actually
 > wanted; and a guard rule enforces it rather than the sentence.
+> Shipped 2026-08-26: `judge-network`, `judge-write` and
+> `judge-sandbox-escape` in `factory/policies/guardrails.yml`, scoped to one
+> worktree by a lease the orchestrator opens (`smith sandbox open`) and the
+> judge itself is refused the verbs to lift. Six of the seven; `researcher`
+> stays outside it, because fetching is its job and it fetches through
+> `WebFetch`/`WebSearch` rather than `Bash`.
 
 **N-11. planner + scribe — unbounded `Write`.** coder and tester write only
 inside their claimed globs, and an out-of-claim edit fails the gate with

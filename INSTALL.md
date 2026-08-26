@@ -137,7 +137,10 @@ support policy:
 - `scripts/check.sh` and `.claude/hooks/guard.sh` are bash scripts, and the
   guard hook is wired into Claude Code as
   `$CLAUDE_PROJECT_DIR/.claude/hooks/guard.sh` (`.claude/settings.json`) —
-  with no bash on `PATH` the safety hook cannot run at all.
+  with no bash on `PATH` the safety hook cannot run at all. The *rules* are no
+  longer the blocker: they moved into TypeScript behind `smith policy hook`,
+  and what is left in bash is a short transport shim. Porting it is the
+  smallest of these three problems, but it is not done.
 - The test gate spawns each check `detached: true` and kills the whole **POSIX
   process group** on timeout (`testgate.ts` `runOne()`, which exists precisely
   because a per-child kill leaked grandchildren). Windows has no equivalent,
@@ -187,6 +190,11 @@ node factory/orchestrator/dist/cli.js --help
 ```
 
 **Expect:** the `smith` usage banner listing the command namespaces.
+
+Until this step has run there is no policy layer for `.claude/hooks/guard.sh`
+to consult, so it escalates every `Bash` call to you for approval rather than
+guessing — a fresh clone prompts more than a built one. The same is true after
+a `git pull` that touches `factory/orchestrator/src/`: rebuild.
 
 ### Step 4 — Run the gate
 

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { BudgetPolicy } from '../src/budgets.js';
 import type { StoredEvent } from '../src/events.js';
-import { checkWaveBudget, inFlightTasks, type ProposedWaveBudget } from '../src/waveBudget.js';
+import {
+  blocksAdmission,
+  checkWaveBudget,
+  inFlightTasks,
+  type ProposedWaveBudget,
+  type WaveBudgetStatus,
+} from '../src/waveBudget.js';
 
 // ---------------------------------------------------------------------------
 // Wave admission's budget gate. budgetAlarm.ts (P9-33) made epic.cap_tokens
@@ -191,5 +197,80 @@ describe('checkWaveBudget', () => {
     });
     expect(check.epicId).toBeNull();
     expect(check.status).toBe('not-applicable');
+  });
+
+  // F0's lesson, in this gate's own terms: the old guard hook had exactly one
+  // outcome -- a silent yes -- for both "no rule matched" and "the matcher is
+  // broken", and that is what gave the bug eight phases to hide in. Here a
+  // session-less check and a checked-and-it-fits check must not answer the
+  // same word, because they are not the same answer.
+  describe('with no session to read the epic’s spend from', () => {
+    const NO_SESSION = { sessionId: '', epicId: 'epic-1' };
+
+    it('is unchecked rather than ok, even for a wave that fits the cap on its own', () => {
+      seq = 0;
+      const check = checkWaveBudget([], POLICY, [proposed('epic-1/task-1', 1_000)], NO_SESSION);
+      expect(check.status).toBe('unchecked');
+      expect(check.detail).toMatch(/--session/);
+    });
+
+    it('reads the epic as unspent, and says so in the numbers as well as the status', () => {
+      seq = 0;
+      // The events are there; without a session id there is no lineage to
+      // attribute them to, so they are not read at all. The zeros are the same
+      // zeros a genuine first wave produces -- the status is what tells them
+      // apart, which is the whole reason it exists.
+      const events = [waveAdmitted('epic-1', ['task-1']), result('task-1', 800_000)];
+      const check = checkWaveBudget(events, POLICY, [proposed('epic-1/task-2', 1_000)], NO_SESSION);
+      expect(check.measuredTokens).toBe(0);
+      expect(check.projectedTokens).toBe(0);
+      expect(check.headroomTokens).toBe(POLICY.epic.capTokens);
+      expect(check.status).toBe('unchecked');
+    });
+
+    it('still refuses a wave whose own declared cost exceeds the whole cap', () => {
+      seq = 0;
+      // Ranked above `unchecked` on purpose: this refusal needs no log to
+      // reach, because no prior spend could make it false.
+      const proposedTasks = [proposed('epic-1/task-1', 1_500_000)];
+      const check = checkWaveBudget([], POLICY, proposedTasks, NO_SESSION);
+      expect(check.waveTokens).toBeGreaterThan(POLICY.epic.capTokens);
+      expect(check.status).toBe('refused');
+    });
+
+    it('still reports an unpriced task as unverifiable', () => {
+      seq = 0;
+      const proposedTasks = [proposed('epic-1/task-1', 1_000), proposed('epic-1/task-2', null)];
+      expect(checkWaveBudget([], POLICY, proposedTasks, NO_SESSION).status).toBe('unverifiable');
+    });
+  });
+});
+
+describe('blocksAdmission', () => {
+  const ALL: WaveBudgetStatus[] = [
+    'ok',
+    'refused',
+    'over-fan-out',
+    'unverifiable',
+    'unchecked',
+    'not-applicable',
+  ];
+
+  it.each(ALL)('has an answer for %s', (status) => {
+    expect(typeof blocksAdmission(status)).toBe('boolean');
+  });
+
+  it('blocks exactly the three statuses that judged the wave and found against it', () => {
+    expect(ALL.filter(blocksAdmission)).toEqual(['refused', 'over-fan-out', 'unverifiable']);
+  });
+
+  it('does not block unchecked, because nothing judged the wave at all', () => {
+    // A session-less `wave check` has no log to write an admission to, so it
+    // is advisory whatever it answers -- blocking it would only stop the
+    // operator who asked before committing to anything. What it must not do is
+    // answer `ok`, which the checkWaveBudget tests above pin down.
+    expect(blocksAdmission('unchecked')).toBe(false);
+    expect(blocksAdmission('not-applicable')).toBe(false);
+    expect(blocksAdmission('ok')).toBe(false);
   });
 });

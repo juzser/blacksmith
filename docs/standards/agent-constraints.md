@@ -183,14 +183,19 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
 
 ## budgets (factory-wide)
 
-- **Per-epic cap: 2,000,000 tokens** (planner + all workers + judges).
-  Alarm at 70% (1.4M): planner must re-plan remaining work to fit or ask.
-  Epics that can't fit are split into multiple epics at spec time.
-- Concurrency: **uncapped** (2026-08-05). Parallelism is bounded by the
-  path-claim graph — disjoint claims fan out, overlapping claims get a
+- **Per-epic cap: 4,000,000 tokens** (planner + all workers + judges).
+  Raised from 2,000,000 by operator decision on 2026-08-11 — the reasoning,
+  and the two things the raise does not fix, sit beside the number in
+  `budgets.yml`. Alarm at 70% (2.8M): planner must re-plan remaining work to
+  fit or ask. Epics that can't fit are split into multiple epics at spec time.
+- Concurrency: **uncapped by default** (2026-08-05). Parallelism is bounded by
+  the path-claim graph — disjoint claims fan out, overlapping claims get a
   dependency edge and run serially — not by a worker count. Hundreds of
   concurrent workers is a supported shape; cost stays bounded by the per-epic
-  token cap above, which fan-out does not increase.
+  token cap above, which fan-out does not increase. `epic.max_in_flight_tasks`
+  exists for an operator who wants a wall-clock or rate-limit bound of their
+  own — a provider's concurrent-request limit, a laptop's CPU count — and is
+  `null` unless they set one. It is not the mechanism that bounds spend.
 - Escalation ladder: after 2 failed rounds on a task, escalate coder
   sonnet → opus **automatically** (logged); after 3, escalate to operator.
 

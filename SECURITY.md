@@ -46,15 +46,25 @@ text* and *things that execute*:
 - **Bypassing a gate.** Anything that lets a task reach the merge queue with
   a failing schema check, a failing test gate, or an unresolved S1/S2 finding.
 - **Judge integrity.** A read-only judge that can mutate the tree it is
-  judging, or influence its own verdict. `smith worktree fingerprint` /
-  `verify` bracket this deliberately.
+  judging, reach the network, or influence its own verdict. The judge sandbox
+  (`smith sandbox`, plus the `judge-*` rules in
+  [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml))
+  refuses those commands up front, and `smith worktree fingerprint` / `verify`
+  bracket the run to catch what a text matcher cannot see. Both halves are
+  stated in
+  [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "The judge
+  sandbox"; a way past *both* is in scope.
 - **Secret leakage.** A credential value reaching the event log, a projection,
   a PR body, a screenshot, or a judge prompt. See
   [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "No secrets
   in outputs".
-- **The guard hook.** `.claude/hooks/guard.sh` and the deny list in
-  `.claude/settings.json` block `push origin main`, force-pushes,
-  history rewriting, and unbounded `rm -rf`. A bypass is in scope.
+- **The guard hook.** `.claude/hooks/guard.sh` — a transport shim over
+  `smith policy hook` — and the deny list in `.claude/settings.json` block
+  pushes to `main`, force-pushes, history rewriting, and unbounded deletion.
+  A bypass is in scope, and so is a shim that fails *open*: when the policy
+  layer cannot answer, the hook escalates to the operator and never emits an
+  `allow` envelope, because a hook's `allow` outranks the operator's own deny
+  list.
 - **The local dashboard.** `smith ui serve` binds a local HTTP server with
   write routes (waivers, lesson approve/reject). Anything that turns it into
   a remote-write surface is in scope.

@@ -1,9 +1,20 @@
 # Guardrails
 
 > Hard rules the factory enforces mechanically — hooks and CI, not trust.
-> Phase 2 ships the enforcement (guard hook + permission config + CI jobs);
-> this document is the contract they implement. Violations are S1
-> ("stop the line") unless stated otherwise.
+> This document is the contract. The data it is enforced from lives in
+> [`factory/policies/guardrails.yml`](../../factory/policies/guardrails.yml)
+> and the matchers in `factory/orchestrator/src/policy.ts`;
+> [`.claude/hooks/guard.sh`](../../.claude/hooks/guard.sh) is a transport
+> shim that pipes each `Bash` tool call into `smith policy hook` and relays
+> the answer. Violations are S1 ("stop the line") unless stated otherwise.
+>
+> To ask what the rules would say about a command without running it:
+> `smith policy check --command '<cmd>'` — exit 1 means denied, and the output
+> names the rule. The matchers read command text, not intent, so they are
+> deliberately loose: they over-refuse at the edges rather than let a real
+> violation through. They live in tested TypeScript rather than as regexes in
+> YAML because the bash predecessor silently allowed everything on macOS for
+> eight phases and no test noticed.
 
 ## Secrets, keys, tokens
 
@@ -57,6 +68,43 @@
   sends, and webhook registrations require operator approval; judges'
   provider API calls are the one exception (read-only judgment, budgeted,
   logged).
+
+## The judge sandbox
+
+Six roles judge work they did not do — grader, reviewer, verifier,
+spec-reviewer, security-reviewer, uiux. Their bodies say "you never modify the
+worktree", and until this shipped that sentence *was* the enforcement. It is
+now backed. They hold `Read, Grep, Glob, Bash` and no `Edit`/`Write`, so
+`Bash` is the only way one of them can change anything — and the hook already
+sits on every `Bash` call.
+
+The orchestrator opens a lease over a worktree before handing it to a judge
+(`smith sandbox open <dir> --role <role> --task <id> --session <id>`) and
+closes it once the verdict is filed. While that lease is open, three further
+S1 rules apply to any command run inside that directory, on top of everything
+above:
+
+| Rule | What it refuses |
+| --- | --- |
+| `judge-network` | Outbound access of any kind — `curl`, `wget`, `gh`, `git fetch`/`clone`, package installs. A judge that cannot verify something records a finding; it does not go and fetch what it is missing. |
+| `judge-write` | Every write except the judge's own verdict, under `state/results/` or `state/artifacts/`. Redirects into the tree, in-place edits, staging, moves, permission changes, editors. If the code needs changing, that is a finding, not an edit. |
+| `judge-sandbox-escape` | `smith sandbox` itself. A lease the leaseholder can lift is not a lease. |
+
+The lease is keyed by worktree path and matched by containment, so stepping
+two directories down stays inside it, and a command in a different worktree is
+untouched — an ordinary coder session in the same repo sees none of these
+rules. `smith sandbox status` lists what is currently open.
+
+`researcher` is deliberately outside the sandbox: fetching is its job, and it
+reaches the network through `WebFetch`/`WebSearch` rather than through `Bash`.
+
+**What this is not.** It is not a container, a seccomp profile, or a read-only
+mount. It reads command text, so a write smuggled through an interpreter
+(`python3 -c`, opening a file for writing) is invisible to it and always will
+be. That is exactly why `smith worktree fingerprint`/`verify` stays in the
+pipeline behind it: the sandbox refuses up front the writes a matcher can see,
+the fingerprint catches after the fact the ones it cannot. Neither half is
+sold as the other.
 
 ## CI
 

@@ -323,7 +323,7 @@ Either edit takes effect on the next case; nothing to restart.
   below frontier-tier pricing (DeepSeek's own published rates at time of
   writing) — cheap enough to run as a shadow-mode judge on every
   `quorum_triggers` case without materially moving the epic token budget
-  (`factory/policies/budgets.yml`'s 2,000,000-token per-epic cap). `raw_usage`
+  (`factory/policies/budgets.yml`'s 4,000,000-token per-epic cap). `raw_usage`
   on each `JudgeResult` (`input_tokens`/`output_tokens`, when the API
   reports them) is available for cost accounting if you want to fold it
   into `smith stats analytics`'s cost-by-provider view later — not wired in

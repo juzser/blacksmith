@@ -416,6 +416,29 @@ export async function emitEdgesRecorded(
 }
 
 /**
+ * What the epic budget gate saw at the moment this wave was admitted, in the
+ * log's own snake_case shape.
+ *
+ * Recorded on every admission, not only on an overridden one. An event log
+ * that carries a record only when a check FAILED cannot answer "was this wave
+ * ever checked?" for the waves that passed — absence would mean both "the
+ * gate said yes" and "no gate ran", which is the same one-yes-for-two-reasons
+ * failure `blocksAdmission` keeps `unchecked` separate from `ok` to avoid.
+ *
+ * `override_rationale` is present only when a human actually overrode a
+ * refusal, so an admission that simply fit is never dressed up as a decision
+ * somebody had to make.
+ */
+export interface WaveAdmissionBudget {
+  status: string;
+  cap_tokens: number;
+  projected_tokens: number;
+  wave_tokens: number;
+  headroom_tokens: number;
+  override_rationale?: string;
+}
+
+/**
  * Record that a wave was admitted. Every id is resolved against the plan and
  * the log's own register BEFORE anything is appended, so a wave naming one
  * task that does not exist is refused whole rather than half-written — a
@@ -428,11 +451,16 @@ export async function emitWaveAdmitted(
   typedIds: string[],
   ctx: TaskEventContext,
   opts: EventOpts = {},
+  budget?: WaveAdmissionBudget,
 ): Promise<StoredEvent> {
   const logged = (await readAddedTasks(ctx, opts)).map((t) => t.taskId);
   const taskIds = typedIds.map((typed) => resolveTaskId(plan, typed, logged));
   return appendEvent(
-    envelope(planScoped(ctx, plan), 'wave-admitted', { epic_id: plan.epic_id, task_ids: taskIds }),
+    envelope(planScoped(ctx, plan), 'wave-admitted', {
+      epic_id: plan.epic_id,
+      task_ids: taskIds,
+      ...(budget ? { budget } : {}),
+    }),
     opts,
   );
 }

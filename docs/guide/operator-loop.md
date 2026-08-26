@@ -89,8 +89,10 @@ arrives with the acceptance-criteria checklist, screenshots (desktop + mobile
 test results and any waivers granted.
 
 **You merge it. Blacksmith never does.** No agent can push to `main`, and that
-is enforced by [`.claude/hooks/guard.sh`](../../.claude/hooks/guard.sh) plus
-branch protection, not by asking nicely.
+is enforced by the policy layer behind
+[`.claude/hooks/guard.sh`](../../.claude/hooks/guard.sh) plus branch
+protection, not by asking nicely. `smith policy check --command '<cmd>'`
+answers what any of it would say, without running the command.
 
 ## 6. Teach it — `/bs lessons`
 

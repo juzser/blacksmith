@@ -1431,19 +1431,25 @@ quality KPI: same-mistake rate should trend to zero.
 
 ## 9. Budget alarms + the escalation ladder
 
-- **Per-epic cap: 2,000,000 tokens** (planner + all workers + judges).
-  Alarm at 70% (1.4M): the planner must re-plan remaining work to fit, or
-  ask you. Epics that can't fit are split into multiple epics at spec time
-  — the cap is never silently extended. Checked by `smith budget alarm`
-  (§9a); until 2026-08-10 nothing checked it at all.
+- **Per-epic cap: 4,000,000 tokens** (planner + all workers + judges),
+  raised from 2,000,000 on 2026-08-11 after the `envkit-mcp-surface` dogfood
+  measured 1,529,963 tokens for its two *smallest* tasks. That raise was an
+  operator decision, recorded beside the number in `budgets.yml` along with
+  what it does not fix. Alarm at 70% (2.8M): the planner must re-plan
+  remaining work to fit, or ask you. Epics that can't fit are split into
+  multiple epics at spec time — the cap is never silently extended. Checked
+  by `smith budget alarm` (§9a); until 2026-08-10 nothing checked it at all.
 - **Per-task caps (coder): 150,000 tokens, ≤400 changed diff lines**
   (excluding lockfiles/generated files). Hitting either is not a failure —
   the coder stops, reports what's done, and the task returns to the planner
   for re-scoping (`budget-exceeded`, no retry at the same scope).
-- **Concurrency: uncapped.** Fan-out is limited by the path-claim graph, not
-  by a worker count: disjoint claims run in parallel, overlapping claims get a
-  dependency edge and run serially. Hundreds of concurrent workers is a
-  supported shape — what bounds cost is the per-epic token cap, not headcount.
+- **Concurrency: uncapped by default.** Fan-out is limited by the path-claim
+  graph, not by a worker count: disjoint claims run in parallel, overlapping
+  claims get a dependency edge and run serially. Hundreds of concurrent workers
+  is a supported shape — what bounds cost is the per-epic token cap, not
+  headcount. Set `epic.max_in_flight_tasks` if you want a wall-clock or
+  rate-limit ceiling of your own (a provider's concurrent-request limit, your
+  laptop's CPU count); it is `null` — off — unless you set it.
 - **Escalation ladder** (never skipped, never looped past its bound):
   1. Bounded retry on the same contract.
   2. 2 failed rounds → escalate model tier automatically (sonnet → opus),

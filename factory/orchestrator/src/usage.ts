@@ -88,8 +88,11 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'wave check',
     positionals: '<plan.json> <task-id>...',
-    flags: `[--dry] ${EVENTS_DIR}`,
-    summary: 'Admit a wave whose claims are disjoint. --dry asks without writing the admission.',
+    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] ${EVENTS_DIR}`,
+    summary:
+      'Admit a wave whose claims are disjoint and whose declared cost fits under the epic ' +
+      'token cap. --dry asks without writing the admission; --override-rationale admits a ' +
+      'refused wave and records the machine verdict beside the human reason.',
   },
   {
     command: 'new',
@@ -245,6 +248,40 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: '--task <task.json> [--policy <file>] [--case <case>] [--epic-tag <tag>...] [--recheck]',
     summary:
       'Compute whether the security reviewer must be dispatched. A fired trigger is not a red.',
+  },
+  {
+    command: 'sandbox open',
+    positionals: '<worktree-dir>',
+    flags: '--role <role> --task <id> --session <id> [--at <iso>] [--lease-dir <dir>]',
+    summary:
+      'Open a judge sandbox over a worktree. While it is open the judge-* rules apply. Exit 1 if one is already open.',
+  },
+  {
+    command: 'sandbox close',
+    positionals: '<worktree-dir>',
+    flags: '[--lease-dir <dir>]',
+    summary: 'Release a judge sandbox. Closing one that is not open is not an error.',
+  },
+  {
+    command: 'sandbox status',
+    positionals: '',
+    flags: '[--worktree <dir>] [--lease-dir <dir>]',
+    summary: 'Open judge sandboxes — all of them, or the one binding commands run in --worktree.',
+  },
+  {
+    command: 'policy check',
+    positionals: '',
+    flags:
+      '--command <cmd> [--tool <name>] [--branch <branch>] [--sandbox <role>] [--lease-dir <dir>]',
+    summary:
+      'Would the guard hook deny this Bash command? Branch and sandbox auto-detect unless given. Exit 1 on deny.',
+  },
+  {
+    command: 'policy hook',
+    positionals: '',
+    flags: '',
+    summary:
+      'The PreToolUse hook body: reads a hook payload from stdin. Prints a deny envelope, or nothing at all when no rule fires. Non-zero exit means it could not decide.',
   },
   {
     command: 'gate run',

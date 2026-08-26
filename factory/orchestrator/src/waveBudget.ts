@@ -36,7 +36,25 @@ export type WaveBudgetStatus =
   | 'refused' // admitting it would cross epic.cap_tokens
   | 'over-fan-out' // max_in_flight_tasks would be exceeded
   | 'unverifiable' // a proposed task declares no budget, so the cost cannot be summed
+  | 'unchecked' // no session, so the epic's spend so far could not be read at all
   | 'not-applicable'; // no epic could be identified for the wave
+
+/**
+ * The statuses that must stop an admission.
+ *
+ * `unchecked` is deliberately not among them, and the distinction is the
+ * whole reason it exists as a separate status rather than being folded into
+ * `ok`. A session-less `wave check` cannot write a `wave-admitted` event in
+ * the first place -- it has no log to write to -- so it is always advisory,
+ * and refusing it would only stop the operator who asked politely before
+ * committing to anything. What it must not do is answer `ok`: that is one
+ * indistinguishable yes for "checked, and it fits" and "never checked", which
+ * is the exact shape of the bug that made the old guard hook allow everything
+ * on macOS for eight phases.
+ */
+export function blocksAdmission(status: WaveBudgetStatus): boolean {
+  return status === 'refused' || status === 'over-fan-out' || status === 'unverifiable';
+}
 
 export interface ProposedWaveBudget {
   taskId: string;
@@ -149,6 +167,15 @@ function okDetail(headroomTokens: number, waveTokens: number, capTokens: number)
   );
 }
 
+function uncheckedDetail(waveTokens: number, capTokens: number): string {
+  return (
+    `${fmt(waveTokens)} tokens declared for this wave fit under the ${fmt(capTokens)} ` +
+    `epic.cap_tokens cap on their own, but no --session was given, so the spend this epic has ` +
+    `already run up could not be read and the real headroom is unknown. Re-run with --session ` +
+    `to have the cap actually checked -- this is not a pass, it is an unasked question.`
+  );
+}
+
 const NOT_APPLICABLE_DETAIL =
   'No epic id was given for this wave, so there is no epic cap to check it against.';
 
@@ -171,12 +198,20 @@ const NOT_APPLICABLE_DETAIL =
  *   3. over-fan-out    -- admitting the wave would put more of the epic's
  *      tasks in flight than epic.max_in_flight_tasks allows.
  *   4. refused         -- admitting the wave would cross epic.cap_tokens.
- *   5. ok              -- otherwise, including an epic's genuine first wave.
+ *      Ranked above `unchecked` on purpose: with no session the epic's prior
+ *      spend reads as zero, so this fires only when the wave's own declared
+ *      cost exceeds the whole cap by itself -- a sound refusal that needs no
+ *      log to reach.
+ *   5. unchecked       -- nothing checkable is wrong, but no session id was
+ *      given, so the epic's spend so far could not be read and the headroom
+ *      the wave was measured against is not the real one.
+ *   6. ok              -- otherwise, including an epic's genuine first wave.
  *
  * An epic on its genuine first wave (checkBudgetAlarm finds no prior event
  * attributing anything to it) reads `measuredTokens: 0, projectedTokens: 0`
  * -- ok if the wave itself fits under the cap, never not-applicable. A fresh
- * epic is not an unreadable one.
+ * epic is not an unreadable one, and neither is a session-less check: that
+ * one is `unchecked`, which is not the same as either.
  */
 export function checkWaveBudget(
   events: readonly StoredEvent[],
@@ -208,8 +243,16 @@ export function checkWaveBudget(
   }
 
   const epicId = options.epicId;
-  const report = checkBudgetAlarm(events, policy, { sessionId: options.sessionId, epicId });
-  const epicCheck = report.epics[0];
+  // No session id means no lineage to read, so checkBudgetAlarm is not asked a
+  // question it cannot answer -- it would fold an empty event list into its
+  // synthetic `*` entry and hand back zeros indistinguishable from a genuine
+  // first wave. The zeros below are the same zeros, but the status that
+  // carries them says which kind they are.
+  const hasSession = options.sessionId.trim().length > 0;
+  const report = hasSession
+    ? checkBudgetAlarm(events, policy, { sessionId: options.sessionId, epicId })
+    : undefined;
+  const epicCheck = report?.epics[0];
   // checkBudgetAlarm emits a synthetic `epicId: '*'` entry exactly when it
   // found no event attributing anything to this epic id (its own comment on
   // the empty-epics-array branch) -- that is this epic's genuine first wave,
@@ -252,6 +295,10 @@ export function checkWaveBudget(
       status: 'refused',
       detail: refusedDetail(projectedTokens, waveTokens, capTokens),
     };
+  }
+
+  if (!hasSession) {
+    return { ...base, status: 'unchecked', detail: uncheckedDetail(waveTokens, capTokens) };
   }
 
   return { ...base, status: 'ok', detail: okDetail(headroomTokens, waveTokens, capTokens) };
