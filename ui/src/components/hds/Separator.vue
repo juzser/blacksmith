@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ orientation?: 'horizontal' | 'vertical' }>(), { orientation: 'horizontal' });
+withDefaults(defineProps<{ orientation?: 'horizontal' | 'vertical' }>(), {
+  orientation: 'horizontal',
+});
 </script>
 
 <template>

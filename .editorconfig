@@ -1,0 +1,25 @@
+# Biome (biome.json) owns formatting for TypeScript and Vue SFCs, and it wins
+# wherever both apply. This file covers everything Biome's `files.includes`
+# does not: the bash gate, the design-gate Python, the policy YAML, the JSON
+# Schemas, and the docs — which is most of what a first-time contributor
+# actually opens.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{py,sh}]
+indent_size = 4
+
+# Markdown: two trailing spaces is a hard line break, so stripping them
+# silently rewrites the rendered document.
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

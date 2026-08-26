@@ -43,7 +43,9 @@ const plotted = computed(() =>
 
 const path = computed(() => {
   if (plotted.value.length < 2) return '';
-  return plotted.value.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  return plotted.value
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+    .join(' ');
 });
 
 const summary = computed(() => {

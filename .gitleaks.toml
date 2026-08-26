@@ -1,0 +1,30 @@
+# Secret-scanning config for the gate that docs/standards/guardrails.md § CI
+# promises. Wired into scripts/check.sh (so local and CI cannot drift) and run
+# in .github/workflows/ci.yml against the full history.
+#
+# Run it yourself:  gitleaks dir . --no-banner --redact
+title = "Blacksmith"
+
+[extend]
+useDefault = true
+
+[[rules]]
+# The default generic-api-key rule is the one that fires here, and it fires on
+# prose, not on credentials: several epic specs quote a deliberately fake token
+# while *specifying* the redaction rule that must catch it. Allowlisting the
+# literal keeps the rule armed for anything else shaped like a key.
+id = "generic-api-key"
+[rules.allowlist]
+description = "Fixture credential named in envkit-mcp spec acceptance criteria"
+regexes = ['''sk-live-0123456789abcdef''']
+
+[allowlist]
+description = "Paths that hold names of secrets, never values"
+paths = [
+  # Variable NAMES only — guardrails.md § Secrets makes this the one
+  # committed env file, and a value landing in it is exactly what the gate
+  # should catch, so it is deliberately NOT allowlisted:
+  #   '''\.env\.example$''',
+  '''pnpm-lock\.yaml$''',
+  '''ui/e2e/__screenshots__/''',
+]

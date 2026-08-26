@@ -43,6 +43,51 @@ than appearing in it.
   to read `smith stats providers` before a promotion, why one active provider
   still changes no outcome, and what a judge is shown — a finding's claim,
   never the file contents and never the diff.
+- **The repository health pass**, which is mostly infrastructure a contributor
+  meets on their first PR:
+  - `.editorconfig` and `.gitattributes`, so the file types here agree on line
+    endings and whitespace before Biome has an opinion about them.
+  - A secret-scanning gate that exists rather than being described:
+    `.gitleaks.toml` allowlisting the one synthetic fixture credential by
+    *literal* rather than by path, so the rule stays armed over the specs that
+    quote it; a `gitleaks dir .` step in `scripts/check.sh`; and a
+    checksum-pinned install in CI (`GITLEAKS_VERSION` + `GITLEAKS_SHA256`, both
+    literal in the workflow, so a swapped release cannot pass quietly).
+    Verified by canary rather than assumed: the AWS key from the vendor docs is
+    stoplisted and finds nothing, a random `ghp_` token trips it.
+  - Coverage thresholds on all three suites, each scoped to the code the suite
+    is about — `factory/orchestrator/src`, `ui/server/src/app.ts`, and
+    `ui/src/lib` minus `api.ts` — and run by `scripts/check.sh`, so the floors
+    are part of the gate rather than a command someone remembers.
+  - `.github/`: three issue-template files (Discussions are off, so the
+    template `config.yml` does not link to them), `dependabot.yml`, and
+    `CODEOWNERS`.
+  - `package.json` metadata a public repo needs (description, keywords,
+    homepage, repository, bugs, author, license, `engines`, `bin`) and the
+    scripts that were only ever in prose: `check`, `format`, `test:watch`, the
+    three coverage variants, and a `prepare` that builds the orchestrator so
+    `smith` works from a fresh clone without a separate build step.
+- `ui/src/lib/waivable.ts` — the "is this finding waivable" rule, extracted so
+  it is unit-tested rather than inlined in a `.vue` file no type-checker reads.
+  `TaskDetailPage.vue` now delegates to it; seven tests cover the S1/S2 refusal
+  and the S3/S4 cases.
+- **Rule D in the P9-37 event-type lint.** The scanner already followed a
+  literal *at* `event_type:` (A), a literal handed *to* an `eventType`
+  parameter (B), and either of those naming a module-level constant (C).
+  Rule D is the mirror of B: a helper handing an event type *back*. Findings
+  are credited to the `return` in the defining file, not to the call site,
+  because that is where the typo would be. Its body spans are found textually
+  and bounded away from nested callbacks' returns, and the suite asserts out
+  loud that the rule still fires — P9-22: a rule that finds nothing is
+  indistinguishable from one that never ran.
+- The scheduler's three proposals — `recheck-proposed`, `maintenance-proposed`,
+  `growth-review-due` — now render on the operator timeline with an icon and a
+  title naming the task, the outdated packages or the cadence, instead of a
+  bare `event_type`. Architecture §12 has the scheduler propose and the
+  operator dispose, so the timeline row *is* the offer being made.
+- `CONTRIBUTING.md` gained a **What the gate does not cover** section and a
+  coverage table; `SECURITY.md` gained the same gap. The one thing the gate
+  structurally cannot check is now written where a contributor will meet it.
 
 ### Changed
 
@@ -81,14 +126,48 @@ than appearing in it.
   now point at the file that owns the content: `SECURITY.md` → `INSTALL.md`
   § Known platform gaps, `INSTALL.md` → `smith --help` and the operator
   guides, `docs/guide/operator-guide.md` → `docs/guide/operator-loop.md`.
+- **Biome now lints `.vue` files**, which it had been configured out of. Three
+  rules stay off for `**/*.vue` and say why in `biome.json`: `noUnusedImports`,
+  `noUnusedVariables` and `useVueMultiWordComponentNames` all misfire when the
+  linter cannot see a template using an import. Twenty-seven components
+  reformatted on the first honest run. A warning for anyone editing that file:
+  it is parsed as strict JSON, and a `//` comment does not error — it silently
+  invalidates the block it sits in, which is how the `overrides` array came to
+  be disabled while the lint reported 112 errors and nobody read the config.
+- The Kanban filter gained a `scheduler` chip; the kind existed in the data and
+  not in the control.
+
+### Fixed
+
+- **Three scheduler event types were invisible to all three directions of the
+  P9-37 lint at once** — undeclared, apparently unemitted, and unseen on the
+  timeline — with every test green. `scheduler.ts` writes
+  `event_type: eventTypeFor(proposal)`, and a call expression at that position
+  was deliberately ignored by every rule the scanner had. Adding Rule D made
+  the first direction fail with exactly those three types; declaring them then
+  made the third fire ("written and never shown"); fixing that produced the
+  timeline rows above. The lint written to catch this class of bug had the
+  bug's own shape as its blind spot.
+- Four exported error classes that nothing ever threw — `ProjectorError`,
+  `GateError`, `QuorumError`, `TestGateError` — are gone, each replaced by a
+  comment saying why its module does not throw. None of the four files contains
+  a single `throw`: a gate failing is a verdict, a failed command is a
+  `CheckResult` carrying the exit code and the output, a provider blowing up is
+  a recorded transport failure, and a record the projector cannot fold is
+  logged and skipped. The classes advertised an error mode that did not exist,
+  and the one-error-class-per-module convention would have kept regrowing them.
+- `docs/standards/guardrails.md` § CI described a gitleaks gate on every PR
+  that did not exist. It exists now (see **Added**), so the line is a
+  description again rather than an intention.
 
 ### Known gaps
 
-- `docs/standards/guardrails.md` describes a gitleaks secret-scanning gate on
-  every PR. `.github/workflows/ci.yml` does not run one. Treat that line as
-  intent, not as an enforced control — see `SECURITY.md`.
 - Budget caps in `factory/policies/budgets.yml` are prompt-level and counted
   after the fact; the loop runner does not hard-stop on them.
+- `.vue` single-file components are neither type-checked nor fully linted.
+  `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
+  and TypeScript 7's native port does not expose one. UI logic lives in
+  `ui/src/lib/*.ts` — checked, linted and unit-tested — to keep the hole small.
 
 ## Phase 10 — Deployment + ops — planned
 

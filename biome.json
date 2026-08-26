@@ -12,6 +12,7 @@
       "ui/server/src/**/*.ts",
       "ui/server/test/**/*.ts",
       "ui/src/**/*.ts",
+      "ui/src/**/*.vue",
       "ui/test/**/*.ts",
       "ui/e2e/**/*.ts",
       "!ui/dist",
@@ -36,5 +37,21 @@
       "semicolons": "always",
       "trailingCommas": "all"
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/*.vue"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedImports": "off",
+            "noUnusedVariables": "off"
+          },
+          "style": {
+            "useVueMultiWordComponentNames": "off"
+          }
+        }
+      }
+    }
+  ]
 }

@@ -10,7 +10,6 @@ import { type CommitCertificate, certifyCommit } from './commit.js';
 import { type CoverageEvidence, collectCoverageEvidence } from './coverage.js';
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from './crosscheck.js';
 import { DiffstatError, measureDiff } from './diffstat.js';
-import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents } from './events.js';
 import {
   type Finding,
@@ -43,7 +42,9 @@ import { taskIdsMatch } from './taskId.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 import { type CheckCommand, type RunResult, run as runTestgate } from './testgate.js';
 
-export class GateError extends SmithError {}
+// No GateError: a gate failing is the gate working. Every outcome here comes
+// back as a verdict the caller records, never as an exception the caller
+// might catch and shrug off. Do not add one back for symmetry.
 
 export interface GateContext {
   sessionId: string;

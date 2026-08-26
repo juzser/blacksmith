@@ -44,7 +44,7 @@
 // built from @vue-flow/core's own useVueFlow() viewport methods (no new
 // dependency); MiniMap is skipped rather than faked.
 import '@vue-flow/core/dist/style.css';
-import { Panel, VueFlow, useVueFlow } from '@vue-flow/core';
+import { Panel, useVueFlow, VueFlow } from '@vue-flow/core';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import Banner from '../components/hds/Banner.vue';
@@ -56,14 +56,9 @@ import Select from '../components/hds/Select.vue';
 import Skeleton from '../components/hds/Skeleton.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
-import { fetchFlow, fetchOverview, type FlowGraph, selectableEpics } from '../lib/api.js';
+import { type FlowGraph, fetchFlow, fetchOverview, selectableEpics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
-import {
-  ALL_EPICS,
-  EPIC_LIST_UNAVAILABLE,
-  epicOptions,
-  retainedEpic,
-} from '../lib/epicPicker.js';
+import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
 import { dependsOnLabel, flowLayoutNodes, planVersionOptions } from '../lib/flowLayout.js';
 import { pluralize, summarize } from '../lib/format.js';
 import { taskStatusTone } from '../lib/taxonomy.js';
@@ -171,7 +166,11 @@ const flowEdges = computed(() => {
       // dark 7.76:1, contrast.py) and is already used for the wave
       // labels on this same page, so edges and labels now read at a
       // consistent, visible weight.
-      style: { strokeDasharray: style.dash, strokeWidth: style.width, stroke: 'var(--ds-text-subtlest)' },
+      style: {
+        strokeDasharray: style.dash,
+        strokeWidth: style.width,
+        stroke: 'var(--ds-text-subtlest)',
+      },
     };
   });
 });

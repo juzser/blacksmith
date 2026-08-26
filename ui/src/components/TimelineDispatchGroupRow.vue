@@ -5,8 +5,8 @@
 // the same column as the rows it holds; a header with its own shape would read
 // as a different kind of thing rather than as several of the rows below it.
 import { computed } from 'vue';
-import type { DispatchGroup } from '../lib/timelineDisplay.js';
 import { formatDateTime, formatTime } from '../lib/format.js';
+import type { DispatchGroup } from '../lib/timelineDisplay.js';
 import Icon from './hds/Icon.vue';
 
 const props = defineProps<{ group: DispatchGroup; expanded: boolean }>();

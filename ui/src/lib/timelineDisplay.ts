@@ -226,6 +226,19 @@ export const KIND_OPTIONS: readonly KindOption[] = [
       'gate-outcome',
     ],
   },
+  // The scheduler's whole output. `smith scheduler run` appends one event per
+  // proposal and dispatches nothing itself (architecture §12), so these three
+  // rows ARE the ask — and until this chip existed they were the only writer
+  // in the factory no chip could select: an operator filtering the log could
+  // see every gate and every dispatch, but not the recheck they were being
+  // asked to approve. Free strings rather than a taxonomy dimension (same
+  // precedent as dispatch_decision), so the test derives the list from
+  // scheduler.ts's eventTypeFor() instead of from taxonomy.yml.
+  {
+    value: 'scheduler',
+    label: 'Scheduler',
+    types: ['recheck-proposed', 'maintenance-proposed', 'growth-review-due'],
+  },
   { value: 'error-logged', label: 'Errors', types: ['error-logged'] },
 ];
 
@@ -278,6 +291,16 @@ export function iconFor(entry: TimelineEntry): string {
     case 'lesson-edited':
     case 'lesson-status-changed':
       return 'graduation-cap';
+    // The scheduler's three proposals. Each gets the icon of the thing it is
+    // proposing rather than one shared "proposal" glyph, because the operator
+    // decides them one at a time and the icon is the first thing that says
+    // which decision this is.
+    case 'recheck-proposed':
+      return 'rotate-cw';
+    case 'maintenance-proposed':
+      return 'refresh-cw';
+    case 'growth-review-due':
+      return 'map';
     default:
       return 'history';
   }
@@ -443,6 +466,34 @@ export function titleFor(entry: TimelineEntry): string {
       return `Lesson edited — ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-status-changed':
       return `Lesson ${String(p.lesson_id ?? '')} — ${String(p.to_status ?? '')}`;
+    // The scheduler writes its proposal object straight through as the
+    // payload, so these read camelCase keys where the rest of this file reads
+    // snake_case — the shape is scheduler.ts's SchedulerProposal, not an
+    // envelope built for the log.
+    //
+    // Each title names what the operator is being asked to decide, because
+    // that is the whole content of the event: architecture §12 has the
+    // scheduler propose and the operator dispose, and a row reading
+    // "recheck-proposed" with no task on it asks a question nobody can answer.
+    case 'recheck-proposed': {
+      const reasons = Array.isArray(p.reasons) ? p.reasons.join(', ') : '';
+      return `Recheck proposed — ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
+    }
+    case 'maintenance-proposed': {
+      const packages = Array.isArray(p.packages) ? p.packages : [];
+      const names = packages
+        .slice(0, 3)
+        .map((entry) => String((entry as Record<string, unknown>).name ?? ''))
+        .filter(Boolean);
+      const rest = packages.length - names.length;
+      const detail =
+        names.length > 0 ? `${names.join(', ')}${rest > 0 ? ` +${rest}` : ''}` : 'none';
+      return `Maintenance proposed — ${packages.length} outdated (${detail})`;
+    }
+    case 'growth-review-due': {
+      const since = p.lastReviewAt ? `, last ${String(p.lastReviewAt).slice(0, 10)}` : '';
+      return `Growth review due — every ${String(p.cadenceDays ?? '?')} days${since}`;
+    }
     default:
       return entry.eventType;
   }

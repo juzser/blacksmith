@@ -73,11 +73,14 @@ text* and *things that execute*:
 
 ## Known gaps, stated rather than papered over
 
-- **Secret scanning is not wired into CI.**
-  [`docs/standards/guardrails.md`](docs/standards/guardrails.md) § CI
-  describes a gitleaks gate on every PR; `.github/workflows/ci.yml` does not
-  run one today. Treat that line as intent, not as an enforced control, and
-  check your own diffs.
+- **`.vue` single-file components are neither type-checked nor fully linted.**
+  `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
+  and this repo runs TypeScript 7's native port, which does not expose one.
+  A template referencing something that does not exist is caught by e2e or
+  not at all. The mitigation is structural: UI logic lives in
+  `ui/src/lib/*.ts`, which is type-checked, linted and unit-tested, and the
+  SFCs stay thin. It still means the dashboard has a lint-shaped hole the
+  orchestrator does not.
 - **Budget caps are prompt-level.** The per-epic and per-task token caps in
   [`factory/policies/budgets.yml`](factory/policies/budgets.yml) are stated to
   agents and counted after the fact; the loop runner does not hard-stop a

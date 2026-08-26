@@ -1,0 +1,19 @@
+# WSL2 is the documented Windows path (INSTALL.md), and scripts/check.sh plus
+# .claude/hooks/guard.sh are read by bash. A CRLF checkout breaks both, so
+# normalise on the way in and check out LF everywhere.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.svg text eol=lf
+
+# 106 committed screenshots under ui/e2e/__screenshots__/ are rendered by
+# Playwright, not written by hand. Keeping them out of diffs and out of the
+# language stats is the difference between a readable PR and a wall of PNGs.
+ui/e2e/__screenshots__/** linguist-generated=true
+
+pnpm-lock.yaml linguist-generated=true merge=binary -diff
+
+# Generated at build time or by `smith` itself; never hand-edited.
+factory/orchestrator/dist/** linguist-generated=true
+.agents/generated/** linguist-generated=true

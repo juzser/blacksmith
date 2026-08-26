@@ -44,7 +44,6 @@ import {
   foldAgents,
   type StaleAgent,
 } from '../agents-registry.js';
-import { SmithError } from '../errors.js';
 import {
   type EventRecord,
   eventTaskId,
@@ -72,7 +71,10 @@ import {
 import { RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
 import * as schema from './schema.js';
 
-export class ProjectorError extends SmithError {}
+// No ProjectorError: the projector never throws. A record it cannot fold in
+// is logged and skipped, because a projection that dies on one bad row is a
+// dashboard that dies on one bad row -- and the event log, not this file, is
+// the thing that has to survive. Do not add one back for symmetry.
 
 export type SmithDb = BetterSQLite3Database<typeof schema>;
 

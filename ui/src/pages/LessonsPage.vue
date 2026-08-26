@@ -25,13 +25,13 @@ import {
   type LessonWriteResult,
   rejectLesson,
 } from '../lib/api.js';
+import { canClaimEmpty } from '../lib/emptyClaim.js';
 import {
   lessonActions,
   lessonActionsNote,
   type NoveltyNotice,
   noveltyNotice,
 } from '../lib/lessonActions.js';
-import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { type LessonFilter, visibleLessons } from '../lib/lessonFilters.js';
 import { lessonStatusTone } from '../lib/taxonomy.js';
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import Icon from './Icon.vue';
 import type { Crumb } from '../../composables/useBreadcrumb.js';
+import Icon from './Icon.vue';
 
 const props = defineProps<{ items: Crumb[] }>();
 const emit = defineEmits<{ select: [to: string] }>();

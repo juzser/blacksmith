@@ -37,7 +37,9 @@ const activeId = computed(() => {
 // read); it is hidden on the Projects hub, Task detail and Lessons, none of
 // which have a project column.
 const showProjectSwitcher = computed(() => SCOPABLE_ROUTES.has(String(route.name)));
-const projectOptions = ref<{ value: string; label: string }[]>([{ value: '', label: 'All projects' }]);
+const projectOptions = ref<{ value: string; label: string }[]>([
+  { value: '', label: 'All projects' },
+]);
 
 async function loadProjectOptions() {
   try {
@@ -51,9 +53,12 @@ async function loadProjectOptions() {
   }
 }
 onMounted(loadProjectOptions);
-watch(() => route.name, () => {
-  if (showProjectSwitcher.value) loadProjectOptions();
-});
+watch(
+  () => route.name,
+  () => {
+    if (showProjectSwitcher.value) loadProjectOptions();
+  },
+);
 
 function onSwitchProject(value: string) {
   setProject(value || undefined);

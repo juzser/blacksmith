@@ -43,13 +43,13 @@ import IdentityChip from '../components/IdentityChip.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { agentScopeLabel } from '../lib/agentScope.js';
 import { fetchOverview, type OverviewResult, type RunningSession } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { agentScopeLabel } from '../lib/agentScope.js';
 import { formatDateTime, formatElapsed, formatRelative, pluralize } from '../lib/format.js';
 import {
-  activeSessionCount,
   type AgentActivity,
+  activeSessionCount,
   agentActivity,
   SESSION_ACTIVE_WITHIN_MS,
   type SessionActivity,
@@ -177,7 +177,8 @@ watch(canvasEl, (el) => {
   measured.value = true;
   if (typeof ResizeObserver === 'undefined') return;
   canvasObserver = new ResizeObserver(([entry]) => {
-    if (entry) canvasSize.value = { width: entry.contentRect.width, height: entry.contentRect.height };
+    if (entry)
+      canvasSize.value = { width: entry.contentRect.width, height: entry.contentRect.height };
   });
   canvasObserver.observe(el);
 });

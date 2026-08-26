@@ -5,12 +5,12 @@
 // epic identity chips (operator directive 2).
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import CommandHint, { type CommandHintItem } from '../components/CommandHint.vue';
 import Banner from '../components/hds/Banner.vue';
 import Card from '../components/hds/Card.vue';
 import EmptyState from '../components/hds/EmptyState.vue';
 import PageHeader from '../components/hds/PageHeader.vue';
 import Skeleton from '../components/hds/Skeleton.vue';
-import CommandHint, { type CommandHintItem } from '../components/CommandHint.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { fetchOverview, type OverviewResult, type ProjectOverviewSummary } from '../lib/api.js';

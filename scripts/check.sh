@@ -191,6 +191,33 @@ else
 fi
 
 echo
+echo "-- Secret scan: gitleaks --"
+# The rule set is .gitleaks.toml, and it is deliberately narrow: exactly one
+# allowlisted literal (the fake credential the envkit-mcp acceptance criteria
+# quote by name) rather than a path-allowlist over factory/specs, so the
+# generic-api-key rule stays armed everywhere else. .env.example is NOT
+# allowlisted — it holds variable names, and a value appearing there is
+# precisely the mistake worth catching.
+if command -v gitleaks >/dev/null 2>&1; then
+  if gitleaks dir . --no-banner --redact --exit-code 1; then
+    echo "OK   gitleaks dir ."
+  else
+    echo "FAIL gitleaks dir . — a credential-shaped string reached the tree."
+    echo "     If it is a fixture, allowlist the literal in .gitleaks.toml; do not"
+    echo "     allowlist the path."
+    FAIL=1
+  fi
+elif [ -n "${CI:-}" ]; then
+  # Same reasoning as the pnpm branch below: locally, no gitleaks means you
+  # have not installed it. In CI it means the install step failed, and a run
+  # that never scanned must not be able to report PASS.
+  echo "FAIL gitleaks not found on PATH — in CI a missing scanner is a failure, not a skip."
+  FAIL=1
+else
+  echo "SKIP gitleaks not found on PATH — secret scan not run (brew install gitleaks)."
+fi
+
+echo
 echo "-- Phase-3 orchestrator package (only if pnpm is on PATH) --"
 if command -v pnpm >/dev/null 2>&1; then
   if pnpm exec biome check .; then
@@ -214,10 +241,13 @@ if command -v pnpm >/dev/null 2>&1; then
     FAIL=1
   fi
 
-  if pnpm vitest run; then
-    echo "OK   pnpm vitest run"
+  # --coverage, not a bare run: the thresholds in each vitest config are
+  # only a gate if the gate is what runs them. Each config's floors sit under
+  # today's numbers on purpose — they catch a regression, not a refactor.
+  if pnpm run test:coverage; then
+    echo "OK   pnpm test:coverage"
   else
-    echo "FAIL pnpm vitest run"
+    echo "FAIL pnpm test:coverage"
     FAIL=1
   fi
 
@@ -245,17 +275,17 @@ if command -v pnpm >/dev/null 2>&1; then
     FAIL=1
   fi
 
-  if pnpm run test:server; then
-    echo "OK   pnpm test:server"
+  if pnpm run test:server:coverage; then
+    echo "OK   pnpm test:server:coverage"
   else
-    echo "FAIL pnpm test:server"
+    echo "FAIL pnpm test:server:coverage"
     FAIL=1
   fi
 
-  if pnpm run test:ui; then
-    echo "OK   pnpm test:ui"
+  if pnpm run test:ui:coverage; then
+    echo "OK   pnpm test:ui:coverage"
   else
-    echo "FAIL pnpm test:ui"
+    echo "FAIL pnpm test:ui:coverage"
     FAIL=1
   fi
 

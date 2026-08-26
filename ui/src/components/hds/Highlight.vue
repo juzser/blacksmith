@@ -21,7 +21,8 @@ const BOLD: Record<string, [string, string]> = {
 };
 
 const style = computed(() => {
-  const [bg, fg] = BOLD[props.tint] ?? BOLD.blue ?? ['var(--ds-info-bold)', 'var(--ds-text-on-bold)'];
+  const [bg, fg] = BOLD[props.tint] ??
+    BOLD.blue ?? ['var(--ds-info-bold)', 'var(--ds-text-on-bold)'];
   return {
     background: bg,
     color: fg,

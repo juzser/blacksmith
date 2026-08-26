@@ -33,38 +33,10 @@
 // otherwise every card would flash every 5s and the motion would mean nothing.
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import {
-  fetchLessons,
-  fetchOverview,
-  type LiveAgentEntry,
-  type OverviewResult,
-  type RunningSession,
-} from '../lib/api.js';
-import { agentScopeLabel } from '../lib/agentScope.js';
-import { formatDateTime, formatElapsed, formatRelative, pluralize } from '../lib/format.js';
-import {
-  nothingPending,
-  type PendingReviewCounts,
-  pendingClauses,
-} from '../lib/pendingReview.js';
-import {
-  activeSessionCount,
-  AGENT_STALE_AFTER_MS,
-  agentActivity,
-  byRuntimeDesc,
-  bySessionRecency,
-  longestRunningSince,
-  SESSION_ACTIVE_WITHIN_MS,
-  sessionActivity,
-  type SessionActivity,
-  workingCount,
-} from '../lib/liveness.js';
-import { useBreadcrumb } from '../composables/useBreadcrumb.js';
-import { useFlashOnChange } from '../composables/useFlashOnChange.js';
-import { useNow } from '../composables/useNow.js';
-import { useProjectContext } from '../composables/useProjectContext.js';
-import { usePoll } from '../composables/usePoll.js';
+import coffeeIllustration from '../assets/illustrations/coffee.svg';
+import CommandHint, { type CommandHintItem } from '../components/CommandHint.vue';
 import Banner from '../components/hds/Banner.vue';
+import Button from '../components/hds/Button.vue';
 import Card from '../components/hds/Card.vue';
 import EmptyState from '../components/hds/EmptyState.vue';
 import Highlight from '../components/hds/Highlight.vue';
@@ -76,13 +48,37 @@ import RowList from '../components/hds/RowList.vue';
 import Skeleton from '../components/hds/Skeleton.vue';
 import StatCard from '../components/hds/StatCard.vue';
 import TwoColumn from '../components/hds/TwoColumn.vue';
-import Button from '../components/hds/Button.vue';
-import CommandHint, { type CommandHintItem } from '../components/CommandHint.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import LiveAgentGroupRow, { type LiveAgentGroupUI } from '../components/LiveAgentGroupRow.vue';
 import LiveStatus from '../components/LiveStatus.vue';
 import ProgressBar from '../components/ProgressBar.vue';
-import coffeeIllustration from '../assets/illustrations/coffee.svg';
+import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { useFlashOnChange } from '../composables/useFlashOnChange.js';
+import { useNow } from '../composables/useNow.js';
+import { usePoll } from '../composables/usePoll.js';
+import { useProjectContext } from '../composables/useProjectContext.js';
+import { agentScopeLabel } from '../lib/agentScope.js';
+import {
+  fetchLessons,
+  fetchOverview,
+  type LiveAgentEntry,
+  type OverviewResult,
+  type RunningSession,
+} from '../lib/api.js';
+import { formatDateTime, formatElapsed, formatRelative, pluralize } from '../lib/format.js';
+import {
+  AGENT_STALE_AFTER_MS,
+  activeSessionCount,
+  agentActivity,
+  byRuntimeDesc,
+  bySessionRecency,
+  longestRunningSince,
+  SESSION_ACTIVE_WITHIN_MS,
+  type SessionActivity,
+  sessionActivity,
+  workingCount,
+} from '../lib/liveness.js';
+import { nothingPending, type PendingReviewCounts, pendingClauses } from '../lib/pendingReview.js';
 
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
@@ -207,10 +203,18 @@ const liveAgentGroups = computed<LiveAgentGroupUI[]>(() => {
       existing.count += 1;
       existing.entries.push(a);
     } else {
-      byKey.set(key, { key, agentRole: a.agentRole, modelTier: a.modelTier, count: 1, entries: [a] });
+      byKey.set(key, {
+        key,
+        agentRole: a.agentRole,
+        modelTier: a.modelTier,
+        count: 1,
+        entries: [a],
+      });
     }
   }
-  return [...byKey.values()].sort((a, b) => b.count - a.count || a.agentRole.localeCompare(b.agentRole));
+  return [...byKey.values()].sort(
+    (a, b) => b.count - a.count || a.agentRole.localeCompare(b.agentRole),
+  );
 });
 
 // Operator directive (Phase 6b round 6): round 5's group rows + full-width
@@ -357,7 +361,8 @@ const agentsSignature = () =>
 // flash.
 const sessionsSignature = () =>
   (data.value?.runningSessions ?? []).map((s) => `${s.sessionId}:${s.lastEventAt}`).join('|');
-const dispatchSignature = () => (data.value?.recentDispatches ?? []).map((d) => d.eventId).join('|');
+const dispatchSignature = () =>
+  (data.value?.recentDispatches ?? []).map((d) => d.eventId).join('|');
 const { flashing: agentsFlash } = useFlashOnChange(agentsSignature);
 const { flashing: sessionsFlash } = useFlashOnChange(sessionsSignature);
 const { flashing: dispatchFlash } = useFlashOnChange(dispatchSignature);

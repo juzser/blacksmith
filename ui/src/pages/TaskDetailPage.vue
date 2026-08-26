@@ -20,9 +20,21 @@ import IdentityChip from '../components/IdentityChip.vue';
 import TimelineRow from '../components/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useToast } from '../composables/useToast.js';
-import { applyWaiverBatch, fetchTaskDetail, fetchTimeline, type TaskDetail, type TimelineEntry } from '../lib/api.js';
+import {
+  applyWaiverBatch,
+  fetchTaskDetail,
+  fetchTimeline,
+  type TaskDetail,
+  type TimelineEntry,
+} from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
-import { agentStatusTone, findingStatusTone, severityTone, taskStatusTone } from '../lib/taxonomy.js';
+import {
+  agentStatusTone,
+  findingStatusTone,
+  severityTone,
+  taskStatusTone,
+} from '../lib/taxonomy.js';
+import { isWaivable } from '../lib/waivable.js';
 
 const props = defineProps<{ taskId: string }>();
 const { setBreadcrumb } = useBreadcrumb();
@@ -91,8 +103,15 @@ onMounted(() => {
 const saving = ref<string | null>(null); // fingerprint currently in flight, or null
 const openPopover = ref<string | null>(null); // fingerprint whose Popover is open
 
+// Delegated, not inlined. This used to read `S3-minor && confirmed`, which
+// is narrower than the predicate the Overview banner counts with
+// (queries.ts: S3-minor|S4-nit x raised|confirmed) and narrower than what
+// applyBatch() accepts (waivers.ts). The banner therefore counted S4-nits
+// and not-yet-confirmed S3s as "waivers pending" and then sent the operator
+// to a page with no control for them -- a number you cannot act on, which is
+// worse than no number. One predicate now, pinned by ui/test/waivable.test.ts.
 function canWaive(f: TaskDetail['findings'][number]): boolean {
-  return f.severity === 'S3-minor' && f.findingStatus === 'confirmed' && f.waiverId === null;
+  return isWaivable(f);
 }
 
 async function decide(fingerprint: string, decision: 'granted' | 'denied') {
@@ -102,7 +121,11 @@ async function decide(fingerprint: string, decision: 'granted' | 'denied') {
   openPopover.value = null;
   try {
     await applyWaiverBatch(detail.value.task.sessionId, [
-      { fingerprint, decision, operatorNote: `${decision === 'granted' ? 'Waived' : 'Denied'} via Task detail` },
+      {
+        fingerprint,
+        decision,
+        operatorNote: `${decision === 'granted' ? 'Waived' : 'Denied'} via Task detail`,
+      },
     ]);
     showToast(decision === 'granted' ? 'Waived 1 finding.' : 'Denied 1 waiver.');
     await load();

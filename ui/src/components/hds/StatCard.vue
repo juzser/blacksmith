@@ -18,7 +18,9 @@ const props = withDefaults(
 const raw = computed(() => (props.delta == null ? '' : String(props.delta).trim()));
 const down = computed(() => raw.value.startsWith('-'));
 const flat = computed(() => raw.value === '0' || raw.value === '±0' || raw.value.startsWith('0%'));
-const dTone = computed(() => props.deltaTone || (flat.value ? 'neutral' : down.value ? 'danger' : 'success'));
+const dTone = computed(
+  () => props.deltaTone || (flat.value ? 'neutral' : down.value ? 'danger' : 'success'),
+);
 const chipStyle = computed(() => ({
   background: `var(--ds-tint-${props.tint})`,
   color: `var(--ds-tint-${props.tint}-text)`,

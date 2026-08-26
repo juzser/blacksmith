@@ -1,5 +1,7 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ title: string; description?: string; level?: 2 | 3 | 4 }>(), { level: 3 });
+withDefaults(defineProps<{ title: string; description?: string; level?: 2 | 3 | 4 }>(), {
+  level: 3,
+});
 </script>
 
 <template>

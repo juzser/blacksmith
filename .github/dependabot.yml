@@ -1,0 +1,50 @@
+# This repo pins everything on purpose — pnpm@9.3.0, pyyaml==6.0.2,
+# gitleaks 8.30.1 with its sha256, and exact versions (no `^`) across
+# package.json. guardrails.md: "CI never resolves new dependency versions."
+# Pinning without a bump channel is just an old tree, so this is that
+# channel: one PR at a time, through the same gate as any other change.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'deps'
+      prefix-development: 'deps(dev)'
+    groups:
+      # One PR per blast radius, not one per package. A contributor reviewing
+      # "bump @types/node" learns nothing the lockfile did not already say.
+      typescript-toolchain:
+        patterns: ['typescript', '@biomejs/*', '@types/*']
+      vue-stack:
+        patterns: ['vue', 'vue-router', '@vue-flow/*', '@vitejs/*', 'vite', 'tailwindcss', '@tailwindcss/*']
+      test-stack:
+        patterns: ['vitest', '@vitest/*', '@playwright/*']
+    ignore:
+      # better-sqlite3 ships the one native binding here, and its prebuilds
+      # are why "nothing compiles" is true (README, INSTALL.md). A major is a
+      # platform-matrix decision, not a dependency bump.
+      - dependency-name: better-sqlite3
+        update-types: ['version-update:semver-major']
+      # TypeScript 7 is the native Go port. A major carries a compiler
+      # rewrite, and this repo already routes around one consequence of it
+      # (no classic compiler API, hence no vue-tsc — see CONTRIBUTING.md).
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'ci'
+    groups:
+      actions:
+        patterns: ['*']

@@ -4,28 +4,56 @@
   "private": true,
   "type": "module",
   "description": "Autonomous agent factory — loop runner and worktree engine.",
+  "keywords": [
+    "agent",
+    "agents",
+    "ai",
+    "autonomous",
+    "claude-code",
+    "code-review",
+    "git-worktree",
+    "llm",
+    "multi-agent",
+    "orchestration"
+  ],
+  "homepage": "https://github.com/juzser/blacksmith#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/juzser/blacksmith.git"
+  },
+  "bugs": {
+    "url": "https://github.com/juzser/blacksmith/issues"
+  },
+  "author": "juzser (https://github.com/juzser)",
   "license": "MIT",
   "engines": {
     "node": ">=22"
   },
+  "packageManager": "pnpm@9.3.0",
   "bin": {
     "smith": "factory/orchestrator/dist/cli.js"
   },
   "scripts": {
+    "prepare": "pnpm run build",
+    "check": "bash scripts/check.sh",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
     "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "build:server": "pnpm build && tsc -p ui/server/tsconfig.json",
     "typecheck:server": "tsc -p ui/server/tsconfig.test.json",
     "test:server": "pnpm build:server && vitest run --config ui/server/vitest.config.ts",
+    "test:server:coverage": "pnpm build:server && vitest run --config ui/server/vitest.config.ts --coverage",
     "build:ui": "vite build --config ui/vite.config.ts",
     "dev:ui": "vite --config ui/vite.config.ts",
     "typecheck:ui": "tsc -p ui/tsconfig.json",
     "typecheck:ui:test": "tsc -p ui/tsconfig.test.json",
     "test:ui": "vitest run --config ui/vitest.config.ts",
+    "test:ui:coverage": "vitest run --config ui/vitest.config.ts --coverage",
     "test:e2e": "pnpm build:server && pnpm build:ui && playwright test --config ui/playwright.config.ts"
   },
   "dependencies": {

@@ -42,15 +42,27 @@ It runs, in order:
 | `x-taxonomy` resolution | every schema annotation names a real dimension in `taxonomy.yml` |
 | agent frontmatter | the set of `.claude/agents/*.md` equals the taxonomy's `agent` dimension |
 | `bash -n .claude/hooks/*.sh` | the safety hooks are syntactically valid |
+| `gitleaks dir .` | no credential-shaped string is about to be committed |
 | `biome check .` | lint + format |
-| `tsc --noEmit` ×4 | orchestrator, its tests, the server, the UI and UI tests |
-| `vitest run` ×3 | orchestrator, server, UI suites |
+| `tsc --noEmit` ×5 | orchestrator, its tests, the server, the UI, UI tests |
+| `vitest run` ×3 | orchestrator, server, UI suites — each with coverage thresholds |
 | `vite build` | the UI still builds |
 | four design gates | hardcoded values, emoji, token resolution, contrast |
 | `pnpm test:e2e` | Playwright, **if** a Chromium is present — otherwise `SKIP` |
 
-Every step degrades to a printed `SKIP` rather than a false `OK` when its
-tool is missing, so **read the tail of the output, not just the exit code**.
+Almost every step degrades to a printed `SKIP` rather than a false `OK` when
+its tool is missing, so **read the tail of the output, not just the exit
+code**. Three exceptions fail instead of skipping, because skipping them
+would be the whole gate quietly not running:
+
+- **PyYAML missing** — always a FAIL. Without it the policy and schema half
+  of the gate cannot run at all, and a green tail would be a lie about eight
+  steps rather than one.
+- **pnpm missing, with `CI` set** — a SKIP is a reasonable local answer and
+  never a reasonable one on a runner claiming to have gated the branch.
+- **gitleaks missing, with `CI` set** — same rule. A secret scan that silently
+  did not run is worse than no secret scan, because the badge says otherwise.
+
 Locally, e2e usually says `SKIP`; run it explicitly once you have touched
 anything under `ui/`:
 
@@ -62,12 +74,50 @@ pnpm test:e2e
 Individual suites, when you do not want the full gate:
 
 ```bash
+pnpm check         # the whole gate — bash scripts/check.sh
 pnpm lint          # biome check .
+pnpm format        # biome check --write . — the same rules, applied
 pnpm typecheck     # tsc --noEmit
 pnpm test          # orchestrator vitest
+pnpm test:watch    # the same, in watch mode
 pnpm test:ui       # UI vitest
 pnpm test:server   # server vitest (runs build:server first)
 ```
+
+`pnpm install` runs `prepare`, which builds the orchestrator — so `smith` is
+on `node factory/orchestrator/dist/cli.js` from a fresh clone without a
+separate build step.
+
+### What the gate does not cover
+
+Stated here rather than discovered by a contributor whose PR broke something
+no step looks at:
+
+- **`.vue` single-file components are not type-checked.** `tsc --noEmit ×5`
+  covers every `.ts` file including the UI's, but the `<script setup lang="ts">`
+  block inside an SFC needs `vue-tsc`, and `vue-tsc` needs Volar, which needs
+  TypeScript's classic Node compiler API. This repo is on TypeScript 7's
+  native port, whose JS entry point exposes no such API — `createProgram` and
+  `createSourceFile` are both `undefined` — so `vue-tsc` cannot run here at
+  all. The UI's logic therefore lives in `ui/src/lib/*.ts`, which *is* checked
+  and *is* unit-tested, and SFCs stay as thin as that split allows. Type
+  errors inside a template are caught by e2e or not at all.
+- **Biome does not lint SFC `<script>` blocks either**, for the adjacent
+  reason: `noUnusedImports`, `noUnusedVariables` and
+  `useVueMultiWordComponentNames` are disabled for `**/*.vue` in
+  [`biome.json`](biome.json) because Biome cannot see a template using an
+  import, and reports every component's props as dead code.
+- **`biome.json` cannot carry comments.** It is parsed as strict JSON, and a
+  `//` line does not error — it silently invalidates the block it sits in.
+  The `overrides` array above was disabled that way for a while, with the
+  lint reporting 112 errors and nobody reading the config as the cause. If
+  you edit that file, validate it: `python3 -c "import json,sys;
+  json.load(open('biome.json'))"`.
+- **There is no root `pnpm-workspace.yaml`, on purpose.** This is one package
+  with several `tsconfig`s, not a monorepo. An empty workspace file — one
+  with no `packages:` key — makes pnpm 9 refuse to install at all
+  (`ERR_PNPM_INVALID_WORKSPACE_CONFIGURATION`), so adding one to "tidy up"
+  breaks the clone for everyone. Do not add it.
 
 ## Where changes go
 
@@ -108,6 +158,26 @@ several of them exist.
 
 A change that alters observable behaviour without a test that would have
 caught the old behaviour is not finished.
+
+### Coverage
+
+All three suites enforce thresholds, and each is scoped to the code the
+suite is actually about rather than to everything it happens to import:
+
+| Suite | Scope | Thresholds |
+|---|---|---|
+| `pnpm test:coverage` | `factory/orchestrator/src` | 80 / 70 / 80 / 80 |
+| `pnpm test:server:coverage` | `ui/server/src/app.ts` | 85 / 60 / 85 / 85 |
+| `pnpm test:ui:coverage` | `ui/src/lib` (minus `api.ts`) | 80 / 80 / 80 / 80 |
+
+`scripts/check.sh` runs the coverage variants, so the thresholds are part of
+the gate and not a separate thing you can forget. The numbers are floors set
+just under where the suites actually sit — they exist to catch a drop, not to
+be a target to code toward. `ui/src/lib/api.ts` is excluded because it is
+`fetch` wrappers whose only behaviour is the network call the unit suite
+mocks; the branch coverage floor on the server is 60 for the same honest
+reason, and raising it means testing error paths rather than editing this
+table.
 
 ## Commits and PRs
 
