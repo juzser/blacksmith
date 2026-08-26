@@ -70,11 +70,11 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.6",
+    "@biomejs/biome": "2.5.10",
     "@playwright/test": "1.62.1",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",
-    "@types/node": "26.1.2",
+    "@types/node": "26.2.0",
     "@vitejs/plugin-vue": "6.0.8",
     "@vitest/coverage-v8": "4.1.10",
     "drizzle-kit": "0.31.10",
