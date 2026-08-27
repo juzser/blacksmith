@@ -57,7 +57,7 @@
     "test:e2e": "pnpm build:server && pnpm build:ui && playwright test --config ui/playwright.config.ts"
   },
   "dependencies": {
-    "@hono/node-server": "2.0.12",
+    "@hono/node-server": "2.1.1",
     "@vue-flow/core": "1.48.2",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
