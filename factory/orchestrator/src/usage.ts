@@ -475,6 +475,28 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Call one provider by hand for calibration. Touches neither the log nor quorum.',
   },
   {
+    command: 'crossfind request',
+    positionals: '',
+    flags:
+      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>]',
+    summary:
+      'Print the finder request without sending it — exactly what would leave the machine. Refuses when send_diff is false.',
+  },
+  {
+    command: 'crossfind reconcile',
+    positionals: '',
+    flags: '--task <id> --native <findings.json> --independent <runs.json> [--policy <file>]',
+    summary:
+      'Reconcile two saved finding lists offline. No provider, no log. Exit 1 when the result would change a gate.',
+  },
+  {
+    command: 'crossfind run',
+    positionals: '',
+    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>] ${EVENTS_DIR}`,
+    summary:
+      'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
+  },
+  {
     command: 'ui serve',
     positionals: '',
     flags:

@@ -218,6 +218,60 @@ than appearing in it.
   never as "same agent". 27 tests in `test/testerAudit.test.ts`; documented as
   operator-guide §2d.
 
+- **An independent finder, so a quorum can raise a finding and not only drop
+  one.** Everything the external tier did until now was subtractive:
+  `quorum.ts`'s vocabulary is `confirm | refute`, a critic is handed one claim
+  the native reviewer already raised and asked whether it survives, and the
+  strongest available outcome is deleting it. That makes the second vendor a
+  brake and never an eye — a bug the native reviewer's context did not surface
+  is a bug no amount of cross-checking reaches, because nothing outside that
+  context is ever asked to look.
+
+  `src/crossFinding.ts` asks. A finder on a different vendor reads the same
+  diff in a fresh context, returns evidence against the new
+  `finding-evidence.schema.json`, and the two lists are reconciled into four
+  outcomes: `corroborated` (same fingerprint — severity may rise per
+  `severity_resolution`), `co-located` (same file and category, different
+  claim — recorded, never merged), `independent-only` (mintable as a real
+  finding) and `native-only` (**no effect, by rule**). That last one is the
+  design: silence is not a refutation. The finder was never asked about a
+  native claim, it was asked to read a diff, so its not mentioning something
+  is absence of evidence — subtracting on it would let a truncated second
+  opinion delete real findings. Refutation stays in the critic tier, where a
+  judge is handed the claim itself. And an `independent-only` finding is
+  minted, not privileged: it enters the gate as an ordinary finding and at
+  S1/S2 meets the same `quorum_triggers` critic as any other, so an unshared
+  third-party opinion still has to survive a refute pass before it blocks.
+
+  The switch that matters is `send_diff`, and it ships `false`. A critic
+  judges a *claim*, so quorum can send a summary and a failure scenario and
+  never the source; a finder has nothing to read but the diff. Shipping
+  worktree source to a third-party API is not a decision this code has
+  standing to make quietly, so `smith crossfind run` **refuses** rather than
+  degrading to a diffless "find bugs" prompt that would invent findings about
+  code the model never saw — and `max_diff_bytes` refuses rather than
+  truncating, for the same reason. `smith crossfind request` prints the exact
+  payload without sending it, so the decision is made on the bytes.
+
+  Three verbs: `request` (print, send nothing), `reconcile` (two saved lists,
+  offline, no provider and no event — it answers under
+  `SMITH_CROSSCHECK_OFFLINE` because it is pure) and `run` (dispatch, then
+  reconcile). `run` and `reconcile` exit 1 when the result would change a
+  gate, which under `mode: shadow` is never. Each run writes one
+  `cross-finding-reconciled` event — outcome counts, providers run, skipped
+  and failed, and the ids it would have minted; in shadow mode that event is
+  the only thing a run produces, so it also gained a timeline row, because a
+  shadow verdict nobody can see is a shadow deployment nobody can evaluate.
+  41 tests (29 unit, 8 CLI, 4 UI); documented as providers-runbook §5.
+
+  One of those CLI tests exists because the suite hid the feature from itself:
+  `test/setup.ts` sets `SMITH_CROSSCHECK_OFFLINE` for the whole run and the
+  CLI subprocess inherits it, so the first `crossfind run` test silently
+  exercised the kill switch instead of the verb. The switch now has its own
+  test asserting the refusal *names* the skipped provider — the runbook has
+  warned since Phase 8 that a skipped provider leaves no trace, and a finder
+  that found nothing reads exactly like a finder that never ran.
+
 ### Changed
 
 - Demo project fixtures, screenshots and compiled lessons use neutral names

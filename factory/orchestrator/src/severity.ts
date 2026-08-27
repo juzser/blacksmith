@@ -8,7 +8,53 @@ export class SeverityError extends SmithError {}
 
 const SEVERITY_POLICY_PATH = `${REPO_ROOT}/factory/policies/severity.yml`;
 /** Escalation order, worst first — the same order severity.yml/taxonomy.yml document values in. */
-const SEVERITY_ORDER = ['S1-stop-the-line', 'S2-major', 'S3-minor', 'S4-nit'];
+export const SEVERITY_ORDER: readonly string[] = [
+  'S1-stop-the-line',
+  'S2-major',
+  'S3-minor',
+  'S4-nit',
+];
+
+/**
+ * Position in SEVERITY_ORDER, or `null` for a value that is not in it.
+ *
+ * `null` rather than a sentinel index, because both sentinels lie:
+ * `Number.POSITIVE_INFINITY` makes an unknown severity the mildest thing in the
+ * list and `-1` makes it the worst, and a caller that forgets to check gets a
+ * confident wrong answer either way. Callers that must not silently pass an
+ * unknown value — escalate() below — turn the `null` into a
+ * `severity.unknown-severity` throw.
+ */
+export function severityRank(severity: string): number | null {
+  const index = SEVERITY_ORDER.indexOf(severity);
+  return index === -1 ? null : index;
+}
+
+/**
+ * The worse of two severities, worst-wins. Used by crossFinding.ts's
+ * `highest-wins` resolution, where two providers raised the same fingerprint
+ * and disagree on how bad it is.
+ *
+ * An unknown value on either side throws rather than losing the comparison:
+ * mintFindings() already refuses a non-canonical severity, so an unknown one
+ * here means a stored finding predates a taxonomy edit, and quietly treating it
+ * as mild is how an S1 becomes an S4.
+ */
+export function worseSeverity(a: string, b: string): string {
+  const rankA = severityRank(a);
+  const rankB = severityRank(b);
+  for (const [value, rank] of [
+    [a, rankA],
+    [b, rankB],
+  ] as const) {
+    if (rank === null) {
+      throw new SeverityError('severity.unknown-severity', `Unknown severity "${value}".`, {
+        severity: value,
+      });
+    }
+  }
+  return (rankA as number) <= (rankB as number) ? a : b;
+}
 
 export interface SeverityLevelPolicy {
   blocksMerge: boolean;
@@ -246,8 +292,8 @@ function findMatchingLesson(
 }
 
 function escalate(severity: string, policy: SeverityPolicy): string {
-  const index = SEVERITY_ORDER.indexOf(severity);
-  if (index === -1) {
+  const index = severityRank(severity);
+  if (index === null) {
     throw new SeverityError('severity.unknown-severity', `Unknown severity "${severity}".`, {
       severity,
     });
@@ -273,15 +319,30 @@ export interface SeverityFinding {
 export interface SeverityContext {
   filePath: string;
   lessons: readonly LessonRule[];
+  /**
+   * A severity an INDEPENDENT finder gave the same fingerprint
+   * (crossFinding.ts, crosscheck.yml `independent_finder.severity_resolution:
+   * highest-wins`). Applied before the lesson escalation, and only ever
+   * upward: two reviewers who read the same code and disagreed about how bad
+   * it is are not averaged, because taking the milder reading is how an S1
+   * becomes an S3 by committee.
+   *
+   * Optional, and absent on every gate run that had no finder: a corroborated
+   * severity is evidence the caller either has or does not, never something
+   * this function may assume.
+   */
+  corroboratedSeverity?: string;
 }
 
 export interface SeverityDecision {
-  /** Original severity, escalated one level on a same-mistake match. */
+  /** Original severity, raised to a corroborating finder's reading and then escalated one level on a same-mistake match. */
   severity: string;
   blocks: boolean;
   action: SeverityAction;
   sameMistake: boolean;
   matchedLessonId: string | null;
+  /** True when an independent finder's severity moved this finding. False when none was offered, or it was no worse. */
+  corroborated: boolean;
 }
 
 function actionFor(severity: string, level: SeverityLevelPolicy): SeverityAction {
@@ -300,8 +361,18 @@ export function decide(
   context: SeverityContext,
   policy: SeverityPolicy = loadSeverityPolicy(),
 ): SeverityDecision {
+  // Corroboration first, escalation second, and the order is the decision:
+  // a repeat mistake is one level worse than whatever the finding actually
+  // IS, so the two readings have to be reconciled before the lesson has
+  // something to escalate. Reversed, a corroborated S2 that repeats a lesson
+  // would land at S2 instead of S1.
+  const corroborated =
+    context.corroboratedSeverity === undefined
+      ? finding.severity
+      : worseSeverity(finding.severity, context.corroboratedSeverity);
+
   const matched = findMatchingLesson(finding.finding_category, context.filePath, context.lessons);
-  const severity = matched ? escalate(finding.severity, policy) : finding.severity;
+  const severity = matched ? escalate(corroborated, policy) : corroborated;
 
   const level = policy.levels[severity];
   if (!level) {
@@ -316,5 +387,6 @@ export function decide(
     action: actionFor(severity, level),
     sameMistake: matched !== null,
     matchedLessonId: matched?.lessonId ?? null,
+    corroborated: corroborated !== finding.severity,
   };
 }

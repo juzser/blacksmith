@@ -13,6 +13,7 @@ import {
 } from '../agents-registry.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
+import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
 import type { SmithDb } from './projector.js';
@@ -1079,6 +1080,12 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   // -- hiding the repair itself from the timeline would be the same failure
   // one layer out.
   'finding-obligation-repaired',
+  // The independent finder's reconciliation. It is the one event that says a
+  // second, differently-vendored eye read this diff at all, and in shadow mode
+  // it is the ONLY thing the run produces -- gating nothing by definition. A
+  // shadow verdict nobody can see is a shadow deployment nobody can evaluate,
+  // which is the whole reason the mode exists.
+  'cross-finding-reconciled',
   // The scheduler's three proposals. Architecture §12 has the scheduler
   // propose and the operator dispose, so the timeline is the only place the
   // offer is ever made -- drop the row and the proposal is never put to
@@ -1345,7 +1352,6 @@ export interface KanbanColumn {
   tasks: KanbanTask[];
 }
 
-const SEVERITY_ORDER = ['S1-stop-the-line', 'S2-major', 'S3-minor', 'S4-nit'];
 // D-127: `amend-pending` is open. The amendment has been written but the tasks
 // it obligates have not landed, so nothing is discharged yet. This query has no
 // obligation data — that lives in epic.ts's summary, which checks each named
@@ -1363,8 +1369,11 @@ function worstSeverity(severities: string[]): string | null {
   let worst: string | null = null;
   let worstIndex = Number.POSITIVE_INFINITY;
   for (const s of severities) {
-    const index = SEVERITY_ORDER.indexOf(s);
-    if (index !== -1 && index < worstIndex) {
+    // Not worseSeverity(): this list comes out of SQL and may hold a severity a
+    // taxonomy edit has since retired. A chip on a Kanban card degrades to
+    // "no severity" for one; a reconciliation must not, so that one throws.
+    const index = severityRank(s);
+    if (index !== null && index < worstIndex) {
       worstIndex = index;
       worst = s;
     }

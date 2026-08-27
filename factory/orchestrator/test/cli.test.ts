@@ -7117,4 +7117,380 @@ describe('cli.ts (built binary)', () => {
       expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('BLOCKED');
     });
   });
+
+  describe('crossfind request / reconcile / run (B1)', () => {
+    const JUDGE_CLI = path.join(import.meta.dirname, 'fixtures', 'fake-judge-cli.mjs');
+    const DIFF = '--- a/src/a.ts\n+++ b/src/a.ts\n@@\n-const x = 0;\n+const x = 1;\n';
+
+    /**
+     * A crosscheck.yml whose `codex` is the fake CLI judge. Written per test
+     * rather than shared, because the two switches these tests are about —
+     * `independent_finder.mode` and the provider's own `mode` — are exactly
+     * what each case varies.
+     */
+    async function writePolicy(
+      name: string,
+      opts: { mode: 'shadow' | 'active'; answerPath?: string },
+    ): Promise<string> {
+      const file = path.join(scratchDir, name);
+      const args = JSON.stringify([JUDGE_CLI, 'echo-prompt', opts.answerPath ?? '/dev/null']);
+      await writeFile(
+        file,
+        [
+          'providers:',
+          '  claude: { kind: native, enabled: true }',
+          '  codex:',
+          '    kind: api',
+          '    transport: cli',
+          '    command: node',
+          `    args: ${args}`,
+          '    model_tier: mid',
+          '    enabled: true',
+          `    mode: ${opts.mode}`,
+          'independent_finder:',
+          '  enabled: true',
+          `  mode: ${opts.mode}`,
+          '  providers: [codex]',
+          '  send_diff: true',
+          '  severity_resolution: highest-wins',
+          '',
+        ].join('\n'),
+      );
+      return file;
+    }
+
+    async function writeJson(name: string, value: unknown): Promise<string> {
+      const file = path.join(scratchDir, name);
+      await writeFile(file, JSON.stringify(value));
+      return file;
+    }
+
+    function evidence(overrides: Record<string, unknown> = {}) {
+      return {
+        file_path: 'src/b.ts',
+        finding_category: 'correctness',
+        severity: 'S2-major',
+        summary: 'the retry loop runs one fewer time than the criterion asks',
+        failure_scenario: { inputs: 'n=3', expected: '3 retries', actual: '2 retries' },
+        ...overrides,
+      };
+    }
+
+    /** One native finding, on a different file from `evidence()` above, so the two never co-locate. */
+    const NATIVE = [
+      {
+        finding_id: 'f-native-1',
+        fingerprint: 'fp-native-1',
+        file_path: 'src/a.ts',
+        finding_category: 'correctness',
+        severity: 'S3-minor',
+        summary: 'the native reviewer saw this one and the finder did not',
+      },
+    ];
+
+    it('request prints exactly what would leave the machine, and sends nothing', async () => {
+      const policy = await writePolicy('cf-request.yml', { mode: 'shadow' });
+      const diffPath = path.join(scratchDir, 'cf-request.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'request',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'smith/epic-1/integration...task-1',
+        '--criterion',
+        'retries exactly three times',
+        '--criterion',
+        'never retries a 4xx',
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(0);
+      const request = JSON.parse(stdout);
+      expect(request.kind).toBe('review');
+      expect(request.schemaName).toBe('finding-evidence');
+      expect(request.inputRefs.diff_ref).toBe('smith/epic-1/integration...task-1');
+      // The diff IS the request: a finder with no code invents findings.
+      expect(request.prompt).toContain('+const x = 1;');
+      // Repeated --criterion accumulates (args.ts `repeated`), in order.
+      expect(request.prompt).toContain('retries exactly three times');
+      expect(request.prompt).toContain('never retries a 4xx');
+    });
+
+    it('request narrows the judge budget from the command line, with a floor at 1', async () => {
+      const policy = await writePolicy('cf-budget.yml', { mode: 'shadow' });
+      const diffPath = path.join(scratchDir, 'cf-budget.diff');
+      await writeFile(diffPath, DIFF);
+      const base = [
+        'crossfind',
+        'request',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'ref',
+        '--policy',
+        policy,
+      ];
+
+      const narrowed = runCli([...base, '--timeout-ms', '5000', '--max-output-bytes', '4096']);
+      expect(narrowed.status).toBe(0);
+      expect(JSON.parse(narrowed.stdout).budget).toEqual({
+        timeout_ms: 5000,
+        max_output_bytes: 4096,
+      });
+
+      // A zero timeout would make every call fail as a timeout and read as a
+      // provider that refuses to answer; a zero byte cap would truncate every
+      // verdict to nothing and read as a provider that answered with silence.
+      // Those are the two failures this repo works hardest to keep apart.
+      const zero = runCli([...base, '--timeout-ms', '0']);
+      expect(zero.status).toBe(1);
+      expect(JSON.parse(zero.stdout).error.code).toBe('cli.invalid-flag');
+    });
+
+    it('request refuses under the shipped policy rather than sending source', async () => {
+      const diffPath = path.join(scratchDir, 'cf-shipped.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'request',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'ref',
+      ]);
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.error.code).toBe('crossfind.diff-not-authorized');
+      expect(parsed.error.message).toContain('send_diff');
+    });
+
+    it('reconcile works offline and exits 1 when the result would change a gate', async () => {
+      const policy = await writePolicy('cf-reconcile-active.yml', { mode: 'active' });
+      const nativePath = await writeJson('cf-native.json', NATIVE);
+      const independentPath = await writeJson('cf-independent.json', [
+        { provider: 'codex', mode: 'active', evidence: [evidence()] },
+      ]);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'reconcile',
+        '--task',
+        'epic-1/task-1',
+        '--native',
+        nativePath,
+        '--independent',
+        independentPath,
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(1);
+      const report = JSON.parse(stdout);
+      expect(report.mode).toBe('active');
+      expect(report.gates).toBe(true);
+      expect(report.counts).toMatchObject({ 'independent-only': 1, 'native-only': 1 });
+      expect(report.mintable).toHaveLength(1);
+      // Rule 1: silence is not a refutation. The native finding the finder
+      // never mentioned is recorded untouched, not subtracted.
+      const nativeOnly = report.entries.find(
+        (e: { outcome: string }) => e.outcome === 'native-only',
+      );
+      expect(nativeOnly).toMatchObject({ effect: 'none', applied: false });
+    });
+
+    it('reconcile in shadow mode exits 0: the same finding, gating nothing', async () => {
+      const policy = await writePolicy('cf-reconcile-shadow.yml', { mode: 'shadow' });
+      const nativePath = await writeJson('cf-native.json', NATIVE);
+      const independentPath = await writeJson('cf-independent-shadow.json', [
+        { provider: 'codex', mode: 'shadow', evidence: [evidence()] },
+      ]);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'reconcile',
+        '--task',
+        'epic-1/task-1',
+        '--native',
+        nativePath,
+        '--independent',
+        independentPath,
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(0);
+      const report = JSON.parse(stdout);
+      expect(report.mode).toBe('shadow');
+      expect(report.gates).toBe(false);
+      expect(report.counts['independent-only']).toBe(1);
+      expect(report.mintable).toEqual([]);
+    });
+
+    it('run dispatches the finder, records the reconciliation, and prints what to raise', async () => {
+      const sessionId = `cli-crossfind-run-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'crossfind-events');
+      const start = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(start.status).toBe(0);
+      const parent = JSON.parse(start.stdout).event_id as string;
+
+      const answerPath = await writeJson('cf-answer.json', [evidence()]);
+      const policy = await writePolicy('cf-run.yml', { mode: 'active', answerPath });
+      const diffPath = path.join(scratchDir, 'cf-run.diff');
+      await writeFile(diffPath, DIFF);
+
+      // test/setup.ts sets SMITH_CROSSCHECK_OFFLINE for the whole suite, and
+      // the CLI runs as a subprocess that inherits it. Cleared here alone:
+      // this judge is a node fixture on the local disk, so honouring the
+      // switch would test the switch, not the verb. The test below is the one
+      // that tests the switch.
+      const { stdout, status } = runCli(
+        [
+          'crossfind',
+          'run',
+          '--task',
+          'epic-1/task-1',
+          '--diff',
+          diffPath,
+          '--diff-ref',
+          'smith/epic-1/integration...task-1',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          parent,
+          '--state-dir',
+          eventsDir,
+          '--policy',
+          policy,
+        ],
+        { SMITH_CROSSCHECK_OFFLINE: '' },
+      );
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.native_considered).toBe(0);
+      expect(parsed.report.counts['independent-only']).toBe(1);
+      expect(parsed.runs).toHaveLength(1);
+      expect(parsed.runs[0].provider).toBe('codex');
+      // Printed, never minted: which findings enter a gate is the operator's
+      // call, and `smith findings raise` is where they make it.
+      expect(parsed.raise).toHaveLength(1);
+      expect(parsed.raise[0].finding.summary).toBe(evidence().summary);
+      expect(parsed.raise[0].finding.found_by_provider).toBe('codex');
+      expect(parsed.raise[0].filePath).toBe('src/b.ts');
+
+      const log = readFileSync(path.join(eventsDir, `${sessionId}.jsonl`), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(log.map((e) => e.event_type)).toContain('cross-finding-reconciled');
+      expect(log.map((e) => e.event_type)).toContain('judge-verdict');
+      expect(parsed.reconciled_event_id).toBe(`${sessionId}#${log.length - 1}`);
+    });
+
+    it('run refuses under the offline switch instead of finding nothing quietly', async () => {
+      // SMITH_CROSSCHECK_OFFLINE is inherited from test/setup.ts here -- this
+      // is the one test in the block that wants it. A skipped provider that
+      // left no trace would read exactly like a finder that found nothing, so
+      // the contract is that the verb fails and names who was skipped.
+      const sessionId = `cli-crossfind-offline-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'crossfind-offline-events');
+      const start = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(start.status).toBe(0);
+
+      const answerPath = await writeJson('cf-offline-answer.json', [evidence()]);
+      const policy = await writePolicy('cf-offline.yml', { mode: 'active', answerPath });
+      const diffPath = path.join(scratchDir, 'cf-offline.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'run',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'smith/epic-1/integration...task-1',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        JSON.parse(start.stdout).event_id as string,
+        '--state-dir',
+        eventsDir,
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.error.code).toBe('crossfind.no-providers');
+      expect(parsed.error.details.skipped).toEqual(['codex']);
+    });
+
+    it('run names a session that does not exist instead of reconciling against nothing', async () => {
+      const policy = await writePolicy('cf-missing.yml', { mode: 'shadow' });
+      const diffPath = path.join(scratchDir, 'cf-missing.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'run',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'ref',
+        '--session',
+        'no-such-session',
+        '--causal-parent',
+        'no-such-session#0',
+        '--state-dir',
+        path.join(scratchDir, 'crossfind-events'),
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('events.unknown-session');
+    });
+  });
 });

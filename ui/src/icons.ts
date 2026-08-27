@@ -77,6 +77,12 @@ export const ICON_PATHS: Record<string, string> = {
     '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
   'line-chart': '<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>',
   'rotate-cw': '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+
+  // --- added Phase B1 (independent finder timeline row) ---
+  // The second eye. `scale` already carries "a judge decided"; this row is a
+  // second reader saying what it saw, so it needs an icon that reads as sight
+  // rather than as judgement.
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
 };
 
 export type IconName = keyof typeof ICON_PATHS;

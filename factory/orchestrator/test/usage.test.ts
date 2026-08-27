@@ -7,6 +7,13 @@ import { COMMANDS, flagSpecFor, usageFor, usageLine, usageText } from '../src/us
 const CLI_SOURCE = readFileSync(path.join(import.meta.dirname, '..', 'src', 'cli.ts'), 'utf8');
 
 /**
+ * A nested `if (action === '…') {` under a bare namespace guard, at either
+ * indentation the dispatcher uses. Shared by both extractors below so they
+ * cannot disagree about what a nested action looks like.
+ */
+const NESTED_ACTION_RE = /^ {4,6}if \(action === '([\w-]+)'\) \{/gm;
+
+/**
  * Read the command set back out of the dispatcher itself.
  *
  * A hand-maintained help table is a second register of the same fact, and the
@@ -31,10 +38,14 @@ function dispatchedCommands(source: string): Set<string> {
 
   // `if (namespace === 'x') {` — either action-less (`new`, `dream`) or a
   // namespace whose actions are dispatched by a nested `if (action === ...)`.
+  // The nested arm is matched at either depth because the depth is incidental:
+  // `stats` opens a `try` around its actions and lands at six spaces,
+  // `crossfind` does not and lands at four. Pinning one of them would have let
+  // the other dispatch a command this guard never saw.
   for (const m of source.matchAll(/^ {2}if \(namespace === '([\w-]+)'\) \{/gm)) {
     bare.push({ namespace: m[1] as string, index: m.index });
   }
-  for (const m of source.matchAll(/^ {6}if \(action === '([\w-]+)'\) \{/gm)) {
+  for (const m of source.matchAll(NESTED_ACTION_RE)) {
     nested.push({ action: m[1] as string, index: m.index });
   }
 
@@ -68,6 +79,7 @@ describe('the drift guard itself', () => {
     ['an action-less namespace', 'new'],
     ['the second arm of an || dispatch', 'lessons reject'],
     ['a nested action under a bare namespace', 'stats providers'],
+    ['a nested action one indent shallower', 'crossfind run'],
   ])('finds %s (%s)', (_shape, command) => {
     expect(dispatched.has(command)).toBe(true);
   });
@@ -131,7 +143,7 @@ describe('COMMANDS ⊇ the flags each handler reads', () => {
       actions: [m[2], m[3]].filter((a): a is string => a !== undefined),
       index: m.index,
     }));
-    const nested = [...source.matchAll(/^ {6}if \(action === '([\w-]+)'\) \{/gm)].map((m) => ({
+    const nested = [...source.matchAll(NESTED_ACTION_RE)].map((m) => ({
       action: m[1] as string,
       index: m.index,
     }));

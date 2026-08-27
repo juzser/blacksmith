@@ -1,8 +1,8 @@
 # Runbook — cross-provider judges (Codex + DeepSeek)
 
 Operator procedure for `factory/policies/crosscheck.yml`'s Phase 8 providers:
-key/auth setup, enabling, shadow-mode calibration, promotion, rollback, cost,
-and security. Companion to `docs/specs/black-smith-architecture.md` §6 and
+key/auth setup, enabling, shadow-mode calibration, promotion, the independent
+finder, rollback, cost, and security. Companion to `docs/specs/black-smith-architecture.md` §6 and
 `docs/guide/operator-guide.md`; commands assume a built CLI
 (`pnpm run build` → `factory/orchestrator/dist/cli.js`, substitute `smith`
 if linked).
@@ -291,7 +291,126 @@ not a bug. To actually let the quorum overturn findings you need **two**
 active external providers (or a finding whose `found_by_provider` is an
 external provider, which puts native back in the pool).
 
-## 5. Rollback
+## 5. The independent finder — the additive direction
+
+Sections 1–4 describe a **subtractive** tier. `quorum.ts`'s vocabulary is
+`confirm | refute`: a critic is handed one claim the native reviewer already
+raised and asked whether it survives. The strongest thing that tier can do
+is delete a finding. It is a brake, and it is never an eye — a bug the
+native reviewer's context did not surface is a bug no amount of
+cross-checking reaches, because nothing outside that context is ever asked
+to look.
+
+`independent_finder` in `crosscheck.yml` is the other direction. A finder
+from a different vendor reads the same diff in a fresh context, returns its
+own evidence against
+`factory/specs/schema/finding-evidence.schema.json`, and
+`src/crossFinding.ts` reconciles its list against the native reviewer's. A
+quorum can now raise, not only lower.
+
+```yaml
+independent_finder:
+  enabled: false            # ships off
+  mode: shadow              # reconciliations recorded, gating nothing
+  providers: [codex]        # external only — never the native provider
+  send_diff: false          # the operator mandate, below
+  max_diff_bytes: 120000
+  severity_resolution: highest-wins
+```
+
+### The four outcomes
+
+Every reconciled pair lands in exactly one bucket, and only one of them
+can change anything:
+
+| Outcome | What it means | Effect |
+| --- | --- | --- |
+| `corroborated` | same fingerprint on both sides | severity may rise (below) |
+| `co-located` | same file and category, different claim | none — recorded only |
+| `independent-only` | only the finder raised it | `raise-finding`, and only when gating |
+| `native-only` | only the native reviewer raised it | none, ever |
+
+`native-only` is `none` **by rule, not by omission**: silence is not a
+refutation. The finder was never asked about that claim — it was asked to
+read a diff — so its not mentioning something is absence of evidence, and
+subtracting on it would let a truncated or lazy second opinion delete real
+findings. Refutation stays where it belongs, in §2–§4's critic tier, where
+a judge is handed the claim itself.
+
+`co-located` exists because nothing here can tell one bug described twice
+from two bugs in one function. It is surfaced for you and merged by nobody.
+
+An `independent-only` finding is **minted, not privileged**. It enters the
+gate as an ordinary finding carrying `found_by_provider`, and at S1/S2 it
+meets the same `quorum_triggers` critic as any other finding — a third-party
+vendor's unshared opinion still has to survive a refute pass before it
+blocks a task.
+
+`severity_resolution` decides a corroborated pair the two sides graded
+differently: `highest-wins` takes the worse of the two, `native-wins` keeps
+the native severity and records the disagreement without acting on it.
+
+### The operator mandate: `send_diff`
+
+A critic judges a **claim**, so §2's tier can send a summary and a failure
+scenario and never the source. A finder cannot — it has nothing to read but
+the diff. Shipping worktree source to a third-party API is a decision no
+code in this repo has standing to make quietly, so it is a switch, it ships
+`false`, and `smith crossfind run` **refuses** rather than falling back to a
+diffless "find bugs" prompt that would invent findings.
+
+`max_diff_bytes` refuses rather than truncates, for the same reason: half a
+diff produces confident findings about code that is not there.
+
+See exactly what would leave the machine before anything does:
+
+```bash
+smith crossfind request --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1
+```
+
+It prints the `JudgeRequest` and sends nothing. With `send_diff: false` it
+refuses, which is the point: the refusal is what tells you the switch is
+still off.
+
+### Calibrating it
+
+Same arc as §3, one command:
+
+```bash
+smith crossfind run --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
+  --session <id> --causal-parent <event-id>
+```
+
+Every run writes one `cross-finding-reconciled` event — outcome counts,
+which providers ran, which were skipped, which failed, and the ids it would
+have minted. Under `mode: shadow` that event is the **only** thing the run
+produces, and it is what you read to decide whether to promote. It has a
+timeline row in the dashboard for exactly that reason.
+
+Exit code 1 means "this run would have changed a gate" (`report.gates`);
+under shadow mode that is always 0, because nothing it says applies.
+
+To reconcile two lists you already have — no provider, no cost, no event —
+use `crossfind reconcile`, which takes the native findings and saved finder
+runs as files. It is pure, so it answers under `SMITH_CROSSCHECK_OFFLINE`
+too.
+
+### Promotion, and what it costs
+
+`mode: shadow` → `mode: active` in `crosscheck.yml`, same operator edit as
+§4. Two differences from promoting a critic:
+
+- **`min_providers` does not apply.** The finder is not voting on a claim,
+  so one provider is enough to raise. The fail-closed arithmetic in §4 is a
+  property of the quorum rule, not of this block.
+- **This is the one judge call that costs a diff**, in tokens and in
+  exposure. Budget for it per task, not per epic: `max_diff_bytes` is the
+  ceiling on a single call, and the finder runs on the whole diff, not on
+  one finding's summary.
+
+## 6. Rollback
 
 Two levers, same file, same "operator edit, never a runtime write" rule:
 
@@ -311,7 +430,7 @@ file when the change should outlive the shell.
 
 Either edit takes effect on the next case; nothing to restart.
 
-## 6. Cost notes
+## 7. Cost notes
 
 - **Codex** runs on the ChatGPT subscription via `codex exec` (no
   per-token API billing) — the whole point of the CLI-transport choice
@@ -329,7 +448,7 @@ Either edit takes effect on the next case; nothing to restart.
   into `smith stats analytics`'s cost-by-provider view later — not wired in
   by Phase 8 (YAGNI: no cost dashboard was asked for).
 
-## 7. Security notes
+## 8. Security notes
 
 - **Keys are env-only, never committed.** `crosscheck.yml` references
   `DEEPSEEK_API_KEY` by name; the actual value lives in `.env` (gitignored)
@@ -358,6 +477,17 @@ Either edit takes effect on the next case; nothing to restart.
   downgrade real quorum cases back to native-only. So: pass it per command,
   and if you ever promote a provider, check for it in the environment that
   runs the gate before you do.
+- **The finder is the one provider call that sends source.** Everything in
+  §2–§4 sends a claim: a summary, a category, a path, a failure scenario.
+  `independent_finder` sends the diff, because a second eye has nothing else
+  to read (§5). That is why `send_diff` ships `false` and why the verb
+  refuses instead of degrading — the fallback that would have been "ask for
+  bugs without showing the code" is worse than no finder at all, since it
+  produces findings about code the model never saw. Before you flip it,
+  decide the same thing you would decide for any other outbound path: which
+  vendor, under which terms, sees this repository's source. `crossfind
+  request` prints the exact payload so that decision can be made on the
+  bytes rather than on a description of them.
 - **Provider output is data, not commands.** Neither transport gives a
   provider write access to worktrees, the event log, or anything callable —
   `runCliJudge`/`runApiJudge` return a schema-validated JSON value

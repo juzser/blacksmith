@@ -1442,6 +1442,94 @@ epic's live plan is v5. Whatever the amendment changed has been reviewed
 against no spec at all.
 ```
 
+## 7d. `smith crossfind` — a second eye, not a second vote
+
+Everything in §7 is **subtractive**. A quorum is handed a claim the native
+reviewer already raised and asked whether it survives; the strongest thing it
+can do is delete a finding. That is a brake, and it is worth having, but it
+cannot reach a bug the native reviewer's context never surfaced — nothing
+outside that context is asked to look.
+
+`independent_finder` in `crosscheck.yml` is the other direction, and
+`smith crossfind` is how you drive it. A finder on a different vendor reads
+the diff in a fresh context and returns its own evidence; the two lists are
+then reconciled.
+
+```bash
+smith crossfind run --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
+  --session <id> --causal-parent <event-id>
+```
+
+Every reconciled pair lands in one of four outcomes, and only one of them can
+do anything:
+
+| Outcome | Meaning | Effect |
+| --- | --- | --- |
+| `corroborated` | both sides raised the same fingerprint | severity may rise (`severity_resolution`) |
+| `co-located` | same file and category, different claim | none — recorded for you |
+| `independent-only` | only the finder raised it | mintable as a real finding, and only while gating |
+| `native-only` | only the native reviewer raised it | **none, ever** |
+
+The last row is the rule the whole design turns on: **silence is not a
+refutation.** The finder was never asked about that native claim — it was
+asked to read a diff — so its not mentioning something is absence of evidence.
+Subtracting on it would let a truncated or lazy second opinion delete real
+findings, which is exactly the failure a second opinion is supposed to
+prevent. If you want a claim refuted, that is §7's tier, where a judge is
+handed the claim itself.
+
+`co-located` is a hedge with a reason: nothing in this code can tell one bug
+described twice from two bugs in one function. It is surfaced and merged by
+nobody.
+
+An `independent-only` finding is **minted, not privileged**. It enters the
+gate as an ordinary finding carrying `found_by_provider`, and at S1/S2 it
+meets the same `quorum_triggers` critic as any other — a third-party vendor's
+unshared opinion still has to survive a refute pass before it blocks a task.
+
+### The one switch to read before you enable anything
+
+`send_diff` ships `false`, and `crossfind run` **refuses** rather than
+degrading. A critic judges a claim, so §7 can send a summary and a failure
+scenario and never the source; a finder has nothing to read but the diff.
+Shipping worktree source to a third-party API is your decision, not the
+gate's — and the fallback that was available (ask for bugs without showing
+the code) is worse than no finder at all, because it produces confident
+findings about code the model never saw. `max_diff_bytes` refuses rather than
+truncating for the same reason: half a diff is the same failure in a smaller
+package.
+
+See the exact bytes first:
+
+```bash
+smith crossfind request --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1
+```
+
+It prints the `JudgeRequest` and sends nothing. With `send_diff: false` it
+refuses — and that refusal is the useful answer, because it tells you the
+switch is still off.
+
+`smith crossfind reconcile --task <id> --native <findings.json> --independent
+<runs.json>` does the reconciliation over two files you already have: no
+provider, no cost, no event. It is pure, so it answers under
+`SMITH_CROSSCHECK_OFFLINE` as well.
+
+`run` and `reconcile` exit **1 when the result would change a gate**, which
+under `mode: shadow` is never, because nothing it says applies. Both write
+one `cross-finding-reconciled` event — the outcome counts, which providers
+ran, which were skipped, which failed, and the finding ids it would have
+minted. In shadow mode that event is the *only* product of a run, so it is
+what you read to decide whether to promote; it has its own timeline row for
+that reason (`docs/runbooks/providers.md` §5).
+
+Promotion is the same operator edit as any other provider, with one
+arithmetic difference: `min_providers` does not apply. The finder is not
+voting on a claim, so one provider is enough to raise — §7's fail-closed
+"one active provider changes nothing" is a property of the quorum rule, not
+of this block.
+
 ## 8. Severity + waiver semantics, from the operator's chair
 
 | Severity | Blocks merge | What you see |
@@ -1984,3 +2072,11 @@ That is the false clean this command exists to refuse.
   `mode: active` provider changes no outcomes — `finder_ne_critic` excludes
   the claim's finder (the native reviewer today), leaving a below-quorum
   pool that escalates instead of deciding; you need two.
+- **The independent finder ships off, not merely powerless.** Every external
+  provider in `crosscheck.yml` ships `enabled: true, mode: shadow` — it runs,
+  it is recorded, and it gates nothing. `independent_finder` is `enabled: false`,
+  because it is the one call that would send the diff rather than a claim, and
+  `send_diff: false` is a second lock on the same door. Turning it on is two
+  edits and a decision about which vendor sees this repository's source; until
+  you make it, `smith crossfind run` refuses and no diff leaves the machine
+  (§7d).

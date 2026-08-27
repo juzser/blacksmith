@@ -429,6 +429,64 @@ describe('lib/timelineDisplay.ts', () => {
     });
   });
 
+  /**
+   * The independent finder's row. In shadow mode this event is the ONLY thing
+   * a run produces -- it gates nothing by construction -- so if it does not
+   * reach the timeline legibly there is no way to evaluate the shadow
+   * deployment before promoting it, which is the whole reason shadow mode
+   * exists.
+   */
+  describe('cross-finding-reconciled', () => {
+    it('leads with the findings only the second eye raised', () => {
+      const e = entry({
+        eventType: 'cross-finding-reconciled',
+        payload: {
+          task_id: 'epic-1/task-1',
+          mode: 'active',
+          counts: { corroborated: 2, 'co-located': 1, 'independent-only': 3, 'native-only': 4 },
+          providers: ['codex', 'gemini'],
+        },
+      });
+      expect(iconFor(e)).toBe('eye');
+      expect(titleFor(e)).toBe(
+        'Cross-finding — 3 independent-only, 2 corroborated (codex, gemini)',
+      );
+    });
+
+    // Same numbers, no gating power. An operator reading the row has to be
+    // able to tell "the finder would have raised three" from "the finder
+    // raised three", and only the mode says which.
+    it('says so when the same numbers gated nothing', () => {
+      const e = entry({
+        eventType: 'cross-finding-reconciled',
+        payload: {
+          mode: 'shadow',
+          counts: { 'independent-only': 3, corroborated: 2 },
+          providers: ['codex'],
+        },
+      });
+      expect(titleFor(e)).toBe(
+        'Cross-finding — 3 independent-only, 2 corroborated (codex, shadow)',
+      );
+    });
+
+    // A run where the two readers agreed on everything is the common case and
+    // still has to render: reading `NaN` off an absent count would make the
+    // quietest, most reassuring row the one that looks broken.
+    it('reads absent counts as zero rather than as NaN', () => {
+      expect(titleFor(entry({ eventType: 'cross-finding-reconciled', payload: {} }))).toBe(
+        'Cross-finding — 0 independent-only, 0 corroborated ()',
+      );
+    });
+
+    // The guard from the scheduler proposals, one event further out. `eye` is
+    // not in the kit's vendored 42-icon subset, so it is exactly the kind of
+    // name that renders a blank cell instead of failing a build.
+    it('gives the row an icon the registry actually has', () => {
+      expect(iconFor(entry({ eventType: 'cross-finding-reconciled' })) in ICON_PATHS).toBe(true);
+    });
+  });
+
   // The other half of D-153, and the half the operator reported: rendering
   // operator-note correctly is worth nothing while the chip they reach for to
   // find it selects a single event type that this factory's logs contain none

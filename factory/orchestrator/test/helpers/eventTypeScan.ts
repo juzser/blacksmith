@@ -98,6 +98,12 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
       'One external judge run (quorum.ts), payload-tagged via PAYLOAD_DIMENSION_MAP. Declared by no dimension, and it stays that way: promoting it into the vocabulary is an operator call (taxonomy version bump plus the architecture section 8 re-splice), not a change this lint should make on its own. It does now reach the operator (queries.ts FREE_TIMELINE_EVENT_TYPES) — being outside the taxonomy is a reason to stay in this list, not a reason to be invisible.',
   },
   {
+    eventType: 'cross-finding-reconciled',
+    writtenBy: 'src',
+    reason:
+      "One independent-finder run reconciled against the native reviewer's findings (crossFinding.ts). Outside the taxonomy for the same reason as judge-verdict -- promoting it into gate_event is an operator call with a version bump, not a change this lint makes on its own -- and unlike a gate result it decides nothing: it records what the second eye saw, which findings the two agreed on, and which the operator could raise. The mintable ids in the payload are drafts, not findings.",
+  },
+  {
     eventType: 'judge-reported',
     writtenBy: 'src',
     reason:

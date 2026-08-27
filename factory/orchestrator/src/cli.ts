@@ -20,6 +20,13 @@ import {
 } from './claims.js';
 import { collectCoverageEvidence } from './coverage.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
+import {
+  type IndependentRun,
+  independentFinderRequest,
+  type NativeFindingRecord,
+  reconcile,
+  runIndependentFinder,
+} from './crossFinding.js';
 import { apply as applyDb, type DbOpts, openDb, rebuild as rebuildDb } from './db/projector.js';
 import {
   analytics,
@@ -55,6 +62,7 @@ import {
   findingScope,
   listFindings,
   mintFindings,
+  OPEN_FINDING_STATUSES,
   raiseFinding,
   repairObligation,
   reverifyFinding,
@@ -103,7 +111,7 @@ import {
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
-import type { JudgeRequest } from './providers/types.js';
+import type { JudgeBudget, JudgeRequest } from './providers/types.js';
 import { admit, adopt, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { checkRuntime } from './runtime.js';
@@ -299,6 +307,34 @@ function boundedIntFlag(
     );
   }
   return value;
+}
+
+/**
+ * The same two numbers gate.ts, epic.ts and planQuorum.ts each declare for
+ * themselves, and for their reason: a judge call is a network round-trip, not
+ * a test. Declared here rather than imported because none of those three
+ * exports it, and cli.ts depending on a gate module for a default would make
+ * the CLI a fourth caller of the gate rather than a peer of it.
+ */
+const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_bytes: 262_144 };
+
+/**
+ * A judge budget the operator may narrow from the command line.
+ *
+ * Both bounds are floors, not ceilings, on purpose: a `--timeout-ms 0` would
+ * make every call fail as a timeout and read as a provider that refuses to
+ * answer, and a `--max-output-bytes 0` would truncate every verdict to nothing
+ * and read as a provider that answered with silence. Those are the two
+ * failures this repo works hardest to keep distinguishable, so neither is
+ * reachable by typo.
+ */
+function judgeBudgetFromFlags(flags: Record<string, string>): JudgeBudget {
+  return {
+    timeout_ms: boundedIntFlag(flags, 'timeout-ms', { min: 1 }) ?? DEFAULT_JUDGE_BUDGET.timeout_ms,
+    max_output_bytes:
+      boundedIntFlag(flags, 'max-output-bytes', { min: 1 }) ??
+      DEFAULT_JUDGE_BUDGET.max_output_bytes,
+  };
 }
 
 /**
@@ -2655,6 +2691,87 @@ async function main(): Promise<number> {
     const result = await runJudge(providerName, request);
     printJson({ ...result, shadow: flags.shadow === 'true' });
     return 0;
+  }
+
+  if (namespace === 'crossfind') {
+    // crosscheck.yml's `independent_finder`, driven by hand. Three verbs, and
+    // the split between them is the operator mandate made operable: `request`
+    // shows exactly what would leave the machine WITHOUT sending it, `run`
+    // sends it, and `reconcile` needs no provider at all.
+    const policy = loadCrosscheckPolicy(flags.policy);
+
+    if (action === 'request') {
+      // Read-only and network-free by construction: it builds the JudgeRequest
+      // and prints it. Every refusal independentFinderRequest() can raise —
+      // send_diff false, empty diff, oversized diff — fires here too, so an
+      // operator can find out what the policy forbids before spending a call.
+      const request = independentFinderRequest({
+        taskId: requireFlag(flags, 'task'),
+        diff: readFileSync(requireFlag(flags, 'diff'), 'utf8'),
+        diffRef: requireFlag(flags, 'diff-ref'),
+        ...(repeated.criterion ? { criteria: repeated.criterion } : {}),
+        budget: judgeBudgetFromFlags(flags),
+        policy: policy.independentFinder,
+      });
+      printJson(request);
+      return 0;
+    }
+
+    if (action === 'reconcile') {
+      // Offline calibration: two saved lists in, one report out, no provider
+      // invoked and nothing appended to the log. This is the verb to run over
+      // a shadow-mode backlog before deciding whether to flip `mode: active`.
+      const report = reconcile({
+        taskId: requireFlag(flags, 'task'),
+        native: readJsonFile<NativeFindingRecord[]>(requireFlag(flags, 'native')),
+        independent: readJsonFile<IndependentRun[]>(requireFlag(flags, 'independent')),
+        policy: policy.independentFinder,
+      });
+      printJson(report);
+      return report.gates ? 1 : 0;
+    }
+
+    if (action === 'run') {
+      const sessionId = requireFlag(flags, 'session');
+      const taskId = requireFlag(flags, 'task');
+      const eventOpts = eventOptsFromFlags(flags);
+      requireSession(sessionId, eventOpts);
+      // Lineage-wide (D-119), like every other read of a task's findings: a
+      // finding raised before a session split is still a finding this diff has
+      // to be reconciled against.
+      const native = (await listFindings(sessionId, { taskId }, eventOpts)).filter((f) =>
+        flags.status === undefined
+          ? OPEN_FINDING_STATUSES.has(f.finding_status)
+          : f.finding_status === flags.status,
+      );
+      // Built separately from the run for the reason RunIndependentFinderInput
+      // says: `crossfind request` and `crossfind run` must assemble the same
+      // bytes, so the thing the operator inspected is the thing that is sent.
+      const request = independentFinderRequest({
+        taskId,
+        diff: readFileSync(requireFlag(flags, 'diff'), 'utf8'),
+        diffRef: requireFlag(flags, 'diff-ref'),
+        ...(repeated.criterion ? { criteria: repeated.criterion } : {}),
+        budget: judgeBudgetFromFlags(flags),
+        policy: policy.independentFinder,
+      });
+      const result = await runIndependentFinder(
+        { taskId, request, native, policy },
+        eventContextFromFlags(flags),
+        eventOpts,
+      );
+      // `raise` is printed, never minted (crossFinding.ts's contract): which
+      // findings enter a gate is the operator's call, and `smith findings
+      // raise` is where they make it.
+      printJson({
+        report: result.report,
+        runs: result.runs,
+        raise: result.raise,
+        reconciled_event_id: result.reconciledEventId,
+        native_considered: native.length,
+      });
+      return result.report.gates ? 1 : 0;
+    }
   }
 
   if (namespace === 'ui' && action === 'serve') {

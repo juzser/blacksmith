@@ -18,6 +18,7 @@ import {
   type Finding,
   foldFindingsDetailed,
   isNonEmptyString,
+  OPEN_FINDING_STATUSES,
   type SkippedFindingRecord,
   transition,
 } from './findings.js';
@@ -68,21 +69,6 @@ import { RESERVED_TASK_ID } from './worktree.js';
  */
 
 const TERMINAL_OK_TASK_STATUSES = new Set(['completed', 'waived']);
-// D-127 Part B: `amend-pending` is open the same way `fix-pending` is — the
-// finding has an assigned discharge condition (amends_task_ids at
-// amends_plan_version, not a diff) that has not yet been shown to hold.
-// summarizeEpic() below is the one place that also knows how to tell a
-// satisfied amendment from an unsatisfied one; every other reader of this set
-// (db/queries.ts's kanban()) has no obligation data to consult and treats the
-// status as unconditionally open, which is correct for a per-task severity
-// chip and fails closed rather than silently agreeing the amendment landed.
-const OPEN_FINDING_STATUSES = new Set([
-  'raised',
-  'confirmed',
-  'fix-pending',
-  'fix-landed',
-  AMEND_PENDING_STATUS,
-]);
 
 /** The terminal-OK status that is a decision rather than a completion (D-120). */
 const WAIVED_TASK_STATUS = 'waived';

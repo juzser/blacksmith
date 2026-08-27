@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/finding-evidence.schema.json",
+  "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
+  "title": "Finding Evidence",
+  "description": "What a judge actually returns when its mandate is to FIND: evidence, no identity. finding.schema.json describes the record the orchestrator stores, and requires six fields a judge cannot know — finding_id, task_id, fingerprint, finding_status, found_by, found_by_provider — which findings.ts then refuses to accept from a judge (findings.evidence-carries-identity). Asking an external finder for that shape means asking it to invent a sha256 and a status, and throwing both away. This schema is the judge's half of the contract; mintFindings() adds the other half.",
+  "type": "object",
+  "required": ["file_path", "finding_category", "severity", "summary", "failure_scenario"],
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repo-relative path the finding is anchored to, normalized (forward slashes, no leading ./). The fingerprint's first component."
+    },
+    "finding_category": {
+      "type": "string",
+      "x-taxonomy": "finding_category"
+    },
+    "severity": {
+      "type": "string",
+      "x-taxonomy": "severity"
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "failure_scenario": {
+      "type": "object",
+      "description": "Concrete inputs -> wrong output. A finding without one dies at verify (agent-interviews.md V-2).",
+      "required": ["inputs", "expected", "actual"],
+      "properties": {
+        "inputs": { "type": "string" },
+        "expected": { "type": "string" },
+        "actual": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "criterion_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which acceptance criterion the evidence is against. Evidence, not identity: a spec reviewer legitimately knows which criterion it read, and cannot know the plan version it was dispatched on."
+    }
+  },
+  "additionalProperties": false
+}
