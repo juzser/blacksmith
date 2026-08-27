@@ -158,7 +158,7 @@ test.describe('Kanban', () => {
     // has done whatever it does to `error` -- so the assertions below land
     // inside the in-flight window rather than racing it.
     const refetch = page.waitForRequest('**/api/kanban*');
-    await page.getByRole('button', { name: 'Refresh' }).click();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await refetch;
 
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();

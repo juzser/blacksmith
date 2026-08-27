@@ -56,11 +56,17 @@ test.describe('Disclosure ARIA', () => {
     page,
   }) => {
     await page.goto('/overview');
-    // Only a landed fetch turns "Connecting…" into a real liveness state.
-    await expect(page.locator('.live-status__label')).toHaveText(/^Live · updated /);
 
+    // Data-gated on THIS page's own fetch. The liveness label used to serve as
+    // that gate, but it moved into the app shell and now runs off /api/pulse —
+    // it turns "Live" when the pulse lands, which can be before /api/overview
+    // has returned a single agent. Waiting on the rows the sweep is about is
+    // the only gate that cannot drift out from under it again.
     const groups = page.locator('.live-agent-group-row');
+    await expect(groups.first()).toBeVisible();
     const count = await groups.count();
+    // Said out loud, because "no dangling IDREFs" and "no disclosures on the
+    // page" read identically otherwise.
     expect(count).toBeGreaterThan(0);
 
     // This page opens every group by default while the whole factory fits on

@@ -506,7 +506,12 @@ than appearing in it.
   recorded where it will be found again: `lib/navBadges.ts`'s header,
   `ui/docs/design-spec.md` §A.6, and the `ui/docs/DESIGN.md` decision log.
   24 badge tests, plus `lastEventLabel` coverage; three new contrast pairs
-  (48 checked, 0 failures).
+  (48 checked, 0 failures). The wiring is asserted where only a browser can
+  see it, in the new `ui/e2e/shell.spec.ts`: that the shell polls on a page
+  that has no poll of its own, that its Refresh refetches the page you are on
+  rather than only the indicator beside it, and that a counter growing while
+  you were elsewhere reaches the rail and clears when you read it. A fold that
+  is correct and never mounted still leaves you staring at a frozen server.
 
 ### Changed
 

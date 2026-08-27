@@ -132,7 +132,7 @@ test.describe('Sessions', () => {
 
     // The factory goes idle and the canvas leaves the page entirely.
     sessionCount = 0;
-    await page.getByRole('button', { name: 'Refresh' }).click();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(page.locator('.sessions-canvas')).toHaveCount(0);
 
     // The operator narrows the window while there is nothing to draw, so this
@@ -141,7 +141,7 @@ test.describe('Sessions', () => {
 
     // A run starts again.
     sessionCount = 8;
-    await page.getByRole('button', { name: 'Refresh' }).click();
+    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(page.locator('.session-node')).toHaveCount(8);
 
     // Same claim as the fit test, made after a remount: a layout chosen for the
