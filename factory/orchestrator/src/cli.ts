@@ -149,6 +149,14 @@ import {
 } from './security.js';
 import { parseLessons } from './severity.js';
 import { amendPlan, recordSpecReview } from './spec.js';
+import {
+  approveSpecChange,
+  listSpecChanges,
+  proposeSpecChange,
+  rejectSpecChange,
+  type SpecChangeRequest,
+  type SpecChangeStatus,
+} from './specChange.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import {
   emitEdgesRecorded,
@@ -1074,6 +1082,105 @@ async function main(): Promise<number> {
       sitesUnclaimed: result.sitesUnclaimed,
       diff: result.diff,
     });
+    return 0;
+  }
+
+  // The worker's half of the same wall. A coder cannot emit an event and
+  // cannot mint a spec-scoped finding, so it returns a spec_change_request in
+  // its structured_output and the node that dispatched it runs this. Nothing
+  // here writes a plan file: `plan amend` above stays the only path to a
+  // version, and this only records that someone asked for one.
+  if (namespace === 'plan' && action === 'propose') {
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    // A file, not a flag soup: `changes` alone is a nested object, and the
+    // worker already returned the whole request as JSON. Asking the dispatcher
+    // to re-type it into flags would be asking it to paraphrase the worker.
+    const request = readJsonFile<SpecChangeRequest>(requireFlag(flags, 'request'));
+    const proposal = await proposeSpecChange(
+      {
+        plan,
+        taskId: requireFlag(flags, 'task'),
+        proposedBy: requireFlag(flags, 'proposed-by'),
+        ...(flags['proposed-by-provider']
+          ? { proposedByProvider: flags['proposed-by-provider'] }
+          : {}),
+        request,
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    printJson(proposal);
+    return 0;
+  }
+
+  if (namespace === 'plan' && action === 'proposals') {
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    // Same P9-28 rule the findings verbs follow: an empty list is an answer
+    // about the proposals, and it must not double as the answer about a
+    // session that was never opened.
+    requireSession(sessionId, eventOpts);
+    const proposals = await listSpecChanges(
+      sessionId,
+      {
+        epicId: flags.epic,
+        taskId: flags.task,
+        status: flags.status as SpecChangeStatus | undefined,
+      },
+      { ...eventOpts, ...planOptsFromFlags(flags) },
+    );
+    // Printed whole, diff included. The operator's next move is a yes or a no
+    // on a plan diff, and a listing that made them go and read the proposal
+    // event by hand to see it would have answered the wrong question.
+    printJson(proposals);
+    return 0;
+  }
+
+  // "Duyệt nhanh" is one command, and it is one command without any guard
+  // being relaxed: `amendPlan` still demands a rationale, findings, and
+  // sites. Approval supplies them from what the worker already recorded.
+  if (namespace === 'plan' && action === 'approve') {
+    const [proposalId] = requirePositionals(positional, usageFor('plan approve')) as [string];
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const result = await approveSpecChange(
+      {
+        proposalId,
+        plan,
+        decidedBy: requireFlag(flags, 'decided-by'),
+        ...(flags.rationale ? { rationale: flags.rationale } : {}),
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    printJson({
+      proposalId,
+      epic: result.plan.epic_id,
+      version: result.plan.version,
+      previousVersion: plan.version,
+      findingIds: [result.proposal.findingId],
+      sites: result.proposal.sites,
+      sitesUnclaimed: result.sitesUnclaimed,
+      diff: result.diff,
+    });
+    return 0;
+  }
+
+  if (namespace === 'plan' && action === 'reject') {
+    const [proposalId] = requirePositionals(positional, usageFor('plan reject')) as [string];
+    // --rationale is required here and optional on approve, which is not an
+    // inconsistency: approval can fall back to the worker's own argument
+    // because approval agrees with it. A rejection is the operator saying
+    // something the log does not already contain.
+    const proposal = await rejectSpecChange(
+      {
+        proposalId,
+        decidedBy: requireFlag(flags, 'decided-by'),
+        rationale: requireFlag(flags, 'rationale'),
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    printJson(proposal);
     return 0;
   }
 

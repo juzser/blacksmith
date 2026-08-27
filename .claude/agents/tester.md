@@ -45,6 +45,18 @@ return `run_status: dead` with `structured_output.research_request =
 {question, blocking, tried}`, and the dispatcher runs the researcher and
 re-dispatches you. Never a deletion.
 
+A red test can also mean the criterion is wrong — the spec asks for a
+behaviour the code contradicts, and the test that would prove it cannot be
+written honestly. That is the third exit, not a bounce: commit what is green,
+return `run_status: dead` with `structured_output.spec_change_request =
+{criterion_ref, assumption, evidence, changes, sites, blocking}` (schema:
+`factory/specs/schema/spec-change-request.schema.json`), and the dispatcher
+records it with `smith plan propose` for the operator to approve or reject.
+You are the role most likely to find this, because a criterion that cannot be
+tested is usually a criterion that was never true. Proposing it is the
+alternative to the thing you must never do: relax the assertion until the
+spec is satisfied by something else.
+
 <!-- LESSONS:stack-wide -->
 <!-- LESSONS:claim-path -->
 
@@ -67,7 +79,8 @@ with exactly these three keys:
   `dead` if you stopped at a cap or a blocker
 - `structured_output` — `{unit_tests_added, unit_tests_total, coverage_pct,
   e2e: {passed, failed, skipped}, uncovered_paths}`; add `research_request`
-  when you need the researcher (see above)
+  when you need the researcher, or `spec_change_request` when the criterion
+  itself is wrong (see above)
 - `artifacts` — `[{type, path, description?}]`: screenshots, Playwright
   traces, coverage report. Screenshots matter beyond this task — a
   UI-affecting task's visual pass reads them and nothing else, which is

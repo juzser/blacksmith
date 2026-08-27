@@ -108,6 +108,38 @@ function longLiveAgent(sessionId: string, hoursAgo: number): StoredEvent {
   );
 }
 
+/**
+ * A worker's spec change proposal, as the log holds it. The daemon reads it
+ * through `foldSpecChanges`, so the fixture is the payload rather than a
+ * `SpecChangeProposal` — a fold given a hand-built object would prove only
+ * that the object was hand-built.
+ */
+function proposal(
+  sessionId: string,
+  overrides: Record<string, unknown> = {},
+  taskId = 'epic-1/task-2',
+): StoredEvent {
+  return stored(
+    sessionId,
+    'spec-change-proposed',
+    {
+      epic_id: 'epic-1',
+      base_version: 1,
+      proposed_by: 'coder',
+      finding_id: 'F-1',
+      criterion_ref: 'epic-1/task-2:criterion-1',
+      assumption: 'every value is single-line',
+      evidence: 'the parser reads a quoted newline',
+      sites: ['src/parse.ts'],
+      changes: {},
+      blocking: true,
+      severity: 'S2-major',
+      ...overrides,
+    },
+    { task_id: taskId },
+  );
+}
+
 let dir = '';
 
 beforeEach(async () => {
@@ -209,6 +241,68 @@ describe('what one tick notices', () => {
       staleHours: 4,
     });
     expect(findings.filter((f) => f.kind === 'stale-agent')).toEqual([]);
+  });
+
+  // The whole point of the living-spec path: a worker that hits a wrong
+  // criterion stops, and nothing about that stop is visible in the budget, the
+  // agent registry or the recheck queue. Without this the operator learns
+  // about it by noticing a task that never finished.
+  it('raises the proposal nobody has answered yet', () => {
+    const findings = inspectSession('sess-1', [proposal('sess-1')], OPTS);
+    const specChanges = findings.filter((f) => f.kind === 'spec-change');
+    expect(specChanges).toHaveLength(1);
+    expect(specChanges[0]?.subject).toBe('epic-1/task-2');
+    // `blocking` is the worker saying it cannot go further, which is a stalled
+    // task and not a queue item.
+    expect(specChanges[0]?.severity).toBe('attention');
+    // The criterion, the assumption being overturned, and the two commands
+    // that answer it: an operator should not have to run a second command to
+    // find out what they are being asked.
+    expect(specChanges[0]?.detail).toContain('epic-1/task-2:criterion-1');
+    expect(specChanges[0]?.detail).toContain('every value is single-line');
+    expect(specChanges[0]?.detail).toContain('smith plan approve');
+    expect(specChanges[0]?.detail).toContain('smith plan reject');
+  });
+
+  it('files a non-blocking proposal as work to schedule, not as a fault', () => {
+    const findings = inspectSession('sess-1', [proposal('sess-1', { blocking: false })], OPTS);
+    expect(findings.filter((f) => f.kind === 'spec-change')[0]?.severity).toBe('info');
+  });
+
+  it('drops a proposal the operator has already decided', () => {
+    const open = proposal('sess-1');
+    const events = [
+      open,
+      stored('sess-1', 'spec-change-decided', {
+        proposal_id: open.event_id,
+        epic_id: 'epic-1',
+        decision: 'approved',
+        decided_by: 'operator',
+        rationale: 'the evidence holds',
+        plan_version: 2,
+      }),
+    ];
+    expect(inspectSession('sess-1', events, OPTS).filter((f) => f.kind === 'spec-change')).toEqual(
+      [],
+    );
+  });
+
+  it('drops a rejected proposal too — decided is decided, either way', () => {
+    const open = proposal('sess-1');
+    const events = [
+      open,
+      stored('sess-1', 'spec-change-decided', {
+        proposal_id: open.event_id,
+        epic_id: 'epic-1',
+        decision: 'rejected',
+        decided_by: 'operator',
+        rationale: 'the criterion is right and the parser is wrong',
+        plan_version: null,
+      }),
+    ];
+    expect(inspectSession('sess-1', events, OPTS).filter((f) => f.kind === 'spec-change')).toEqual(
+      [],
+    );
   });
 
   it('names the session on every finding it makes', () => {

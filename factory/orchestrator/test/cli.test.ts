@@ -4797,6 +4797,394 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // The other side of the same wall. `plan amend` above is the operator's
+    // exit from a spec defect; these four verbs are the worker's way of
+    // reaching it. A coder cannot emit an event and cannot mint a spec-scoped
+    // finding, so it returns the request and the dispatcher records it.
+    describe('living spec: worker-proposed amendments', () => {
+      const CRITERION = 'epic-1/task-2:criterion-1';
+
+      /** The diff a worker would propose: task-2's criterion, restated. */
+      function proposedChanges() {
+        return {
+          supersede: {
+            'epic-1/task-2': {
+              ...PLAN.tasks[1],
+              acceptance_criteria: ['parses `A="x\\ny"` into a single entry'],
+            },
+          },
+        };
+      }
+
+      async function requestFile(
+        name: string,
+        overrides: Record<string, unknown> = {},
+      ): Promise<string> {
+        const filePath = path.join(scratchDir, `${name}-request.json`);
+        await writeFile(
+          filePath,
+          JSON.stringify({
+            criterion_ref: CRITERION,
+            assumption: 'a .env value never spans two physical lines',
+            evidence: 'src/bar/thing.ts:41 reads line by line and never rewinds',
+            changes: proposedChanges(),
+            sites: ['src/bar/thing.ts', 'src/elsewhere/same-shape.ts'],
+            blocking: true,
+            ...overrides,
+          }),
+        );
+        return filePath;
+      }
+
+      async function propose(
+        name: string,
+        s: { sessionId: string; eventsDir: string; planPath: string },
+        specsDir: string,
+        overrides: Record<string, unknown> = {},
+      ) {
+        return runCli([
+          'plan',
+          'propose',
+          '--plan',
+          s.planPath,
+          '--task',
+          'epic-1/task-2',
+          '--proposed-by',
+          'coder',
+          '--request',
+          await requestFile(name, overrides),
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+      }
+
+      it('records a proposal, raises the finding that anchors it, and cuts no version', async () => {
+        const s = await session();
+        const specsDir = path.join(scratchDir, `${s.sessionId}-propose-specs`);
+
+        const result = await propose('cli-propose', s, specsDir);
+        expect(result.status).toBe(0);
+        const proposal = JSON.parse(result.stdout);
+        expect(proposal).toMatchObject({
+          epicId: 'epic-1',
+          taskId: 'epic-1/task-2',
+          baseVersion: 1,
+          proposedBy: 'coder',
+          criterionRef: CRITERION,
+          blocking: true,
+          status: 'open',
+          decision: null,
+          // Defaulted above the waivable band (D-196), so a standing waiver
+          // cannot swallow the finding the amendment would have to cite.
+          severity: 'S2-major',
+          diff: { superseded: ['epic-1/task-2'] },
+        });
+        expect(proposal.proposalId).toBeTruthy();
+        expect(proposal.findingId).toBeTruthy();
+
+        const records = tail(s.sessionId, s.eventsDir);
+        expect(records.filter((r) => r.event_type === 'spec-change-proposed')).toHaveLength(1);
+        // A proposal is data, not a command: the finding exists so the
+        // amendment has something to cite, and nothing else has moved.
+        expect(records.filter((r) => r.event_type === 'finding-raised')).toHaveLength(1);
+        expect(records.filter((r) => r.event_type === 'plan-version-created')).toEqual([]);
+        expect(existsSync(path.join(specsDir, 'epic-1', 'plan-v2.json'))).toBe(false);
+      });
+
+      it('refuses a diff that could never be applied, while the worker is still there to be told', async () => {
+        const s = await session();
+        const specsDir = path.join(scratchDir, `${s.sessionId}-badpropose-specs`);
+
+        const result = await propose('cli-propose-bad', s, specsDir, {
+          changes: {
+            supersede: { 'epic-1/task-2': { ...PLAN.tasks[1], case: 'not-a-real-case' } },
+          },
+        });
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('spec-change.proposal-invalid-draft');
+        // Refused before the anchor is minted: an unappliable proposal must
+        // not leave a finding behind waiting on an amendment nobody can cut.
+        expect(
+          tail(s.sessionId, s.eventsDir).filter((r) => r.event_type === 'finding-raised'),
+        ).toEqual([]);
+      });
+
+      it('lists open proposals with the diff the operator has to answer', async () => {
+        const s = await session();
+        const specsDir = path.join(scratchDir, `${s.sessionId}-list-specs`);
+        expect((await propose('cli-list', s, specsDir)).status).toBe(0);
+
+        const listed = runCli([
+          'plan',
+          'proposals',
+          '--session',
+          s.sessionId,
+          '--status',
+          'open',
+          '--specs-dir',
+          specsDir,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(listed.status).toBe(0);
+        const open = JSON.parse(listed.stdout);
+        expect(open).toHaveLength(1);
+        expect(open[0]).toMatchObject({
+          status: 'open',
+          criterionRef: CRITERION,
+          sites: ['src/bar/thing.ts', 'src/elsewhere/same-shape.ts'],
+          diff: { superseded: ['epic-1/task-2'] },
+        });
+        // The whole diff, not a reference to it: the operator's next move is
+        // yes or no on this object.
+        expect(open[0].changes.supersede['epic-1/task-2']).toBeTruthy();
+
+        const filtered = runCli([
+          'plan',
+          'proposals',
+          '--session',
+          s.sessionId,
+          '--task',
+          'epic-1/task-1',
+          '--specs-dir',
+          specsDir,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(filtered.status).toBe(0);
+        expect(JSON.parse(filtered.stdout)).toEqual([]);
+      });
+
+      it('approves in one command: the amendment cites the finding and diff the worker recorded', async () => {
+        const s = await session();
+        const specsDir = path.join(scratchDir, `${s.sessionId}-approve-specs`);
+        const proposed = await propose('cli-approve', s, specsDir);
+        expect(proposed.status).toBe(0);
+        const { proposalId, findingId } = JSON.parse(proposed.stdout);
+
+        // No --changes, no --sites, no --rationale. That is the whole of
+        // "duyệt nhanh": everything `plan amend` demands was recorded by the
+        // worker that hit the wall, so approval supplies it rather than
+        // asking the operator to reconstruct it.
+        const result = runCli([
+          'plan',
+          'approve',
+          proposalId,
+          '--plan',
+          s.planPath,
+          '--decided-by',
+          'operator',
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          proposalId,
+          epic: 'epic-1',
+          version: 2,
+          previousVersion: 1,
+          findingIds: [findingId],
+          sites: ['src/bar/thing.ts', 'src/elsewhere/same-shape.ts'],
+          sitesUnclaimed: ['src/elsewhere/same-shape.ts'],
+        });
+
+        // Immutable and on disk, cut by the one code path that cuts versions.
+        const written = JSON.parse(
+          await readFile(path.join(specsDir, 'epic-1', 'plan-v2.json'), 'utf8'),
+        ) as { version: number };
+        expect(written.version).toBe(2);
+
+        const records = tail(s.sessionId, s.eventsDir);
+        const cut = records.filter((r) => r.event_type === 'plan-version-created');
+        expect(cut).toHaveLength(1);
+        expect(cut[0]?.payload).toMatchObject({
+          version: 2,
+          amends: [{ finding_id: findingId, criterion_ref: CRITERION }],
+        });
+        // The rationale the operator never typed: the worker's own argument,
+        // which is the thing they actually agreed with.
+        expect(
+          String((cut[0]?.payload as { rationale?: string } | undefined)?.rationale),
+        ).toContain('a .env value never spans two physical lines');
+        const decided = records.filter((r) => r.event_type === 'spec-change-decided');
+        expect(decided).toHaveLength(1);
+        expect(decided[0]?.payload).toMatchObject({
+          proposal_id: proposalId,
+          decision: 'approved',
+          decided_by: 'operator',
+          plan_version: 2,
+        });
+
+        // And it is answered: a second approval of the same proposal is not a
+        // second version.
+        const again = runCli([
+          'plan',
+          'approve',
+          proposalId,
+          '--plan',
+          s.planPath,
+          '--decided-by',
+          'operator',
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(again.status).toBe(1);
+        expect(JSON.parse(again.stdout).error.code).toBe('spec-change.already-decided');
+      });
+
+      it('refuses a proposal a newer version has already overtaken, and says which one', async () => {
+        const s = await session();
+        const specsDir = path.join(scratchDir, `${s.sessionId}-stale-specs`);
+        const first = await propose('cli-stale-a', s, specsDir);
+        const second = await propose('cli-stale-b', s, specsDir);
+        expect(first.status).toBe(0);
+        expect(second.status).toBe(0);
+
+        // Approve one. The other was written against v1, which no longer
+        // describes the plan its diff would be applied to.
+        const approved = runCli([
+          'plan',
+          'approve',
+          JSON.parse(first.stdout).proposalId,
+          '--plan',
+          s.planPath,
+          '--decided-by',
+          'operator',
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(approved.status).toBe(0);
+
+        const stale = runCli([
+          'plan',
+          'approve',
+          JSON.parse(second.stdout).proposalId,
+          '--plan',
+          s.planPath,
+          '--decided-by',
+          'operator',
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(stale.status).toBe(1);
+        const error = JSON.parse(stale.stdout).error;
+        expect(error.code).toBe('spec-change.approval-stale');
+        // Named, not merely refused: the operator's next move is to re-propose
+        // against v2, and the message is where they learn that.
+        expect(error.message).toContain('v2');
+        expect(existsSync(path.join(specsDir, 'epic-1', 'plan-v3.json'))).toBe(false);
+
+        // And the listing agrees with the refusal rather than still offering it.
+        const listed = runCli([
+          'plan',
+          'proposals',
+          '--session',
+          s.sessionId,
+          '--status',
+          'open',
+          '--specs-dir',
+          specsDir,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(listed.status).toBe(0);
+        expect(JSON.parse(listed.stdout)).toEqual([]);
+      });
+
+      it('rejects a proposal: the anchor finding is refuted and no version is cut', async () => {
+        const s = await session();
+        const specsDir = path.join(scratchDir, `${s.sessionId}-reject-specs`);
+        const proposed = await propose('cli-reject', s, specsDir);
+        expect(proposed.status).toBe(0);
+        const { proposalId, findingId } = JSON.parse(proposed.stdout);
+
+        const bare = runCli([
+          'plan',
+          'reject',
+          proposalId,
+          '--decided-by',
+          'operator',
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        // Required, unlike on approve: the log already holds the case for.
+        expect(bare.status).toBe(1);
+        expect(bare.stdout).toContain('rationale');
+
+        const result = runCli([
+          'plan',
+          'reject',
+          proposalId,
+          '--decided-by',
+          'operator',
+          '--rationale',
+          'the reader is line-oriented by contract; multi-line values are out of scope for v1',
+          '--specs-dir',
+          specsDir,
+          '--session',
+          s.sessionId,
+          '--causal-parent',
+          `${s.sessionId}#0`,
+          '--state-dir',
+          s.eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          proposalId,
+          status: 'rejected',
+          decision: { decision: 'rejected', decidedBy: 'operator', planVersion: null },
+        });
+
+        const records = tail(s.sessionId, s.eventsDir);
+        expect(records.filter((r) => r.event_type === 'plan-version-created')).toEqual([]);
+        expect(existsSync(path.join(specsDir, 'epic-1', 'plan-v2.json'))).toBe(false);
+        // The finding does not outlive the answer. Left raised, it would block
+        // the epic gate over a criterion the operator has just said is fine.
+        const transitioned = records.filter((r) => r.event_type === 'finding-transitioned');
+        expect(transitioned).toHaveLength(1);
+        expect(transitioned[0]?.payload).toMatchObject({
+          finding_id: findingId,
+          to_status: 'refuted',
+        });
+      });
+    });
+
     // B3. Every gate before this one grades planner-authored text against
     // planner-authored text: the spec review reads the plan, the schema gate
     // reads the task's own output schema, the reviewer reads the criteria the

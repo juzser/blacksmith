@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://black-smith.dev/schema/spec-change-request.schema.json",
+  "$comment": "Taxonomy-valued fields carry an x-taxonomy annotation naming the dimension in factory/policies/taxonomy.yml. The runtime validates those values against that file at write time; enums are never inlined here to avoid drift between the schema and the taxonomy (architecture §8).",
+  "title": "Spec Change Request",
+  "description": "A worker's third exit, returned in structured_output alongside research_request and never emitted as an event — a worker that stops mid-flight cannot emit anything, so signalling through a returned field is the only shape that survives its own failure case (architecture §15). It says the criterion is wrong and what it should say instead. It is a proposal, not an amendment: nothing here moves a plan file, and only an operator's approval reaches `plan amend`.",
+  "type": "object",
+  "required": ["criterion_ref", "assumption", "evidence", "changes", "sites", "blocking"],
+  "properties": {
+    "criterion_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Which acceptance criterion the worker read and found wrong. \"The plan is wrong\" has to say which clause — the same rule mintFindings enforces on spec-review evidence."
+    },
+    "assumption": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The assumption that criterion makes, stated as the worker understood it before it broke. This is what the operator is being asked to overturn, so it is recorded in the worker's words rather than paraphrased from the diff."
+    },
+    "evidence": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What the worker found that contradicts the assumption — the file it read, the signature it hit, the test that cannot be written. A proposal without it is an opinion, and the operator is the one who would have to go and check."
+    },
+    "changes": {
+      "type": "object",
+      "description": "The proposed diff, in PlanChanges shape: {added?, supersede?, newEdges?}. Validated at proposal time by drafting the next version and running the plan's own validator over it, so a proposal that could never be applied is refused before it reaches an operator's queue rather than after."
+    },
+    "sites": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Every place the wrong assumption's shape occurs, not only where the worker hit it (D-123). The worker is better placed to enumerate these than the operator, which is the whole reason this field is asked for here rather than typed at approval."
+    },
+    "blocking": {
+      "type": "boolean",
+      "description": "Whether the worker can make any further progress without the amendment. Mirrors research_request.blocking. A blocking proposal left unreviewed is a stalled task, which is why the daemon reports it and a non-blocking one only waits."
+    },
+    "severity": {
+      "type": "string",
+      "x-taxonomy": "severity",
+      "description": "Optional. How badly the wrong criterion breaks the epic, if the worker has a view. Defaults at the dispatcher, never here: a schema default would make an absent field indistinguishable from a chosen one."
+    }
+  },
+  "additionalProperties": false
+}
