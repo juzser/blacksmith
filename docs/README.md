@@ -7,9 +7,9 @@ Read on demand — nothing here is meant to be preloaded (`AGENTS.md`
 | Doc | Description | Audience |
 |---|---|---|
 | [`specs/black-smith-architecture.md`](specs/black-smith-architecture.md) | Full architecture spec (v3, 17 sections): loop, worktrees, cross-check, taxonomy, gates, self-extension, PR flow, stack standard, build order, evidence base | operator, contributor, agent |
-| [`specs/black-smith-interview.md`](specs/black-smith-interview.md) | Recorded operator interview (stack, budgets, severity calibration) that compiled into `standards/stack.md` and `standards/agent-constraints.md` | operator |
+| [`specs/black-smith-interview.md`](specs/black-smith-interview.md) | The operator interview: the stack half runs at install time and lands in `factory/policies/stack.yml`; the rest (budgets, severity calibration, gates) compiled into `standards/agent-constraints.md` | operator |
 | [`specs/agent-interviews.md`](specs/agent-interviews.md) | Per-agent-role interview; answers compile into `standards/agent-constraints.md` and, from Phase 2, into `.claude/agents/` | operator, contributor |
-| [`standards/stack.md`](standards/stack.md) | The one stack every scaffolded project uses (TS, Vue+Vite, Cloudflare Workers+Hono, D1/Drizzle, pnpm, Biome, Vitest+Playwright) | operator, contributor |
+| [`standards/stack.md`](standards/stack.md) | What the install interview's stack answers mean, who reads each one, and which the shipped templates honour, record, or refuse — the answers themselves live in `factory/policies/stack.yml` | operator, contributor |
 | [`standards/agent-constraints.md`](standards/agent-constraints.md) | Per-agent constraint blocks (TDD strictness, coverage floor, severity calibration, budgets, context-window compaction) — source of truth until fully baked into templates | contributor, agent |
 | [`standards/guardrails.md`](standards/guardrails.md) | Hard rules the factory enforces mechanically (secrets, git actions, filesystem, deploy/outbound, CI) — violations are S1 unless stated otherwise | operator, contributor, agent |
 | [`standards/mcp.md`](standards/mcp.md) | The MCP surface every shipped project must declare — stdio by default, read-only tools by default, hard-gated at epic close; rule ids MCP-P1, MCP-T4, … are the contract | operator, contributor, agent |

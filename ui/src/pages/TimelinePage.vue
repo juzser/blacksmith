@@ -13,14 +13,14 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import CausalTimelineList from '../components/CausalTimelineList.vue';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import FilterChips from '../components/hds/FilterChips.vue';
-import Icon from '../components/hds/Icon.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import Toolbar from '../components/hds/Toolbar.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import FilterChips from '../components/ds/FilterChips.vue';
+import Icon from '../components/ds/Icon.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import Toolbar from '../components/ds/Toolbar.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
@@ -135,7 +135,7 @@ function goToTask(taskId: string) {
 
     <template v-else-if="loading">
       <!-- ds-allow-hardcode:start — 28px matches .timeline-row__icon's own
-           fixed icon-circle diameter (hds-components.css); no token models
+           fixed icon-circle diameter (ds-components.css); no token models
            a specific icon-circle size. -->
       <div v-for="i in 6" :key="i" style="display: flex; gap: var(--ds-space-2); padding: var(--ds-space-2) 0">
         <Skeleton width="28px" height="28px" radius="var(--ds-radius-pill)" /><!-- ds-allow-hardcode:end -->

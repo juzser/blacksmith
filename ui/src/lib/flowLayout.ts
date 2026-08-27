@@ -24,7 +24,7 @@
 //     tasks it heads, so it simply cannot drift.
 //
 // NODE_WIDTH/NODE_HEIGHT are the box `.flow-node` occupies. They are mirrored
-// in hds-components.css (`width`, `min-height`) and the two must move
+// in ds-components.css (`width`, `min-height`) and the two must move
 // together — a node wider than NODE_WIDTH would overlap its neighbour, which
 // is what flowLayout.test.ts's overlap check is there to catch.
 import type { FlowGraph, FlowNode } from './api.js';

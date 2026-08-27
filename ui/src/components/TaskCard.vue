@@ -12,7 +12,7 @@
 import { computed } from 'vue';
 import type { KanbanTask } from '../lib/api.js';
 import { severityTone } from '../lib/taxonomy.js';
-import Lozenge from './hds/Lozenge.vue';
+import Lozenge from './ds/Lozenge.vue';
 import IdentityChip from './IdentityChip.vue';
 
 const props = defineProps<{ task: KanbanTask }>();

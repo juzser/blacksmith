@@ -4,19 +4,19 @@
 // Dialog, cursor Load more (client-side page-through — errorsPage() has no
 // server cursor yet, flagged in ui/docs/DESIGN.md).
 import { computed, onMounted, ref, watch } from 'vue';
-import Banner from '../components/hds/Banner.vue';
-import BarChart from '../components/hds/BarChart.vue';
-import Button from '../components/hds/Button.vue';
-import Card from '../components/hds/Card.vue';
-import Dialog from '../components/hds/Dialog.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import Icon from '../components/hds/Icon.vue';
-import LineChart from '../components/hds/LineChart.vue';
-import Lozenge from '../components/hds/Lozenge.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import RowList from '../components/hds/RowList.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import Table from '../components/hds/Table.vue';
+import Banner from '../components/ds/Banner.vue';
+import BarChart from '../components/ds/BarChart.vue';
+import Button from '../components/ds/Button.vue';
+import Card from '../components/ds/Card.vue';
+import Dialog from '../components/ds/Dialog.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import Icon from '../components/ds/Icon.vue';
+import LineChart from '../components/ds/LineChart.vue';
+import Lozenge from '../components/ds/Lozenge.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import RowList from '../components/ds/RowList.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import Table from '../components/ds/Table.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { type ErrorsResult, fetchErrors } from '../lib/api.js';
@@ -110,10 +110,10 @@ const columns = [
       <Skeleton v-if="loading" height="80" />
       <EmptyState v-else-if="canClaimEmpty(loaded, providerDisagreement.length)" icon="scale" inline>No provider disagreements logged.</EmptyState>
       <RowList v-else-if="loaded" density="compact">
-        <li v-for="c in providerDisagreement" :key="`${c.errorGroup}.${c.errorClass}`" class="hds-row">
-          <span class="hds-row__main">
-            <span class="hds-row__title">judgment · provider-disagreement</span>
-            <span class="hds-row__meta">{{ c.count }} occurrences</span>
+        <li v-for="c in providerDisagreement" :key="`${c.errorGroup}.${c.errorClass}`" class="ds-row">
+          <span class="ds-row__main">
+            <span class="ds-row__title">judgment · provider-disagreement</span>
+            <span class="ds-row__meta">{{ c.count }} occurrences</span>
           </span>
         </li>
       </RowList>

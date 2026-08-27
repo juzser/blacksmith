@@ -7,9 +7,9 @@
 export type Tone = 'info' | 'success' | 'warning' | 'danger' | 'discovery' | 'neutral';
 // Only variants Lozenge.vue can actually render belong here: `subtle` and
 // `bold` are the two the component's `style` computed handles (and the only
-// two that apply `tone` at all), `outline` is served by a .hds-loz--outline
+// two that apply `tone` at all), `outline` is served by a .ds-loz--outline
 // rule. A fourth member, `solid`, was declared here and rendered by neither
-// channel — see D-217. hdsVariants.test.ts holds the union to that rule.
+// channel — see D-217. dsVariants.test.ts holds the union to that rule.
 export type LozengeVariant = 'subtle' | 'bold' | 'outline';
 
 export interface ToneMapping {

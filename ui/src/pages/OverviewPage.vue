@@ -44,19 +44,19 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import coffeeIllustration from '../assets/illustrations/coffee.svg';
 import CommandHint, { type CommandHintItem } from '../components/CommandHint.vue';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import Card from '../components/hds/Card.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import Highlight from '../components/hds/Highlight.vue';
-import Lozenge from '../components/hds/Lozenge.vue';
-import MetricGrid from '../components/hds/MetricGrid.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Row from '../components/hds/Row.vue';
-import RowList from '../components/hds/RowList.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import StatCard from '../components/hds/StatCard.vue';
-import TwoColumn from '../components/hds/TwoColumn.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import Card from '../components/ds/Card.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import Highlight from '../components/ds/Highlight.vue';
+import Lozenge from '../components/ds/Lozenge.vue';
+import MetricGrid from '../components/ds/MetricGrid.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Row from '../components/ds/Row.vue';
+import RowList from '../components/ds/RowList.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import StatCard from '../components/ds/StatCard.vue';
+import TwoColumn from '../components/ds/TwoColumn.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import LiveAgentGroupRow, { type LiveAgentGroupUI } from '../components/LiveAgentGroupRow.vue';
 import ProgressBar from '../components/ProgressBar.vue';
@@ -446,7 +446,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
     <!-- Stat row: its own remote-data zone. Operator directive 3 (round 3):
          each StatCard is now a clickable link to its detail page (native
          <a> via router-link — a:focus-visible is already covered by the
-         vendored base layer, hds-tokens.css, so no new focus CSS). -->
+         vendored base layer, ds-tokens.css, so no new focus CSS). -->
     <MetricGrid :columns="4">
       <template v-if="loading">
         <Skeleton v-for="i in 4" :key="i" height="112" />
@@ -454,8 +454,8 @@ const bsCommands = computed<CommandHintItem[]>(() => {
       <template v-else-if="data">
         <router-link
           to="/flow"
-          class="hds-stat-link"
-          :class="{ 'hds-flash': agentsFlash }"
+          class="ds-stat-link"
+          :class="{ 'ds-flash': agentsFlash }"
           aria-label="Active agents, view in Flow"
         >
           <StatCard
@@ -468,7 +468,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
             hint="vs 5 min ago"
           />
         </router-link>
-        <router-link to="/analytics" class="hds-stat-link" aria-label="Budget used, view in Analytics">
+        <router-link to="/analytics" class="ds-stat-link" aria-label="Budget used, view in Analytics">
           <StatCard
             label="Budget used"
             :value="`${data.tokensByEpic.reduce((s, e) => s + e.tokensSpent, 0)} tok`"
@@ -479,7 +479,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
             :hint="data.budgetUsedPctPointDelta1h === null ? 'No budget set' : 'vs 1h ago'"
           />
         </router-link>
-        <router-link to="/kanban" class="hds-stat-link" aria-label="Epics in flight, view in Kanban">
+        <router-link to="/kanban" class="ds-stat-link" aria-label="Epics in flight, view in Kanban">
           <StatCard
             label="Epics in flight"
             :value="data.epicsInFlight.length"
@@ -489,7 +489,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
             hint="No history yet"
           />
         </router-link>
-        <router-link to="/kanban" class="hds-stat-link" aria-label="Alerts, view in Kanban">
+        <router-link to="/kanban" class="ds-stat-link" aria-label="Alerts, view in Kanban">
           <StatCard
             label="Alerts"
             :value="data.alerts.escalations + data.alerts.pendingWaivers"
@@ -513,7 +513,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
     <Card
       v-if="!loading && data && nowRunning.length > 0"
       title="Now running"
-      :class="{ 'hds-flash': sessionsFlash }"
+      :class="{ 'ds-flash': sessionsFlash }"
     >
       <template #action>
         <Button variant="ghost" size="sm" @click="router.push('/flow')">View →</Button>
@@ -606,9 +606,9 @@ const bsCommands = computed<CommandHintItem[]>(() => {
     <TwoColumn v-else-if="!loading && data">
       <!-- Operator directive 3 (round 3): every card gets an explicit
            affordance to its detail page — a ghost Button in Card's own
-           `action` slot (design-system/hds/components/surfaces/
-           Card.prompt.md), "View ->" pattern already established by the
-           Recent-dispatch row titles' own arrow glyph. -->
+           `action` slot (the kit's own Card.prompt.md), "View ->" pattern
+           already established by the Recent-dispatch row titles' own arrow
+           glyph. -->
       <!-- Operator directive (Phase 6b round 5, revised round 6): grouped
            by "role · tier" (IdentityChip + count Lozenge), each a
            Disclosure trigger (LiveAgentGroupRow.vue — same aria-expanded/
@@ -620,7 +620,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
            (round 5's actual bug); this way each column keeps its own
            groups' details confined to itself, so toggling one group never
            reflows or reorders the other column. -->
-      <Card title="Live agents" :class="{ 'hds-flash': agentsFlash }">
+      <Card title="Live agents" :class="{ 'ds-flash': agentsFlash }">
         <template #action>
           <Button variant="ghost" size="sm" @click="router.push('/flow')">View →</Button>
         </template>
@@ -652,7 +652,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
         <EmptyState v-else icon="bot" inline>No agents running right now.</EmptyState>
       </Card>
 
-      <Card title="Recent dispatch decisions" :class="{ 'hds-flash': dispatchFlash }">
+      <Card title="Recent dispatch decisions" :class="{ 'ds-flash': dispatchFlash }">
         <template #action>
           <Button variant="ghost" size="sm" @click="router.push('/timeline')">View →</Button>
         </template>
@@ -680,7 +680,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
         </template>
         <div v-if="data.milestoneProgress.length > 0" style="display: flex; flex-direction: column; gap: var(--ds-space-3)">
           <div v-for="m in data.milestoneProgress" :key="m.milestoneId">
-            <div class="hds-row__title">{{ m.name }}</div>
+            <div class="ds-row__title">{{ m.name }}</div>
             <ProgressBar :value="m.tasksCompleted" :total="m.tasksTotal || 1" :label="`${m.name} progress`" />
           </div>
         </div>
@@ -693,7 +693,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
                its own affordance — /kanban?epic=<id>, KanbanPage.vue reads
                the query param to pre-select that epic's lane. -->
           <RowList v-if="data.epicsInFlight.length > 0" density="compact">
-            <li v-for="epicId in data.epicsInFlight" :key="epicId" class="hds-row">
+            <li v-for="epicId in data.epicsInFlight" :key="epicId" class="ds-row">
               <router-link
                 :to="`/kanban?epic=${encodeURIComponent(epicId)}`"
                 style="display: flex; align-items: center; gap: var(--ds-space-2); color: inherit; text-decoration: none"
@@ -713,13 +713,13 @@ const bsCommands = computed<CommandHintItem[]>(() => {
             Nothing pending.
           </EmptyState>
           <div v-else style="display: flex; flex-wrap: wrap; gap: var(--ds-space-2)">
-            <button v-if="data.alerts.pendingWaivers > 0" type="button" class="hds-btn hds-btn--ghost hds-btn--xs" style="padding: 0" @click="goToKanban">
+            <button v-if="data.alerts.pendingWaivers > 0" type="button" class="ds-btn ds-btn--ghost ds-btn--xs" style="padding: 0" @click="goToKanban">
               <Lozenge tone="warning">{{ pluralize(data.alerts.pendingWaivers, 'waiver') }} pending</Lozenge>
             </button>
-            <button v-if="data.alerts.escalations > 0" type="button" class="hds-btn hds-btn--ghost hds-btn--xs" style="padding: 0" @click="goToKanban">
+            <button v-if="data.alerts.escalations > 0" type="button" class="ds-btn ds-btn--ghost ds-btn--xs" style="padding: 0" @click="goToKanban">
               <Lozenge tone="danger">{{ pluralize(data.alerts.escalations, 'escalation') }}</Lozenge>
             </button>
-            <button v-if="pendingLessons !== null && pendingLessons > 0" type="button" class="hds-btn hds-btn--ghost hds-btn--xs" style="padding: 0" @click="router.push('/lessons')">
+            <button v-if="pendingLessons !== null && pendingLessons > 0" type="button" class="ds-btn ds-btn--ghost ds-btn--xs" style="padding: 0" @click="router.push('/lessons')">
               <Lozenge tone="discovery">{{ pluralize(pendingLessons, 'lesson candidate') }}</Lozenge>
             </button>
             <!-- Said out loud rather than left as a silence the operator would

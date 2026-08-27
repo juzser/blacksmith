@@ -151,7 +151,8 @@ a chat transcript.
   per-project scoping. It binds to `127.0.0.1` and is read-only — clicking
   nothing there dispatches an agent.
 - **Project scaffolding.** `/bs new <project>` generates a target project from
-  this repo's stack standard; `/bs mcp` layers an MCP surface onto it.
+  the stack you answered for at install time; `/bs mcp` layers an MCP surface
+  onto it.
 - **A factory that extends itself.** New agent roles, policies and taxonomy
   values are data files, not code — see
   [extending](docs/guide/extending.md).
@@ -188,7 +189,7 @@ Day to day, from a Claude Code session opened in this repo:
 
 | Command | What it does |
 |---|---|
-| `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
+| `/bs new <project> [--ui]` | Scaffold a new target project from your stack answers |
 | `/bs mcp <project>` | Layer the MCP surface on and make its milestone due |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner + spec-reviewer |
 | `/bs run <epic>` | Admit a wave and drive it through the loop to merge |

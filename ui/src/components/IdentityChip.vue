@@ -36,7 +36,7 @@ const dotStyle = computed(() => ({ background: identityColorVar(props.id) }));
 </script>
 
 <template>
-  <span class="hds-loz hds-loz--outline identity-chip" :style="style">
+  <span class="ds-loz ds-loz--outline identity-chip" :style="style">
     <span
       class="identity-chip__dot"
       :class="{ 'identity-chip__dot--live': live }"

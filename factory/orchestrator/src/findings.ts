@@ -363,7 +363,7 @@ function mintFindingId(taskId: string, fingerprint: string): string {
  *
  * Three rules, each returning only when it picks out exactly one candidate:
  * the bare head (`S2` → `S2-major`), the bare tail (`coverage` →
- * `test-coverage`, `hds` → `visual-hds`), and one shared hyphen token
+ * `test-coverage`, `design` → `visual-design`), and one shared hyphen token
  * (`test-gap` → `test-coverage` — the wave-3 slip in D-37 that cost a full
  * gate round).
  */

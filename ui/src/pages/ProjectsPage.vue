@@ -6,11 +6,11 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import CommandHint, { type CommandHintItem } from '../components/CommandHint.vue';
-import Banner from '../components/hds/Banner.vue';
-import Card from '../components/hds/Card.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
+import Banner from '../components/ds/Banner.vue';
+import Card from '../components/ds/Card.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { fetchOverview, type OverviewResult, type ProjectOverviewSummary } from '../lib/api.js';
@@ -60,8 +60,8 @@ function goToProject(project: string) {
 // `smith new` scaffolds a repo on disk. Naming the command is the honest
 // version of that button. Descriptions follow .claude/skills/bs/SKILL.md.
 const newProjectCommands: CommandHintItem[] = [
-  { cmd: '/bs new <project>', desc: 'Scaffold a new project from the stack standard' },
-  { cmd: '/bs new <project> --ui', desc: 'Same, plus Vue + Vite and the vendored HDS tokens' },
+  { cmd: '/bs new <project>', desc: 'Scaffold a new project from the stack answers' },
+  { cmd: '/bs new <project> --ui', desc: 'Same, plus the frontend and design system answered for' },
   { cmd: '/bs mcp <project>', desc: 'Layer the MCP surface on at the closing milestone' },
 ];
 </script>
@@ -103,7 +103,7 @@ const newProjectCommands: CommandHintItem[] = [
           <IdentityChip :id="p.project" />
         </template>
         <!-- Bug fix (Phase 6b round 7, token-existence check): --ds-text-lg
-             doesn't exist in hds-tokens.css's scale (xs/sm/base/xl/2xl,
+             doesn't exist in ds-tokens.css's scale (xs/sm/base/xl/2xl,
              no "lg" step) — an invalid custom property silently drops to
              the browser's default font-size instead of failing loudly.
              --ds-text-xl is the real next size up from base. -->

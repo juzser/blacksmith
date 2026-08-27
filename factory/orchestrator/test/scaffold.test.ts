@@ -34,6 +34,7 @@ import {
   scaffoldProject,
   validateProjectName,
 } from '../src/scaffold.js';
+import type { StackAnswers } from '../src/stack.js';
 import { git, runOrThrow } from './helpers/process.js';
 
 const BIOME_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'biome');
@@ -50,6 +51,47 @@ afterEach(() => {
   for (const dir of scratchDirs) rmSync(dir, { recursive: true, force: true });
   scratchDirs = [];
 });
+
+/**
+ * A UI operator's stack answers, injected rather than read from
+ * factory/policies/stack.yml.
+ *
+ * The shipped answers say `frontend: none` — most projects are not UI
+ * projects — so a `--ui` test that read the file would be asserting against
+ * whatever this clone's operator happened to answer, and would go red the day
+ * they answered honestly. Tests that exercise the UI layer name the answers
+ * they are testing.
+ */
+function uiStack(overrides: Partial<StackAnswers> = {}): StackAnswers {
+  return {
+    language: 'typescript',
+    frontend: 'vue',
+    designSystem: 'none',
+    designSystemSource: '',
+    styling: 'plain-css',
+    backend: 'none',
+    database: 'none',
+    orm: 'none',
+    packageManager: 'pnpm',
+    repoShape: 'single',
+    lint: 'biome',
+    testUnit: 'vitest',
+    testE2e: 'playwright',
+    ci: 'github-actions',
+    hosting: 'unspecified',
+    ...overrides,
+  };
+}
+
+/** A throwaway design-system kit on disk, to vendor from. */
+function mkDesignKit(prefix: string): string {
+  const dir = mkScratch(prefix);
+  const kit = path.join(dir, 'kit');
+  mkdirSync(path.join(kit, 'components'), { recursive: true });
+  writeFileSync(path.join(kit, 'tokens.css'), ':root {\n  --ds-accent: #0a7;\n}\n', 'utf8');
+  writeFileSync(path.join(kit, 'components', 'button.css'), '.ds-button {\n}\n', 'utf8');
+  return kit;
+}
 
 function assertParseableJson(filePath: string): void {
   expect(() => JSON.parse(readFileSync(filePath, 'utf8'))).not.toThrow();
@@ -141,7 +183,8 @@ describe('scaffold.ts', () => {
       expect(existsSync(path.join(targetDir, rel)), `missing ${rel}`).toBe(true);
     }
     // No UI files leaked into a non-UI scaffold.
-    expect(existsSync(path.join(targetDir, 'hds'))).toBe(false);
+    expect(existsSync(path.join(targetDir, 'design'))).toBe(false);
+    expect(existsSync(path.join(targetDir, 'src/styles'))).toBe(false);
     expect(existsSync(path.join(targetDir, 'vite.config.ts'))).toBe(false);
 
     const pkg = JSON.parse(readFileSync(path.join(targetDir, 'package.json'), 'utf8'));
@@ -273,7 +316,7 @@ describe('scaffold.ts', () => {
     expect(realpathSync(path.dirname(nodeModules))).toBe(realpathSync(targetDir));
   });
 
-  it('--ui adds Vue+Vite+vendored HDS tokens and merges package.json', () => {
+  it('--ui adds Vue+Vite, generates the style entry, and merges package.json', () => {
     const workDir = mkScratch('smith-scaffold-ui-');
     const targetDir = path.join(workDir, 'wt', 'acme-dashboard');
 
@@ -283,6 +326,7 @@ describe('scaffold.ts', () => {
       targetDir,
       templateDir: SCAFFOLD_DIR,
       repoRoot: REPO_ROOT,
+      stack: uiStack(),
       skipGit: true,
       skipToolchain: true,
     });
@@ -294,8 +338,6 @@ describe('scaffold.ts', () => {
       'src/App.vue',
       'src/shims.d.ts',
       'src/styles/main.css',
-      'hds/hds-tokens.css',
-      'hds/hds-components.css',
     ]) {
       expect(existsSync(path.join(targetDir, rel)), `missing ${rel}`).toBe(true);
     }
@@ -316,9 +358,134 @@ describe('scaffold.ts', () => {
     assertValidTypeScriptSyntax(targetDir, 'src/shims.d.ts');
     assertValidTypeScriptSyntax(targetDir, 'vite.config.ts');
 
-    const tokens = readFileSync(path.join(targetDir, 'hds/hds-tokens.css'), 'utf8');
-    const sourceTokens = readFileSync(path.join(REPO_ROOT, 'ui/src/styles/hds-tokens.css'), 'utf8');
-    expect(tokens).toBe(sourceTokens);
+    // `design_system: none` vendors nothing — the project owns its components
+    // — and `styling: plain-css` puts no utility layer in the lockfile. Both
+    // used to be unconditional: every scaffolded UI project got Tailwind and a
+    // copy of this repo's own private kit, whatever its operator wanted.
+    expect(existsSync(path.join(targetDir, 'design'))).toBe(false);
+    expect(pkg.devDependencies['@tailwindcss/vite']).toBeUndefined();
+    const css = readFileSync(path.join(targetDir, 'src/styles/main.css'), 'utf8');
+    expect(css).not.toContain('tailwindcss');
+    expect(css).not.toContain('design/');
+    expect(css).toContain('.app {');
+  });
+
+  it('--ui with styling: tailwind layers the utility CSS over the same template', () => {
+    const workDir = mkScratch('smith-scaffold-tw-');
+    const targetDir = path.join(workDir, 'wt', 'acme-tw');
+
+    scaffoldProject({
+      projectName: 'acme-tw',
+      ui: true,
+      targetDir,
+      templateDir: SCAFFOLD_DIR,
+      repoRoot: REPO_ROOT,
+      stack: uiStack({ styling: 'tailwind' }),
+      skipGit: true,
+      skipToolchain: true,
+    });
+
+    const css = readFileSync(path.join(targetDir, 'src/styles/main.css'), 'utf8');
+    expect(css).toContain("@import 'tailwindcss';");
+
+    const pkg = JSON.parse(readFileSync(path.join(targetDir, 'package.json'), 'utf8'));
+    expect(pkg.devDependencies['@tailwindcss/vite']).toBeDefined();
+    // The layer overwrites vite.config.ts rather than shipping a second one:
+    // one plugin list, with Tailwind added to it.
+    const vite = readFileSync(path.join(targetDir, 'vite.config.ts'), 'utf8');
+    expect(vite).toContain('tailwindcss()');
+    expect(vite).toContain('vue()');
+    assertValidTypeScriptSyntax(targetDir, 'vite.config.ts');
+  });
+
+  it('--ui vendors the named design system and imports its tokens', () => {
+    const kit = mkDesignKit('smith-scaffold-ds-');
+    const workDir = mkScratch('smith-scaffold-dsproj-');
+    const targetDir = path.join(workDir, 'wt', 'acme-ds');
+
+    scaffoldProject({
+      projectName: 'acme-ds',
+      ui: true,
+      targetDir,
+      templateDir: SCAFFOLD_DIR,
+      repoRoot: REPO_ROOT,
+      stack: uiStack({ designSystem: 'acme-ds', designSystemSource: kit }),
+      skipGit: true,
+      skipToolchain: true,
+    });
+
+    // Vendored, not referenced: the copy is verbatim and recursive, so the
+    // scaffolded project builds with the network unplugged.
+    expect(readFileSync(path.join(targetDir, 'design/tokens.css'), 'utf8')).toBe(
+      readFileSync(path.join(kit, 'tokens.css'), 'utf8'),
+    );
+    expect(existsSync(path.join(targetDir, 'design/components/button.css'))).toBe(true);
+
+    const css = readFileSync(path.join(targetDir, 'src/styles/main.css'), 'utf8');
+    expect(css).toContain("@import '../../design/tokens.css';");
+  });
+
+  it('refuses a design_system_source that does not exist, before creating anything', () => {
+    const workDir = mkScratch('smith-scaffold-dsmiss-');
+    const targetDir = path.join(workDir, 'wt', 'acme-dsmiss');
+
+    expect(() =>
+      scaffoldProject({
+        projectName: 'acme-dsmiss',
+        ui: true,
+        targetDir,
+        templateDir: SCAFFOLD_DIR,
+        repoRoot: REPO_ROOT,
+        stack: uiStack({
+          designSystem: 'acme-ds',
+          designSystemSource: path.join(workDir, 'no-such-kit'),
+        }),
+        skipGit: true,
+        skipToolchain: true,
+      }),
+    ).toThrow(ScaffoldError);
+    // A refusal that leaves half a project behind is a refusal the operator
+    // has to clean up; the old best-effort copy left one that also imported a
+    // directory it had never written, and reported success.
+    expect(existsSync(targetDir)).toBe(false);
+  });
+
+  it('refuses --ui when the operator does not build a frontend', () => {
+    const workDir = mkScratch('smith-scaffold-nofe-');
+    const targetDir = path.join(workDir, 'wt', 'acme-nofe');
+
+    expect(() =>
+      scaffoldProject({
+        projectName: 'acme-nofe',
+        ui: true,
+        targetDir,
+        templateDir: SCAFFOLD_DIR,
+        repoRoot: REPO_ROOT,
+        stack: uiStack({ frontend: 'none' }),
+        skipGit: true,
+        skipToolchain: true,
+      }),
+    ).toThrow(/frontend/);
+    expect(existsSync(targetDir)).toBe(false);
+  });
+
+  it('refuses a frontend the templates cannot build, rather than handing over Vue', () => {
+    const workDir = mkScratch('smith-scaffold-react-');
+    const targetDir = path.join(workDir, 'wt', 'acme-react');
+
+    expect(() =>
+      scaffoldProject({
+        projectName: 'acme-react',
+        ui: true,
+        targetDir,
+        templateDir: SCAFFOLD_DIR,
+        repoRoot: REPO_ROOT,
+        stack: uiStack({ frontend: 'react' }),
+        skipGit: true,
+        skipToolchain: true,
+      }),
+    ).toThrow(/react/);
+    expect(existsSync(targetDir)).toBe(false);
   });
 
   it('--ui variant: shims.d.ts declares every non-.ts asset type main.ts imports (real tsc typecheck needs node_modules — vue, etc. — which this test policy deliberately never installs; this is the targeted fallback assertion instead)', () => {
@@ -331,6 +498,7 @@ describe('scaffold.ts', () => {
       targetDir,
       templateDir: SCAFFOLD_DIR,
       repoRoot: REPO_ROOT,
+      stack: uiStack(),
       skipGit: true,
       skipToolchain: true,
     });
@@ -399,6 +567,7 @@ describe('the scaffold can run its own gates (P9-19)', () => {
       targetDir,
       templateDir: SCAFFOLD_DIR,
       repoRoot: REPO_ROOT,
+      stack: ui ? uiStack() : undefined,
       skipGit: true,
       skipToolchain: true,
     });

@@ -645,7 +645,7 @@ error:
   memory:       [lesson-contamination, lesson-stale, poisoning-suspected]
 
 # ── Review ──────────────────────────────────────────────────────────
-finding_category: [correctness, security, a11y, performance, visual-hds,
+finding_category: [correctness, security, a11y, performance, visual-design,
                    behavioral-drift, test-coverage, over-engineering,
                    maintainability]
                    # behavioral-drift — changed input validation / error

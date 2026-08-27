@@ -36,8 +36,8 @@ import {
   longestRunningSince,
   workingCount,
 } from '../lib/liveness.js';
-import Icon from './hds/Icon.vue';
-import Lozenge from './hds/Lozenge.vue';
+import Icon from './ds/Icon.vue';
+import Lozenge from './ds/Lozenge.vue';
 import IdentityChip from './IdentityChip.vue';
 
 export interface LiveAgentGroupUI {

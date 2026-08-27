@@ -348,6 +348,19 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Open judge sandboxes — all of them, or the one binding commands run in --worktree.',
   },
   {
+    command: 'stack show',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary: "The operator's stack answers from factory/policies/stack.yml, parsed.",
+  },
+  {
+    command: 'stack check',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary:
+      'Which stack answers the shipped templates honour, which they only record, and which make `smith new` refuse. Exit 1 on a refusal.',
+  },
+  {
     command: 'policy check',
     positionals: '',
     flags:

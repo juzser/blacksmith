@@ -1,7 +1,7 @@
 // Lucide icon path data. The 26 entries marked "(kit)" are copied verbatim
-// from knowledge/design-system/hds/assets/icons/*.svg (via the kit's own
-// Icon.jsx PATHS registry) — offline, inherits currentColor, stroke 2 at
-// every size. The remaining entries are icons this dashboard's nav/domain
+// from the source kit's own icon assets (via its Icon.jsx PATHS registry,
+// ui/docs/DESIGN.md "Provenance") — offline, inherits currentColor, stroke 2
+// at every size. The remaining entries are icons this dashboard's nav/domain
 // vocabulary needs (design-spec.md §2 SidebarNav, §5.1 StatCard, §5.2
 // Timeline row anatomy) that the kit's curated 42-icon subset does not
 // include; sourced from the same lucide set, same stroke conventions, and

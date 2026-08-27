@@ -228,7 +228,7 @@ describe('mintFindings', () => {
         'security',
         'a11y',
         'performance',
-        'visual-hds',
+        'visual-design',
         'behavioral-drift',
         'test-coverage',
         'over-engineering',
@@ -246,10 +246,10 @@ describe('mintFindings', () => {
       ).toThrow(/test-coverage/);
     });
 
-    it('names the taxonomy value for a bare suffix like "coverage" or "hds"', () => {
+    it('names the taxonomy value for a bare suffix like "coverage" or "design"', () => {
       for (const [written, canonical] of [
         ['coverage', 'test-coverage'],
-        ['hds', 'visual-hds'],
+        ['design', 'visual-design'],
         ['drift', 'behavioral-drift'],
       ]) {
         expect(() =>

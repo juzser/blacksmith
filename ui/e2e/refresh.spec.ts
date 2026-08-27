@@ -53,7 +53,7 @@ test.describe('Manual refresh (design-spec §8)', () => {
       if (surface.ready) {
         await expect(page.getByRole('tablist', { name: surface.ready })).toBeVisible();
       }
-      await expect(page.locator('.hds-skeleton')).toHaveCount(0);
+      await expect(page.locator('.ds-skeleton')).toHaveCount(0);
 
       // Hold the refetch open so the in-flight state is observable rather
       // than raced (the kanban.spec.ts idiom).
@@ -69,7 +69,7 @@ test.describe('Manual refresh (design-spec §8)', () => {
       // because a list re-sorting mid-read is bad; replacing the whole page
       // with a skeleton (and, on Task detail, the Refresh button with it) is
       // strictly worse than the re-sort it was meant to avoid.
-      expect(await page.locator('.hds-skeleton').count()).toBe(0);
+      expect(await page.locator('.ds-skeleton').count()).toBe(0);
     });
   }
 

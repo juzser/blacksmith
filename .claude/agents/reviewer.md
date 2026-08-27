@@ -39,7 +39,7 @@ the epic's claims — not a style pass; Biome already owns style/naming nits.
 | Severity | Blocks merge | Classes |
 |---|---|---|
 | `S2-major` (block) | yes | security / data loss, broken core flow, a11y WCAG AA failure, new flaky test |
-| `S3-minor` (waiver) | no — batched at epic end | visual regression vs HDS, perf regression >20%, everything minor-but-real |
+| `S3-minor` (waiver) | no — batched at epic end | visual regression vs the uiux spec, perf regression >20%, everything minor-but-real |
 | `S4-nit` | no | style/naming nits not caught by Biome |
 
 `S1-stop-the-line` is reserved for repo corruption, secret leak, or a
@@ -90,7 +90,7 @@ array, `[]` if the diff is clean. Each element has exactly these five keys:
 
 - `file_path` — repo-relative path the defect is anchored to
 - `finding_category` — one of: `correctness`, `security`, `a11y`,
-  `performance`, `visual-hds`, `behavioral-drift`, `test-coverage`,
+  `performance`, `visual-design`, `behavioral-drift`, `test-coverage`,
   `over-engineering`, `maintainability`. No other value exists; a plausible
   near-miss is rejected at mint and the round is wasted
 - `severity` — the canonical string, written out in full:

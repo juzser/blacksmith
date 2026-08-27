@@ -298,8 +298,8 @@ if command -v pnpm >/dev/null 2>&1; then
 
   echo
   echo "-- Design-system gates (Phase 6b fix-round; vendored under scripts/design/,"
-  echo "   not referencing the hans repo at runtime — ui/docs/DESIGN.md's 'Gates"
-  echo "   wired' table) --"
+  echo "   reaching outside this repo at neither build nor run time —"
+  echo "   ui/docs/DESIGN.md's 'Gates wired' table) --"
 
   if python3 scripts/design/lint_hardcodes.py ui/src; then
     echo "OK   scripts/design/lint_hardcodes.py ui/src"

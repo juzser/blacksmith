@@ -13,7 +13,7 @@ test.describe('Errors', () => {
 
   test('row click opens the error detail Dialog', async ({ page }) => {
     await page.goto('/errors');
-    await page.locator('.hds-table tbody tr[data-clickable]').first().click();
+    await page.locator('.ds-table tbody tr[data-clickable]').first().click();
     await expect(page.getByRole('dialog', { name: 'Error detail' })).toBeVisible();
     await expect(page.locator('pre')).toBeVisible();
   });

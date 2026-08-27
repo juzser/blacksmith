@@ -56,7 +56,7 @@
               "properties": {
                 "cloudflareAccess": {
                   "const": true,
-                  "description": "MCP-X2. Cloudflare Access in front, per stack.md: nothing is exposed beyond localhost without it."
+                  "description": "MCP-X2 (mcp.md). Cloudflare Access in front: nothing is exposed beyond localhost without something authenticating for it."
                 }
               }
             },

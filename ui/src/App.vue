@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import Breadcrumb from './components/hds/Breadcrumb.vue';
-import Icon from './components/hds/Icon.vue';
-import Select from './components/hds/Select.vue';
-import Sheet from './components/hds/Sheet.vue';
-import SidebarNav from './components/hds/SidebarNav.vue';
-import Toast from './components/hds/Toast.vue';
-import Tooltip from './components/hds/Tooltip.vue';
+import Breadcrumb from './components/ds/Breadcrumb.vue';
+import Icon from './components/ds/Icon.vue';
+import Select from './components/ds/Select.vue';
+import Sheet from './components/ds/Sheet.vue';
+import SidebarNav from './components/ds/SidebarNav.vue';
+import Toast from './components/ds/Toast.vue';
+import Tooltip from './components/ds/Tooltip.vue';
 import LiveStatus from './components/LiveStatus.vue';
 import { useBreadcrumb } from './composables/useBreadcrumb.js';
 import { useNow } from './composables/useNow.js';
@@ -121,7 +121,7 @@ const factoryPulseTitle = computed(() =>
         <button
           v-if="isMobileWidth"
           type="button"
-          class="hds-btn hds-btn--ghost hds-btn--icon-sm"
+          class="ds-btn ds-btn--ghost ds-btn--icon-sm"
           aria-label="Open navigation"
           @click="sheetOpen = true"
         >
@@ -152,7 +152,7 @@ const factoryPulseTitle = computed(() =>
           <Tooltip :label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
             <button
               type="button"
-              class="hds-btn hds-btn--ghost hds-btn--icon-sm"
+              class="ds-btn ds-btn--ghost ds-btn--icon-sm"
               aria-label="Toggle theme"
               @click="toggle"
             >

@@ -4,8 +4,8 @@ import type { TimelineEntry } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
 import { findingStatusTone, severityTone } from '../lib/taxonomy.js';
 import { iconFor, metaFor, tintFor, titleFor } from '../lib/timelineDisplay.js';
-import Icon from './hds/Icon.vue';
-import Lozenge from './hds/Lozenge.vue';
+import Icon from './ds/Icon.vue';
+import Lozenge from './ds/Lozenge.vue';
 import IdentityChip from './IdentityChip.vue';
 
 const props = withDefaults(
@@ -75,7 +75,7 @@ const clickable = computed(
     <button
       v-if="hasChildren"
       type="button"
-      class="hds-btn hds-btn--ghost hds-btn--icon-xs"
+      class="ds-btn ds-btn--ghost ds-btn--icon-xs"
       :aria-expanded="expanded"
       :aria-controls="`tl-group-${entry.eventId}`"
       :aria-label="expanded ? 'Collapse' : 'Expand'"

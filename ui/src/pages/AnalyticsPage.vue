@@ -1,18 +1,18 @@
 <script setup lang="ts">
 // Analytics — design-spec.md §5.8. MetricGrid + 3 charts + rail cards.
 import { computed, onMounted, ref, watch } from 'vue';
-import Banner from '../components/hds/Banner.vue';
-import BarChart from '../components/hds/BarChart.vue';
-import Button from '../components/hds/Button.vue';
-import Card from '../components/hds/Card.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import LineChart from '../components/hds/LineChart.vue';
-import MetricGrid from '../components/hds/MetricGrid.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import RowList from '../components/hds/RowList.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import StatCard from '../components/hds/StatCard.vue';
-import TwoColumn from '../components/hds/TwoColumn.vue';
+import Banner from '../components/ds/Banner.vue';
+import BarChart from '../components/ds/BarChart.vue';
+import Button from '../components/ds/Button.vue';
+import Card from '../components/ds/Card.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import LineChart from '../components/ds/LineChart.vue';
+import MetricGrid from '../components/ds/MetricGrid.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import RowList from '../components/ds/RowList.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import StatCard from '../components/ds/StatCard.vue';
+import TwoColumn from '../components/ds/TwoColumn.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import {
@@ -137,10 +137,10 @@ const throughputLine = computed(() =>
       <template #rail>
         <Card title="Recheck outcomes">
           <RowList v-if="data.recheckOutcomes.length > 0" density="compact">
-            <li v-for="r in data.recheckOutcomes" :key="r.taskStatus" class="hds-row">
-              <span class="hds-row__main">
-                <span class="hds-row__title">{{ r.taskStatus }}</span>
-                <span class="hds-row__meta">{{ r.count }}</span>
+            <li v-for="r in data.recheckOutcomes" :key="r.taskStatus" class="ds-row">
+              <span class="ds-row__main">
+                <span class="ds-row__title">{{ r.taskStatus }}</span>
+                <span class="ds-row__meta">{{ r.count }}</span>
               </span>
             </li>
           </RowList>
@@ -148,13 +148,13 @@ const throughputLine = computed(() =>
         </Card>
         <Card title="Cross-check quorum">
           <RowList v-if="quorum.length > 0" density="compact">
-            <li v-for="q in quorum" :key="q.provider" class="hds-row">
-              <span class="hds-row__main">
-                <span class="hds-row__title">{{ q.provider }}</span>
-                <span class="hds-row__meta">{{ q.answered }}<template v-if="q.latency"> · {{ q.latency }}</template></span>
-                <span v-for="f in q.failures" :key="f" class="hds-row__meta">{{ f }}</span>
+            <li v-for="q in quorum" :key="q.provider" class="ds-row">
+              <span class="ds-row__main">
+                <span class="ds-row__title">{{ q.provider }}</span>
+                <span class="ds-row__meta">{{ q.answered }}<template v-if="q.latency"> · {{ q.latency }}</template></span>
+                <span v-for="f in q.failures" :key="f" class="ds-row__meta">{{ f }}</span>
               </span>
-              <span class="hds-row__trail">{{ q.agreement }}</span>
+              <span class="ds-row__trail">{{ q.agreement }}</span>
             </li>
           </RowList>
           <EmptyState v-else icon="scale" inline>No cross-check judges have run.</EmptyState>

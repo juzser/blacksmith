@@ -58,7 +58,7 @@ test.describe('Task detail', () => {
     const taskId = decodeURIComponent(new URL(page.url()).pathname.replace(/^\/tasks\//, ''));
 
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-    await expect(page.locator('.hds-crumbs__current')).toHaveText(taskId);
+    await expect(page.locator('.ds-crumbs__current')).toHaveText(taskId);
   });
 
   // Every event in this tab was fetched with `{ task: <this task> }`, and

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Scaffolded from black-smith's stack standard (docs/standards/stack.md).",
+  "description": "Scaffolded by Blacksmith from factory/policies/stack.yml.",
   "engines": {
     "node": ">=22"
   },

@@ -1,19 +1,28 @@
-# Design — black-smith
+# Design — the Blacksmith dashboard
 
-Implements the **Hans Design System** (master: hans repo,
-`knowledge/design-system/`). Global token/layout/UX rules apply; this file
-adds the repo-local specifics. On conflict, the master wins — flag the
-conflict, don't fork the rule.
+The dashboard ships its own design kit, and it is complete inside this
+repository: tokens in [`ds-tokens.css`](../src/styles/ds-tokens.css),
+component CSS in [`ds-components.css`](../src/styles/ds-components.css), and
+the Vue primitives under [`ui/src/components/ds/`](../src/components/ds/).
+Nothing under `ui/` reaches outside this repository at build or run time, and
+nothing here needs an account, a token, or a second clone. This file is the
+kit's rulebook: on conflict between it and any older note below, this file
+wins, because there is no upstream left to defer to.
 
-**Cross-repo note:** `black-smith` is a separate git repository from the hans
-second-brain repo that hosts `knowledge/design-system/adopters.md`. Per
-`adopters.md`'s own "one-PR rule does not survive a repo boundary" clause
-(the `claude-sessman` precedent), this repo's half — this file — lands in
-this PR; the companion `adopters.md` row (variant `dashboard`, tokens copy
-`ui/src/styles/hds-tokens.css`, version 3.0.0) is a separate change in the
-hans repo, landed the same day and treated as one change per that clause.
-Until both land, `black-smith` is not yet a registered adopter by the
-registry's own definition — flagged here so it is not forgotten.
+**Provenance.** The kit was ported in July–August 2026 from a private design
+system, referred to as *HDS* in the dated notes and version history elsewhere
+under `ui/`, and in the `knowledge/design-system/…` paths a handful of
+comments still cite. That repository is not public and is not a dependency:
+the port finished, the assets are in-tree, and those citations survive only so
+a reader can tell which primitives were copied from a reference and which this
+repo composed itself. Treat every such path as a footnote about where a file
+came from, never as somewhere to go.
+
+**This kit is the dashboard's, not the factory's.** What a *scaffolded* project
+gets is whatever the operator answered for `design_system` at install time
+(`factory/policies/stack.yml`), and `none` is a complete answer — see
+[`../../docs/standards/stack.md`](../../docs/standards/stack.md). Nothing in
+this file is prescribed to the projects Blacksmith builds.
 
 ## Declarations
 
@@ -21,7 +30,7 @@ registry's own definition — flagged here so it is not forgotten.
   `profile/layouts.md` for everything inherited). Justification: Overview is
   a stat-row + multi-feed landing page (Template 5A); Kanban is a flagged
   composition (§6.2 gap) rather than a stock template.
-- **Tokens copy:** `ui/src/styles/hds-tokens.css`, version 3.0.0, copied
+- **Tokens copy:** `ui/src/styles/ds-tokens.css`, version 3.0.0, copied
   2026-08-04, byte-identical to `knowledge/design-system/profile/tokens.css`
   above its repo-specific extension point (empty — no additive tokens were
   needed).
@@ -43,7 +52,7 @@ registry's own definition — flagged here so it is not forgotten.
 
 ## Primitive inventory (closed set)
 
-Vendored under `ui/src/components/hds/`. Phase 6a built the subset needed
+Vendored under `ui/src/components/ds/`. Phase 6a built the subset needed
 for Overview/Timeline/Kanban; Phase 6b built the rest of what the six new
 pages need (Select/Textarea/RadioGroup/Tabs/Popover/Dialog/AlertDialog/
 Toast/Sparkline/LineChart/BarChart), per this task's own instruction to
@@ -73,7 +82,7 @@ simplifications.
 | Breadcrumb | Phase 6a | |
 | Highlight | Phase 6a | |
 | Sheet | Phase 6a | mobile off-canvas sidebar only, per §6.1 |
-| **Select** | **Phase 6b** | real primitive (`ui/src/components/hds/Select.vue`), a native `<select>` wrapper — closes the 6a "disclosed simplification" gap; used by the topbar project switcher, Kanban/Roadmap/Flow epic and plan-version pickers |
+| **Select** | **Phase 6b** | real primitive (`ui/src/components/ds/Select.vue`), a native `<select>` wrapper — closes the 6a "disclosed simplification" gap; used by the topbar project switcher, Kanban/Roadmap/Flow epic and plan-version pickers |
 | Input | Disclosed simplification (unchanged) | raw `<input class="raw-input">` (Timeline/Roadmap search boxes) — a real `Field`/`Input` wrapper wasn't needed this round (no validation states) |
 | **Textarea** | **Phase 6b** | Lessons' edit-mode statement field |
 | **RadioGroup** | **Phase 6b** | Lessons' edit-mode `lesson_type` picker (3-option enum) |
@@ -92,17 +101,17 @@ Custom, gap components (design-spec.md §6.2, not in the 48-primitive set):
 milestone-progress fill/track, and Phase 6b's Roadmap progress cells).
 Phase 6b additions: `IdentityChip` (operator directive 2 — deterministic
 epic/project identity colour, `ui/src/lib/identityColor.ts`), Flow's custom
-DOM task nodes (`FlowPage.vue`'s `#node-task` template, HDS tokens only).
+DOM task nodes (`FlowPage.vue`'s `#node-task` template, kit tokens only).
 
 ## Gates wired
 
 | Gate | Command | Wired |
 |---|---|---|
-| Hardcode lint | `python3 scripts/design/lint_hardcodes.py ui/src` | **yes, Phase 6b fix-round** — vendored (not a `knowledge/design-system` runtime reference) into `scripts/design/`, wired into `bash scripts/check.sh`. Repo-specific `EXCLUDE_FILES` (documented in the script's own header): the two vendored `hds-tokens.css`/`hds-components.css` assets, and `icons.ts` (raw SVG path data the regex misreads as CSS). Everything else in `ui/src` is clean as of this commit. |
-| Contrast | `node scripts/design/contrast_check.mjs` | **yes, Phase 6b fix-round** — a repo-specific script (not the generic one-pair-at-a-time `contrast.py` CLI), reads the real hex values straight from `ui/src/styles/hds-tokens.css` and checks the two pairings this phase's uiux findings flagged: `IdentityChip`'s 8 `--ds-chart-N` border/dot slots and Flow's edge stroke token, both against their surface, in both themes. `ProgressBar`'s fill/track pairing was measured by hand in the 6a round (recorded below) and isn't re-checked by this script — could be folded in later. |
+| Hardcode lint | `python3 scripts/design/lint_hardcodes.py ui/src` | **yes, Phase 6b fix-round** — vendored (not a `knowledge/design-system` runtime reference) into `scripts/design/`, wired into `bash scripts/check.sh`. Repo-specific `EXCLUDE_FILES` (documented in the script's own header): the two vendored `ds-tokens.css`/`ds-components.css` assets, and `icons.ts` (raw SVG path data the regex misreads as CSS). Everything else in `ui/src` is clean as of this commit. |
+| Contrast | `node scripts/design/contrast_check.mjs` | **yes, Phase 6b fix-round** — a repo-specific script (not the generic one-pair-at-a-time `contrast.py` CLI), reads the real hex values straight from `ui/src/styles/ds-tokens.css` and checks the two pairings this phase's uiux findings flagged: `IdentityChip`'s 8 `--ds-chart-N` border/dot slots and Flow's edge stroke token, both against their surface, in both themes. `ProgressBar`'s fill/track pairing was measured by hand in the 6a round (recorded below) and isn't re-checked by this script — could be folded in later. |
 | No-emoji | `python3 scripts/design/check_no_emoji.py ui/src` | **yes, Phase 6b fix-round** — vendored with one adaptation: the em/en-dash "AI-pattern tell" check now skips comment lines (JS `//` and HTML `<!-- -->`) instead of scanning every line of a `.vue`/`.tsx` file — the original flagged 30+ hits, all inside source-code doc comments (this repo's established comment style since Phase 6a), not rendered UI copy; the two genuine UI-copy hits it caught (`ProjectsPage.vue`) were fixed. |
-| Token existence | `python3 scripts/design/check_tokens.py ui/src` | **yes, Phase 6b round 7** — repo-authored (no generic design-system-pack equivalent to copy), added after the same invalid-token bug (`--ds-space-5`, never declared, so `padding`/`gap` silently compute to their initial value instead of a build error) shipped twice: round 4's milestone-block padding, round 6's Roadmap SectionHeading gap. Scans every `var(--ds-...)` reference in `ui/src/**/*.{vue,css}` against every `--ds-*` declared in `hds-tokens.css`/`hds-components.css` PLUS every component-scoped runtime definition (a `.vue`'s `:style` object setting a custom property, e.g. `Highlight.vue`'s `--ds-btn-fg`/`--ds-btn-ground`) — both count as "defined", so only a genuinely wrong/missing token name fails. First run caught 8 real instances beyond the two already-known ones: 3 more `--ds-space-5` sites (`.kanban-lane`, `.kanban-lane__columns`, `.hds-dialog`), 3 `--ds-text-lg` sites (no "lg" step in the xs/sm/base/xl/2xl scale — fixed to `--ds-text-xl`), and `--ds-inverse-surface`/`--ds-inverse-text` on `.hds-toast` (never declared anywhere, always silently rendered via their own `var()` fallback — the phantom wrapper was dropped, same rendered result). |
-| Adherence lint | `npx oxlint -c knowledge/design-system/hds/_adherence.oxlintrc.json ui/src` | no — still a gap (needs `oxlint` added to the sanctioned dependency list first; also has no `.vue` SFC parser per the master README, same blocker as Biome's) |
+| Token existence | `python3 scripts/design/check_tokens.py ui/src` | **yes, Phase 6b round 7** — repo-authored (no generic design-system-pack equivalent to copy), added after the same invalid-token bug (`--ds-space-5`, never declared, so `padding`/`gap` silently compute to their initial value instead of a build error) shipped twice: round 4's milestone-block padding, round 6's Roadmap SectionHeading gap. Scans every `var(--ds-...)` reference in `ui/src/**/*.{vue,css}` against every `--ds-*` declared in `ds-tokens.css`/`ds-components.css` PLUS every component-scoped runtime definition (a `.vue`'s `:style` object setting a custom property, e.g. `Highlight.vue`'s `--ds-btn-fg`/`--ds-btn-ground`) — both count as "defined", so only a genuinely wrong/missing token name fails. First run caught 8 real instances beyond the two already-known ones: 3 more `--ds-space-5` sites (`.kanban-lane`, `.kanban-lane__columns`, `.ds-dialog`), 3 `--ds-text-lg` sites (no "lg" step in the xs/sm/base/xl/2xl scale — fixed to `--ds-text-xl`), and `--ds-inverse-surface`/`--ds-inverse-text` on `.ds-toast` (never declared anywhere, always silently rendered via their own `var()` fallback — the phantom wrapper was dropped, same rendered result). |
+| Adherence lint | none vendored | no — still a gap. The source kit's adherence config was never ported, and re-authoring it needs `oxlint` on the sanctioned dependency list first; `oxlint` also has no `.vue` SFC parser, the same blocker Biome has. |
 
 Three of the four design-system gates are wired as of the Phase 6b fix-round
 (closing the 6a-round gap recorded below unedited, for the record).
@@ -228,7 +237,7 @@ with a Lozenge tone.
   SidebarNav/StatCard/Timeline vocabulary this dashboard needs (`history`,
   `bar-chart-3`, `kanban`, `map`, `graduation-cap`, `bot`, `coins`, `layers`,
   `message-circle`, `send`, `shield-check`, `shield-alert`) is not in
-  `knowledge/design-system/hds/assets/icons/`. Added to `ui/src/icons.ts`
+  the kit's vendored 42-icon subset. Added to `ui/src/icons.ts`
   from the same lucide set, same stroke conventions (24×24, stroke 2,
   round caps/joins), not pixel-verified against the real lucide SVGs.
 - **CLOSED, Phase 6b — Overview's "Recent dispatch decisions" card.**
@@ -382,7 +391,7 @@ with a Lozenge tone.
   oscillates the contrast of every word inside it, which is why Flow's
   pulse moved onto a 6px dot. A ring drawn outside the border does not
   touch text contrast, so `.roadmap-node--live` animates `box-shadow` only,
-  through its own `hds-ring-pulse` keyframe. Flow's `.flow-node__live-dot`
+  through its own `ds-ring-pulse` keyframe. Flow's `.flow-node__live-dot`
   is untouched — it marks a live *agent*, a different claim. Under
   `prefers-reduced-motion` the ring is frozen at its start radius rather
   than removed, so reduced-motion users do not get a *less* prominent live

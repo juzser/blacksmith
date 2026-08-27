@@ -4,7 +4,7 @@
 // harness — so a class name can be invented, misspelled, or outlive the rule
 // it was written for and the only symptom is an element that quietly renders
 // with the browser's defaults. FilterChips' "Clear" button was exactly that
-// (D-229): `class="hds-chips__clear"` never matched anything, so Tailwind
+// (D-229): `class="ds-chips__clear"` never matched anything, so Tailwind
 // preflight governed it and the control rendered as bare inherited text in a
 // row of pill-shaped chips. This is the gate that would have caught it.
 import { readdirSync, readFileSync } from 'node:fs';
@@ -23,14 +23,14 @@ const STYLES = join(SRC, 'styles');
  *
  * - `cmd-hint` — CommandHint.vue's root. `__list`, `__item`, `__cmd`,
  *   `__desc` and `__note` are all styled; the root only stacks two blocks.
- * - `hds-sh__left` — SectionHeading.vue. Exists to make the title and the
- *   description one flex item, so `.hds-sh`'s space-between pushes the
+ * - `ds-sh__left` — SectionHeading.vue. Exists to make the title and the
+ *   description one flex item, so `.ds-sh`'s space-between pushes the
  *   action slot to the far edge. Grouping is the whole job.
  * - `live-agent-group` — LiveAgentGroupRow.vue's root. `-row` and `-detail`
  *   are both styled, and the detail is already inside `.live-agents-col`'s
- *   flex column (hds-components.css notes this at the `-detail` rule).
+ *   flex column (ds-components.css notes this at the `-detail` rule).
  */
-const WRAPPERS_WITHOUT_RULES = ['cmd-hint', 'hds-sh__left', 'live-agent-group'];
+const WRAPPERS_WITHOUT_RULES = ['cmd-hint', 'ds-sh__left', 'live-agent-group'];
 
 function vueFiles(dir: string): string[] {
   const out: string[] = [];
@@ -88,7 +88,7 @@ describe('every class a template writes resolves to a rule', () => {
   it('finds the rules and the call sites at all, so a rename cannot make this vacuous', () => {
     expect(defined.size).toBeGreaterThan(100);
     expect(sites.length).toBeGreaterThan(100);
-    expect(defined.has('hds-chip')).toBe(true);
+    expect(defined.has('ds-chip')).toBe(true);
   });
 
   it('has no orphan class', () => {
@@ -119,7 +119,7 @@ describe('FilterChips clears through the Button primitive', () => {
   // its own "Clear filters". A bare <button> here reached the operator with
   // no border, no padding, no pointer cursor and the inherited body font,
   // sitting in a row of small subtle pills (D-229).
-  const src = readFileSync(join(SRC, 'components', 'hds', 'FilterChips.vue'), 'utf8');
+  const src = readFileSync(join(SRC, 'components', 'ds', 'FilterChips.vue'), 'utf8');
 
   it('renders a Button, not a bare element with an invented class', () => {
     expect(src).toContain("import Button from './Button.vue'");

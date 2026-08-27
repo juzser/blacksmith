@@ -7,7 +7,7 @@
 import { computed } from 'vue';
 import { formatDateTime, formatTime } from '../lib/format.js';
 import type { DispatchGroup } from '../lib/timelineDisplay.js';
-import Icon from './hds/Icon.vue';
+import Icon from './ds/Icon.vue';
 
 const props = defineProps<{ group: DispatchGroup; expanded: boolean }>();
 const emit = defineEmits<{ toggle: [] }>();
@@ -32,7 +32,7 @@ const span = computed(() => {
   <div class="timeline-row">
     <button
       type="button"
-      class="hds-btn hds-btn--ghost hds-btn--icon-xs"
+      class="ds-btn ds-btn--ghost ds-btn--icon-xs"
       :aria-expanded="expanded"
       :aria-controls="`tl-group-${group.id}`"
       :aria-label="expanded ? 'Collapse dispatches' : 'Expand dispatches'"

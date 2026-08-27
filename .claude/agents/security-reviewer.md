@@ -90,7 +90,7 @@ array, `[]` if clean. Each element has exactly these five keys:
 
 - `file_path` — repo-relative path the vulnerability is anchored to
 - `finding_category` — one of: `correctness`, `security`, `a11y`,
-  `performance`, `visual-hds`, `behavioral-drift`, `test-coverage`,
+  `performance`, `visual-design`, `behavioral-drift`, `test-coverage`,
   `over-engineering`, `maintainability` — usually `security`. No other value
   exists; a plausible near-miss is rejected at mint
 - `severity` — the canonical string, written out in full:

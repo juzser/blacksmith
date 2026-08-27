@@ -84,7 +84,7 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
 | Severity | Blocks merge | Classes |
 |---|---|---|
 | **`S2-major`** (block) | yes | security / data loss · broken core flow · **a11y WCAG AA failure** · **new flaky test** |
-| **`S3-minor`** (waiver) | no — batched question at epic end | visual regression vs HDS · perf regression >20% · everything minor-but-real |
+| **`S3-minor`** (waiver) | no — batched question at epic end | visual regression vs the uiux spec · perf regression >20% · everything minor-but-real |
 | **`S4-nit`** | no | style/naming nits not caught by Biome |
 
 - `S1-stop-the-line` remains reserved for exactly that (repo corruption,
@@ -160,7 +160,7 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
   are bounded scans against a written artifact, not open-ended judgment.
 - `researcher` and `uiux` are `medium` rather than `low` because both make
   judgment calls — researcher on external source quality (it holds
-  `WebFetch`/`WebSearch`), uiux on HDS design fit.
+  `WebFetch`/`WebSearch`), uiux on design-system fit.
 - **`maxTurns` is inert.** Zero of the 31 agents in the official plugin
   marketplace set it and the Agent tool exposes no turns parameter. The key
   stays in the templates as recorded intent; the turn budget is delivered

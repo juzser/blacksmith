@@ -39,8 +39,8 @@ export async function settleForShot(page: Page, marker: Locator, settleMs = 150)
 // Every capture goes through here, and every one of them disables animations.
 //
 // harness.ts pins `Date`; this pins the compositor. `page.clock.setFixedTime`
-// has no authority over the animation clock, and hds-components.css runs
-// `hds-pulse` and `hds-ring-pulse` on `infinite` — so a live dot or an agent
+// has no authority over the animation clock, and ds-components.css runs
+// `ds-pulse` and `ds-ring-pulse` on `infinite` — so a live dot or an agent
 // halo was captured at whatever phase the frame happened to land on, and 15 of
 // the 48 committed PNGs re-wrote themselves on a no-op run because of it
 // (D-235). `animations: 'disabled'` fast-forwards finite animations to their

@@ -9,7 +9,7 @@
 // knowledge/design-system/pack/scripts/contrast.py (re-implemented here in
 // JS, not shelled out to Python, so this repo's gate has no runtime
 // dependency outside its own toolchain — the READING is still verbatim
-// from ui/src/styles/hds-tokens.css, never a second hardcoded copy of the
+// from ui/src/styles/ds-tokens.css, never a second hardcoded copy of the
 // hex values, so this script can't silently drift from the real tokens).
 //
 // Checks:
@@ -81,7 +81,7 @@ import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '..', '..');
-const TOKENS_PATH = path.join(REPO_ROOT, 'ui/src/styles/hds-tokens.css');
+const TOKENS_PATH = path.join(REPO_ROOT, 'ui/src/styles/ds-tokens.css');
 
 function parseThemeBlocks(css) {
   // ":root { ... }" = light theme; ".dark { ... }" = dark theme. Chart

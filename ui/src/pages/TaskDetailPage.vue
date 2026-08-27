@@ -3,19 +3,19 @@
 // History; waiver UI exactly per spec: Waive/Deny only on S3+confirmed+
 // unwaived, Popover confirm naming the fingerprint, Toast, race guard.
 import { onMounted, ref } from 'vue';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import Card from '../components/hds/Card.vue';
-import Dialog from '../components/hds/Dialog.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import Lozenge from '../components/hds/Lozenge.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Popover from '../components/hds/Popover.vue';
-import RowList from '../components/hds/RowList.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import Table from '../components/hds/Table.vue';
-import Tabs from '../components/hds/Tabs.vue';
-import TwoColumn from '../components/hds/TwoColumn.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import Card from '../components/ds/Card.vue';
+import Dialog from '../components/ds/Dialog.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import Lozenge from '../components/ds/Lozenge.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Popover from '../components/ds/Popover.vue';
+import RowList from '../components/ds/RowList.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import Table from '../components/ds/Table.vue';
+import Tabs from '../components/ds/Tabs.vue';
+import TwoColumn from '../components/ds/TwoColumn.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import TimelineRow from '../components/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
@@ -201,14 +201,14 @@ function agentChipLabel(role: string, modelTier: string | null): string {
               </Card>
               <Card title="Attempts" style="flex: 3; min-width: 320px">
                 <RowList v-if="detail.attempts.length > 0">
-                  <li v-for="a in detail.attempts" :key="a.eventId" class="hds-row">
-                    <span class="hds-row__main">
-                      <span class="hds-row__title">{{ a.agentRole }} · {{ a.modelTier }}/{{ a.provider }}</span>
-                      <span class="hds-row__meta">
+                  <li v-for="a in detail.attempts" :key="a.eventId" class="ds-row">
+                    <span class="ds-row__main">
+                      <span class="ds-row__title">{{ a.agentRole }} · {{ a.modelTier }}/{{ a.provider }}</span>
+                      <span class="ds-row__meta">
                         started {{ formatDateTime(a.ts) }}<template v-if="a.terminalAt"> · ended {{ formatDateTime(a.terminalAt) }}</template>
                       </span>
                     </span>
-                    <span class="hds-row__trail">
+                    <span class="ds-row__trail">
                       <IdentityChip :id="a.agentRole" :label="agentChipLabel(a.agentRole, a.modelTier)" />
                       <Lozenge v-if="a.agentStatus" :tone="agentStatusTone(a.agentStatus)">{{ a.agentStatus }}</Lozenge>
                     </span>
@@ -321,12 +321,12 @@ function agentChipLabel(role: string, modelTier: string | null): string {
           </Card>
           <Card title="Agents">
             <RowList v-if="detail.agents.length > 0" density="compact">
-              <li v-for="a in detail.agents" :key="a.id" class="hds-row">
-                <span class="hds-row__main">
+              <li v-for="a in detail.agents" :key="a.id" class="ds-row">
+                <span class="ds-row__main">
                   <IdentityChip :id="a.agentRole" :label="agentChipLabel(a.agentRole, a.modelTier)" />
-                  <span class="hds-row__meta">{{ a.provider }}</span>
+                  <span class="ds-row__meta">{{ a.provider }}</span>
                 </span>
-                <span class="hds-row__trail">
+                <span class="ds-row__trail">
                   <Lozenge :tone="agentStatusTone(a.status)">{{ a.status }}</Lozenge>
                 </span>
               </li>

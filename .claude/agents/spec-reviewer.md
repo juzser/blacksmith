@@ -118,7 +118,7 @@ these six keys:
   name the criterion a reader would wrongly assume covers it — that is the
   clause the amendment will move
 - `finding_category` — one of: `correctness`, `security`, `a11y`,
-  `performance`, `visual-hds`, `behavioral-drift`, `test-coverage`,
+  `performance`, `visual-design`, `behavioral-drift`, `test-coverage`,
   `over-engineering`, `maintainability`. Closest fit for a spec gap is
   `correctness` or `maintainability`, and `security` for a missing
   nonfunctional clause. No other value exists; a plausible near-miss is

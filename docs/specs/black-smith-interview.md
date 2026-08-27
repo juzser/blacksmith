@@ -1,12 +1,17 @@
 # Blacksmith — Operator Interview
 
-> **Recorded answers — 2026-08-03** (compiled into `docs/standards/stack.md`
-> and `docs/standards/agent-constraints.md`):
-> A2 = Vue 3 + Vite · A6/A8 = pnpm + Biome · D2: S2 = security/data-loss,
-> broken core flow, a11y WCAG AA failure, new flaky test (visual-vs-HDS and
-> perf >20% are S3) · E1 = 2M tokens/epic, alarm at 70%.
+> **Recorded answers — 2026-08-03** (compiled into
+> `docs/standards/agent-constraints.md`):
+> D2: S2 = security/data-loss, broken core flow, a11y WCAG AA failure, new
+> flaky test (visual regression and perf >20% are S3) · E1 = 2M tokens/epic,
+> alarm at 70%.
 > All other questions accepted the recommended defaults. Re-answer any
 > question below to trigger a recompile.
+
+> **Amendment — 2026-08-26.** Section **A (stack)** left this file. Its
+> questions are now asked at install time and its answers stored as data in
+> `factory/policies/stack.yml`, so a stranger who clones this repo answers for
+> their own stack instead of inheriting one operator's. See below.
 
 > **Amendment — 2026-08-05.** The old **E2 (concurrency: max workers in
 > parallel)** was removed, not re-answered: concurrency is now uncapped.
@@ -15,65 +20,35 @@
 > bounded nothing that the per-epic token cap did not already bound. The old
 > E3 (escalation ladder) is now E2.
 
-> Purpose: your answers compile into (a) `docs/standards/stack.md` — the one
-> stack every scaffolded project uses — and (b) per-subagent constraint blocks
-> baked into agent templates. Answer inline under each `> Answer:` line, or
-> answer in chat and Hans fills this in. Every question has a recommended
-> default — leave an answer blank to accept it. Re-runnable: edit any answer
-> later and the standards recompile.
+> Purpose: your answers compile into per-subagent constraint blocks baked into
+> the agent templates (`docs/standards/agent-constraints.md`). Answer inline
+> under each `> Answer:` line, or answer in chat and let the assistant fill
+> this in. Every question has a recommended default — leave an answer blank to
+> accept it. Re-runnable: edit any answer later and the standards recompile.
 
-## A. Unified stack (→ stack.md + scaffold)
+## A. Stack — asked at install, not here
 
-**A1. Language.**
-Recommended: TypeScript everywhere (strict mode).
-> Answer:
+The stack questions used to live in this section, and their answers were
+hand-compiled into a prose standard that every scaffolded project was told to
+obey. That worked for exactly one operator. This is a public repo, so the
+stack is now an install-time interview whose answers are stored as data:
 
-**A2. Frontend framework.**
-Options: Vue/Nuxt · React/Next · Svelte/SvelteKit · plain Vite + TS.
-Recommended: pick the one you already ship at work — consistency beats taste.
-> Answer:
+- **The questions** — [`INSTALL.md`](../../INSTALL.md) Step 5, one table, one
+  message, fifteen questions.
+- **The answers** — `factory/policies/stack.yml`, the only place they live.
+- **What reads them** — [`../standards/stack.md`](../standards/stack.md):
+  which fields the shipped templates honour, which they merely record, and
+  which make `smith new` refuse rather than hand over something else.
 
-**A3. Styling.**
-Recommended: HDS tokens + adoption kit for every UI project; Tailwind (or
-vanilla-extract) as the utility layer under HDS. Confirm HDS is mandatory for
-all Blacksmith projects or only operator-facing ones.
-> Answer:
+Blacksmith ships the answers that assume least — `frontend: none`,
+`backend: none`, `design_system: none` — so a fresh clone inherits nobody's
+taste. Run `smith stack show` to read what this clone answered, and
+`smith stack check` to see what the templates can build from it.
 
-**A4. Backend/runtime.**
-Recommended: Cloudflare Workers (Hono) as default API runtime; Node only when
-Workers can't (long-running, heavy binaries).
-> Answer:
-
-**A5. Database.**
-Recommended: SQLite locally / Cloudflare D1 deployed, via Drizzle ORM (one
-schema, both targets). Alternatives: Postgres/Supabase if you need relational
-scale.
-> Answer:
-
-**A6. Package manager + repo shape.**
-Recommended: pnpm; single-repo per project (no monorepo) unless a project has
-3+ deployable units.
-> Answer:
-
-**A7. Testing stack.**
-Recommended: Vitest (unit) + Playwright (e2e + screenshots). Coverage floor —
-see C2.
-> Answer:
-
-**A8. Lint/format.**
-Recommended: Biome (one tool, fast) — or ESLint+Prettier if editor/CI parity
-with work projects matters.
-> Answer:
-
-**A9. CI.**
-Recommended: GitHub Actions — lint + test + build on PR; the merge queue's
-gates run locally but CI is the public record.
-> Answer:
-
-**A10. Hosting.**
-Recommended: Cloudflare (Pages/Workers + D1 + R2 + Access). Confirm, and note
-any project class that must host elsewhere.
-> Answer:
+Nothing about a design system is prescribed here. If you have one, name it and
+its source directory; `smith new --ui` vendors it into the target project's
+`design/` and imports its tokens. If you do not, `design_system: none` is a
+complete answer and the generated stylesheet simply has no kit to import.
 
 ## B. Planner constraints
 
@@ -120,7 +95,8 @@ scaffold's lint config (JSDoc, English-only, none)?
 
 **D2. Severity calibration — what is S2 (blocks merge) for you?** Tick all
 that block: data loss · security · broken core flow · a11y failure (WCAG AA) ·
-visual regression vs HDS · perf regression >20% · flaky test introduced.
+visual regression vs the design spec · perf regression >20% · flaky test
+introduced.
 Recommended: all except visual regression (S3) and perf (S3 unless user-facing).
 > Answer:
 

@@ -57,7 +57,7 @@ test.describe('Overview', () => {
     page,
   }) => {
     await page.goto('/overview');
-    const mark = page.locator('.hds-side__mark img');
+    const mark = page.locator('.ds-side__mark img');
     await expect(mark).toBeVisible();
     await expect(mark).toHaveAttribute('alt', 'Blacksmith');
 

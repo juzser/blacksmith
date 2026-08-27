@@ -1,11 +1,11 @@
-/* Entry stylesheet: Tailwind base first, then HDS tokens @theme inline
-   blocks (design-spec.md section 9 - tokens copy path), then the ported
-   HDS component CSS. Order matters: hds-tokens.css has a base layer block
-   that must land after the tailwindcss import so a repo base layer would
-   still win if one existed. */
+/* Entry stylesheet: Tailwind base first, then the kit's tokens @theme
+   inline blocks (design-spec.md section 9 - tokens copy path), then the
+   ported kit component CSS. Order matters: ds-tokens.css has a base layer
+   block that must land after the tailwindcss import so a repo base layer
+   would still win if one existed. */
 @import "tailwindcss";
-@import "./hds-tokens.css";
-@import "./hds-components.css";
+@import "./ds-tokens.css";
+@import "./ds-components.css";
 
 /* Repo-specific, additive only (not part of the vendored token file). */
 :root {
@@ -47,7 +47,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hds-skeleton {
+  .ds-skeleton {
     animation: none !important;
     opacity: 0.7;
   }

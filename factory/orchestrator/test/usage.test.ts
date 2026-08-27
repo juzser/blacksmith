@@ -25,7 +25,7 @@ const NESTED_ACTION_RE = /^ {4,6}if \(action === '([\w-]+)'\) \{/gm;
  */
 function dispatchedCommands(source: string): Set<string> {
   const commands = new Set<string>();
-  const bare: Array<{ namespace: string; index: number }> = [];
+  const arms: Array<{ namespace: string; bare: boolean; index: number }> = [];
   const nested: Array<{ action: string; index: number }> = [];
 
   // `namespace === 'x' && action === 'y'`, plus the `(action === 'a' || action === 'b')` form.
@@ -36,28 +36,35 @@ function dispatchedCommands(source: string): Set<string> {
     if (m[3]) commands.add(`${m[1]} ${m[3]}`);
   }
 
-  // `if (namespace === 'x') {` — either action-less (`new`, `dream`) or a
-  // namespace whose actions are dispatched by a nested `if (action === ...)`.
+  // Every top-level dispatch arm, in source order and in both shapes: a bare
+  // `if (namespace === 'x') {` is either action-less (`new`, `dream`) or
+  // dispatches its actions from a nested `if (action === ...)`, while a
+  // pair-form arm names its action in the guard and was already recorded
+  // above. Both kinds are collected because a nested action belongs to the arm
+  // directly above it and only a bare arm may own one: a pair-form arm that
+  // branches on `action` again inside it (`stack show` vs `stack check`) would
+  // otherwise hand that branch to whichever bare namespace happened to sit
+  // further up the file — inventing a command and swallowing a real one.
+  for (const m of source.matchAll(/^ {2}if \(namespace === '([\w-]+)'(\) \{| &&)/gm)) {
+    arms.push({ namespace: m[1] as string, bare: m[2] === ') {', index: m.index });
+  }
   // The nested arm is matched at either depth because the depth is incidental:
   // `stats` opens a `try` around its actions and lands at six spaces,
   // `crossfind` does not and lands at four. Pinning one of them would have let
   // the other dispatch a command this guard never saw.
-  for (const m of source.matchAll(/^ {2}if \(namespace === '([\w-]+)'\) \{/gm)) {
-    bare.push({ namespace: m[1] as string, index: m.index });
-  }
   for (const m of source.matchAll(NESTED_ACTION_RE)) {
     nested.push({ action: m[1] as string, index: m.index });
   }
 
   const hasNested = new Set<string>();
   for (const n of nested) {
-    const owner = bare.filter((b) => b.index < n.index).pop();
-    if (!owner) continue;
+    const owner = arms.filter((a) => a.index < n.index).pop();
+    if (!owner?.bare) continue;
     commands.add(`${owner.namespace} ${n.action}`);
     hasNested.add(owner.namespace);
   }
-  for (const b of bare) {
-    if (!hasNested.has(b.namespace)) commands.add(b.namespace);
+  for (const a of arms) {
+    if (a.bare && !hasNested.has(a.namespace)) commands.add(a.namespace);
   }
 
   return commands;
@@ -86,6 +93,15 @@ describe('the drift guard itself', () => {
 
   it('does not mistake a namespace with nested actions for a command of its own', () => {
     expect(dispatched.has('stats')).toBe(false);
+  });
+
+  it("does not hand a pair-form arm's inner action branch to an earlier namespace", () => {
+    // `stack` guards on `(action === 'show' || action === 'check')` and then
+    // branches on `action` again inside. That inner branch belongs to nobody:
+    // attributing it to the last bare namespace above it once produced a
+    // phantom `new show` and lost the real `new`.
+    expect(dispatched.has('new show')).toBe(false);
+    expect(dispatched.has('new')).toBe(true);
   });
 });
 
