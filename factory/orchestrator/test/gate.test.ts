@@ -576,6 +576,69 @@ describe('gate.ts (integration)', () => {
     });
   });
 
+  it('names the escalating lessons and places each decision, so an idle lesson is provable', async () => {
+    // `lessons_escalating` is a count, and a count answers "could this gate
+    // have caught a repeat at all" — the question `kpi same-mistake` asks. It
+    // cannot answer "was THIS entry loaded", which is the question that
+    // separates a lesson worth retiring from one that was never installed. So
+    // the ids go on the event beside the count, and each decision carries the
+    // two fields the escalation match itself consumes, so `lessons audit` can
+    // reconstruct which entries had an opportunity rather than infer it.
+    const lessons: LessonRule[] = [
+      {
+        lessonId: 'lesson-live',
+        scope: 'claim-path',
+        category: 'over-engineering',
+        claimPath: 'src/**',
+        agentRole: '',
+        caseType: '',
+        statement: 'never add an abstraction layer for a single caller',
+      },
+      {
+        lessonId: 'lesson-role',
+        scope: 'agent-role',
+        category: '',
+        claimPath: '**',
+        agentRole: 'coder',
+        caseType: '',
+        statement: 'read the spec before writing code',
+      },
+    ];
+    const findingsInput: RaiseFindingInput[] = [
+      {
+        finding: findingDraft({
+          severity: 'S3-minor',
+          finding_category: 'over-engineering',
+          summary: 'unnecessary abstraction layer',
+        }),
+        filePath: 'src/foo.ts',
+      },
+    ];
+
+    await runGate(baseInput({ findingsInput, lessons }), ctx(), { stateDir });
+    const event = (await readEvents(sessionId, { stateDir })).find(
+      (e) => e.record.event_type === 'severity-decisions',
+    );
+    if (!event) throw new Error('unreachable');
+    // The role lesson is loaded and cannot escalate, so it is absent here for
+    // the same reason it does not count: this list is what the match walked.
+    expect(event.record.payload).toMatchObject({
+      lessons_loaded: 2,
+      lessons_escalating: 1,
+      lesson_ids_escalating: ['lesson-live'],
+    });
+    const decisions = (
+      event.record.payload as {
+        decisions: Array<{ finding_category: string; file_path: string }>;
+      }
+    ).decisions;
+    expect(decisions[0]).toMatchObject({
+      finding_category: 'over-engineering',
+      file_path: 'src/foo.ts',
+      matched_lesson_id: 'lesson-live',
+    });
+  });
+
   it('a waived finding is suppressed and never blocks or enters the waiver batch again', async () => {
     const findingsInput: RaiseFindingInput[] = [
       {

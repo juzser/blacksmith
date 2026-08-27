@@ -249,7 +249,12 @@ export function isFileScoped(lesson: LessonRule): boolean {
   return FILE_SCOPED.has(lesson.scope);
 }
 
-function lessonCoversFile(lesson: LessonRule, filePath: string): boolean {
+/**
+ * Whether this lesson's compiled `claim_path` covers `filePath` — the second
+ * half of the escalation match, exported so `lessonAudit.ts` can ask the match
+ * its own question rather than reimplementing the glob semantics beside it.
+ */
+export function lessonCoversFile(lesson: LessonRule, filePath: string): boolean {
   if (!isFileScoped(lesson)) return false;
   const isMatch = picomatch(lesson.claimPath);
   return isMatch(filePath);

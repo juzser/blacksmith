@@ -186,6 +186,112 @@ takes a sha captured before the dispatch: the planner holds `Bash`, so it can
 commit its own work and leave a clean tree that a working-tree-only check would
 call a pass.
 
+### The blind spot a claim has by construction (P9-3)
+
+`wave check` also asks a second question, and it is not about globs. Two
+tasks can hold claims that are pairwise disjoint, share no hotspot, and carry
+no dependency edge, and still be unsafe to run together: task A changes
+`parse()`'s signature in `src/a.ts`, task B calls `parse()` from `src/b.ts`,
+every claim check is green, and integration is where the factory finds out.
+The conflict was never in a file. It lived on the import edge between two
+files, which is the one place a comparison of two lists of paths cannot look.
+
+So the verdict carries a `symbolImpact` beside the claim result:
+
+```json
+{"valid":true,
+ "symbolImpact":{"status":"coupled","ok":false,
+   "crossings":[{"producer":"epic-1/task-a","consumer":"epic-1/task-b",
+                 "exportedBy":"src/a.ts","importedBy":"src/b.ts",
+                 "symbols":["parse"],"typeOnly":false,"dynamic":false}],
+   "detail":"1 symbol crossing(s) across 1 task pair(s): run them in order, not in parallel."}}
+```
+
+`valid: true` and exit 1: read it as *"these claims really are disjoint, and
+that is not enough"*. The remedy is the same one the other violations hand
+you — split the wave and run the producer first.
+
+There is no override for a crossing, and that is deliberate rather than an
+oversight. The dependency check above already refuses a wave holding both ends
+of an edge the plan *declared*, so any crossing that reaches this check is
+between two tasks the plan declared **no** edge between: it is exactly the
+dependency the planner missed. Refusing costs one extra wave; admitting costs
+an integration conflict plus the round trip to find it. Only the budget verdict
+is overridable (`--override-rationale`), because a cost ceiling is a judgement
+call and a compile-time edge is not.
+
+`--repo <dir>` names the checkout the graph is read from; it defaults to the
+repository root. The claims say which files a task *may* write, and only the
+tree says what those files import today, so the declarations are read off the
+checkout rather than off the plan.
+
+Two things this check reports without failing the wave. `exposure` names a
+file outside every claim that imports from a claimed file — a consumer nobody
+in this wave is watching, worth knowing and not evidence of anything.
+`unanalyzed` and `unresolved` name the scanner's blind spots: a file it could
+not parse, a specifier it could not resolve. Holes are never fatal here, on
+purpose — failing a wave for the scanner's limits would teach operators to
+reach for the override, which costs more than the check was ever worth.
+
+### `smith claims impact` — the same two questions, asked directly
+
+The gate above runs inside `wave check`. The same machinery is a verb, in two
+forms, because the pre-run and post-run questions have genuinely different
+answers.
+
+**Before dispatch, over declarations:**
+
+```bash
+smith claims impact --plan factory/specs/active/epic-1/plan-v1.json task-a task-b
+```
+
+Identical to what `wave check` folds in — exit 1 on `coupled`. Useful while
+cutting a plan, when you want the coupling answer without a session, a state
+directory, or a budget policy.
+
+**After the work, over a diff:**
+
+```bash
+smith claims impact "$WORKTREE" factory/specs/active/epic-1/task-1.json
+```
+
+```json
+{"ok":false,
+ "breaks":[{"severity":"proven","reason":"removed",
+            "exportedBy":"src/a.ts","importedBy":"src/theirs.ts","symbols":["gone"]}],
+ "detail":"1 importer(s) outside the claims lost a symbol they use."}
+```
+
+Here the finding is not a risk but a fact. The task removed an export, and a
+file **outside its claims** still imports it: that is a break, and the branch
+carries the proof. `severity` is the whole contract of this form:
+
+- `proven` / `removed` — the symbol is gone and someone outside the claims
+  imports it by name. Exit 1. Nothing to weigh.
+- `possible` / `signature-changed` — the export survived but its declaration
+  text changed. Exit 0. This is a text-level scanner, not a type checker: it
+  compares each export's clause up to the first `;` or `{`, so a widened
+  parameter type and a changed constant both read the same way. It says
+  `possible` and means it.
+
+A worktree is a full checkout, so it is both halves of the question at once —
+the diff this task committed against its integration branch, and every importer
+in the repository. Run it after the test gate and before merge-queue admission,
+where a real break is still one task's problem.
+
+### Why the scanner is hand-written
+
+`factory/orchestrator/src/symbols.ts` reads imports and exports with its own
+parser rather than calling into TypeScript, and the reason is not preference.
+`typescript@7.0.2` is the native (tsgo) rewrite: it ships `"main": null`,
+`"types": null`, and exports only `./lib/version.cjs` plus two `unstable`
+entry points. `ts.createSourceFile` does not exist to be called. The scanner
+also resolves a `/dist/` specifier back to `/src/` when the build path has no
+file, because this repository's own source imports its build output.
+
+That is why every verdict above is careful about what it claims: a scanner can
+prove an export is gone, and cannot prove a type is compatible.
+
 ## 2a. `smith security triggers` — the security-reviewer's dispatch condition
 
 The `security-reviewer` is conditional dispatch only, and its first trigger is
@@ -2125,6 +2231,90 @@ That is the false clean this command exists to refuse.
   means one of them is wrong, and the report cannot say which.
 - A per-session read. An epic spanning sessions needs one call per session
   (§5b); there is no cross-session roll-up.
+
+## 10b. `smith lessons audit` — which entries still earn their place
+
+`kpi same-mistake` above reads the corpus as one number. This verb reads it
+entry by entry, and it exists because a lessons file only ever grows: every
+incident adds a line, nothing removes one, and the corpus drifts into a set of
+standing instructions that contradict each other while the escalation match
+quietly stops reaching half of them.
+
+```bash
+node factory/orchestrator/dist/cli.js lessons audit <session-id> \
+  [--lessons <lessons.md>] [--state-dir <dir>]
+```
+
+Order is load-bearing, which is the thing that makes this necessary.
+`findMatchingLesson` is first-match-wins, so an entry an earlier one provably
+covers can never fire again no matter how true it is — and nothing in the file
+says so.
+
+### Two kinds of evidence, never conflated
+
+**Structural** death is provable from the corpus text alone. If an earlier
+same-category entry's glob *provably contains* this one's, the entry is
+`unreachable` and the recommendation is `retire`. No run, no log, no sampling:
+`coversEntirely` decides it, and only actual containment counts. Overlap that
+is not containment lands in `overlapsWith` and is informational — on the
+intersection the earlier entry wins, on the rest this one is still live, and
+overlapping globs are normal rather than a defect.
+
+**Evidential** death needs the log to prove the entry was actually *loaded*.
+An entry is `idle` only when decisions in its category, on files its glob
+covers, were recorded by an intake whose payload shows the gate was holding it
+— and went somewhere else. That denominator is what `opportunities` counts, and
+it is why a severity decision now records its `finding_category` and
+`file_path`: without them a decision cannot be placed against any entry, and
+the audit counts it in `decisionsWithoutContext` rather than guessing.
+
+### It recommends; it does not act
+
+| Recommendation | What it means |
+| --- | --- |
+| `keep` | It fires. |
+| `review` | Two standing instructions need a human to reconcile them. |
+| `retire` | It cannot fire, and the corpus proves it without reference to any run. |
+| `rescope` | It could fire and does not — its glob or its position is wrong. |
+| `no-evidence` | This audit has nothing to say about it. **Never a reason to drop one.** |
+
+The gap between `retire` and `no-evidence` is the point of the whole verb. A
+corpus you prune on "we saw nothing" is a corpus you prune on missing telemetry.
+
+Contradictions are reported rather than resolved. Two entries whose statements
+clear a unigram-Jaccard topic threshold while their polarity differs are listed
+in `contradictions` and both get `review`, because deciding which of two
+standing instructions survives is not a thing a text comparison has standing to
+do.
+
+Exit 0 only on `clean`; exit 1 on `defective` and equally on `unverifiable`, so
+the verb can sit in a scheduled job without anyone reading the JSON on a good
+day.
+
+### What it reports on this repository's own corpus today
+
+Run against a session with no severity decisions, it still says something true
+about the corpus itself:
+
+```json
+{"reach":{"total":24,"escalating":0,"withoutCategory":24,
+          "nonFileScoped":2,"categoriesCovered":[]},
+ "counts":{"keep":0,"review":0,"retire":0,"rescope":0,"no-evidence":24},
+ "status":"unverifiable","ok":false}
+```
+
+**None of the 24 compiled lessons can escalate anything.** All 24 name no
+`finding_category`, so none of them participates in the escalation match at
+all; they are spliced into role prompts instead, and this audit is honest that
+it cannot measure that path. Two are not file-scoped on top of it. That is not
+a bug the audit found in itself — it is the state of the corpus, and it is why
+`status` is `unverifiable` rather than `clean`: a corpus that cannot fire is
+not a corpus that is working.
+
+The fix is upstream, in what `smith dream` and the scribe write: a checkpoint
+distilled without a `finding_category` compiles to an entry the severity gate
+can never reach. Until those entries carry one, `kpi same-mistake` above is
+reading a number the corpus could not have moved.
 
 ## Limitations today
 

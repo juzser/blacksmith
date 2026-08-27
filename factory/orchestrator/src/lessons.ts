@@ -130,8 +130,13 @@ function polaritiesIn(text: string): Set<string> {
 /**
  * Symmetric difference of the two statements' polarity sets is non-empty —
  * "always X" against "never X", and either against a bare "X", still differ.
+ *
+ * Exported for `lessonAudit.ts`, which asks the same question of two APPROVED
+ * statements rather than of a candidate against the corpus, and pairs it with
+ * its own similarity bar — see `TOPIC_SIMILARITY_THRESHOLD` there for why the
+ * novelty threshold in front of `checkNovelty` is the wrong one for that.
  */
-function polarityDiffers(a: string, b: string): boolean {
+export function polarityDiffers(a: string, b: string): boolean {
   const polaritiesA = polaritiesIn(a);
   const polaritiesB = polaritiesIn(b);
   for (const polarity of polaritiesA) if (!polaritiesB.has(polarity)) return true;

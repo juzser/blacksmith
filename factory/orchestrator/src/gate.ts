@@ -164,6 +164,14 @@ export interface SeverityDecisionRecord {
   fingerprint: string;
   findingId: string;
   originalSeverity: string;
+  /**
+   * What the escalation match was given to work with. `matchedLessonId` says
+   * which lesson won; these two say which lessons could have. Without them a
+   * lesson that never matched anything is indistinguishable from one nothing
+   * ever came near, and `lessons audit` would be reduced to guessing which.
+   */
+  findingCategory: string;
+  filePath: string;
   decision: SeverityDecision;
 }
 
@@ -691,6 +699,8 @@ async function intakeAndDecide(
       fingerprint: raised.finding.fingerprint,
       findingId: raised.finding.finding_id,
       originalSeverity: raised.finding.severity,
+      findingCategory: raised.finding.finding_category,
+      filePath,
       decision,
     });
 
@@ -759,6 +769,8 @@ async function intakeAndDecide(
         action: d.decision.action,
         same_mistake: d.decision.sameMistake,
         matched_lesson_id: d.decision.matchedLessonId,
+        finding_category: d.findingCategory,
+        file_path: d.filePath,
         corroborated: d.decision.corroborated,
       })),
       // The instrument, recorded next to the reading. Every `same_mistake:
@@ -771,6 +783,14 @@ async function intakeAndDecide(
       // already on disk, deliberately.
       lessons_loaded: input.lessons.length,
       lessons_escalating: input.lessons.filter(canEscalate).length,
+      // The same argument one level finer, and for the same reason. A count
+      // tells `kpi same-mistake` whether the gate could detect a repeat at
+      // all; it cannot tell `lessons audit` whether THIS lesson was among the
+      // ones loaded, and "never fired" is only evidence against a lesson that
+      // was present to fire. Events written before this field say nothing
+      // about any individual entry, and the audit reads them as `unverifiable`
+      // rather than as a corpus of lessons that have earned deletion.
+      lesson_ids_escalating: input.lessons.filter(canEscalate).map((l) => l.lessonId),
     },
     input.taskId,
     ctx,

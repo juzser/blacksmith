@@ -352,6 +352,75 @@ than appearing in it.
   operator-guide §7e, `/bs run` step 14, and a third dispatch shape in the
   `spec-reviewer` agent contract.
 
+- **A lessons audit, so the corpus can be pruned on evidence rather than on
+  taste** — `smith lessons audit <session-id>`. A lessons file only grows: every
+  incident adds an entry, nothing ever removes one, and the corpus drifts into a
+  set of standing instructions that contradict each other while the escalation
+  match quietly stops reaching half of them. `findMatchingLesson` is
+  first-match-wins, so corpus *order* is load-bearing, and an entry an earlier
+  one provably covers can never fire again no matter how true it is.
+
+  The audit answers that with two independent classes of evidence, and it never
+  conflates them. **Structural** death is provable from the corpus text alone:
+  `coversEntirely` decides whether an earlier same-category entry's glob
+  contains this one's, and if it does the entry is `unreachable` and recommended
+  `retire` — no run, no log, no sampling required. **Evidential** death needs the
+  event log to prove the entry was actually *loaded*: an entry is `idle` only
+  when decisions in its category, on files its glob covers, were recorded by an
+  intake whose payload shows the gate was holding it, and went somewhere else.
+  That denominator is why `SeverityDecisionRecord` gained `findingCategory` and
+  `filePath` — without them a decision cannot be placed against an entry, and
+  the audit counts it in `decisionsWithoutContext` rather than guessing.
+
+  It recommends and does not act. `keep`, `review`, `retire`, `rescope`,
+  `no-evidence` — and `no-evidence` is never a reason to drop an entry, which is
+  the whole point of separating it from `retire`. Contradictions are reported
+  rather than resolved: two entries whose statements pass a unigram-Jaccard
+  topic threshold while their polarity differs get `review`, because reconciling
+  two standing instructions is a human's call. `overlapsWith` is informational
+  on purpose — overlap between globs is normal, and only provable containment
+  kills. Exit 1 on anything but `clean`, so it can sit in a scheduled job.
+  22 unit tests plus gate and CLI coverage.
+
+- **Path claims that see past the file, to the symbols crossing between
+  files** — `factory/orchestrator/src/symbols.ts` and `impact.ts`, surfaced as
+  `smith claims impact` and folded into `smith wave check`. A path claim answers
+  "did two tasks write the same file", and that question has a blind spot with a
+  name: task A changes `parse()`'s signature in `src/a.ts`, task B calls
+  `parse()` from `src/b.ts`, the two claim lists are disjoint, every gate is
+  green, and integration is where the factory finds out. The conflict was never
+  in a file — it lived on the edge between two files.
+
+  `symbols.ts` is a scanner, not a compiler front end, and that is a constraint
+  rather than a preference: `typescript@7.0.2` is the native rewrite, which
+  ships `"main": null` and exports only `./lib/version.cjs` plus two `unstable`
+  entry points. There is no `ts.createSourceFile` to call. So the module reads
+  imports, exports and re-exports directly, records each export's clause text
+  (everything up to the first depth-0 `;` or `{`, whitespace-collapsed) as its
+  signature, and resolves specifiers with a `/dist/` → `/src/` fallback because
+  this repo's own source imports its build paths.
+
+  Two checks, and the difference between them is the difference between a risk
+  and a fact. **`waveImpact` runs before dispatch, over declarations.** All it
+  can see is that two tasks in one wave sit on either end of a compile-time
+  edge; that is a reason to order them, not evidence anything is wrong, so it
+  reports `coupled` and the wave is refused. There is deliberately **no
+  override**: `validateWave` already refuses a wave holding both ends of a
+  *declared* edge, so any crossing that reaches this check is between two tasks
+  the plan declared *no* edge between — precisely the dependency the planner
+  missed — and the remedy is to run them in separate waves, which is cheap.
+  **`exportImpact` runs after the work, over a diff.** An export removed while a
+  file outside the task's claims still imports it is not a risk but a `proven`
+  break; a signature that changed is the weaker `possible` claim, because this
+  module reads text and not types and says so.
+
+  Holes are reported and never fatal — an unparseable file, an unresolved
+  specifier, a claim matching nothing. Failing a wave for the scanner's blind
+  spots would teach operators to reach for the override, which costs more than
+  the check was ever worth. `wave check` gained `--repo <dir>` to name the
+  checkout the graph is read from, and prints its verdict as `symbolImpact`
+  beside the claim result. 27 impact tests, 47 scanner tests, 7 CLI tests.
+
 
 ### Changed
 

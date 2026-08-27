@@ -643,6 +643,11 @@ export function classifyChanges(
 }
 
 /**
+ * Which integration branch a task worktree was cut from, by convention. Its own
+ * export because the symbol-impact check (impact.ts) asks the same question of
+ * the same worktree, and two derivations of one convention would be two
+ * answers.
+ *
  * Collector A (P9-3): what this task branch committed, against the integration
  * branch it was cut from — derived from the branch naming convention
  * smith/<epic>/<task-id> -> smith/<epic>/integration (worktree.yml
@@ -654,7 +659,7 @@ export function classifyChanges(
  * branch. What used to be wrong was that this was the *only* way to reach the
  * classifier.
  */
-export function collectCommittedChanges(worktreeDir: string): string[] {
+export function integrationBranchFor(worktreeDir: string): string {
   const branch = runGit(worktreeDir, ['rev-parse', '--abbrev-ref', 'HEAD']);
 
   const lastSlash = branch.lastIndexOf('/');
@@ -665,7 +670,11 @@ export function collectCommittedChanges(worktreeDir: string): string[] {
       { branch },
     );
   }
-  const integrationBranch = `${branch.slice(0, lastSlash)}/integration`;
+  return `${branch.slice(0, lastSlash)}/integration`;
+}
+
+export function collectCommittedChanges(worktreeDir: string): string[] {
+  const integrationBranch = integrationBranchFor(worktreeDir);
 
   const diffOutput = runGit(worktreeDir, ['diff', '--name-only', `${integrationBranch}...HEAD`]);
   return diffOutput
