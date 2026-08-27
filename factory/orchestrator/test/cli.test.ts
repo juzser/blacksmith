@@ -2172,8 +2172,14 @@ describe('cli.ts (built binary)', () => {
   // one word in thirteen (Jaccard 0.571), which straddles the two policies
   // below: ignore the file again and one of the two runs is wrong.
   it('dream: novelty gate scores against the policy file, not a constant', () => {
-    const policyAt = (threshold: number): string => {
-      const file = path.join(scratchDir, `d159-scheduler-${threshold}.yml`);
+    // Length-awareness is written explicitly here for the reason D-208 writes
+    // it: one word in thirteen scores exactly 0.571, which is also the ceiling
+    // a thirteen-word statement has after one word changes, so with the
+    // correction on no threshold in the file can call the pair novel. It is
+    // off while the file's own number is the variable, then on for the last
+    // run, which is what proves the correction reaches dream() from the file.
+    const policyAt = (threshold: number, lengthAware = false): string => {
+      const file = path.join(scratchDir, `d159-scheduler-${threshold}-${lengthAware}.yml`);
       writeFileSync(
         file,
         [
@@ -2190,6 +2196,7 @@ describe('cli.ts (built binary)', () => {
           'lessons:',
           `  novelty_jaccard_threshold: ${threshold}`,
           '  shingle_size: 3',
+          `  novelty_length_aware: ${lengthAware}`,
           '',
         ].join('\n'),
         'utf8',
@@ -2266,7 +2273,15 @@ describe('cli.ts (built binary)', () => {
     const loose = dreamUnder(policyAt(0.6), 'loose');
     expect(loose.raised).toHaveLength(2);
     expect(loose.noveltyRejected).toHaveLength(0);
-  }, 20_000); // six sequential CLI process spawns
+
+    // Same 0.6, same events, correction on (P9-35 (a)): thirteen words cannot
+    // score above 0.571 after one word changes, so the bar comes down to meet
+    // the score and the second escalation is what it always was — the first
+    // one restated. This is the hole P9-35 measured, closed through the file.
+    const corrected = dreamUnder(policyAt(0.6, true), 'corrected');
+    expect(corrected.raised).toHaveLength(1);
+    expect(corrected.noveltyRejected).toHaveLength(1);
+  }, 30_000); // nine sequential CLI process spawns
 
   // D-208. The same number has two doors and only one of them was locked.
   // Through factory/policies/scheduler.yml, parseSchedulerPolicy refuses
@@ -2288,8 +2303,14 @@ describe('cli.ts (built binary)', () => {
     const NEAR =
       'Always give each dispatched task its own git worktree so two agents never share a branch.';
 
-    const policyAt = (threshold: number): string => {
-      const file = path.join(scratchDir, `d208-scheduler-${threshold}.yml`);
+    // The length correction is written explicitly rather than left to default,
+    // because on a sixteen-word pair it caps every bar at 0.647 and the two
+    // thresholds under test here — the file's and the flag's — become the same
+    // number. D-208 is about which of them wins; it is tested with the
+    // correction off so that precedence is the only variable, and the last
+    // case in the test turns it back on to show it reaches the gate.
+    const policyAt = (threshold: number, lengthAware = false): string => {
+      const file = path.join(scratchDir, `d208-scheduler-${threshold}-${lengthAware}.yml`);
       writeFileSync(
         file,
         [
@@ -2306,6 +2327,7 @@ describe('cli.ts (built binary)', () => {
           'lessons:',
           `  novelty_jaccard_threshold: ${threshold}`,
           '  shingle_size: 3',
+          `  novelty_length_aware: ${lengthAware}`,
           '',
         ].join('\n'),
         'utf8',
@@ -2404,9 +2426,12 @@ describe('cli.ts (built binary)', () => {
     it('still lets a legal override beat the policy file', () => {
       // A rejected candidate is logged either way, so each threshold gets its
       // own session: score NEAR against SEED, never against a leftover NEAR.
-      const scoreNear = (tag: string, extra: string[]): Record<string, unknown> => {
+      const scoreNear = (
+        tag: string,
+        extra: string[],
+        policy = policyAt(0.8),
+      ): Record<string, unknown> => {
         const s = seed(tag);
-        const policy = policyAt(0.8);
         expect(raise(s, SEED, 'lesson-d208-seed', ['--policy', policy]).status).toBe(0);
         const result = raise(s, NEAR, 'lesson-d208-near', ['--policy', policy, ...extra]);
         const json = JSON.parse(result.stdout) as Record<string, unknown>;
@@ -2426,7 +2451,15 @@ describe('cli.ts (built binary)', () => {
       // 1 is the inclusive end of the range the policy file is held to, so the
       // check must admit it rather than fence the flag into (0, 1).
       expect(scoreNear('one', ['--novelty-threshold', '1'])).toMatchObject({ novel: true });
-    }, 30_000); // nine sequential CLI process spawns
+
+      // Same pair, same 0.8 in the file, correction on (P9-35 (a)): sixteen
+      // words cannot score 0.8 after a small edit, so the bar drops to 0.647
+      // and the text the flat gate called novel is what it always was.
+      expect(scoreNear('corrected', [], policyAt(0.8, true))).toMatchObject({
+        novel: false,
+        status: 1,
+      });
+    }, 40_000); // twelve sequential CLI process spawns
 
     it('holds the approve door to the same range as the raise door', () => {
       const s = seed('approve');

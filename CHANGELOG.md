@@ -704,6 +704,29 @@ than appearing in it.
   rather than at the bash; and `docs/specs/agent-interviews.md` N-10 — the
   interview question that observed "judges are read-only" was a sentence and
   not a rule — carries its answer.
+- **The novelty gate now corrects its threshold for how long the two
+  statements are** (P9-35 (a)). A statement of *n* words has *n-s+1* shingles
+  and swapping one interior word destroys *s* of them, so nothing shorter than
+  twenty-nine words could score 0.8 against its own near-copy — the gate built
+  to stop lessons accumulating in slightly different words was, at its
+  shipped defaults, an exact-duplicate detector. Each pair is now judged at
+  `(n-2s+1)/(n+1)` for the **shorter** of the two statements, which is the
+  worst of the three one-word edits and therefore the bar that catches all of
+  them. Measured over the real 25-statement corpus: one word substituted 16/25
+  → **25/25**, inserted 19/25 → **25/25**, deleted 19/25 → **25/25**, with no
+  genuine pair newly judged redundant (highest real similarity 0.0238 against
+  a lowest corrected bar of 0.400). Two-word rewrites stay 0/25 — the
+  correction is calibrated to exactly one edit and says so rather than
+  implying more. It never *raises* an operator's threshold, and below
+  `2*shingle_size+1` words it stands aside entirely, because there a near-copy
+  and two unrelated statements sharing one three-word run score identically
+  and `novelty-rejected` is a terminal status. The knob is
+  `lessons.novelty_length_aware` in `factory/policies/scheduler.yml`,
+  validated as a real boolean because YAML 1.2 reads `off` as a truthy string
+  — an operator switching the correction off would have switched it on. The
+  bar a verdict was taken at now travels with the match, so a rejected
+  candidate is no longer reported as "scores 0.65, threshold 0.8" in the CLI
+  error, the approval-time `novelty` block, or the dashboard's notice.
 
 ### Fixed
 
