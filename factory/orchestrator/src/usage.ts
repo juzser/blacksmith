@@ -272,9 +272,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'policy check',
     positionals: '',
     flags:
-      '--command <cmd> [--tool <name>] [--branch <branch>] [--sandbox <role>] [--lease-dir <dir>]',
+      '--command <cmd> [--tool <name>] [--file <path>] [--branch <branch>] [--sandbox <role>] [--lease-dir <dir>]',
     summary:
-      'Would the guard hook deny this Bash command? Branch and sandbox auto-detect unless given. Exit 1 on deny.',
+      'Would the guard hook deny this command? --tool Write --file <path> asks the same of a file write. Branch and sandbox auto-detect unless given. Exit 1 on deny.',
   },
   {
     command: 'policy hook',

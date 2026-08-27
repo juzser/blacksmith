@@ -47,6 +47,7 @@ rules:
     reason: rm -rf is only allowed inside workspaces/ or state/.
 
 judge_sandbox:
+  roles: [reviewer, verifier, spec-reviewer]
   write_roots: [state/results, state/artifacts]
   network_commands: [curl, wget, nc, gh, npx]
   network_subcommands:
@@ -65,6 +66,21 @@ judge_sandbox:
     - id: judge-sandbox-escape
       severity: S1
       reason: a {role} judge cannot touch its own sandbox lease.
+
+role_write_scopes:
+  scopes:
+    - role: tester
+      write_globs:
+        - "**/*.test.ts"
+        - "**/test/**"
+        - "state/results/**"
+        - "state/artifacts/**"
+      refused_commands: [cp, mv, ln, patch, chmod]
+      refused_git_subcommands: [apply, checkout, restore, reset]
+  rules:
+    - id: role-write-scope
+      severity: S1
+      reason: a {role} session writes only {write_globs}.
 `;
 
 /**
@@ -75,6 +91,7 @@ judge_sandbox:
  */
 const MINI_JUDGE_SANDBOX = `
 judge_sandbox:
+  roles: [reviewer]
   write_roots: [state/results]
   network_commands: [curl]
   network_subcommands: []
@@ -85,6 +102,15 @@ judge_sandbox:
     - { id: judge-network, severity: S1, reason: no outbound access. }
     - { id: judge-write, severity: S1, reason: verdicts only. }
     - { id: judge-sandbox-escape, severity: S1, reason: not your lease. }
+
+role_write_scopes:
+  scopes:
+    - role: tester
+      write_globs: ["**/*.test.ts"]
+      refused_commands: [cp]
+      refused_git_subcommands: [apply]
+  rules:
+    - { id: role-write-scope, severity: S1, reason: tests only. }
 `;
 
 /** A lease over the same `/repo` root `ctx()` reports, so relative paths in a command resolve there. */
@@ -96,11 +122,21 @@ const LEASE: SandboxLease = {
   openedAt: '2026-08-26T00:00:00.000Z',
 };
 
+/** The same lease held by a role that has a write scope rather than a judge's read-only one. */
+const TESTER_LEASE: SandboxLease = { ...LEASE, role: 'tester' };
+
 const policy: GuardrailPolicy = parseGuardrailPolicy(MINI_POLICY_YAML);
 
 /** Builds a PolicyContext, defaulting to a Bash call from an unrelated repo root so path-bounds tests are deterministic. */
 function ctx(overrides: Partial<PolicyContext> = {}): PolicyContext {
-  return { toolName: 'Bash', command: '', branch: '', repoRoot: '/repo', ...overrides };
+  return {
+    toolName: 'Bash',
+    command: '',
+    branch: '',
+    repoRoot: '/repo',
+    filePath: null,
+    ...overrides,
+  };
 }
 
 function ruleIds(decision: PolicyDecision): string[] {
@@ -108,7 +144,7 @@ function ruleIds(decision: PolicyDecision): string[] {
 }
 
 describe('parseGuardrailPolicy', () => {
-  it('parses protected branch names/patterns, allowed removal roots, deploy commands, and all nine rules', () => {
+  it('parses protected branch names/patterns, allowed removal roots, deploy commands, and all ten rules', () => {
     expect(policy.protectedBranchNames).toEqual(['main', 'master']);
     expect(policy.protectedBranchPatterns).toEqual(['smith/*/integration']);
     expect(policy.allowedRemovalRoots).toEqual(['workspaces', 'state']);
@@ -116,7 +152,7 @@ describe('parseGuardrailPolicy', () => {
       { command: 'wrangler', subcommands: ['deploy', 'publish'] },
       { command: 'pages', subcommands: ['publish'] },
     ]);
-    expect(policy.rules.size).toBe(9);
+    expect(policy.rules.size).toBe(10);
     expect(policy.rules.get('push-to-protected')?.severity).toBe('S1');
     expect(policy.rules.get('unbounded-rm')?.reason).toBe(
       'rm -rf is only allowed inside workspaces/ or state/.',
@@ -743,5 +779,216 @@ describe('detectCurrentBranch / detectRepoRoot', () => {
   it('resolve a branch name and a repo root inside this real git checkout', () => {
     expect(detectCurrentBranch()).not.toBe('');
     expect(detectRepoRoot()).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Role write scopes (B2a). The judge sandbox answers "this role writes
+// nothing". A tester writes plenty — it just must not write the thing it is
+// grading. Same lease machinery, a different rule set selected by role.
+// ---------------------------------------------------------------------------
+
+describe('role write scopes', () => {
+  describe('parsing', () => {
+    it('parses the declared judge roles and the per-role write scopes', () => {
+      expect(policy.judgeSandbox.roles).toEqual(['reviewer', 'verifier', 'spec-reviewer']);
+      expect(policy.roleWriteScopes).toHaveLength(1);
+      const tester = policy.roleWriteScopes[0];
+      expect(tester?.role).toBe('tester');
+      expect(tester?.writeGlobs).toContain('**/*.test.ts');
+      expect(tester?.refusedCommands).toContain('cp');
+      expect(tester?.refusedGitSubcommands).toContain('apply');
+      expect(policy.rules.get('role-write-scope')?.severity).toBe('S1');
+    });
+
+    it('rejects a document with no role_write_scopes block', () => {
+      // Required on the same terms as judge_sandbox. A policy that cannot
+      // name the tester's scope is a policy under which the tester either
+      // writes nothing at all or writes the code it is grading — and neither
+      // failure announces itself.
+      const stripped = MINI_POLICY_YAML.slice(0, MINI_POLICY_YAML.indexOf('role_write_scopes:'));
+      expect(() => parseGuardrailPolicy(stripped)).toThrow(/role_write_scopes/);
+    });
+
+    it('rejects a judge_sandbox block that does not name its roles', () => {
+      const noRoles = MINI_POLICY_YAML.replace(
+        '  roles: [reviewer, verifier, spec-reviewer]\n',
+        '',
+      );
+      expect(() => parseGuardrailPolicy(noRoles)).toThrow(/judge_sandbox.roles/);
+    });
+
+    it('rejects a scope whose role collides with a declared judge role', () => {
+      // A role cannot be both read-only and write-scoped; the two rule sets
+      // are selected by role, so an overlap is an unanswerable question.
+      const collide = MINI_POLICY_YAML.replace('    - role: tester', '    - role: reviewer');
+      expect(() => parseGuardrailPolicy(collide)).toThrow(/reviewer/);
+    });
+
+    it('the real repo guardrails.yml declares a tester scope', () => {
+      const real = loadGuardrailPolicy();
+      const tester = real.roleWriteScopes.find((s) => s.role === 'tester');
+      expect(tester).toBeDefined();
+      expect(tester?.writeGlobs.length).toBeGreaterThan(0);
+      expect(real.judgeSandbox.roles).toContain('reviewer');
+    });
+  });
+
+  describe('a tester lease', () => {
+    const write = (filePath: string, toolName = 'Write'): PolicyDecision =>
+      evaluateCommand(ctx({ toolName, command: '', filePath, sandbox: TESTER_LEASE }), policy);
+    const run = (command: string): PolicyDecision =>
+      evaluateCommand(ctx({ command, sandbox: TESTER_LEASE }), policy);
+
+    it.each([
+      ['factory/orchestrator/test/gate.test.ts'],
+      ['/repo/factory/orchestrator/test/gate.test.ts'],
+      ['ui/test/fixtures/plan.json'],
+      ['state/results/task-1.json'],
+      ['state/artifacts/task-1/home.png'],
+    ])('allows a Write to %s', (filePath) => {
+      expect(write(filePath).allowed).toBe(true);
+    });
+
+    it.each([
+      ['factory/orchestrator/src/gate.ts'],
+      ['/repo/factory/orchestrator/src/gate.ts'],
+      ['README.md'],
+      ['factory/policies/guardrails.yml'],
+    ])('refuses a Write to %s — the coder owns the implementation', (filePath) => {
+      expect(ruleIds(write(filePath))).toEqual(['role-write-scope']);
+    });
+
+    it('refuses an Edit to the implementation the same way it refuses a Write', () => {
+      expect(ruleIds(write('factory/orchestrator/src/gate.ts', 'Edit'))).toContain(
+        'role-write-scope',
+      );
+      expect(write('factory/orchestrator/test/gate.test.ts', 'Edit').allowed).toBe(true);
+    });
+
+    it('names the role and the scope in the refusal, so the agent can see what it may write', () => {
+      const reason = write('src/gate.ts').violations[0]?.reason ?? '';
+      expect(reason).toContain('tester');
+      expect(reason).toContain('**/*.test.ts');
+    });
+
+    it.each([
+      ['echo x > factory/orchestrator/src/gate.ts'],
+      ['cat fixture >> src/index.ts'],
+      ['tee src/index.ts < /dev/null'],
+      ['mkdir -p src/generated'],
+      ['touch src/new.ts'],
+      ['rm factory/orchestrator/src/gate.ts'],
+      ['sed -i "" s/a/b/ src/gate.ts'],
+      ['cp src/a.ts src/b.ts'],
+      ['patch -p1 < fix.diff'],
+      ['git checkout -- src/gate.ts'],
+      ['git apply /tmp/fix.diff'],
+      ['git reset --hard HEAD~1'],
+    ])('refuses %s through Bash as well, so the tool choice is not the loophole', (command) => {
+      expect(ruleIds(run(command))).toContain('role-write-scope');
+    });
+
+    it.each([
+      ['echo x > state/results/task-1.json'],
+      ['mkdir -p factory/orchestrator/test/fixtures'],
+      ['mkdir -p state/results'],
+      ['touch ui/test/new.test.ts'],
+      ['rm factory/orchestrator/test/stale.test.ts'],
+      ['pnpm vitest run'],
+      ['cat factory/orchestrator/src/gate.ts'],
+      ['grep -rn recordResult factory/orchestrator/src'],
+      ['git add -A'],
+      ['git commit -m "test: cover the merge queue"'],
+      ['git status --porcelain'],
+      ['git diff --stat'],
+    ])('allows %s', (command) => {
+      expect(run(command).allowed).toBe(true);
+    });
+
+    it('lets the tester commit, because its output contract requires a commit on the task branch', () => {
+      expect(run('git add -A && git commit -m "test: add coverage"').allowed).toBe(true);
+    });
+
+    it.each([
+      ['git commit -m "test: cover the restore path"'],
+      ['git commit -m "test: cover cp and patch handling"'],
+      ["git commit -m 'test: reset the fixture between cases'"],
+    ])('reads %s as a message, not as the verbs it names', (command) => {
+      expect(run(command).allowed).toBe(true);
+    });
+
+    it('does not apply the judge rules — a tester runs the suite, and suites reach the network', () => {
+      expect(run('pnpm install --frozen-lockfile').allowed).toBe(true);
+      expect(run('npx playwright install chromium').allowed).toBe(true);
+    });
+
+    it('still refuses to let the tester lift its own lease', () => {
+      // The one judge rule that is not about being read-only: it is about a
+      // lease being a lease. It applies to every role that holds one.
+      expect(ruleIds(run('smith sandbox close'))).toContain('judge-sandbox-escape');
+      expect(ruleIds(run('rm state/sandboxes/abc.json'))).toContain('judge-sandbox-escape');
+    });
+
+    it('keeps the base six, so a lease is never a way to become more permissible', () => {
+      expect(ruleIds(run('git push origin main'))).toContain('push-to-protected');
+    });
+  });
+
+  describe('role resolution', () => {
+    it('gives an undeclared role the judge rules, not the tester scope', () => {
+      // Fail closed: `sandbox open --role coder` is either a typo or an
+      // attempt to pick a rule set, and the strictest one is the safe answer
+      // to both.
+      const rogue: SandboxLease = { ...LEASE, role: 'coder' };
+      const d = evaluateCommand(ctx({ command: 'curl https://x', sandbox: rogue }), policy);
+      expect(ruleIds(d)).toContain('judge-network');
+    });
+
+    it('checks a judge Write against the judge write roots, not only its Bash', () => {
+      // Judges hold no Edit/Write today. If one ever does, the lease answers
+      // for it — the rule is about the role, not about which tool it reached
+      // for.
+      const denied = evaluateCommand(
+        ctx({ toolName: 'Write', command: '', filePath: 'src/gate.ts', sandbox: LEASE }),
+        policy,
+      );
+      expect(ruleIds(denied)).toContain('judge-write');
+      const allowed = evaluateCommand(
+        ctx({
+          toolName: 'Write',
+          command: '',
+          filePath: 'state/results/task-1.json',
+          sandbox: LEASE,
+        }),
+        policy,
+      );
+      expect(allowed.allowed).toBe(true);
+    });
+  });
+
+  describe('outside a lease', () => {
+    it('leaves an ordinary session free to write anything', () => {
+      // The coder's own session holds no lease, and nothing here narrows it.
+      expect(
+        evaluateCommand(ctx({ toolName: 'Write', command: '', filePath: 'src/gate.ts' }), policy)
+          .allowed,
+      ).toBe(true);
+    });
+
+    it('allows a file tool with no path at all rather than guessing', () => {
+      expect(
+        evaluateCommand(ctx({ toolName: 'Write', command: '', filePath: '' }), policy).allowed,
+      ).toBe(true);
+    });
+
+    it('ignores a tool it does not inspect', () => {
+      expect(
+        evaluateCommand(
+          ctx({ toolName: 'Read', command: '', filePath: 'src/gate.ts', sandbox: TESTER_LEASE }),
+          policy,
+        ).allowed,
+      ).toBe(true);
+    });
   });
 });

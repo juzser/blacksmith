@@ -43,6 +43,13 @@ export interface DeployCommandSpec {
  * for why the lists are deliberately generous.
  */
 export interface JudgeSandboxPolicy {
+  /**
+   * The roles this rule set is written for. A lease is matched to a rule set
+   * by role, and an undeclared role falls back to *this* one — so the list
+   * is not a gate, it is documentation plus the vocabulary
+   * `smith sandbox open --role` validates against.
+   */
+  readonly roles: readonly string[];
   /** Repo-root-relative path prefixes a judge may write into, posix-separated as written in YAML. */
   readonly writeRoots: readonly string[];
   readonly networkCommands: readonly string[];
@@ -52,6 +59,25 @@ export interface JudgeSandboxPolicy {
   /** Write verbs refused outright, with no path check. */
   readonly refusedWriteCommands: readonly string[];
   readonly gitWriteSubcommands: readonly string[];
+}
+
+/**
+ * A role that writes, but not everywhere (guardrails.yml `role_write_scopes`).
+ *
+ * The judge sandbox says "this role writes nothing", which is the whole
+ * answer for a reviewer. It is no answer at all for a tester: a tester's job
+ * is to write tests, and the isolation that matters is that it must not
+ * write the implementation it is grading. Same lease machinery, a different
+ * rule selected by role.
+ */
+export interface RoleWriteScope {
+  readonly role: string;
+  /** Repo-root-relative globs (picomatch, posix separators) this role may write. */
+  readonly writeGlobs: readonly string[];
+  /** Write verbs refused outright, because which of their tokens is the target is undecidable. */
+  readonly refusedCommands: readonly string[];
+  /** git subcommands that change tracked content without passing through a path-checked write. */
+  readonly refusedGitSubcommands: readonly string[];
 }
 
 export interface GuardrailRule {
@@ -74,6 +100,8 @@ export interface GuardrailPolicy {
   readonly allowedRemovalRoots: readonly string[];
   readonly deployCommands: readonly DeployCommandSpec[];
   readonly judgeSandbox: JudgeSandboxPolicy;
+  /** Roles whose lease narrows their writes to a glob set instead of forbidding writes outright. */
+  readonly roleWriteScopes: readonly RoleWriteScope[];
   /** Keyed by rule id (`push-to-protected`, etc.) — every id in `REQUIRED_RULE_IDS` is guaranteed present. */
   readonly rules: ReadonlyMap<string, GuardrailRule>;
 }
@@ -83,6 +111,7 @@ interface RawGuardrailsYaml {
   destructive_removal?: { allowed_roots?: unknown };
   deploy_commands?: unknown;
   judge_sandbox?: {
+    roles?: unknown;
     write_roots?: unknown;
     network_commands?: unknown;
     network_subcommands?: unknown;
@@ -91,6 +120,7 @@ interface RawGuardrailsYaml {
     git_write_subcommands?: unknown;
     rules?: unknown;
   };
+  role_write_scopes?: { scopes?: unknown; rules?: unknown };
   rules?: unknown;
 }
 
@@ -102,7 +132,10 @@ interface RawGuardrailsYaml {
  * not "off by default", it is a hole. The judge rules are required on the
  * same terms even though they fire only under a lease: a policy file that
  * cannot name them is a policy file that would run judges unguarded and
- * report nothing wrong.
+ * report nothing wrong. `role-write-scope` is required for the mirror of
+ * that reason: it is the mechanism that keeps a tester out of the code it is
+ * grading, and a policy that cannot name it either blocks the tester
+ * entirely or lets it mark its own homework.
  */
 const REQUIRED_RULE_IDS = [
   'push-to-protected',
@@ -114,6 +147,7 @@ const REQUIRED_RULE_IDS = [
   'judge-network',
   'judge-write',
   'judge-sandbox-escape',
+  'role-write-scope',
 ] as const;
 
 function isStringArray(value: unknown): value is string[] {
@@ -195,6 +229,67 @@ function collectRules(raw: unknown, into: Map<string, GuardrailRule>, key: strin
  * shape — a guard-hook policy file with a typo'd key must fail loudly, not
  * load as a policy with an empty `rules` map that denies nothing.
  */
+/**
+ * `role_write_scopes.scopes` — one entry per role that writes under a lease.
+ *
+ * A role declared here must not also be a judge role: the two rule sets are
+ * selected by role, so an overlap is a question with no answer, and guessing
+ * one silently is exactly the kind of quiet mis-enforcement this whole
+ * module exists to end.
+ */
+function parseRoleWriteScopes(raw: unknown, judgeRoles: readonly string[]): RoleWriteScope[] {
+  if (!Array.isArray(raw)) {
+    throw new PolicyError(
+      'policy.invalid-document',
+      'guardrails.yml is missing role_write_scopes.scopes (a list of role scopes).',
+    );
+  }
+  const scopes: RoleWriteScope[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const key = `role_write_scopes.scopes[${index}]`;
+    if (typeof entry !== 'object' || entry === null) {
+      throw new PolicyError('policy.invalid-document', `guardrails.yml ${key} is not a mapping.`);
+    }
+    const item = entry as Record<string, unknown>;
+    const role = item.role;
+    if (typeof role !== 'string' || role === '') {
+      throw new PolicyError('policy.invalid-document', `guardrails.yml ${key} is missing role.`);
+    }
+    if (judgeRoles.includes(role)) {
+      throw new PolicyError(
+        'policy.invalid-document',
+        `guardrails.yml declares "${role}" as both a judge role and a write-scoped role; a role gets one rule set, not two.`,
+        { role },
+      );
+    }
+    if (scopes.some((s) => s.role === role)) {
+      throw new PolicyError(
+        'policy.invalid-document',
+        `guardrails.yml declares role "${role}" twice under role_write_scopes.scopes.`,
+        { role },
+      );
+    }
+    const writeGlobs = requireStringArray(item.write_globs, `${key}.write_globs`);
+    if (writeGlobs.length === 0) {
+      throw new PolicyError(
+        'policy.invalid-document',
+        `guardrails.yml ${key}.write_globs is empty; a scope that permits nothing blocks the role instead of bounding it.`,
+        { role },
+      );
+    }
+    scopes.push({
+      role,
+      writeGlobs,
+      refusedCommands: requireStringArray(item.refused_commands, `${key}.refused_commands`),
+      refusedGitSubcommands: requireStringArray(
+        item.refused_git_subcommands,
+        `${key}.refused_git_subcommands`,
+      ),
+    });
+  }
+  return scopes;
+}
+
 export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
   const doc = (parseYaml(yamlText) ?? {}) as RawGuardrailsYaml;
 
@@ -230,6 +325,7 @@ export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
     );
   }
   const judgeSandbox: JudgeSandboxPolicy = {
+    roles: requireStringArray(rawSandbox.roles, 'judge_sandbox.roles'),
     writeRoots: requireStringArray(rawSandbox.write_roots, 'judge_sandbox.write_roots'),
     networkCommands: requireStringArray(
       rawSandbox.network_commands,
@@ -253,9 +349,19 @@ export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
     ),
   };
 
+  const rawScopes = doc.role_write_scopes;
+  if (rawScopes === undefined || rawScopes === null) {
+    throw new PolicyError(
+      'policy.invalid-document',
+      'guardrails.yml is missing role_write_scopes (the per-role write bounds).',
+    );
+  }
+  const roleWriteScopes = parseRoleWriteScopes(rawScopes.scopes, judgeSandbox.roles);
+
   const rules = new Map<string, GuardrailRule>();
   collectRules(doc.rules, rules, 'rules');
   collectRules(rawSandbox.rules, rules, 'judge_sandbox.rules');
+  collectRules(rawScopes.rules, rules, 'role_write_scopes.rules');
   for (const requiredId of REQUIRED_RULE_IDS) {
     if (!rules.has(requiredId)) {
       throw new PolicyError(
@@ -272,8 +378,20 @@ export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
     allowedRemovalRoots: allowedRoots,
     deployCommands,
     judgeSandbox,
+    roleWriteScopes,
     rules,
   };
+}
+
+/**
+ * Every role `smith sandbox open --role` accepts — the judge roles plus the
+ * write-scoped ones. A role outside this list is a typo or an attempt to
+ * pick a rule set by naming one that does not exist; sandbox.ts refuses it
+ * at lease time so the mistake surfaces there rather than as silently
+ * stricter enforcement three commands later.
+ */
+export function sandboxRoles(policy: GuardrailPolicy = loadGuardrailPolicy()): string[] {
+  return [...policy.judgeSandbox.roles, ...policy.roleWriteScopes.map((s) => s.role)];
 }
 
 export function loadGuardrailPolicy(filePath: string = GUARDRAILS_POLICY_PATH): GuardrailPolicy {
@@ -419,6 +537,18 @@ export interface PolicyContext {
    * the guard hook off.
    */
   readonly sandbox?: SandboxLease | null;
+  /**
+   * The path a file tool (`Write`/`Edit`/…) is about to write, or
+   * `null`/absent for a `Bash` call — Claude Code sends it as
+   * `tool_input.file_path`, absolute; `smith policy check --file` takes it
+   * relative or absolute.
+   *
+   * Bash was the only tool worth inspecting while every leased role was a
+   * judge, because judges hold no `Edit`/`Write` and so a shell was their
+   * only write path. A tester holds both, so a rule that watches only `Bash`
+   * would be a rule the tester routes around by using the tool it was given.
+   */
+  readonly filePath?: string | null;
 }
 
 /**
@@ -428,6 +558,14 @@ export interface PolicyContext {
  * tool added later is a one-line change here, not new control flow.
  */
 const INSPECTED_TOOLS: readonly string[] = ['Bash'];
+
+/**
+ * Tools whose `file_path` this policy inspects — the write path that does
+ * not go through a shell. Nothing here has a command to match, so only the
+ * lease rules can fire on them; the base six are all about shell commands
+ * and no-op on an empty one.
+ */
+const INSPECTED_FILE_TOOLS: readonly string[] = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
 
 function requireRule(policy: GuardrailPolicy, id: string): GuardrailRule {
   const rule = policy.rules.get(id);
@@ -721,6 +859,39 @@ function isUnderWriteRoot(normalizedPath: string, roots: readonly string[]): boo
   });
 }
 
+/**
+ * A probe segment appended to a path to ask "would anything *inside* this
+ * directory be in scope?" — see `isWithinWriteScope`.
+ */
+const SCOPE_PROBE = '__scope_probe__';
+
+/** Repo-root-relative, posix-separated — the shape `write_globs` are written in. */
+function toRepoRelativePosix(token: string, repoRoot: string | null): string {
+  return normalizeRemovalPath(token, repoRoot).split(path.sep).join('/');
+}
+
+/**
+ * Is a repo-root-relative path inside a role's write scope?
+ *
+ * Globs rather than `write_roots`' path prefixes, because a tester's scope is
+ * not a directory: a double-star test-file pattern is a shape, and the files
+ * it names sit beside the implementation they cover.
+ *
+ * A directory counts as in scope when something inside it would be, which is
+ * what the probe asks: `mkdir -p factory/orchestrator/test/fixtures` is a
+ * tester preparing to write fixtures, and refusing it would be a false deny
+ * — the kind that teaches an agent to route around the gate rather than
+ * trust it. A path that climbed above the repo root (`path.relative` renders
+ * that with a leading `..`, an absolute path with a leading empty segment)
+ * is never in scope, whatever the globs say.
+ */
+function isWithinWriteScope(normalizedPath: string, globs: readonly string[]): boolean {
+  const first = normalizedPath.split('/')[0];
+  if (first === undefined || first === '' || first === '..' || normalizedPath === '.') return false;
+  const isMatch = picomatch([...globs], { dot: true });
+  return isMatch(normalizedPath) || isMatch(`${normalizedPath}/${SCOPE_PROBE}`);
+}
+
 /** `{role}` and `{write_roots}` in a judge rule's reason, same placeholder convention as `{branch}`. */
 function renderSandboxReason(
   template: string,
@@ -760,7 +931,9 @@ function checkJudgeNetwork(
  * Judge rule 2: the only write a judge may make is a redirection into a
  * write root.
  *
- * Three shapes, deliberately not unified. A redirection has one readable
+ * Four shapes, deliberately not unified. A file tool names its target
+ * outright, so it is checked directly (judges hold no `Edit`/`Write` today,
+ * but the rule answers for the role, not for the tool it reached for). A redirection has one readable
  * target, so it is checked against the allowlist. `mkdir`/`tee`/`touch` take
  * nothing but targets, so every non-flag argument is checked. Everything
  * else that writes is refused outright rather than path-checked, because
@@ -769,6 +942,7 @@ function checkJudgeNetwork(
  */
 function checkJudgeWrite(
   command: string,
+  filePath: string | null,
   lease: SandboxLease,
   repoRoot: string | null,
   policy: GuardrailPolicy,
@@ -778,6 +952,9 @@ function checkJudgeWrite(
   const outOfBounds = (token: string): boolean =>
     !isUnderWriteRoot(normalizeRemovalPath(token, repoRoot), writeRoots);
 
+  if (filePath !== null && filePath !== '' && outOfBounds(filePath)) {
+    return sandboxViolation(policy, 'judge-write', lease);
+  }
   if (redirectTargets(command).some(outOfBounds)) {
     return sandboxViolation(policy, 'judge-write', lease);
   }
@@ -796,6 +973,93 @@ function checkJudgeWrite(
     );
   });
   return writes ? sandboxViolation(policy, 'judge-write', lease) : null;
+}
+
+/**
+ * Blank out quoted spans before scanning a segment for command words.
+ *
+ * Only the write-scope rule needs this, and only because the role it governs
+ * commits: `git commit -m "test: cover the restore path"` is a tester doing
+ * exactly what its output contract asks, and refusing it because the message
+ * says "restore" is the same class of false deny as refusing `git merge-base`
+ * — the kind that teaches an agent to route around the gate rather than
+ * trust it. A quoted span is an argument, never a command word.
+ *
+ * Replaced rather than deleted, so token boundaries survive. Targets keep
+ * being read off the unstripped segment, since `tee "state/results/x"` is a
+ * write whose target happens to be quoted.
+ */
+function stripQuotedSpans(segment: string): string {
+  return segment.replace(/"[^"]*"|'[^']*'/g, '""');
+}
+
+/** `{role}` and `{write_globs}` in the role-write-scope rule's reason. */
+function scopeViolation(
+  policy: GuardrailPolicy,
+  lease: SandboxLease,
+  scope: RoleWriteScope,
+): PolicyViolation {
+  const rule = requireRule(policy, 'role-write-scope');
+  return violation(
+    rule,
+    rule.reason.replace('{role}', lease.role).replace('{write_globs}', scope.writeGlobs.join(', ')),
+  );
+}
+
+/**
+ * Role rule: a write-scoped role writes inside its globs and nowhere else.
+ *
+ * The shapes mirror `checkJudgeWrite`, with two differences that follow from
+ * the role actually being allowed to write. `rm` is path-checked rather than
+ * refused, because deleting a stale test is ordinary tester work and its
+ * arguments are all targets. `git add`/`commit` stay allowed, because the
+ * tester's output contract *requires* a commit on the task branch — only the
+ * git subcommands that change tracked content without passing a path check
+ * (`apply`, `checkout`, `reset`, …) are refused, since those would put the
+ * implementation back under the tester's control by the back door.
+ *
+ * `sed -i` and the verbs in `refused_commands` are refused outright for the
+ * same reason the judge refuses them: deciding which token of `cp a b` is
+ * the target is more machinery than the legitimate cases justify, and here
+ * the role has `Edit` and `Write`, which *are* path-checked, as the better
+ * route to the same edit.
+ *
+ * The known limit is the judge sandbox's, unchanged: this reads command
+ * text, not intent. A write smuggled through an interpreter is invisible to
+ * it, which is why `smith worktree fingerprint`/`verify` stays behind it.
+ */
+function checkRoleWriteScope(
+  command: string,
+  filePath: string | null,
+  lease: SandboxLease,
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+  scope: RoleWriteScope,
+): PolicyViolation | null {
+  const outOfScope = (token: string): boolean =>
+    !isWithinWriteScope(toRepoRelativePosix(token, repoRoot), scope.writeGlobs);
+
+  if (filePath !== null && filePath !== '' && outOfScope(filePath)) {
+    return scopeViolation(policy, lease, scope);
+  }
+  if (redirectTargets(command).some(outOfScope)) {
+    return scopeViolation(policy, lease, scope);
+  }
+  // Which verbs take nothing but targets is a fact about the verbs, not
+  // about the role, so the judge sandbox's list is reused rather than
+  // restated once per scope. `rm` joins them here only.
+  const targetVerbs = [...policy.judgeSandbox.targetWriteCommands, 'rm'];
+  const stripped = stripHeredocBodies(command);
+  const writes = splitChainSegments(stripped).some((segment) => {
+    const words = stripQuotedSpans(segment);
+    if (scope.refusedCommands.some((word) => hasCommandWord(words, word))) return true;
+    if (/\bsed\b[^;&|]*\s-i(\.[^\s]*)?(\s|$)/i.test(words)) return true;
+    if (scope.refusedGitSubcommands.some((sub) => isGitSubcommand(words, sub))) return true;
+    return targetVerbs.some(
+      (word) => hasCommandWord(segment, word) && argumentsAfter(segment, word).some(outOfScope),
+    );
+  });
+  return writes ? scopeViolation(policy, lease, scope) : null;
 }
 
 /**
@@ -829,14 +1093,22 @@ function checkJudgeSandboxEscape(
  * The guard hook's decision for one tool call: every guardrails.yml rule
  * that fires, not just the first (an agent — or an operator reading the
  * denial — should see every reason at once, the same way `smith check` does
- * for gate failures). Only tools in `INSPECTED_TOOLS` are evaluated; every
- * other tool call, and an empty command, allows trivially.
+ * for gate failures). Only tools in `INSPECTED_TOOLS` (a shell command) or
+ * `INSPECTED_FILE_TOOLS` (a target path) are evaluated; every other tool
+ * call, an empty command and an absent path all allow trivially.
  */
 export function evaluateCommand(
   context: PolicyContext,
   policy: GuardrailPolicy = loadGuardrailPolicy(),
 ): PolicyDecision {
-  if (!INSPECTED_TOOLS.includes(context.toolName) || context.command.trim() === '') {
+  const inspectsCommand = INSPECTED_TOOLS.includes(context.toolName);
+  const inspectsPath = INSPECTED_FILE_TOOLS.includes(context.toolName);
+  const filePath = inspectsPath ? (context.filePath ?? null) : null;
+  if (!inspectsCommand && !inspectsPath) return { allowed: true, violations: [] };
+  if (inspectsCommand && context.command.trim() === '') {
+    return { allowed: true, violations: [] };
+  }
+  if (inspectsPath && (filePath === null || filePath.trim() === '')) {
     return { allowed: true, violations: [] };
   }
   const { command, branch, repoRoot } = context;
@@ -854,11 +1126,24 @@ export function evaluateCommand(
   // is checked by fewer rules than it would have been with no lease at all.
   const lease = context.sandbox ?? null;
   if (lease !== null) {
-    checks.push(
-      () => checkJudgeNetwork(command, lease, policy),
-      () => checkJudgeWrite(command, lease, repoRoot, policy),
-      () => checkJudgeSandboxEscape(command, lease, policy),
-    );
+    // One rule set per lease, selected by role. A role with no declared
+    // write scope gets the judge rules — that covers the six judge roles
+    // and, deliberately, anything unrecognised: `--role coder` is either a
+    // typo or an attempt to pick a rule set, and the strictest set is the
+    // safe answer to both. sandbox.ts refuses the unknown role outright at
+    // lease time; this is the second line, for a lease file written by hand.
+    const scope = policy.roleWriteScopes.find((s) => s.role === lease.role) ?? null;
+    if (scope === null) {
+      checks.push(
+        () => checkJudgeNetwork(command, lease, policy),
+        () => checkJudgeWrite(command, filePath, lease, repoRoot, policy),
+      );
+    } else {
+      checks.push(() => checkRoleWriteScope(command, filePath, lease, repoRoot, policy, scope));
+    }
+    // Not role-dependent: a lease a leaseholder can lift is not a lease,
+    // whichever rule set the role draws the rest of its bounds from.
+    checks.push(() => checkJudgeSandboxEscape(command, lease, policy));
   }
   const violations = checks.map((check) => check()).filter((v): v is PolicyViolation => v !== null);
   return { allowed: violations.length === 0, violations };

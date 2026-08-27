@@ -46,14 +46,18 @@ text* and *things that execute*:
 - **Bypassing a gate.** Anything that lets a task reach the merge queue with
   a failing schema check, a failing test gate, or an unresolved S1/S2 finding.
 - **Judge integrity.** A read-only judge that can mutate the tree it is
-  judging, reach the network, or influence its own verdict. The judge sandbox
+  judging, reach the network, or influence its own verdict. The role sandbox
   (`smith sandbox`, plus the `judge-*` rules in
   [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml))
   refuses those commands up front, and `smith worktree fingerprint` / `verify`
   bracket the run to catch what a text matcher cannot see. Both halves are
   stated in
-  [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "The judge
+  [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "The role
   sandbox"; a way past *both* is in scope.
+- **Grading one's own work.** A tester that can edit the implementation it is
+  covering, so a red test turns green by changing the subject rather than the
+  test. `role_write_scopes` in the same file fences it to test files; a write
+  it reaches outside them is in scope.
 - **Secret leakage.** A credential value reaching the event log, a projection,
   a PR body, a screenshot, or a judge prompt. See
   [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "No secrets

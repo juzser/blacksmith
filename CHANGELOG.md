@@ -128,6 +128,38 @@ than appearing in it.
   stays inside it while an ordinary coder session in the same repo sees none
   of these rules. `researcher` is deliberately outside: fetching is its job,
   and it fetches through `WebFetch`/`WebSearch` rather than `Bash`.
+- **The tester is fenced to test files, so it cannot make a red test green by
+  editing the subject.** A test whose author may edit what it covers is a test
+  that grades itself, which is the same failure the fresh-context reviewer
+  exists to prevent one gate later. `role_write_scopes` in
+  [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml) declares
+  a role's `write_globs`, and the new S1 `role-write-scope` refuses a write
+  outside them — for the tester: test and spec files, the test directories, and
+  its own results under `state/`. It also refuses outright the verbs whose
+  target a text matcher cannot pin down (`cp`, `mv`, `patch`, `sed -i`,
+  editors) and the git subcommands that rewrite tracked content without naming
+  a path (`apply`, `cherry-pick`, `reset`, `restore`, `checkout`, `stash`).
+  What the tester keeps is deliberate: the network, because a suite installs
+  and downloads browsers, and `git add`/`commit`, because its output contract
+  *is* a commit on the task branch.
+- **The guard hook now sits on `Write`, `Edit`, `MultiEdit` and `NotebookEdit`
+  as well as `Bash`.** The judge sandbox could watch `Bash` alone because a
+  judge holds no `Edit`/`Write` and a shell was therefore its only write path.
+  A tester holds both, so a rule watching only `Bash` is a rule it routes
+  around with the tool it was handed. `smith policy check --tool Write --file
+  <path>` asks the same question of a file write that `--command` asks of a
+  shell line, and the same globs decide both a redirect target and a
+  `tool_input.file_path`. A directory is in scope when something inside it
+  would be, so `mkdir -p …/test/fixtures` is allowed rather than refused —
+  a false deny teaches an agent to route around the gate rather than trust it,
+  which is why the refused-verb scan also blanks quoted spans before it runs
+  (`git commit -m "test: cover the restore path"` is the tester doing exactly
+  what its contract asks, not a `restore`).
+- **`sandbox open` refuses a role `guardrails.yml` has no rules for**, rather
+  than leasing one it cannot govern. `judge_sandbox.roles` is now declared
+  data instead of a list hard-coded in TypeScript, and an unrecognised role
+  falls back to the judge rules — the strictest set, because that is the only
+  fallback that fails closed.
 - **`smith wave check` now refuses a wave that cannot fit**, where it
   previously only checked that the claims were disjoint. It prices the wave
   against what the epic has already spent and refuses admission that would
@@ -335,12 +367,20 @@ than appearing in it.
   anyway, and `smith budget alarm` reports that after the fact. The
   150,000-tokens-per-task cap reports rather than blocks *by design*: a
   self-policed cap becomes pressure on the work being measured.
-- **The judge sandbox reads command text, not intent.** It is not a container,
+- **The role sandbox reads command text, not intent.** It is not a container,
   a seccomp profile, or a read-only mount, so a write smuggled through an
   interpreter (`python3 -c "open(...,'w')"`) is invisible to it and always
-  will be. `smith worktree fingerprint`/`verify` stays in the pipeline behind
+  will be. The `Write`/`Edit` half is exact — the path is an argument, not
+  prose — but the `Bash` half stays a matcher, so a tester's write scope is
+  enforced precisely on the tools it normally uses and approximately on the
+  shell. `smith worktree fingerprint`/`verify` stays in the pipeline behind
   it to catch after the fact what the matcher cannot see up front; neither
   half is sold as the other.
+- **Nothing yet checks that a tester actually ran, or that it ran in a session
+  the coder did not own.** `role-write-scope` fences a tester that *is* leased;
+  it says nothing about a task whose tests the coder wrote in its own session
+  and never handed over. That check is a dispatch-record audit, not a policy
+  rule, and it is not built.
 - `.vue` single-file components are neither type-checked nor fully linted.
   `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
   and TypeScript 7's native port does not expose one. UI logic lives in

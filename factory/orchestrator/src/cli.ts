@@ -1674,8 +1674,16 @@ async function main(): Promise<number> {
     // to what the checkout actually is, same as the hook itself resolves
     // them, so a caller only needs --branch/--tool to ask a hypothetical
     // ("what if I were on main") rather than the real one.
+    // --command stays required even for a file tool, because the answer to
+    // "what would the hook say" depends on both halves of the payload and a
+    // caller who omits one is usually asking the wrong question. `--command
+    // ''` is the file-tool form: nothing to run, a path to check.
     const command = requireFlag(flags, 'command');
     const toolName = flags.tool ?? 'Bash';
+    // The other half of a PreToolUse payload: `tool_input.file_path`, which
+    // is what a `Write`/`Edit` call carries instead of a command. Only the
+    // role write scopes read it today — see policy.ts's PolicyContext.
+    const filePath = flags.file ?? null;
     // Resolved from the caller's cwd, not from the checkout this binary was
     // built in: an operator asking "would this be denied?" means from where
     // they are standing, and in this repo that is routinely a worktree on a
@@ -1698,7 +1706,7 @@ async function main(): Promise<number> {
         }
       : activeSandboxFor(process.cwd(), flags['lease-dir'] ?? SANDBOX_LEASE_DIR);
     const decision = evaluateCommand(
-      { toolName, command, branch, repoRoot, sandbox },
+      { toolName, command, branch, repoRoot, sandbox, filePath },
       loadGuardrailPolicy(),
     );
     printJson(decision);
@@ -1725,12 +1733,21 @@ async function main(): Promise<number> {
     const raw = readFileSync(0, 'utf8');
     const payload = JSON.parse(raw) as {
       tool_name?: unknown;
-      tool_input?: { command?: unknown };
+      tool_input?: { command?: unknown; file_path?: unknown };
       cwd?: unknown;
     };
     const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
     const command =
       typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '';
+    // A `Write`/`Edit`/`MultiEdit` payload carries no command; its target is
+    // `tool_input.file_path`, absolute. Bash was the only tool worth
+    // inspecting while every leased role was a judge, since judges hold no
+    // file tools and a shell was their only write path. A tester holds both,
+    // so watching only Bash would leave the rule to be routed around with
+    // the tool the role was handed. Same shape as `command`: a missing or
+    // non-string field reads as absent, never as a guess.
+    const filePath =
+      typeof payload.tool_input?.file_path === 'string' ? payload.tool_input.file_path : null;
     // Branch and repo root come from where the command would actually run,
     // which the PreToolUse payload carries as `cwd`. Resolving them from this
     // binary's own checkout instead would be wrong in the case this factory
@@ -1756,6 +1773,7 @@ async function main(): Promise<number> {
       // in a PreToolUse payload that says where the command will run. No lease
       // is the ordinary case and costs one directory read.
       sandbox: activeSandboxFor(cwd),
+      filePath,
     };
     const decision = evaluateCommand(context, loadGuardrailPolicy());
     if (!decision.allowed) {
