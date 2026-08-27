@@ -272,6 +272,87 @@ than appearing in it.
   warned since Phase 8 that a skipped provider leaves no trace, and a finder
   that found nothing reads exactly like a finder that never ran.
 
+- **`smith judge preflight`** — the one provider question that can be answered
+  without spending a judge call. It came out of running the cross-provider
+  check live against the shipped `crosscheck.yml` to confirm the tier is
+  actually wired: it is — `gate.ts` raised a trigger unprompted on a blocking
+  finding, codex returned a schema-valid `refute` in 7.6s, and the quorum
+  correctly declined to gate it (both externals are `mode: shadow`, and the
+  native reviewer was `excluded_as_finder`, so the pool was empty and the
+  finding kept blocking). What the same run also showed is the gap:
+  `deepseek` ships `enabled: true`, so on a machine with no
+  `DEEPSEEK_API_KEY` every trigger spawned a call that could not leave the
+  box, caught it, and wrote an `ok: false` row. Nothing was unsafe — the
+  quorum is fail-closed — but it is one doomed call per blocking finding, and
+  the only surfaces that reported it (`judge-verdict` rows, `smith stats
+  providers`) are readable *after* the calls are spent.
+
+  The command reads the policy and asks only what is knowable locally: is the
+  `api_key_env` variable set, is the `command` on `PATH`, and does the
+  arithmetic of the promotions add up — one `mode: active` external against
+  `min_providers: 2` is flagged, because with the native finder excluded that
+  operator is paying a gating provider's bill for a shadow provider's
+  influence. Exit 1 with a `problems` array, 0 when there is nothing to fix.
+
+  Three deliberate non-behaviours. It never makes a judge call — a preflight
+  that proved a provider answers by asking it something would cost exactly
+  what it saves, so a resolvable `command` is reported as resolvable and
+  never as authenticated. It never prints a key, only the variable *name*.
+  And it ignores `SMITH_CROSSCHECK_OFFLINE`, which forces every provider off
+  at load time and would therefore hide the misconfiguration being looked
+  for; the switch is reported as `offlineSwitch` instead. Zero active
+  externals is the shipped default and is never flagged. 15 tests (14 unit,
+  1 CLI); documented as providers-runbook §1.
+
+- **A spec-vs-goal gate: `smith epic goal` and `smith epic goal-check`.** Every
+  gate that existed before this one reads text the planner produced — the plan,
+  the diffs the plan asked for, the gate records those diffs earned. So all of
+  them go green on a plan that decomposes the *wrong problem*: criteria met,
+  tests passing, spec review closed, and the epic ships something nobody asked
+  for. The one reference the planner did not write is the `- goal:` line of the
+  roadmap milestone that owns the epic, and nothing read it.
+
+  `smith epic goal` prints that goal split into clauses, and writes nothing —
+  the split happens here rather than in a judge's head, so two runs of the same
+  check answer the same question. `smith epic goal-check` records one verdict
+  per clause, in the goal's order. `covered` must name live plan tasks; a
+  clause credited to a task the plan does not have is refused
+  (`goal-check.unknown-task`), because a clause delivered by a task that does
+  not exist is a clause nothing delivers. `uncovered` mints an S2-major
+  spec-scoped finding against the plan file, which no task diff can close —
+  `smith plan amend` is the only answer. `out-of-scope` is the one verdict that
+  makes a clause disappear, so it demands a reason and that reason is printed
+  back to the epic judge verbatim. Everything validates before anything is
+  written, the way `plan amend` does: a map that raises two findings and then
+  names a phantom task on the third clause writes neither finding and no event.
+
+  **The gate fails closed, and the blast radius is the point: an epic whose
+  owning milestone states no `- goal:` line no longer closes.** `smith epic
+  verdict` holds it, and `smith epic goal-check` refuses to run there
+  (`cli.no-epic-goal`) rather than record a check against nothing. There is
+  deliberately no `not-required` escape hatch of the kind
+  `MCP_SURFACE_NOT_REQUIRED` gives the MCP surface gate — an epic can honestly
+  owe no manifest, while "no goal is stated" is the absence of the only text
+  this gate can grade against, and treating it as a pass would make the gate
+  skippable by deleting a line from `factory/specs/roadmap.md`. The fix is that
+  same one-line edit in reverse: give the milestone a goal, or add the epic to
+  the `- epics:` list of a milestone that has one.
+
+  A check goes stale two ways, the pair D-125 drew for the closing spec review:
+  a plan version older than the live plan, and a goal digest the roadmap no
+  longer states. The second is why `epic goal` prints a digest at all —
+  rewording a goal invalidates a check exactly the way cutting a new plan
+  version does, and without the digest a reworded goal would silently keep a
+  green check. `dispatchAudit`'s `CRITIC_WORK_EVENTS` gained
+  `goal-check-recorded` at the moment the event was written rather than after
+  an incident: a recorded check with no dispatch behind it is `unverifiable`,
+  and one dispatch cannot cover both a spec review and a goal check — nor can
+  two dispatches fired before either record, since the second one falls
+  outside its record's window. 64 tests (57 unit, 7 CLI); documented as
+  operator-guide §7e, `/bs run` step 14, and a third dispatch shape in the
+  `spec-reviewer` agent contract.
+
+
 ### Changed
 
 - Demo project fixtures, screenshots and compiled lessons use neutral names

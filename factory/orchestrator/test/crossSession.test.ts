@@ -21,6 +21,7 @@ import {
   sessionLineage,
 } from '../src/events.js';
 import { type FindingDraft, listFindings, raiseFinding, transition } from '../src/findings.js';
+import { type EpicGoalStatus, goalDigest } from '../src/goalCheck.js';
 import { MCP_SURFACE_NOT_REQUIRED } from '../src/mcp.js';
 import { readAddedTasks } from '../src/taskEvents.js';
 import { grantWaiver, isWaived } from '../src/waivers.js';
@@ -506,6 +507,21 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
     };
   }
 
+  // The roadmap goal the epic gate checks the plan against. It is held current
+  // here for the same reason the integration run is: this suite is about a
+  // finding surviving a session boundary, and every other gate has to be green
+  // for that to be the thing under test.
+  const GOAL_TEXT = 'Redact secrets before they reach a log line.';
+
+  function goalStatus(): EpicGoalStatus {
+    return {
+      milestoneId: 'milestone-1',
+      goal: GOAL_TEXT,
+      clauses: [GOAL_TEXT],
+      digest: goalDigest(GOAL_TEXT),
+    };
+  }
+
   async function emit(
     sessionId: string,
     eventType: string,
@@ -579,6 +595,21 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
       },
       `${epicId}/integration`,
     );
+    await emit(
+      child,
+      'goal-check-recorded',
+      {
+        epic_id: epicId,
+        milestone_id: 'milestone-1',
+        plan_version: 1,
+        goal_digest: goalDigest(GOAL_TEXT),
+        checked_by: 'spec-reviewer',
+        coverage: [{ clause: GOAL_TEXT, verdict: 'covered', task_ids: [`${epicId}/task-1`] }],
+        finding_ids: [],
+        finding_count: 0,
+      },
+      `${epicId}/integration`,
+    );
   });
 
   afterEach(async () => {
@@ -592,7 +623,7 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
 
   it('holds the verdict on the open finding instead of reporting zero', async () => {
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED },
+      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
       ctxOf(child),
       { stateDir },
     );
@@ -608,7 +639,12 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
     expect(
       await codeOf(() =>
         closeEpic(
-          { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED },
+          {
+            epicId,
+            integrationHeadSha: HEAD_SHA,
+            mcp: MCP_SURFACE_NOT_REQUIRED,
+            goal: goalStatus(),
+          },
           ctxOf(child),
           { stateDir },
         ),

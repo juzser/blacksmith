@@ -68,6 +68,11 @@ export interface DispatchRecord {
  */
 const CRITIC_WORK_EVENTS: Record<string, { key: string; label: string }> = {
   'spec-review-recorded': { key: 'reviewed_by', label: 'spec review' },
+  // `smith epic goal-check` reaches the log the same way `epic spec-review`
+  // does — a judge's verdict on the planner's output, written by a command
+  // rather than by a dispatch — so it is in the domain for the same reason,
+  // and listed here at the moment it was written rather than after a D-124.
+  'goal-check-recorded': { key: 'checked_by', label: 'spec-vs-goal check' },
 };
 
 /** One critic-work event, flattened the way DispatchRecord flattens a dispatch. */

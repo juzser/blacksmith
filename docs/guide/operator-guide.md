@@ -320,17 +320,33 @@ record at all, so for a while a closing review nobody dispatched was not
 `unverifiable` here — it was *invisible*, the pair read `not-applicable`, and
 the report exited 0 on a session in which no critic had run.
 
-Each `spec-review-recorded` in scope must now be answered for by a
-`spec-reviewer` dispatch that preceded it, and each dispatch answers for at
-most one review. An unanswered review is reported as `unverifiable` against
-its own event id, with `criticModel: null` — no dispatch chose a model, so
-there is nothing to compare and the audit says so out loud:
+Two commands write critic work this way, and the audit's domain
+(`CRITIC_WORK_EVENTS` in `dispatchAudit.ts`) names both: `spec-review-recorded`
+from `smith epic spec-review`, reading `reviewed_by`, and
+`goal-check-recorded` from `smith epic goal-check` (§7e), reading `checked_by`.
+The second was listed the day it was written rather than after its own D-124,
+because enumerating the domain is not documentation here — it *is* the check,
+and an event type missing from that map is a critic that can never be found
+unaccounted for.
+
+Each record in scope must now be answered for by a `spec-reviewer` dispatch
+that preceded it, and each dispatch answers for at most one record. That last
+clause is why a closing epic needs two `spec-reviewer` dispatches: the review
+and the goal check are separate work, and one session cannot vouch for both.
+Order matters as much as count, because the window is *(previous record of
+this role, this record]* — dispatching both sessions up front and then typing
+both commands leaves the second record with nothing inside its window, since
+the earlier dispatch already answered for the first. Dispatch, record,
+dispatch, record.
+An unanswered record is reported as `unverifiable` against its own event id,
+with `criticModel: null` — no dispatch chose a model, so there is nothing to
+compare and the audit says so out loud:
 
 ```json
 {"finder":"planner","critic":"spec-reviewer","criticEventId":"s-3#380","criticModel":null,"finderEventId":null,"finderModel":null,"status":"unverifiable","detail":"spec-reviewer recorded a spec review at 2026-08-16T09:12:04.881Z with no spec-reviewer dispatch behind it, so no model is on record and finder_ne_critic cannot be evaluated."}
 ```
 
-One dispatch per review is the point. Letting an old dispatch vouch for every
+One dispatch per record is the point. Letting an old dispatch vouch for every
 later hand-recorded re-review is the same laundering the finder side already
 refuses, and `found_by` cannot close the gap from the other end: it is
 validated against the taxonomy `agent` dimension, so an operator-authored
@@ -1529,6 +1545,106 @@ arithmetic difference: `min_providers` does not apply. The finder is not
 voting on a claim, so one provider is enough to raise — §7's fail-closed
 "one active provider changes nothing" is a property of the quorum rule, not
 of this block.
+
+## 7e. `smith epic goal-check` — the plan against the goal it was cut from
+
+Every gate up to here reads text the planner produced. The spec review reads
+the plan; the task gates read the diffs the plan asked for; the epic verdict
+reads what those gates recorded. All of them stay green when the plan
+decomposes the *wrong problem* — the criteria are met, the tests pass, the
+review closes, and the epic ships something nobody asked for.
+
+The spec-vs-goal check reads the one reference the planner did not write: the
+`- goal:` line of the roadmap milestone that owns the epic. Ask for the clause
+list first — the split is done here, not left to the judge:
+
+```bash
+smith epic goal --epic epic-1 [--roadmap-path factory/specs/roadmap.md]
+```
+
+```json
+{
+  "milestoneId": "phase-1-config",
+  "goal": "Load config from .env files. Reject unbalanced quotes.",
+  "clauses": ["Load config from .env files.", "Reject unbalanced quotes."],
+  "digest": "3f6c1a09b28e4d75"
+}
+```
+
+It writes nothing — no event, no finding. Hand a judge the clause list and the
+plan, take back one verdict per clause, in the goal's order, and record it:
+
+```bash
+smith epic goal-check --epic epic-1 \
+  --plan factory/specs/active/epic-1/plan-v1.json \
+  --coverage /tmp/coverage.json \
+  --checked-by spec-reviewer [--checked-by-provider google:gemini-2.5-pro] \
+  --session <session-id> --causal-parent <event-id>
+```
+
+`--coverage` is a JSON array, one entry per clause:
+
+```json
+[
+  { "clause": "Load config from .env files.",
+    "verdict": "covered", "taskIds": ["epic-1/task-1"] },
+  { "clause": "Reject unbalanced quotes.",
+    "verdict": "out-of-scope", "reason": "phase-2 owns the parser" }
+]
+```
+
+Three verdicts, and each one costs something. `covered` must name live plan
+tasks — a clause credited to a task the plan does not have is refused
+(`goal-check.unknown-task`), because a clause delivered by a task that does not
+exist is a clause nothing delivers. `uncovered` mints an **S2-major**
+spec-scoped finding against the plan file itself, which no task diff can close:
+`smith plan amend` (§6a) is the only answer. `out-of-scope` is the one verdict
+that makes a clause disappear, so it demands a `reason` and that reason is
+printed back to the epic judge verbatim — it is what an operator most needs to
+read.
+
+Everything validates before anything is written. A coverage map that raises two
+findings and then names a phantom task on the third clause writes neither
+finding and no event: a half-recorded check of a check that never finished is
+worse than no check.
+
+**This gate fails closed on a missing goal, and that is the point.** `smith
+epic verdict` holds an epic with no check on record; it also holds one whose
+owning milestone states no `- goal:` line at all, and `smith epic goal-check`
+**refuses to run** there (`cli.no-epic-goal`) rather than record a check
+against nothing. There is deliberately no `not-required` escape hatch — the MCP
+surface gate has one because an epic can honestly owe no manifest, while "no
+goal is stated" is the absence of the only text this gate can grade against.
+Treating it as a pass would make the gate skippable by deleting a line from the
+roadmap.
+
+The blast radius is worth stating plainly: **an epic whose milestone has no
+`- goal:` line does not close.** The fix is a one-line roadmap edit — give the
+milestone a goal, or add the epic to the `- epics:` list of a milestone that
+already has one.
+
+A check goes stale two ways, the same two `epic spec-review` does (D-125) and
+for the same reason:
+
+```
+The spec-vs-goal check for "epic-1" is stale: it graded plan v4, and the
+epic's live plan is v5. Whatever the amendment changed has been checked
+against no goal at all.
+```
+
+```
+The spec-vs-goal check for "epic-1" is stale: it read a goal that digests to
+9b1c…, and milestone "phase-1-config" now declares one that digests to 3f6c….
+The plan has been checked against a goal the roadmap no longer states.
+```
+
+The second is why `epic goal` prints a digest: rewording the roadmap goal
+invalidates a check exactly the way cutting a new plan version does.
+
+Like `epic spec-review`, it exits **0 even when it raises findings** — the
+check ran, and what it found blocks the plan, not this command. And like it,
+the event is written even when every clause is covered: "ran and was clean" and
+"never ran" are different facts, and only the first one closes an epic.
 
 ## 8. Severity + waiver semantics, from the operator's chair
 

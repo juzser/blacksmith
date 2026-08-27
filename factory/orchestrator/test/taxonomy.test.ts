@@ -177,8 +177,10 @@ describe('validateRequiredDimensions', () => {
 describe('loadTaxonomy (real repo file)', () => {
   it('loads factory/policies/taxonomy.yml and exposes all documented dimensions', () => {
     const tx = loadTaxonomy();
-    // Bumped to 5 by D-127, which added `amend-pending` to finding_status.
-    expect(tx.version).toBe(5);
+    // Bumped to 5 by D-127, which added `amend-pending` to finding_status;
+    // to 6 by the spec-vs-goal gate, which added `goal-check-recorded` to
+    // gate_event.
+    expect(tx.version).toBe(6);
     for (const dim of [
       'case',
       'origin',

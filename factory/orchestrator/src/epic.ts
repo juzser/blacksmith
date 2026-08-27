@@ -22,6 +22,12 @@ import {
   type SkippedFindingRecord,
   transition,
 } from './findings.js';
+import {
+  type EpicGoalStatus,
+  type GoalCheckStatus,
+  goalCheckBlockers,
+  latestGoalCheck,
+} from './goalCheck.js';
 import { type IntegrationCheckRecord, latestIntegrationCheck } from './integration.js';
 import { type McpSurfaceStatus, mcpBlockers } from './mcp.js';
 import { bareTaskId, latestPlanVersion, livePlanTasks, loadPlan, type PlanOpts } from './plan.js';
@@ -224,6 +230,7 @@ export interface EpicSummary {
   integration: IntegrationStatus;
   mcp: McpSurfaceStatus;
   specReview: SpecReviewStatus;
+  goalCheck: GoalCheckStatus;
   blockers: string[];
   mechanicallyReady: boolean;
 }
@@ -320,7 +327,10 @@ function integrationBlockers(epicId: string, integration: IntegrationStatus): st
  * the diff rather than as an omission. `specReview` is required with no escape
  * value at all: an epic can legitimately owe no MCP surface, but every epic
  * has a plan, and only a review run after the code exists can see the defects
- * the code reveals (P9-9/D-33).
+ * the code reveals (P9-9/D-33). `goalCheck` is required on the same terms and
+ * for the sharper reason: every gate above it reads text the planner wrote, so
+ * a plan that decomposes the wrong goal passes all of them, and the roadmap
+ * goal is the only reference in this pipeline the planner did not author.
  *
  * `plan` is the epic's live plan roster, or null when it has no plan file.
  * D-126: without it the roster is the event-log fold alone, so a task the plan
@@ -357,6 +367,7 @@ export function summarizeEpic(
   integration: IntegrationStatus,
   mcp: McpSurfaceStatus,
   specReview: SpecReviewStatus,
+  goalCheck: GoalCheckStatus,
   plan: EpicPlanRoster | null = null,
   quarantined: readonly SkippedFindingRecord[] = [],
 ): EpicSummary {
@@ -537,6 +548,12 @@ export function summarizeEpic(
     // The roster is what knows the live plan version, so the review's own
     // plan_version has something to be stale against (D-125).
     ...specReviewBlockers(epicId, specReview, plan?.version ?? null),
+    ...goalCheckBlockers(
+      epicId,
+      goalCheck,
+      plan?.version ?? null,
+      plan?.tasks.map((t) => t.taskId) ?? [],
+    ),
   ];
 
   return {
@@ -555,6 +572,7 @@ export function summarizeEpic(
     integration,
     mcp,
     specReview,
+    goalCheck,
     blockers,
     mechanicallyReady: blockers.length === 0,
   };
@@ -676,6 +694,37 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
           `  Findings that review raised: ${review.findingIds.length}${review.findingIds.length > 0 ? ` (${review.findingIds.join(', ')})` : ''}`,
         ];
 
+  const goalText = summary.goalCheck.goal;
+  const goalRecord = summary.goalCheck.check;
+  const goalCheckLines =
+    goalText.goal === null
+      ? [
+          `  No roadmap milestone states a goal for this epic${goalText.milestoneId === null ? '' : ` (milestone ${goalText.milestoneId})`}.`,
+        ]
+      : [
+          `  Goal (milestone ${goalText.milestoneId}): ${goalText.goal}`,
+          ...(goalRecord === null
+            ? ['  There is no spec-vs-goal check on record for this epic.']
+            : [
+                `  Checked by: ${goalRecord.checkedBy}, against plan v${goalRecord.planVersion}`,
+                `  Goal digest read: ${goalRecord.goalDigest}${goalRecord.goalDigest === goalText.digest ? ' (current)' : ` — the roadmap now digests to ${goalText.digest}`}`,
+                // Verdict per clause, in the goal's own order. An out-of-scope
+                // dismissal prints its reason: it is the one verdict a judge
+                // can use to make a clause disappear, so it is the one an
+                // operator most needs to read back.
+                ...goalRecord.coverage.map(
+                  (entry, i) =>
+                    `  Clause ${i + 1} [${entry.verdict}]: ${entry.clause}${
+                      entry.verdict === 'covered'
+                        ? ` — ${(entry.taskIds ?? []).join(', ')}`
+                        : entry.verdict === 'out-of-scope'
+                          ? ` — dismissed: ${entry.reason ?? ''}`
+                          : ''
+                    }`,
+                ),
+              ]),
+        ];
+
   const mcpLine = !summary.mcp.required
     ? '  This epic owes no MCP surface.'
     : `  Milestone ${summary.mcp.milestoneId ?? '(unnamed)'}, manifest ${summary.mcp.manifestPath ?? '(none)'}: ${mcpVerdict(summary.mcp)}`;
@@ -703,6 +752,9 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     '',
     'Closing spec review (run after the code existed, P9-9/D-33):',
     ...specReviewLines,
+    '',
+    'Spec vs goal — the plan against the one reference the planner did not write:',
+    ...goalCheckLines,
     '',
     'MCP surface:',
     mcpLine,
@@ -784,6 +836,14 @@ export interface EpicVerdictInput {
    * other caller says MCP_SURFACE_NOT_REQUIRED out loud.
    */
   mcp: McpSurfaceStatus;
+  /**
+   * The goal the roadmap declares for this epic, or EPIC_GOAL_UNDECLARED.
+   * REQUIRED, and with no not-required value: cli.ts resolves it via
+   * resolveEpicGoal(), and an epic whose goal nobody wrote down is one nobody
+   * can say succeeded — see goalCheck.ts's header for why that fails closed
+   * where the MCP surface does not.
+   */
+  goal: EpicGoalStatus;
   /**
    * Where to look for the epic's plan file (D-126). Defaults to the repo's
    * `factory/specs/active/`; cli.ts threads `--specs-dir` through here, and
@@ -910,6 +970,11 @@ export async function runEpicVerdict(
       review: latestSpecReview(events, input.epicId),
       headSha: input.integrationHeadSha,
     },
+    // Same shape, other axis: the recorded check comes from the log this call
+    // already read, and the goal it is measured against comes from the
+    // roadmap the caller resolved — a check is only evidence about the text it
+    // read, so the pair is what makes "current" decidable.
+    { check: latestGoalCheck(events, input.epicId), goal: input.goal },
     resolvePlanRoster(input.epicId, input.planOpts ?? {}),
     skipped,
   );

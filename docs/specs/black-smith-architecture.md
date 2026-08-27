@@ -429,7 +429,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 5
+version: 6
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -475,10 +475,11 @@ gate_event:      [schema-check-result, artifact-check-result,
                   commit-check-result, deps-check-result,
                   judges-outstanding, grader-verdict, budget-check-result,
                   testgate-result, coverage-evidence, integration-check,
-                  spec-review-recorded, quorum-decision, finding-raised,
-                  finding-reverified, finding-suppressed, finding-transitioned,
-                  finding-reattributed, severity-decisions, waiver-granted,
-                  waiver-denied, gate-outcome]
+                  spec-review-recorded, goal-check-recorded, quorum-decision,
+                  finding-raised, finding-reverified, finding-suppressed,
+                  finding-transitioned, finding-reattributed,
+                  severity-decisions, waiver-granted, waiver-denied,
+                  gate-outcome]
                   # schema-check-result — task Result vs result.schema.json
                   # artifact-check-result — every artifacts[].path in that
                   #                       Result, resolved against the task's
@@ -542,6 +543,16 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       Recorded even when it found nothing,
                   #                       so "ran and was clean" is
                   #                       distinguishable from "never ran"
+                  # goal-check-recorded — the epic's plan was checked against
+                  #                       the goal its roadmap milestone
+                  #                       declares, clause by clause. The one
+                  #                       gate whose reference text the planner
+                  #                       did not author, so a plan that is
+                  #                       internally consistent but answers the
+                  #                       wrong question still fails it.
+                  #                       Carries the goal digest it read, so a
+                  #                       reworded goal invalidates the check
+                  #                       the same way a new plan version does
                   # quorum-decision     — one cross-provider quorum case closed:
                   #                       who voted, on what, and whether the
                   #                       finding survived. Emitted exactly once

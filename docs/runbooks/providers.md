@@ -100,6 +100,51 @@ if linked).
   {"error":{"code":"provider.missing-api-key","message":"Environment variable \"DEEPSEEK_API_KEY\" is not set (required for provider \"deepseek\").","details":{"provider":"deepseek","envVar":"DEEPSEEK_API_KEY"}}}
   ```
 
+### Checking both before you spend a call — `smith judge preflight`
+
+Everything above is only knowable after the fact by default: a provider
+whose precondition is unmet still gets invoked on every quorum trigger,
+fails, and leaves a `judge-verdict` row with `ok: false`. `gate.ts` raises
+a trigger on **every** blocking finding without being asked, so a single
+missing key turns into one doomed call per finding — pure latency, plus a
+log that reads like a provider outage.
+
+```bash
+node factory/orchestrator/dist/cli.js judge preflight
+```
+
+It reads `crosscheck.yml` and asks only what can be answered locally: is
+the `api_key_env` variable set, is the `command` on `PATH`, and does the
+arithmetic of the promotions add up. Exit `0` when there is nothing to
+fix, exit `1` with a `problems` array when there is:
+
+```json
+{
+  "policyPath": "factory/policies/crosscheck.yml",
+  "offlineSwitch": false,
+  "gating": {"activeExternal": [], "shadowExternal": ["codex"], "minProviders": 2, "canDecide": false},
+  "problems": ["Provider \"deepseek\" is enabled but its precondition (DEEPSEEK_API_KEY) is unmet. Set it, or set \"enabled: false\" for this runner."]
+}
+```
+
+Three things it deliberately does **not** do:
+
+- **It never makes a judge call.** A preflight that proved a provider
+  answers by asking it a question would cost exactly what it is trying to
+  save. A resolvable `command` on `PATH` is reported as resolvable, not as
+  authenticated — whether `codex exec` is entitled to run is not knowable
+  without spending a call, which is what §3's calibration pass is for.
+- **It never prints a key.** Only the variable *name* is reported, per
+  `docs/standards/guardrails.md` "No secrets in outputs".
+- **It ignores `SMITH_CROSSCHECK_OFFLINE`.** That switch forces every
+  provider off at load time (§2), which would hide the exact
+  misconfiguration this command exists to find. The switch is reported as
+  `offlineSwitch` instead, so a run under it is still legible.
+
+Zero active externals is the shipped default and is reported, never
+flagged. Exactly **one** is flagged — see §4 for why that configuration
+pays for a gating provider and gets no gating.
+
 ## 2. Enabling a provider
 
 Edit `factory/policies/crosscheck.yml` — never a runtime write, always a
@@ -290,6 +335,11 @@ escalation on the gate outcome. That is a deliberate fail-closed default,
 not a bug. To actually let the quorum overturn findings you need **two**
 active external providers (or a finding whose `found_by_provider` is an
 external provider, which puts native back in the pool).
+
+`smith judge preflight` (§1) checks this arithmetic for you: one active
+external with `min_providers: 2` is reported as a problem, because that
+configuration pays a gating provider's bill for a shadow provider's
+influence.
 
 ## 5. The independent finder — the additive direction
 

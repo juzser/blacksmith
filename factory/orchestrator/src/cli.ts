@@ -70,12 +70,14 @@ import {
   transition as transitionFinding,
 } from './findings.js';
 import { runGate } from './gate.js';
+import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
 import {
   checkWorktreeImmutable,
   fingerprintWorktree,
   type WorktreeFingerprint,
 } from './immutability.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
+import { judgePreflight } from './judgePreflight.js';
 import {
   outstandingJudges,
   readJudgeTurns,
@@ -753,6 +755,18 @@ function mcpSurfaceFor(epicId: string, projectDir: string, flags: Record<string,
   return resolveMcpSurface({
     epicId,
     projectDir,
+    ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
+  });
+}
+
+/**
+ * The goal half of the epic gate. Same division of labour as mcpSurfaceFor:
+ * the roadmap read happens out here so epic.ts stays a fold over values it was
+ * handed, and `--roadmap-path` points both halves at the same file.
+ */
+function epicGoalFor(epicId: string, flags: Record<string, string>) {
+  return resolveEpicGoal({
+    epicId,
     ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
   });
 }
@@ -2111,6 +2125,7 @@ async function main(): Promise<number> {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
+        goal: epicGoalFor(epicId, flags),
         // D-126: the live plan is a voter. Without this the roster is the
         // event-log fold alone, and a task an amendment added but nobody
         // dispatched is invisible rather than unfinished.
@@ -2136,6 +2151,7 @@ async function main(): Promise<number> {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
+        goal: epicGoalFor(epicId, flags),
         planOpts: planOptsFromFlags(flags),
         ...(flags['override-rationale'] !== undefined
           ? { overrideRationale: flags['override-rationale'] }
@@ -2188,6 +2204,56 @@ async function main(): Promise<number> {
     printJson(record);
     // Exit 0 even when it found something: the review ran, and a spec finding
     // blocks the plan, not this command. `plan amend` is what answers it.
+    return 0;
+  }
+
+  // The spec-vs-goal check. Every gate before it reads text the planner wrote;
+  // this one reads the roadmap goal the operator wrote before planning began,
+  // so a plan that decomposes the wrong problem stops being invisible.
+  if (namespace === 'epic' && action === 'goal-check') {
+    const epicId = requireFlag(flags, 'epic');
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const goal = epicGoalFor(epicId, flags);
+    // Refuse rather than record a check against nothing. The blocker for an
+    // undeclared goal is already in the epic gate; producing an event here
+    // would be a record of a check that had no reference text.
+    if (goal.goal === null || goal.milestoneId === null) {
+      throw new SmithError(
+        'cli.no-epic-goal',
+        `No roadmap milestone states a goal for "${epicId}", so there is nothing to check its plan against. Give the milestone that owns it a \`- goal:\` line in factory/specs/roadmap.md, or add the epic to an existing milestone's \`- epics:\` list.`,
+        { epicId, milestoneId: goal.milestoneId },
+      );
+    }
+    const coverage = readJsonFile<ClauseCoverage[]>(requireFlag(flags, 'coverage'));
+    const record = await recordGoalCheck(
+      {
+        epicId,
+        milestoneId: goal.milestoneId,
+        goal: goal.goal,
+        planVersion: plan.version,
+        livePlanTaskIds: livePlanTasks(plan).map((spec) => spec.task_id),
+        checkedBy: requireFlag(flags, 'checked-by'),
+        ...(flags['checked-by-provider']
+          ? { checkedByProvider: flags['checked-by-provider'] }
+          : {}),
+        coverage,
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(record);
+    // Exit 0 for the reason `epic spec-review` does: the check ran, and an
+    // uncovered clause blocks the plan rather than this command. `plan amend`
+    // is what answers it.
+    return 0;
+  }
+
+  // The clause list a coverage map has to answer, printed so a judge dispatch
+  // (or an operator writing one by hand) does not have to guess how
+  // goalClauses() splits the goal. Read-only: no event, no finding.
+  if (namespace === 'epic' && action === 'goal') {
+    const epicId = requireFlag(flags, 'epic');
+    printJson(epicGoalFor(epicId, flags));
     return 0;
   }
 
@@ -2679,6 +2745,16 @@ async function main(): Promise<number> {
     );
     printJson(open);
     return open.length > 0 ? 1 : 0;
+  }
+
+  if (namespace === 'judge' && action === 'preflight') {
+    // The one provider question that can be answered without spending a call.
+    // Deliberately ahead of `judge run` in this file for the same reason it is
+    // ahead of it in the runbook: an operator reaching for a calibration call
+    // to find out why a provider keeps failing usually needed this instead.
+    const report = judgePreflight(flags.policy);
+    printJson(report);
+    return report.problems.length > 0 ? 1 : 0;
   }
 
   if (namespace === 'judge' && action === 'run') {

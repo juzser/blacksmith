@@ -83,6 +83,13 @@ export const ICON_PATHS: Record<string, string> = {
   // second reader saying what it saw, so it needs an icon that reads as sight
   // rather than as judgement.
   eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+
+  // --- added Phase B3 (spec-vs-goal timeline row) ---
+  // Concentric rings, not a shield. Every other gate row asks "did this
+  // artifact meet its own criteria"; this one asks whether the plan is aimed
+  // at the thing the roadmap said to hit.
+  target:
+    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
 };
 
 export type IconName = keyof typeof ICON_PATHS;

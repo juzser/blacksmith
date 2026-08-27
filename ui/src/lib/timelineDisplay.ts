@@ -214,6 +214,7 @@ export const KIND_OPTIONS: readonly KindOption[] = [
       'coverage-evidence',
       'integration-check',
       'spec-review-recorded',
+      'goal-check-recorded',
       'quorum-decision',
       'finding-raised',
       'finding-reverified',
@@ -289,6 +290,12 @@ export function iconFor(entry: TimelineEntry): string {
     // pass over a diff, and it says what was seen rather than what was decided.
     case 'cross-finding-reconciled':
       return 'eye';
+    // The one gate that reads outside the plan. Not a shield — a shield says
+    // "this artifact was checked against its own criteria", and the whole
+    // point of this row is that the criteria came from somewhere the planner
+    // could not reach.
+    case 'goal-check-recorded':
+      return 'target';
     case 'epic-closed':
       return 'git-merge';
     case 'lesson-candidate-raised':

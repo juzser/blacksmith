@@ -337,6 +337,19 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Record the closing spec review, pinned to the integration head it was read at.',
   },
   {
+    command: 'epic goal',
+    positionals: '',
+    flags: '--epic <id> [--roadmap-path <file>]',
+    summary: "The epic's roadmap goal, split into the clauses a coverage map has to answer.",
+  },
+  {
+    command: 'epic goal-check',
+    positionals: '',
+    flags: `--epic <id> --plan <plan.json> --coverage <file> --checked-by <role> [--checked-by-provider <name>] [--roadmap-path <file>] ${EVENTS_DIR}`,
+    summary:
+      'Record the plan checked clause by clause against the roadmap goal — the one reference the planner did not write.',
+  },
+  {
     command: 'epic close',
     positionals: '',
     flags: `--epic <id> --project <dir> [--roadmap-path <file>] [--specs-dir <dir>] [--override-rationale <text>] ${EVENTS_DIR}`,
@@ -467,6 +480,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: '--session <id> --task <task-id> [--state-dir <dir>]',
     summary: 'List the judge turns still owed on a task. Exit 1 while the list is non-empty.',
+  },
+  {
+    command: 'judge preflight',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary:
+      'Can the enabled providers be called at all, and would a promotion decide anything? Exit 1 on a provider that costs a call it cannot make.',
   },
   {
     command: 'judge run',

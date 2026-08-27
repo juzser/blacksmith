@@ -2727,6 +2727,62 @@ describe('cli.ts (built binary)', () => {
     expect(JSON.parse(disabled.stdout).error.code).toBe('provider.disabled');
   });
 
+  it('judge preflight: names the unmet precondition, never its value', async () => {
+    // `judge run` answers "did this provider work" by spending a call.
+    // `judge preflight` answers "could it have worked" without spending one,
+    // which is the question an operator actually has before a wave starts.
+    const policyPath = path.join(scratchDir, 'preflight-policy.yml');
+    await writeFile(
+      policyPath,
+      [
+        'providers:',
+        '  claude:',
+        '    kind: native',
+        '    enabled: true',
+        '  ds:',
+        '    kind: api',
+        '    transport: api',
+        '    enabled: true',
+        '    mode: shadow',
+        '    model_tier: mid',
+        '    base_url: https://example.invalid',
+        '    model: test-model',
+        '    api_key_env: SMITH_TEST_KEY_THAT_IS_NEVER_SET',
+        '',
+      ].join('\n'),
+    );
+
+    const unmet = runCli(['judge', 'preflight', '--policy', policyPath]);
+    expect(unmet.status).toBe(1);
+    const report = JSON.parse(unmet.stdout);
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0]).toContain('SMITH_TEST_KEY_THAT_IS_NEVER_SET');
+    expect(report.gating).toMatchObject({ activeExternal: [], canDecide: false });
+
+    // The whole point of reporting a key by NAME: a preflight that printed the
+    // value would be a preflight that leaked one into every operator's stdout.
+    const withKey = runCli(['judge', 'preflight', '--policy', policyPath], {
+      SMITH_TEST_KEY_THAT_IS_NEVER_SET: 'sk-not-a-real-key',
+    });
+    expect(withKey.status).toBe(0);
+    expect(withKey.stdout).not.toContain('sk-not-a-real-key');
+    expect(JSON.parse(withKey.stdout).problems).toEqual([]);
+
+    // SMITH_CROSSCHECK_OFFLINE forces every provider off at load time, which is
+    // why `judge run` above sees codex as disabled. The preflight deliberately
+    // does NOT apply it: the question is whether the file is sound, and the
+    // offline switch would hide exactly the misconfiguration being looked for.
+    const offline = runCli(['judge', 'preflight', '--policy', policyPath], {
+      SMITH_CROSSCHECK_OFFLINE: '1',
+    });
+    expect(offline.status).toBe(1);
+    expect(JSON.parse(offline.stdout).offlineSwitch).toBe(true);
+    expect(
+      JSON.parse(offline.stdout).providers.find((p: { provider: string }) => p.provider === 'ds')
+        .enabled,
+    ).toBe(true);
+  });
+
   it('stats providers: reports per-provider calibration stats from judge-verdict events', () => {
     const sessionId = `cli-providers-${Date.now()}`;
     const eventsDir = path.join(scratchDir, 'providers-events');
@@ -4615,6 +4671,279 @@ describe('cli.ts (built binary)', () => {
         expect(
           tail(sessionId, eventsDir).filter((r) => r.event_type === 'spec-review-recorded'),
         ).toEqual([]);
+      });
+    });
+
+    // B3. Every gate before this one grades planner-authored text against
+    // planner-authored text: the spec review reads the plan, the schema gate
+    // reads the task's own output schema, the reviewer reads the criteria the
+    // planner wrote. `epic goal-check` is the one that reads the roadmap goal
+    // the operator wrote before planning began, so a plan that decomposes the
+    // wrong problem has somewhere to fail.
+    describe('the spec-vs-goal gate', () => {
+      const GOAL = 'Load config from .env files. Reject unbalanced quotes.';
+      const CLAUSES = ['Load config from .env files.', 'Reject unbalanced quotes.'];
+
+      /** A roadmap whose one milestone owns epic-1. Pass null to drop the goal. */
+      async function roadmap(name: string, goalLine: string | null = `- goal: ${GOAL}`) {
+        const filePath = path.join(scratchDir, `${name}-roadmap.md`);
+        await writeFile(
+          filePath,
+          [
+            '## Phase 1 — Config',
+            '- id: phase-1-config',
+            '- status: in-progress',
+            ...(goalLine === null ? [] : [goalLine]),
+            '- epics: [epic-1]',
+            '',
+          ].join('\n'),
+        );
+        return filePath;
+      }
+
+      async function coverageFile(name: string, coverage: unknown) {
+        const filePath = path.join(scratchDir, `${name}-coverage.json`);
+        await writeFile(filePath, JSON.stringify(coverage));
+        return filePath;
+      }
+
+      function checks(sessionId: string, eventsDir: string) {
+        return tail(sessionId, eventsDir).filter((r) => r.event_type === 'goal-check-recorded');
+      }
+
+      it('prints the clause list a coverage map has to answer', async () => {
+        const result = runCli([
+          'epic',
+          'goal',
+          '--epic',
+          'epic-1',
+          '--roadmap-path',
+          await roadmap('cli-goal-read'),
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual({
+          milestoneId: 'phase-1-config',
+          goal: GOAL,
+          clauses: CLAUSES,
+          digest: expect.stringMatching(/^[0-9a-f]{16}$/),
+        });
+      });
+
+      it('keeps `epic goal` read-only by declaring no flag a write would need', async () => {
+        // The check that bites here is D-132's: a flag no usage line declares
+        // is a refusal, so the day this command starts appending an event it
+        // fails until someone declares --session and says why.
+        const { sessionId } = await session();
+        const result = runCli([
+          'epic',
+          'goal',
+          '--epic',
+          'epic-1',
+          '--roadmap-path',
+          await roadmap('cli-goal-readonly'),
+          '--session',
+          sessionId,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.unknown-flag');
+      });
+
+      it('records a plan checked clause by clause against the goal', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-ok'),
+          '--coverage',
+          await coverageFile('cli-goal-ok', [
+            { clause: CLAUSES[0], verdict: 'covered', taskIds: ['epic-1/task-1'] },
+            { clause: CLAUSES[1], verdict: 'covered', taskIds: ['epic-1/task-2'] },
+          ]),
+          '--checked-by',
+          'spec-reviewer',
+          '--checked-by-provider',
+          'gemini',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          epicId: 'epic-1',
+          milestoneId: 'phase-1-config',
+          planVersion: 1,
+          checkedBy: 'spec-reviewer',
+          findingIds: [],
+        });
+
+        const recorded = checks(sessionId, eventsDir);
+        expect(recorded).toHaveLength(1);
+        // The check is epic-level work, so it is filed against the epic's
+        // integration task rather than any one task it graded.
+        expect(recorded[0]?.task_id).toBe('epic-1/integration');
+        expect(recorded[0]?.payload).toMatchObject({
+          epic_id: 'epic-1',
+          milestone_id: 'phase-1-config',
+          checked_by: 'spec-reviewer',
+          checked_by_provider: 'gemini',
+          clause_count: 2,
+          uncovered_count: 0,
+          out_of_scope_count: 0,
+          finding_count: 0,
+        });
+      });
+
+      it('turns an uncovered clause into a spec finding against the plan', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-gap'),
+          '--coverage',
+          await coverageFile('cli-goal-gap', [
+            { clause: CLAUSES[0], verdict: 'covered', taskIds: ['epic-1/task-1'] },
+            { clause: CLAUSES[1], verdict: 'uncovered' },
+          ]),
+          '--checked-by',
+          'spec-reviewer',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        // Exit 0 for the reason `epic spec-review` exits 0 on a finding: the
+        // check ran. What blocks the epic is the finding, and `plan amend` is
+        // the verb that answers it.
+        expect(result.status).toBe(0);
+        const record = JSON.parse(result.stdout) as { findingIds: string[] };
+        expect(record.findingIds).toHaveLength(1);
+
+        const listed = JSON.parse(
+          runCli([
+            'findings',
+            'list',
+            '--session',
+            sessionId,
+            '--epic',
+            'epic-1',
+            '--state-dir',
+            eventsDir,
+          ]).stdout,
+        ) as Record<string, unknown>[];
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toMatchObject({
+          finding_id: record.findingIds[0],
+          severity: 'S2-major',
+          finding_scope: 'spec',
+          // Anchored to the plan file, not to any source file: the defect is
+          // that the plan never promised the clause, so no diff can hold it.
+          file_path: 'factory/specs/active/epic-1/plan-v1.json',
+          spec_ref: { plan_version: 1, criterion_ref: 'goal:phase-1-config#2' },
+        });
+      });
+
+      it('refuses to record a check against a milestone that states no goal', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-none', null),
+          '--coverage',
+          await coverageFile('cli-goal-none', []),
+          '--checked-by',
+          'spec-reviewer',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.no-epic-goal');
+        // A recorded check against nothing would read, at the epic gate, as a
+        // check that passed. The gate's own blocker is what has to fire here.
+        expect(checks(sessionId, eventsDir)).toEqual([]);
+      });
+
+      it('refuses coverage credited to a task the plan does not have', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-phantom'),
+          '--coverage',
+          await coverageFile('cli-goal-phantom', [
+            { clause: CLAUSES[0], verdict: 'covered', taskIds: ['epic-1/task-1'] },
+            { clause: CLAUSES[1], verdict: 'covered', taskIds: ['epic-1/task-9'] },
+          ]),
+          '--checked-by',
+          'spec-reviewer',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('goal-check.unknown-task');
+        // Validate before acting: the first clause was answerable, and it
+        // still leaves no half-written record behind.
+        expect(checks(sessionId, eventsDir)).toEqual([]);
+        expect(
+          JSON.parse(
+            runCli([
+              'findings',
+              'list',
+              '--session',
+              sessionId,
+              '--epic',
+              'epic-1',
+              '--state-dir',
+              eventsDir,
+            ]).stdout,
+          ),
+        ).toEqual([]);
+      });
+
+      // Same shape as the D-139 check on `epic spec-review`: an undeclared
+      // flag is a refusal, so the usage line is load-bearing.
+      it('documents every flag epic goal-check requires', () => {
+        const { stdout, status } = runCli(['epic', 'goal-check', '--help']);
+        expect(status).toBe(0);
+        expect(stdout).toContain('--coverage');
+        expect(stdout).toContain('--checked-by');
+        expect(stdout).toContain('--plan');
       });
     });
 
