@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { SmithError } from './errors.js';
@@ -720,6 +720,22 @@ export async function readLineageEvents(
   opts: EventOpts = {},
 ): Promise<StoredEvent[]> {
   return mergeSessionLogs(await walkLineage(sessionId, opts, false));
+}
+
+/**
+ * Every session that has a log in `stateDir`, sorted, with no log read.
+ *
+ * A session id is only ever a `<id>.jsonl` filename here, so this is the one
+ * place that knows it — the projector kept a private copy and the daemon
+ * wanted a third, and three answers to "what sessions exist" is how a reader
+ * comes to inspect a set the writer never wrote.
+ */
+export function listSessionIds(stateDir: string = STATE_EVENTS_DIR): string[] {
+  if (!existsSync(stateDir)) return [];
+  return readdirSync(stateDir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .map((f) => f.slice(0, -'.jsonl'.length))
+    .sort();
 }
 
 /** One session's id and its log, as `walkLineage` and `readAllSessionLogs` carry them. */

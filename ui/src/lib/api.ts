@@ -372,6 +372,27 @@ export function fetchOverview(session?: string, project?: string): Promise<Overv
   return getJson(`/api/overview${qs ? `?${qs}` : ''}`);
 }
 
+/**
+ * Mirrors PulseResult in factory/orchestrator/src/db/queries.ts. `counts` are
+ * monotonic — they only ever grow — which is what lets the shell subtract two
+ * polls and call the difference an arrival. `lessonsPending` is a level and is
+ * rendered as itself. See usePulse.ts.
+ */
+export interface PulseResult {
+  lastEventAt: string | null;
+  lastEventType: string | null;
+  counts: { events: number; errors: number };
+  lessonsPending: number;
+}
+
+export function fetchPulse(session?: string, project?: string): Promise<PulseResult> {
+  const q = new URLSearchParams();
+  if (session) q.set('session', session);
+  if (project) q.set('project', project);
+  const qs = q.toString();
+  return getJson(`/api/pulse${qs ? `?${qs}` : ''}`);
+}
+
 export function fetchProjects(session?: string): Promise<ProjectOverviewSummary[]> {
   return getJson(`/api/projects${session ? `?session=${encodeURIComponent(session)}` : ''}`);
 }

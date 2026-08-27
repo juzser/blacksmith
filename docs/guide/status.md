@@ -23,16 +23,21 @@ dashboard's Roadmap page parses.
 | 7. Self-extension | Scaffolder, `/bs` operator skill, scheduler, lessons compilation | Built, merged |
 | 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — the judges ship powerless, the finder ships off |
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
-| 10. Deployment + ops | Runbooks beyond providers, a Cloudflare port of the UI, an always-on dispatch daemon | Planned, unspecced |
+| 10. Deployment + ops | A background watcher (`smith daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
 
 ## The four things to know before you rely on it
 
-**1. There is no daemon.** `/bs run <epic>` is a playbook your Claude Code
-session follows, not a background process. Close the session and nothing
-advances. Every deterministic mechanic underneath it — plan and wave
-validation, worktree lifecycle, the gate pipeline, the merge queue,
-findings and waivers, the scheduler, the lessons pipeline, the event log —
-is built, tested and reachable from the CLI. The always-on loop is Phase 10.
+**1. The daemon watches; it does not drive.** `smith daemon` (Phase 10) runs
+in the background and tells you what the factory needs — budget alarms, agents
+that never came back, rechecks and cadences that are due — so knowing no longer
+requires an open session. Running still does: `/bs run <epic>` is a playbook
+your Claude Code session follows, and closing the session still stops the work.
+Every deterministic mechanic underneath it — plan and wave validation, worktree
+lifecycle, the gate pipeline, the merge queue, findings and waivers, the
+scheduler, the lessons pipeline, the event log — is built, tested and reachable
+from the CLI. An always-on loop that *dispatches* is not built, and is not a
+line the daemon is allowed to cross. See
+[`../runbooks/ops.md`](../runbooks/ops.md).
 
 **2. Some checks only run when you run them.** `smith integration check` is
 the only check that sees the *assembled* integration branch, and it is

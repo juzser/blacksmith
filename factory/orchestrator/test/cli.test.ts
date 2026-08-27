@@ -8146,4 +8146,204 @@ describe('cli.ts (built binary)', () => {
       expect(JSON.parse(stdout).error.code).toBe('events.unknown-session');
     });
   });
+  // Phase 10's watcher, driven the way an operator drives it. The unit tests
+  // in daemon.test.ts own the folds; what is only true out here is the argv
+  // wiring, the exit codes a health check reads, and the fact that a detached
+  // `start` really does end up holding the lock.
+  describe('daemon', () => {
+    let daemonRoot: string;
+    let n = 0;
+
+    beforeAll(async () => {
+      daemonRoot = await mkdtemp(path.join(tmpdir(), 'smith-cli-daemon-'));
+    });
+
+    afterAll(async () => {
+      if (daemonRoot) await rm(daemonRoot, { recursive: true, force: true });
+    });
+
+    /** A fresh dir pair plus one session log, so a tick has something to read. */
+    function fixture(): { dir: string; stateDir: string } {
+      n += 1;
+      const dir = path.join(daemonRoot, `d${n}`);
+      const stateDir = path.join(daemonRoot, `e${n}`);
+      mkdirSync(dir, { recursive: true });
+      mkdirSync(stateDir, { recursive: true });
+      writeFileSync(
+        path.join(stateDir, 'sess-cli.jsonl'),
+        `${JSON.stringify({
+          event_id: 'sess-cli#0',
+          record: {
+            event_id: 'sess-cli#0',
+            session_id: 'sess-cli',
+            ts: '2026-08-20T00:00:00.000Z',
+            event_type: 'session-start',
+            actor: 'operator',
+            causal_parent: null,
+            payload: {},
+          },
+        })}\n`,
+        'utf8',
+      );
+      return { dir, stateDir };
+    }
+
+    async function waitFor(predicate: () => boolean, ms = 10_000): Promise<boolean> {
+      const deadline = Date.now() + ms;
+      while (Date.now() < deadline) {
+        if (predicate()) return true;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return predicate();
+    }
+
+    it('runs one tick, publishes it, and holds no lock afterwards', () => {
+      const { dir, stateDir } = fixture();
+      const { stdout, status } = runCli([
+        'daemon',
+        'run',
+        '--once',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+      ]);
+
+      expect(status).toBe(0);
+      const out = JSON.parse(stdout);
+      expect(out.ticks).toBe(1);
+      expect(out.last.sessions).toEqual(['sess-cli']);
+      expect(JSON.parse(readFileSync(path.join(dir, 'status.json'), 'utf8')).sessions).toEqual([
+        'sess-cli',
+      ]);
+      // The invariant a --once run shares with a killed loop: the lock is the
+      // daemon's, and a daemon that has exited does not have one.
+      expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+    });
+
+    it('exits 1 from `status` when nobody is watching, last tick and all', () => {
+      const { dir, stateDir } = fixture();
+      runOrThrow('node', [
+        CLI_PATH,
+        'daemon',
+        'run',
+        '--once',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+      ]);
+
+      const { stdout, status } = runCli(['daemon', 'status', '--dir', dir]);
+      // Exit 1 is the contract a health check reads, so `smith daemon status
+      // >/dev/null` is the whole probe -- no JSON parsing in a shell script.
+      expect(status).toBe(1);
+      const out = JSON.parse(stdout);
+      expect(out.running).toBe(false);
+      expect(out.lock).toBeNull();
+      expect(out.lastTick.sessions).toEqual(['sess-cli']);
+    });
+
+    it('starts a detached daemon that takes the lock, and stops it again', async () => {
+      const { dir, stateDir } = fixture();
+      const started = JSON.parse(
+        runOrThrow('node', [
+          CLI_PATH,
+          'daemon',
+          'start',
+          '--dir',
+          dir,
+          '--state-dir',
+          stateDir,
+          '--no-db',
+          '--interval',
+          '3600',
+        ]).stdout,
+      );
+      expect(started.started).toBe(true);
+      expect(typeof started.pid).toBe('number');
+
+      const lockFile = path.join(dir, 'daemon.pid');
+      expect(await waitFor(() => existsSync(lockFile))).toBe(true);
+
+      const live = JSON.parse(
+        runOrThrow('node', [CLI_PATH, 'daemon', 'status', '--dir', dir]).stdout,
+      );
+      expect(live.running).toBe(true);
+      // The child writes the lock under its own pid, which is the one `start`
+      // reported -- `spawn` returns the process it made, not a shell's.
+      expect(live.lock.pid).toBe(started.pid);
+
+      const stopped = JSON.parse(
+        runOrThrow('node', [CLI_PATH, 'daemon', 'stop', '--dir', dir]).stdout,
+      );
+      expect(stopped).toMatchObject({ stopped: true, pid: started.pid });
+      expect(existsSync(lockFile)).toBe(false);
+    });
+
+    it('refuses a second daemon while one is alive', () => {
+      const { dir, stateDir } = fixture();
+      // This test process is, definitionally, a live pid.
+      writeFileSync(
+        path.join(dir, 'daemon.pid'),
+        `${JSON.stringify({
+          pid: process.pid,
+          startedAt: '2026-08-20T00:00:00.000Z',
+          intervalSeconds: 300,
+        })}\n`,
+        'utf8',
+      );
+
+      const { stdout, status } = runCli([
+        'daemon',
+        'start',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+      ]);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('daemon.already-running');
+    });
+
+    it('clears the lock a crash left behind, without claiming it stopped anything', () => {
+      const { dir } = fixture();
+      // pid 2^22 is above every configured pid_max; nothing is there.
+      writeFileSync(
+        path.join(dir, 'daemon.pid'),
+        `${JSON.stringify({
+          pid: 4_194_304,
+          startedAt: '2026-08-20T00:00:00.000Z',
+          intervalSeconds: 300,
+        })}\n`,
+        'utf8',
+      );
+
+      const { stdout, status } = runCli(['daemon', 'stop', '--dir', dir]);
+      expect(status).toBe(0);
+      // `stopped: false` with a pid is the honest answer: the lock was stale,
+      // and the operator learns the daemon was already gone rather than being
+      // told this call is what ended it.
+      expect(JSON.parse(stdout)).toEqual({ stopped: false, pid: 4_194_304 });
+      expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+    });
+
+    it('refuses an interval that is not a positive whole number of seconds', () => {
+      const { dir } = fixture();
+      const { stdout, status } = runCli([
+        'daemon',
+        'run',
+        '--once',
+        '--dir',
+        dir,
+        '--interval',
+        '0',
+      ]);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('cli.invalid-flag');
+    });
+  });
 });

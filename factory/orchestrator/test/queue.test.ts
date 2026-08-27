@@ -1,5 +1,5 @@
-import { writeFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync, writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -540,5 +540,116 @@ describe('adopt', () => {
 
     expect(result.outcome).toBe('adopted');
     expect(await logged()).toEqual([]);
+  });
+});
+
+describe('step with test selection', () => {
+  let root: string;
+  let originDir: string;
+  let projectDir: string;
+
+  /** Records the files the test command was handed, one per line. */
+  const RECORD = 'printf "%s\\n" {files} > selected.txt';
+
+  async function selectedFiles(worktreeDir: string): Promise<string[]> {
+    const raw = await readFile(path.join(worktreeDir, 'selected.txt'), 'utf8');
+    return raw.split('\n').filter((line) => line.length > 0);
+  }
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'smith-select-'));
+    originDir = path.join(root, 'origin.git');
+    projectDir = path.join(root, 'project');
+
+    git(root, ['init', '-q', '--bare', '-b', 'main', originDir]);
+    git(root, ['clone', '-q', originDir, projectDir]);
+    git(projectDir, ['config', 'user.email', 'test@example.com']);
+    git(projectDir, ['config', 'user.name', 'Test']);
+    await mkdir(path.join(projectDir, 'src'), { recursive: true });
+    await mkdir(path.join(projectDir, 'test'), { recursive: true });
+    await writeFile(path.join(projectDir, 'src/alpha.ts'), 'export const alpha = 1;\n');
+    await writeFile(path.join(projectDir, 'src/beta.ts'), 'export const beta = 2;\n');
+    await writeFile(
+      path.join(projectDir, 'test/alpha.test.ts'),
+      "import { alpha } from '../src/alpha.js';\nexport const a = alpha;\n",
+    );
+    await writeFile(
+      path.join(projectDir, 'test/beta.test.ts'),
+      "import { beta } from '../src/beta.js';\nexport const b = beta;\n",
+    );
+    git(projectDir, ['add', '.']);
+    git(projectDir, ['commit', '-q', '-m', 'init']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('runs only the tests that can reach the task diff', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'src/beta.ts'), 'export const beta = 3;\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit beta']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'false', selectTestCmd: RECORD },
+    );
+
+    expect(result.outcome).toBe('merged');
+    expect(result.tests).toEqual({
+      mode: 'selected',
+      ran: ['test/beta.test.ts'],
+      known: 2,
+    });
+    expect(await selectedFiles(task.worktreeDir)).toEqual(['test/beta.test.ts']);
+  });
+
+  it('falls back to the full command when the diff touches a non-source file', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'src/beta.ts'), 'export const beta = 3;\n');
+    await writeFile(path.join(task.worktreeDir, 'config.yml'), 'k: v\n');
+    git(task.worktreeDir, ['add', '.']);
+    git(task.worktreeDir, ['commit', '-q', '-m', 'edit beta and config']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true', selectTestCmd: RECORD },
+    );
+
+    expect(result.outcome).toBe('merged');
+    expect(result.tests?.mode).toBe('full');
+    expect((result.tests?.reasons ?? []).join(' ')).toContain('config.yml');
+    expect(existsSync(path.join(task.worktreeDir, 'selected.txt'))).toBe(false);
+  });
+
+  it('reports nothing at all when no selection was asked for', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'src/beta.ts'), 'export const beta = 3;\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit beta']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true' },
+    );
+
+    // `tests` present means selection ran. Absent means it was never asked for,
+    // which is the shape every result had before selection existed.
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+  });
+
+  it('still blocks the merge when a selected test fails', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'src/beta.ts'), 'export const beta = 3;\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit beta']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true', selectTestCmd: 'false # {files}' },
+    );
+
+    expect(result.outcome).toBe('tests-failed');
+    const log = git(projectDir, ['log', 'smith/epic-1/integration', '--oneline']);
+    expect(log).not.toContain('edit beta');
   });
 });

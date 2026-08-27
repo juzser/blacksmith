@@ -25,8 +25,10 @@ is your console:
 
 One thing to know up front: those playbooks are dispatch instructions for
 your orchestrator session, **not a background daemon**. Nothing advances
-while the session is closed — see
-[Limitations today](operator-guide.md#limitations-today).
+while the session is closed. `smith daemon` runs in the background and will
+tell you what the factory needs while you are away, but it watches and never
+dispatches — see [Limitations today](operator-guide.md#limitations-today) and
+[the ops runbook](../runbooks/ops.md).
 
 ## 1. Say what you want — `/bs plan <goal>`
 
@@ -52,7 +54,7 @@ finding, no amendment.
 ## 3. Let it run — `/bs run <epic>`
 
 You are out of the per-step loop from here (keep the session open, though —
-there is no daemon). The scheduler admits a **wave**: tasks whose path claims
+the daemon watches, it does not dispatch). The scheduler admits a **wave**: tasks whose path claims
 are disjoint and whose dependencies are satisfied. Each gets its own worktree
 and runs coder → tester → grader → the gate pipeline (schema check, cumulative
 tests, coverage evidence, reviewer, verifier). Whatever passes joins the

@@ -34,6 +34,7 @@ import {
   kanban,
   lessonsPage,
   overview,
+  pulse,
   roadmapPage,
   taskDetail,
   timeline,
@@ -431,6 +432,18 @@ export function createApp(opts: AppOpts): AppHandle {
         ...(sessionId ? { sessionId } : {}),
         ...(project ? { project } : {}),
       }),
+    );
+  });
+
+  // The app shell's own poll — "is the factory still moving, and what has
+  // arrived since I looked?". It sits under the refresh middleware like every
+  // other read, so the frame's liveness reading and the page's data are folded
+  // from the same event log at the same moment.
+  app.get('/api/pulse', (c) => {
+    const sessionId = c.req.query('session');
+    const project = c.req.query('project');
+    return c.json(
+      pulse(handle.db, { ...(sessionId ? { sessionId } : {}), ...(project ? { project } : {}) }),
     );
   });
 

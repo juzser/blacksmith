@@ -69,6 +69,21 @@ export function livenessLabel(
 }
 
 /**
+ * "last event 12s ago" — the *factory's* pulse, which is a different question
+ * from livenessLabel()'s.
+ *
+ * livenessLabel answers "is my screen current". This answers "is anything
+ * happening". They come apart in exactly the case the shell indicator exists
+ * for: a healthy server polled every five seconds reports `Live` forever, and
+ * says nothing about a factory that has not emitted an event since Tuesday.
+ * Both are shown, side by side, because neither implies the other.
+ */
+export function lastEventLabel(lastEventAtIso: string | null, nowIso: string): string {
+  if (lastEventAtIso === null) return 'no events yet';
+  return `last event ${formatRelative(lastEventAtIso, nowIso)}`;
+}
+
+/**
  * `working` — dispatched recently enough that the factory itself still counts
  *   it as doing something.
  * `stalled` — still `live` in the registry, but past the point where the

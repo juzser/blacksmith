@@ -200,7 +200,16 @@ with a Lozenge tone.
 - **Theme composable:** `ui/src/composables/useTheme.ts` —
   localStorage-first, falls back to `prefers-color-scheme`.
 - **Poll composable:** `ui/src/composables/usePoll.ts` — Page Visibility API
-  pause, used at 5s (Overview) and 15s (Timeline, Kanban) per design-spec §8.
+  pause, used at 5s (the app shell's `/api/pulse`, Overview) and 15s
+  (Timeline, Kanban, Sessions) per design-spec §8. Also exports
+  `triggerGlobalRefresh()`: the shell's Refresh button sits above the
+  router and cannot know what the page under it fetches, so it bumps a
+  signal every mounted poller watches.
+- **Pulse composable:** `ui/src/composables/usePulse.ts` — the shell's own
+  poll, feeding the topbar freshness indicator and the nav arrival badges.
+  Its pure half is `ui/src/lib/navBadges.ts`, which is where the
+  badge-not-toast argument is recorded and is the only half under test
+  (`ui/vitest.config.ts` covers `lib/`, not `composables/`).
 - **Viewport composable:** `ui/src/composables/useViewport.ts` — drives
   sidebar collapse (<1024px) and the mobile Sheet (<768px).
 
@@ -378,6 +387,54 @@ with a Lozenge tone.
   `prefers-reduced-motion` the ring is frozen at its start radius rather
   than removed, so reduced-motion users do not get a *less* prominent live
   node than everyone else.
+- **2026-08-27 (shell liveness round) — "did something just happen" is a
+  badge, not a toast.** Operator directive 9 asked for a toast on each
+  event/trigger/dispatch "để hệ thống có cảm giác đang chạy". Declined, on
+  transport grounds rather than taste: `useToast` already means "*your*
+  action landed" (Task detail waive/deny, Lessons approve/reject) and a
+  toast the operator did not cause overloads it; the data arrives by poll,
+  so a diff-fired toast reports when the poll noticed rather than when the
+  thing happened, and a wave landing ten events between two ticks either
+  storms the corner or lies about the count; and `usePoll` pauses on a
+  hidden tab, which makes a toast lossy for something the event log records
+  durably. What shipped is a surface the operator can come back to — nav
+  arrival badges (`lib/navBadges.ts`, where this argument is also kept, next
+  to the code that would have to be undone to reverse it).
+- **2026-08-27 (shell liveness round) — `LiveStatus` moved from Overview
+  into the topbar, and gained a second clock.** Round 7 put it on Overview
+  only; every page polls, and on the other nine a frozen server looked
+  exactly like a quiet factory. It is now fed by one shell-level 5s
+  `/api/pulse` poll. Beside it, `lastEventLabel()` — `livenessLabel()`
+  answers "is my screen current", this answers "is the factory moving", and
+  a healthy server reports `Live` indefinitely over a factory that has
+  emitted nothing since Tuesday. Both shown; neither implies the other.
+  Hidden below 768px, where the topbar has no room. This supersedes
+  design-spec §2's "Right: theme toggle only".
+- **2026-08-27 (shell liveness round) — only monotonic counters get an
+  arrival badge.** Timeline and Errors badge the difference between the
+  current poll and the counter as of the last time the operator opened that
+  page. Lessons badges its pending *level*, drawn as itself, because
+  approving one makes it fall and "-1 new" is not a thing that can have
+  arrived. `arrivalsSince()` clamps at zero anyway, as a backstop for a
+  projection rebuild the shell cannot see. A first poll with no baseline
+  badges nothing — everything already in the log is history, and badging it
+  would greet the operator with "99+ new" on every cold open.
+- **2026-08-27 (shell liveness round) — the collapsed rail draws a dot, and
+  the number lives in the accessible name.** The 64px icon rail has no room
+  for `99+`, so it keeps only the fact that something is waiting. Expanded
+  or collapsed, the badge glyph is `aria-hidden` and the count reaches a
+  screen reader through the button's `aria-label` — "Timeline, 3 new",
+  "Lessons, 3 pending" — because a bare `3` is not a claim. Same reasoning
+  as round 7's freshness label: the number is never *only* in a glyph.
+- **2026-08-27 (shell liveness round) — the shell's Refresh wakes every
+  mounted poller, via a signal in `usePoll` rather than per-page wiring.**
+  Hoisting `LiveStatus` above the router would have made its Refresh button
+  a lie: it would reload the shell's pulse and leave the page under it
+  untouched. `usePoll` now owns a module-level counter that
+  `triggerGlobalRefresh()` bumps and every poller watches, so Overview,
+  Timeline, Kanban and Sessions answer it with no edits of their own. The
+  watcher is registered inside `usePoll`'s setup call, so Vue's effect scope
+  disposes it with the component — an unmounted page cannot be woken.
 
 **Verification** (per the design spec's own verification protocol):
 - Contrast on `ProgressBar`'s fill/track pairing (`--ds-info-bold` fill on
@@ -437,6 +494,22 @@ with a Lozenge tone.
   node's own `--ds-surface` was never checked, on Roadmap or on Flow. It
   matters now because round 8 makes that border the static,
   reduced-motion-safe half of a state signal rather than decoration.
+- **Nav arrival badges and the topbar pulse (shell liveness round,
+  operator directive 9, 2026-08-27): three new pairings, all clear.** The
+  expanded badge's count is real text, so it takes the 4.5:1 floor:
+  `--ds-text-on-bold` on `--ds-info-bold` — 5.17:1 in *both* themes, since
+  that token is `#2563eb` either way. That is also why the badge is not
+  `--ds-primary`, the obvious choice: identical in light theme, but
+  `--ds-primary` lightens in dark and drops white text to 3.68:1, under the
+  floor. The collapsed rail's dot is a UI graphic: `--ds-info-bold` on
+  `--ds-surface-sunken` — 4.95:1 light / 3.43:1 dark. The dot is painted
+  with a 2px ring in that same sunken surface precisely so this is the pair
+  that applies — it can sit on an active item, whose `--ds-primary-subtle`
+  tint would put it at 2.84:1 in dark, under the 3:1 floor. The topbar
+  pulse readout is `--ds-text-subtle` on `--ds-surface` — 7.73:1 light /
+  13.46:1 dark, measured at the text floor rather than waved through as
+  decoration. Run: `node scripts/design/contrast_check.mjs` — 48 pairs
+  checked, 0 failures.
 - Not yet run: a real-browser check of both themes at 1280px/1024px/390px
   beyond what Playwright's screenshots capture; the oxlint adherence gate
   (still blocked on a sanctioned-dependency addition, see "Gates wired").

@@ -1,7 +1,26 @@
 // Polling per design-spec.md §8: an interval that pauses via the Page
 // Visibility API when the tab is hidden, plus a manual trigger for the
 // Toolbar's "Refresh" button. No WebSockets — see §8's reasoning.
-import { onBeforeUnmount, onMounted } from 'vue';
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+
+/**
+ * One shared "the operator asked for fresh data" tick.
+ *
+ * The freshness indicator moved from the Overview page into the app shell
+ * (composables/usePulse.ts), and its Refresh button moved with it — but the
+ * shell has no idea what the page under it fetches. Rather than teach it, the
+ * button bumps this counter and every mounted poller re-runs its own callback.
+ * A page therefore keeps ownership of its data and still answers a Refresh it
+ * never had to know about.
+ *
+ * The watcher is registered inside usePoll's setup call, so Vue's effect scope
+ * disposes it with the component; an unmounted page cannot be woken by it.
+ */
+const refreshSignal = ref(0);
+
+export function triggerGlobalRefresh(): void {
+  refreshSignal.value += 1;
+}
 
 export function usePoll(callback: () => void | Promise<void>, intervalMs: number) {
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -33,6 +52,10 @@ export function usePoll(callback: () => void | Promise<void>, intervalMs: number
     void callback();
     start();
   }
+
+  watch(refreshSignal, () => {
+    void callback();
+  });
 
   onMounted(() => {
     start();

@@ -13,6 +13,8 @@ export const STATE_EVENTS_DIR = path.join(REPO_ROOT, 'state', 'events');
 export const STATE_ARTIFACTS_DIR = path.join(REPO_ROOT, 'state', 'artifacts');
 export const WORKTREE_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'worktree.yml');
 export const STATE_DB_PATH = path.join(REPO_ROOT, 'state', 'smith.db');
+/** The background watcher's lock and last tick: `state/daemon/{daemon.pid,status.json}`. */
+export const STATE_DAEMON_DIR = path.join(REPO_ROOT, 'state', 'daemon');
 export const DB_MIGRATIONS_DIR = path.join(REPO_ROOT, 'factory', 'orchestrator', 'drizzle');
 export const ROADMAP_PATH = path.join(REPO_ROOT, 'factory', 'specs', 'roadmap.md');
 export const SCAFFOLD_DIR = path.join(REPO_ROOT, 'factory', 'scaffold');

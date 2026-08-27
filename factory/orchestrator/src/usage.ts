@@ -121,6 +121,32 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Check a research brief cites what it claims. Exit 1 on an uncited claim.',
   },
   {
+    command: 'daemon run',
+    positionals: '',
+    flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    summary:
+      'Watch the event log in the foreground: budgets, stale agents, work that is due. ' +
+      'Never dispatches.',
+  },
+  {
+    command: 'daemon start',
+    positionals: '',
+    flags: `[--interval <seconds>] [--dir <dir>] [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    summary: 'Spawn `daemon run` detached, logging to <dir>/daemon.log. Prints the spawned pid.',
+  },
+  {
+    command: 'daemon status',
+    positionals: '',
+    flags: '[--dir <dir>]',
+    summary: 'Print whether a daemon holds the lock and what its last tick found. Exit 1 if none.',
+  },
+  {
+    command: 'daemon stop',
+    positionals: '',
+    flags: '[--dir <dir>]',
+    summary: 'SIGTERM the daemon the lock names and clear the lock, live or already dead.',
+  },
+  {
     command: 'scheduler run',
     positionals: '',
     flags: `[--dry] [--now <iso>] [--project <dir>] ${EVENTS_DIR}`,
@@ -160,7 +186,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--select-test-cmd <cmd>] [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
     summary: 'Serially rebase, test, and merge task branches into the integration branch.',
   },
   {

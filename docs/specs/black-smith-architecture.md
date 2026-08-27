@@ -1045,8 +1045,10 @@ each mapped to a Blacksmith mechanism:
    candidates`/`compile`, `smith dream [--since]`), and the `.claude/
    skills/bs/SKILL.md` operator console tying the deterministic mechanics
    above to the agent templates. Dispatch itself is skill-guided from the
-   operator's Claude Code session, not yet a standalone daemon
-   (`docs/guide/operator-guide.md` "Limitations today").
+   operator's Claude Code session; the Phase 10 `smith daemon` is a standalone
+   background process, but a watcher — it folds the log and reports, and never
+   dispatches (`docs/guide/operator-guide.md` "Limitations today",
+   `docs/runbooks/ops.md`).
 8. **Cross-provider judges** — provider adapters (codex, deepseek), quorum
    policy, disagreement analytics.
 9. **Hardening** — escalation ladders, budget alarms, same-mistake KPI,

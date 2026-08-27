@@ -6,6 +6,7 @@ import {
   agentActivity,
   byRuntimeDesc,
   bySessionRecency,
+  lastEventLabel,
   livenessLabel,
   livenessLevel,
   longestRunningSince,
@@ -261,5 +262,19 @@ describe('lib/liveness.ts activeSessionCount()', () => {
 
   it('is 0 for no sessions', () => {
     expect(activeSessionCount([], now)).toBe(0);
+  });
+});
+
+describe('lib/liveness.ts lastEventLabel()', () => {
+  it('says the factory has never emitted rather than showing an empty age', () => {
+    expect(lastEventLabel(null, now)).toBe('no events yet');
+  });
+
+  it('ages the last event, which is a different question from the poll age', () => {
+    // livenessLabel would say "Live" for all three of these: the screen is
+    // current in every case. Whether anything is *happening* is not.
+    expect(lastEventLabel('2026-08-05T11:59:58.000Z', now)).toBe('last event just now');
+    expect(lastEventLabel('2026-08-05T11:58:00.000Z', now)).toBe('last event 2m ago');
+    expect(lastEventLabel('2026-08-01T12:00:00.000Z', now)).toBe('last event 4d ago');
   });
 });

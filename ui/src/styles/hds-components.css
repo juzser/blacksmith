@@ -1158,6 +1158,42 @@ a.live-agent-entry:focus-visible {
   cursor: not-allowed;
   opacity: 0.55;
 }
+/* Nav arrival badges — the persistent surface the shell reports arrivals on
+   instead of a toast (lib/navBadges.ts carries that argument). --ds-info-bold
+   rather than --ds-primary: the two are the same blue in light theme, but
+   --ds-primary lightens in dark and drops --ds-text-on-bold to 3.68:1, under
+   the 4.5:1 AA floor. info-bold is #2563eb in both themes, so the pill reads
+   identically either way (scripts/design/contrast_check.mjs measures it). */
+.hds-side__badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  padding: 0 var(--ds-space-1);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-info-bold);
+  color: var(--ds-text-on-bold);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-semibold);
+  line-height: 1.25rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* The collapsed rail is 4rem wide and mostly icon, so "99+" has nowhere to
+   go: the dot keeps the fact that something is waiting, and the button's
+   aria-label keeps the number. */
+.hds-side__dot {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-info-bold);
+  /* The ring is the rail's own surface, so the dot's contrast neighbour stays
+     --ds-surface-sunken even sitting on an active item's tint — against which
+     info-bold measures 2.84:1 in dark theme, under the 3:1 UI-graphics floor. */
+  box-shadow: 0 0 0 2px var(--ds-surface-sunken);
+}
 .hds-side__cat {
   padding: var(--ds-space-3) var(--ds-space-2) var(--ds-space-1);
   font-size: var(--ds-text-xs);
@@ -1266,6 +1302,21 @@ a.live-agent-entry:focus-visible {
   padding: 0 var(--ds-space-4);
   background: var(--ds-surface);
   border-bottom: 1px solid var(--ds-border);
+}
+
+/* "last event 12s ago" — the factory's pulse, sat next to LiveStatus in the
+   topbar because the two answer different questions and neither implies the
+   other (lib/liveness.ts carries that argument). Subtle rather than default
+   text: it is a standing readout, not a state change, and it must not
+   out-shout the indicator beside it. nowrap because the label grows a word
+   at a time — "3m ago", "2 days ago" — and a topbar that reflows on a clock
+   tick is a topbar that twitches. */
+.app-topbar__pulse {
+  flex-shrink: 0;
+  color: var(--ds-text-subtle);
+  font-size: var(--ds-text-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .app-scroll {
   flex: 1;

@@ -895,6 +895,59 @@ requires `--plan` — the merge is logged under the id the plan declares, or
 not at all. Every refusal exits `1` with a `queue.adopt-*` code and writes
 no event: a mistyped sha is an operator error, not a blocked task.
 
+### 4b. `--select-test-cmd` — paying for the tests the change can reach
+
+The queue is serial and the regression gate is cumulative, so N tasks each
+pay for the whole suite: the honest thing, and a quadratic one. `--select-test-cmd`
+narrows the *gate*, never the contract.
+
+```bash
+smith queue run epic-1 \
+  --project workspaces/my-project \
+  --test-cmd "pnpm test" \
+  --select-test-cmd "pnpm vitest run {files}" \
+  --tasks tasks.json
+```
+
+After the rebase — so the change set is the task's commits replayed on the
+current integration head — the queue diffs the worktree against
+`smith/<epic>/integration`, builds the same symbol graph `smith claims impact`
+uses, and walks `dependents` out from the changed files until the frontier
+stops growing. Whatever test files that reaches is what runs, through your
+template with `{files}` replaced by the shell-quoted list.
+
+Every ambiguity resolves to running everything. A changed file the scanner has
+never seen, cannot read, or that is not source at all (a `.yml`, a lockfile, a
+fixture) can affect anything; a module with a computed `import()` or an import
+that never resolved is treated as reached by every change, because the scanner
+cannot prove it is not; and a change that reaches *no* test is far more likely
+a stale graph than genuinely uncovered code. In each case the run falls back to
+`--test-cmd` with the reason attached rather than reporting a narrow pass.
+
+That fallback is the whole design. A test gate that skips on error is not a
+gate, so there is no path where a failure to build the graph turns into fewer
+tests run — only into the full command, plus a line saying why.
+
+Each outcome carries what actually happened, which is the part to read:
+
+```json
+{ "outcome": "merged", "taskId": "task-3",
+  "tests": { "mode": "selected", "ran": ["src/config.test.ts"], "known": 41 } }
+```
+
+`mode: "full"` arrives with `reasons` when something forced it — `known` is
+how many test files the graph knows about, so `ran: 1 of 41` is legible
+without trusting the selection blindly. Drop `--select-test-cmd` and the
+`tests` key disappears entirely: its presence means selection ran, its absence
+means the full command was the only command there ever was.
+
+Two things it deliberately does not do. It never narrows a typecheck: `tsc -p`
+is a whole-program question, and a subset of files is a different, weaker one —
+so keep `tsc` in `--test-cmd`, not in the selective template. And it never
+invents the command: a `--select-test-cmd` without a `{files}` placeholder is
+refused before the queue starts (`test-select.no-files-placeholder`) rather
+than silently running your full suite and reporting it as a selective run.
+
 ## 5. `smith gate run`
 
 The composed gate pipeline for one task: **schema check → artifact check →
@@ -1929,8 +1982,10 @@ and exited 0. That is the false clean this command exists to refuse.
 
 ### Limits, stated plainly
 
-- It reads the log; it does not stop anything. There is no dispatch daemon to
-  refuse the next wave, so acting on `alarm` is still your call.
+- It reads the log; it does not stop anything. `smith daemon` re-runs the same
+  fold on an interval so an alarm reaches you without an open session
+  ([`../runbooks/ops.md`](../runbooks/ops.md)), but it does not dispatch and so
+  cannot refuse the next wave either — acting on `alarm` is still your call.
 - The projection prices each unmeasured dispatch at its role's *cap*. That is an
   upper bound by construction, so `at-risk` means "could cross", not "will".
 - Judge tokens are never recorded anywhere, at any budget. Until a dispatch
@@ -2316,23 +2371,77 @@ distilled without a `finding_category` compiles to an entry the severity gate
 can never reach. Until those entries carry one, `kpi same-mistake` above is
 reading a number the corpus could not have moved.
 
+## 11. `smith daemon` — the same folds, without an open session
+
+Everything above is a command you run. Most of them answer a question that has
+a shelf life: is the epic over its cap, did an agent that was dispatched ever
+come back, is a recheck due. Asking them means being at the terminal.
+
+```bash
+smith daemon start                  # detached, logs to state/daemon/daemon.log
+smith daemon status                 # exit 1 when nothing is watching
+smith daemon stop
+smith daemon run --once             # one tick in the foreground, for cron
+```
+
+A tick reads the event log, runs the same folds `smith budget alarm` (§9a) and
+`smith scheduler run --dry` run plus the live-agent fold behind `/bs status`,
+refreshes the SQLite read-model the dashboard serves, and writes the result to
+`state/daemon/status.json`:
+
+```json
+{
+  "at": "2026-08-27T09:00:00.000Z",
+  "sessions": ["sess-7"],
+  "findings": [
+    {
+      "kind": "stale-agent",
+      "severity": "attention",
+      "sessionId": "sess-7",
+      "subject": "task-4",
+      "detail": "coder (claude/mid) has been live for 6.2h with no result, error or supersession — past the 4h threshold. Dispatched 2026-08-27T02:48:00.000Z."
+    }
+  ],
+  "attention": 1,
+  "projected": 1
+}
+```
+
+Two things make it safe to leave running. It never dispatches — that is
+architecture §12's rule for the scheduler it wraps, applied to a process that
+outlives your terminal — and its entire write surface is `state/daemon/` and
+`state/smith.db`, both derived, both git-ignored, both rebuildable from the
+log it only ever reads. It cannot merge, cannot touch a worktree, and cannot
+spend a token.
+
+Because it re-runs the same folds rather than reimplementing them, it and
+those commands cannot disagree. The full operator story — every flag, the
+finding kinds, launchd/systemd/cron units, the health check, what to back up —
+is [`../runbooks/ops.md`](../runbooks/ops.md).
+
 ## Limitations today
 
-- **Dispatch orchestration is skill-guided, not yet a daemon.** Phase 7
-  ships `.claude/skills/bs/SKILL.md` — the operator runs `/bs new|plan|run|
-  status|ui|waivers|lessons|report` in a Claude Code session inside this
-  repo, and that session follows the skill's playbooks: it dispatches
-  planner/coder/tester/reviewer/etc. sessions from `.claude/agents/`
-  itself and drives them through the real `smith` commands in sequence.
-  There is **no standalone background process** that watches the event log
-  and dispatches on its own — the operator (or their Claude Code session)
-  is still the loop that keeps calling `/bs run <epic>` until the epic is
-  done. Every deterministic mechanic the skill relies on — plan/wave
-  validation, worktree lifecycle, the gate pipeline, the merge queue,
-  findings/waivers, the scheduler, the lessons pipeline, the event log —
-  is built, tested, and CLI-accessible; only the "always-on daemon that
-  needs no human in the loop at all" framing from architecture §16's later
-  phases is still ahead (Phase 9 hardening).
+- **Dispatch orchestration is skill-guided; the background process watches,
+  it does not drive.** Phase 7 ships `.claude/skills/bs/SKILL.md` — the
+  operator runs `/bs new|plan|run|status|ui|waivers|lessons|report` in a
+  Claude Code session inside this repo, and that session follows the skill's
+  playbooks: it dispatches planner/coder/tester/reviewer/etc. sessions from
+  `.claude/agents/` itself and drives them through the real `smith` commands
+  in sequence. Phase 10 adds `smith daemon`
+  ([`../runbooks/ops.md`](../runbooks/ops.md)): a standalone background
+  process that folds the event log on an interval and reports budget alarms,
+  agents that never came back, and rechecks and cadences that are due, so
+  *knowing* what the factory needs no longer takes an open session. It
+  **never dispatches** — that is architecture §12's rule for the scheduler it
+  wraps ("it never dispatches an agent itself"), applied to a process that
+  outlives your terminal. The operator (or their Claude Code session) is
+  still the loop that keeps calling `/bs run <epic>` until the epic is done.
+  Every deterministic mechanic the skill relies on — plan/wave validation,
+  worktree lifecycle, the gate pipeline, the merge queue, findings/waivers,
+  the scheduler, the lessons pipeline, the event log — is built, tested, and
+  CLI-accessible; only the "always-on daemon that needs no human in the loop
+  at all" framing from architecture §16's later phases is still ahead, and it
+  is not a line the watcher is allowed to cross on its own.
 - **Nothing runs the integration-root check for you, and it is the only
   check that sees the assembled branch.** Every automatic gate runs inside a
   task worktree (§7a). `smith integration check` is operator-invoked, and it

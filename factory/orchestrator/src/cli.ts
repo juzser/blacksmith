@@ -2,7 +2,8 @@
 // Thin CLI router: one subcommand per orchestrator module operation. No
 // framework — plain argv parsing. Logic lives in the modules; this file only
 // wires stdin/argv to them and prints JSON.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ParsedArgs, parseArgs } from './args.js';
@@ -29,6 +30,16 @@ import {
   reconcile,
   runIndependentFinder,
 } from './crossFinding.js';
+import {
+  DaemonError,
+  DEFAULT_DAEMON_DIR,
+  DEFAULT_INTERVAL_SECONDS,
+  daemonStatus,
+  readLock,
+  runDaemon,
+  stopDaemon,
+  type TickOptions,
+} from './daemon.js';
 import { apply as applyDb, type DbOpts, openDb, rebuild as rebuildDb } from './db/projector.js';
 import {
   analytics,
@@ -148,6 +159,7 @@ import {
 } from './taskEvents.js';
 import { checkTesterIsolation } from './testerAudit.js';
 import type { CheckCommand } from './testgate.js';
+import { assertSelectableTestCmd } from './testSelect.js';
 import {
   COMMANDS,
   type CommandDoc,
@@ -1293,6 +1305,118 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // The background watcher (Phase 10). Four verbs and one invariant: none of
+  // them dispatches an agent, merges a branch or writes to a worktree. A
+  // process that outlives the operator's terminal is the last place to relax
+  // the rule that a human admits work.
+  if (namespace === 'daemon' && action === 'run') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    const interval =
+      flags.interval === undefined ? DEFAULT_INTERVAL_SECONDS : Number(flags.interval);
+    if (!Number.isInteger(interval) || interval <= 0) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--interval must be a whole number of seconds greater than zero, got "${flags.interval}".`,
+        { flag: 'interval', value: flags.interval ?? null },
+      );
+    }
+    const tickOpts: TickOptions = {
+      ...eventOptsFromFlags(flags),
+      ...(flags.project ? { projectDir: flags.project } : {}),
+      ...(flags.db ? { dbPath: flags.db } : {}),
+      ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
+    };
+
+    // SIGTERM has to reach the sleep, not just the flag: a daemon woken only
+    // by the next tick would ignore `smith daemon stop` for up to an interval,
+    // and an operator who waits that long reaches for `kill -9` — which is
+    // exactly the exit that strands the lock.
+    let stopping = false;
+    let wake: (() => void) | null = null;
+    const requestStop = (): void => {
+      stopping = true;
+      wake?.();
+    };
+    process.once('SIGTERM', requestStop);
+    process.once('SIGINT', requestStop);
+
+    const reports = await runDaemon({
+      dir,
+      intervalSeconds: interval,
+      ...tickOpts,
+      ...(flags.once === 'true' ? { once: true } : {}),
+      shouldContinue: () => !stopping,
+      sleep: (ms: number) =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            wake = null;
+            resolve();
+          }, ms);
+          wake = () => {
+            clearTimeout(timer);
+            wake = null;
+            resolve();
+          };
+        }),
+    });
+    const last = reports[reports.length - 1];
+    printJson({ ticks: reports.length, dir, ...(last === undefined ? {} : { last }) });
+    return 0;
+  }
+
+  if (namespace === 'daemon' && action === 'start') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    const held = readLock(dir);
+    if (held !== null) {
+      // Let acquireLock own the liveness question — one implementation of
+      // "is that pid still there" rather than a second opinion here.
+      throw new DaemonError(
+        'daemon.already-running',
+        `A daemon (pid ${held.pid}, started ${held.startedAt}) already holds ${dir}. ` +
+          'Run `smith daemon stop` first, or `smith daemon status` to see what it last found.',
+        { pid: held.pid, dir },
+      );
+    }
+    mkdirSync(dir, { recursive: true });
+    // `ignore` would discard the one account of why a detached daemon died.
+    const logFd = openSync(path.join(dir, 'daemon.log'), 'a');
+    const argv = [
+      'daemon',
+      'run',
+      '--dir',
+      dir,
+      ...(flags.interval === undefined ? [] : ['--interval', flags.interval]),
+      ...(flags.project === undefined ? [] : ['--project', flags.project]),
+      ...(flags.db === undefined ? [] : ['--db', flags.db]),
+      ...(flags['no-db'] === 'true' ? ['--no-db'] : []),
+      ...(flags['state-dir'] === undefined ? [] : ['--state-dir', flags['state-dir']]),
+    ];
+    const child = spawn(process.execPath, [process.argv[1] as string, ...argv], {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+    });
+    child.unref();
+    // The child writes the lock under its OWN pid; this one is the spawn's
+    // answer, and `smith daemon status` is what confirms the lock exists.
+    printJson({ started: true, pid: child.pid ?? null, dir, log: path.join(dir, 'daemon.log') });
+    return 0;
+  }
+
+  if (namespace === 'daemon' && action === 'status') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    const report = daemonStatus(dir);
+    printJson(report);
+    // Exit 1 when nothing is watching, so a health check is `smith daemon
+    // status >/dev/null` rather than a JSON parse in a shell script.
+    return report.running ? 0 : 1;
+  }
+
+  if (namespace === 'daemon' && action === 'stop') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    printJson(stopDaemon(dir));
+    return 0;
+  }
+
   if (namespace === 'worktree' && action === 'create') {
     const [projectDir, epic, taskId] = requirePositionals(
       positional,
@@ -1410,6 +1534,12 @@ async function main(): Promise<number> {
     const projectDir = requireFlag(flags, 'project');
     const testCmd = requireFlag(flags, 'test-cmd');
     const tasksFile = requireFlag(flags, 'tasks');
+    // D-260: the narrowed command is validated here, once, before any git
+    // runs. A template with no `{files}` would otherwise render as the full
+    // suite on every task while the outcome said `selected` — a gate that
+    // lies about its own coverage is worse than a slow one.
+    const selectTestCmd = flags['select-test-cmd'] as string | undefined;
+    if (selectTestCmd !== undefined) assertSelectableTestCmd(selectTestCmd);
     const tasks =
       readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
     // D-46/P9-29: the queue is the only component that knows a branch landed,
@@ -1464,6 +1594,7 @@ async function main(): Promise<number> {
         projectDir,
         epic,
         testCmd,
+        ...(selectTestCmd !== undefined ? { selectTestCmd } : {}),
         ...(events ? { events } : {}),
       });
       outcomes.push(outcome);

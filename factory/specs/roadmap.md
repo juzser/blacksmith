@@ -69,9 +69,9 @@ until an epic is tagged here).
 
 ## Phase 10 — Deployment + ops
 - id: phase-10
-- status: planned
+- status: in-progress
 - epics: []
-- goal: The three items Phase 9 carried on its goal line and never started. Runbooks beyond `docs/runbooks/providers.md` — the factory can be operated today only by reading the operator guide end to end. The Cloudflare port of the UI (moved from Phase 6, then Phase 9): the dashboard is local-only, `wrangler deploy`/`pages publish` are deny-listed for agents by `.claude/settings.json`, and no deploy path has been designed. The always-on dispatch daemon (moved from Phase 7, then Phase 9): dispatch is still skill-guided through `/bs`. None of the three is specced — this milestone records that they exist and are deferred, not that they are planned in detail.
+- goal: The three items Phase 9 carried on its goal line. Two landed, one stays deferred. **Ops runbook** — `docs/runbooks/ops.md`, so the factory can be operated without reading the operator guide end to end. **The background process** (moved from Phase 7, then Phase 9) — shipped as `smith daemon`, and shipped deliberately narrower than the "always-on dispatch daemon" the earlier phases named: it is a *watcher*. It folds the event log on an interval and reports budgets, stale agents, due rechecks and due cadences, so that *knowing* what the factory needs no longer requires an open session; it never dispatches an agent, never enters the merge queue, and never writes outside `state/daemon/` and the derived SQLite read-model. Dispatch stays skill-guided through `/bs` — architecture §12, not a gap. **The Cloudflare port of the UI** (moved from Phase 6, then Phase 9) stays deferred and unspecced: the dashboard is local-only, the two Cloudflare publish commands are deny-listed for agents by `.claude/settings.json`, and no upload path has been designed — this milestone records that it exists and is deferred, not that it is planned in detail.
 
 ## envkit — bootstrap
 - id: envkit-bootstrap

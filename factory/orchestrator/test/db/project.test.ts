@@ -13,6 +13,7 @@ import {
   errorsPage,
   kanban,
   overview,
+  pulse,
   roadmapPage,
   timeline,
 } from '../../src/db/queries.js';
@@ -329,6 +330,27 @@ describe('project dimension (Phase 6b)', () => {
   // reading every project. One result object, half of it answering the
   // question that was asked.
   // -------------------------------------------------------------------------
+
+  it('scopes the shell pulse to the project, and the projects partition the whole', () => {
+    const global = pulse(db);
+    const a = pulse(db, { project: 'black-smith' });
+    const b = pulse(db, { project: 'demo-hub' });
+
+    expect(a.counts.errors).toBe(1);
+    expect(b.counts.errors).toBe(1);
+    expect(a.counts.events + b.counts.events).toBe(global.counts.events);
+    expect(a.counts.errors + b.counts.errors).toBe(global.counts.errors);
+    // Project B's events were appended last, so the global newest event is
+    // B's — and A's newest is strictly older than it.
+    expect(global.lastEventAt).toBe(b.lastEventAt);
+    expect(a.lastEventAt !== null && b.lastEventAt !== null && a.lastEventAt <= b.lastEventAt).toBe(
+      true,
+    );
+    // The lessons table has no project column, so this number is deliberately
+    // the same under every scope rather than silently partitioned.
+    expect(a.lessonsPending).toBe(global.lessonsPending);
+    expect(b.lessonsPending).toBe(global.lessonsPending);
+  });
 
   it('scopes cost per model_tier/provider to the project (D-207)', () => {
     expect(analytics(db, { project: 'black-smith' }).costByModelTierAndProvider).toEqual([
