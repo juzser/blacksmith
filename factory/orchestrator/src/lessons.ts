@@ -46,6 +46,18 @@ export class LessonsError extends SmithError {}
 
 const WORD_PATTERN = /[a-z0-9]+/g;
 
+const DEFAULT_NOVELTY_THRESHOLD = 0.8;
+const DEFAULT_SHINGLE_SIZE = 3;
+/**
+ * Whether the threshold is corrected for statement length by default. On,
+ * because off is the behaviour P9-35 (a) recorded as a hole: at a fixed 0.8
+ * bar, restating any lesson shorter than twenty-nine words with one word
+ * changed reads as a new lesson. `lengthAware: false` is kept as a policy knob
+ * (`lessons.novelty_length_aware`), not as dead code — an operator running a
+ * corpus of near-identical short rules may want the looser gate back.
+ */
+const DEFAULT_NOVELTY_LENGTH_AWARE = true;
+
 /** Normalized word n-gram ("shingle") set — lowercase, punctuation-stripped, whitespace-collapsed. */
 export function shingles(text: string, size = 3): Set<string> {
   const words = (text.toLowerCase().match(WORD_PATTERN) ?? []) as string[];
@@ -69,9 +81,70 @@ export function jaccardSimilarity(a: ReadonlySet<string>, b: ReadonlySet<string>
   return union === 0 ? 1 : intersection / union;
 }
 
+/** Words as the shingler counts them, so a length rule and the score it adjusts cannot disagree. */
+export function wordCount(text: string): number {
+  return (text.toLowerCase().match(WORD_PATTERN) ?? []).length;
+}
+
+/**
+ * The similarity two `words`-long statements score when exactly one word
+ * differs — or null when this length cannot tell that from coincidence.
+ *
+ * A statement of n words has n-s+1 shingles at shingle size s, and changing
+ * one interior word destroys s of them and mints s new ones, so the pair
+ * scores (n-2s+1)/(n+1). At s=3 that is 0.6 for a fourteen-word rule and only
+ * reaches 0.8 at twenty-nine words — which is why a fixed 0.8 bar let a
+ * one-word restatement of most real lessons through as "novel" (P9-35 (a)).
+ * An edit at either end of the statement destroys fewer shingles and so scores
+ * higher; this is the worst case, and therefore the bar that catches all of
+ * them.
+ *
+ * Below n = 2s+1 the two share a single shingle — and so do two unrelated
+ * statements that happen to repeat one three-word run. No threshold separates
+ * those, so this returns null and the caller keeps its configured bar rather
+ * than inventing one. `novelty-rejected` is terminal: a wrong rejection is a
+ * lesson nobody gets back, so the metric declines to guess where it is blind.
+ */
+export function oneWordEditCeiling(
+  words: number,
+  shingleSize = DEFAULT_SHINGLE_SIZE,
+): number | null {
+  if (!Number.isInteger(shingleSize) || shingleSize < 1) return null;
+  if (words < 2 * shingleSize + 1) return null;
+  return (words - 2 * shingleSize + 1) / (words + 1);
+}
+
+/**
+ * The bar THIS PAIR is judged at: the configured threshold, lowered to the
+ * one-edit ceiling when the shorter of the two statements cannot reach it.
+ *
+ * The shorter one governs because its shingles are the scarce ones — a nine-
+ * word rule quoted verbatim inside a fourteen-word candidate cannot score
+ * above 0.6 no matter how redundant it is. Never raises the operator's
+ * threshold: an operator who set 0.4 asked for a looser gate, not a
+ * length-corrected one.
+ */
+export function effectiveNoveltyThreshold(
+  a: string,
+  b: string,
+  threshold: number,
+  shingleSize = DEFAULT_SHINGLE_SIZE,
+): number {
+  const ceiling = oneWordEditCeiling(Math.min(wordCount(a), wordCount(b)), shingleSize);
+  return ceiling === null ? threshold : Math.min(threshold, ceiling);
+}
+
 export interface NoveltyMatch {
   statement: string;
   score: number;
+  /**
+   * The bar THIS pair was judged at — the configured threshold, or the
+   * length-corrected one when `lengthAware` lowered it (see
+   * `effectiveNoveltyThreshold`). Displayed rather than the configured value,
+   * because a reviewer told "0.72, below the 0.8 threshold" about a rejected
+   * candidate has been handed a contradiction.
+   */
+  threshold: number;
 }
 
 export interface NoveltyResult {
@@ -156,21 +229,40 @@ export function checkNovelty(
   statement: string,
   existingStatements: readonly string[],
   threshold: number,
-  shingleSize = 3,
+  shingleSize = DEFAULT_SHINGLE_SIZE,
+  lengthAware = DEFAULT_NOVELTY_LENGTH_AWARE,
 ): NoveltyResult {
   const candidateShingles = shingles(statement, shingleSize);
   let mostSimilar: NoveltyMatch | null = null;
 
   for (const existing of existingStatements) {
     const score = jaccardSimilarity(candidateShingles, shingles(existing, shingleSize));
-    if (!mostSimilar || score > mostSimilar.score) mostSimilar = { statement: existing, score };
+    const bar = lengthAware
+      ? effectiveNoveltyThreshold(statement, existing, threshold, shingleSize)
+      : threshold;
+    const match: NoveltyMatch = { statement: existing, score, threshold: bar };
+    if (mostSimilar === null || decidesOver(match, mostSimilar)) mostSimilar = match;
   }
 
-  const aboveThreshold = (mostSimilar?.score ?? 0) >= threshold;
+  const aboveThreshold = mostSimilar !== null && mostSimilar.score >= mostSimilar.threshold;
   const polarityConflict =
     aboveThreshold && mostSimilar !== null && polarityDiffers(statement, mostSimilar.statement);
 
   return { novel: !aboveThreshold || polarityConflict, mostSimilar, polarityConflict };
+}
+
+/**
+ * Ranks two matches by how far each cleared ITS OWN bar, raw score breaking
+ * ties. Under one shared threshold this is just "highest score wins"; under
+ * per-pair bars it is not, and the difference matters: `mostSimilar` is the
+ * evidence shown to whoever has to understand the verdict, so it must be the
+ * match that produced it, not merely the closest-looking one.
+ */
+function decidesOver(a: NoveltyMatch, b: NoveltyMatch): boolean {
+  const marginA = a.score - a.threshold;
+  const marginB = b.score - b.threshold;
+  if (marginA !== marginB) return marginA > marginB;
+  return a.score > b.score;
 }
 
 // ---------------------------------------------------------------------------
@@ -902,6 +994,11 @@ export interface DreamOptions {
   since?: string;
   noveltyThreshold?: number;
   shingleSize?: number;
+  /**
+   * Correct the threshold for statement length (P9-35 (a)); defaults to on.
+   * See `oneWordEditCeiling` for what a fixed bar misses.
+   */
+  noveltyLengthAware?: boolean;
 }
 
 export interface DreamResult {
@@ -912,9 +1009,6 @@ export interface DreamResult {
   /** lesson_ids raised (not rejected) whose nearest match had a polarityConflict — see checkNovelty. */
   possibleContradictions: string[];
 }
-
-const DEFAULT_NOVELTY_THRESHOLD = 0.8;
-const DEFAULT_SHINGLE_SIZE = 3;
 
 /** The lesson_id in `existing` whose statement is exactly `statement`, or null. */
 function lessonIdForStatement(
@@ -952,6 +1046,7 @@ export async function dream(
 ): Promise<DreamResult> {
   const threshold = options.noveltyThreshold ?? DEFAULT_NOVELTY_THRESHOLD;
   const shingleSize = options.shingleSize ?? DEFAULT_SHINGLE_SIZE;
+  const lengthAware = options.noveltyLengthAware ?? DEFAULT_NOVELTY_LENGTH_AWARE;
 
   const checkpoints = extractDecisionCheckpoints(events, options.since);
   const existing: LessonFoldRow[] = foldLessons(events);
@@ -974,7 +1069,13 @@ export async function dream(
     // Novelty is decided BEFORE the raise is appended, so a possible
     // contradiction is recorded on the SAME event rather than needing a
     // follow-up write.
-    const novelty = checkNovelty(checkpoint.summary, existingStatements, threshold, shingleSize);
+    const novelty = checkNovelty(
+      checkpoint.summary,
+      existingStatements,
+      threshold,
+      shingleSize,
+      lengthAware,
+    );
     const contradictionOf = novelty.polarityConflict
       ? describeMatch(novelty.mostSimilar?.statement ?? '', existing)
       : null;
@@ -1219,6 +1320,11 @@ export interface RaiseLessonInput {
 export interface RaiseLessonOptions {
   noveltyThreshold?: number;
   shingleSize?: number;
+  /**
+   * Correct the threshold for statement length (P9-35 (a)); defaults to on.
+   * See `oneWordEditCeiling` for what a fixed bar misses.
+   */
+  noveltyLengthAware?: boolean;
 }
 
 export interface RaiseLessonResult {
@@ -1362,6 +1468,7 @@ export async function raiseLessonCandidate(
     existing.map((l) => l.statement),
     options.noveltyThreshold ?? DEFAULT_NOVELTY_THRESHOLD,
     options.shingleSize ?? DEFAULT_SHINGLE_SIZE,
+    options.noveltyLengthAware ?? DEFAULT_NOVELTY_LENGTH_AWARE,
   );
   const contradictionOf = novelty.polarityConflict
     ? describeMatch(novelty.mostSimilar?.statement ?? '', existing)
@@ -1472,6 +1579,11 @@ export interface LessonTransitionExtra {
   acceptDuplicate?: boolean;
   noveltyThreshold?: number;
   shingleSize?: number;
+  /**
+   * Correct the threshold for statement length (P9-35 (a)); defaults to on.
+   * See `oneWordEditCeiling` for what a fixed bar misses.
+   */
+  noveltyLengthAware?: boolean;
 }
 
 /**
@@ -1486,8 +1598,14 @@ export interface LessonNoveltyReview {
   edited: boolean;
   novel: boolean;
   polarityConflict: boolean;
+  /**
+   * The CONFIGURED bar (`lessons.novelty_jaccard_threshold` or
+   * `--novelty-threshold`), unchanged by length correction. The bar the
+   * verdict was actually taken at is `mostSimilar.threshold`, which is the
+   * same number unless the pair was too short to reach it.
+   */
   threshold: number;
-  /** Nearest statement in the corpus and its Jaccard score, or null if this is the only lesson. */
+  /** Nearest statement in the corpus, its Jaccard score, and the bar that pair was judged at. */
   mostSimilar: NoveltyMatch | null;
   mostSimilarLessonId: string | null;
   /** True when a non-novel edit was let through by `acceptDuplicate`. */
@@ -1657,15 +1775,29 @@ export async function transitionLesson(
       corpus.map((row) => row.statement),
       threshold,
       extra.shingleSize ?? DEFAULT_SHINGLE_SIZE,
+      extra.noveltyLengthAware ?? DEFAULT_NOVELTY_LENGTH_AWARE,
     );
     const overridden = editedStatement !== undefined && !result.novel;
     if (overridden && !extra.acceptDuplicate) {
+      // Name the bar the verdict was taken at, not the configured one. An
+      // operator told "scores 0.65 (threshold 0.8)" about a REJECTED edit has
+      // been handed a contradiction and no way to resolve it.
+      const bar = result.mostSimilar?.threshold ?? threshold;
+      const barText =
+        bar === threshold
+          ? `threshold ${threshold}`
+          : `threshold ${bar.toFixed(2)}, corrected down from ${threshold} because a statement this short cannot score higher after a one-word change`;
       throw new LessonsError(
         'lessons.edit-not-novel',
         `Approval-time edit of lesson "${lessonId}" scores ${result.mostSimilar?.score.toFixed(2)} against "${
           lessonIdForStatement(result.mostSimilar?.statement ?? '', corpus) ?? 'an existing lesson'
-        }" (threshold ${threshold}) — the same gate the raise passed. Approve the lesson it duplicates, edit it to say something new, or pass --accept-duplicate to record the override.`,
-        { lessonId, score: result.mostSimilar?.score ?? null, threshold },
+        }" (${barText}) — the same gate the raise passed. Approve the lesson it duplicates, edit it to say something new, or pass --accept-duplicate to record the override.`,
+        {
+          lessonId,
+          score: result.mostSimilar?.score ?? null,
+          threshold,
+          effectiveThreshold: bar,
+        },
       );
     }
     novelty = {

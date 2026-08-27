@@ -142,7 +142,33 @@ describe('parseSchedulerPolicy / loadSchedulerPolicy', () => {
     const policy = parseSchedulerPolicy(
       withLessons('  novelty_jaccard_threshold: 1\n  shingle_size: 1\n'),
     );
-    expect(policy.lessons).toEqual({ noveltyJaccardThreshold: 1, shingleSize: 1 });
+    expect(policy.lessons).toEqual({
+      noveltyJaccardThreshold: 1,
+      shingleSize: 1,
+      noveltyLengthAware: true,
+    });
+  });
+
+  // The third lessons knob is a boolean, and the failure mode is the mirror
+  // image of the numeric ones: YAML 1.2 reads `off`/`no` as strings, every
+  // non-empty string is truthy, so an operator switching the length
+  // correction OFF would have switched it on and been told nothing.
+  it('rejects a length-aware knob that is not a boolean, however it reads', () => {
+    for (const value of ['off', 'no', '"false"', '0']) {
+      expect(() => parseSchedulerPolicy(withLessons(`  novelty_length_aware: ${value}\n`))).toThrow(
+        SchedulerError,
+      );
+    }
+  });
+
+  it('accepts the correction being switched off, and defaults it on', () => {
+    expect(
+      parseSchedulerPolicy(withLessons('  novelty_length_aware: false\n')).lessons
+        .noveltyLengthAware,
+    ).toBe(false);
+    expect(
+      parseSchedulerPolicy(withLessons('  shingle_size: 3\n')).lessons.noveltyLengthAware,
+    ).toBe(true);
   });
 
   // The same class one file over, already reasoned out for `--now` (D-209):

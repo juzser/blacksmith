@@ -40,6 +40,8 @@ export interface GrowthPolicy {
 export interface LessonsSchedulerPolicy {
   noveltyJaccardThreshold: number;
   shingleSize: number;
+  /** Correct the threshold for statement length before comparing (P9-35 (a)). */
+  noveltyLengthAware: boolean;
 }
 
 export interface SchedulerPolicy {
@@ -61,7 +63,11 @@ interface RawSchedulerYaml {
     minor_or_patch_confidence?: number;
   };
   growth?: { cadence_days?: number };
-  lessons?: { novelty_jaccard_threshold?: number; shingle_size?: number };
+  lessons?: {
+    novelty_jaccard_threshold?: number;
+    shingle_size?: number;
+    novelty_length_aware?: boolean;
+  };
 }
 
 /**
@@ -96,6 +102,8 @@ const READS_SILENTLY =
   'A value the comparison cannot read does not fail the run, it changes what the run proposes.';
 const VOIDS_THE_GATE =
   'The novelty gate reads this directly and a degenerate value voids it silently.';
+const TRUTHY_IS_NOT_TRUE =
+  'YAML 1.2 reads `on`/`off`/`yes`/`no` as strings, and every non-empty string is truthy — an operator who typed `off` would have switched the gate ON.';
 
 function checkKnob(
   field: string,
@@ -117,6 +125,18 @@ function checkKnob(
 /** A knob whose only rule is that a comparison can read it. */
 function count(field: string, value: number): number {
   return checkKnob(field, value, 'a finite number', READS_SILENTLY);
+}
+
+/** A knob the code branches on directly, where any string at all would read as `true`. */
+function flag(field: string, value: boolean, note: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new SchedulerError(
+      'scheduler.invalid-policy',
+      `scheduler.yml ${field} must be true or false; got ${JSON.stringify(value)}. ${note}`,
+      { field, value },
+    );
+  }
+  return value;
 }
 
 export function parseSchedulerPolicy(yamlText: string): SchedulerPolicy {
@@ -165,6 +185,11 @@ export function parseSchedulerPolicy(yamlText: string): SchedulerPolicy {
         'an integer >= 1',
         VOIDS_THE_GATE,
         (n) => Number.isInteger(n) && n >= 1,
+      ),
+      noveltyLengthAware: flag(
+        'lessons.novelty_length_aware',
+        doc.lessons?.novelty_length_aware ?? true,
+        TRUTHY_IS_NOT_TRUE,
       ),
     },
   };

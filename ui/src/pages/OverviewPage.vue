@@ -598,7 +598,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
       <EmptyState :illustration-src="coffeeIllustration">
         Nothing running yet. Start the factory with a plan and this page fills in.
       </EmptyState>
-      <Card title="Factory commands" size="sm">
+      <Card title="Factory commands">
         <CommandHint :items="bsCommands" />
       </Card>
     </template>
@@ -688,7 +688,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
       </Card>
 
       <template #rail>
-        <Card title="Epics in flight" size="sm">
+        <Card title="Epics in flight">
           <!-- Operator directive 3: each row (not just the card header) is
                its own affordance — /kanban?epic=<id>, KanbanPage.vue reads
                the query param to pre-select that epic's lane. -->
@@ -705,7 +705,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
           </RowList>
           <EmptyState v-else icon="layers" inline>No epics in flight.</EmptyState>
         </Card>
-        <Card title="Pending your review" size="sm">
+        <Card title="Pending your review">
           <!-- Every count known, every count zero. An unknown lesson count
                fails this on purpose: the all-clear is a claim about the
                factory, and it is not one a dropped request can make (D-225). -->
@@ -730,8 +730,10 @@ const bsCommands = computed<CommandHintItem[]>(() => {
         </Card>
         <!-- Operator directive (Phase 6b round 10): the page shows what the
              factory did; this is where the operator finds out how to make it
-             do the next thing. Rail, small, below the two cards it refers to. -->
-        <Card title="Factory commands" size="sm">
+             do the next thing. Rail, below the two cards it refers to. The
+             directive also said "small"; Card has no size, and never did
+             (D-258), so that half is unmet rather than silently faked. -->
+        <Card title="Factory commands">
           <CommandHint :items="bsCommands" />
         </Card>
       </template>

@@ -38,3 +38,11 @@ lessons:
   # describes (SAGE) is a documented future upgrade, not built here.
   novelty_jaccard_threshold: 0.8
   shingle_size: 3
+  # Correct that threshold for how long the two statements are before
+  # comparing them (P9-35 (a)). A statement has n-s+1 shingles, and changing
+  # one word destroys s of them, so nothing shorter than ~29 words can score
+  # 0.8 against its own near-copy: at a fixed bar, restating a shorter lesson
+  # with one word changed read as a new lesson. Set false for one bar per
+  # pair; below 2*shingle_size+1 words the correction stands aside either way,
+  # because there a one-word edit and a coincidence score the same.
+  novelty_length_aware: true

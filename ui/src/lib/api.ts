@@ -257,6 +257,13 @@ export interface LessonsResult {
 export interface NoveltyMatch {
   statement: string;
   score: number;
+  /**
+   * The bar THIS pair was judged at. Equal to `LessonNoveltyReview.threshold`
+   * unless the gate corrected it down for the length of the shorter statement
+   * (P9-35 (a)) — which it does for most real lessons, so a notice that quotes
+   * the configured threshold next to the score can read as a contradiction.
+   */
+  threshold: number;
 }
 /**
  * lessons.ts's LessonNoveltyReview: what the novelty gate saw at transition
@@ -270,6 +277,7 @@ export interface LessonNoveltyReview {
   edited: boolean;
   novel: boolean;
   polarityConflict: boolean;
+  /** The configured bar; `mostSimilar.threshold` is the one the verdict was taken at. */
   threshold: number;
   mostSimilar: NoveltyMatch | null;
   mostSimilarLessonId: string | null;

@@ -548,10 +548,17 @@ function dbOptsFromFlags(flags: Record<string, string>): DbOpts {
 function noveltyOptsFromFlags(flags: Record<string, string>): {
   noveltyThreshold: number;
   shingleSize: number;
+  noveltyLengthAware: boolean;
 } {
   const override = noveltyThresholdOverride(flags);
-  const { noveltyJaccardThreshold, shingleSize } = loadSchedulerPolicy(flags.policy).lessons;
-  return { noveltyThreshold: override ?? noveltyJaccardThreshold, shingleSize };
+  const { noveltyJaccardThreshold, shingleSize, noveltyLengthAware } = loadSchedulerPolicy(
+    flags.policy,
+  ).lessons;
+  // No flag for the length correction, deliberately: it decides HOW the
+  // threshold is read, and an operator who wants a different bar for one run
+  // already has --novelty-threshold to say so in the units they are thinking
+  // in. A second flag that silently re-scales the first is a worse override.
+  return { noveltyThreshold: override ?? noveltyJaccardThreshold, shingleSize, noveltyLengthAware };
 }
 
 /**

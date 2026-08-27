@@ -91,6 +91,20 @@ export interface NoveltyNotice {
  * Returns null when there is nothing to report — a clean novel approval must
  * not grow a banner, or the operator learns to dismiss it without reading.
  */
+/**
+ * The bar the verdict was actually taken at, spelled for an operator.
+ *
+ * `review.threshold` is what the policy file says; `mostSimilar.threshold` is
+ * what this pair was measured against, and for a lesson shorter than ~29 words
+ * those differ (P9-35 (a)). Quoting the policy number next to the score would
+ * put "scores 0.65, threshold 0.8" under the word REJECTED.
+ */
+function thresholdPhrase(review: LessonNoveltyReview): string {
+  const bar = review.mostSimilar?.threshold ?? review.threshold;
+  if (bar === review.threshold) return `threshold ${review.threshold}`;
+  return `threshold ${bar.toFixed(2)}, corrected down from ${review.threshold} for the length of the shorter statement`;
+}
+
 export function noveltyNotice(review: LessonNoveltyReview | null): NoveltyNotice | null {
   if (!review?.mostSimilar) return null;
   const near = review.mostSimilarLessonId ?? 'an existing lesson';
@@ -111,11 +125,11 @@ export function noveltyNotice(review: LessonNoveltyReview | null): NoveltyNotice
     return review.overridden
       ? {
           tone: 'warning',
-          text: `Approved as a recorded duplicate override — scores ${score} against ${near} (threshold ${review.threshold}): "${review.mostSimilar.statement}".`,
+          text: `Approved as a recorded duplicate override — scores ${score} against ${near} (${thresholdPhrase(review)}): "${review.mostSimilar.statement}".`,
         }
       : {
           tone: 'warning',
-          text: `Near-duplicate of ${near} (similarity ${score}, threshold ${review.threshold}): "${review.mostSimilar.statement}". An unedited approval isn't gated, so this entered memory alongside it.`,
+          text: `Near-duplicate of ${near} (similarity ${score}, ${thresholdPhrase(review)}): "${review.mostSimilar.statement}". An unedited approval isn't gated, so this entered memory alongside it.`,
         };
   }
 

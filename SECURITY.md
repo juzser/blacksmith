@@ -87,18 +87,24 @@ text* and *things that execute*:
 
 ## Known gaps, stated rather than papered over
 
-- **`.vue` single-file components are neither type-checked nor fully linted.**
-  `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
-  and this repo runs TypeScript 7's native port, which does not expose one.
-  A template referencing something that does not exist is caught by e2e or
-  not at all. The mitigation is structural: UI logic lives in
-  `ui/src/lib/*.ts`, which is type-checked, linted and unit-tested, and the
-  SFCs stay thin. It still means the dashboard has a lint-shaped hole the
-  orchestrator does not.
-- **Budget caps are prompt-level.** The per-epic and per-task token caps in
-  [`factory/policies/budgets.yml`](factory/policies/budgets.yml) are stated to
-  agents and counted after the fact; the loop runner does not hard-stop a
-  session at the cap.
+- **`.vue` single-file components are not type-checked.** `vue-tsc` needs
+  Volar, Volar needs TypeScript's classic Node compiler API, and this repo
+  runs TypeScript 7's native port, which does not expose one. The hole is
+  narrower than it was: `ui/test/vueContract.test.ts` compiles every SFC with
+  Vue's own compiler and fails the gate on anything the compiler had to leave
+  for runtime — an identifier no binding provides, an unregistered component
+  or directive, an import the template does not use — and on any call site
+  passing a prop, event or slot the component it calls never declared. That
+  is a contract check, not a type check: it knows a prop exists, not that a
+  `string` was passed where a `number` was declared. The rest of the
+  mitigation is structural — UI logic lives in `ui/src/lib/*.ts`, which is
+  type-checked, linted and unit-tested, and the SFCs stay thin.
+- **Per-task budget caps are advisory.** `smith wave check` refuses to admit
+  a wave whose declared cost would cross the epic's `cap_tokens`, so the epic
+  cap in [`factory/policies/budgets.yml`](factory/policies/budgets.yml) is
+  enforced before any of that wave's tokens are spent. The per-task caps are
+  not, and deliberately: a cap a worker polices mid-task is pressure on the
+  work it is measuring (D-29). Nothing hard-stops a session already running.
 - **CI is one Linux runner.** No matrix — see
   [`INSTALL.md`](INSTALL.md#known-platform-gaps) § Known platform gaps.
 

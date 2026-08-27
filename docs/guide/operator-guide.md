@@ -2238,14 +2238,27 @@ After approving, run `smith db apply --session <id>` before
 write to SQLite, and those verbs read the projection, so a freshly-approved
 lesson is invisible to them until you do.
 
-**Known limitation — the gate only catches verbatim re-raises.** Measured, not
-estimated (P9-35): at the default 0.8 threshold on 3-word shingles, changing
-one word in a statement drops similarity to `(n-5)/(n+1)` for an *n*-word
-statement, so a statement must be **29 words or longer** before a single-word
-edit can even reach the threshold. A synonym swap on a short rule scored 0.600;
-the same rule reworded scored 0.000. Both passed. Read the candidate queue as
-if there were no duplicate check on it, because for anything short of a
-copy-paste there effectively is not.
+**The gate catches one-word re-raises; it stops there.** Measured, not
+estimated (P9-35). Changing one word in an *n*-word statement drops 3-shingle
+similarity to `(n-5)/(n+1)`, so at a flat 0.8 threshold a statement had to be
+**29 words or longer** before a single-word edit could even reach the bar —
+most lessons are shorter, and every one of them could be re-raised with a
+synonym swapped. Since P9-35 (a) the threshold is corrected per pair for the
+length of the *shorter* statement, and one-word substitutions, insertions and
+deletions are now all caught 25/25 on the real corpus (16/25, 19/25 and 19/25
+before), with no genuine pair newly judged redundant. What still passes:
+**two or more changed words** (0/25 both before and after — the correction is
+calibrated to exactly one edit), a short rule quoted verbatim inside a longer
+one, and the same rule reworded, which scores 0.000. So read the candidate
+queue as if the duplicate check catches copy-paste and near-copy-paste only,
+because that is what it catches; the operator is still the check for anything
+reworded. Below `2*shingle_size+1` words the correction deliberately stands
+aside and the configured threshold applies unchanged — down there a near-copy
+and two unrelated statements sharing one three-word run score identically, and
+`novelty-rejected` is terminal, so guessing would lose real lessons for good.
+The knob is `lessons.novelty_length_aware` in `factory/policies/scheduler.yml`
+(default `true`); there is no CLI flag, because `--novelty-threshold` already
+sets a one-run bar in the units you are thinking in.
 
 **Approval is the second door, and it is now gated too (P9-34).** `smith
 lessons approve --statement "..."` rewrites the text on the way into memory, so
@@ -2268,9 +2281,13 @@ Three things follow from where the check sits:
 
 Every approval — edited or not — now prints a `novelty` block naming the
 nearest lesson in the corpus, its score, and that lesson's id (P9-35). This is
-the part that matters most in practice: given the verbatim-only limitation
-above, the mechanical gate will almost never fire, so `mostSimilar` is there to
-put the near-duplicate in front of the operator, who is the real check. **An
+the part that matters most in practice: the mechanical gate now fires on
+one-word re-raises but on nothing more reworded than that, so `mostSimilar` is
+there to put the near-duplicate in front of the operator, who is the real
+check. The score is reported against **the bar that pair was judged at**, and
+says so when that bar was corrected down for length — a rejected candidate
+reported as "scores 0.65, threshold 0.8" would be a contradiction with no way
+to resolve it. **An
 approval whose text is not novel exits 1 with the transition applied** — it
 landed, and it is a duplicate; both are true, and the exit code reports the
 second.

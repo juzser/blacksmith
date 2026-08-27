@@ -100,13 +100,24 @@ no step looks at:
   native port, whose JS entry point exposes no such API — `createProgram` and
   `createSourceFile` are both `undefined` — so `vue-tsc` cannot run here at
   all. The UI's logic therefore lives in `ui/src/lib/*.ts`, which *is* checked
-  and *is* unit-tested, and SFCs stay as thin as that split allows. Type
-  errors inside a template are caught by e2e or not at all.
-- **Biome does not lint SFC `<script>` blocks either**, for the adjacent
-  reason: `noUnusedImports`, `noUnusedVariables` and
-  `useVueMultiWordComponentNames` are disabled for `**/*.vue` in
-  [`biome.json`](biome.json) because Biome cannot see a template using an
-  import, and reports every component's props as dead code.
+  and *is* unit-tested, and SFCs stay as thin as that split allows.
+- **SFCs are contract-checked instead**, by `ui/test/vueContract.test.ts` on
+  top of `ui/test/sfc.ts`, which runs in the ui suite like any other test.
+  It hands each SFC to Vue's own compiler and reads what the compiler had to
+  defer: `_ctx.<name>` means the template names something no binding
+  provides, `_resolveComponent`/`_resolveDirective` mean nothing registered
+  it, and an import mentioned by neither the script body nor the generated
+  render code is dead. A second pass walks each template's call sites and
+  compares what they pass against what the called SFC declares — the check
+  that would have caught eight `<Card size="sm">` where `Card` has no `size`
+  (D-258). What it cannot do is types: it knows a prop exists, not that
+  the value passed fits it.
+- **Biome still does not lint SFC `<script>` blocks.** `noUnusedImports`,
+  `noUnusedVariables` and `useVueMultiWordComponentNames` are disabled for
+  `**/*.vue` in [`biome.json`](biome.json), because Biome cannot see a
+  template using an import and reports every component's props as dead code.
+  The unused-import half of that is now covered template-aware by the gate
+  above; do not re-enable the Biome rules to chase the rest.
 - **`biome.json` cannot carry comments.** It is parsed as strict JSON, and a
   `//` line does not error — it silently invalidates the block it sits in.
   The `overrides` array above was disabled that way for a while, with the

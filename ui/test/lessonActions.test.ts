@@ -116,7 +116,11 @@ describe('lib/lessonActions.ts', () => {
       const notice = noveltyNotice(
         review({
           novel: false,
-          mostSimilar: { statement: 'Check the loop bound, not a constant.', score: 0.91 },
+          mostSimilar: {
+            statement: 'Check the loop bound, not a constant.',
+            score: 0.91,
+            threshold: 0.8,
+          },
           mostSimilarLessonId: 'lesson-3',
         }),
       );
@@ -131,7 +135,7 @@ describe('lib/lessonActions.ts', () => {
           novel: false,
           edited: true,
           overridden: true,
-          mostSimilar: { statement: 'Check the loop bound.', score: 0.86 },
+          mostSimilar: { statement: 'Check the loop bound.', score: 0.86, threshold: 0.8 },
           mostSimilarLessonId: 'lesson-3',
         }),
       );
@@ -147,13 +151,47 @@ describe('lib/lessonActions.ts', () => {
         review({
           novel: true,
           polarityConflict: true,
-          mostSimilar: { statement: 'Never check the loop bound.', score: 0.72 },
+          mostSimilar: { statement: 'Never check the loop bound.', score: 0.72, threshold: 0.6 },
           mostSimilarLessonId: 'lesson-9',
         }),
       );
       expect(notice?.tone).toBe('warning');
       expect(notice?.text).toMatch(/contradict/i);
       expect(notice?.text).toContain('lesson-9');
+    });
+
+    // The notice quotes the bar the verdict was taken at. Most real lessons
+    // are short enough that the gate corrects the configured 0.8 down (P9-35
+    // (a)), so printing the policy number beside the score would tell the
+    // operator their rejected statement scored 0.65 against a threshold of
+    // 0.8 — a contradiction with no way to resolve it.
+    it('quotes the corrected bar, and says it was corrected', () => {
+      const notice = noveltyNotice(
+        review({
+          novel: false,
+          mostSimilar: {
+            statement: 'Check the loop bound, not a constant.',
+            score: 0.65,
+            threshold: 0.6,
+          },
+          mostSimilarLessonId: 'lesson-3',
+        }),
+      );
+      expect(notice?.text).toContain('threshold 0.60');
+      expect(notice?.text).toMatch(/corrected down from 0\.8/);
+    });
+
+    // ...and stays quiet about the correction when there was none.
+    it('names the configured threshold plainly when no correction applied', () => {
+      const notice = noveltyNotice(
+        review({
+          novel: false,
+          mostSimilar: { statement: 'Check the loop bound.', score: 0.91, threshold: 0.8 },
+          mostSimilarLessonId: 'lesson-3',
+        }),
+      );
+      expect(notice?.text).toContain('threshold 0.8');
+      expect(notice?.text).not.toMatch(/corrected/);
     });
 
     // Nothing to say is said with nothing: a clean approval must not grow a

@@ -49,7 +49,7 @@ const SCHEDULER: SchedulerPolicy = {
     minorOrPatchConfidence: 0.9,
   },
   growth: { cadenceDays: 30 },
-  lessons: { noveltyJaccardThreshold: 0.6, shingleSize: 3 },
+  lessons: { noveltyJaccardThreshold: 0.6, shingleSize: 3, noveltyLengthAware: true },
 };
 
 const NOW = new Date('2026-08-20T12:00:00.000Z');

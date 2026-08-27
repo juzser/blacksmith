@@ -81,8 +81,9 @@ validated *before* either event is written, as `lessons.invalid-lesson-tag`
 until now), so a bad `--lesson-scope` can never leave a half-applied
 transition.
 
-Not done here, and deliberately: **`ui/server`'s approve/reject/edit routes
-still call `appendEvent` directly**, so the state machine guards the CLI only.
+Not done here, and deliberately (**closed later by P9-36**):
+**`ui/server`'s approve/reject/edit routes still call `appendEvent`
+directly**, so the state machine guards the CLI only.
 Wiring them up changes UI behaviour no item has asked for — a double-approve
 would become a 409 — and the fixture the UI tests run against
 (`test/db/fixtures.ts`) approves `lesson-1` before any request is made, so it
@@ -3073,15 +3074,52 @@ mechanical gate only catches verbatim re-raises and making the *operator* the
 near-duplicate check, with `mostSimilar` surfaced at approval time instead of
 only at raise time. The numbers exist so the choice is made against measurement.
 
-**Status: (c) built, 2026-08-10, branch `smith/phase-9/approval-novelty-gate`.
-(a) and (b) remain unbuilt.** Every `lessons approve` — edited or not — now
-returns a `novelty` block: the text that was scored, the nearest statement in
-the corpus, its score, and *that lesson's id*, so the operator reading an
-approval sees the thing it most resembles by name rather than having to
-remember the corpus. A 0.6 near-duplicate still lands; it lands with the
-operator having been shown what it is near. That is the whole of (c) — it moves
+**Status: (c) built, 2026-08-10, branch `smith/phase-9/approval-novelty-gate`;
+(a) built, 2026-08-27, branch `feat/vue-contract-gate`. (b) remains unbuilt.**
+Every `lessons approve` — edited or not — now returns a `novelty` block: the
+text that was scored, the nearest statement in the corpus, its score, and
+*that lesson's id*, so the operator reading an approval sees the thing it most
+resembles by name rather than having to remember the corpus. A 0.6
+near-duplicate still lands; it lands with the operator having been shown what
+it is near. That is the whole of (c) — it moves
 the check to the human, it does not make the metric smarter, and the table above
 still describes exactly what the mechanical gate can and cannot see.
+
+(a) is now built. `effectiveNoveltyThreshold` lowers the bar for each *pair* to
+`(n-2s+1)/(n+1)` — the score an *n*-word statement gets after one interior word
+is swapped, which is the worst case of the three one-word edits and so the bar
+that catches all of them — using the **shorter** of the two statements, because
+the shorter one owns the scarce shingles. It never raises the operator's
+threshold (`Math.min`): whoever configured 0.4 asked for a looser gate, not a
+corrected one. Below `2*shingle_size+1` words it declines to judge and returns
+the configured bar unchanged — there a near-copy and two unrelated statements
+that happen to share one three-word run both score exactly one shingle, no
+threshold separates them, and `novelty-rejected` is terminal, so a false
+rejection is permanent loss. The knob is `lessons.novelty_length_aware`
+(default `true`); there is deliberately no CLI flag, because
+`--novelty-threshold` already lets an operator state a one-run bar in the units
+they are thinking in and a second flag that silently rescales the first is a
+worse override.
+
+Measured against the real 25-statement corpus in `factory/policies/lessons.md`,
+mutating every statement in turn:
+
+| mutation | caught before | caught after |
+| --- | --- | --- |
+| one word substituted | 16/25 | **25/25** |
+| one word inserted | 19/25 | **25/25** |
+| one word deleted | 19/25 | **25/25** |
+| two words changed | 0/25 | 0/25 |
+
+No genuine pair in the corpus is newly judged redundant: the highest real
+pairwise similarity is **0.0238**, and the lowest bar the correction put in play
+is **0.400** — sixteen times the headroom. The last row is the honest boundary,
+not an oversight: the correction is calibrated to exactly one edit, and a
+two-word rewrite still walks through. So does containment — a nine-word rule
+quoted verbatim inside a fourteen-word candidate tops out at 0.583 against its
+own text. Both, and rewording that shares no shingles at all, remain (b)'s
+problem; Jaccard on 3-shingles cannot see meaning at any threshold, corrected or
+not.
 
 The polarity guard has the same shape and was left alone deliberately.
 `polarityDiffers` only runs when the score is already above threshold

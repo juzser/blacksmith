@@ -920,10 +920,14 @@ pointed at another project's db would show this repo's roadmap.
      lesson it duplicates, reword, or re-run with `--accept-duplicate`,
      which lands it and records `novelty_override` on the event. Never add
      `--accept-duplicate` on your own initiative.
-   - **Read the `novelty` block on every approval** (P9-35). The gate is a
-     verbatim-duplicate detector — one changed word slips past it below 29
-     words — so the printed `mostSimilarLessonId` and score are the real
-     near-duplicate check, and the operator is the one making it. An
+   - **Read the `novelty` block on every approval** (P9-35). The gate
+     catches copy-paste and one-word re-raises — since P9-35 (a) the
+     threshold is corrected per pair for the shorter statement's length —
+     but two changed words, containment and any real rewording all pass it,
+     so the printed `mostSimilarLessonId` and score are the real
+     near-duplicate check, and the operator is the one making it. Quote the
+     score with the bar the block reports, not the configured threshold;
+     they differ whenever the correction applied. An
      approval that lands non-novel text exits 1 *with the transition
      applied*: surface it, do not retry it. The UI's Edit action runs the
      same gate since P9-36 — but it has no `--accept-duplicate` control, so
