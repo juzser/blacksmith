@@ -135,7 +135,7 @@ const throughputLine = computed(() =>
       </Card>
 
       <template #rail>
-        <Card title="Recheck outcomes" size="sm">
+        <Card title="Recheck outcomes">
           <RowList v-if="data.recheckOutcomes.length > 0" density="compact">
             <li v-for="r in data.recheckOutcomes" :key="r.taskStatus" class="hds-row">
               <span class="hds-row__main">
@@ -146,7 +146,7 @@ const throughputLine = computed(() =>
           </RowList>
           <EmptyState v-else icon="rotate-cw" inline>No rechecks yet.</EmptyState>
         </Card>
-        <Card title="Cross-check quorum" size="sm">
+        <Card title="Cross-check quorum">
           <RowList v-if="quorum.length > 0" density="compact">
             <li v-for="q in quorum" :key="q.provider" class="hds-row">
               <span class="hds-row__main">

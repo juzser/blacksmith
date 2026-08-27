@@ -20,9 +20,12 @@ export default defineConfig({
       //     (environment: 'node');
       //   - src/lib/api.ts is the fetch client, exercised against a real
       //     server by ui/e2e.
-      // .vue files are absent for a harder reason: no tool in this repo
-      // type-checks or covers an SFC — see CONTRIBUTING.md § What the gate
-      // does not cover.
+      // .vue files are absent for a harder reason: nothing type-checks an
+      // SFC here, so a coverage number over one would measure a suite that
+      // does not exist. What does check them is vueContract.test.ts, which
+      // asks Vue's compiler what each template left for runtime — a contract
+      // gate, not coverage. See CONTRIBUTING.md § What the gate does not
+      // cover.
       include: ['ui/src/lib/**/*.ts'],
       exclude: ['ui/src/lib/api.ts'],
       // Floors sit under today's numbers (93/84/97/94) with room to breathe:

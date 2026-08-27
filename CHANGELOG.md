@@ -569,6 +569,27 @@ than appearing in it.
   6 CLI tests, 4 daemon tests, 7 timeline tests. Documented in
   `docs/guide/operator-guide.md` §6b, with every command and every JSON body in
   that section copied from a real run against the built CLI.
+- **A contract gate over `.vue` single-file components**, closing the oldest
+  gap `SECURITY.md` states. Nothing here type-checked an SFC and nothing could:
+  `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
+  and this repo runs the native port, which exposes none. So the gate asks the
+  compiler that actually renders these files what it had to leave for runtime.
+  `ui/test/sfc.ts` runs `compileScript` for the binding metadata and
+  `compileTemplate` with it, then reads the generated render code:
+  `_ctx.<name>` is a template identifier no binding provides,
+  `_resolveComponent`/`_resolveDirective` are an unregistered component or
+  directive, and an import mentioned by neither the script body nor the render
+  code is dead — which restores template-aware what `biome.json` has to turn
+  off for `**/*.vue`. A second pass walks every call site and compares what it
+  passes against what the called SFC declares, props, events and slots alike.
+  Vue's real fallthrough rules are encoded rather than assumed: `aria-*`,
+  `data-*` and the HTML globals are legitimate on a component, so are native
+  DOM listeners, `v-bind="obj"` makes a call site unknowable and nothing is
+  claimed about it, and a component with a bound slot name has no knowable
+  slot set. `ui/test/vueContract.test.ts` runs it over all 57 SFCs in
+  `ui/src` and carries 22 unit tests besides, because a sweep that has never
+  failed is a sweep nobody has proven fires. No new dependency, and no CI
+  wiring — it is a test in the ui suite `scripts/check.sh` already runs.
 
 ### Changed
 
@@ -686,6 +707,20 @@ than appearing in it.
 
 ### Fixed
 
+- **Eight cards asked to be small and eight `<div>`s got an attribute**
+  (D-258). `<Card size="sm">` at eight call sites in `AnalyticsPage.vue`,
+  `OverviewPage.vue` and `TaskDetailPage.vue`, where `Card.vue` declares
+  `title`, `description` and `padded` and nothing else — so Vue's fallthrough
+  put the literal string on the root element, `<div class="hds-card"
+  size="sm">`, where no stylesheet selects on it and no `.hds-card--sm` rule
+  exists to be selected. The cards had rendered at full size since the file
+  was written. The attributes are deleted rather than a compact variant
+  invented: the cards already look the way they look, so the diff is provably
+  visual-neutral, and shipping a design decision no design pass made would be
+  the worse fix (D-229's precedent). The unmet intent is recorded as a finding
+  instead. Found by the gate above, on its first run; e2e had photographed the
+  wrong card 135 green tests at a time, because `shoot()` writes a screenshot
+  and does not compare one.
 - **Three scheduler event types were invisible to all three directions of the
   P9-37 lint at once** — undeclared, apparently unemitted, and unseen on the
   timeline — with every test green. `scheduler.ts` writes
@@ -765,10 +800,12 @@ than appearing in it.
   read the log after the fact, and the operator runs them per round. Nothing
   blocks a merge on a `violation` — the check reports, and acting on it is a
   step in the loop, not an automatic stop.
-- `.vue` single-file components are neither type-checked nor fully linted.
-  `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
-  and TypeScript 7's native port does not expose one. UI logic lives in
-  `ui/src/lib/*.ts` — checked, linted and unit-tested — to keep the hole small.
+- `.vue` single-file components are still not *type*-checked. `vue-tsc` needs
+  Volar, Volar needs TypeScript's classic Node compiler API, and TypeScript
+  7's native port does not expose one. The contract gate above knows a prop
+  exists; it does not know a `string` was passed where a `number` was
+  declared. UI logic stays in `ui/src/lib/*.ts` — checked, linted and
+  unit-tested — to keep what remains small.
 
 ## Phase 10 — Deployment + ops — in progress
 

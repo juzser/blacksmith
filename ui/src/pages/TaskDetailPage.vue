@@ -303,7 +303,7 @@ function agentChipLabel(role: string, modelTier: string | null): string {
         </Tabs>
 
         <template #rail>
-          <Card title="Details" size="sm">
+          <Card title="Details">
             <dl style="display: grid; grid-template-columns: auto 1fr; gap: var(--ds-space-2) var(--ds-space-3); margin: 0; font-size: var(--ds-text-sm)">
               <dt style="color: var(--ds-text-subtlest)">Task ID</dt>
               <dd style="font-family: var(--ds-font-mono); font-size: var(--ds-text-xs)">{{ detail.task.taskId }}</dd>
@@ -319,7 +319,7 @@ function agentChipLabel(role: string, modelTier: string | null): string {
               <dd><IdentityChip v-if="detail.task.caseTag" :id="detail.task.caseTag" /></dd>
             </dl>
           </Card>
-          <Card title="Agents" size="sm">
+          <Card title="Agents">
             <RowList v-if="detail.agents.length > 0" density="compact">
               <li v-for="a in detail.agents" :key="a.id" class="hds-row">
                 <span class="hds-row__main">

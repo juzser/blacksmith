@@ -8,7 +8,7 @@ as an input, so defects in how that log is written and queried surface as
 working problems rather than as audit observations.
 
 Findings continue the dogfood-3 run's numbering, which closed at **D-127**,
-and run **D-128** through **D-252**. That run's own findings file is not
+and run **D-128** through **D-258**. That run's own findings file is not
 published — it recorded an operator's provider-account state — so D-101..D-127
 are cited here by id only.
 
@@ -12909,3 +12909,80 @@ reached for by habit is worth less than the check that caused it (D-9's shape,
 one register over).
 
 **Related:** [[D-212]], [[D-256]].
+
+## D-258 — eight cards asked to be small, and eight `<div>`s got an attribute
+
+**Severity:** S3 (minor) — the render is wrong at eight call sites, and has
+been since the file was written. What makes it worth a number is that no gate
+in the repo could see it, including the one that renders the page.
+
+**Where:** `ui/src/components/hds/Card.vue`, the call sites in
+`ui/src/pages/AnalyticsPage.vue`, `ui/src/pages/OverviewPage.vue` and
+`ui/src/pages/TaskDetailPage.vue`, and the sweep that found it,
+`ui/test/vueContract.test.ts` on `ui/test/sfc.ts`.
+
+Eight rail cards were written as `<Card title="…" size="sm">`. `Card.vue`
+declares three props — `title`, `description`, `padded` — and `size` is not
+among them, so Vue's fallthrough put the literal string on the root element.
+Compiling the real file and rendering it says so exactly:
+
+```html
+<div class="hds-card" size="sm">…</div>
+```
+
+`size` is not a valid attribute on a `<div>`, no stylesheet selects on it, and
+no `.hds-card--sm` rule exists to be selected — the only card modifier in the
+three stylesheets, `.hds-card--capped`, survives solely inside a comment
+recording its own deletion. The eight cards render at full size. The intent —
+a denser card for the rail — was never implemented, and asking for it in the
+markup produced no error, no warning, and no visible difference from not
+asking.
+
+**Why every layer stayed quiet.** `vue-tsc` cannot run here at all (Volar
+needs TypeScript's classic Node compiler API; this repo is on the native
+port), so nothing type-checks a template. Biome's `**/*.vue` override turns
+off the rules that might have noticed, because a linter blind to templates
+calls every template-only import dead. `cssClassDrift` reads `class="…"` and
+this defect is not in a class. And e2e passed all 135 tests through it, which
+is the part worth stating plainly: `shoot()` in `ui/e2e/helpers.ts` **writes**
+a screenshot, it does not compare one (D-235 measured the corpus rewriting
+itself), so a run that photographs the wrong card reports exactly the green a
+run that photographs the right one does.
+
+**The idiom it came from.** `Button.vue`, `Dialog.vue` and `Icon.vue` all do
+declare `size`. `size="sm"` is correct at 29 call sites across `ui/src/pages`,
+eight of them in these same three files — the eight bad `<Card>`s sit in the
+middle of the good ones. This is the ordinary
+way a design system leaks: a prop that is real on four components reads as
+real on the fifth, and the fifth accepts it silently.
+
+**The fix, and why it is a deletion.** The eight attributes are removed, and
+no `--sm` variant is invented to receive them. D-229 settled this shape: an
+orphan class was fixed by routing the control through the design system that
+already existed, not by writing the rule the markup implied. Inventing a
+compact card here would ship a visual decision no design pass made, on the
+strength of eight call sites whose authors are not available to confirm what
+"small" meant. Deleting the attributes changes nothing on screen — the cards
+already render at full size — so the diff is provably visual-neutral and the
+unmet intent is recorded here instead of guessed at in CSS. If a denser rail
+card is wanted, it is a design task with a spec, not a fallthrough.
+
+**The gate.** `ui/test/sfc.ts` hands each SFC to Vue's own compiler and reads
+what the compiler had to defer to runtime: `_ctx.<name>` for a template
+identifier no binding provides, `_resolveComponent`/`_resolveDirective` for
+anything unregistered, and an import that neither the script body nor the
+generated render code mentions. A second pass walks every call site and
+compares what it passes against what the called SFC declares — props, events
+and slots — with Vue's real fallthrough rules encoded rather than assumed:
+`aria-*`, `data-*` and the HTML globals are legitimate on a component, native
+DOM listeners are legitimate, `v-bind="obj"` makes the call site unknowable
+so nothing is claimed about it, and a component with a bound slot name has no
+knowable slot set. Written against the clean repo it found exactly these
+eight and nothing else; the twenty-two unit tests around it exist because a
+sweep that has never failed is a sweep nobody has proven fires.
+
+This is a contract check and not a type check. It knows `size` is not a prop.
+It does not know that `:count="'3'"` passed a string to a `number`. That
+remains the gap SECURITY.md states, now one bullet narrower.
+
+**Related:** [[D-229]], [[D-235]].

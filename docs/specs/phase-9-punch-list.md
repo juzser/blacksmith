@@ -81,8 +81,9 @@ validated *before* either event is written, as `lessons.invalid-lesson-tag`
 until now), so a bad `--lesson-scope` can never leave a half-applied
 transition.
 
-Not done here, and deliberately: **`ui/server`'s approve/reject/edit routes
-still call `appendEvent` directly**, so the state machine guards the CLI only.
+Not done here, and deliberately (**closed later by P9-36**):
+**`ui/server`'s approve/reject/edit routes still call `appendEvent`
+directly**, so the state machine guards the CLI only.
 Wiring them up changes UI behaviour no item has asked for — a double-approve
 would become a 409 — and the fixture the UI tests run against
 (`test/db/fixtures.ts`) approves `lesson-1` before any request is made, so it
