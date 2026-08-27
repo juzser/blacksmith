@@ -114,6 +114,7 @@ Finding kinds, and where each one comes from:
 | `unattributed-spend` | `info` | Dispatches nobody can be billed to an epic for. |
 | `stale-agent` | `attention` | An agent was dispatched and never came back inside the 4-hour stale window. |
 | `recheck` | `info` | Completed work `scheduler.yml`'s recheck policy says is due another look. |
+| `spec-change` | `attention` when the worker called it `blocking`, `info` otherwise | A worker proposed amending an acceptance criterion and nobody has answered. `detail` names the criterion, the assumption and both answering commands. |
 | `maintenance` | `info` | Dependencies `pnpm outdated` reports behind, with the scheduler's confidence. Needs `--project`; repo-scoped. |
 | `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. |
 | `unreadable-log` | `attention` | A session log could not be read. |
@@ -122,6 +123,13 @@ Finding kinds, and where each one comes from:
 The `info` / `attention` split is the whole point of the `attention` count:
 `attention > 0` means something is wrong **now**, and it stops meaning that the
 moment a routine 30-day cadence is filed under the same word.
+
+`spec-change` is the one kind whose severity the *worker* chose: `blocking`
+means the task cannot go further without the amendment, so an unanswered
+blocking proposal is a stalled task rather than a queue item. The finding says
+only that a decision is outstanding, which stays true whichever way it is
+answered; whether the proposal's diff has since been overtaken by a later plan
+version is a second question, and `smith plan proposals` is where it is asked.
 
 The last two kinds are why a tick never aborts. One corrupt line, or one
 SQLite file the daemon cannot write, becomes a finding and the tick carries

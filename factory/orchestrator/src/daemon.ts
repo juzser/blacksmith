@@ -35,6 +35,7 @@ import {
 } from './events.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
 import { computeProposals, loadSchedulerPolicy, type SchedulerPolicy } from './scheduler.js';
+import { foldSpecChanges } from './specChange.js';
 
 export class DaemonError extends SmithError {}
 
@@ -55,6 +56,7 @@ export type FindingKind =
   | 'unattributed-spend'
   | 'stale-agent'
   | 'recheck'
+  | 'spec-change'
   | 'maintenance'
   | 'growth-review'
   | 'unreadable-log'
@@ -147,6 +149,29 @@ export function inspectSession(
         `${agent.agentRole} (${agent.provider}/${agent.modelTier}) has been live for ` +
         `${agent.liveHours.toFixed(1)}h with no result, error or supersession — past the ` +
         `${staleHours}h threshold. Dispatched ${agent.dispatchedAt}.`,
+    });
+  }
+
+  // A proposal nobody has answered. `blocking` is the worker's own word for
+  // "I cannot go further without this", which makes an unanswered blocking
+  // proposal a stalled task and not a queue item — the same split
+  // research_request draws.
+  //
+  // Folded, never staleness-checked: `isStale` reads the plan directory and
+  // this function is pure. The daemon's claim is that a decision is
+  // outstanding, which stays true whether or not a later version has overtaken
+  // the diff; `smith plan proposals` is where that second question is answered.
+  for (const proposal of foldSpecChanges(events, { status: 'open' })) {
+    findings.push({
+      kind: 'spec-change',
+      severity: proposal.blocking ? 'attention' : 'info',
+      sessionId,
+      subject: proposal.taskId,
+      detail:
+        `${proposal.proposedBy} proposes amending ${proposal.criterionRef}: ${proposal.assumption} ` +
+        `(${proposal.severity}, ${proposal.blocking ? 'blocking' : 'non-blocking'}, ` +
+        `${proposal.sites.length} site(s)). Answer it with \`smith plan approve ` +
+        `${proposal.proposalId}\` or \`smith plan reject ${proposal.proposalId}\`.`,
     });
   }
 

@@ -179,8 +179,9 @@ describe('loadTaxonomy (real repo file)', () => {
     const tx = loadTaxonomy();
     // Bumped to 5 by D-127, which added `amend-pending` to finding_status;
     // to 6 by the spec-vs-goal gate, which added `goal-check-recorded` to
-    // gate_event.
-    expect(tx.version).toBe(6);
+    // gate_event; to 7 by the worker-proposed amendment path, which added
+    // `spec-change-proposed` and `spec-change-decided` to graph_event.
+    expect(tx.version).toBe(7);
     for (const dim of [
       'case',
       'origin',

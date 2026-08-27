@@ -25,7 +25,7 @@ dashboard's Roadmap page parses.
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
 | 10. Deployment + ops | A background watcher (`smith daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
 
-## The four things to know before you rely on it
+## The five things to know before you rely on it
 
 **1. The daemon watches; it does not drive.** `smith daemon` (Phase 10) runs
 in the background and tells you what the factory needs — budget alarms, agents
@@ -70,6 +70,18 @@ measured — and the loop runner does not hard-stop a dispatch that is already
 running, at either cap. An epic can still cross its cap by overrunning inside
 an admitted wave; `smith budget alarm` and `smith escalation check` are what
 tell you, after the fact.
+
+**5. A worker can argue with the spec, but only you can change it.** A plan
+version is still immutable and still the contract a worker is graded against.
+What is new is the third exit: a worker that finds the criterion itself wrong
+stops and returns a `spec_change_request` — the criterion, the assumption it
+makes, the evidence against it, the diff it proposes, and every other site with
+the same shape. That is a *proposal*. It moves no plan file, and no worker,
+judge or scheduler can approve it: `smith plan approve` is an operator command,
+and approving is what calls `plan amend` with no guard relaxed. An unanswered
+proposal is a queue item the daemon reports, and a blocking one is a stalled
+task. See
+[operator-guide §6b](operator-guide.md#6b-worker-proposed-spec-changes--the-third-exit).
 
 ## Dogfooding record
 

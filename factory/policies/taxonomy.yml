@@ -9,7 +9,7 @@
 # across months of runs. Changing the taxonomy is a PR that bumps `version` —
 # never a runtime write. Analytics may group only by taxonomy dimensions.
 
-version: 6
+version: 7
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -48,7 +48,15 @@ edge_provenance: [observed, declared, inferred]
                   # inferred — reconstructed after the fact (lowest trust)
 graph_event:     [plan-version-created, plan-version-superseded,
                   task-added, task-split, task-superseded, edge-recorded,
-                  wave-admitted, wave-merged]
+                  wave-admitted, wave-merged,
+                  spec-change-proposed, spec-change-decided]
+                  # spec-change-proposed — a worker hit a wrong assumption and
+                  #                      returned a spec diff. Data, not a
+                  #                      command: no plan file moves (D-33)
+                  # spec-change-decided  — the operator approved or rejected
+                  #                      one. Approval is what calls the
+                  #                      amendment; the version is still cut
+                  #                      by `plan amend` alone
 
 # ── Gates (event-log first-class, §11 — added Phase 4) ───────────────
 gate_event:      [schema-check-result, artifact-check-result,
