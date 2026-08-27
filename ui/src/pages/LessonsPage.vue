@@ -3,17 +3,17 @@
 // Dialog (RadioGroup in edit mode, Approve primary / Edit outline / Reject
 // destructive -> AlertDialog).
 import { computed, onMounted, ref, watch } from 'vue';
-import AlertDialog from '../components/hds/AlertDialog.vue';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import Dialog from '../components/hds/Dialog.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import Lozenge from '../components/hds/Lozenge.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import RadioGroup from '../components/hds/RadioGroup.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import Table from '../components/hds/Table.vue';
-import Textarea from '../components/hds/Textarea.vue';
+import AlertDialog from '../components/ds/AlertDialog.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import Dialog from '../components/ds/Dialog.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import Lozenge from '../components/ds/Lozenge.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import RadioGroup from '../components/ds/RadioGroup.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import Table from '../components/ds/Table.vue';
+import Textarea from '../components/ds/Textarea.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useToast } from '../composables/useToast.js';
 import {

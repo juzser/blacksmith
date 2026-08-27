@@ -1,0 +1,2329 @@
+/* Component CSS for the kit vendored under ui/src/components/ds/, ported
+   mechanically from the inline CSS template literals in the source kit's
+   own component jsx files (ui/docs/DESIGN.md, "Provenance") — same class
+   names (ds-*), same token usage, adapted for a single stylesheet (Vue
+   components apply these classes) instead of each component injecting its
+   own style tag at runtime. Source components read for this port:
+   Button, Icon, Lozenge, Skeleton, Separator, Card (+StatCard), RowList,
+   Table, PageHeader, Toolbar, FilterChips, MetricGrid, TwoColumn,
+   SectionHeading, EmptyState, Banner, Tooltip, SidebarNav, Breadcrumb,
+   Highlight. Custom additions (causal timeline disclosure, Kanban board,
+   Sheet mobile sidebar) are flagged section 6.2 gaps in
+   ui/docs/design-spec.md — built on the same tokens, no new colours or
+   radii. */
+
+@keyframes ds-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ds-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+/* Operator directive (round 8): "có animation ở node đang running". An
+   expanding, fading ring — box-shadow ONLY, never opacity. That distinction
+   is the whole reason this is a separate keyframe from ds-pulse: pulsing a
+   whole content node's opacity oscillates the contrast of every word inside
+   it (which is why Flow's fix-round moved its pulse off the node and onto a
+   6px dot). A box-shadow ring animates outside the border, so the node's
+   text contrast is constant. */
+@keyframes ds-ring-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ds-info-bold) 40%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--ds-info-bold) 0%, transparent);
+  }
+}
+@keyframes ds-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* Operator directive (Phase 6b round 9): "Các update hoặc block cần động hơn
+   để thấy thực sự factory đang chạy." A one-shot ring that marks the block
+   whose data just changed under the 5s poll, then gets out of the way.
+   box-shadow, not background/opacity — like ds-ring-pulse, it must not move
+   the text's own contrast ratio while it plays, and it must not reflow
+   anything around it. */
+@keyframes ds-flash {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-info-bold) 38%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-info-bold) 0%, transparent);
+  }
+}
+/* The utility that spends it. Applied for ~900ms by composables/
+   useFlashOnChange.ts and removed again, so it is keyed to a change in the
+   DATA, never to the poll itself — a ring that fires every 5s regardless
+   would be a metronome, not information. */
+.ds-flash {
+  animation: ds-flash 900ms var(--ds-ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-flash {
+    animation: none;
+  }
+}
+
+/* Button */
+.ds-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-family: var(--ds-font-sans);
+  font-weight: var(--ds-weight-medium);
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-lg);
+  background-clip: padding-box;
+  transition: all var(--ds-motion) var(--ds-ease-out);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+.ds-btn:focus-visible {
+  border-color: var(--ds-focus-ring);
+  box-shadow: 0 0 0 var(--ds-focus-width) color-mix(in srgb, var(--ds-focus-ring) 50%, transparent);
+}
+.ds-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.ds-btn:disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+.ds-btn--default {
+  background: var(--ds-primary);
+  color: var(--ds-text-on-primary);
+}
+.ds-btn--default:hover {
+  background: var(--ds-primary-hover);
+}
+.ds-btn--outline {
+  border-color: var(--ds-border);
+  background: var(--ds-surface);
+  color: var(--ds-text);
+}
+.ds-btn--outline:hover {
+  background: var(--ds-surface-sunken);
+}
+.ds-btn--secondary {
+  background: var(--ds-neutral-subtle);
+  color: var(--ds-text-subtle);
+}
+.ds-btn--secondary:hover {
+  color: var(--ds-text);
+}
+.ds-btn--ghost {
+  background: transparent;
+  color: var(--ds-text);
+}
+.ds-btn--ghost:hover {
+  background: var(--ds-surface-sunken);
+}
+.ds-btn--destructive {
+  background: color-mix(in srgb, var(--ds-danger-bold) 10%, transparent);
+  color: var(--ds-danger-text);
+}
+.ds-btn--destructive:hover {
+  background: color-mix(in srgb, var(--ds-danger-bold) 20%, transparent);
+}
+.ds-btn--link {
+  background: transparent;
+  color: var(--ds-text);
+  text-underline-offset: 4px;
+}
+.ds-btn--link:hover {
+  text-decoration: underline;
+}
+.ds-btn--inverse {
+  background: var(--ds-btn-fg, var(--ds-surface));
+  color: var(--ds-btn-ground, var(--ds-text));
+  border-color: transparent;
+}
+.ds-btn--inverse:hover {
+  opacity: 0.88;
+}
+.ds-btn--default-size {
+  height: var(--ds-control-height);
+  gap: var(--ds-space-1-5);
+  padding: 0 var(--ds-space-2-5);
+  font-size: var(--ds-text-sm);
+}
+.ds-btn--sm {
+  height: var(--ds-control-height);
+  gap: var(--ds-space-1);
+  padding: 0 var(--ds-space-2-5);
+  font-size: var(--ds-text-sm);
+  border-radius: var(--ds-radius-control);
+}
+.ds-btn--xs {
+  height: var(--ds-control-height-sm);
+  gap: var(--ds-space-1);
+  padding: 0 var(--ds-space-2);
+  font-size: var(--ds-text-xs);
+  border-radius: var(--ds-radius-control);
+}
+.ds-btn--icon {
+  height: var(--ds-control-height);
+  width: var(--ds-control-height);
+  padding: 0;
+}
+.ds-btn--icon-sm {
+  height: var(--ds-control-height);
+  width: var(--ds-control-height);
+  padding: 0;
+  border-radius: var(--ds-radius-control);
+}
+.ds-btn--icon-xs {
+  height: var(--ds-control-height-sm);
+  width: var(--ds-control-height-sm);
+  padding: 0;
+  border-radius: var(--ds-radius-control);
+}
+
+/* Lozenge */
+.ds-loz {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-1);
+  width: fit-content;
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 var(--ds-space-2);
+  border: 1px solid transparent;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ds-loz--subtle,
+.ds-loz--bold {
+  border-radius: var(--ds-radius-control);
+}
+.ds-loz--outline {
+  border-radius: var(--ds-radius-pill);
+  border-color: var(--ds-border);
+  color: var(--ds-text);
+}
+
+/* Skeleton */
+.ds-skeleton {
+  background: var(--ds-surface-sunken);
+  border-radius: var(--ds-radius-control);
+  animation: ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.dark .ds-skeleton {
+  background: var(--ds-primary-subtle);
+}
+
+/* Separator */
+.ds-sep {
+  background: var(--ds-border);
+  flex-shrink: 0;
+}
+.ds-sep--h {
+  height: 1px;
+  width: 100%;
+}
+.ds-sep--v {
+  width: 1px;
+  align-self: stretch;
+}
+
+/* Card + StatCard */
+.ds-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+  padding: var(--ds-space-4) 0;
+  background: var(--ds-surface-raised);
+  color: var(--ds-text);
+  font-size: var(--ds-text-sm);
+  border-radius: var(--ds-radius-card);
+  box-shadow: var(--ds-ring-card), var(--ds-shadow-raised);
+  overflow: hidden;
+}
+.ds-card__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  padding: 0 var(--ds-space-4);
+}
+.ds-card__headrow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+.ds-card__headend {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-shrink: 0;
+}
+.ds-card__title {
+  font-size: var(--ds-type-card-title);
+  font-weight: var(--ds-weight-medium);
+  line-height: 1.375;
+  color: var(--ds-text);
+}
+.ds-card__desc {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  line-height: var(--ds-leading-xs);
+}
+.ds-card__body {
+  padding: 0 var(--ds-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.ds-card__body--unpadded {
+  padding: 0;
+}
+.ds-card__footer {
+  padding: var(--ds-space-3) var(--ds-space-4) 0;
+  border-top: 1px solid var(--ds-border);
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+.ds-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-height: 112px;
+  padding: var(--ds-space-4);
+  padding-bottom: calc(var(--ds-space-4) + 24px);
+  background: var(--ds-surface-raised);
+  border-radius: var(--ds-radius-card);
+  box-shadow: var(--ds-ring-card), var(--ds-shadow-raised);
+  overflow: hidden;
+}
+.ds-stat__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  min-height: 28px;
+}
+.ds-stat__label {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ds-stat__chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--ds-radius-control);
+}
+.ds-stat__value {
+  font-size: var(--ds-type-hero);
+  line-height: var(--ds-leading-2xl);
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.ds-stat__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  margin-top: auto;
+  min-height: 20px;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+.ds-stat__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 var(--ds-space-1-5);
+  border-radius: var(--ds-radius-control);
+  font-weight: var(--ds-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+.ds-stat__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 3px;
+}
+
+/* Operator directive 3 (Phase 6b round 3): StatCards become clickable links
+   to their relevant page. A plain <a> (router-link) rather than a
+   role="link" div (kanban-card/flow-node's pattern) — StatCard has no
+   internal interactive content to conflict with, so the native anchor is
+   simpler and gets the vendored `a:focus-visible` ring (ds-tokens.css) for
+   free, no new focus CSS needed here. */
+.ds-stat-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--ds-radius-card);
+}
+
+/* Overview "Live agents" compact grid (Phase 6b round 4 operator
+   directive): a container query, not a viewport media query — this grid
+   lives inside TwoColumn's variable-width main column, not the full
+   viewport, so `container-type: inline-size` on its own wrapper is what
+   makes the breakpoint below meaningful here.
+
+   The operator's brief said "~640px" as an approximate guideline; measured
+   (Playwright boundingBox) this card's own container at the app's own
+   1280px desktop test viewport is 616px wide (TwoColumn's main column
+   minus the card's own padding) — honoring 640px literally would mean the
+   2-column layout NEVER actually appears at a normal desktop width,
+   defeating the point of "many agents will run concurrently" needing a
+   denser grid. Set to 480px instead: 2 columns from ~600px main-column
+   widths up (covers the real desktop case), 1 column below that (narrow
+   windows, and the mobile viewport where TwoColumn stacks to a near-full-
+   width single column anyway). ds-allow-hardcode: a breakpoint value, not
+   a spacing/sizing design token — same class of exception as
+   useViewport.ts's own hardcoded breakpoints. */
+.live-agents-container {
+  container-type: inline-size;
+}
+.live-agents-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--ds-space-2) var(--ds-space-4);
+}
+@container (max-width: 480px) {
+  .live-agents-grid {
+    /* Stacks the two .live-agents-col children (round 6 fix below) —
+       every group still renders, just left-column groups fully before
+       right-column ones instead of interleaved; acceptable at this width,
+       nothing is hidden. */
+    grid-template-columns: 1fr;
+  }
+}
+/* Operator directive (Phase 6b round 6): each column is its own flex list
+   (index-parity split, OverviewPage.vue) so an expanded group's detail
+   lines stack directly under their own row WITHIN this column only — see
+   that file's header comment for why NOT a single grid with full-span
+   detail items (round 5's actual bug: consecutive expanded groups forced
+   full-width rows, visually collapsing the grid to one column). */
+.live-agents-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+.live-agent-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  padding: var(--ds-space-1-5) var(--ds-space-2);
+  border-radius: var(--ds-radius-control);
+  color: inherit;
+  text-decoration: none;
+  font-size: var(--ds-text-xs);
+}
+a.live-agent-entry:hover,
+a.live-agent-entry:focus-visible {
+  background: var(--ds-surface-sunken);
+}
+/* Round 9: the pulse became conditional. Until this round every dot here
+   animated, including an agent the factory itself would report as stale —
+   which made the motion decorative. The three modifiers come from
+   lib/liveness.ts's agentActivity(); `--unknown` (unreadable dispatch
+   timestamp) is deliberately the dullest of the three, because the one thing
+   the UI must not do is animate a claim it cannot support. */
+.live-agent-entry__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ds-info-bold);
+  flex-shrink: 0;
+}
+.live-agent-entry__dot--working {
+  animation: ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+/* Colour is not the only channel: the elapsed column on the same row already
+   reads past four hours in words. */
+.live-agent-entry__dot--stalled {
+  background: var(--ds-warning-bold);
+}
+.live-agent-entry__dot--unknown {
+  background: var(--ds-text-subtlest);
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-agent-entry__dot--working {
+    animation: none;
+  }
+}
+.live-agent-entry__task {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-font-mono);
+  color: var(--ds-text-subtlest);
+}
+/* Round 7: how long this agent has been running. Tabular figures and a
+   right-aligned column so a ticking "9s" -> "10s" cannot shove the task id
+   beside it sideways once a second. */
+.live-agent-entry__elapsed {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: var(--ds-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-subtlest);
+}
+.live-agents-summary {
+  margin: 0 0 var(--ds-space-2);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtle);
+}
+/* Operator directive (dogfood round 2): "nên thay thông tin trong block now
+   running bằng các session đang chạy hiện tại, có animation indicator". Round
+   9's .now-running-list was one flat grid of agent rows; the unit is now the
+   session, so this is a vertical list of blocks — each a session header plus,
+   only while that session is active, its own agent rows indented under it.
+   A grid of equal cells would have flattened that hierarchy back out. */
+.running-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.running-session + .running-session {
+  padding-top: var(--ds-space-2);
+  border-top: 1px solid var(--ds-border);
+}
+.running-session__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  min-width: 0;
+}
+/* The animation indicator. Bigger than .live-agent-entry__dot (6px) because
+   it answers a bigger question — is this RUN alive — and it carries the
+   expanding ring as well as the pulse, the same box-shadow-only ring the
+   Roadmap/Flow live nodes use (ds-ring-pulse), so nothing around it reflows
+   or changes contrast while it plays. Colour is never the only channel: the
+   Lozenge beside it spells the state out, and .running-session__state gives
+   the timestamp behind it. */
+.running-session__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ds-text-subtlest);
+}
+.running-session__dot--active {
+  background: var(--ds-info-bold);
+  animation:
+    ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite,
+    ds-ring-pulse 2s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .running-session__dot--active {
+    animation: none;
+  }
+}
+.running-session__id {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.running-session__state {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtle);
+}
+.running-session__meta {
+  margin: var(--ds-space-0-5) 0 0 var(--ds-space-4);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+.running-session__meta code {
+  font-family: var(--ds-font-mono);
+}
+/* Indented under the session header: these rows belong to that run, and the
+   indent is what says so when several sessions are listed at once. */
+.running-session__agents {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--ds-space-1) var(--ds-space-3);
+  margin: var(--ds-space-1) 0 0 var(--ds-space-3);
+  padding: 0;
+  list-style: none;
+}
+.running-session__note {
+  margin: var(--ds-space-1) 0 0 var(--ds-space-4);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+.now-running-more {
+  margin: var(--ds-space-2) 0 0;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+
+/* Operator directive (Phase 6b round 10): the `/bs` command hints
+   (CommandHint.vue). The command sits on --ds-surface-sunken so it reads as
+   a thing you type, not a link you click — nothing on this page runs it. */
+.cmd-hint__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cmd-hint__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-0-5);
+  min-width: 0;
+}
+.cmd-hint__cmd {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: var(--ds-space-0-5) var(--ds-space-1-5);
+  border-radius: var(--ds-radius-control);
+  background: var(--ds-surface-sunken);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text);
+  /* Long forms ("/bs new <project> --ui") must wrap inside the narrow rail
+     rather than widening the card or spilling out of it. */
+  overflow-wrap: anywhere;
+}
+.cmd-hint__desc {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtle);
+}
+.cmd-hint__note {
+  margin: var(--ds-space-3) 0 0;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+/* Operator directive (Phase 6b round 5): grouped role·tier rows replace
+   round 4's flat capped list ("+N more" removed — grouping supersedes the
+   cap, every agent is always reachable via its group's disclosure). */
+.live-agent-group-row {
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  justify-content: flex-start;
+}
+.live-agent-group-row:hover,
+.live-agent-group-row:focus-visible {
+  background: var(--ds-surface-sunken);
+}
+/* Round 7 freshness indicator (LiveStatus.vue). The dot pulses only while
+   the data is actually live — an animation that keeps running on a stale
+   page is a lie about the page's state, so `lagging`/`stale` hold a static
+   dot in warning/danger tone. Colour is never the only channel: the label
+   beside it spells out "Live"/"Lagging"/"Stale" plus the age. */
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtle);
+}
+.live-status__label {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ds-text-subtlest);
+}
+.live-status--live .live-status__dot {
+  background: var(--ds-success-bold);
+  animation: ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.live-status--lagging .live-status__dot {
+  background: var(--ds-warning-bold);
+}
+.live-status--stale .live-status__dot {
+  background: var(--ds-danger-bold);
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-status--live .live-status__dot {
+    animation: none;
+  }
+}
+
+/* No grid-column span (round 6) — this now lives inside its own
+   .live-agents-col flex column (LiveAgentGroupRow.vue), so it's already
+   confined under its own row without needing to span anything. */
+.live-agent-group-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  padding-left: var(--ds-space-6);
+}
+
+/* RowList */
+.ds-rows {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.ds-rows > li + li {
+  border-top: 1px solid var(--ds-border);
+}
+.ds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font-family: inherit;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text);
+}
+.ds-rows[data-density="prose"] > li {
+  padding: var(--ds-space-2-5) 0;
+}
+.ds-rows[data-density="prose"] > li:first-child {
+  padding-top: 0;
+}
+.ds-rows[data-density="prose"] > li:last-child {
+  padding-bottom: 0;
+}
+.ds-row--button {
+  cursor: pointer;
+  border-radius: var(--ds-radius-control);
+  padding: var(--ds-space-1-5) var(--ds-space-2);
+  margin: 0 calc(var(--ds-space-2) * -1);
+  transition: background var(--ds-motion-fast) var(--ds-ease-out);
+}
+.ds-row--button:hover {
+  background: var(--ds-primary-subtle);
+}
+.ds-row__main {
+  min-width: 0;
+  flex: 1;
+}
+.ds-row__title {
+  display: block;
+  font-weight: var(--ds-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-row__meta {
+  display: block;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ds-row__trail {
+  flex-shrink: 0;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+
+/* Table */
+.ds-tablewrap {
+  width: 100%;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  overflow: auto;
+  background: var(--ds-surface-raised);
+}
+.ds-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text);
+}
+.ds-table th + th,
+.ds-table td + td {
+  border-left: 1px solid var(--ds-border);
+}
+.ds-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.ds-table thead th {
+  height: 2.5rem;
+  padding: 0 var(--ds-space-2);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtlest);
+  background: var(--ds-surface-sunken);
+  border-bottom: 1px solid var(--ds-border);
+}
+.ds-table tbody td {
+  border-bottom: 1px solid var(--ds-border);
+  height: var(--ds-row-height);
+  padding: var(--ds-space-1) var(--ds-space-2);
+  vertical-align: middle;
+}
+.ds-table tbody tr {
+  transition: background var(--ds-motion-fast) var(--ds-ease-out);
+}
+.ds-table tbody tr[data-clickable="true"] {
+  cursor: pointer;
+}
+.ds-table tbody tr:hover {
+  background: var(--ds-surface-sunken);
+}
+.ds-table td[data-numeric="true"],
+.ds-table th[data-numeric="true"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ds-table__empty {
+  padding: var(--ds-space-6) var(--ds-space-2);
+  text-align: center;
+  color: var(--ds-text-subtlest);
+  font-size: var(--ds-text-sm);
+}
+
+/* PageHeader */
+.ds-ph {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  flex-wrap: wrap;
+}
+.ds-ph__left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1-5);
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.ds-ph__titlerow {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ds-ph__title {
+  font-size: var(--ds-type-page-title);
+  font-weight: var(--ds-weight-semibold);
+  line-height: 1.3;
+  margin: 0;
+  min-width: 0;
+}
+.ds-ph__desc {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-subtlest);
+}
+.ds-ph__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+/* Toolbar */
+.ds-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+}
+.ds-toolbar__end {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+}
+.ds-toolbar__count {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .ds-toolbar {
+    flex-wrap: wrap;
+  }
+  .ds-toolbar__end {
+    margin-left: 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* FilterChips */
+.ds-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-1-5);
+  flex-wrap: wrap;
+}
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  height: var(--ds-control-height-sm);
+  padding: 0 var(--ds-space-2);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-surface);
+  font-family: inherit;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtle);
+  cursor: pointer;
+  transition: all var(--ds-motion-fast) var(--ds-ease-out);
+}
+.ds-chip:hover {
+  background: var(--ds-surface-sunken);
+  color: var(--ds-text);
+}
+.ds-chip[data-active="true"] {
+  background: var(--ds-primary-subtle);
+  border-color: var(--ds-primary-border);
+  color: var(--ds-primary);
+}
+.dark .ds-chip[data-active="true"] {
+  color: var(--ds-text);
+}
+.ds-chip__count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* MetricGrid */
+.ds-mgrid {
+  display: grid;
+  gap: var(--ds-space-6);
+}
+.ds-mgrid[data-cols="2"] {
+  grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 1 * var(--ds-space-6)) / 2)), 1fr));
+}
+.ds-mgrid[data-cols="4"] {
+  grid-template-columns: repeat(auto-fit, minmax(max(150px, calc((100% - 3 * var(--ds-space-6)) / 4)), 1fr));
+}
+
+/* TwoColumn */
+.ds-2col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+  align-items: stretch;
+}
+.ds-2col__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+.ds-2col__rail {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+@media (min-width: 1024px) {
+  .ds-2col {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .ds-2col__rail {
+    width: var(--ds-rail-width);
+    flex-shrink: 0;
+  }
+}
+
+/* SectionHeading */
+.ds-sh {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+}
+.ds-sh__t {
+  font-size: var(--ds-type-section);
+  font-weight: var(--ds-weight-semibold);
+  margin: 0;
+}
+.ds-sh__d {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+
+/* EmptyState */
+.ds-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-6) var(--ds-space-4);
+  text-align: center;
+}
+.ds-empty__text {
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-subtlest);
+  max-width: 34rem;
+}
+.ds-empty--inline {
+  align-items: flex-start;
+  padding: 0;
+  text-align: left;
+}
+
+/* Banner */
+.ds-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-3);
+  border-radius: var(--ds-radius-lg);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-sm);
+}
+.ds-banner__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  flex: 1;
+}
+
+/* Tooltip */
+.ds-tt {
+  position: relative;
+  display: inline-flex;
+}
+.ds-tt__bubble {
+  position: absolute;
+  z-index: 60;
+  padding: var(--ds-space-1) var(--ds-space-2);
+  background: var(--ds-primary);
+  color: var(--ds-text-on-primary);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading-xs);
+  border-radius: var(--ds-radius-control);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: ds-fade var(--ds-motion-fast) var(--ds-ease-out);
+}
+.ds-tt__bubble[data-side="top"] {
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+.ds-tt__bubble[data-side="right"] {
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+.ds-tt__bubble[data-side="bottom"] {
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* SidebarNav */
+.ds-side {
+  display: flex;
+  flex-direction: column;
+  width: var(--ds-sidebar-width);
+  flex-shrink: 0;
+  background: var(--ds-surface-sunken);
+  border-right: 1px solid var(--ds-border);
+  color: var(--ds-text-subtle);
+  transition: width var(--ds-motion-slow) var(--ds-ease);
+  height: 100%;
+}
+.ds-side[data-collapsed="true"] {
+  width: var(--ds-sidebar-width-collapsed);
+}
+.ds-side__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  height: var(--ds-topbar-height);
+  flex-shrink: 0;
+}
+.ds-side__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  /* The logo is the mascot's head on transparency, so the mark carries no
+     fill, no radius and no ring: a --ds-primary square would show as four
+     coloured corners, and a circular clip would slice through the hair and
+     the beard. The artwork sits directly on the sidebar surface. */
+}
+.ds-side__mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+.ds-side__word {
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ds-side__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--ds-space-2);
+  list-style: none;
+  margin: 0;
+  overflow-y: auto;
+}
+.ds-side__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  width: 100%;
+  height: 2rem;
+  padding: 0 var(--ds-space-2);
+  border: 0;
+  background: transparent;
+  border-radius: var(--ds-radius-control);
+  font-family: inherit;
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-subtle);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background var(--ds-motion-fast) var(--ds-ease-out);
+}
+.ds-side__item:hover:not(:disabled) {
+  background: var(--ds-primary-subtle);
+  color: var(--ds-text);
+}
+.ds-side__item[data-active="true"] {
+  background: var(--ds-primary-subtle);
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+}
+.ds-side__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+/* Nav arrival badges — the persistent surface the shell reports arrivals on
+   instead of a toast (lib/navBadges.ts carries that argument). --ds-info-bold
+   rather than --ds-primary: the two are the same blue in light theme, but
+   --ds-primary lightens in dark and drops --ds-text-on-bold to 3.68:1, under
+   the 4.5:1 AA floor. info-bold is #2563eb in both themes, so the pill reads
+   identically either way (scripts/design/contrast_check.mjs measures it). */
+.ds-side__badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  min-width: 1.25rem;
+  padding: 0 var(--ds-space-1);
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-info-bold);
+  color: var(--ds-text-on-bold);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-semibold);
+  line-height: 1.25rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+/* The collapsed rail is 4rem wide and mostly icon, so "99+" has nowhere to
+   go: the dot keeps the fact that something is waiting, and the button's
+   aria-label keeps the number. */
+.ds-side__dot {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--ds-radius-pill);
+  background: var(--ds-info-bold);
+  /* The ring is the rail's own surface, so the dot's contrast neighbour stays
+     --ds-surface-sunken even sitting on an active item's tint — against which
+     info-bold measures 2.84:1 in dark theme, under the 3:1 UI-graphics floor. */
+  box-shadow: 0 0 0 2px var(--ds-surface-sunken);
+}
+.ds-side__cat {
+  padding: var(--ds-space-3) var(--ds-space-2) var(--ds-space-1);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ds-text-subtlest);
+}
+
+/* Breadcrumb */
+.ds-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-sm);
+  color: var(--ds-text-subtlest);
+  min-width: 0;
+}
+.ds-crumbs__link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--ds-text-subtlest);
+  cursor: pointer;
+  text-decoration: none;
+}
+.ds-crumbs__link:hover {
+  color: var(--ds-text);
+}
+.ds-crumbs__current {
+  color: var(--ds-text);
+  font-weight: var(--ds-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Highlight */
+.ds-hl {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-6);
+  padding: var(--ds-space-6);
+  border: 1px solid transparent;
+  border-radius: var(--ds-radius-card);
+  overflow: hidden;
+}
+.ds-hl__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+  min-width: 0;
+  flex: 1;
+}
+.ds-hl__eyebrow {
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ds-hl__title {
+  font-size: var(--ds-type-page-title);
+  line-height: var(--ds-leading-heading);
+  font-weight: var(--ds-weight-semibold);
+  margin: 0;
+  color: inherit;
+}
+.ds-hl__text {
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading-sm);
+  max-width: 60ch;
+}
+.ds-hl__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: nowrap;
+  margin-top: var(--ds-space-2);
+}
+
+/* --- App shell (custom composition, not a single kit export) --- */
+.app-shell {
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+}
+.app-shell__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  height: var(--ds-topbar-height);
+  flex-shrink: 0;
+  padding: 0 var(--ds-space-4);
+  background: var(--ds-surface);
+  border-bottom: 1px solid var(--ds-border);
+}
+
+/* "last event 12s ago" — the factory's pulse, sat next to LiveStatus in the
+   topbar because the two answer different questions and neither implies the
+   other (lib/liveness.ts carries that argument). Subtle rather than default
+   text: it is a standing readout, not a state change, and it must not
+   out-shout the indicator beside it. nowrap because the label grows a word
+   at a time — "3m ago", "2 days ago" — and a topbar that reflows on a clock
+   tick is a topbar that twitches. */
+.app-topbar__pulse {
+  flex-shrink: 0;
+  color: var(--ds-text-subtle);
+  font-size: var(--ds-text-xs);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.app-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.app-page {
+  padding: var(--ds-space-6);
+  width: 100%;
+  max-width: var(--ds-content-max);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+}
+.app-page--full-bleed {
+  max-width: none;
+}
+
+/* Mobile off-canvas sidebar sheet (§2 <768px, custom — Sheet reused as the
+   documented mobile-sidebar case, the kit's Sheet.prompt.md). */
+.app-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--ds-text) 40%, transparent);
+  animation: ds-fade var(--ds-motion) var(--ds-ease-out);
+}
+.app-sheet {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 50;
+  width: var(--ds-sidebar-width);
+  max-width: 85vw;
+  box-shadow: var(--ds-shadow-overlay);
+}
+
+/* --- Causal timeline (gap component §6.2.1) --- */
+.timeline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2) 0;
+}
+.timeline-row__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: var(--ds-radius-pill);
+  margin-top: 2px;
+}
+.timeline-row__main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.timeline-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  flex-wrap: wrap;
+}
+.timeline-row__title {
+  font-weight: var(--ds-weight-medium);
+  overflow-wrap: anywhere;
+}
+.timeline-row__meta {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+/* .timeline-children is gone: TimelineNodeList renders its disclosure panels
+   as `<div role="group" :hidden … style="padding-left: 1.5rem">` with no class
+   at all, so the rule had no user — deleted rather than left as dead CSS, and
+   the <ol> inside stacks as blocks regardless (D-229). */
+
+/* --- Kanban board (gap component §6.2.2; operator directive 1 cleanup
+   pass Phase 6b — tighter cards, sunken wells with a visible border (not
+   just a colour wash), clearer counts, more whitespace rhythm per the
+   spacing scale) --- */
+.kanban-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-6);
+  overflow-x: auto;
+  padding-bottom: var(--ds-space-2);
+}
+/* Bug fix (Phase 6b round 7, token-existence check): both properties below
+   referenced --ds-space-5, which doesn't exist in the 4/6/8 spacing scale
+   — same invalid-custom-property bug class as the milestone-block padding
+   (round 4) and Roadmap SectionHeading gap (round 6), just never noticed
+   here because nothing visually obvious sat flush; the lane's own border/
+   background still rendered, just with 0 internal padding and 0 gap
+   between the status columns. --ds-space-4 (the "gap inside a section"
+   token, per its own ds-tokens.css comment) is the real fit for both. */
+.kanban-lane {
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  background: var(--ds-surface-raised);
+  padding: var(--ds-space-4);
+}
+.kanban-lane__columns {
+  display: flex;
+  gap: var(--ds-space-4);
+  margin-top: var(--ds-space-4);
+}
+.kanban-col {
+  flex: 1 0 232px;
+  min-width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  background: var(--ds-surface-sunken);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  padding: var(--ds-space-3);
+}
+.kanban-col__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 var(--ds-space-1);
+}
+.kanban-col__count {
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtlest);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+  text-align: right;
+}
+.kanban-col__substatus {
+  padding: 0 var(--ds-space-1);
+  margin-top: calc(-1 * var(--ds-space-2));
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+.kanban-col__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2-5);
+}
+.kanban-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  min-height: 24px;
+  padding: var(--ds-space-3);
+  background: var(--ds-surface-raised);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-shadow-raised);
+  cursor: pointer;
+  transition: background var(--ds-motion-fast) var(--ds-ease-out);
+}
+.kanban-card:hover {
+  background: var(--ds-surface-sunken);
+}
+/* TaskCard is role="link" tabindex="0" on a plain div, not a native <a>/
+   <button> — the vendored base layer's `[tabindex]:focus-visible` rule
+   (ds-tokens.css) should already cover it, but an explicit rule here
+   removes any doubt and matches the outline width/colour exactly. */
+.kanban-card:focus-visible {
+  outline: var(--ds-focus-width) solid var(--ds-focus-ring);
+  outline-offset: 1px;
+}
+.kanban-card__title {
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.kanban-card__id {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+.kanban-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-1);
+}
+
+/* --- Raw form elements (disclosed simplification, DESIGN.md's primitive
+   inventory) --- TimelinePage's search <input> and KanbanPage's epic
+   <select> are plain elements this phase, not a built kit Field/Input/
+   Select component. The vendored base layer's `input:focus-visible` /
+   `select:focus-visible` rules (ds-tokens.css) should already cover
+   them, but an explicit rule here removes any doubt. */
+.raw-input:focus-visible {
+  outline: var(--ds-focus-width) solid var(--ds-focus-ring);
+  outline-offset: 1px;
+}
+
+/* --- Phase 6b primitives (ui/docs/DESIGN.md's inventory, built properly
+   this phase — Select/Tabs/Dialog/AlertDialog/Popover/RadioGroup/Textarea).
+   z-index scale: topbar 10 < popover 45 < sheet-overlay/sheet 40/50 <
+   dialog-overlay/dialog 55/56 < toast 70. --- */
+
+/* Select (replaces the disclosed .raw-input <select> simplification). */
+.ds-select {
+  height: var(--ds-control-height);
+  padding: 0 var(--ds-space-2);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-control);
+  background: var(--ds-surface);
+  color: var(--ds-text);
+  font-size: var(--ds-text-sm);
+}
+.ds-select:focus-visible {
+  outline: var(--ds-focus-width) solid var(--ds-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Textarea */
+.ds-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: var(--ds-space-2);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-control);
+  background: var(--ds-surface);
+  color: var(--ds-text);
+  font: inherit;
+  resize: vertical;
+}
+.ds-textarea:focus-visible {
+  outline: var(--ds-focus-width) solid var(--ds-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Tabs (WAI-ARIA Tabs pattern, roving tabindex). */
+.ds-tabs__list {
+  display: flex;
+  gap: var(--ds-space-1);
+  border-bottom: 1px solid var(--ds-border);
+}
+.ds-tabs__tab {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtlest);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.ds-tabs__tab[aria-selected="true"] {
+  color: var(--ds-text);
+  border-bottom-color: var(--ds-primary);
+}
+.ds-tabs__tab:focus-visible {
+  outline: var(--ds-focus-width) solid var(--ds-focus-ring);
+  outline-offset: -2px;
+}
+.ds-tabs__panel {
+  padding-top: var(--ds-space-4);
+}
+
+/* RadioGroup */
+.ds-radiogroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ds-radio {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-sm);
+}
+.ds-radio input[type="radio"] {
+  accent-color: var(--ds-primary);
+}
+
+/* Popover (light-weight anchored panel — waiver confirm). */
+.ds-popover {
+  position: relative;
+  display: inline-block;
+}
+.ds-popover__panel {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + var(--ds-space-1));
+  right: 0;
+  min-width: 240px;
+  padding: var(--ds-space-3);
+  background: var(--ds-surface-raised);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  box-shadow: var(--ds-shadow-overlay);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+
+/* Dialog / AlertDialog */
+.ds-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: color-mix(in srgb, var(--ds-text) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ds-space-4);
+}
+.ds-dialog {
+  position: relative;
+  z-index: 56;
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--ds-surface);
+  border-radius: var(--ds-radius-card);
+  box-shadow: var(--ds-shadow-overlay);
+  /* Bug fix (Phase 6b round 7, token-existence check): --ds-space-5 again
+     (see .kanban-lane's comment above) — the dialog box had 0 internal
+     padding, content sitting flush against its own edges. */
+  padding: var(--ds-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-4);
+}
+.ds-dialog--sm {
+  max-width: 420px;
+}
+.ds-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+}
+.ds-dialog__title {
+  /* Bug fix (Phase 6b round 7, token-existence check): --ds-text-lg
+     doesn't exist (the scale is xs/sm/base/xl/2xl, no "lg" step) —
+     --ds-text-xl is the real next size up from base. */
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-semibold);
+}
+.ds-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+}
+.ds-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ds-space-2);
+}
+
+/* Toast */
+.ds-toast-region {
+  position: fixed;
+  bottom: var(--ds-space-4);
+  right: var(--ds-space-4);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ds-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-3);
+  min-width: 240px;
+  padding: var(--ds-space-3) var(--ds-space-3) var(--ds-space-3) var(--ds-space-4);
+  /* Bug fix (Phase 6b round 7, token-existence check): --ds-inverse-surface/
+     --ds-inverse-text were never declared ANYWHERE — not in CSS, not by any
+     component at runtime either — so these two properties always rendered
+     via their own var() FALLBACK (--ds-text / --ds-surface), never the
+     named token. Dropped the phantom wrapper; same rendered colour either
+     way (--ds-text is dark-on-light / light-on-dark per theme, --ds-surface
+     the inverse of that, which is what made this toast read as "inverse of
+     the current theme" even though the token names suggesting a dedicated
+     inverse palette never actually existed). */
+  background: var(--ds-text);
+  color: var(--ds-surface);
+  border-radius: var(--ds-radius-control);
+  box-shadow: var(--ds-shadow-overlay);
+  font-size: var(--ds-text-sm);
+  animation: ds-fade var(--ds-motion) var(--ds-ease-out);
+}
+.ds-toast > span {
+  flex: 1;
+}
+.ds-toast__dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--ds-radius-control);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.ds-toast__dismiss:hover {
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+.ds-toast__dismiss:focus-visible {
+  outline: var(--ds-focus-width) solid var(--ds-focus-ring);
+  outline-offset: 1px;
+}
+
+/* Charts (Sparkline/LineChart/BarChart — modeled on the kit's own
+   charts/{LineChart,BarChart}.jsx reference implementations). */
+.ds-chart {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-2);
+}
+.ds-chart__axisrow {
+  display: flex;
+  justify-content: space-between;
+}
+.ds-chart__axislabel {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+.ds-chart__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+.ds-chart__gridline {
+  stroke: var(--ds-border);
+  stroke-width: 1;
+}
+.ds-chart__line {
+  fill: none;
+  /* Fix-round (uiux S2 #2): --ds-chart-1 vs --ds-surface* only ever needs
+     to clear the 3:1 UI-graphics floor (a decorative data mark, not text)
+     — verified via contrast.py in both themes, see the PR description's
+     matrix (LineChart's stroke reuses chart-1, already in that table). */
+  stroke: var(--ds-chart-1);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ds-chart__point {
+  fill: var(--ds-surface-raised);
+  stroke: var(--ds-chart-1);
+  stroke-width: 1.5;
+}
+
+/* BarChart — flex column-per-category, height chain per the kit's own
+   documented comment: plot has a definite height, columns stretch to it,
+   track claims leftover space, bar is absolutely positioned inside. */
+.ds-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  width: 100%;
+}
+.ds-bars__plot {
+  display: flex;
+  align-items: stretch;
+  gap: var(--ds-space-2);
+  width: 100%;
+}
+.ds-bars__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ds-space-1-5);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.ds-bars__track {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 4px;
+  width: 100%;
+  background: var(--ds-surface-sunken);
+  border-radius: var(--ds-radius-sm, 4px);
+  overflow: hidden;
+}
+.ds-bars__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--ds-chart-1);
+  border-radius: var(--ds-radius-sm, 4px) var(--ds-radius-sm, 4px) 0 0;
+}
+.ds-bars__x {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+.ds-bars__v {
+  font-size: var(--ds-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ds-text-subtlest);
+  flex-shrink: 0;
+}
+.ds-bars__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mini-timeline (Roadmap, operator directive 4) */
+.mini-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-2);
+}
+.mini-timeline__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+}
+.mini-timeline__label {
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtlest);
+}
+.mini-timeline__row {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  font-size: var(--ds-text-xs);
+}
+.mini-timeline__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* Operator directive 4 (Phase 6b round 3): task TITLE truncated to a single
+   line (the plain-text equivalent of "line-clamp 1" — no multi-line box
+   needed for one line, so overflow+ellipsis is the minimal-CSS approach;
+   the row's own `title` attribute carries the untruncated text). */
+.mini-timeline__row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-timeline__row-meta {
+  flex-shrink: 0;
+  color: var(--ds-text-subtlest);
+}
+
+/* Roadmap as a VueFlow diagram (Phase 6b round 6 operator directive: "phần
+   roadmap, display theo dạng VueFlow"). Replaces the card-list rules
+   (.ds-card--capped / .roadmap-groups / .roadmap-group /
+   .roadmap-group-separator), which had no other users once RoadmapPage
+   stopped rendering <article> cards in stacked project groups — deleted
+   rather than left as dead CSS. The width cap those rules provided is now
+   inherent: a node is exactly one column wide.
+
+   The canvas is taller than Flow's 640px because a milestone node carries a
+   progress bar and a two-column mini-timeline, not just a title and a
+   status. Node width is kept just under roadmapFlow.ts's MILESTONE_STEP_X
+   (360) so adjacent milestones never touch. */
+.roadmap-canvas {
+  height: 720px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  background: var(--ds-surface-sunken);
+}
+.roadmap-node {
+  width: 320px;
+  padding: var(--ds-space-3);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  font-size: var(--ds-text-xs);
+  text-align: left;
+}
+/* The milestone the factory is actually on. Was border-only, on the reasoning
+   that Flow's pulsing dot marks a live AGENT and a milestone has none — the
+   operator overrode that in round 8 ("có animation ở node đang running"): the
+   whole point of the diagram is answering "where is work now", and a 1px
+   border recolour does not carry that across a 720px canvas.
+   The ring is the motion channel; border-color is the static one, so the
+   state survives prefers-reduced-motion and greyscale both, and the node's
+   Lozenge still spells "in-progress" in words. */
+.roadmap-node--live {
+  border-color: var(--ds-info-bold);
+  animation: ds-ring-pulse 2s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .roadmap-node--live {
+    /* Not just `animation: none` — that would drop the halo to nothing and
+       leave the live node less prominent than it is for everyone else. The
+       ring is kept, frozen at its starting radius. */
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-info-bold) 30%, transparent);
+  }
+}
+.roadmap-node__title {
+  font-weight: var(--ds-weight-semibold);
+  font-size: var(--ds-text-sm);
+}
+.roadmap-node__goal {
+  margin-top: var(--ds-space-2);
+  color: var(--ds-text-subtle);
+  overflow-wrap: anywhere;
+}
+/* Inside a node the two timeline columns sit side by side — the node is
+   wide and short-ish, the opposite of the old full-width card where
+   stacking read better. */
+.roadmap-node .mini-timeline {
+  flex-direction: row;
+  gap: var(--ds-space-4);
+}
+.roadmap-node .mini-timeline__col {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Projects hub cards */
+.project-card__stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-2);
+}
+.project-card__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.project-card__stat-value {
+  /* Bug fix (Phase 6b round 7, token-existence check): --ds-text-lg
+     doesn't exist — same fix as .ds-dialog__title above, --ds-text-xl. */
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.project-card__stat-label {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+
+/* Flow page */
+.flow-canvas {
+  height: 640px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  background: var(--ds-surface-sunken);
+}
+.flow-node {
+  /* The box is FIXED, and it is the same box lib/flowLayout.ts reserves:
+     NODE_WIDTH 232 / NODE_HEIGHT 132. The layout places nodes a full
+     COLUMN_GAP (96) and ROW_GAP (48) apart on top of that, so the two files
+     have to move together — flowLayout.test.ts's all-pairs overlap check is
+     what catches them drifting apart. (Round 6's reason for capping the box
+     still holds: a node must not grow to swallow the canvas, and the label is
+     clamped to two lines because summarize()'s char cap alone cannot stop a
+     single unbroken token like a path or a URL.)
+
+     Operator directive (round 11): "tách nhau ra và hiển thị rõ ràng hơn" —
+     separation is geometry, clarity is contrast, so the node also moves from
+     the flat --ds-surface it shared with the canvas onto a raised surface
+     with the standard card shadow and radius. Each node now reads as an
+     object lifted off the board rather than a rectangle drawn on it. */
+  width: 232px;
+  min-height: 132px;
+  padding: var(--ds-space-3);
+  background: var(--ds-surface-raised);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  box-shadow: var(--ds-shadow-raised);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-sm);
+}
+.flow-node--live {
+  border-color: var(--ds-info-bold);
+}
+.flow-node__id {
+  /* Round 11: names the task the node IS, above the objective summary. Mono
+     so ids align down a column; one line, clipped — the full id is in the
+     node's tooltip and in the sr-only table. --ds-text-subtlest on
+     --ds-surface-raised is 4.83:1 light / 6.91:1 dark, checked as text
+     (contrast_check.mjs), not merely as a UI graphic. */
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.flow-node__title {
+  font-weight: var(--ds-weight-medium);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.flow-node__tags {
+  display: flex;
+  gap: var(--ds-space-1);
+  flex-wrap: wrap;
+  /* Pushed to the bottom of the fixed-height box so status sits on one line
+     across the whole diagram, however long the title above it wrapped. */
+  margin-top: auto;
+}
+/* Operator directive 1 (Phase 6b round 3): the pulse moves from the whole
+   node (fix-round's .flow-node--live) to a small dedicated dot — "gentle
+   opacity pulse", not the entire node dimming. Text colour is
+   --ds-info-bold, already used for the node's live border, so no new token
+   pairing needs a contrast_check.mjs entry. */
+.flow-node__live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ds-space-1);
+  font-size: var(--ds-text-xs);
+  color: var(--ds-info-bold);
+}
+.flow-node__live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ds-info-bold);
+  flex-shrink: 0;
+  animation: ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flow-node__live-dot {
+    animation: none;
+  }
+  /* Operator directive 1: edges keep their dash pattern under reduced
+     motion (still "dashed") but the marching-dashes animation stops —
+     Vue Flow's own .animated class (dist/style.css) supplies the
+     dashdraw keyframe; this override only removes the motion. */
+  .vue-flow__edge.animated path {
+    animation: none;
+  }
+}
+.flow-checkpoint {
+  width: 32px;
+  height: 32px;
+  transform: rotate(45deg);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Operator directive (round 11): replaces `.flow-wave-band`, the absolutely-
+   positioned stripe this page used to paint behind the canvas. The band was
+   laid out in the page's pixels while the graph is drawn in the viewport's,
+   so `fit-view-on-init` alone put the two out of register and any pan or zoom
+   widened the gap (design-spec.md §A.4-5 records the same defect). This is a
+   Vue Flow node instead — it is transformed with the column it heads, so it
+   cannot drift. It keeps round 3's reading as a column header (semibold, sits
+   above its column) and drops the tint, which was doing no work at 4%.
+
+   It matches the node width exactly so the header and its column share one
+   left edge. --ds-text-subtle / --ds-text-subtlest on --ds-surface-sunken are
+   both checked as text against the 4.5:1 floor in contrast_check.mjs. */
+.flow-wave-label {
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-0-5);
+  padding-bottom: var(--ds-space-2);
+  border-bottom: 1px solid var(--ds-border);
+  pointer-events: none;
+}
+.flow-wave-label__name {
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-subtle);
+}
+.flow-wave-label__count {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+
+/* Sessions canvas (operator directive: "Làm kiểu T1", after reading nodeterm).
+   The dot classes are NOT redefined here — .running-session__dot* and
+   .live-agent-entry__dot* are reused verbatim from the Overview rules above,
+   so the two surfaces reading /api/overview speak one visual vocabulary and a
+   threshold change lands in both at once.
+
+   Both node boxes are height-budgeted against lib/sessionsFlow.ts, the same
+   way .flow-node is budgeted against lib/flowLayout.ts, and the budget runs the
+   other way round from what the arithmetic first suggests: .session-node's cap
+   IS the layout's SESSION_NODE_H (136), which that file imposes as a band's
+   minimum height, so a session card can never be taller than the band drawn
+   around it. .agent-node is capped one notch under AGENT_STEP_Y (84 - 72 = a
+   12px channel), so consecutive agents in a band cannot touch however the data
+   comes back. If those constants move, these caps move with them.
+
+   The caps are declared max-heights and not merely the sum of the paddings,
+   because every metric inside a node is rem-based (--ds-text-sm, --ds-space-3)
+   while AGENT_STEP_Y and SESSION_NODE_H are absolute px: a reader whose browser
+   default font size is 20px scales the content ~1.25x and would push a band
+   into the one below it. Under a cap that reader loses the last line of a node
+   instead — a clipped project chip, whose full list is already in the title
+   attribute and in the sr-only table. Degrading to clipped beats degrading to
+   overlapped, and the e2e overlap test only ever runs at 16px. */
+.sessions-canvas {
+  height: 640px;
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  background: var(--ds-surface-sunken);
+}
+/* Same weight as Overview's .now-running-more: a truncation note is a footnote
+   about the view, never a finding about the factory. */
+.sessions-canvas__more {
+  margin: var(--ds-space-2) 0 0;
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+
+/* 320 wide against AGENT_COLUMN_X (380) leaves a 60px channel for the edge —
+   the same "node narrower than its step" rule .roadmap-node follows. */
+.session-node {
+  width: 320px;
+  /* SESSION_NODE_H — the floor sessionsFlow.ts puts under every band precisely
+     so this card fits in one. See the height-budget note above. */
+  max-height: 136px;
+  overflow: hidden;
+  padding: var(--ds-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1-5);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  font-size: var(--ds-text-xs);
+  text-align: left;
+}
+/* Border only, deliberately — no ring, unlike .roadmap-node--live. Roadmap had
+   no other motion channel, so round 8's directive put the pulse on the node
+   itself. Here an active run already animates in two places: its dot, and the
+   edges out to every agent it is driving (sessionsFlow.ts animates an edge
+   only when the run AND the agent are both moving). A third concentric pulse
+   per band would be noise, not information. The state still survives greyscale
+   and reduced motion because the node's Lozenge spells it in words. */
+.session-node--active {
+  border-color: var(--ds-info-bold);
+}
+.session-node__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  overflow: hidden;
+}
+/* The dot and the state word hold their size; the id is the only thing allowed
+   to give ground, because it is the only one whose tail is redundant. */
+.session-node__head > .running-session__dot,
+.session-node__head > .ds-loz {
+  flex-shrink: 0;
+}
+/* One line, always. The height budget above only holds if nothing wraps, and a
+   session id is opaque enough that its tail is not what identifies it — the
+   full id is in the title attribute and in the sr-only table. */
+.session-node__id {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-semibold);
+  font-family: var(--ds-font-mono);
+}
+.session-node__meta,
+.session-node__agents {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ds-text-subtle);
+}
+.session-node__agents code {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtlest);
+}
+/* Chips clip rather than wrap, for the same height budget. A session's project
+   list is 0–2 entries in practice; the container carries the full list in its
+   title attribute so a clipped third is still reachable. */
+.session-node__projects {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: var(--ds-space-1-5);
+  overflow: hidden;
+}
+
+/* Under AGENT_STEP_Y (84) by a 12px channel, so consecutive agents in the same
+   band never touch. The node's own content is ~62px at a 16px root — 8px
+   padding twice, a 20px lozenge row, a 6px gap, a ~20px foot row — so min-height
+   is what governs at that size, and dropping the cap from 96 to 72 clips
+   nothing that a 72px floor was not already deciding. */
+.agent-node {
+  width: 300px;
+  min-height: 64px;
+  /* AGENT_STEP_Y (84) less the channel. Two agents in a band step by 84. */
+  max-height: 72px;
+  overflow: hidden;
+  padding: var(--ds-space-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--ds-space-1-5);
+  background: var(--ds-surface-raised);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-card);
+  box-shadow: var(--ds-shadow-raised);
+  font-size: var(--ds-text-xs);
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+}
+/* Only an agent that carries a taskId renders as a <button>; the rest are
+   <article>s, so there is no control here that looks clickable and does
+   nothing. These rules apply to the button case only. */
+.agent-node--linked {
+  cursor: pointer;
+}
+.agent-node--linked:hover {
+  border-color: var(--ds-border-bold);
+}
+.agent-node--linked:focus-visible {
+  outline: 2px solid var(--ds-focus-ring);
+  outline-offset: 2px;
+}
+.agent-node__head {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  overflow: hidden;
+}
+.agent-node__head > .live-agent-entry__dot,
+.agent-node__head > .ds-loz:last-child {
+  flex-shrink: 0;
+}
+.agent-node__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ds-space-2);
+  color: var(--ds-text-subtlest);
+}
+.agent-node__task {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Tabular figures so a ticking "2h 13m" does not reflow the row every second
+   — same reason Overview's elapsed labels use them. */
+.agent-node__elapsed {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* IdentityChip (fix-round, uiux S2 #1): chart token on border + dot only;
+   label text is --ds-text-subtlest (4.5:1 AA in both themes, independent
+   of which chart slot is assigned — see IdentityChip.vue's header comment). */
+.identity-chip {
+  color: var(--ds-text-subtlest);
+  gap: var(--ds-space-1-5);
+}
+.identity-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* Round 9: opt-in, and only ever set from data (IdentityChip.vue's `live`
+   prop). Reuses ds-pulse rather than adding a fourth cadence to the page —
+   this dot and the entry dots below it are the same claim at two zoom
+   levels, so they should breathe together. */
+.identity-chip__dot--live {
+  animation: ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .identity-chip__dot--live {
+    animation: none;
+  }
+}

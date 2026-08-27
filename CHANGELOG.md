@@ -590,9 +590,81 @@ than appearing in it.
   `ui/src` and carries 22 unit tests besides, because a sweep that has never
   failed is a sweep nobody has proven fires. No new dependency, and no CI
   wiring — it is a test in the ui suite `scripts/check.sh` already runs.
+- **The stack is an install-time answer, not a mandate**
+  (`factory/policies/stack.yml`). Blacksmith used to ship one operator's
+  answers, recorded 2026-08-03 and hand-compiled into `docs/standards/stack.md`
+  as prose every scaffolded project was told to obey: Vue 3 + Vite, Workers +
+  Hono, SQLite/D1 + Drizzle, and a design system that lives in a private
+  repository. A stranger who cloned this repo inherited all of it, including
+  the part they could not obtain. Now [`INSTALL.md`](INSTALL.md) Step 5 asks
+  the fifteen questions once, the answers land in one commented YAML, and
+  `smith new` reads that file rather than a standard. The shipped answers are
+  the ones that assume least — `frontend: none`, `backend: none`,
+  `design_system: none` — so a fresh clone inherits nobody's taste, and
+  `stack.md` now documents what reads each field instead of dictating it.
+  - `smith stack show` prints what this clone answered. `smith stack check`
+    sorts every field into **honoured** (a shipped template reads it),
+    **recorded** (nothing in `factory/scaffold/` reads it, but the agents do)
+    and **refused**, and exits non-zero only on `refused` — a check that goes
+    red for every operator whose stack is wider than the template tree is a
+    check they learn to ignore.
+  - An answer the templates cannot build makes `smith new` **refuse before it
+    creates anything**, rather than quietly handing over the frontend they do
+    ship: answering `frontend: react` and receiving Vue reads as the factory
+    ignoring the interview it just ran. Both the scaffoldability check and the
+    design-system resolution run ahead of the first `mkdirSync`, so a refusal
+    leaves nothing behind to clean up.
+  - `design_system` names a kit and `design_system_source` names a directory:
+    `smith new --ui` copies that directory into the new project's `design/`
+    verbatim and imports its tokens. Vendored, never referenced — a named
+    source that is not on disk is a refusal, not a warning. And
+    `src/styles/main.css` is generated from the `styling` and `design_system`
+    answers rather than copied from a template, because its content follows
+    from them.
+  - Validation is written against YAML 1.2 as it actually reads: closed
+    vocabularies check membership instead of truthiness (`off`, `no` and `yes`
+    are all non-empty, all truthy), and free-text fields refuse a non-string
+    outright, because an unquoted version arrives as a number.
+    `factory/orchestrator/test/stack.test.ts` carries 18 tests over it.
+  - `stack show` and `stack check` share one dispatch arm and branch on
+    `action` inside it — a shape the help-table drift guard misread, handing
+    that inner branch to the last bare namespace above it and so inventing a
+    `new show` while losing the real `new`. The extractor in `usage.test.ts`
+    now reads pair-form arms as well as bare ones, so only a bare namespace
+    can own a nested action.
 
 ### Changed
 
+- **Nothing prescribes a design system any more, and the dashboard stopped
+  naming a private one.** This repo's own kit was called HDS, after the
+  private design system it was ported from, and the name had leaked into
+  places that bind *other people's* projects: the `uiux` agent was told to
+  write an "HDS-grounded" spec, `taxonomy.yml`'s finding vocabulary carried a
+  `visual-hds` category, `severity.yml`'s S3 row read "visual regression vs
+  HDS", and `ui/docs/DESIGN.md` opened by declaring this repository an adopter
+  of a design system whose registry lives somewhere nobody outside can clone.
+  - `visual-hds` → `visual-design`, named for the uiux spec the render departs
+    from rather than for any one kit. `suggestCanonical` derives its
+    suggestions from the vocabulary itself, so the rename retargets the
+    typo-suggestion for free and the bare-tail rule still resolves `design` to
+    exactly one candidate; no recorded event carried the old value.
+  - The `uiux` agent looks the answer up instead of assuming it. Which design
+    system a project has is a fact in `factory/policies/stack.yml`, a project
+    scaffolded with a named kit carries it vendored at `design/`, and
+    `design_system: none` is a complete answer — spec against the components
+    and tokens the project already ships, and say in the spec that you did.
+  - The dashboard's kit moved to the neutral namespace its tokens already
+    used: `ui/src/components/hds/` → `components/ds/`, `hds-tokens.css` and
+    `hds-components.css` → `ds-*`, and the `hds-` class prefix → `ds-` across
+    `ui/src`, `ui/test`, `ui/e2e` and the four design gates. Every token was
+    already `--ds-*`, so nothing collided. The port's provenance is now
+    recorded once, in `ui/docs/DESIGN.md`, and reads as a footnote about where
+    files came from rather than as somewhere to go — nothing under `ui/`
+    reaches outside this repository at build or run time.
+  - Section A of `docs/specs/black-smith-interview.md`, the stack questions,
+    is a pointer to `INSTALL.md` and `stack.yml` instead of a second copy of
+    them, because a second copy is a copy that drifts. The dated answers
+    already recorded there stay: they are history, not a declaration.
 - Demo project fixtures, screenshots and compiled lessons use neutral names
   (`demo-rpg`, `demo-hub`). Provider credentials are environment-only, named
   in `.env.example` and never committed.

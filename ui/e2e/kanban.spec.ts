@@ -35,8 +35,8 @@ test.describe('Kanban', () => {
     await page.route('**/api/overview*', (route) => route.abort('failed'));
     await page.goto('/kanban');
     await expect(page.locator('h1')).toHaveText('Kanban');
-    await expect(page.locator('.hds-skeleton')).toHaveCount(0);
-    await expect(page.locator('.hds-banner')).toBeVisible();
+    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.ds-banner')).toBeVisible();
     // The board's own endpoint is healthy, so the tasks still arrive.
     await expect(page.locator('.kanban-card').first()).toBeVisible();
   });
@@ -68,9 +68,9 @@ test.describe('Kanban', () => {
     );
     await page.goto('/kanban');
 
-    // `.hds-toolbar__count` also labels the Epic Select, so scope to the end
+    // `.ds-toolbar__count` also labels the Epic Select, so scope to the end
     // slot where Toolbar.vue puts the real one.
-    const count = page.locator('.hds-toolbar__end .hds-toolbar__count');
+    const count = page.locator('.ds-toolbar__end .ds-toolbar__count');
     await expect(count).toHaveText('1 tasks');
     await expect(page.locator('.kanban-card')).toHaveCount(1);
   });
@@ -99,7 +99,7 @@ test.describe('Kanban', () => {
       }),
     );
     await page.goto('/kanban');
-    await expect(page.locator('.hds-toolbar__end .hds-toolbar__count')).toHaveText('0 tasks');
+    await expect(page.locator('.ds-toolbar__end .ds-toolbar__count')).toHaveText('0 tasks');
     await expect(page.getByText('No tasks match these filters.')).toBeVisible();
   });
 
@@ -114,7 +114,7 @@ test.describe('Kanban', () => {
       await route.continue();
     });
     await page.goto('/kanban');
-    const skeleton = page.locator('.hds-skeleton').first();
+    const skeleton = page.locator('.ds-skeleton').first();
     await expect(skeleton).toBeVisible();
     const box = await skeleton.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThan(100);

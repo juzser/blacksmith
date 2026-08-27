@@ -1,8 +1,14 @@
 // New-project scaffolder (architecture §14 "Unified stack standard").
-// `factory/scaffold/base/` is the always-copied template tree implementing
-// docs/standards/stack.md; `factory/scaffold/ui/` layers Vue+Vite+vendored
-// HDS tokens on top for `--ui` projects. Deterministic file copy + string
-// substitution only — no LLM calls, no network, no git push (guardrails.md:
+// `factory/scaffold/base/` is the always-copied template tree;
+// `factory/scaffold/ui/` layers Vue+Vite on top for `--ui` projects, and
+// `factory/scaffold/ui-tailwind/` layers the utility CSS over that when the
+// operator answered `styling: tailwind`. What gets layered is not this
+// module's opinion: factory/policies/stack.yml holds the answers, stack.ts
+// parses them, and an answer these templates cannot build stops the scaffold
+// (requireScaffoldable) instead of quietly producing a different project —
+// which is what the old hardcoded "Vue + Tailwind + a private design system"
+// path did to anyone who wanted something else. Deterministic file copy +
+// string substitution only — no LLM calls, no network, no git push (guardrails.md:
 // only the operator pushes/creates the remote; this module prints the
 // commands for them to run, never executes them).
 import { spawnSync } from 'node:child_process';
@@ -20,6 +26,7 @@ import { SmithError } from './errors.js';
 import { runGit as git } from './git.js';
 import { REPO_ROOT, ROADMAP_PATH, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
 import { readRoadmapText, roadmapDeclaresId } from './roadmap.js';
+import { loadStackAnswers, requireScaffoldable, type StackAnswers } from './stack.js';
 
 export class ScaffoldError extends SmithError {}
 
@@ -144,27 +151,102 @@ export function mergePackageJson(targetDir: string, fragmentPath: string): void 
   writeFileSync(packageJsonPath, `${JSON.stringify(base, null, 2)}\n`, 'utf8');
 }
 
-/**
- * The HDS kit is vendor-copied into each scaffolded UI project (stack.md:
- * "never referenced from an external repo") — sourced from black-smith's
- * OWN already-vendored copy (`ui/src/styles/`) rather than re-declaring the
- * tokens a second time in the template tree, so there is exactly one place
- * that ever hand-edits the HDS token values.
- */
-function vendorHdsTokens(targetDir: string, repoRoot: string): string[] {
-  const sourceDir = path.join(repoRoot, 'ui', 'src', 'styles');
-  const destDir = path.join(targetDir, 'hds');
+/** Verbatim recursive copy — no placeholder substitution, no `.tmpl` stripping. */
+function copyTree(srcDir: string, destDir: string, written: string[]): void {
   mkdirSync(destDir, { recursive: true });
-  const files = ['hds-tokens.css', 'hds-components.css'];
-  const written: string[] = [];
-  for (const file of files) {
-    const src = path.join(sourceDir, file);
-    if (!existsSync(src)) continue; // best-effort — never fatal to the scaffold
-    const dest = path.join(destDir, file);
+  for (const entry of readdirSync(srcDir)) {
+    const src = path.join(srcDir, entry);
+    const dest = path.join(destDir, entry);
+    if (statSync(src).isDirectory()) {
+      copyTree(src, dest, written);
+      continue;
+    }
     copyFileSync(src, dest);
     written.push(dest);
   }
+}
+
+/**
+ * Vendor the operator's design system into `<project>/design/`.
+ *
+ * Vendored, never referenced from an external repo: a design system a project
+ * cannot build offline is a dependency on somebody else's uptime. What is
+ * copied comes from stack.yml, not from here — this repo used to hardcode its
+ * own dashboard's private kit as `hds/` in every scaffolded project, which
+ * made every project downstream of a design system its operator could not
+ * obtain. `design_system: none` vendors nothing, which is the right answer
+ * for a project that owns its own components.
+ *
+ * A named source that does not exist is a refusal, not a skip. The previous
+ * version's `if (!existsSync(src)) continue` meant a moved kit produced a
+ * project whose stylesheet imported a directory that was never written, and
+ * the scaffold reported success. Resolution is split out from the copy so the
+ * refusal lands before the target directory exists, rather than leaving half
+ * a project for the operator to clean up.
+ */
+function resolveDesignSystemSource(stack: StackAnswers, repoRoot: string): string | null {
+  if (stack.designSystem === 'none' || stack.designSystemSource === '') return null;
+  const source = stack.designSystemSource;
+  const sourceDir = path.isAbsolute(source) ? source : path.join(repoRoot, source);
+  if (!existsSync(sourceDir)) {
+    throw new ScaffoldError(
+      'scaffold.design-system-missing',
+      `factory/policies/stack.yml names design_system_source ${source}, which does not exist (looked in ${sourceDir}). Fix the path or set design_system: none.`,
+      { designSystem: stack.designSystem, source, sourceDir },
+    );
+  }
+  return sourceDir;
+}
+
+/** Copy the resolved kit in. Resolution already happened, and already refused. */
+function vendorDesignSystem(targetDir: string, sourceDir: string | null): string[] {
+  if (sourceDir === null) return [];
+  const written: string[] = [];
+  copyTree(sourceDir, path.join(targetDir, DESIGN_DIR), written);
   return written;
+}
+
+/** Where a vendored kit lands, and the token file the style entry imports if it finds one. */
+const DESIGN_DIR = 'design';
+const DESIGN_TOKENS_FILE = 'tokens.css';
+
+/**
+ * Write `src/styles/main.css`, which is generated rather than copied.
+ *
+ * Its whole content is a consequence of two answers — whether Tailwind is the
+ * utility layer, and whether a design system was vendored — so a static
+ * template could only be right for one combination. It was: `@import
+ * 'tailwindcss'` over `@import '../../hds/hds-tokens.css'`, both unconditional.
+ */
+function writeStyleEntry(targetDir: string, stack: StackAnswers): string {
+  const lines = [
+    '/* Style entry, generated by `smith new` from factory/policies/stack.yml',
+    ` * (styling: ${stack.styling}, design_system: ${stack.designSystem}).`,
+    ' * Yours from here — nothing regenerates this file.',
+    ' */',
+  ];
+  if (stack.styling === 'tailwind') lines.push("@import 'tailwindcss';");
+  const tokens = path.join(targetDir, DESIGN_DIR, DESIGN_TOKENS_FILE);
+  if (existsSync(tokens)) lines.push(`@import '../../${DESIGN_DIR}/${DESIGN_TOKENS_FILE}';`);
+  else if (stack.designSystem !== 'none') {
+    lines.push(
+      `/* ${stack.designSystem} is vendored under ${DESIGN_DIR}/ but ships no`,
+      ` * ${DESIGN_TOKENS_FILE} — import its entry point here. */`,
+    );
+  }
+  lines.push(
+    '',
+    '.app {',
+    '  margin: 0 auto;',
+    '  max-width: 60rem;',
+    '  padding: 2rem 1.5rem;',
+    '}',
+    '',
+  );
+  const dest = path.join(targetDir, 'src', 'styles', 'main.css');
+  mkdirSync(path.dirname(dest), { recursive: true });
+  writeFileSync(dest, lines.join('\n'), 'utf8');
+  return dest;
 }
 
 const SETUP_BRANCH = 'setup';
@@ -209,7 +291,7 @@ function initGitRepo(targetDir: string): CommitIdentity {
   git(targetDir, ['checkout', '-b', SETUP_BRANCH]);
   const identity = ensureCommitIdentity(targetDir);
   git(targetDir, ['add', '-A']);
-  git(targetDir, ['commit', '-m', 'Initial scaffold from black-smith (docs/standards/stack.md)']);
+  git(targetDir, ['commit', '-m', 'Initial scaffold from Blacksmith (factory/policies/stack.yml)']);
   return identity;
 }
 
@@ -267,7 +349,14 @@ export interface ScaffoldOptions {
   /** Defaults to REPO_ROOT/workspaces/<projectName>. */
   targetDir?: string;
   templateDir?: string; // defaults to factory/scaffold/
-  repoRoot?: string; // for vendoring HDS tokens; defaults to REPO_ROOT
+  /** Resolves a relative `design_system_source`; defaults to REPO_ROOT. */
+  repoRoot?: string;
+  /**
+   * The operator's stack answers; defaults to factory/policies/stack.yml.
+   * Injected by tests so a unit test asserts against the answers it names
+   * rather than against whatever this clone's operator happens to run.
+   */
+  stack?: StackAnswers;
   /** Skip git init/commit — used by tests that only care about the file tree. */
   skipGit?: boolean;
   /**
@@ -336,9 +425,14 @@ function runToolchain(targetDir: string, run: RunCommand): ToolchainReport {
 
 export function scaffoldProject(opts: ScaffoldOptions): ScaffoldResult {
   validateProjectName(opts.projectName);
+  const stack = opts.stack ?? loadStackAnswers();
+  // Before the directory is created, not after: a refusal that leaves half a
+  // project behind is a refusal the operator has to clean up.
+  requireScaffoldable(stack, { ui: opts.ui });
 
   const templateDir = opts.templateDir ?? SCAFFOLD_DIR;
   const repoRoot = opts.repoRoot ?? REPO_ROOT;
+  const designSystemDir = opts.ui ? resolveDesignSystemSource(stack, repoRoot) : null;
   const targetDir = opts.targetDir ?? path.join(WORKSPACES_DIR, opts.projectName);
 
   if (existsSync(targetDir) && readdirSync(targetDir).length > 0) {
@@ -364,7 +458,22 @@ export function scaffoldProject(opts: ScaffoldOptions): ScaffoldResult {
       new Set([PACKAGE_FRAGMENT_NAME]),
     );
     mergePackageJson(targetDir, path.join(uiDir, PACKAGE_FRAGMENT_NAME));
-    filesWritten.push(...vendorHdsTokens(targetDir, repoRoot));
+    if (stack.styling === 'tailwind') {
+      // A layer, not a variant: it overwrites vite.config.ts with the same
+      // file plus the plugin, and merges the dependency in. `plain-css`
+      // projects never see Tailwind in their lockfile, which is the point.
+      const tailwindDir = path.join(templateDir, 'ui-tailwind');
+      copyTemplateDir(
+        tailwindDir,
+        targetDir,
+        opts.projectName,
+        filesWritten,
+        new Set([PACKAGE_FRAGMENT_NAME]),
+      );
+      mergePackageJson(targetDir, path.join(tailwindDir, PACKAGE_FRAGMENT_NAME));
+    }
+    filesWritten.push(...vendorDesignSystem(targetDir, designSystemDir));
+    filesWritten.push(writeStyleEntry(targetDir, stack));
   }
 
   // Before the commit, not after: `pnpm install` is what writes

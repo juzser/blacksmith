@@ -39,6 +39,15 @@ export const SENSITIVE_PATHS_POLICY_PATH = path.join(
 export const GUARDRAILS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'guardrails.yml');
 
 /**
+ * The operator's stack answers, recorded at install time (stack.ts).
+ *
+ * A declaration, not state: it is what this operator said they build with,
+ * and the scaffolder reads it instead of the prose in docs/standards/stack.md
+ * — which described one operator's stack as if it were everyone's.
+ */
+export const STACK_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'stack.yml');
+
+/**
  * Open judge sandbox leases, one file per worktree (sandbox.ts).
  *
  * Under `state/` because a lease is state, not a declaration — and in the

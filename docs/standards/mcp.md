@@ -54,9 +54,13 @@ is therefore its own command, run when the tools are known.
   to the MCP client that spawned the process, which is what the spec
   recommends for locally-run servers and what makes the rest of this section
   mostly unnecessary.
-- **MCP-X2 — HTTP sits behind Cloudflare Access.** The Streamable HTTP opt-in
-  requires `transport.access.cloudflareAccess: true`, matching stack.md:
-  "Cloudflare Access before anything is exposed beyond localhost".
+- **MCP-X2 — HTTP sits behind an authenticating proxy.** The Streamable HTTP
+  opt-in requires `transport.access.cloudflareAccess: true`. Nothing is
+  exposed beyond localhost without something that authenticates in front of
+  it. The field is named for the proxy this repo was built against; it is the
+  one place the stack interview's `hosting` answer is not yet honoured, and it
+  is a deliberate hardcode rather than an oversight — see the note in
+  [stack.md](stack.md).
 - **MCP-X3 — HTTP is an OAuth 2.0 protected resource, declared precisely.**
   `resourceServer` names an https `canonicalUri` (the token audience), at
   least one https `authorizationServers` issuer, and

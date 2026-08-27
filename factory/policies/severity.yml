@@ -40,7 +40,7 @@ levels:
     blocks_merge: false
     semantics: waivable — batched to operator at epic end
     classes:
-      - visual regression vs HDS
+      - visual regression vs the uiux spec
       - performance regression > 20%
       - over-engineering (default severity — see rule below)
       - behavioral-drift not touching a core flow

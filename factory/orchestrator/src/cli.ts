@@ -157,6 +157,7 @@ import {
   type SpecChangeRequest,
   type SpecChangeStatus,
 } from './specChange.js';
+import { checkStack, loadStackAnswers } from './stack.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import {
   emitEdgesRecorded,
@@ -2062,6 +2063,24 @@ async function main(): Promise<number> {
     }
     printJson({ sandboxes: listSandboxes(leaseDir) });
     return 0;
+  }
+
+  if (namespace === 'stack' && (action === 'show' || action === 'check')) {
+    // The install interview's answers, read back (`show`) and priced against
+    // what factory/scaffold/ can actually build (`check`).
+    //
+    // `check` exits 1 only on a `refused` answer — one `smith new` will stop
+    // on. A `recorded` mismatch is deliberately green: an operator whose stack
+    // is wider than the template tree has not misconfigured anything, and a
+    // check that went red for them would be a check they learned to ignore.
+    const answers = loadStackAnswers(flags.policy);
+    if (action === 'show') {
+      printJson(answers);
+      return 0;
+    }
+    const report = checkStack(answers);
+    printJson(report);
+    return report.ok ? 0 : 1;
   }
 
   if (namespace === 'policy' && action === 'check') {

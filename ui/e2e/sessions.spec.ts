@@ -206,7 +206,7 @@ test.describe('Sessions', () => {
     await page.route('**/api/overview*', (route) => route.abort('failed'));
     await page.goto('/sessions');
     await expect(page.locator('h1')).toHaveText('Sessions');
-    await expect(page.locator('.hds-banner')).toBeVisible();
+    await expect(page.locator('.ds-banner')).toBeVisible();
     await expect(page.getByText('No sessions are running')).toHaveCount(0);
     await expect(page.locator('.sessions-canvas')).toHaveCount(0);
   });

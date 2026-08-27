@@ -58,7 +58,7 @@ test.describe('Timeline', () => {
     await expect(page.locator('button[aria-expanded="true"]').first()).toBeVisible();
   });
 
-  // D-229. The Clear control carried `class="hds-chips__clear"`, and no rule
+  // D-229. The Clear control carried `class="ds-chips__clear"`, and no rule
   // by that name existed in any of the three stylesheets -- so Tailwind
   // preflight was the only thing styling it: inherited 14px body text,
   // `cursor: default`, no padding, 20px tall in a row of 24px pills. Nothing
@@ -74,7 +74,7 @@ test.describe('Timeline', () => {
     // screenshot test has ever had it on screen.
     await page.getByRole('button', { name: 'Dispatches', exact: true }).click();
     const clear = page.getByRole('button', { name: 'Clear', exact: true });
-    const chip = page.locator('.hds-chip').last();
+    const chip = page.locator('.ds-chip').last();
     await expect(clear).toBeVisible();
 
     const box = async (l: typeof clear) =>
@@ -150,7 +150,7 @@ test.describe('Timeline', () => {
     // resolves, and `\d+` matches that — so the wait that exists to hold until
     // there is data would return with none, and `before` would be 0. Every
     // assertion below compares against `before`.
-    const count = page.locator('.hds-toolbar__count');
+    const count = page.locator('.ds-toolbar__count');
     await expect(count).toHaveText(/^[1-9]\d* events$/);
     const before = Number((await count.innerText()).split(' ')[0]);
     await page.getByRole('button', { name: 'Decisions', exact: true }).click();
@@ -171,7 +171,7 @@ test.describe('Timeline', () => {
     // Same nonzero wait as above, and this test is the one that proved it
     // necessary: it has no rendered-row assertion to hide behind, so it read
     // "0 events" straight off the pre-fetch render and failed on `2 < 0`.
-    const count = page.locator('.hds-toolbar__count');
+    const count = page.locator('.ds-toolbar__count');
     await expect(count).toHaveText(/^[1-9]\d* events$/);
     const before = Number((await count.innerText()).split(' ')[0]);
 

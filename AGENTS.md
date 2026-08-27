@@ -15,7 +15,8 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Full architecture | `docs/specs/black-smith-architecture.md` |
 | Operator interview (Phase 1) | `docs/specs/black-smith-interview.md` |
 | Per-agent interviews (constraints per role) | `docs/specs/agent-interviews.md` |
-| Stack standard (compiled from interview) | `docs/standards/stack.md` |
+| This operator's stack answers (install interview) | `factory/policies/stack.yml` |
+| What reads those answers, and what the templates honour | `docs/standards/stack.md` |
 | Per-agent constraints (compiled from interview) | `docs/standards/agent-constraints.md` |
 | Guardrails: secrets/env, git, deploy (S1 on violation) | `docs/standards/guardrails.md` |
 | Policies: taxonomy, budgets, severity, worktree, crosscheck | `factory/policies/` |

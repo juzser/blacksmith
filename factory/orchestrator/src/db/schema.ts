@@ -6,8 +6,10 @@
 // plain text — validation already happened at event-write time in events.ts
 // (architecture §8: "the event logger rejects unknown tags at write time").
 //
-// One schema, both targets (docs/standards/stack.md): this file is the
-// single source for SQLite locally and Cloudflare D1 later via Drizzle.
+// One schema, both targets: this file is the single source for the
+// orchestrator's local SQLite and for D1 later, via Drizzle. It describes
+// this repo's own database, not whatever a scaffolded project answered for
+// `database` in factory/policies/stack.yml.
 import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**

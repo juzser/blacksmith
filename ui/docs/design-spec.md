@@ -206,7 +206,7 @@ CausalTimelineList (custom — see §6 gap):
   ● 27/07 14:02  "Add roadmap page to §10"                          (user_prompt)
     └ ▸ Dispatched uiux (sonnet/claude) for task-142 — spec before build
          ├ ▸ schema-check-result — pass
-         └ ▾ finding-raised — S2, visual-hds                [expanded]
+         └ ▾ finding-raised — S2, visual-design             [expanded]
               ├ Table missing bordered grid
               └ (Lozenge: S2-major · danger subtle)
   ● 27/07 13:58  "Ship the Kanban board"                            (user_prompt)
@@ -416,7 +416,7 @@ Illustration: `Illustration` (one use — Overview's first-run empty state, `cof
 
 Not used in v1, vendor only if needed later: `Checkbox`, `Switch`, `Sheet` (only for the mobile off-canvas sidebar, not as a generic drawer), `DropdownMenu` (no per-row destructive actions exist anywhere in this read-mostly app), `SplitPanel`, `TwoColumn`, `Callout`, `FormFooter` (no standalone form pages).
 
-### 6.2 Gaps — needs custom build on HDS tokens (flag explicitly, not silent inventions)
+### 6.2 Gaps — needs custom build on the kit's tokens (flag explicitly, not silent inventions)
 
 1. **`CausalTimelineList`** (Timeline page, §5.2). The kit's `Timeline` primitive is a flat dated list with no expand/collapse (`Timeline.prompt.md` shows a fixed `items[]`, no children). Causal-chain expansion needs the WAI-ARIA Disclosure pattern layered on top: build from `RowList`/`Timeline` row anatomy (icon, tint, title, meta) + a chevron `Button` toggling `aria-expanded`/`aria-controls`, indented children in a `role="group"`. Token-only, no new colours or radii.
 2. **`KanbanBoard` with milestone lanes** (§5.3). Not one of the 48 primitives — nearest relative is `CardGrid`, which doesn't do multi-column-times-multi-lane layouts or horizontal scroll wells. Build from `Card` (per TaskCard) inside labelled column wells (`bg-surface-sunken`, matching the sidebar/table-header sunken convention) inside labelled lane sections (`SectionHeading`). No drag library — read-only, click-to-navigate only.
@@ -473,7 +473,7 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 ## 9. For `docs/DESIGN.md` (dev to fill in, from `adoption/DESIGN-md-template.md`)
 
 - **Variant:** `dashboard`.
-- **Tokens copy:** `ui/src/styles/hds-tokens.css` (suggested path), version 3.0.0, copied at implementation time.
+- **Tokens copy:** `ui/src/styles/ds-tokens.css` (suggested path), version 3.0.0, copied at implementation time.
 - **UI language:** English — pending explicit operator confirmation (§7).
 - **Date format:** `DD/MM/YYYY` display default unless the operator overrides.
 - **Delete semantics:** N/A — no delete anywhere in this app (writes are limited to waiver/lesson decisions, none of which delete data).
@@ -607,7 +607,7 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
 5. **Roadmap as a graph** — "Trong dashboard, phần roadmap, display theo
    dạng VueFlow". §5.4's provisional Table/card list is superseded: the
    page renders as a `@vue-flow/core` diagram using the same house pattern
-   as §A.2's Flow page — custom DOM nodes on HDS tokens, `useVueFlow()`
+   as §A.2's Flow page — custom DOM nodes on the kit's tokens, `useVueFlow()`
    viewport controls in a `Panel` (never the unsanctioned
    `@vue-flow/controls`), no MiniMap, and an `sr-only <table>` carrying the
    ordering a DOM graph cannot express (WCAG 1.1.1).
@@ -695,7 +695,7 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      full of text oscillates the contrast of every word in it. That
      objection does not apply to a ring drawn outside the border, so
      `.roadmap-node--live` animates `box-shadow` only, via a separate
-     `hds-ring-pulse` keyframe, and the node's text contrast is constant.
+     `ds-ring-pulse` keyframe, and the node's text contrast is constant.
      Flow's `.flow-node__live-dot` is unchanged — it marks a live *agent*,
      which is a different claim from "work is at this milestone".
    - **Motion is never the only channel.** The live border-colour is the

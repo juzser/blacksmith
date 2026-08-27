@@ -2,7 +2,7 @@
 """Fail if any `var(--ds-...)` reference in ui/src points at a token that is
 never actually declared — the "same mistake twice" bug class (Phase 6b round 4's
 milestone-block padding, round 6's Roadmap SectionHeading gap: both referenced
-`--ds-space-5`, which does not exist in hds-tokens.css's 4/6/8 spacing scale — an
+`--ds-space-5`, which does not exist in ds-tokens.css's 4/6/8 spacing scale — an
 invalid custom property silently computes to the CSS property's initial value,
 NOT a build error, so both shipped as "the padding/gap is just... gone" instead
 of a loud failure).
@@ -19,14 +19,14 @@ Usage:
 Definitions come from two places, BOTH count as "defined" (component-scoped
 definitions are not second-class):
   1. Any `--ds-<name>: <value>;` CSS declaration anywhere in
-     ui/src/styles/hds-tokens.css or ui/src/styles/hds-components.css — not
+     ui/src/styles/ds-tokens.css or ui/src/styles/ds-components.css — not
      just `:root` blocks, so a token declared inside a specific class rule
      still counts.
   2. Any `'--ds-<name>':` / `"--ds-<name>":` quoted object key in a .vue
      file's <script> — a component setting a custom property at runtime via
      an inline `:style` object (e.g. Highlight.vue's `tint` prop picking a
      bold/on-bold pair and injecting `--ds-btn-fg`/`--ds-btn-ground`, read
-     by `.hds-btn--inverse` in hds-components.css). This is a real,
+     by `.ds-btn--inverse` in ds-components.css). This is a real,
      intentional definition — just not a CSS one — so it is NOT an
      exception needing an escape comment; it is scanned into the same
      `defined` set as the CSS declarations, same as design-spec.md's
@@ -61,7 +61,7 @@ import sys
 from pathlib import Path
 
 SCAN_EXTS = {".vue", ".css"}
-TOKEN_FILES = ("hds-tokens.css", "hds-components.css")
+TOKEN_FILES = ("ds-tokens.css", "ds-components.css")
 
 DEFINE_RE = re.compile(r"(--ds-[\w-]+)\s*:")
 JS_DEFINE_RE = re.compile(r"""['"](--ds-[\w-]+)['"]\s*:""")

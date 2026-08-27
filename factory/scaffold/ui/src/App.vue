@@ -3,8 +3,8 @@
 </script>
 
 <template>
-  <main class="ds-app">
+  <main class="app">
     <h1>__PROJECT_NAME__</h1>
-    <p>Scaffolded with the HDS kit vendored at <code>hds/</code>.</p>
+    <p>Scaffolded by Blacksmith. Styles start in <code>src/styles/main.css</code>.</p>
   </main>
 </template>

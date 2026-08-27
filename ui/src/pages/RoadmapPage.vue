@@ -7,7 +7,7 @@
 // Operator directive (Phase 6b round 6): "Trong dashboard, phần roadmap,
 // display theo dạng VueFlow" — the card list becomes a @vue-flow/core
 // diagram, same sanctioned dependency and same house pattern as FlowPage
-// (custom DOM nodes styled with HDS tokens, useVueFlow() viewport controls in
+// (custom DOM nodes styled with kit tokens, useVueFlow() viewport controls in
 // a Panel rather than the unsanctioned @vue-flow/controls package, sr-only
 // table alternative). Nothing the cards showed was dropped: each node still
 // carries name + status Lozenge + identity chips + goal + ProgressBar + the
@@ -26,7 +26,7 @@
 // (a milestone node is content-sized, so same-lane nodes share a top edge but
 // not a height, and Vue Flow's default bezier bowed between their offset
 // handles), and .roadmap-node--live gains a pulsing ring on top of its live
-// border. See hds-components.css for why that ring animates box-shadow and
+// border. See ds-components.css for why that ring animates box-shadow and
 // never opacity.
 //
 // Deviation, flagged (same as FlowPage): @vue-flow/minimap and
@@ -41,13 +41,13 @@ import '@vue-flow/core/dist/style.css';
 import { Panel, useVueFlow, VueFlow } from '@vue-flow/core';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import Lozenge from '../components/hds/Lozenge.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import Toolbar from '../components/hds/Toolbar.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import Lozenge from '../components/ds/Lozenge.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import Toolbar from '../components/ds/Toolbar.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';

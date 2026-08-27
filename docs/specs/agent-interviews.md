@@ -121,10 +121,11 @@ structured. Recommended: yes.
 
 ## uiux
 
-**U-1. Spec fidelity.** Pixel-level (exact tokens/spacings per HDS) or
-component-level (name HDS components, coder fills in)? Recommended:
-component-level with tokens named only where the design deviates from HDS
-defaults.
+**U-1. Spec fidelity.** Pixel-level (exact tokens/spacings from the project's
+design system) or component-level (name the components, coder fills in)?
+Recommended: component-level, with tokens named only where the design deviates
+from the design system's defaults. Which design system that is comes from
+`factory/policies/stack.yml`, not from this file.
 > Answer:
 
 ## M. Roster verification (opened 2026-08-05)

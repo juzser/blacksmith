@@ -14,7 +14,7 @@
 import { computed } from 'vue';
 import { formatDateTime } from '../lib/format.js';
 import { livenessLabel, livenessLevel } from '../lib/liveness.js';
-import Button from './hds/Button.vue';
+import Button from './ds/Button.vue';
 
 const props = defineProps<{
   /** ISO timestamp of the last SUCCESSFUL load — not of the last attempt. */

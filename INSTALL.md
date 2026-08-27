@@ -222,7 +222,71 @@ rather than a false `OK` when its tool is missing. `SKIP` lines for the
 TypeScript half mean `pnpm` was not found; `SKIP` lines for the policy half
 mean PyYAML was not found. Neither is a passing install.
 
-### Step 5 — Install the Claude Code CLI
+### Step 5 — The stack interview
+
+Blacksmith has to know what this operator builds with — the planner grounds
+task specs in it, the coder writes against it, and `smith new` scaffolds from
+it. It ships the answers that assume least: a TypeScript library, no
+frontend, no database, no design system. This step replaces them with real
+ones.
+
+**Ask the operator all of these in one message,** with the shipped default
+beside each. "Keep the defaults" is a complete answer, and so is skipping any
+single question.
+
+| Question | Field | Ships as | Values |
+| --- | --- | --- | --- |
+| What does the code get written in? | `language` | `typescript` | `typescript` · `javascript` · `python` · `go` · `rust` · `other` |
+| Is there a frontend? | `frontend` | `none` | `none` · `vue` · `react` · `svelte` · `solid` · `vite-vanilla` · `other` |
+| Do UI projects build against a design system? | `design_system` | `none` | `none`, or its name |
+| If so, which directory is the kit vendored from? | `design_system_source` | *(empty)* | a path on this machine, or empty |
+| What sits under the components? | `styling` | `plain-css` | `plain-css` · `tailwind` · `css-modules` · `vanilla-extract` · `other` |
+| What runs the server, if anything? | `backend` | `none` | `none` · `node` · `deno` · `bun` · `cloudflare-workers` · `other` |
+| What stores the data? | `database` | `none` | `none` · `sqlite` · `postgres` · `mysql` · `d1` · `other` |
+| Reached through what? | `orm` | `none` | `none` · `drizzle` · `prisma` · `kysely` · `other` |
+| Which package manager? | `package_manager` | `pnpm` | `pnpm` · `npm` · `yarn` · `bun` |
+| One package, or a monorepo? | `repo_shape` | `single` | `single` · `monorepo` |
+| Lint and format with? | `lint` | `biome` | `biome` · `eslint-prettier` · `none` |
+| Unit tests with? | `test_unit` | `vitest` | `vitest` · `jest` · `node-test` · `none` |
+| End-to-end tests with? | `test_e2e` | `playwright` | `playwright` · `cypress` · `none` |
+| CI on? | `ci` | `github-actions` | `github-actions` · `gitlab-ci` · `circleci` · `none` |
+| Deployed where? | `hosting` | `unspecified` | free text |
+
+Write the answers into [`factory/policies/stack.yml`](factory/policies/stack.yml)
+— change the values in place, leave the comments — then read them back and
+price them:
+
+```bash
+node factory/orchestrator/dist/cli.js stack show
+node factory/orchestrator/dist/cli.js stack check
+```
+
+**Expect:** `stack check` prints `"ok": true` and one verdict per answer.
+
+There are three verdicts, and only one of them is a problem:
+
+- **`honoured`** — `factory/scaffold/` builds it. `smith new` produces it.
+- **`recorded`** — nothing in the scaffold reads this answer; the agents do.
+  `database: postgres` does not make the scaffolder write migrations, it makes
+  the planner and the coder know what they are writing against. Green on
+  purpose: an operator whose stack is wider than the template tree has not
+  misconfigured anything, and a check that went red for them is a check they
+  would learn to ignore.
+- **`refused`** — `smith new` will stop rather than scaffold something else,
+  and `stack check` exits 1. Either change the answer or accept that this kind
+  of project gets scaffolded by hand.
+
+That refusal is the point of running the interview at all. Answer
+`frontend: react` and `smith new --ui` stops, naming the answer and the file;
+it does not quietly hand over the Vue project the templates happen to ship and
+let you discover the substitution afterwards.
+
+A design system is **vendored, not referenced**: `design_system_source` is
+copied into each scaffolded UI project's `design/` directory, so the project
+still builds when that directory is gone. A named source that does not exist
+is `refused` — a stylesheet importing a kit nobody wrote is worse than no kit.
+
+### Step 6 — Install the Claude Code CLI
 
 Needed to drive an actual epic: the planner and every worker run as Claude
 Code sessions. Follow Anthropic's current install instructions for the
@@ -235,7 +299,7 @@ claude --version
 Without it, the CLI and the gate still work — you simply cannot dispatch the
 agents that do the work.
 
-### Step 6 — Link the `smith` command *(optional)*
+### Step 7 — Link the `smith` command *(optional)*
 
 ```bash
 pnpm link --global     # or a global install

@@ -25,11 +25,11 @@ const folded = computed(() => foldIntoColumns(flatTasks.value, props.showAll));
 <template>
   <div class="kanban-board">
     <section class="kanban-lane" :aria-label="`${laneLabel} lane`">
-      <h3 class="hds-sh__t">{{ laneLabel }}</h3>
+      <h3 class="ds-sh__t">{{ laneLabel }}</h3>
       <div class="kanban-lane__columns">
         <div v-for="col in folded" :key="col.name" class="kanban-col">
           <div class="kanban-col__head">
-            <h4 class="hds-card__title">{{ col.name }}</h4>
+            <h4 class="ds-card__title">{{ col.name }}</h4>
             <span class="kanban-col__count">{{ col.tasks.length }}</span>
           </div>
           <div v-if="subStatusSummary(col.tasks)" class="kanban-col__substatus">

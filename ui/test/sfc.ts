@@ -7,7 +7,7 @@
  * native port, which exposes none); and `biome.json` turns
  * `noUnusedImports`/`noUnusedVariables` off for `**\/*.vue` precisely because
  * a linter that cannot read the template would call every template-only
- * import dead. The repo's other SFC gates — `cssClassDrift`, `hdsVariants` —
+ * import dead. The repo's other SFC gates — `cssClassDrift`, `dsVariants` —
  * read templates with regexes for the same reason.
  *
  * This module hands the problem to the compiler that actually renders these

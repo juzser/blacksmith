@@ -55,8 +55,8 @@ test.describe('Flow', () => {
     await page.route('**/api/overview*', (route) => route.abort('failed'));
     await page.goto('/flow');
     await expect(page.locator('h1')).toHaveText('Flow');
-    await expect(page.locator('.hds-skeleton')).toHaveCount(0);
-    await expect(page.locator('.hds-banner')).toBeVisible();
+    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.ds-banner')).toBeVisible();
     await expect(page.locator('.flow-node').first()).toBeVisible();
   });
 

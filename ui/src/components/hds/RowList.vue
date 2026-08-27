@@ -1,9 +1,0 @@
-<script setup lang="ts">
-withDefaults(defineProps<{ density?: 'prose' | 'compact' }>(), { density: 'prose' });
-</script>
-
-<template>
-  <ul class="hds-rows" :data-density="density">
-    <slot />
-  </ul>
-</template>

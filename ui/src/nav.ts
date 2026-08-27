@@ -1,4 +1,4 @@
-import type { NavItem } from './components/hds/types.js';
+import type { NavItem } from './components/ds/types.js';
 
 // design-spec.md §2's SidebarNav item array, 2 groups + Phase 6b's Projects
 // hub / Flow additions. All pages ship this phase — nothing disabled.

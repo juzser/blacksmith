@@ -2,7 +2,7 @@
 // Flow — design-spec addendum (Phase 6b, ui/docs/design-spec.md's new §5.9,
 // recorded per this task's own spec-authoring instruction). The active
 // plan version's task DAG, @vue-flow/core (docs/standards/stack.md's
-// sanctioned dependency): custom DOM task nodes styled purely with HDS
+// sanctioned dependency): custom DOM task nodes styled purely with kit
 // tokens, edges styled by edge_type, wave columns from graph.ts's own
 // waveLayers() (exposed via /api/flow — "no layout library" per stack.md),
 // live pulse (opacity-only under prefers-reduced-motion, .flow-node--live
@@ -13,7 +13,7 @@
 // waves progress left->right with tasks in the same wave stacked
 // vertically in that wave's column. Every edge is dashed + Vue Flow
 // `animated: true` (marching dashes, its own dist/style.css keyframe),
-// reduced-motion turns the animation off (hds-components.css); running
+// reduced-motion turns the animation off (ds-components.css); running
 // nodes get a small pulsing dot (`.flow-node__live`) instead of pulsing
 // the whole node border.
 //
@@ -47,13 +47,13 @@ import '@vue-flow/core/dist/style.css';
 import { Panel, useVueFlow, VueFlow } from '@vue-flow/core';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import Lozenge from '../components/hds/Lozenge.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Select from '../components/hds/Select.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import Lozenge from '../components/ds/Lozenge.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Select from '../components/ds/Select.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { type FlowGraph, fetchFlow, fetchOverview, selectableEpics } from '../lib/api.js';

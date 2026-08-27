@@ -76,7 +76,7 @@ describe('every Skeleton in the app asks for a size the browser will honour', ()
 
 describe('Skeleton.vue writes its style through the helper', () => {
   it('does not re-implement the coercion in the template', () => {
-    const src = readFileSync(join(SRC, 'components', 'hds', 'Skeleton.vue'), 'utf8');
+    const src = readFileSync(join(SRC, 'components', 'ds', 'Skeleton.vue'), 'utf8');
     expect(src).toContain('cssLength');
     expect(src).not.toContain("typeof height === 'number'");
   });

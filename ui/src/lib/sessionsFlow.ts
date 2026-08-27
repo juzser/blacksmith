@@ -34,7 +34,7 @@ import {
 export const AGENT_COLUMN_X = 380;
 /**
  * Vertical distance between two agents in the same session's band. Paired with
- * `.agent-node`'s 72px cap in hds-components.css, which leaves a 12px channel:
+ * `.agent-node`'s 72px cap in ds-components.css, which leaves a 12px channel:
  * the node is the fixed thing and the step is what clears it, so these two move
  * together or agents touch.
  */
@@ -42,7 +42,7 @@ export const AGENT_STEP_Y = 84;
 /** Blank space between one band and the row of bands below it. */
 export const BAND_GAP_Y = 40;
 /**
- * The height `.session-node` is capped at in hds-components.css. Duplicated
+ * The height `.session-node` is capped at in ds-components.css. Duplicated
  * here on purpose: a band has to clear whichever is taller, its agent stack or
  * the session card beside it, and a one-agent stack (84+40 = 124) is shorter
  * than the card. Without this floor the row below would be drawn across the
@@ -50,7 +50,7 @@ export const BAND_GAP_Y = 40;
  */
 export const SESSION_NODE_H = 136;
 /**
- * The width `.session-node` is fixed at in hds-components.css. It is the whole
+ * The width `.session-node` is fixed at in ds-components.css. It is the whole
  * width of a band that dispatched nothing — the ordinary state of a run between
  * tasks — because with no agents there is no node out at `AGENT_COLUMN_X` for
  * the band to reach.

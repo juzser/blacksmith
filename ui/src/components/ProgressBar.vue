@@ -29,6 +29,6 @@ const pct = computed(() => (props.total > 0 ? Math.round((props.value / props.to
         }"
       />
     </div>
-    <span class="hds-stat__label" style="font-size: var(--ds-text-xs)">{{ value }}/{{ total }} ({{ pct }}%)</span>
+    <span class="ds-stat__label" style="font-size: var(--ds-text-xs)">{{ value }}/{{ total }} ({{ pct }}%)</span>
   </div>
 </template>

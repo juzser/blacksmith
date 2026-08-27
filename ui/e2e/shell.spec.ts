@@ -55,7 +55,7 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
     // it stayed exactly as stale. usePoll's global signal is what makes the
     // claim true, and this is the only layer that can see it.
     await page.goto('/timeline');
-    await expect(page.locator('.hds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
 
     // Timeline's own poll is 15s away; this resolves in milliseconds.
     const refetch = page.waitForRequest('**/api/timeline*');

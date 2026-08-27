@@ -6,7 +6,7 @@ import type { TimelineEntry } from './api.js';
 export type RowTint = 'blue' | 'slate' | 'lilac';
 
 /** CausalTimelineList's pre-built causal-parent tree node (moved here, not
- * exported from a .vue SFC — see components/hds/types.ts's header comment
+ * exported from a .vue SFC — see components/ds/types.ts's header comment
  * for why: ui/tsconfig.json doesn't type-check .vue files). */
 export interface TimelineNode {
   entry: TimelineEntry;

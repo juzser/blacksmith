@@ -374,23 +374,29 @@ fail-closed contract, and the two are not substitutes.
 
 | Subcommand | Purpose |
 |---|---|
-| `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
+| `/bs new <project> [--ui]` | Scaffold a new target project from the stack answers |
 | `/bs mcp <project>` | Layer the MCP surface on and make its milestone due |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner + spec-reviewer |
 | `/bs run <epic>` | Admit a wave and drive it through the loop to merge |
 | `/bs status` | Live agent count, budget burn, epic phase |
-| `/bs ui` | Serve the local HDS dashboard |
+| `/bs ui` | Serve the local dashboard |
 | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic |
 | `/bs lessons` | Review pending lesson candidates |
 | `/bs report` | Render/send the scribe's progress digest |
 
 ## `/bs new <project> [--ui]`
 
-1. Run `smith new <project> [--ui]`. This copies `factory/scaffold/`
-   (stack.md: TS strict, pnpm, Biome, Vitest, CI; `--ui` layers Vue+Vite+
-   vendored HDS tokens), installs and runs the project's own gates, commits it
-   on a `setup` branch, and registers a bootstrap milestone in
-   `factory/specs/roadmap.md` — all in one call.
+1. Run `smith new <project> [--ui]`. This copies `factory/scaffold/` (TS
+   strict, Biome, Vitest, CI) and layers whatever `factory/policies/stack.yml`
+   answered for — `--ui` adds the frontend, generates `src/styles/main.css`,
+   and vendors the named design system into `design/` if there is one. Then it
+   installs and runs the project's own gates, commits it on a `setup` branch,
+   and registers a bootstrap milestone in `factory/specs/roadmap.md` — all in
+   one call.
+   An answer the templates cannot build (`frontend: react`) makes it **refuse
+   before creating anything**, rather than quietly handing over the frontend
+   they do ship. `smith stack check` says in advance which answers are
+   honoured, merely recorded, or refused.
 2. The gate run is `pnpm install` then `lint`, `typecheck`, `test:coverage`,
    `build` — `ci.yml`'s order, so the lockfile lands in the first commit and no
    epic ever needs a serial `task-0-toolchain` (P9-19). It takes a minute or

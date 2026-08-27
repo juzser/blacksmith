@@ -200,7 +200,7 @@ function checkTransport(transport: unknown, violations: McpViolation[]): void {
       rule: 'MCP-X2',
       path: `${at}/access`,
       message:
-        'An HTTP surface must sit behind Cloudflare Access (stack.md: "Cloudflare Access before anything is exposed beyond localhost").',
+        'An HTTP surface must sit behind Cloudflare Access (mcp.md MCP-X2: nothing is exposed beyond localhost without something authenticating in front of it).',
     });
   }
 

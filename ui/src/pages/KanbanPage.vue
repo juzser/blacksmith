@@ -11,13 +11,13 @@
 // (either the selected epic, or "All epics" when chosen from the picker).
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import Banner from '../components/hds/Banner.vue';
-import Button from '../components/hds/Button.vue';
-import EmptyState from '../components/hds/EmptyState.vue';
-import PageHeader from '../components/hds/PageHeader.vue';
-import Select from '../components/hds/Select.vue';
-import Skeleton from '../components/hds/Skeleton.vue';
-import Toolbar from '../components/hds/Toolbar.vue';
+import Banner from '../components/ds/Banner.vue';
+import Button from '../components/ds/Button.vue';
+import EmptyState from '../components/ds/EmptyState.vue';
+import PageHeader from '../components/ds/PageHeader.vue';
+import Select from '../components/ds/Select.vue';
+import Skeleton from '../components/ds/Skeleton.vue';
+import Toolbar from '../components/ds/Toolbar.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
@@ -137,7 +137,7 @@ function goToTask(taskId: string) {
 
     <Toolbar :count="`${taskCount} tasks`">
       <label style="display: flex; align-items: center; gap: var(--ds-space-1-5)">
-        <span class="hds-toolbar__count">Epic</span>
+        <span class="ds-toolbar__count">Epic</span>
         <Select v-model="selectedEpic" :options="epicOptions(epics)" aria-label="Epic" />
       </label>
     </Toolbar>
@@ -149,7 +149,7 @@ function goToTask(taskId: string) {
 
     <template v-else-if="loading">
       <!-- ds-allow-hardcode:start — Skeleton width matches .kanban-col's own
-           232px flex-basis (hds-components.css), a board-layout constant,
+           232px flex-basis (ds-components.css), a board-layout constant,
            not a spacing/sizing design token. -->
       <div style="display: flex; gap: var(--ds-space-4)">
         <Skeleton v-for="i in 5" :key="i" height="240" width="232px" />

@@ -1,4 +1,4 @@
-// The §10 HDS dashboard page queries, each a typed function over the
+// The §10 dashboard page queries, each a typed function over the
 // projection tables in db/schema.ts. Every function accepts a `SmithDb`
 // (see db/projector.ts's openDb()) plus an optional session scope — when
 // omitted, a query spans every projected session (a single Blacksmith
