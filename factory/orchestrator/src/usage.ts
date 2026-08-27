@@ -88,11 +88,12 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'wave check',
     positionals: '<plan.json> <task-id>...',
-    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] ${EVENTS_DIR}`,
+    flags: `[--dry] [--budget-policy <file>] [--override-rationale <text>] [--repo <dir>] ${EVENTS_DIR}`,
     summary:
-      'Admit a wave whose claims are disjoint and whose declared cost fits under the epic ' +
-      'token cap. --dry asks without writing the admission; --override-rationale admits a ' +
-      'refused wave and records the machine verdict beside the human reason.',
+      'Admit a wave whose claims are disjoint, whose files share no import edge, and whose ' +
+      'declared cost fits under the epic token cap. --dry asks without writing the admission; ' +
+      '--override-rationale admits a cost-refused wave and records the machine verdict beside ' +
+      'the human reason; --repo names the checkout the symbol graph is read from.',
   },
   {
     command: 'new',
@@ -220,6 +221,22 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: '',
     summary:
       'Post-run mode: every file a task touched must fall inside its claims. Exit 1 on violation.',
+  },
+  {
+    command: 'claims impact',
+    form: '--plan',
+    positionals: '<task-id>...',
+    flags: '--plan <file> [--repo <dir>]',
+    summary:
+      'Pre-run: refuse a wave whose tasks sit on either end of an import edge. Exit 1 when coupled.',
+  },
+  {
+    command: 'claims impact',
+    form: 'spec',
+    positionals: '<worktree-dir> <spec.json>',
+    flags: '',
+    summary:
+      'Post-run: an export this task removed, still imported outside its claims. Exit 1 on a proven break.',
   },
   {
     command: 'dispatch check',
@@ -455,6 +472,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags:
       '[--plan <file> --task <task-id>] [--case-type <case>] [--lessons <lessons.md>] [--agents-dir <dir>]',
     summary: 'Print the lesson block to splice into one role prompt.',
+  },
+  {
+    command: 'lessons audit',
+    positionals: '<session-id>',
+    flags: '[--lessons <lessons.md>] [--state-dir <dir>]',
+    summary:
+      'Which entries fire, which are shadowed dead, which contradict. Recommends only. Exit 1 on anything but clean.',
   },
   {
     command: 'dream',

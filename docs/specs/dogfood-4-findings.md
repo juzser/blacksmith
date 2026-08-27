@@ -12814,3 +12814,98 @@ answer to "which providers are running", and a caveat under a chart is a worse
 place for it than a card that names them.
 
 **Related:** [[D-31]], [[D-168]], [[D-219]], [[D-221]], [[D-253]].
+
+## D-256 — every compiled lesson names no category, so none of them can fire
+
+`smith lessons audit` was built to find entries that stopped earning their
+place. Its first run against this repository's own corpus found something
+larger:
+
+```json
+{"reach":{"total":24,"escalating":0,"withoutCategory":24,
+          "nonFileScoped":2,"categoriesCovered":[]},
+ "counts":{"no-evidence":24},"status":"unverifiable"}
+```
+
+Twenty-four compiled lessons, zero of which participate in the escalation
+match. `findMatchingLesson` (`severity.ts`) matches on `finding_category` first
+and then on the claim glob; an entry that names no category is unreachable by
+construction, whatever its glob says. Two are not file-scoped on top of it.
+
+This is not a defect in the corpus's content — the entries are true, and they
+are spliced into role prompts, which is a real path. It is a defect in what
+distillation writes. `smith dream` extracts decision checkpoints, and a
+gate-block checkpoint carries the finding that blocked it; the scribe's
+distillation drops that category on the way to a principle-level statement, and
+`lessons compile` has nothing to put in the field. The severity gate therefore
+holds a corpus it can never match against.
+
+The consequence reaches further than the audit. `kpi same-mistake` (§10a) reads
+a rate the corpus could not have moved: with nothing escalating, a repeat
+finding cannot be attributed to a lesson that failed to prevent it, so the
+number is measuring the absence of a mechanism rather than the mechanism's
+performance.
+
+**Not fixed here, deliberately.** The audit reports it rather than repairing
+it, because the repair is a change to what the scribe writes and to the
+compile step's schema — a decision about the distillation contract, not about
+the reading of it. Backfilling categories onto twenty-four existing entries
+would also invent attributions no log supports.
+
+The audit is honest about the difference in the meantime: those entries are
+`liveness: dispatch-only` and `recommendation: no-evidence`, never `retire`.
+An entry this tool cannot measure is not an entry it has grounds to drop, and
+`status: unverifiable` says the reading is about the corpus rather than about
+the work.
+
+**Related:** [[D-257]].
+
+## D-257 — a path claim cannot see the edge between two files
+
+Claims are globs, and `wave check` compares two lists of them. That answers
+"did two tasks write the same file" and nothing else, which leaves a blind spot
+with a name: task A changes `parse()`'s signature in `src/a.ts`, task B calls
+`parse()` from `src/b.ts`, the claim lists are disjoint, every gate is green,
+and integration is where the factory finds out. The conflict was never in a
+file. It lived on the import edge between two files.
+
+**No compiler front end was available.** `typescript@7.0.2` is the native
+(tsgo) rewrite: `"main": null`, `"types": null`, and `exports` limited to
+`./lib/version.cjs` plus `./unstable/sync` and `./unstable/ast`. There is no
+`ts.createSourceFile` to call. So `symbols.ts` is a hand-written scanner, and
+that constraint is recorded in its module header rather than left for the next
+reader to rediscover. It also resolves a `/dist/` specifier back to `/src/`
+when the build path holds no file, because this repository's own source imports
+its build output.
+
+**Two checks, and the gap between them is the gap between a risk and a fact.**
+
+`waveImpact` runs before dispatch, over declarations. All it can observe is
+that two tasks in one wave sit on either end of a compile-time edge. That is a
+reason to order them, not evidence that anything is wrong, so it reports
+`coupled` and the wave is refused.
+
+`exportImpact` runs after the work, over a diff. An export removed while a file
+outside the task's claims still imports it is not a risk — it is a break, and
+the branch carries the proof, so it is `proven`. A signature that changed is
+`possible` and no stronger: the scanner compares each export's clause text up
+to the first depth-0 `;` or `{`, which makes a widened parameter type and a
+changed constant read identically. Labelling that `proven` would be a lie the
+tool cannot back.
+
+**Why a crossing has no override.** `validateWave` already refuses a wave
+holding both ends of a *declared* dependency edge. So every crossing that
+reaches `waveImpact` is between two tasks the plan declared **no** edge between
+— precisely the dependency the planner missed. An override there would be an
+override on "the planner was wrong", which is not a thing an operator should be
+able to wave through in a hurry; and the remedy costs one extra wave. The
+budget verdict keeps its `--override-rationale` because a cost ceiling is a
+judgement call and a compile-time edge is not.
+
+**Why holes are never fatal.** An unparseable file, an unresolved specifier, a
+claim matching nothing: all reported, none refusing. A gate that fails for its
+own blind spots teaches operators to reach for the override, and an override
+reached for by habit is worth less than the check that caused it (D-9's shape,
+one register over).
+
+**Related:** [[D-212]], [[D-256]].

@@ -12,10 +12,12 @@ import type { TaskBudget } from './budgets.js';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import {
   type ClaimedTask,
+  collectCommittedChanges,
   loadWorktreePolicy,
   type ProposedWaveTask,
   postRunCheck,
   validateWave,
+  type WaveTask,
   writeRootCheck,
 } from './claims.js';
 import { collectCoverageEvidence } from './coverage.js';
@@ -76,6 +78,7 @@ import {
   fingerprintWorktree,
   type WorktreeFingerprint,
 } from './immutability.js';
+import { collectExportDiffs, exportImpact, waveImpact } from './impact.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { judgePreflight } from './judgePreflight.js';
 import {
@@ -84,6 +87,7 @@ import {
   recordJudgeDispatch,
   recordJudgeReport,
 } from './judges.js';
+import { auditLessons } from './lessonAudit.js';
 import {
   compileLessons,
   dream,
@@ -134,6 +138,7 @@ import {
 } from './security.js';
 import { parseLessons } from './severity.js';
 import { amendPlan, recordSpecReview } from './spec.js';
+import { buildSymbolGraph, collectSources } from './symbols.js';
 import {
   emitEdgesRecorded,
   emitTasksAdded,
@@ -1112,6 +1117,27 @@ async function main(): Promise<number> {
     // the register that says which of these tasks may not run beside which.
     const result = validateWave(tasks, policy, plan.edges);
 
+    // P9-3: the claim check compares two lists of globs. This compares the
+    // edges between the files those globs match, which is where the conflict
+    // a disjoint claim list cannot see actually lives — task A changes
+    // `parse()`, task B calls it, neither writes the other's file. A crossing
+    // between two tasks the plan declared no edge between is a dependency the
+    // planner missed, so the wave is refused and the remedy is to run them in
+    // order. (A crossing the plan DID declare never reaches here: validateWave
+    // above already refuses a wave holding both ends of a declared edge.)
+    //
+    // Only asked of a wave that survived the claim check: validateWave is what
+    // proves the claims are readable at all, and a wave already refused is
+    // better named by the failure an operator can act on first.
+    const symbolImpact = result.valid
+      ? waveImpact(
+          buildSymbolGraph(collectSources(flags.repo ?? REPO_ROOT)),
+          // Readable by construction — validateWave threw otherwise.
+          tasks as WaveTask[],
+        )
+      : null;
+    const coupled = symbolImpact !== null && !symbolImpact.ok;
+
     // The epic budget gate, checked after the claim check so a wave that fails
     // both is still named by the failure an operator can act on first — and so
     // the claim errors above keep their exact wording. Two separate questions:
@@ -1157,7 +1183,7 @@ async function main(): Promise<number> {
     // wave that just failed its claim-disjointness check would record an
     // admission that never happened. `--dry` asks the question without
     // answering it in the log.
-    if (result.valid && !blocked && flags.dry !== 'true') {
+    if (result.valid && !coupled && !blocked && flags.dry !== 'true') {
       await emitWaveAdmitted(
         plan,
         taskIds,
@@ -1166,8 +1192,8 @@ async function main(): Promise<number> {
         admissionBudget(budget, overridden ? rationale : undefined),
       );
     }
-    printJson({ ...result, budget });
-    return result.valid && !blocked ? 0 : 1;
+    printJson({ ...result, symbolImpact, budget });
+    return result.valid && !coupled && !blocked ? 0 : 1;
   }
 
   if (namespace === 'new') {
@@ -1655,6 +1681,59 @@ async function main(): Promise<number> {
     const result = postRunCheck(worktreeDir, spec.claims);
     printJson(result);
     return result.violation ? 1 : 0;
+  }
+
+  if (namespace === 'claims' && action === 'impact') {
+    // The blind spot a path claim has by construction (P9-3). `claims check`
+    // compares two lists of globs; this compares the edges between the files
+    // those globs match, which is where "task A changed parse(), task B calls
+    // it" actually lives. Two forms, and the difference is what they can
+    // prove — see impact.ts's header.
+    if (flags.plan !== undefined) {
+      const plan = readJsonFile<PlanFile>(flags.plan);
+      // Same refusal as `wave check`, for the same reason: validating the
+      // empty set answers "admissible" about a wave nobody described.
+      if (positional.length === 0) {
+        throw new SmithError(
+          'cli.empty-wave',
+          'Usage: smith claims impact --plan <plan.json> <task-id>... — a wave with no tasks is not a wave.',
+          { plan: plan.epic_id },
+        );
+      }
+      const claimsById = new Map(plan.tasks.map((task) => [task.task_id, task.claims]));
+      const tasks: WaveTask[] = positional.map((typed) => {
+        const id = resolveTaskId(plan, typed);
+        const claims = claimsById.get(id);
+        if (!Array.isArray(claims) || claims.some((claim) => typeof claim !== 'string')) {
+          throw new SmithError(
+            'claims.unreadable-claims',
+            `Task "${id}" does not declare its claims as a list of globs.`,
+            { task_id: id, received: claims === undefined ? 'undefined' : typeof claims },
+          );
+        }
+        return { task_id: id, claims };
+      });
+      // The declarations are read off the checkout, not off the plan: a claim
+      // says which files a task may write, and only the tree says what those
+      // files import today.
+      const graph = buildSymbolGraph(collectSources(flags.repo ?? REPO_ROOT));
+      const report = waveImpact(graph, tasks);
+      printJson(report);
+      return report.ok ? 0 : 1;
+    }
+
+    const [worktreeDir, specFile] = requirePositionals(
+      positional,
+      usageFor('claims impact spec'),
+    ) as [string, string];
+    const spec = readJsonFile<ClaimedTask>(specFile);
+    // The worktree is a full checkout, so it is both halves of the question:
+    // the diff this task committed, and everyone in the repo who imports it.
+    const diffs = collectExportDiffs(worktreeDir, collectCommittedChanges(worktreeDir));
+    const graph = buildSymbolGraph(collectSources(worktreeDir));
+    const report = exportImpact(graph, diffs, spec.claims);
+    printJson(report);
+    return report.ok ? 0 : 1;
   }
 
   if (namespace === 'effort' && action === 'show') {
@@ -2657,6 +2736,26 @@ async function main(): Promise<number> {
       }),
     );
     return 0;
+  }
+
+  // The other half of the lessons loop, and the one it never had: `lessons.md`
+  // only ever grows, and nothing read an entry back to ask whether it still
+  // does anything. Read-only over both the log and the corpus — it recommends
+  // `retire`, it does not retire, because a lesson is a standing instruction a
+  // human wrote and §9.6 reserves supersession for a human's call. Exit 1 on
+  // anything but `clean`, for the same reason `kpi same-mistake` does: a corpus
+  // that cannot be read is not a corpus that is fine.
+  if (namespace === 'lessons' && action === 'audit') {
+    const [sessionId] = requirePositionals(positional, usageFor('lessons audit'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119), and here the reason is sharper than elsewhere: the
+    // question is whether an entry has EVER fired, and a session-scoped read
+    // answers "not in this half of the epic" while printing `retire`.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const lessons = parseLessons(readFileSync(flags.lessons ?? LESSONS_MD_PATH, 'utf8'));
+    const report = auditLessons(events, lessons, { sessionId });
+    printJson(report);
+    return report.ok ? 0 : 1;
   }
 
   if (namespace === 'dream') {

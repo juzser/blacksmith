@@ -2127,7 +2127,41 @@ describe('cli.ts (built binary)', () => {
     expect(dispatch.scopes).toContain('stack-wide');
     expect(dispatch.lessons.map((l: { lessonId: string }) => l.lessonId)).toContain(lessonId);
     expect(dispatch.text).toContain(lessonId);
-  }, 30_000); // nine sequential CLI process spawns — over vitest's 5s default on a CI runner
+
+    // ...and the verb that reads it back, on the corpus the factory's own loop
+    // just produced. The reading is `dispatch-only`, and that is not a stub:
+    // a gate-block checkpoint compiles with no `finding_category`, so the
+    // lesson this whole pipeline just minted reaches the scribe's prompt and
+    // is invisible to the escalation match — `reach.withoutCategory` names
+    // exactly why. Being unmeasurable here is not evidence against it, so the
+    // recommendation is `no-evidence` and never `retire`.
+    //
+    // Exit 1 because `unverifiable` is the honest verdict on a log holding no
+    // gate decision at all: nothing here could have shown the lesson working.
+    const auditResult = runCli([
+      'lessons',
+      'audit',
+      sessionId,
+      '--lessons',
+      lessonsOut,
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(auditResult.status).toBe(1);
+    const audit = JSON.parse(auditResult.stdout);
+    expect(audit.status).toBe('unverifiable');
+    expect(audit.entries).toHaveLength(1);
+    expect(audit.entries[0]).toMatchObject({
+      lessonId,
+      escalates: false,
+      liveness: 'dispatch-only',
+      recommendation: 'no-evidence',
+      firings: 0,
+      opportunities: 0,
+    });
+    expect(audit.reach).toMatchObject({ total: 1, escalating: 0, withoutCategory: 1 });
+    expect(audit.counts.retire).toBe(0);
+  }, 35_000); // ten sequential CLI process spawns — over vitest's 5s default on a CI runner
 
   // D-159. The novelty gate's cutoff is documented as living in
   // factory/policies/scheduler.yml: architecture §9.3 points operators at it,
@@ -3183,6 +3217,95 @@ describe('cli.ts (built binary)', () => {
       expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
         [],
       );
+    });
+
+    // Disjoint claims, no declared edge, and still not parallelisable: the
+    // conflict lives on the import edge between the two claimed files, which
+    // is exactly what a glob comparison cannot see (P9-3).
+    it('wave check: refuses two tasks joined by an import edge their claims do not show', async () => {
+      const { sessionId, eventsDir, planPath } = await session();
+      const coupledRepo = await mkdtemp(path.join(tmpdir(), 'smith-wave-symbols-'));
+      try {
+        await mkdir(path.join(coupledRepo, 'src', 'foo'), { recursive: true });
+        await mkdir(path.join(coupledRepo, 'src', 'bar'), { recursive: true });
+        await writeFile(
+          path.join(coupledRepo, 'src/foo/a.ts'),
+          'export function parse(x: string) { return x; }\n',
+        );
+        await writeFile(
+          path.join(coupledRepo, 'src/bar/b.ts'),
+          "import { parse } from '../foo/a.js';\nexport const b = parse('x');\n",
+        );
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--repo',
+          coupledRepo,
+          '--session',
+          sessionId,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        const parsed = JSON.parse(result.stdout);
+        // Named apart from the claim check: these claims ARE disjoint.
+        expect(parsed.valid).toBe(true);
+        expect(parsed.symbolImpact.status).toBe('coupled');
+        expect(parsed.symbolImpact.crossings).toEqual([
+          {
+            producer: 'epic-1/task-1',
+            consumer: 'epic-1/task-2',
+            exportedBy: 'src/foo/a.ts',
+            importedBy: 'src/bar/b.ts',
+            symbols: ['parse'],
+            typeOnly: false,
+            dynamic: false,
+          },
+        ]);
+        // A refused wave moves nothing to `ready`.
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      } finally {
+        await rm(coupledRepo, { recursive: true, force: true });
+      }
+    });
+
+    it('wave check: admits the same wave when the two claimed trees share no edge', async () => {
+      const { sessionId, eventsDir, planPath } = await session();
+      const looseRepo = await mkdtemp(path.join(tmpdir(), 'smith-wave-symbols-ok-'));
+      try {
+        await mkdir(path.join(looseRepo, 'src', 'foo'), { recursive: true });
+        await mkdir(path.join(looseRepo, 'src', 'bar'), { recursive: true });
+        await writeFile(path.join(looseRepo, 'src/foo/a.ts'), 'export const a = 1;\n');
+        await writeFile(path.join(looseRepo, 'src/bar/b.ts'), 'export const b = 2;\n');
+        const result = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--repo',
+          looseRepo,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout);
+        expect(parsed.symbolImpact.status).toBe('clean');
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted'),
+        ).toHaveLength(1);
+      } finally {
+        await rm(looseRepo, { recursive: true, force: true });
+      }
     });
 
     // The log is the other register, and it used to substitute `[]` for a
@@ -6415,6 +6538,207 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('cli.missing-positional');
       expect(parsed.error.message).toContain('spec.json');
+    });
+  });
+
+  // The blind spot `claims check` cannot see (P9-3): two disjoint claim lists
+  // joined by an import edge.
+  describe('claims impact', () => {
+    let repoDir: string;
+    let planPath: string;
+
+    const IMPACT_PLAN = {
+      epic_id: 'epic-1',
+      version: 1,
+      status: 'active',
+      tasks: [
+        {
+          task_id: 'epic-1/task-a',
+          epic_id: 'epic-1',
+          plan_version: 1,
+          objective: 'Own the producer.',
+          output_schema_ref: 'result.schema.json',
+          acceptance_criteria: ['it works'],
+          claims: ['src/a.ts'],
+          budget: { tokens: 1000, diff_lines: 100 },
+          contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+        },
+        {
+          task_id: 'epic-1/task-b',
+          epic_id: 'epic-1',
+          plan_version: 1,
+          objective: 'Own the consumer.',
+          output_schema_ref: 'result.schema.json',
+          acceptance_criteria: ['it works'],
+          claims: ['src/b.ts'],
+          budget: { tokens: 1000, diff_lines: 100 },
+          contract: { functional_clauses: ['do it'], nonfunctional_clauses: [] },
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+        },
+      ],
+      edges: [],
+    };
+
+    beforeAll(async () => {
+      repoDir = await mkdtemp(path.join(tmpdir(), 'smith-cli-impact-'));
+      await mkdir(path.join(repoDir, 'src'), { recursive: true });
+      await writeFile(
+        path.join(repoDir, 'src/a.ts'),
+        'export function parse(x: string) { return x; }\n',
+      );
+      await writeFile(
+        path.join(repoDir, 'src/b.ts'),
+        "import { parse } from './a.js';\nexport const b = parse('x');\n",
+      );
+      await writeFile(path.join(repoDir, 'src/c.ts'), 'export const c = 1;\n');
+      planPath = path.join(repoDir, 'plan.json');
+      await writeFile(planPath, JSON.stringify(IMPACT_PLAN));
+    }, 30_000);
+
+    afterAll(async () => {
+      if (repoDir) await rm(repoDir, { recursive: true, force: true });
+    });
+
+    it('exits 1 and names the crossing when one task imports what another exports', () => {
+      const { stdout, status } = runCli([
+        'claims',
+        'impact',
+        '--plan',
+        planPath,
+        '--repo',
+        repoDir,
+        'epic-1/task-a',
+        'epic-1/task-b',
+      ]);
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.status).toBe('coupled');
+      expect(parsed.crossings).toEqual([
+        {
+          producer: 'epic-1/task-a',
+          consumer: 'epic-1/task-b',
+          exportedBy: 'src/a.ts',
+          importedBy: 'src/b.ts',
+          symbols: ['parse'],
+          typeOnly: false,
+          dynamic: false,
+        },
+      ]);
+    });
+
+    it('exits 0 when no task in the wave imports what another one exports', async () => {
+      const disjoint = {
+        ...IMPACT_PLAN,
+        tasks: IMPACT_PLAN.tasks.map((task, index) =>
+          index === 1 ? { ...task, claims: ['src/c.ts'] } : task,
+        ),
+      };
+      const disjointPath = path.join(repoDir, 'plan-disjoint.json');
+      await writeFile(disjointPath, JSON.stringify(disjoint));
+
+      const { stdout, status } = runCli([
+        'claims',
+        'impact',
+        '--plan',
+        disjointPath,
+        '--repo',
+        repoDir,
+        'epic-1/task-a',
+        'epic-1/task-b',
+      ]);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.status).toBe('clean');
+      expect(parsed.crossings).toEqual([]);
+      // src/b.ts still imports src/a.ts, and nobody in this wave claims it.
+      expect(parsed.exposure).toEqual([
+        {
+          producer: 'epic-1/task-a',
+          exportedBy: 'src/a.ts',
+          importedBy: 'src/b.ts',
+          symbols: ['parse'],
+        },
+      ]);
+    });
+
+    it('refuses a wave with no task ids rather than pronouncing the empty set clean', () => {
+      const { stdout, status } = runCli([
+        'claims',
+        'impact',
+        '--plan',
+        planPath,
+        '--repo',
+        repoDir,
+      ]);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('cli.empty-wave');
+    });
+
+    describe('post-run, against a task branch', () => {
+      let worktree: string;
+      let specPath: string;
+
+      beforeAll(async () => {
+        worktree = await mkdtemp(path.join(tmpdir(), 'smith-cli-impact-run-'));
+        runOrThrow('git', ['init', '-q', '-b', 'smith/epic-1/integration', worktree]);
+        runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: worktree });
+        runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: worktree });
+        await mkdir(path.join(worktree, 'src'), { recursive: true });
+        await writeFile(
+          path.join(worktree, 'src/a.ts'),
+          'export const kept = 1;\nexport const gone = 2;\n',
+        );
+        await writeFile(
+          path.join(worktree, 'src/theirs.ts'),
+          "import { gone } from './a.js';\nexport const t = gone;\n",
+        );
+        runOrThrow('git', ['add', '.'], { cwd: worktree });
+        runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: worktree });
+        runOrThrow('git', ['checkout', '-q', '-b', 'smith/epic-1/task-1'], { cwd: worktree });
+        await writeFile(path.join(worktree, 'src/a.ts'), 'export const kept = 1;\n');
+        runOrThrow('git', ['commit', '-q', '-am', 'drop gone'], { cwd: worktree });
+        specPath = path.join(worktree, 'spec.json');
+        await writeFile(
+          specPath,
+          JSON.stringify({ task_id: 'epic-1/task-1', claims: ['src/a.ts'] }),
+        );
+      }, 30_000);
+
+      afterAll(async () => {
+        if (worktree) await rm(worktree, { recursive: true, force: true });
+      });
+
+      it('exits 1 when a removed export is still imported outside the claims', () => {
+        const { stdout, status } = runCli(['claims', 'impact', worktree, specPath]);
+        expect(status).toBe(1);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.ok).toBe(false);
+        expect(parsed.breaks).toEqual([
+          {
+            severity: 'proven',
+            reason: 'removed',
+            exportedBy: 'src/a.ts',
+            importedBy: 'src/theirs.ts',
+            symbols: ['gone'],
+          },
+        ]);
+      });
+
+      it('exits 0 when the claims already cover every importer', async () => {
+        const widePath = path.join(worktree, 'spec-wide.json');
+        await writeFile(widePath, JSON.stringify({ task_id: 'epic-1/task-1', claims: ['src/**'] }));
+
+        const { stdout, status } = runCli(['claims', 'impact', worktree, widePath]);
+        expect(status).toBe(0);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.ok).toBe(true);
+        expect(parsed.breaks).toEqual([]);
+      });
     });
   });
 

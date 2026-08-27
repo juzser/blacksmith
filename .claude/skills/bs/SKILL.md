@@ -553,6 +553,12 @@ below the floor.
    — claims must be pairwise disjoint and share no `worktree.yml`
    `serialize_always_globs` hotspot. A violation means cut a dependency
    edge and run the pair serially instead of forcing the wave.
+   - The same verdict carries `symbolImpact`. `valid: true` with
+     `symbolImpact.status: "coupled"` means the claims really are disjoint
+     and that is not enough: the two tasks sit on either end of an import
+     edge the plan declared no dependency for. Split the wave and run the
+     producer first — there is no override for a crossing, because the
+     declared-edge case is already refused above it (operator-guide §2).
 2. Per admitted task: `smith worktree create workspaces/<project> <epic>
    <task-id>`.
 3. Pre-code, if the task needs it: dispatch `researcher` for an unknown, or
@@ -666,9 +672,15 @@ below the floor.
    — see "Round counting and escalation" above. Then have the log check
    you: `smith escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
-10. Gate outcome `pass`/`pass-with-waivers-pending` → admit into the merge
-    queue: `smith queue run <epic> --project workspaces/<project> --test-cmd
-    "<cumulative test command>" --tasks tasks.json`. On a
+10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting,
+    ask what the diff did to everyone outside the claims:
+    `smith claims impact <worktree-dir> <spec.json>`. Exit 1 means a
+    `proven` break — this task removed an export a file outside its claims
+    still imports — and that is a bounce to the coder, not a merge. A
+    `possible` / `signature-changed` entry exits 0 and is a note: the
+    scanner reads text, not types (operator-guide §2). Then admit into the
+    merge queue: `smith queue run <epic> --project workspaces/<project>
+    --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
     `rebase-conflict` outcome, dispatch **`merger`**
     (`.claude/agents/merger.md`) with both diffs + specs, and note three
     things the queue's own behaviour forces (agent-interviews.md N-12):
@@ -940,6 +952,18 @@ pointed at another project's db would show this repo's roadmap.
    sectioned by scope (architecture §9.5). Commit the regenerated file — it
    is the file every later dispatch reads (`smith lessons for-dispatch`), so
    an approved-but-uncompiled lesson reaches nobody.
+6. After a compile — or whenever `lessons.md` has grown enough that nobody
+   reads it — ask which entries still earn their place:
+   `smith lessons audit <session-id> [--lessons <file>] [--state-dir <dir>]`.
+   It **recommends only**; every removal is still the operator's call, the
+   same boundary step 2 draws. Read the two evidence classes apart
+   (operator-guide §10b): `retire`/`unreachable` is structural — an earlier
+   entry shadows this one, provable from the corpus text alone — while
+   `idle`/`rescope` needs a log showing the entry was actually loaded and
+   still did not fire. `no-evidence` means the audit could not see enough,
+   and is **never** a reason to drop an entry. Contradictions are reported,
+   not resolved: two entries that disagree are a question for the operator,
+   not something a tool should pick a winner in.
 
 ## `/bs report`
 
