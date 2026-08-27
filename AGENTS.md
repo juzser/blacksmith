@@ -26,7 +26,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | New-project scaffolder (`smith new`) | `factory/scaffold/`, `factory/orchestrator/src/scaffold.ts` |
 | Recheck/maintenance/growth scheduler (`smith scheduler run`) | `factory/orchestrator/src/scheduler.ts`, `factory/policies/scheduler.yml` |
 | Lessons pipeline (novelty gate, compile, `smith dream`) | `factory/orchestrator/src/lessons.ts` |
-| Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
+| Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge preflight`, `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
 
 ## Operating rules
 

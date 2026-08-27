@@ -20,6 +20,13 @@ import {
 } from './claims.js';
 import { collectCoverageEvidence } from './coverage.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
+import {
+  type IndependentRun,
+  independentFinderRequest,
+  type NativeFindingRecord,
+  reconcile,
+  runIndependentFinder,
+} from './crossFinding.js';
 import { apply as applyDb, type DbOpts, openDb, rebuild as rebuildDb } from './db/projector.js';
 import {
   analytics,
@@ -55,6 +62,7 @@ import {
   findingScope,
   listFindings,
   mintFindings,
+  OPEN_FINDING_STATUSES,
   raiseFinding,
   repairObligation,
   reverifyFinding,
@@ -62,12 +70,14 @@ import {
   transition as transitionFinding,
 } from './findings.js';
 import { runGate } from './gate.js';
+import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
 import {
   checkWorktreeImmutable,
   fingerprintWorktree,
   type WorktreeFingerprint,
 } from './immutability.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
+import { judgePreflight } from './judgePreflight.js';
 import {
   outstandingJudges,
   readJudgeTurns,
@@ -103,7 +113,7 @@ import {
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
-import type { JudgeRequest } from './providers/types.js';
+import type { JudgeBudget, JudgeRequest } from './providers/types.js';
 import { admit, adopt, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { checkRuntime } from './runtime.js';
@@ -131,6 +141,7 @@ import {
   readAddedTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
+import { checkTesterIsolation } from './testerAudit.js';
 import type { CheckCommand } from './testgate.js';
 import {
   COMMANDS,
@@ -298,6 +309,34 @@ function boundedIntFlag(
     );
   }
   return value;
+}
+
+/**
+ * The same two numbers gate.ts, epic.ts and planQuorum.ts each declare for
+ * themselves, and for their reason: a judge call is a network round-trip, not
+ * a test. Declared here rather than imported because none of those three
+ * exports it, and cli.ts depending on a gate module for a default would make
+ * the CLI a fourth caller of the gate rather than a peer of it.
+ */
+const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_bytes: 262_144 };
+
+/**
+ * A judge budget the operator may narrow from the command line.
+ *
+ * Both bounds are floors, not ceilings, on purpose: a `--timeout-ms 0` would
+ * make every call fail as a timeout and read as a provider that refuses to
+ * answer, and a `--max-output-bytes 0` would truncate every verdict to nothing
+ * and read as a provider that answered with silence. Those are the two
+ * failures this repo works hardest to keep distinguishable, so neither is
+ * reachable by typo.
+ */
+function judgeBudgetFromFlags(flags: Record<string, string>): JudgeBudget {
+  return {
+    timeout_ms: boundedIntFlag(flags, 'timeout-ms', { min: 1 }) ?? DEFAULT_JUDGE_BUDGET.timeout_ms,
+    max_output_bytes:
+      boundedIntFlag(flags, 'max-output-bytes', { min: 1 }) ??
+      DEFAULT_JUDGE_BUDGET.max_output_bytes,
+  };
 }
 
 /**
@@ -716,6 +755,18 @@ function mcpSurfaceFor(epicId: string, projectDir: string, flags: Record<string,
   return resolveMcpSurface({
     epicId,
     projectDir,
+    ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
+  });
+}
+
+/**
+ * The goal half of the epic gate. Same division of labour as mcpSurfaceFor:
+ * the roadmap read happens out here so epic.ts stays a fold over values it was
+ * handed, and `--roadmap-path` points both halves at the same file.
+ */
+function epicGoalFor(epicId: string, flags: Record<string, string>) {
+  return resolveEpicGoal({
+    epicId,
     ...(flags['roadmap-path'] ? { roadmapPath: flags['roadmap-path'] } : {}),
   });
 }
@@ -1537,6 +1588,28 @@ async function main(): Promise<number> {
     return report.ok ? 0 : 1;
   }
 
+  if (namespace === 'tester' && action === 'check') {
+    // The other half of `dispatch check`: that one asks whether the critic ran
+    // on the finder's model, this one asks whether a tester ran at all, in a
+    // turn of its own, before the gate that graded its tests. Same fail-closed
+    // contract — `unverifiable` exits 1 — and testerAudit.ts says why absence
+    // is a violation here where it is `not-applicable` there.
+    // required: 1 — `<id>` and `<path>` in the usage line are flag values.
+    const [sessionId] = requirePositionals(positional, usageFor('tester check'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119), for `dispatch check`'s reason: a coder dispatched
+    // before a session split and its tester after it is exactly the pairing
+    // this check reads, and one session's log holds half of it.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const pairs = loadCrosscheckPolicy(flags.policy).roleIsolation.pairs;
+    const report = checkTesterIsolation(events, pairs, {
+      sessionId,
+      ...(flags.task ? { taskId: flags.task } : {}),
+    });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
   if (namespace === 'escalation' && action === 'check') {
     // P9-32: budgets.yml's escalation_ladder, asserted against the log instead
     // of trusted. Same fail-closed contract as `dispatch check` — see
@@ -1674,8 +1747,16 @@ async function main(): Promise<number> {
     // to what the checkout actually is, same as the hook itself resolves
     // them, so a caller only needs --branch/--tool to ask a hypothetical
     // ("what if I were on main") rather than the real one.
+    // --command stays required even for a file tool, because the answer to
+    // "what would the hook say" depends on both halves of the payload and a
+    // caller who omits one is usually asking the wrong question. `--command
+    // ''` is the file-tool form: nothing to run, a path to check.
     const command = requireFlag(flags, 'command');
     const toolName = flags.tool ?? 'Bash';
+    // The other half of a PreToolUse payload: `tool_input.file_path`, which
+    // is what a `Write`/`Edit` call carries instead of a command. Only the
+    // role write scopes read it today — see policy.ts's PolicyContext.
+    const filePath = flags.file ?? null;
     // Resolved from the caller's cwd, not from the checkout this binary was
     // built in: an operator asking "would this be denied?" means from where
     // they are standing, and in this repo that is routinely a worktree on a
@@ -1698,7 +1779,7 @@ async function main(): Promise<number> {
         }
       : activeSandboxFor(process.cwd(), flags['lease-dir'] ?? SANDBOX_LEASE_DIR);
     const decision = evaluateCommand(
-      { toolName, command, branch, repoRoot, sandbox },
+      { toolName, command, branch, repoRoot, sandbox, filePath },
       loadGuardrailPolicy(),
     );
     printJson(decision);
@@ -1725,12 +1806,21 @@ async function main(): Promise<number> {
     const raw = readFileSync(0, 'utf8');
     const payload = JSON.parse(raw) as {
       tool_name?: unknown;
-      tool_input?: { command?: unknown };
+      tool_input?: { command?: unknown; file_path?: unknown };
       cwd?: unknown;
     };
     const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
     const command =
       typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '';
+    // A `Write`/`Edit`/`MultiEdit` payload carries no command; its target is
+    // `tool_input.file_path`, absolute. Bash was the only tool worth
+    // inspecting while every leased role was a judge, since judges hold no
+    // file tools and a shell was their only write path. A tester holds both,
+    // so watching only Bash would leave the rule to be routed around with
+    // the tool the role was handed. Same shape as `command`: a missing or
+    // non-string field reads as absent, never as a guess.
+    const filePath =
+      typeof payload.tool_input?.file_path === 'string' ? payload.tool_input.file_path : null;
     // Branch and repo root come from where the command would actually run,
     // which the PreToolUse payload carries as `cwd`. Resolving them from this
     // binary's own checkout instead would be wrong in the case this factory
@@ -1756,6 +1846,7 @@ async function main(): Promise<number> {
       // in a PreToolUse payload that says where the command will run. No lease
       // is the ordinary case and costs one directory read.
       sandbox: activeSandboxFor(cwd),
+      filePath,
     };
     const decision = evaluateCommand(context, loadGuardrailPolicy());
     if (!decision.allowed) {
@@ -2034,6 +2125,7 @@ async function main(): Promise<number> {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
+        goal: epicGoalFor(epicId, flags),
         // D-126: the live plan is a voter. Without this the roster is the
         // event-log fold alone, and a task an amendment added but nobody
         // dispatched is invisible rather than unfinished.
@@ -2059,6 +2151,7 @@ async function main(): Promise<number> {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
+        goal: epicGoalFor(epicId, flags),
         planOpts: planOptsFromFlags(flags),
         ...(flags['override-rationale'] !== undefined
           ? { overrideRationale: flags['override-rationale'] }
@@ -2111,6 +2204,56 @@ async function main(): Promise<number> {
     printJson(record);
     // Exit 0 even when it found something: the review ran, and a spec finding
     // blocks the plan, not this command. `plan amend` is what answers it.
+    return 0;
+  }
+
+  // The spec-vs-goal check. Every gate before it reads text the planner wrote;
+  // this one reads the roadmap goal the operator wrote before planning began,
+  // so a plan that decomposes the wrong problem stops being invisible.
+  if (namespace === 'epic' && action === 'goal-check') {
+    const epicId = requireFlag(flags, 'epic');
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const goal = epicGoalFor(epicId, flags);
+    // Refuse rather than record a check against nothing. The blocker for an
+    // undeclared goal is already in the epic gate; producing an event here
+    // would be a record of a check that had no reference text.
+    if (goal.goal === null || goal.milestoneId === null) {
+      throw new SmithError(
+        'cli.no-epic-goal',
+        `No roadmap milestone states a goal for "${epicId}", so there is nothing to check its plan against. Give the milestone that owns it a \`- goal:\` line in factory/specs/roadmap.md, or add the epic to an existing milestone's \`- epics:\` list.`,
+        { epicId, milestoneId: goal.milestoneId },
+      );
+    }
+    const coverage = readJsonFile<ClauseCoverage[]>(requireFlag(flags, 'coverage'));
+    const record = await recordGoalCheck(
+      {
+        epicId,
+        milestoneId: goal.milestoneId,
+        goal: goal.goal,
+        planVersion: plan.version,
+        livePlanTaskIds: livePlanTasks(plan).map((spec) => spec.task_id),
+        checkedBy: requireFlag(flags, 'checked-by'),
+        ...(flags['checked-by-provider']
+          ? { checkedByProvider: flags['checked-by-provider'] }
+          : {}),
+        coverage,
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(record);
+    // Exit 0 for the reason `epic spec-review` does: the check ran, and an
+    // uncovered clause blocks the plan rather than this command. `plan amend`
+    // is what answers it.
+    return 0;
+  }
+
+  // The clause list a coverage map has to answer, printed so a judge dispatch
+  // (or an operator writing one by hand) does not have to guess how
+  // goalClauses() splits the goal. Read-only: no event, no finding.
+  if (namespace === 'epic' && action === 'goal') {
+    const epicId = requireFlag(flags, 'epic');
+    printJson(epicGoalFor(epicId, flags));
     return 0;
   }
 
@@ -2604,6 +2747,16 @@ async function main(): Promise<number> {
     return open.length > 0 ? 1 : 0;
   }
 
+  if (namespace === 'judge' && action === 'preflight') {
+    // The one provider question that can be answered without spending a call.
+    // Deliberately ahead of `judge run` in this file for the same reason it is
+    // ahead of it in the runbook: an operator reaching for a calibration call
+    // to find out why a provider keeps failing usually needed this instead.
+    const report = judgePreflight(flags.policy);
+    printJson(report);
+    return report.problems.length > 0 ? 1 : 0;
+  }
+
   if (namespace === 'judge' && action === 'run') {
     // Manual invocation for calibration (docs/runbooks/providers.md) — never
     // touches the event log or quorum.ts; `--shadow` is an output-only note
@@ -2614,6 +2767,87 @@ async function main(): Promise<number> {
     const result = await runJudge(providerName, request);
     printJson({ ...result, shadow: flags.shadow === 'true' });
     return 0;
+  }
+
+  if (namespace === 'crossfind') {
+    // crosscheck.yml's `independent_finder`, driven by hand. Three verbs, and
+    // the split between them is the operator mandate made operable: `request`
+    // shows exactly what would leave the machine WITHOUT sending it, `run`
+    // sends it, and `reconcile` needs no provider at all.
+    const policy = loadCrosscheckPolicy(flags.policy);
+
+    if (action === 'request') {
+      // Read-only and network-free by construction: it builds the JudgeRequest
+      // and prints it. Every refusal independentFinderRequest() can raise —
+      // send_diff false, empty diff, oversized diff — fires here too, so an
+      // operator can find out what the policy forbids before spending a call.
+      const request = independentFinderRequest({
+        taskId: requireFlag(flags, 'task'),
+        diff: readFileSync(requireFlag(flags, 'diff'), 'utf8'),
+        diffRef: requireFlag(flags, 'diff-ref'),
+        ...(repeated.criterion ? { criteria: repeated.criterion } : {}),
+        budget: judgeBudgetFromFlags(flags),
+        policy: policy.independentFinder,
+      });
+      printJson(request);
+      return 0;
+    }
+
+    if (action === 'reconcile') {
+      // Offline calibration: two saved lists in, one report out, no provider
+      // invoked and nothing appended to the log. This is the verb to run over
+      // a shadow-mode backlog before deciding whether to flip `mode: active`.
+      const report = reconcile({
+        taskId: requireFlag(flags, 'task'),
+        native: readJsonFile<NativeFindingRecord[]>(requireFlag(flags, 'native')),
+        independent: readJsonFile<IndependentRun[]>(requireFlag(flags, 'independent')),
+        policy: policy.independentFinder,
+      });
+      printJson(report);
+      return report.gates ? 1 : 0;
+    }
+
+    if (action === 'run') {
+      const sessionId = requireFlag(flags, 'session');
+      const taskId = requireFlag(flags, 'task');
+      const eventOpts = eventOptsFromFlags(flags);
+      requireSession(sessionId, eventOpts);
+      // Lineage-wide (D-119), like every other read of a task's findings: a
+      // finding raised before a session split is still a finding this diff has
+      // to be reconciled against.
+      const native = (await listFindings(sessionId, { taskId }, eventOpts)).filter((f) =>
+        flags.status === undefined
+          ? OPEN_FINDING_STATUSES.has(f.finding_status)
+          : f.finding_status === flags.status,
+      );
+      // Built separately from the run for the reason RunIndependentFinderInput
+      // says: `crossfind request` and `crossfind run` must assemble the same
+      // bytes, so the thing the operator inspected is the thing that is sent.
+      const request = independentFinderRequest({
+        taskId,
+        diff: readFileSync(requireFlag(flags, 'diff'), 'utf8'),
+        diffRef: requireFlag(flags, 'diff-ref'),
+        ...(repeated.criterion ? { criteria: repeated.criterion } : {}),
+        budget: judgeBudgetFromFlags(flags),
+        policy: policy.independentFinder,
+      });
+      const result = await runIndependentFinder(
+        { taskId, request, native, policy },
+        eventContextFromFlags(flags),
+        eventOpts,
+      );
+      // `raise` is printed, never minted (crossFinding.ts's contract): which
+      // findings enter a gate is the operator's call, and `smith findings
+      // raise` is where they make it.
+      printJson({
+        report: result.report,
+        runs: result.runs,
+        raise: result.raise,
+        reconciled_event_id: result.reconciledEventId,
+        native_considered: native.length,
+      });
+      return result.report.gates ? 1 : 0;
+    }
   }
 
   if (namespace === 'ui' && action === 'serve') {

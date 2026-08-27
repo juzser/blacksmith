@@ -19,7 +19,13 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { SmithError } from './errors.js';
 import { ROADMAP_PATH, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
-import { loadRoadmap, type MilestoneDef, readRoadmapText, roadmapDeclaresId } from './roadmap.js';
+import {
+  loadRoadmap,
+  type MilestoneDef,
+  ownsEpic,
+  readRoadmapText,
+  roadmapDeclaresId,
+} from './roadmap.js';
 import {
   copyTemplateDir,
   mergePackageJson,
@@ -641,30 +647,6 @@ export const MCP_SURFACE_NOT_REQUIRED: McpSurfaceStatus = Object.freeze({
   check: null,
   problem: null,
 });
-
-/**
- * Whether a milestone claims this epic — the gate's applicability test.
- *
- * `epicIds` alone was the original rule and it made the gate unreachable:
- * registerMcpMilestone() writes `- epics: []`, nothing fills it in, and an
- * empty list matches no epic. So `smith epic close` skipped the MCP surface
- * gate for every project, silently, from the day it shipped — the whole
- * roadmap has `epics: []` on all but one milestone.
- *
- * The id fallback keys on a convention this codebase creates rather than on a
- * list it initializes to the disabling value: `smith mcp init <p>` names the
- * milestone `<p>-mcp-surface`, and the epic that closes it carries the same id
- * (envkit-config-loader/envkit-config-loader is the same pattern). An explicit
- * `epics:` entry still works and still wins for any epic named otherwise.
- *
- * Note what this deliberately does NOT do: match every epic in the project.
- * The standard scopes the gate to the epic under the surface milestone, and
- * widening it would block unrelated epics — including ones that legitimately
- * predate the surface — on a manifest they were never meant to own.
- */
-function ownsEpic(milestone: MilestoneDef, epicId: string): boolean {
-  return milestone.epicIds.includes(epicId) || milestone.milestoneId === epicId;
-}
 
 export interface ResolveMcpSurfaceOptions {
   epicId: string;

@@ -263,3 +263,28 @@ export function roadmapDeclaresId(markdown: string, id: string): boolean {
 export function loadRoadmap(roadmapPath: string = ROADMAP_PATH): MilestoneDef[] {
   return parseRoadmap(readRoadmapText(roadmapPath));
 }
+
+/**
+ * Whether a milestone claims this epic — the applicability test both
+ * milestone-scoped gates share (MCP surface, spec-vs-goal).
+ *
+ * `epicIds` alone was the original rule and it made the gate unreachable:
+ * registerMcpMilestone() writes `- epics: []`, nothing fills it in, and an
+ * empty list matches no epic. So `smith epic close` skipped the MCP surface
+ * gate for every project, silently, from the day it shipped — the whole
+ * roadmap has `epics: []` on all but one milestone.
+ *
+ * The id fallback keys on a convention this codebase creates rather than on a
+ * list it initializes to the disabling value: `smith mcp init <p>` names the
+ * milestone `<p>-mcp-surface`, and the epic that closes it carries the same id
+ * (envkit-config-loader/envkit-config-loader is the same pattern). An explicit
+ * `epics:` entry still works and still wins for any epic named otherwise.
+ *
+ * Note what this deliberately does NOT do: match every epic in the project.
+ * The standard scopes the gate to the epic under the surface milestone, and
+ * widening it would block unrelated epics — including ones that legitimately
+ * predate the surface — on a manifest they were never meant to own.
+ */
+export function ownsEpic(milestone: MilestoneDef, epicId: string): boolean {
+  return milestone.epicIds.includes(epicId) || milestone.milestoneId === epicId;
+}

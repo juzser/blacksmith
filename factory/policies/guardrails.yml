@@ -130,6 +130,14 @@ rules:
 # work continues the moment it closes. So these matchers lean towards
 # refusing, and the lists below are deliberately generous.
 judge_sandbox:
+  # The roles this rule set is written for: the six that hold `Bash` and no
+  # `Edit`/`Write` (.claude/agents/*.md). `researcher` is deliberately absent
+  # — fetching is its job, and it is never leased. A lease is matched to a
+  # rule set by role, and a role named in neither list falls back to *this*
+  # one, so the list is the vocabulary `smith sandbox open --role` validates
+  # against rather than a gate of its own.
+  roles: [reviewer, verifier, spec-reviewer, security-reviewer, grader, uiux]
+
   # The only paths a judge may write, repo-root-relative. Both are the
   # judge's own output: `state/results/<task-id>.<role>.json` is the verdict
   # artifact every judge template already names, and `state/artifacts/` is
@@ -207,3 +215,69 @@ judge_sandbox:
       reason: >-
         a {role} judge cannot open, close or inspect its own sandbox lease —
         the orchestrator that opened it closes it when the verdict is in.
+
+# ---------------------------------------------------------------------------
+# Roles that write, but not everywhere.
+#
+# The judge sandbox answers one question — "may this role write at all?" — and
+# for a judge the answer is no. A tester writes plenty. What it must not write
+# is the thing it is grading: a tester that can edit `src/` can make a failing
+# test pass by changing the implementation, which is the same self-marking the
+# fresh-context reviewer exists to prevent, arriving one gate earlier.
+#
+# So: the same lease machinery, a different rule set selected by role.
+#
+# Two differences from the judge rules follow from the role actually being
+# allowed to write. `git add`/`commit` stay allowed, because the tester's
+# output contract *requires* a commit on the task branch — only the git
+# subcommands that change tracked content without passing a path check are
+# refused. And `rm` is path-checked rather than refused outright, because
+# deleting a stale test is ordinary tester work.
+#
+# `judge-sandbox-escape` is not listed here because it is not role-dependent:
+# a lease its holder can lift is not a lease, whichever rule set the role
+# draws the rest of its bounds from.
+role_write_scopes:
+  scopes:
+    - role: tester
+      # Repo-root-relative globs (picomatch, posix separators). A directory
+      # counts as in scope when something inside it would be, so
+      # `mkdir -p factory/orchestrator/test/fixtures` is allowed.
+      write_globs:
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/test/**"
+        - "**/tests/**"
+        - "**/__tests__/**"
+        - "**/__snapshots__/**"
+        - "**/e2e/**"
+        - "state/results/**"
+        - "state/artifacts/**"
+
+      # Write verbs refused with no path check, for the reason the judge
+      # sandbox gives: deciding which token of `cp a b` is the target is more
+      # machinery than the legitimate cases justify — and this role holds
+      # `Edit` and `Write`, which *are* path-checked, as the better route to
+      # the same edit. `install` is absent on purpose: the tester runs the
+      # suite, and `npx playwright install chromium` is not the BSD `install`
+      # verb.
+      refused_commands:
+        [cp, mv, ln, dd, truncate, shred, patch, chmod, chown, chgrp,
+         vi, vim, nano, emacs, ed, pico]
+
+      # git subcommands that put tracked content back under the tester's
+      # control without passing a path check. `add`, `commit`, `switch`,
+      # `status` and `diff` are deliberately absent — the first two are the
+      # tester's output contract.
+      refused_git_subcommands: [apply, am, cherry-pick, revert, reset, clean, checkout, restore, stash]
+
+  rules:
+    - id: role-write-scope
+      severity: S1
+      reason: >-
+        a {role} session writes only {write_globs}. The implementation
+        belongs to the coder, and a test whose subject the tester may edit
+        is a test that grades itself. If the code is wrong, that is a
+        finding, not an edit.

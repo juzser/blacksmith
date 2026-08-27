@@ -365,6 +365,13 @@ It exits 1 on a violation **and** on `unverifiable` — a critic dispatch with
 no model, or with no finder dispatch before it to compare against. A check
 that cannot answer must not read as a pass.
 
+Its sibling `smith tester check <session-id>` asks the other half of the same
+question — not *which model* graded, but *whose turn* did. `crosscheck.yml`'s
+`role_isolation` pairs `coder` with `tester`, and a `testgate-result` with no
+separate `tester` dispatch behind it is a **violation** there, where an absent
+critic is `not-applicable` here: for a tester, absence is the finding. Same
+fail-closed contract, and the two are not substitutes.
+
 | Subcommand | Purpose |
 |---|---|
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
@@ -525,6 +532,10 @@ there means "not looked at", not "looked at and clean".
 8. If this epic opens a new roadmap milestone, add it to
    `factory/specs/roadmap.md` (planner-maintained, architecture §12) — a
    roadmap change is itself a scope change and needs the same operator nod.
+   Give it a `- goal:` line and list the epic under `- epics:`. That line is
+   load-bearing, not documentation: it is the only text the spec-vs-goal gate
+   can grade the plan against (`/bs run` step 14), and a milestone without one
+   holds every epic it owns.
 
 ## `/bs run <epic>`
 
@@ -631,6 +642,14 @@ below the floor.
      gate, because the gate now refuses to score with a non-empty outstanding
      set (`reason: judges-outstanding`) rather than reading a silent judge as
      zero findings.
+   - The gate scores tests it did not write, so once it has run, make the log
+     say who did: `smith tester check <session-id> --task <task-id>`
+     (`crosscheck.yml` `role_isolation`, operator-guide §2d). Exit 1 means no
+     `tester` dispatch precedes this task's `testgate-result`, the coder and
+     tester dispatches share one `agent_id`, or the answer is unknowable. A
+     coder that writes and runs its own tests grades itself and every gate
+     downstream still goes green — step 5 is what prevents that, and this is
+     the log checking that step 5 happened.
 8. Every dispatch in steps 3–7 carries the compiled lessons block for that
    role (`smith lessons for-dispatch <role> --plan … --task …`), every
    worktree dispatch also carries the open-findings block for that task
@@ -745,7 +764,47 @@ below the floor.
     back to step 11 with the new version, and re-run this review against the
     branch that results. Never record a spec defect as a coder failure; that is
     the deadlock this step exists to end.
-14. Before opening the PR, run the epic-final verdict — the last
+14. Check the plan against the **goal it was cut from**. Every gate up to
+    here reads text the planner produced, so all of them go green on a plan
+    that decomposes the wrong problem. This one reads the `- goal:` line of
+    the roadmap milestone that owns the epic — the one reference the planner
+    did not write. Get the clause list first (read-only, no event):
+
+    ```bash
+    smith epic goal --epic <epic>
+    ```
+
+    Hand those clauses and the live plan to a **`spec-reviewer`** session —
+    a fresh one, never the planner's, and never the same dispatch as step 13:
+    the audit refuses to let one dispatch answer for both. Dispatch it *after*
+    step 13's record is written, not alongside it — a dispatch that predates
+    the previous record has already answered for that one, so two sessions
+    fired up front leave this record unaccounted for
+    (`smith dispatch audit` reports it `unverifiable`). Take back one verdict
+    per clause, in the goal's order, and record it:
+
+    ```bash
+    smith epic goal-check --epic <epic> \
+      --plan factory/specs/active/<epic>/plan-vN.json \
+      --coverage state/results/<epic>.goal-coverage-vN.json \
+      --checked-by spec-reviewer \
+      --session <session-id> --causal-parent <event-id>
+    ```
+
+    `covered` must name live plan task ids; `out-of-scope` must give a reason,
+    and that reason is quoted back to the epic judge. `uncovered` mints an
+    S2-major spec finding against the plan file — no task diff can contain
+    that fix, so the answer is `smith plan amend`, which cuts v(n+1) and sends
+    you back to step 11. The command exits 0 even when it raises findings.
+
+    **It refuses (`cli.no-epic-goal`) when the owning milestone states no
+    goal, and the epic then cannot close.** That is deliberate — there is no
+    `not-required` escape hatch, because "no goal is stated" is the absence of
+    the only text this gate can grade against. Fix the roadmap, do not work
+    around it: give the milestone a `- goal:` line, or add the epic to the
+    `- epics:` list of one that has it. Tell the operator you edited the
+    roadmap; it is a scope surface (`/bs plan` step 8).
+15. Before opening the PR, run the epic-final verdict — the last
     `quorum_triggers` gate, and the one that decides whether this epic is
     integrable at all:
 
@@ -755,13 +814,13 @@ below the floor.
     ```
 
     Mechanical oracles first: non-terminal tasks, open blocking findings, a
-    missing/failed/stale integration-root check, or a missing/stale closing
-    spec review return `hold` (exit 1) without spending a judge call.
-    `--project` is required — the verdict
+    missing/failed/stale integration-root check, a missing/stale closing spec
+    review, or a missing/stale spec-vs-goal check return `hold` (exit 1)
+    without spending a judge call. `--project` is required — the verdict
     reads the integration branch head to decide whether the records from
-    steps 12 and 13 still cover it. On `hold`, do not open the PR — report the
-    `blockers` to the operator and go back to step 11.
-15. Record the close. The verdict above is a read-only probe and writes
+    steps 12, 13 and 14 still cover it. On `hold`, do not open the PR — report
+    the `blockers` to the operator and go back to step 11.
+16. Record the close. The verdict above is a read-only probe and writes
     nothing; `epic close` is what makes it a fact in the log (D-43):
 
     ```bash
@@ -773,7 +832,7 @@ below the floor.
     (exit 1, no event) on `hold`. **Never pass `--override-rationale`
     yourself** — closing over a hold is the operator's call; ask for it and
     quote the blockers.
-16. Open **one integration PR per epic**
+17. Open **one integration PR per epic**
     (`smith/<epic>/integration` → target repo `main`) with the scribe-
     written body (`/bs report`'s playbook, below) — screenshots, test
     results, reviewer verdict, waivers granted, timeline link. The operator

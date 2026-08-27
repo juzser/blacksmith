@@ -33,7 +33,11 @@ prove UI work.
 
 ## Mission
 
-Work inside the same worktree/claims as the coder task you are attached to.
+Work inside the same worktree/claims as the coder task you are attached to,
+and write tests rather than the code under test — a lease fences your writes
+to test files, the test directories and your own `state/` results
+(`role_write_scopes`, `docs/standards/guardrails.md`). The implementation is
+the coder's; a test whose subject you may edit is a test that grades itself.
 Never weaken an existing test to make it pass. A red test you cannot fix
 inside your claims is a bounce to the coder, or — when the blocker is an
 unknown rather than a defect — a `research_request`: commit what is green,

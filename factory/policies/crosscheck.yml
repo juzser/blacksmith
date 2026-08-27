@@ -143,6 +143,77 @@ asymmetric_roles:
     is tracked as kill-rate (findings that survive verification and land as
     verified fixes), never findings volume.
 
+role_isolation:
+  # The other half of "a worker never grades its own work". `finder_ne_critic`
+  # above compares MODELS, which is the wrong question for a tester: a tester
+  # may legitimately run on the coder's model, and forcing a second vendor onto
+  # it would buy nothing. What it may not do is run inside the coder's own
+  # turn — a coder that writes its own tests grades itself, and every gate
+  # downstream still goes green.
+  #
+  # The only evidence of a separate turn the event log can hold is a separate
+  # `dispatch_decision`: no role template grants `Agent`, so a dispatch is
+  # written by the orchestrator once per agent it invokes, never by an agent
+  # about itself. `smith tester check <session>` asserts that against the log
+  # after the fact, per `testgate-result`.
+  #
+  # One entry, and it is meant to stay one until a second role starts grading
+  # work it could have written: every other grader in the pipeline is a judge,
+  # and a judge cannot write at all (`role_write_scopes` in guardrails.yml).
+  pairs:
+    - worker: coder
+      auditor: tester
+  note: >
+    the audit answers "was a tester dispatched separately, and did it report,
+    before this task's tests were graded?" — not "did that tester write the
+    tests". Nothing in the log distinguishes a test file the tester authored
+    from one it merely ran; `role-write-scope` fences where a leased tester may
+    write, and the two checks are complementary, not substitutes.
+
+independent_finder:
+  # Everything else on this page is SUBTRACTIVE. quorum.ts's vocabulary is
+  # `confirm | refute`, a critic is handed one claim and told to kill it, and
+  # the strongest thing a quorum can do is drop a finding the native reviewer
+  # already raised. That makes the external tier a brake and never an eye: a
+  # bug the native reviewer's context did not surface is a bug no amount of
+  # cross-checking will ever reach, because nothing outside that context is
+  # ever asked to look.
+  #
+  # This block is the other direction. A finder from a different vendor reads
+  # the same diff in a fresh context, returns its own evidence, and
+  # crossFinding.ts reconciles the two lists. A quorum can now RAISE.
+  #
+  # Three things it deliberately does not do:
+  #
+  # 1. Silence is not a refutation. A native finding the independent finder did
+  #    not raise stays exactly as it was. The finder was never asked about that
+  #    claim — it was asked to read a diff — so its not mentioning something is
+  #    absence of evidence. Subtracting on it would let a lazy or truncated
+  #    second opinion delete real findings.
+  # 2. Same file and category with different wording is not the same finding.
+  #    That is `co-located`: recorded for the operator, never merged and never
+  #    auto-raised, because nothing here can tell one bug described twice from
+  #    two bugs in one function.
+  # 3. An independent-only finding is minted, not privileged. It enters the
+  #    gate as an ordinary finding and, at S1/S2, meets the same
+  #    `quorum_triggers` critic as any other — so a third-party vendor's
+  #    unshared opinion still has to survive a refute pass before it blocks.
+  enabled: false     # ships off: this is the one judge call that costs a diff
+  mode: shadow       # reconciliations are recorded and gate nothing; flip to `active` only after a calibration pass (docs/runbooks/providers.md)
+  providers: [codex] # must be external and must not be the native provider — a "second opinion" from the same model is one opinion billed twice
+  # THE OPERATOR MANDATE. A critic judges a CLAIM, so quorum.ts can send the
+  # summary and the failure scenario and never the source. A finder cannot: it
+  # has nothing to read but the diff. Shipping worktree source to a third-party
+  # API is a decision no code in this repo has standing to make quietly, so it
+  # is a switch, it ships false, and `smith crossfind run` REFUSES rather than
+  # falling back to a diffless "find bugs" prompt that would invent findings.
+  send_diff: false
+  max_diff_bytes: 120000 # refuse rather than truncate: half a diff produces confident findings about code that is not there
+  # How a fingerprint both sides raised resolves when they disagree on how bad
+  # it is. `highest-wins` takes the worse of the two; `native-wins` keeps the
+  # native severity and records the disagreement without acting on it.
+  severity_resolution: highest-wins
+
 mechanical_oracles_first: >
   wherever a deterministic check exists (schema validation, mutation
   testing, coverage, type checks), it runs first and its verdict is final —

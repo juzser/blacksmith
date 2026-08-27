@@ -69,39 +69,70 @@
   provider API calls are the one exception (read-only judgment, budgeted,
   logged).
 
-## The judge sandbox
+## The role sandbox
 
-Six roles judge work they did not do — grader, reviewer, verifier,
+The orchestrator opens a lease over a worktree before handing it to a role
+that must not have the run of it (`smith sandbox open <dir> --role <role>
+--task <id> --session <id>`) and closes it when that role's output is filed.
+While the lease is open, further S1 rules apply to work done inside that
+directory, on top of everything above. Which rules depends on the role;
+`guardrails.yml` names them, and `sandbox open` refuses a role the file has no
+rules for rather than leasing one it cannot govern.
+
+### Judges — write nothing
+
+Six roles judge work they did not do: grader, reviewer, verifier,
 spec-reviewer, security-reviewer, uiux. Their bodies say "you never modify the
 worktree", and until this shipped that sentence *was* the enforcement. It is
-now backed. They hold `Read, Grep, Glob, Bash` and no `Edit`/`Write`, so
-`Bash` is the only way one of them can change anything — and the hook already
-sits on every `Bash` call.
-
-The orchestrator opens a lease over a worktree before handing it to a judge
-(`smith sandbox open <dir> --role <role> --task <id> --session <id>`) and
-closes it once the verdict is filed. While that lease is open, three further
-S1 rules apply to any command run inside that directory, on top of everything
-above:
+now backed.
 
 | Rule | What it refuses |
 | --- | --- |
 | `judge-network` | Outbound access of any kind — `curl`, `wget`, `gh`, `git fetch`/`clone`, package installs. A judge that cannot verify something records a finding; it does not go and fetch what it is missing. |
 | `judge-write` | Every write except the judge's own verdict, under `state/results/` or `state/artifacts/`. Redirects into the tree, in-place edits, staging, moves, permission changes, editors. If the code needs changing, that is a finding, not an edit. |
+
+A role the file does not recognise is leased under these rules too. Falling
+back to the strictest set is the only fallback that fails closed.
+
+### The tester — writes tests, not the code under test
+
+A test whose subject its author may edit is a test that grades itself. The
+tester is isolated from the coder for the same reason the reviewer is, and
+`role_write_scopes` in `guardrails.yml` is where that isolation is stated:
+
+| Rule | What it refuses |
+| --- | --- |
+| `role-write-scope` | Any write outside the role's `write_globs` — for the tester, test and spec files, the test directories, and its own results under `state/`. Also refuses outright the verbs whose target a matcher cannot pin down (`cp`, `mv`, `patch`, `sed -i`, editors) and the git subcommands that rewrite tracked content without naming a path (`apply`, `cherry-pick`, `reset`, `restore`, `checkout`, `stash`). |
+
+The tester keeps the network — a suite installs, downloads browsers, and hits
+fixtures — and keeps `git add`/`commit`, because its output contract is a
+commit on the task branch. What it loses is the implementation.
+
+Unlike a judge, the tester holds `Edit` and `Write`. A rule that watched only
+`Bash` would be a rule it routes around with the tool it was handed, so the
+hook now sits on `Write`, `Edit`, `MultiEdit` and `NotebookEdit` as well, and
+the same globs decide both a redirect target and a `file_path`.
+
+### Both
+
+| Rule | What it refuses |
+| --- | --- |
 | `judge-sandbox-escape` | `smith sandbox` itself. A lease the leaseholder can lift is not a lease. |
 
 The lease is keyed by worktree path and matched by containment, so stepping
 two directories down stays inside it, and a command in a different worktree is
 untouched — an ordinary coder session in the same repo sees none of these
-rules. `smith sandbox status` lists what is currently open.
+rules. `smith sandbox status` lists what is currently open. `smith policy
+check --sandbox <role>` answers what any of them would say without running
+anything.
 
 `researcher` is deliberately outside the sandbox: fetching is its job, and it
 reaches the network through `WebFetch`/`WebSearch` rather than through `Bash`.
 
 **What this is not.** It is not a container, a seccomp profile, or a read-only
-mount. It reads command text, so a write smuggled through an interpreter
-(`python3 -c`, opening a file for writing) is invisible to it and always will
-be. That is exactly why `smith worktree fingerprint`/`verify` stays in the
+mount. It reads command text and tool arguments, so a write smuggled through
+an interpreter (`python3 -c`, opening a file for writing) is invisible to it
+and always will be. That is exactly why `smith worktree fingerprint`/`verify` stays in the
 pipeline behind it: the sandbox refuses up front the writes a matcher can see,
 the fingerprint catches after the fact the ones it cannot. Neither half is
 sold as the other.

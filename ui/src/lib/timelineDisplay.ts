@@ -214,6 +214,7 @@ export const KIND_OPTIONS: readonly KindOption[] = [
       'coverage-evidence',
       'integration-check',
       'spec-review-recorded',
+      'goal-check-recorded',
       'quorum-decision',
       'finding-raised',
       'finding-reverified',
@@ -285,6 +286,16 @@ export function iconFor(entry: TimelineEntry): string {
     case 'judge-verdict':
     case 'judge-reported':
       return 'scale';
+    // The second eye, not a second scale: this row is one reader's independent
+    // pass over a diff, and it says what was seen rather than what was decided.
+    case 'cross-finding-reconciled':
+      return 'eye';
+    // The one gate that reads outside the plan. Not a shield — a shield says
+    // "this artifact was checked against its own criteria", and the whole
+    // point of this row is that the criteria came from somewhere the planner
+    // could not reach.
+    case 'goal-check-recorded':
+      return 'target';
     case 'epic-closed':
       return 'git-merge';
     case 'lesson-candidate-raised':
@@ -456,6 +467,20 @@ export function titleFor(entry: TimelineEntry): string {
       // and so produced no answer to call unparseable (D-253). Rows written
       // before D-253 carry no code and say only "failed".
       return `Judge verdict — ${p.ok === false ? judgeFailureLabel(p.error_code) : String(p.verdict ?? '')} (${String(p.agent ?? '')}/${String(p.provider ?? '')})`;
+    case 'cross-finding-reconciled': {
+      // The counts are the row. `independent-only` is what the native reviewer
+      // missed and `native-only` is what the finder did, and an operator
+      // scanning the timeline is looking for the first number: the whole point
+      // of a second finder is the findings only it raised. Shadow mode is
+      // named in the row because the same numbers gate nothing under it.
+      const counts = (p.counts ?? {}) as Record<string, unknown>;
+      const only = Number(counts['independent-only'] ?? 0);
+      const both = Number(counts.corroborated ?? 0);
+      const shadow = p.mode === 'shadow' ? ', shadow' : '';
+      return `Cross-finding — ${only} independent-only, ${both} corroborated (${String(
+        (p.providers as unknown[] | undefined)?.join(', ') ?? '',
+      )}${shadow})`;
+    }
     case 'judge-reported':
       return `${String(p.agent_role ?? 'Judge')} reported — ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
     case 'epic-closed':

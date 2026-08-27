@@ -23,6 +23,7 @@ import {
   transition,
 } from '../src/findings.js';
 import { type GateInput, runGate } from '../src/gate.js';
+import { type GoalCheckStatus, goalDigest } from '../src/goalCheck.js';
 import type { IntegrationCheckRecord } from '../src/integration.js';
 import { MCP_SURFACE_NOT_REQUIRED } from '../src/mcp.js';
 import type { PlanChanges, PlanFile } from '../src/plan.js';
@@ -1068,6 +1069,40 @@ describe('spec-scoped findings (P9-9)', () => {
       };
     }
 
+    // The goal half of the epic gate. This suite is about the closing spec
+    // review, so the goal check is held current the way okIntegration() holds
+    // the integration run current -- both halves fail closed, and neither is
+    // what these cases are pinning.
+    const GOAL_TEXT = 'Parse .env files the way dotenv does.';
+
+    function okGoalCheck(): GoalCheckStatus {
+      return {
+        check: {
+          epicId: 'envkit',
+          milestoneId: 'milestone-envkit',
+          planVersion: 2,
+          goalDigest: goalDigest(GOAL_TEXT),
+          checkedBy: 'spec-reviewer',
+          coverage: [
+            {
+              clause: GOAL_TEXT,
+              verdict: 'covered',
+              taskIds: ['envkit/task-1b-parse-quotes'],
+            },
+          ],
+          findingIds: [],
+          eventId: 'sess-spec#3',
+          ts: '2026-08-08T00:00:00.000Z',
+        },
+        goal: {
+          milestoneId: 'milestone-envkit',
+          goal: GOAL_TEXT,
+          clauses: [GOAL_TEXT],
+          digest: goalDigest(GOAL_TEXT),
+        },
+      };
+    }
+
     const tasks: EpicTaskRow[] = [
       {
         taskId: 'envkit/task-1b-parse-quotes',
@@ -1098,6 +1133,7 @@ describe('spec-scoped findings (P9-9)', () => {
         okIntegration(),
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
+        okGoalCheck(),
       );
       expect(summary.mechanicallyReady).toBe(true);
     });
@@ -1113,6 +1149,7 @@ describe('spec-scoped findings (P9-9)', () => {
           review: null,
           headSha: HEAD_SHA,
         },
+        okGoalCheck(),
       );
       expect(summary.mechanicallyReady).toBe(false);
       expect(summary.blockers.join('\n')).toContain('no closing spec review');
@@ -1134,6 +1171,7 @@ describe('spec-scoped findings (P9-9)', () => {
         okIntegration(),
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
+        okGoalCheck(),
         roster(2),
       );
       expect(summary.mechanicallyReady).toBe(true);
@@ -1147,6 +1185,7 @@ describe('spec-scoped findings (P9-9)', () => {
         okIntegration(),
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
+        okGoalCheck(),
         roster(3),
       );
       expect(summary.mechanicallyReady).toBe(false);

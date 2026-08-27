@@ -48,6 +48,14 @@ export interface DispatchRecord {
   /** null for events written before `model` became a required dimension. */
   model: string | null;
   modelTier: string | null;
+  /**
+   * The event's top-level `agent_id`, when the dispatcher recorded one. It is
+   * an OPTIONAL event field, not part of the dispatch payload contract, so
+   * null here means "not recorded" and never "same agent" — testerAudit.ts
+   * reads it that way (a missing id may not downgrade a check, or every real
+   * log becomes unverifiable).
+   */
+  agentId: string | null;
 }
 
 /**
@@ -60,6 +68,11 @@ export interface DispatchRecord {
  */
 const CRITIC_WORK_EVENTS: Record<string, { key: string; label: string }> = {
   'spec-review-recorded': { key: 'reviewed_by', label: 'spec review' },
+  // `smith epic goal-check` reaches the log the same way `epic spec-review`
+  // does — a judge's verdict on the planner's output, written by a command
+  // rather than by a dispatch — so it is in the domain for the same reason,
+  // and listed here at the moment it was written rather than after a D-124.
+  'goal-check-recorded': { key: 'checked_by', label: 'spec-vs-goal check' },
 };
 
 /** One critic-work event, flattened the way DispatchRecord flattens a dispatch. */
@@ -159,6 +172,7 @@ export function readDispatchRecords(events: readonly StoredEvent[]): DispatchRec
       provider: payloadString(payload, 'provider') ?? '',
       model: payloadString(payload, 'model'),
       modelTier: payloadString(payload, 'model_tier'),
+      agentId: typeof record.agent_id === 'string' && record.agent_id ? record.agent_id : null,
     });
   }
   return records;

@@ -320,17 +320,33 @@ record at all, so for a while a closing review nobody dispatched was not
 `unverifiable` here — it was *invisible*, the pair read `not-applicable`, and
 the report exited 0 on a session in which no critic had run.
 
-Each `spec-review-recorded` in scope must now be answered for by a
-`spec-reviewer` dispatch that preceded it, and each dispatch answers for at
-most one review. An unanswered review is reported as `unverifiable` against
-its own event id, with `criticModel: null` — no dispatch chose a model, so
-there is nothing to compare and the audit says so out loud:
+Two commands write critic work this way, and the audit's domain
+(`CRITIC_WORK_EVENTS` in `dispatchAudit.ts`) names both: `spec-review-recorded`
+from `smith epic spec-review`, reading `reviewed_by`, and
+`goal-check-recorded` from `smith epic goal-check` (§7e), reading `checked_by`.
+The second was listed the day it was written rather than after its own D-124,
+because enumerating the domain is not documentation here — it *is* the check,
+and an event type missing from that map is a critic that can never be found
+unaccounted for.
+
+Each record in scope must now be answered for by a `spec-reviewer` dispatch
+that preceded it, and each dispatch answers for at most one record. That last
+clause is why a closing epic needs two `spec-reviewer` dispatches: the review
+and the goal check are separate work, and one session cannot vouch for both.
+Order matters as much as count, because the window is *(previous record of
+this role, this record]* — dispatching both sessions up front and then typing
+both commands leaves the second record with nothing inside its window, since
+the earlier dispatch already answered for the first. Dispatch, record,
+dispatch, record.
+An unanswered record is reported as `unverifiable` against its own event id,
+with `criticModel: null` — no dispatch chose a model, so there is nothing to
+compare and the audit says so out loud:
 
 ```json
 {"finder":"planner","critic":"spec-reviewer","criticEventId":"s-3#380","criticModel":null,"finderEventId":null,"finderModel":null,"status":"unverifiable","detail":"spec-reviewer recorded a spec review at 2026-08-16T09:12:04.881Z with no spec-reviewer dispatch behind it, so no model is on record and finder_ne_critic cannot be evaluated."}
 ```
 
-One dispatch per review is the point. Letting an old dispatch vouch for every
+One dispatch per record is the point. Letting an old dispatch vouch for every
 later hand-recorded re-review is the same laundering the finder side already
 refuses, and `found_by` cannot close the gap from the other end: it is
 validated against the taxonomy `agent` dimension, so an operator-authored
@@ -407,6 +423,67 @@ That task blocked twice, then passed, with no `dispatch_decision` event anywhere
 against it — Phase 9's own D-46 gap. Reading dispatches alone reported it as
 "never dispatched again, the rung was never exercised", which is a clean bill
 of health issued over a hole in the record. It now exits 1 and names the hole.
+
+## 2d. `smith tester check` — did a tester grade the code, or did the coder?
+
+`dispatch check` above asks whether the critic ran on a different *model*. For
+a tester that is the wrong question: a tester may legitimately run on the
+coder's model, and forcing a second vendor onto it would buy nothing. The risk
+is a different one — a coder that writes and runs its own tests grades itself,
+and every gate downstream still goes green over it.
+
+The thing that separates those two cases in the log is not a model, it is a
+**turn**. No role template grants `Agent`, so a `dispatch_decision` is written
+by the orchestrator once per agent it invokes and never by an agent about
+itself; a second dispatch is therefore the only evidence the log can hold that
+a second turn happened at all. `crosscheck.yml`'s `role_isolation.pairs` names
+the pair (one entry: `coder` / `tester`), and this asserts it per test gate:
+
+```bash
+smith tester check <session-id> [--task <task-id>] [--policy <path>]
+```
+
+```json
+{"sessionId":"s-1","taskId":null,"gatesExamined":2,"dispatchesExamined":3,
+ "checks":[{"taskId":"epic-1/task-1","worker":"coder","auditor":"tester","gateEventId":"s-1#5","workerEventId":"s-1#1","auditorEventId":"s-1#3","status":"ok","checksRun":2,"detail":"tester was dispatched for epic-1/task-1 after coder and reported (task-result-recorded) before the gate graded 2 test check(s)."},
+ {"taskId":"epic-1/task-2","worker":"coder","auditor":"tester","gateEventId":"s-1#7","workerEventId":null,"auditorEventId":null,"status":"violation","checksRun":1,"detail":"No tester was dispatched at or before the test gate for epic-1/task-2, so the 1 test check(s) it graded were written in some other role's turn — on this pipeline, coder's."}],
+ "ok":false}
+```
+
+One check per `testgate-result` per pair, in log order. A gate passes only if a
+tester was dispatched **at or before** it, after a coder dispatch, under a
+different `agent_id`, and reported something (`task-result-recorded`,
+`error-logged`, `judge-reported` or `judge-verdict`) before the gate ran. An
+`error-logged` counts: a tester that ran and failed still ran in its own turn,
+and demanding success here would conflate isolation with outcome.
+
+| Status | Meaning | Counts as failure |
+|---|---|---|
+| `ok` | A tester was dispatched separately, after the coder, and reported before the gate | no |
+| `violation` | No tester dispatch precedes the gate, or the two dispatches share one `agent_id` | **yes** |
+| `unverifiable` | The gate names no task, records no result list, has no coder dispatch to be isolated from, or the tester never reported before it — also a policy declaring no pairs, and a session with no test gate at all | **yes** |
+| `not-applicable` | The gate ran zero checks, so there was no verdict to grade | no |
+
+**Absence is the finding here, and that is what makes this a separate command
+rather than another `asymmetric_roles` pair.** In `dispatch check` a critic
+that never ran is `not-applicable` and exits 0 — a session that dispatched no
+verifier simply had nothing to verify. Here, a test gate that graded checks
+with no tester behind it is precisely the failure being hunted, so the same
+shape of evidence gets the opposite verdict. Two opposite defaults cannot live
+in one matcher.
+
+A missing `agent_id` never downgrades a check. It is an *optional* top-level
+event field, not part of the dispatch payload contract, so "not recorded" is
+read as not recorded and never as "same agent" — the alternative makes every
+real log `unverifiable`. The same-id check therefore catches the case where the
+dispatcher did stamp ids and they match, and stays silent otherwise.
+
+**What it does not claim.** Nothing in the log distinguishes a test file the
+tester authored from one it merely ran, so this answers "was a tester
+dispatched separately, and did it report, before this task's tests were
+graded?" — not "did that tester write the tests". `role-write-scope` in
+`guardrails.yml` fences where a leased tester may write; the two checks are
+complementary, not substitutes.
 
 ## 3. `smith worktree create`
 
@@ -1381,6 +1458,194 @@ epic's live plan is v5. Whatever the amendment changed has been reviewed
 against no spec at all.
 ```
 
+## 7d. `smith crossfind` — a second eye, not a second vote
+
+Everything in §7 is **subtractive**. A quorum is handed a claim the native
+reviewer already raised and asked whether it survives; the strongest thing it
+can do is delete a finding. That is a brake, and it is worth having, but it
+cannot reach a bug the native reviewer's context never surfaced — nothing
+outside that context is asked to look.
+
+`independent_finder` in `crosscheck.yml` is the other direction, and
+`smith crossfind` is how you drive it. A finder on a different vendor reads
+the diff in a fresh context and returns its own evidence; the two lists are
+then reconciled.
+
+```bash
+smith crossfind run --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
+  --session <id> --causal-parent <event-id>
+```
+
+Every reconciled pair lands in one of four outcomes, and only one of them can
+do anything:
+
+| Outcome | Meaning | Effect |
+| --- | --- | --- |
+| `corroborated` | both sides raised the same fingerprint | severity may rise (`severity_resolution`) |
+| `co-located` | same file and category, different claim | none — recorded for you |
+| `independent-only` | only the finder raised it | mintable as a real finding, and only while gating |
+| `native-only` | only the native reviewer raised it | **none, ever** |
+
+The last row is the rule the whole design turns on: **silence is not a
+refutation.** The finder was never asked about that native claim — it was
+asked to read a diff — so its not mentioning something is absence of evidence.
+Subtracting on it would let a truncated or lazy second opinion delete real
+findings, which is exactly the failure a second opinion is supposed to
+prevent. If you want a claim refuted, that is §7's tier, where a judge is
+handed the claim itself.
+
+`co-located` is a hedge with a reason: nothing in this code can tell one bug
+described twice from two bugs in one function. It is surfaced and merged by
+nobody.
+
+An `independent-only` finding is **minted, not privileged**. It enters the
+gate as an ordinary finding carrying `found_by_provider`, and at S1/S2 it
+meets the same `quorum_triggers` critic as any other — a third-party vendor's
+unshared opinion still has to survive a refute pass before it blocks a task.
+
+### The one switch to read before you enable anything
+
+`send_diff` ships `false`, and `crossfind run` **refuses** rather than
+degrading. A critic judges a claim, so §7 can send a summary and a failure
+scenario and never the source; a finder has nothing to read but the diff.
+Shipping worktree source to a third-party API is your decision, not the
+gate's — and the fallback that was available (ask for bugs without showing
+the code) is worse than no finder at all, because it produces confident
+findings about code the model never saw. `max_diff_bytes` refuses rather than
+truncating for the same reason: half a diff is the same failure in a smaller
+package.
+
+See the exact bytes first:
+
+```bash
+smith crossfind request --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1
+```
+
+It prints the `JudgeRequest` and sends nothing. With `send_diff: false` it
+refuses — and that refusal is the useful answer, because it tells you the
+switch is still off.
+
+`smith crossfind reconcile --task <id> --native <findings.json> --independent
+<runs.json>` does the reconciliation over two files you already have: no
+provider, no cost, no event. It is pure, so it answers under
+`SMITH_CROSSCHECK_OFFLINE` as well.
+
+`run` and `reconcile` exit **1 when the result would change a gate**, which
+under `mode: shadow` is never, because nothing it says applies. Both write
+one `cross-finding-reconciled` event — the outcome counts, which providers
+ran, which were skipped, which failed, and the finding ids it would have
+minted. In shadow mode that event is the *only* product of a run, so it is
+what you read to decide whether to promote; it has its own timeline row for
+that reason (`docs/runbooks/providers.md` §5).
+
+Promotion is the same operator edit as any other provider, with one
+arithmetic difference: `min_providers` does not apply. The finder is not
+voting on a claim, so one provider is enough to raise — §7's fail-closed
+"one active provider changes nothing" is a property of the quorum rule, not
+of this block.
+
+## 7e. `smith epic goal-check` — the plan against the goal it was cut from
+
+Every gate up to here reads text the planner produced. The spec review reads
+the plan; the task gates read the diffs the plan asked for; the epic verdict
+reads what those gates recorded. All of them stay green when the plan
+decomposes the *wrong problem* — the criteria are met, the tests pass, the
+review closes, and the epic ships something nobody asked for.
+
+The spec-vs-goal check reads the one reference the planner did not write: the
+`- goal:` line of the roadmap milestone that owns the epic. Ask for the clause
+list first — the split is done here, not left to the judge:
+
+```bash
+smith epic goal --epic epic-1 [--roadmap-path factory/specs/roadmap.md]
+```
+
+```json
+{
+  "milestoneId": "phase-1-config",
+  "goal": "Load config from .env files. Reject unbalanced quotes.",
+  "clauses": ["Load config from .env files.", "Reject unbalanced quotes."],
+  "digest": "3f6c1a09b28e4d75"
+}
+```
+
+It writes nothing — no event, no finding. Hand a judge the clause list and the
+plan, take back one verdict per clause, in the goal's order, and record it:
+
+```bash
+smith epic goal-check --epic epic-1 \
+  --plan factory/specs/active/epic-1/plan-v1.json \
+  --coverage /tmp/coverage.json \
+  --checked-by spec-reviewer [--checked-by-provider google:gemini-2.5-pro] \
+  --session <session-id> --causal-parent <event-id>
+```
+
+`--coverage` is a JSON array, one entry per clause:
+
+```json
+[
+  { "clause": "Load config from .env files.",
+    "verdict": "covered", "taskIds": ["epic-1/task-1"] },
+  { "clause": "Reject unbalanced quotes.",
+    "verdict": "out-of-scope", "reason": "phase-2 owns the parser" }
+]
+```
+
+Three verdicts, and each one costs something. `covered` must name live plan
+tasks — a clause credited to a task the plan does not have is refused
+(`goal-check.unknown-task`), because a clause delivered by a task that does not
+exist is a clause nothing delivers. `uncovered` mints an **S2-major**
+spec-scoped finding against the plan file itself, which no task diff can close:
+`smith plan amend` (§6a) is the only answer. `out-of-scope` is the one verdict
+that makes a clause disappear, so it demands a `reason` and that reason is
+printed back to the epic judge verbatim — it is what an operator most needs to
+read.
+
+Everything validates before anything is written. A coverage map that raises two
+findings and then names a phantom task on the third clause writes neither
+finding and no event: a half-recorded check of a check that never finished is
+worse than no check.
+
+**This gate fails closed on a missing goal, and that is the point.** `smith
+epic verdict` holds an epic with no check on record; it also holds one whose
+owning milestone states no `- goal:` line at all, and `smith epic goal-check`
+**refuses to run** there (`cli.no-epic-goal`) rather than record a check
+against nothing. There is deliberately no `not-required` escape hatch — the MCP
+surface gate has one because an epic can honestly owe no manifest, while "no
+goal is stated" is the absence of the only text this gate can grade against.
+Treating it as a pass would make the gate skippable by deleting a line from the
+roadmap.
+
+The blast radius is worth stating plainly: **an epic whose milestone has no
+`- goal:` line does not close.** The fix is a one-line roadmap edit — give the
+milestone a goal, or add the epic to the `- epics:` list of a milestone that
+already has one.
+
+A check goes stale two ways, the same two `epic spec-review` does (D-125) and
+for the same reason:
+
+```
+The spec-vs-goal check for "epic-1" is stale: it graded plan v4, and the
+epic's live plan is v5. Whatever the amendment changed has been checked
+against no goal at all.
+```
+
+```
+The spec-vs-goal check for "epic-1" is stale: it read a goal that digests to
+9b1c…, and milestone "phase-1-config" now declares one that digests to 3f6c….
+The plan has been checked against a goal the roadmap no longer states.
+```
+
+The second is why `epic goal` prints a digest: rewording the roadmap goal
+invalidates a check exactly the way cutting a new plan version does.
+
+Like `epic spec-review`, it exits **0 even when it raises findings** — the
+check ran, and what it found blocks the plan, not this command. And like it,
+the event is written even when every clause is covered: "ran and was clean" and
+"never ran" are different facts, and only the first one closes an epic.
+
 ## 8. Severity + waiver semantics, from the operator's chair
 
 | Severity | Blocks merge | What you see |
@@ -1923,3 +2188,11 @@ That is the false clean this command exists to refuse.
   `mode: active` provider changes no outcomes — `finder_ne_critic` excludes
   the claim's finder (the native reviewer today), leaving a below-quorum
   pool that escalates instead of deciding; you need two.
+- **The independent finder ships off, not merely powerless.** Every external
+  provider in `crosscheck.yml` ships `enabled: true, mode: shadow` — it runs,
+  it is recorded, and it gates nothing. `independent_finder` is `enabled: false`,
+  because it is the one call that would send the diff rather than a claim, and
+  `send_diff: false` is a second lock on the same door. Turning it on is two
+  edits and a decision about which vendor sees this repository's source; until
+  you make it, `smith crossfind run` refuses and no diff leaves the machine
+  (§7d).

@@ -165,6 +165,36 @@ export const AMENDED_STATUS = 'amended';
 const AMENDMENT_STATUSES: readonly string[] = [AMEND_PENDING_STATUS, AMENDED_STATUS];
 
 /**
+ * A finding still awaiting something. Derived from LEGAL_TRANSITIONS above by
+ * reading, not by code: these are exactly the statuses with a non-empty
+ * outgoing edge set that are not themselves a decision. `waived` has outgoing
+ * edges too (a denial can reopen it) but is closed until one arrives, so it
+ * belongs with `refuted`/`expired`/`fix-verified`/`amended` on the other side.
+ *
+ * `amend-pending` is in it for D-127 Part B: that finding is open the same way
+ * `fix-pending` is, carrying an assigned discharge condition (amends_task_ids
+ * at amends_plan_version, not a diff) that has not yet been shown to hold. A
+ * reader holding the obligation data can tell a satisfied amendment from an
+ * unsatisfied one and epic.ts does; every reader that cannot treats the status
+ * as unconditionally open, which fails closed rather than silently agreeing
+ * the amendment landed.
+ *
+ * Lives here rather than in the modules that ask, because they are all asking
+ * the same lifecycle question about the same vocabulary: epic.ts's close gate
+ * ("what is still open against this epic"), db/queries.ts's kanban chip, and
+ * `smith crossfind run` ("which native findings is a second opinion allowed to
+ * corroborate"). A second copy would drift the moment taxonomy.yml grows a
+ * status.
+ */
+export const OPEN_FINDING_STATUSES: ReadonlySet<string> = new Set([
+  'raised',
+  'confirmed',
+  'fix-pending',
+  'fix-landed',
+  AMEND_PENDING_STATUS,
+]);
+
+/**
  * D-21 Part 4. Appended by `repairObligation` to correct a malformed
  * `amends_task_ids` entry on a finding parked at `amend-pending` — never a
  * `finding-transitioned` event, because a repair changes no status. Folded
@@ -207,7 +237,15 @@ export interface FingerprintInput {
   summary: string;
 }
 
-function normalizeFilePath(filePath: string): string {
+/**
+ * The fingerprint's first component, and the only path form two findings may
+ * be compared on. Exported because crossFinding.ts co-locates an independent
+ * finder's evidence against native findings by path: `./src/a.ts`,
+ * `src/a.ts` and `src\\a.ts` are the same file, and a private normalizer
+ * would mean a second implementation that is allowed to disagree with the
+ * one the fingerprints were built with.
+ */
+export function normalizeFilePath(filePath: string): string {
   return path.posix.normalize(filePath.replace(/\\/g, '/')).replace(/^\.\//, '');
 }
 

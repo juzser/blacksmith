@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import path from 'node:path';
 import { SmithError } from './errors.js';
 import { SANDBOX_LEASE_DIR } from './paths.js';
+import { sandboxRoles } from './policy.js';
 
 /**
  * The judge sandbox: what turns "judges are read-only" from a sentence an
@@ -113,11 +114,26 @@ function assertLease(value: unknown, file: string): SandboxLease {
  * writes are attributed to the first one's lease and neither verdict can be
  * trusted. The orchestrator's answer is a second worktree, not a second
  * judge in the same tree.
+ *
+ * Refuses an unknown `role` for a related reason. The role is not a label on
+ * the lease, it *selects* which rule set policy.ts applies — the judge rules
+ * or a role write scope — so a typo used to be a silent downgrade to whatever
+ * the fallback happened to be. Guessing is not an option here and neither is
+ * a warning: the lease is written once and read by a hook that has no way to
+ * ask what was meant.
  */
 export function openSandbox(
   input: OpenSandboxInput,
   dir: string = SANDBOX_LEASE_DIR,
 ): SandboxLease {
+  const roles = sandboxRoles();
+  if (!roles.includes(input.role)) {
+    throw new SandboxError(
+      'sandbox.unknown-role',
+      `"${input.role}" is not a role guardrails.yml has rules for. Open the lease as one of: ${roles.join(', ')}.`,
+      { role: input.role, roles },
+    );
+  }
   const worktreeDir = path.resolve(input.worktreeDir);
   const file = leasePathFor(worktreeDir, dir);
   const existing = readSandbox(worktreeDir, dir);

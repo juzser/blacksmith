@@ -128,6 +128,38 @@ than appearing in it.
   stays inside it while an ordinary coder session in the same repo sees none
   of these rules. `researcher` is deliberately outside: fetching is its job,
   and it fetches through `WebFetch`/`WebSearch` rather than `Bash`.
+- **The tester is fenced to test files, so it cannot make a red test green by
+  editing the subject.** A test whose author may edit what it covers is a test
+  that grades itself, which is the same failure the fresh-context reviewer
+  exists to prevent one gate later. `role_write_scopes` in
+  [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml) declares
+  a role's `write_globs`, and the new S1 `role-write-scope` refuses a write
+  outside them — for the tester: test and spec files, the test directories, and
+  its own results under `state/`. It also refuses outright the verbs whose
+  target a text matcher cannot pin down (`cp`, `mv`, `patch`, `sed -i`,
+  editors) and the git subcommands that rewrite tracked content without naming
+  a path (`apply`, `cherry-pick`, `reset`, `restore`, `checkout`, `stash`).
+  What the tester keeps is deliberate: the network, because a suite installs
+  and downloads browsers, and `git add`/`commit`, because its output contract
+  *is* a commit on the task branch.
+- **The guard hook now sits on `Write`, `Edit`, `MultiEdit` and `NotebookEdit`
+  as well as `Bash`.** The judge sandbox could watch `Bash` alone because a
+  judge holds no `Edit`/`Write` and a shell was therefore its only write path.
+  A tester holds both, so a rule watching only `Bash` is a rule it routes
+  around with the tool it was handed. `smith policy check --tool Write --file
+  <path>` asks the same question of a file write that `--command` asks of a
+  shell line, and the same globs decide both a redirect target and a
+  `tool_input.file_path`. A directory is in scope when something inside it
+  would be, so `mkdir -p …/test/fixtures` is allowed rather than refused —
+  a false deny teaches an agent to route around the gate rather than trust it,
+  which is why the refused-verb scan also blanks quoted spans before it runs
+  (`git commit -m "test: cover the restore path"` is the tester doing exactly
+  what its contract asks, not a `restore`).
+- **`sandbox open` refuses a role `guardrails.yml` has no rules for**, rather
+  than leasing one it cannot govern. `judge_sandbox.roles` is now declared
+  data instead of a list hard-coded in TypeScript, and an unrecognised role
+  falls back to the judge rules — the strictest set, because that is the only
+  fallback that fails closed.
 - **`smith wave check` now refuses a wave that cannot fit**, where it
   previously only checked that the claims were disjoint. It prices the wave
   against what the epic has already spent and refuses admission that would
@@ -158,6 +190,168 @@ than appearing in it.
   and vitest runs files in parallel, and a throwing `beforeAll` reports as
   "2 failed, 182 skipped" — a headline that reads like two broken tests when
   in fact no CLI assertion ran at all.
+
+- **`smith tester check` asserts that a tester graded the code, not the coder.**
+  `crosscheck.yml`'s `finder_ne_critic` compares *models*, which is the wrong
+  question for a tester: a tester may legitimately run on the coder's model.
+  The risk is a shared *turn* — a coder that writes and runs its own tests
+  grades itself, and every gate downstream still goes green over it. So the
+  policy gained a second block, `role_isolation.pairs` (one entry today:
+  `coder` / `tester`), and the command asserts it against the log per
+  `testgate-result`: a tester dispatched at or before the gate, after a coder
+  dispatch, under a different `agent_id`, having reported before the gate ran.
+  Statuses and exit codes match `dispatch check` and `escalation check` —
+  `violation` and `unverifiable` both exit 1, because a check that cannot
+  answer must not read as a pass.
+
+  Two things make it a separate command rather than another `asymmetric_roles`
+  pair. **Absence is the finding here**: in `dispatch check` a critic that
+  never ran is `not-applicable` and exits 0, while a test gate that graded
+  checks with no tester behind it is precisely the failure being hunted — two
+  opposite defaults cannot live in one matcher. And the evidence is a
+  *dispatch*, not a model: no role template grants `Agent`, so a
+  `dispatch_decision` is written by the orchestrator once per agent it invokes
+  and never by an agent about itself, which makes a second dispatch the only
+  proof the log can hold that a second turn happened. A missing `agent_id`
+  never downgrades a check — it is an optional event field, not part of the
+  dispatch payload contract, so "not recorded" is read as not recorded and
+  never as "same agent". 27 tests in `test/testerAudit.test.ts`; documented as
+  operator-guide §2d.
+
+- **An independent finder, so a quorum can raise a finding and not only drop
+  one.** Everything the external tier did until now was subtractive:
+  `quorum.ts`'s vocabulary is `confirm | refute`, a critic is handed one claim
+  the native reviewer already raised and asked whether it survives, and the
+  strongest available outcome is deleting it. That makes the second vendor a
+  brake and never an eye — a bug the native reviewer's context did not surface
+  is a bug no amount of cross-checking reaches, because nothing outside that
+  context is ever asked to look.
+
+  `src/crossFinding.ts` asks. A finder on a different vendor reads the same
+  diff in a fresh context, returns evidence against the new
+  `finding-evidence.schema.json`, and the two lists are reconciled into four
+  outcomes: `corroborated` (same fingerprint — severity may rise per
+  `severity_resolution`), `co-located` (same file and category, different
+  claim — recorded, never merged), `independent-only` (mintable as a real
+  finding) and `native-only` (**no effect, by rule**). That last one is the
+  design: silence is not a refutation. The finder was never asked about a
+  native claim, it was asked to read a diff, so its not mentioning something
+  is absence of evidence — subtracting on it would let a truncated second
+  opinion delete real findings. Refutation stays in the critic tier, where a
+  judge is handed the claim itself. And an `independent-only` finding is
+  minted, not privileged: it enters the gate as an ordinary finding and at
+  S1/S2 meets the same `quorum_triggers` critic as any other, so an unshared
+  third-party opinion still has to survive a refute pass before it blocks.
+
+  The switch that matters is `send_diff`, and it ships `false`. A critic
+  judges a *claim*, so quorum can send a summary and a failure scenario and
+  never the source; a finder has nothing to read but the diff. Shipping
+  worktree source to a third-party API is not a decision this code has
+  standing to make quietly, so `smith crossfind run` **refuses** rather than
+  degrading to a diffless "find bugs" prompt that would invent findings about
+  code the model never saw — and `max_diff_bytes` refuses rather than
+  truncating, for the same reason. `smith crossfind request` prints the exact
+  payload without sending it, so the decision is made on the bytes.
+
+  Three verbs: `request` (print, send nothing), `reconcile` (two saved lists,
+  offline, no provider and no event — it answers under
+  `SMITH_CROSSCHECK_OFFLINE` because it is pure) and `run` (dispatch, then
+  reconcile). `run` and `reconcile` exit 1 when the result would change a
+  gate, which under `mode: shadow` is never. Each run writes one
+  `cross-finding-reconciled` event — outcome counts, providers run, skipped
+  and failed, and the ids it would have minted; in shadow mode that event is
+  the only thing a run produces, so it also gained a timeline row, because a
+  shadow verdict nobody can see is a shadow deployment nobody can evaluate.
+  41 tests (29 unit, 8 CLI, 4 UI); documented as providers-runbook §5.
+
+  One of those CLI tests exists because the suite hid the feature from itself:
+  `test/setup.ts` sets `SMITH_CROSSCHECK_OFFLINE` for the whole run and the
+  CLI subprocess inherits it, so the first `crossfind run` test silently
+  exercised the kill switch instead of the verb. The switch now has its own
+  test asserting the refusal *names* the skipped provider — the runbook has
+  warned since Phase 8 that a skipped provider leaves no trace, and a finder
+  that found nothing reads exactly like a finder that never ran.
+
+- **`smith judge preflight`** — the one provider question that can be answered
+  without spending a judge call. It came out of running the cross-provider
+  check live against the shipped `crosscheck.yml` to confirm the tier is
+  actually wired: it is — `gate.ts` raised a trigger unprompted on a blocking
+  finding, codex returned a schema-valid `refute` in 7.6s, and the quorum
+  correctly declined to gate it (both externals are `mode: shadow`, and the
+  native reviewer was `excluded_as_finder`, so the pool was empty and the
+  finding kept blocking). What the same run also showed is the gap:
+  `deepseek` ships `enabled: true`, so on a machine with no
+  `DEEPSEEK_API_KEY` every trigger spawned a call that could not leave the
+  box, caught it, and wrote an `ok: false` row. Nothing was unsafe — the
+  quorum is fail-closed — but it is one doomed call per blocking finding, and
+  the only surfaces that reported it (`judge-verdict` rows, `smith stats
+  providers`) are readable *after* the calls are spent.
+
+  The command reads the policy and asks only what is knowable locally: is the
+  `api_key_env` variable set, is the `command` on `PATH`, and does the
+  arithmetic of the promotions add up — one `mode: active` external against
+  `min_providers: 2` is flagged, because with the native finder excluded that
+  operator is paying a gating provider's bill for a shadow provider's
+  influence. Exit 1 with a `problems` array, 0 when there is nothing to fix.
+
+  Three deliberate non-behaviours. It never makes a judge call — a preflight
+  that proved a provider answers by asking it something would cost exactly
+  what it saves, so a resolvable `command` is reported as resolvable and
+  never as authenticated. It never prints a key, only the variable *name*.
+  And it ignores `SMITH_CROSSCHECK_OFFLINE`, which forces every provider off
+  at load time and would therefore hide the misconfiguration being looked
+  for; the switch is reported as `offlineSwitch` instead. Zero active
+  externals is the shipped default and is never flagged. 15 tests (14 unit,
+  1 CLI); documented as providers-runbook §1.
+
+- **A spec-vs-goal gate: `smith epic goal` and `smith epic goal-check`.** Every
+  gate that existed before this one reads text the planner produced — the plan,
+  the diffs the plan asked for, the gate records those diffs earned. So all of
+  them go green on a plan that decomposes the *wrong problem*: criteria met,
+  tests passing, spec review closed, and the epic ships something nobody asked
+  for. The one reference the planner did not write is the `- goal:` line of the
+  roadmap milestone that owns the epic, and nothing read it.
+
+  `smith epic goal` prints that goal split into clauses, and writes nothing —
+  the split happens here rather than in a judge's head, so two runs of the same
+  check answer the same question. `smith epic goal-check` records one verdict
+  per clause, in the goal's order. `covered` must name live plan tasks; a
+  clause credited to a task the plan does not have is refused
+  (`goal-check.unknown-task`), because a clause delivered by a task that does
+  not exist is a clause nothing delivers. `uncovered` mints an S2-major
+  spec-scoped finding against the plan file, which no task diff can close —
+  `smith plan amend` is the only answer. `out-of-scope` is the one verdict that
+  makes a clause disappear, so it demands a reason and that reason is printed
+  back to the epic judge verbatim. Everything validates before anything is
+  written, the way `plan amend` does: a map that raises two findings and then
+  names a phantom task on the third clause writes neither finding and no event.
+
+  **The gate fails closed, and the blast radius is the point: an epic whose
+  owning milestone states no `- goal:` line no longer closes.** `smith epic
+  verdict` holds it, and `smith epic goal-check` refuses to run there
+  (`cli.no-epic-goal`) rather than record a check against nothing. There is
+  deliberately no `not-required` escape hatch of the kind
+  `MCP_SURFACE_NOT_REQUIRED` gives the MCP surface gate — an epic can honestly
+  owe no manifest, while "no goal is stated" is the absence of the only text
+  this gate can grade against, and treating it as a pass would make the gate
+  skippable by deleting a line from `factory/specs/roadmap.md`. The fix is that
+  same one-line edit in reverse: give the milestone a goal, or add the epic to
+  the `- epics:` list of a milestone that has one.
+
+  A check goes stale two ways, the pair D-125 drew for the closing spec review:
+  a plan version older than the live plan, and a goal digest the roadmap no
+  longer states. The second is why `epic goal` prints a digest at all —
+  rewording a goal invalidates a check exactly the way cutting a new plan
+  version does, and without the digest a reworded goal would silently keep a
+  green check. `dispatchAudit`'s `CRITIC_WORK_EVENTS` gained
+  `goal-check-recorded` at the moment the event was written rather than after
+  an incident: a recorded check with no dispatch behind it is `unverifiable`,
+  and one dispatch cannot cover both a spec review and a goal check — nor can
+  two dispatches fired before either record, since the second one falls
+  outside its record's window. 64 tests (57 unit, 7 CLI); documented as
+  operator-guide §7e, `/bs run` step 14, and a third dispatch shape in the
+  `spec-reviewer` agent contract.
+
 
 ### Changed
 
@@ -335,12 +529,25 @@ than appearing in it.
   anyway, and `smith budget alarm` reports that after the fact. The
   150,000-tokens-per-task cap reports rather than blocks *by design*: a
   self-policed cap becomes pressure on the work being measured.
-- **The judge sandbox reads command text, not intent.** It is not a container,
+- **The role sandbox reads command text, not intent.** It is not a container,
   a seccomp profile, or a read-only mount, so a write smuggled through an
   interpreter (`python3 -c "open(...,'w')"`) is invisible to it and always
-  will be. `smith worktree fingerprint`/`verify` stays in the pipeline behind
+  will be. The `Write`/`Edit` half is exact — the path is an argument, not
+  prose — but the `Bash` half stays a matcher, so a tester's write scope is
+  enforced precisely on the tools it normally uses and approximately on the
+  shell. `smith worktree fingerprint`/`verify` stays in the pipeline behind
   it to catch after the fact what the matcher cannot see up front; neither
   half is sold as the other.
+- **`smith tester check` cannot tell whether the dispatched tester wrote the
+  tests.** It answers "was a tester dispatched separately, and did it report,
+  before this task's tests were graded?" — nothing in the log distinguishes a
+  test file the tester authored from one it merely ran. `role-write-scope`
+  fences where a leased tester may write, and the two are complementary rather
+  than substitutes. It is also **CLI-only and not wired into `gate run`**,
+  following the `dispatch check` / `escalation check` precedent: these audits
+  read the log after the fact, and the operator runs them per round. Nothing
+  blocks a merge on a `violation` — the check reports, and acting on it is a
+  step in the loop, not an automatic stop.
 - `.vue` single-file components are neither type-checked nor fully linted.
   `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
   and TypeScript 7's native port does not expose one. UI logic lives in

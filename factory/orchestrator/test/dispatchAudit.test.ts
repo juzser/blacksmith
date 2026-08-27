@@ -82,6 +82,39 @@ function specReview(
   };
 }
 
+function goalCheck(
+  checkedBy: string,
+  overrides: { ts?: string; epicId?: string; taskId?: string } = {},
+): StoredEvent {
+  const n = seq++;
+  const epicId = overrides.epicId ?? 'epic-1';
+  return {
+    event_id: `sess-1#${n}`,
+    record: {
+      session_id: 'sess-1',
+      actor: 'operator-skill',
+      event_type: 'goal-check-recorded',
+      task_id: overrides.taskId ?? `${epicId}/integration`,
+      plan_version: 1,
+      causal_parent: 'sess-1#0',
+      ts: overrides.ts ?? `2026-08-08T10:${String(n).padStart(2, '0')}:00.000Z`,
+      payload: {
+        epic_id: epicId,
+        milestone_id: 'phase-1',
+        plan_version: 1,
+        goal_digest: '0123456789abcdef',
+        checked_by: checkedBy,
+        coverage: [],
+        clause_count: 0,
+        uncovered_count: 0,
+        out_of_scope_count: 0,
+        finding_ids: [],
+        finding_count: 0,
+      },
+    },
+  };
+}
+
 function noise(): StoredEvent {
   return {
     event_id: 'sess-1#noise',
@@ -427,6 +460,135 @@ describe('dispatchAudit.ts checkDispatchAsymmetry() — undispatched critic work
     const uncovered = report.checks.filter((c) => c.status === 'unverifiable');
     expect(uncovered).toHaveLength(1);
     expect(uncovered[0]?.criticEventId).toBe('sess-1#1');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B3, the same shape one event type later. `smith epic goal-check` writes
+// `goal-check-recorded` by the route `epic spec-review` writes its own event:
+// a judge's verdict on the planner's output, produced by a command and never
+// by a dispatch. D-124 is the reason it was added to CRITIC_WORK_EVENTS as it
+// was written rather than after the audit was found reporting a pass over it.
+// ---------------------------------------------------------------------------
+describe('dispatchAudit.ts checkDispatchAsymmetry() — the spec-vs-goal check (B3)', () => {
+  it('will not read not-applicable for a pair whose critic recorded a goal check', () => {
+    seq = 0;
+    const report = checkDispatchAsymmetry([goalCheck('spec-reviewer')], PAIRS, {
+      sessionId: 'sess-1',
+    });
+
+    expect(report.ok).toBe(false);
+    const check = report.checks.find((c) => c.critic === 'spec-reviewer');
+    expect(check).toMatchObject({
+      status: 'unverifiable',
+      criticEventId: 'sess-1#0',
+      criticModel: null,
+    });
+    // Named as itself, so an operator reading the line knows which piece of
+    // critic work is missing a dispatch.
+    expect(check?.detail).toContain('spec-vs-goal check');
+    expect(report.criticWorkExamined).toBe(1);
+  });
+
+  it('raises no blocker when a spec-reviewer dispatch stands behind the check', () => {
+    seq = 0;
+    const report = checkDispatchAsymmetry(
+      [
+        dispatch('planner', 'claude-opus-5', { ts: '2026-08-08T10:00:00.000Z' }),
+        dispatch('spec-reviewer', 'claude-sonnet-5', { ts: '2026-08-08T10:01:00.000Z' }),
+        goalCheck('spec-reviewer', { ts: '2026-08-08T10:02:00.000Z' }),
+      ],
+      PAIRS,
+      { sessionId: 'sess-1' },
+    );
+
+    expect(report.ok).toBe(true);
+    const specChecks = report.checks.filter((c) => c.critic === 'spec-reviewer');
+    expect(specChecks).toHaveLength(1);
+    expect(specChecks[0]).toMatchObject({ status: 'ok', criticEventId: 'sess-1#1' });
+  });
+
+  it('does not let one dispatch cover both a spec review and a goal check', () => {
+    seq = 0;
+    // The live shape: `epic spec-review` and `epic goal-check` are two verbs,
+    // and an operator who ran one dispatch and then typed both has one piece
+    // of critic work whose independence nothing witnessed. Adding an event
+    // type to the domain is only worth anything if it competes for a dispatch
+    // instead of quietly sharing one.
+    const report = checkDispatchAsymmetry(
+      [
+        dispatch('planner', 'claude-opus-5', { ts: '2026-08-08T10:00:00.000Z' }),
+        dispatch('spec-reviewer', 'claude-sonnet-5', { ts: '2026-08-08T10:01:00.000Z' }),
+        specReview('spec-reviewer', { ts: '2026-08-08T10:02:00.000Z' }),
+        goalCheck('spec-reviewer', { ts: '2026-08-08T10:03:00.000Z' }),
+      ],
+      PAIRS,
+      { sessionId: 'sess-1' },
+    );
+
+    expect(report.ok).toBe(false);
+    expect(report.criticWorkExamined).toBe(2);
+    const uncovered = report.checks.filter((c) => c.status === 'unverifiable');
+    expect(uncovered).toHaveLength(1);
+    expect(uncovered[0]?.criticEventId).toBe('sess-1#3');
+    expect(uncovered[0]?.detail).toContain('spec-vs-goal check');
+  });
+
+  it('accepts two dispatches when the second follows the first record', () => {
+    seq = 0;
+    // The shape the /bs run playbook asks for: step 13 dispatches and records
+    // the closing spec review, then step 14 dispatches a fresh session and
+    // records the goal check. Two pieces of critic work, two dispatches, and
+    // each dispatch inside its own record's window.
+    const report = checkDispatchAsymmetry(
+      [
+        dispatch('planner', 'claude-opus-5', { ts: '2026-08-08T10:00:00.000Z' }),
+        dispatch('spec-reviewer', 'claude-sonnet-5', { ts: '2026-08-08T10:01:00.000Z' }),
+        specReview('spec-reviewer', { ts: '2026-08-08T10:02:00.000Z' }),
+        dispatch('spec-reviewer', 'claude-sonnet-5', { ts: '2026-08-08T10:03:00.000Z' }),
+        goalCheck('spec-reviewer', { ts: '2026-08-08T10:04:00.000Z' }),
+      ],
+      PAIRS,
+      { sessionId: 'sess-1' },
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.criticWorkExamined).toBe(2);
+    expect(report.checks.filter((c) => c.status === 'unverifiable')).toHaveLength(0);
+  });
+
+  it('refuses two dispatches that both precede the first record', () => {
+    seq = 0;
+    // Order is part of the contract, not an accident of how the window was
+    // written: a dispatch that predates the previous record already answered
+    // for that one. Firing both spec-reviewer sessions up front and then
+    // typing both commands leaves the second record with nothing behind it,
+    // and it is worth a test because the playbook's step order is the only
+    // thing that keeps an operator out of this shape.
+    const report = checkDispatchAsymmetry(
+      [
+        dispatch('planner', 'claude-opus-5', { ts: '2026-08-08T10:00:00.000Z' }),
+        dispatch('spec-reviewer', 'claude-sonnet-5', { ts: '2026-08-08T10:01:00.000Z' }),
+        dispatch('spec-reviewer', 'claude-sonnet-5', { ts: '2026-08-08T10:02:00.000Z' }),
+        specReview('spec-reviewer', { ts: '2026-08-08T10:03:00.000Z' }),
+        goalCheck('spec-reviewer', { ts: '2026-08-08T10:04:00.000Z' }),
+      ],
+      PAIRS,
+      { sessionId: 'sess-1' },
+    );
+
+    expect(report.ok).toBe(false);
+    const uncovered = report.checks.filter((c) => c.status === 'unverifiable');
+    expect(uncovered).toHaveLength(1);
+    expect(uncovered[0]?.criticEventId).toBe('sess-1#4');
+    expect(uncovered[0]?.detail).toContain('spec-vs-goal check');
+  });
+
+  it('keeps the goal check out of readDispatchRecords entirely', () => {
+    seq = 0;
+    // Two domains, deliberately: a critic-work record carries no model, so
+    // counting it as a dispatch would invent one.
+    expect(readDispatchRecords([goalCheck('spec-reviewer'), noise()])).toEqual([]);
   });
 });
 

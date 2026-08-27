@@ -21,7 +21,7 @@ dashboard's Roadmap page parses.
 | 5. State + analytics | SQLite projections, `smith db` / `smith stats` | Built, merged |
 | 6. UI | Overview, Timeline, Kanban, Roadmap, Flow, Lessons, Errors, Analytics | Built, merged |
 | 7. Self-extension | Scaffolder, `/bs` operator skill, scheduler, lessons compilation | Built, merged |
-| 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration | Built, merged — shipping powerless on purpose |
+| 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — the judges ship powerless, the finder ships off |
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
 | 10. Deployment + ops | Runbooks beyond providers, a Cloudflare port of the UI, an always-on dispatch daemon | Planned, unspecced |
 

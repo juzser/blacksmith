@@ -93,6 +93,19 @@ export interface GateInput {
    */
   graderVerdict?: unknown;
   lessons: readonly LessonRule[];
+  /**
+   * Severities an independent finder corroborated, keyed by fingerprint
+   * (`smith crossfind run` -> `ReconcileReport.severity_raises`, which lists
+   * only the raises that a) an ACTIVE provider backs and b)
+   * `independent_finder.mode` lets out of shadow). Each entry raises its
+   * finding before the lesson escalation runs; a fingerprint not listed here
+   * is decided exactly as it was pre-crossfind.
+   *
+   * Passed in rather than read: the gate does not dispatch a finder, and a
+   * gate that quietly ran one would spend a judge call and ship a diff to a
+   * third party on a code path nobody chose.
+   */
+  corroboratedSeverities?: Readonly<Record<string, string>>;
   /** Where artifact homes live; defaults to `state/artifacts` (P9-22). */
   artifactsDir?: string;
   runAll?: boolean;
@@ -668,7 +681,11 @@ async function intakeAndDecide(
 
     const decision = decide(
       { finding_category: raised.finding.finding_category, severity: raised.finding.severity },
-      { filePath, lessons: input.lessons },
+      {
+        filePath,
+        lessons: input.lessons,
+        corroboratedSeverity: input.corroboratedSeverities?.[raised.finding.fingerprint],
+      },
     );
     decisions.push({
       fingerprint: raised.finding.fingerprint,
@@ -742,6 +759,7 @@ async function intakeAndDecide(
         action: d.decision.action,
         same_mistake: d.decision.sameMistake,
         matched_lesson_id: d.decision.matchedLessonId,
+        corroborated: d.decision.corroborated,
       })),
       // The instrument, recorded next to the reading. Every `same_mistake:
       // false` above is conditional on the gate having held a lesson that

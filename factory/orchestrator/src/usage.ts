@@ -229,6 +229,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Assert crosscheck.yml’s role asymmetry against the log. Exit 1 on a violation OR an unverifiable answer.',
   },
   {
+    command: 'tester check',
+    positionals: '<session-id>',
+    flags: '[--task <id>] [--policy <path>] [--state-dir <dir>]',
+    summary:
+      'Assert crosscheck.yml’s role_isolation against the log: a tester of its own per test gate. Exit 1 on a violation OR an unverifiable answer.',
+  },
+  {
     command: 'escalation check',
     positionals: '<session-id>',
     flags: '[--task <id>] [--policy <path>] [--state-dir <dir>]',
@@ -272,9 +279,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'policy check',
     positionals: '',
     flags:
-      '--command <cmd> [--tool <name>] [--branch <branch>] [--sandbox <role>] [--lease-dir <dir>]',
+      '--command <cmd> [--tool <name>] [--file <path>] [--branch <branch>] [--sandbox <role>] [--lease-dir <dir>]',
     summary:
-      'Would the guard hook deny this Bash command? Branch and sandbox auto-detect unless given. Exit 1 on deny.',
+      'Would the guard hook deny this command? --tool Write --file <path> asks the same of a file write. Branch and sandbox auto-detect unless given. Exit 1 on deny.',
   },
   {
     command: 'policy hook',
@@ -328,6 +335,19 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--epic <id> --project <dir> --plan <plan.json> --reviewed-by <role> [--reviewed-by-provider <name>] [--evidence <file>] ${EVENTS_DIR}`,
     summary: 'Record the closing spec review, pinned to the integration head it was read at.',
+  },
+  {
+    command: 'epic goal',
+    positionals: '',
+    flags: '--epic <id> [--roadmap-path <file>]',
+    summary: "The epic's roadmap goal, split into the clauses a coverage map has to answer.",
+  },
+  {
+    command: 'epic goal-check',
+    positionals: '',
+    flags: `--epic <id> --plan <plan.json> --coverage <file> --checked-by <role> [--checked-by-provider <name>] [--roadmap-path <file>] ${EVENTS_DIR}`,
+    summary:
+      'Record the plan checked clause by clause against the roadmap goal — the one reference the planner did not write.',
   },
   {
     command: 'epic close',
@@ -462,10 +482,39 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'List the judge turns still owed on a task. Exit 1 while the list is non-empty.',
   },
   {
+    command: 'judge preflight',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary:
+      'Can the enabled providers be called at all, and would a promotion decide anything? Exit 1 on a provider that costs a call it cannot make.',
+  },
+  {
     command: 'judge run',
     positionals: '',
     flags: '--provider <name> --request <request.json> [--shadow]',
     summary: 'Call one provider by hand for calibration. Touches neither the log nor quorum.',
+  },
+  {
+    command: 'crossfind request',
+    positionals: '',
+    flags:
+      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>]',
+    summary:
+      'Print the finder request without sending it — exactly what would leave the machine. Refuses when send_diff is false.',
+  },
+  {
+    command: 'crossfind reconcile',
+    positionals: '',
+    flags: '--task <id> --native <findings.json> --independent <runs.json> [--policy <file>]',
+    summary:
+      'Reconcile two saved finding lists offline. No provider, no log. Exit 1 when the result would change a gate.',
+  },
+  {
+    command: 'crossfind run',
+    positionals: '',
+    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>] ${EVENTS_DIR}`,
+    summary:
+      'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
   },
   {
     command: 'ui serve',

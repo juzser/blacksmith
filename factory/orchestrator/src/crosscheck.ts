@@ -88,11 +88,59 @@ export interface AsymmetricRoles {
   pairs: AsymmetricRolePair[];
 }
 
+/**
+ * One "this role does not grade its own work" rule.
+ *
+ * Deliberately not an `AsymmetricRolePair`. That rule compares the two
+ * dispatches' *models*, and for a tester the model is the wrong question: a
+ * tester may legitimately run on the coder's model, and forcing a second
+ * vendor onto it would buy nothing. What it may not do is run inside the
+ * coder's own turn, and the only evidence of a separate turn the event log
+ * can hold is a separate `dispatch_decision` — no role template grants
+ * `Agent`, so a dispatch is written by the orchestrator once per agent it
+ * invokes, never by an agent about itself.
+ */
+export interface RoleIsolationPair {
+  /** The role whose work is being graded. */
+  worker: string;
+  /** The role that must have been dispatched separately to grade it. */
+  auditor: string;
+}
+
+export interface RoleIsolation {
+  pairs: RoleIsolationPair[];
+}
+
+/** How a fingerprint both the native reviewer and the independent finder raised resolves when they disagree on severity. */
+export type SeverityResolution = 'highest-wins' | 'native-wins';
+
+/**
+ * crosscheck.yml's `independent_finder` block — the additive half of the
+ * cross-provider tier. Everything else in this file makes a quorum a brake;
+ * this makes it an eye. See the block's own comment for what it deliberately
+ * does not do, and crossFinding.ts for the reconciliation it feeds.
+ */
+export interface IndependentFinder {
+  /** Ships false. `false` means never invoked at all, regardless of `mode` — the same contract `providers.<name>.enabled` has. */
+  enabled: boolean;
+  /** `shadow` records reconciliations with zero gating power; only `active` may raise a severity or mint a finding. */
+  mode: ProviderMode;
+  /** Which external providers run the finder. Validated at run time, not parse time: a policy naming a provider this box has not configured is still a readable policy. */
+  providers: string[];
+  /** The operator mandate to send worktree source to a third-party API. Ships false; the runner refuses without it rather than prompting a finder that has nothing to read. */
+  sendDiff: boolean;
+  /** Above this, the runner refuses rather than truncating — half a diff produces confident findings about code that is not there. */
+  maxDiffBytes: number;
+  severityResolution: SeverityResolution;
+}
+
 export interface CrosscheckPolicy {
   providers: Record<string, ProviderConfig>;
   quorumRule: QuorumRule;
   planQuorum: PlanQuorumPolicy;
   asymmetricRoles: AsymmetricRoles;
+  roleIsolation: RoleIsolation;
+  independentFinder: IndependentFinder;
 }
 
 /**
@@ -134,11 +182,26 @@ interface RawAsymmetricRolesYaml {
   pairs?: { finder?: string; critic?: string }[];
 }
 
+interface RawRoleIsolationYaml {
+  pairs?: { worker?: string; auditor?: string }[];
+}
+
+interface RawIndependentFinderYaml {
+  enabled?: boolean;
+  mode?: string;
+  providers?: string[];
+  send_diff?: boolean;
+  max_diff_bytes?: number;
+  severity_resolution?: string;
+}
+
 interface RawCrosscheckYaml {
   providers?: Record<string, RawProviderYaml>;
   quorum_rule?: { agreement?: string; min_providers?: number };
   plan_quorum?: RawPlanQuorumYaml;
   asymmetric_roles?: RawAsymmetricRolesYaml;
+  role_isolation?: RawRoleIsolationYaml;
+  independent_finder?: RawIndependentFinderYaml;
 }
 
 // Mirrors the shipped crosscheck.yml asymmetric_roles.pairs block, which in
@@ -149,6 +212,21 @@ const DEFAULT_ASYMMETRIC_PAIRS: readonly AsymmetricRolePair[] = [
   { finder: 'planner', critic: 'spec-reviewer' },
   { finder: 'reviewer', critic: 'verifier' },
 ];
+
+// Mirrors the shipped crosscheck.yml role_isolation.pairs block. One entry,
+// and it is meant to stay one until a second role starts grading work it
+// could have written: every other grader in the pipeline is a judge, and a
+// judge cannot write at all (`role_write_scopes`, docs/standards/guardrails.md).
+const DEFAULT_ROLE_ISOLATION_PAIRS: readonly RoleIsolationPair[] = [
+  { worker: 'coder', auditor: 'tester' },
+];
+
+// Mirrors the shipped crosscheck.yml independent_finder block. Every default
+// here is the OFF position: a file that omits the block entirely gets a finder
+// that is disabled, gates nothing if enabled, and refuses to send a diff. The
+// only way to any of the three powers is an operator writing it down.
+const DEFAULT_INDEPENDENT_FINDER_PROVIDERS: readonly string[] = ['codex'];
+const DEFAULT_INDEPENDENT_FINDER_MAX_DIFF_BYTES = 120_000;
 
 const DEFAULT_MODEL_TIER = 'mid'; // taxonomy.yml model_tier — judges run sonnet-tier per architecture §4, external judges default to the same tier absent an override.
 
@@ -411,6 +489,89 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
   );
 }
 
+/**
+ * The isolation pair list, rebuilt entry by entry for quorumPairs()' reason:
+ * a half-readable list is the same hole as no list. An empty list stays legal
+ * and testerAudit answers it with one `unverifiable` check.
+ */
+function isolationPairs(field: string, value: readonly unknown[]): RoleIsolationPair[] {
+  if (!Array.isArray(value) || !value.every(isIsolationPair)) {
+    throw new CrosscheckError(
+      'crosscheck.invalid-policy',
+      `crosscheck.yml ${field} must be a list of { worker, auditor } maps naming two roles; got ${JSON.stringify(value)}. A pair the audit cannot read leaves the rule it names unchecked, and the audit still reports ok. ${DECIDES_DIFFERENTLY}`,
+      { field, value },
+    );
+  }
+  return value.map((pair) => ({ worker: pair.worker, auditor: pair.auditor }));
+}
+
+function isIsolationPair(entry: unknown): entry is RoleIsolationPair {
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+  const { worker, auditor } = entry as { worker?: unknown; auditor?: unknown };
+  return (
+    typeof worker === 'string' && worker !== '' && typeof auditor === 'string' && auditor !== ''
+  );
+}
+
+function parseRoleIsolation(raw: RawRoleIsolationYaml | undefined): RoleIsolation {
+  return {
+    // Copied, not aliased — same reason as parsePlanQuorum() above.
+    pairs: isolationPairs(
+      'role_isolation.pairs',
+      raw?.pairs ?? DEFAULT_ROLE_ISOLATION_PAIRS.map((p) => ({ ...p })),
+    ),
+  };
+}
+
+/**
+ * `severity_resolution` gets a closed check where `mode` gets none, and the
+ * asymmetry is the point. An unreadable `mode` falls to `shadow`, which is the
+ * safe direction — a verdict that gates nothing. An unreadable
+ * `severity_resolution` has no safe direction: defaulting to `native-wins`
+ * silently discards the escalation the operator asked for, and defaulting to
+ * `highest-wins` silently grants one they did not. So it is refused.
+ */
+function parseSeverityResolution(value: string): SeverityResolution {
+  if (value === 'highest-wins' || value === 'native-wins') return value;
+  throw new CrosscheckError(
+    'crosscheck.invalid-policy',
+    `crosscheck.yml independent_finder.severity_resolution must be "highest-wins" or "native-wins"; got ${JSON.stringify(value)}. ${DECIDES_DIFFERENTLY}`,
+    { field: 'independent_finder.severity_resolution', value },
+  );
+}
+
+function parseIndependentFinder(raw: RawIndependentFinderYaml | undefined): IndependentFinder {
+  const maxDiffBytes = quorumNumber(
+    'independent_finder.max_diff_bytes',
+    raw?.max_diff_bytes ?? DEFAULT_INDEPENDENT_FINDER_MAX_DIFF_BYTES,
+  );
+  if (!Number.isInteger(maxDiffBytes) || maxDiffBytes <= 0) {
+    throw new CrosscheckError(
+      'crosscheck.invalid-policy',
+      `crosscheck.yml independent_finder.max_diff_bytes must be a positive integer; got ${JSON.stringify(maxDiffBytes)}. A cap of zero or less refuses every diff, which reads in the log exactly like a finder that ran and found nothing.`,
+      { field: 'independent_finder.max_diff_bytes', value: maxDiffBytes },
+    );
+  }
+  return {
+    enabled: quorumBoolean('independent_finder.enabled', raw?.enabled ?? false),
+    // Same fall-to-shadow rule as a provider's own `mode`, for the same reason.
+    mode: raw?.mode === 'active' ? 'active' : 'shadow',
+    // Copied, not aliased — same reason as parsePlanQuorum() above.
+    providers: quorumStringList(
+      'independent_finder.providers',
+      raw?.providers ?? DEFAULT_INDEPENDENT_FINDER_PROVIDERS,
+    ),
+    sendDiff: quorumBoolean('independent_finder.send_diff', raw?.send_diff ?? false),
+    maxDiffBytes,
+    severityResolution: parseSeverityResolution(
+      quorumString(
+        'independent_finder.severity_resolution',
+        raw?.severity_resolution ?? 'highest-wins',
+      ),
+    ),
+  };
+}
+
 function parseAsymmetricRoles(raw: RawAsymmetricRolesYaml | undefined): AsymmetricRoles {
   return {
     // This one's wrong-shape direction is benign -- a truthy string keeps the
@@ -469,6 +630,15 @@ export function parseCrosscheckPolicy(
     },
     planQuorum: parsePlanQuorum(doc.plan_quorum),
     asymmetricRoles: parseAsymmetricRoles(doc.asymmetric_roles),
+    roleIsolation: parseRoleIsolation(doc.role_isolation),
+    // Not touched by `offline`. That switch exists to stop this process
+    // reaching out of the machine, and it already does: it disables every
+    // non-native provider, and runIndependentFinder() invokes providers
+    // through the same enabled check runQuorumCase() does. Flipping
+    // `independent_finder.enabled` here as well would conflate "make no calls"
+    // with "make no reconciliations", and `crossfind reconcile` — which is
+    // pure, offline, and calls nothing — would stop answering under it.
+    independentFinder: parseIndependentFinder(doc.independent_finder),
   };
 }
 

@@ -104,10 +104,21 @@ export type JudgeOutputResult =
   | { valid: false; reason: 'schema-invalid'; errors: ValidationIssue[] };
 
 /**
+ * Schemas that describe ONE item a `kind: review` judge returns MANY of. Both
+ * of them: `finding` is the stored record (the native reviewer's contract,
+ * .claude/agents/reviewer.md), `finding-evidence` is the judge's half of it —
+ * the same evidence without the six identity fields the orchestrator owns.
+ * A set, not a comparison, because the second entry was added a year after the
+ * first and the `=== 'finding'` it replaced would have silently validated an
+ * array of evidence as a single malformed object.
+ */
+const ARRAY_VALUED_SCHEMAS: ReadonlySet<string> = new Set(['finding', 'finding-evidence']);
+
+/**
  * Extract + schema-validate a judge's raw text response. `finding.schema.json`
  * describes ONE finding, but a `kind: review` judge's contract
  * (.claude/agents/reviewer.md) returns an ARRAY of findings — so an array
- * top-level value against schemaName "finding" validates element-wise;
+ * top-level value against an ARRAY_VALUED_SCHEMAS name validates element-wise;
  * every other schema (e.g. "judge-verdict") validates the parsed value
  * directly against its own object shape.
  */
@@ -119,7 +130,7 @@ export function extractAndValidate(
   const { taxonomy, schemas } = resolve(opts);
 
   const validateOne = (parsed: unknown): JudgeOutputResult => {
-    if (schemaName === 'finding' && Array.isArray(parsed)) {
+    if (ARRAY_VALUED_SCHEMAS.has(schemaName) && Array.isArray(parsed)) {
       const errors: ValidationIssue[] = [];
       parsed.forEach((item, index) => {
         const result = validateRecord(schemas, taxonomy, schemaName, item);

@@ -2727,6 +2727,62 @@ describe('cli.ts (built binary)', () => {
     expect(JSON.parse(disabled.stdout).error.code).toBe('provider.disabled');
   });
 
+  it('judge preflight: names the unmet precondition, never its value', async () => {
+    // `judge run` answers "did this provider work" by spending a call.
+    // `judge preflight` answers "could it have worked" without spending one,
+    // which is the question an operator actually has before a wave starts.
+    const policyPath = path.join(scratchDir, 'preflight-policy.yml');
+    await writeFile(
+      policyPath,
+      [
+        'providers:',
+        '  claude:',
+        '    kind: native',
+        '    enabled: true',
+        '  ds:',
+        '    kind: api',
+        '    transport: api',
+        '    enabled: true',
+        '    mode: shadow',
+        '    model_tier: mid',
+        '    base_url: https://example.invalid',
+        '    model: test-model',
+        '    api_key_env: SMITH_TEST_KEY_THAT_IS_NEVER_SET',
+        '',
+      ].join('\n'),
+    );
+
+    const unmet = runCli(['judge', 'preflight', '--policy', policyPath]);
+    expect(unmet.status).toBe(1);
+    const report = JSON.parse(unmet.stdout);
+    expect(report.problems).toHaveLength(1);
+    expect(report.problems[0]).toContain('SMITH_TEST_KEY_THAT_IS_NEVER_SET');
+    expect(report.gating).toMatchObject({ activeExternal: [], canDecide: false });
+
+    // The whole point of reporting a key by NAME: a preflight that printed the
+    // value would be a preflight that leaked one into every operator's stdout.
+    const withKey = runCli(['judge', 'preflight', '--policy', policyPath], {
+      SMITH_TEST_KEY_THAT_IS_NEVER_SET: 'sk-not-a-real-key',
+    });
+    expect(withKey.status).toBe(0);
+    expect(withKey.stdout).not.toContain('sk-not-a-real-key');
+    expect(JSON.parse(withKey.stdout).problems).toEqual([]);
+
+    // SMITH_CROSSCHECK_OFFLINE forces every provider off at load time, which is
+    // why `judge run` above sees codex as disabled. The preflight deliberately
+    // does NOT apply it: the question is whether the file is sound, and the
+    // offline switch would hide exactly the misconfiguration being looked for.
+    const offline = runCli(['judge', 'preflight', '--policy', policyPath], {
+      SMITH_CROSSCHECK_OFFLINE: '1',
+    });
+    expect(offline.status).toBe(1);
+    expect(JSON.parse(offline.stdout).offlineSwitch).toBe(true);
+    expect(
+      JSON.parse(offline.stdout).providers.find((p: { provider: string }) => p.provider === 'ds')
+        .enabled,
+    ).toBe(true);
+  });
+
   it('stats providers: reports per-provider calibration stats from judge-verdict events', () => {
     const sessionId = `cli-providers-${Date.now()}`;
     const eventsDir = path.join(scratchDir, 'providers-events');
@@ -4615,6 +4671,279 @@ describe('cli.ts (built binary)', () => {
         expect(
           tail(sessionId, eventsDir).filter((r) => r.event_type === 'spec-review-recorded'),
         ).toEqual([]);
+      });
+    });
+
+    // B3. Every gate before this one grades planner-authored text against
+    // planner-authored text: the spec review reads the plan, the schema gate
+    // reads the task's own output schema, the reviewer reads the criteria the
+    // planner wrote. `epic goal-check` is the one that reads the roadmap goal
+    // the operator wrote before planning began, so a plan that decomposes the
+    // wrong problem has somewhere to fail.
+    describe('the spec-vs-goal gate', () => {
+      const GOAL = 'Load config from .env files. Reject unbalanced quotes.';
+      const CLAUSES = ['Load config from .env files.', 'Reject unbalanced quotes.'];
+
+      /** A roadmap whose one milestone owns epic-1. Pass null to drop the goal. */
+      async function roadmap(name: string, goalLine: string | null = `- goal: ${GOAL}`) {
+        const filePath = path.join(scratchDir, `${name}-roadmap.md`);
+        await writeFile(
+          filePath,
+          [
+            '## Phase 1 — Config',
+            '- id: phase-1-config',
+            '- status: in-progress',
+            ...(goalLine === null ? [] : [goalLine]),
+            '- epics: [epic-1]',
+            '',
+          ].join('\n'),
+        );
+        return filePath;
+      }
+
+      async function coverageFile(name: string, coverage: unknown) {
+        const filePath = path.join(scratchDir, `${name}-coverage.json`);
+        await writeFile(filePath, JSON.stringify(coverage));
+        return filePath;
+      }
+
+      function checks(sessionId: string, eventsDir: string) {
+        return tail(sessionId, eventsDir).filter((r) => r.event_type === 'goal-check-recorded');
+      }
+
+      it('prints the clause list a coverage map has to answer', async () => {
+        const result = runCli([
+          'epic',
+          'goal',
+          '--epic',
+          'epic-1',
+          '--roadmap-path',
+          await roadmap('cli-goal-read'),
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toEqual({
+          milestoneId: 'phase-1-config',
+          goal: GOAL,
+          clauses: CLAUSES,
+          digest: expect.stringMatching(/^[0-9a-f]{16}$/),
+        });
+      });
+
+      it('keeps `epic goal` read-only by declaring no flag a write would need', async () => {
+        // The check that bites here is D-132's: a flag no usage line declares
+        // is a refusal, so the day this command starts appending an event it
+        // fails until someone declares --session and says why.
+        const { sessionId } = await session();
+        const result = runCli([
+          'epic',
+          'goal',
+          '--epic',
+          'epic-1',
+          '--roadmap-path',
+          await roadmap('cli-goal-readonly'),
+          '--session',
+          sessionId,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.unknown-flag');
+      });
+
+      it('records a plan checked clause by clause against the goal', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-ok'),
+          '--coverage',
+          await coverageFile('cli-goal-ok', [
+            { clause: CLAUSES[0], verdict: 'covered', taskIds: ['epic-1/task-1'] },
+            { clause: CLAUSES[1], verdict: 'covered', taskIds: ['epic-1/task-2'] },
+          ]),
+          '--checked-by',
+          'spec-reviewer',
+          '--checked-by-provider',
+          'gemini',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          epicId: 'epic-1',
+          milestoneId: 'phase-1-config',
+          planVersion: 1,
+          checkedBy: 'spec-reviewer',
+          findingIds: [],
+        });
+
+        const recorded = checks(sessionId, eventsDir);
+        expect(recorded).toHaveLength(1);
+        // The check is epic-level work, so it is filed against the epic's
+        // integration task rather than any one task it graded.
+        expect(recorded[0]?.task_id).toBe('epic-1/integration');
+        expect(recorded[0]?.payload).toMatchObject({
+          epic_id: 'epic-1',
+          milestone_id: 'phase-1-config',
+          checked_by: 'spec-reviewer',
+          checked_by_provider: 'gemini',
+          clause_count: 2,
+          uncovered_count: 0,
+          out_of_scope_count: 0,
+          finding_count: 0,
+        });
+      });
+
+      it('turns an uncovered clause into a spec finding against the plan', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-gap'),
+          '--coverage',
+          await coverageFile('cli-goal-gap', [
+            { clause: CLAUSES[0], verdict: 'covered', taskIds: ['epic-1/task-1'] },
+            { clause: CLAUSES[1], verdict: 'uncovered' },
+          ]),
+          '--checked-by',
+          'spec-reviewer',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        // Exit 0 for the reason `epic spec-review` exits 0 on a finding: the
+        // check ran. What blocks the epic is the finding, and `plan amend` is
+        // the verb that answers it.
+        expect(result.status).toBe(0);
+        const record = JSON.parse(result.stdout) as { findingIds: string[] };
+        expect(record.findingIds).toHaveLength(1);
+
+        const listed = JSON.parse(
+          runCli([
+            'findings',
+            'list',
+            '--session',
+            sessionId,
+            '--epic',
+            'epic-1',
+            '--state-dir',
+            eventsDir,
+          ]).stdout,
+        ) as Record<string, unknown>[];
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toMatchObject({
+          finding_id: record.findingIds[0],
+          severity: 'S2-major',
+          finding_scope: 'spec',
+          // Anchored to the plan file, not to any source file: the defect is
+          // that the plan never promised the clause, so no diff can hold it.
+          file_path: 'factory/specs/active/epic-1/plan-v1.json',
+          spec_ref: { plan_version: 1, criterion_ref: 'goal:phase-1-config#2' },
+        });
+      });
+
+      it('refuses to record a check against a milestone that states no goal', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-none', null),
+          '--coverage',
+          await coverageFile('cli-goal-none', []),
+          '--checked-by',
+          'spec-reviewer',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.no-epic-goal');
+        // A recorded check against nothing would read, at the epic gate, as a
+        // check that passed. The gate's own blocker is what has to fire here.
+        expect(checks(sessionId, eventsDir)).toEqual([]);
+      });
+
+      it('refuses coverage credited to a task the plan does not have', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'goal-check',
+          '--epic',
+          'epic-1',
+          '--plan',
+          planPath,
+          '--roadmap-path',
+          await roadmap('cli-goal-phantom'),
+          '--coverage',
+          await coverageFile('cli-goal-phantom', [
+            { clause: CLAUSES[0], verdict: 'covered', taskIds: ['epic-1/task-1'] },
+            { clause: CLAUSES[1], verdict: 'covered', taskIds: ['epic-1/task-9'] },
+          ]),
+          '--checked-by',
+          'spec-reviewer',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('goal-check.unknown-task');
+        // Validate before acting: the first clause was answerable, and it
+        // still leaves no half-written record behind.
+        expect(checks(sessionId, eventsDir)).toEqual([]);
+        expect(
+          JSON.parse(
+            runCli([
+              'findings',
+              'list',
+              '--session',
+              sessionId,
+              '--epic',
+              'epic-1',
+              '--state-dir',
+              eventsDir,
+            ]).stdout,
+          ),
+        ).toEqual([]);
+      });
+
+      // Same shape as the D-139 check on `epic spec-review`: an undeclared
+      // flag is a refusal, so the usage line is load-bearing.
+      it('documents every flag epic goal-check requires', () => {
+        const { stdout, status } = runCli(['epic', 'goal-check', '--help']);
+        expect(status).toBe(0);
+        expect(stdout).toContain('--coverage');
+        expect(stdout).toContain('--checked-by');
+        expect(stdout).toContain('--plan');
       });
     });
 
@@ -7115,6 +7444,382 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
       expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('BLOCKED');
+    });
+  });
+
+  describe('crossfind request / reconcile / run (B1)', () => {
+    const JUDGE_CLI = path.join(import.meta.dirname, 'fixtures', 'fake-judge-cli.mjs');
+    const DIFF = '--- a/src/a.ts\n+++ b/src/a.ts\n@@\n-const x = 0;\n+const x = 1;\n';
+
+    /**
+     * A crosscheck.yml whose `codex` is the fake CLI judge. Written per test
+     * rather than shared, because the two switches these tests are about —
+     * `independent_finder.mode` and the provider's own `mode` — are exactly
+     * what each case varies.
+     */
+    async function writePolicy(
+      name: string,
+      opts: { mode: 'shadow' | 'active'; answerPath?: string },
+    ): Promise<string> {
+      const file = path.join(scratchDir, name);
+      const args = JSON.stringify([JUDGE_CLI, 'echo-prompt', opts.answerPath ?? '/dev/null']);
+      await writeFile(
+        file,
+        [
+          'providers:',
+          '  claude: { kind: native, enabled: true }',
+          '  codex:',
+          '    kind: api',
+          '    transport: cli',
+          '    command: node',
+          `    args: ${args}`,
+          '    model_tier: mid',
+          '    enabled: true',
+          `    mode: ${opts.mode}`,
+          'independent_finder:',
+          '  enabled: true',
+          `  mode: ${opts.mode}`,
+          '  providers: [codex]',
+          '  send_diff: true',
+          '  severity_resolution: highest-wins',
+          '',
+        ].join('\n'),
+      );
+      return file;
+    }
+
+    async function writeJson(name: string, value: unknown): Promise<string> {
+      const file = path.join(scratchDir, name);
+      await writeFile(file, JSON.stringify(value));
+      return file;
+    }
+
+    function evidence(overrides: Record<string, unknown> = {}) {
+      return {
+        file_path: 'src/b.ts',
+        finding_category: 'correctness',
+        severity: 'S2-major',
+        summary: 'the retry loop runs one fewer time than the criterion asks',
+        failure_scenario: { inputs: 'n=3', expected: '3 retries', actual: '2 retries' },
+        ...overrides,
+      };
+    }
+
+    /** One native finding, on a different file from `evidence()` above, so the two never co-locate. */
+    const NATIVE = [
+      {
+        finding_id: 'f-native-1',
+        fingerprint: 'fp-native-1',
+        file_path: 'src/a.ts',
+        finding_category: 'correctness',
+        severity: 'S3-minor',
+        summary: 'the native reviewer saw this one and the finder did not',
+      },
+    ];
+
+    it('request prints exactly what would leave the machine, and sends nothing', async () => {
+      const policy = await writePolicy('cf-request.yml', { mode: 'shadow' });
+      const diffPath = path.join(scratchDir, 'cf-request.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'request',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'smith/epic-1/integration...task-1',
+        '--criterion',
+        'retries exactly three times',
+        '--criterion',
+        'never retries a 4xx',
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(0);
+      const request = JSON.parse(stdout);
+      expect(request.kind).toBe('review');
+      expect(request.schemaName).toBe('finding-evidence');
+      expect(request.inputRefs.diff_ref).toBe('smith/epic-1/integration...task-1');
+      // The diff IS the request: a finder with no code invents findings.
+      expect(request.prompt).toContain('+const x = 1;');
+      // Repeated --criterion accumulates (args.ts `repeated`), in order.
+      expect(request.prompt).toContain('retries exactly three times');
+      expect(request.prompt).toContain('never retries a 4xx');
+    });
+
+    it('request narrows the judge budget from the command line, with a floor at 1', async () => {
+      const policy = await writePolicy('cf-budget.yml', { mode: 'shadow' });
+      const diffPath = path.join(scratchDir, 'cf-budget.diff');
+      await writeFile(diffPath, DIFF);
+      const base = [
+        'crossfind',
+        'request',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'ref',
+        '--policy',
+        policy,
+      ];
+
+      const narrowed = runCli([...base, '--timeout-ms', '5000', '--max-output-bytes', '4096']);
+      expect(narrowed.status).toBe(0);
+      expect(JSON.parse(narrowed.stdout).budget).toEqual({
+        timeout_ms: 5000,
+        max_output_bytes: 4096,
+      });
+
+      // A zero timeout would make every call fail as a timeout and read as a
+      // provider that refuses to answer; a zero byte cap would truncate every
+      // verdict to nothing and read as a provider that answered with silence.
+      // Those are the two failures this repo works hardest to keep apart.
+      const zero = runCli([...base, '--timeout-ms', '0']);
+      expect(zero.status).toBe(1);
+      expect(JSON.parse(zero.stdout).error.code).toBe('cli.invalid-flag');
+    });
+
+    it('request refuses under the shipped policy rather than sending source', async () => {
+      const diffPath = path.join(scratchDir, 'cf-shipped.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'request',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'ref',
+      ]);
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.error.code).toBe('crossfind.diff-not-authorized');
+      expect(parsed.error.message).toContain('send_diff');
+    });
+
+    it('reconcile works offline and exits 1 when the result would change a gate', async () => {
+      const policy = await writePolicy('cf-reconcile-active.yml', { mode: 'active' });
+      const nativePath = await writeJson('cf-native.json', NATIVE);
+      const independentPath = await writeJson('cf-independent.json', [
+        { provider: 'codex', mode: 'active', evidence: [evidence()] },
+      ]);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'reconcile',
+        '--task',
+        'epic-1/task-1',
+        '--native',
+        nativePath,
+        '--independent',
+        independentPath,
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(1);
+      const report = JSON.parse(stdout);
+      expect(report.mode).toBe('active');
+      expect(report.gates).toBe(true);
+      expect(report.counts).toMatchObject({ 'independent-only': 1, 'native-only': 1 });
+      expect(report.mintable).toHaveLength(1);
+      // Rule 1: silence is not a refutation. The native finding the finder
+      // never mentioned is recorded untouched, not subtracted.
+      const nativeOnly = report.entries.find(
+        (e: { outcome: string }) => e.outcome === 'native-only',
+      );
+      expect(nativeOnly).toMatchObject({ effect: 'none', applied: false });
+    });
+
+    it('reconcile in shadow mode exits 0: the same finding, gating nothing', async () => {
+      const policy = await writePolicy('cf-reconcile-shadow.yml', { mode: 'shadow' });
+      const nativePath = await writeJson('cf-native.json', NATIVE);
+      const independentPath = await writeJson('cf-independent-shadow.json', [
+        { provider: 'codex', mode: 'shadow', evidence: [evidence()] },
+      ]);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'reconcile',
+        '--task',
+        'epic-1/task-1',
+        '--native',
+        nativePath,
+        '--independent',
+        independentPath,
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(0);
+      const report = JSON.parse(stdout);
+      expect(report.mode).toBe('shadow');
+      expect(report.gates).toBe(false);
+      expect(report.counts['independent-only']).toBe(1);
+      expect(report.mintable).toEqual([]);
+    });
+
+    it('run dispatches the finder, records the reconciliation, and prints what to raise', async () => {
+      const sessionId = `cli-crossfind-run-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'crossfind-events');
+      const start = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(start.status).toBe(0);
+      const parent = JSON.parse(start.stdout).event_id as string;
+
+      const answerPath = await writeJson('cf-answer.json', [evidence()]);
+      const policy = await writePolicy('cf-run.yml', { mode: 'active', answerPath });
+      const diffPath = path.join(scratchDir, 'cf-run.diff');
+      await writeFile(diffPath, DIFF);
+
+      // test/setup.ts sets SMITH_CROSSCHECK_OFFLINE for the whole suite, and
+      // the CLI runs as a subprocess that inherits it. Cleared here alone:
+      // this judge is a node fixture on the local disk, so honouring the
+      // switch would test the switch, not the verb. The test below is the one
+      // that tests the switch.
+      const { stdout, status } = runCli(
+        [
+          'crossfind',
+          'run',
+          '--task',
+          'epic-1/task-1',
+          '--diff',
+          diffPath,
+          '--diff-ref',
+          'smith/epic-1/integration...task-1',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          parent,
+          '--state-dir',
+          eventsDir,
+          '--policy',
+          policy,
+        ],
+        { SMITH_CROSSCHECK_OFFLINE: '' },
+      );
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.native_considered).toBe(0);
+      expect(parsed.report.counts['independent-only']).toBe(1);
+      expect(parsed.runs).toHaveLength(1);
+      expect(parsed.runs[0].provider).toBe('codex');
+      // Printed, never minted: which findings enter a gate is the operator's
+      // call, and `smith findings raise` is where they make it.
+      expect(parsed.raise).toHaveLength(1);
+      expect(parsed.raise[0].finding.summary).toBe(evidence().summary);
+      expect(parsed.raise[0].finding.found_by_provider).toBe('codex');
+      expect(parsed.raise[0].filePath).toBe('src/b.ts');
+
+      const log = readFileSync(path.join(eventsDir, `${sessionId}.jsonl`), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(log.map((e) => e.event_type)).toContain('cross-finding-reconciled');
+      expect(log.map((e) => e.event_type)).toContain('judge-verdict');
+      expect(parsed.reconciled_event_id).toBe(`${sessionId}#${log.length - 1}`);
+    });
+
+    it('run refuses under the offline switch instead of finding nothing quietly', async () => {
+      // SMITH_CROSSCHECK_OFFLINE is inherited from test/setup.ts here -- this
+      // is the one test in the block that wants it. A skipped provider that
+      // left no trace would read exactly like a finder that found nothing, so
+      // the contract is that the verb fails and names who was skipped.
+      const sessionId = `cli-crossfind-offline-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'crossfind-offline-events');
+      const start = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(start.status).toBe(0);
+
+      const answerPath = await writeJson('cf-offline-answer.json', [evidence()]);
+      const policy = await writePolicy('cf-offline.yml', { mode: 'active', answerPath });
+      const diffPath = path.join(scratchDir, 'cf-offline.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'run',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'smith/epic-1/integration...task-1',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        JSON.parse(start.stdout).event_id as string,
+        '--state-dir',
+        eventsDir,
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.error.code).toBe('crossfind.no-providers');
+      expect(parsed.error.details.skipped).toEqual(['codex']);
+    });
+
+    it('run names a session that does not exist instead of reconciling against nothing', async () => {
+      const policy = await writePolicy('cf-missing.yml', { mode: 'shadow' });
+      const diffPath = path.join(scratchDir, 'cf-missing.diff');
+      await writeFile(diffPath, DIFF);
+
+      const { stdout, status } = runCli([
+        'crossfind',
+        'run',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'ref',
+        '--session',
+        'no-such-session',
+        '--causal-parent',
+        'no-such-session#0',
+        '--state-dir',
+        path.join(scratchDir, 'crossfind-events'),
+        '--policy',
+        policy,
+      ]);
+
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('events.unknown-session');
     });
   });
 });
