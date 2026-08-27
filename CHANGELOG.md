@@ -191,6 +191,33 @@ than appearing in it.
   "2 failed, 182 skipped" — a headline that reads like two broken tests when
   in fact no CLI assertion ran at all.
 
+- **`smith tester check` asserts that a tester graded the code, not the coder.**
+  `crosscheck.yml`'s `finder_ne_critic` compares *models*, which is the wrong
+  question for a tester: a tester may legitimately run on the coder's model.
+  The risk is a shared *turn* — a coder that writes and runs its own tests
+  grades itself, and every gate downstream still goes green over it. So the
+  policy gained a second block, `role_isolation.pairs` (one entry today:
+  `coder` / `tester`), and the command asserts it against the log per
+  `testgate-result`: a tester dispatched at or before the gate, after a coder
+  dispatch, under a different `agent_id`, having reported before the gate ran.
+  Statuses and exit codes match `dispatch check` and `escalation check` —
+  `violation` and `unverifiable` both exit 1, because a check that cannot
+  answer must not read as a pass.
+
+  Two things make it a separate command rather than another `asymmetric_roles`
+  pair. **Absence is the finding here**: in `dispatch check` a critic that
+  never ran is `not-applicable` and exits 0, while a test gate that graded
+  checks with no tester behind it is precisely the failure being hunted — two
+  opposite defaults cannot live in one matcher. And the evidence is a
+  *dispatch*, not a model: no role template grants `Agent`, so a
+  `dispatch_decision` is written by the orchestrator once per agent it invokes
+  and never by an agent about itself, which makes a second dispatch the only
+  proof the log can hold that a second turn happened. A missing `agent_id`
+  never downgrades a check — it is an optional event field, not part of the
+  dispatch payload contract, so "not recorded" is read as not recorded and
+  never as "same agent". 27 tests in `test/testerAudit.test.ts`; documented as
+  operator-guide §2d.
+
 ### Changed
 
 - Demo project fixtures, screenshots and compiled lessons use neutral names
@@ -376,11 +403,16 @@ than appearing in it.
   shell. `smith worktree fingerprint`/`verify` stays in the pipeline behind
   it to catch after the fact what the matcher cannot see up front; neither
   half is sold as the other.
-- **Nothing yet checks that a tester actually ran, or that it ran in a session
-  the coder did not own.** `role-write-scope` fences a tester that *is* leased;
-  it says nothing about a task whose tests the coder wrote in its own session
-  and never handed over. That check is a dispatch-record audit, not a policy
-  rule, and it is not built.
+- **`smith tester check` cannot tell whether the dispatched tester wrote the
+  tests.** It answers "was a tester dispatched separately, and did it report,
+  before this task's tests were graded?" — nothing in the log distinguishes a
+  test file the tester authored from one it merely ran. `role-write-scope`
+  fences where a leased tester may write, and the two are complementary rather
+  than substitutes. It is also **CLI-only and not wired into `gate run`**,
+  following the `dispatch check` / `escalation check` precedent: these audits
+  read the log after the fact, and the operator runs them per round. Nothing
+  blocks a merge on a `violation` — the check reports, and acting on it is a
+  step in the loop, not an automatic stop.
 - `.vue` single-file components are neither type-checked nor fully linted.
   `vue-tsc` needs Volar, Volar needs TypeScript's classic Node compiler API,
   and TypeScript 7's native port does not expose one. UI logic lives in

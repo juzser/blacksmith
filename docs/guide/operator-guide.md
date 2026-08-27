@@ -408,6 +408,67 @@ against it — Phase 9's own D-46 gap. Reading dispatches alone reported it as
 "never dispatched again, the rung was never exercised", which is a clean bill
 of health issued over a hole in the record. It now exits 1 and names the hole.
 
+## 2d. `smith tester check` — did a tester grade the code, or did the coder?
+
+`dispatch check` above asks whether the critic ran on a different *model*. For
+a tester that is the wrong question: a tester may legitimately run on the
+coder's model, and forcing a second vendor onto it would buy nothing. The risk
+is a different one — a coder that writes and runs its own tests grades itself,
+and every gate downstream still goes green over it.
+
+The thing that separates those two cases in the log is not a model, it is a
+**turn**. No role template grants `Agent`, so a `dispatch_decision` is written
+by the orchestrator once per agent it invokes and never by an agent about
+itself; a second dispatch is therefore the only evidence the log can hold that
+a second turn happened at all. `crosscheck.yml`'s `role_isolation.pairs` names
+the pair (one entry: `coder` / `tester`), and this asserts it per test gate:
+
+```bash
+smith tester check <session-id> [--task <task-id>] [--policy <path>]
+```
+
+```json
+{"sessionId":"s-1","taskId":null,"gatesExamined":2,"dispatchesExamined":3,
+ "checks":[{"taskId":"epic-1/task-1","worker":"coder","auditor":"tester","gateEventId":"s-1#5","workerEventId":"s-1#1","auditorEventId":"s-1#3","status":"ok","checksRun":2,"detail":"tester was dispatched for epic-1/task-1 after coder and reported (task-result-recorded) before the gate graded 2 test check(s)."},
+ {"taskId":"epic-1/task-2","worker":"coder","auditor":"tester","gateEventId":"s-1#7","workerEventId":null,"auditorEventId":null,"status":"violation","checksRun":1,"detail":"No tester was dispatched at or before the test gate for epic-1/task-2, so the 1 test check(s) it graded were written in some other role's turn — on this pipeline, coder's."}],
+ "ok":false}
+```
+
+One check per `testgate-result` per pair, in log order. A gate passes only if a
+tester was dispatched **at or before** it, after a coder dispatch, under a
+different `agent_id`, and reported something (`task-result-recorded`,
+`error-logged`, `judge-reported` or `judge-verdict`) before the gate ran. An
+`error-logged` counts: a tester that ran and failed still ran in its own turn,
+and demanding success here would conflate isolation with outcome.
+
+| Status | Meaning | Counts as failure |
+|---|---|---|
+| `ok` | A tester was dispatched separately, after the coder, and reported before the gate | no |
+| `violation` | No tester dispatch precedes the gate, or the two dispatches share one `agent_id` | **yes** |
+| `unverifiable` | The gate names no task, records no result list, has no coder dispatch to be isolated from, or the tester never reported before it — also a policy declaring no pairs, and a session with no test gate at all | **yes** |
+| `not-applicable` | The gate ran zero checks, so there was no verdict to grade | no |
+
+**Absence is the finding here, and that is what makes this a separate command
+rather than another `asymmetric_roles` pair.** In `dispatch check` a critic
+that never ran is `not-applicable` and exits 0 — a session that dispatched no
+verifier simply had nothing to verify. Here, a test gate that graded checks
+with no tester behind it is precisely the failure being hunted, so the same
+shape of evidence gets the opposite verdict. Two opposite defaults cannot live
+in one matcher.
+
+A missing `agent_id` never downgrades a check. It is an *optional* top-level
+event field, not part of the dispatch payload contract, so "not recorded" is
+read as not recorded and never as "same agent" — the alternative makes every
+real log `unverifiable`. The same-id check therefore catches the case where the
+dispatcher did stamp ids and they match, and stays silent otherwise.
+
+**What it does not claim.** Nothing in the log distinguishes a test file the
+tester authored from one it merely ran, so this answers "was a tester
+dispatched separately, and did it report, before this task's tests were
+graded?" — not "did that tester write the tests". `role-write-scope` in
+`guardrails.yml` fences where a leased tester may write; the two checks are
+complementary, not substitutes.
+
 ## 3. `smith worktree create`
 
 ```bash

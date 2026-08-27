@@ -131,6 +131,7 @@ import {
   readAddedTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
+import { checkTesterIsolation } from './testerAudit.js';
 import type { CheckCommand } from './testgate.js';
 import {
   COMMANDS,
@@ -1530,6 +1531,28 @@ async function main(): Promise<number> {
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
     const pairs = loadCrosscheckPolicy(flags.policy).asymmetricRoles.pairs;
     const report = checkDispatchAsymmetry(events, pairs, {
+      sessionId,
+      ...(flags.task ? { taskId: flags.task } : {}),
+    });
+    printJson(report);
+    return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'tester' && action === 'check') {
+    // The other half of `dispatch check`: that one asks whether the critic ran
+    // on the finder's model, this one asks whether a tester ran at all, in a
+    // turn of its own, before the gate that graded its tests. Same fail-closed
+    // contract — `unverifiable` exits 1 — and testerAudit.ts says why absence
+    // is a violation here where it is `not-applicable` there.
+    // required: 1 — `<id>` and `<path>` in the usage line are flag values.
+    const [sessionId] = requirePositionals(positional, usageFor('tester check'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119), for `dispatch check`'s reason: a coder dispatched
+    // before a session split and its tester after it is exactly the pairing
+    // this check reads, and one session's log holds half of it.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const pairs = loadCrosscheckPolicy(flags.policy).roleIsolation.pairs;
+    const report = checkTesterIsolation(events, pairs, {
       sessionId,
       ...(flags.task ? { taskId: flags.task } : {}),
     });

@@ -229,6 +229,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Assert crosscheck.yml’s role asymmetry against the log. Exit 1 on a violation OR an unverifiable answer.',
   },
   {
+    command: 'tester check',
+    positionals: '<session-id>',
+    flags: '[--task <id>] [--policy <path>] [--state-dir <dir>]',
+    summary:
+      'Assert crosscheck.yml’s role_isolation against the log: a tester of its own per test gate. Exit 1 on a violation OR an unverifiable answer.',
+  },
+  {
     command: 'escalation check',
     positionals: '<session-id>',
     flags: '[--task <id>] [--policy <path>] [--state-dir <dir>]',

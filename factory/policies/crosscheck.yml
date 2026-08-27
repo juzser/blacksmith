@@ -143,6 +143,33 @@ asymmetric_roles:
     is tracked as kill-rate (findings that survive verification and land as
     verified fixes), never findings volume.
 
+role_isolation:
+  # The other half of "a worker never grades its own work". `finder_ne_critic`
+  # above compares MODELS, which is the wrong question for a tester: a tester
+  # may legitimately run on the coder's model, and forcing a second vendor onto
+  # it would buy nothing. What it may not do is run inside the coder's own
+  # turn — a coder that writes its own tests grades itself, and every gate
+  # downstream still goes green.
+  #
+  # The only evidence of a separate turn the event log can hold is a separate
+  # `dispatch_decision`: no role template grants `Agent`, so a dispatch is
+  # written by the orchestrator once per agent it invokes, never by an agent
+  # about itself. `smith tester check <session>` asserts that against the log
+  # after the fact, per `testgate-result`.
+  #
+  # One entry, and it is meant to stay one until a second role starts grading
+  # work it could have written: every other grader in the pipeline is a judge,
+  # and a judge cannot write at all (`role_write_scopes` in guardrails.yml).
+  pairs:
+    - worker: coder
+      auditor: tester
+  note: >
+    the audit answers "was a tester dispatched separately, and did it report,
+    before this task's tests were graded?" — not "did that tester write the
+    tests". Nothing in the log distinguishes a test file the tester authored
+    from one it merely ran; `role-write-scope` fences where a leased tester may
+    write, and the two checks are complementary, not substitutes.
+
 mechanical_oracles_first: >
   wherever a deterministic check exists (schema validation, mutation
   testing, coverage, type checks), it runs first and its verdict is final —

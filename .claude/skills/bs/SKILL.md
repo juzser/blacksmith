@@ -365,6 +365,13 @@ It exits 1 on a violation **and** on `unverifiable` — a critic dispatch with
 no model, or with no finder dispatch before it to compare against. A check
 that cannot answer must not read as a pass.
 
+Its sibling `smith tester check <session-id>` asks the other half of the same
+question — not *which model* graded, but *whose turn* did. `crosscheck.yml`'s
+`role_isolation` pairs `coder` with `tester`, and a `testgate-result` with no
+separate `tester` dispatch behind it is a **violation** there, where an absent
+critic is `not-applicable` here: for a tester, absence is the finding. Same
+fail-closed contract, and the two are not substitutes.
+
 | Subcommand | Purpose |
 |---|---|
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
@@ -631,6 +638,14 @@ below the floor.
      gate, because the gate now refuses to score with a non-empty outstanding
      set (`reason: judges-outstanding`) rather than reading a silent judge as
      zero findings.
+   - The gate scores tests it did not write, so once it has run, make the log
+     say who did: `smith tester check <session-id> --task <task-id>`
+     (`crosscheck.yml` `role_isolation`, operator-guide §2d). Exit 1 means no
+     `tester` dispatch precedes this task's `testgate-result`, the coder and
+     tester dispatches share one `agent_id`, or the answer is unknowable. A
+     coder that writes and runs its own tests grades itself and every gate
+     downstream still goes green — step 5 is what prevents that, and this is
+     the log checking that step 5 happened.
 8. Every dispatch in steps 3–7 carries the compiled lessons block for that
    role (`smith lessons for-dispatch <role> --plan … --task …`), every
    worktree dispatch also carries the open-findings block for that task

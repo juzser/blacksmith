@@ -88,11 +88,35 @@ export interface AsymmetricRoles {
   pairs: AsymmetricRolePair[];
 }
 
+/**
+ * One "this role does not grade its own work" rule.
+ *
+ * Deliberately not an `AsymmetricRolePair`. That rule compares the two
+ * dispatches' *models*, and for a tester the model is the wrong question: a
+ * tester may legitimately run on the coder's model, and forcing a second
+ * vendor onto it would buy nothing. What it may not do is run inside the
+ * coder's own turn, and the only evidence of a separate turn the event log
+ * can hold is a separate `dispatch_decision` — no role template grants
+ * `Agent`, so a dispatch is written by the orchestrator once per agent it
+ * invokes, never by an agent about itself.
+ */
+export interface RoleIsolationPair {
+  /** The role whose work is being graded. */
+  worker: string;
+  /** The role that must have been dispatched separately to grade it. */
+  auditor: string;
+}
+
+export interface RoleIsolation {
+  pairs: RoleIsolationPair[];
+}
+
 export interface CrosscheckPolicy {
   providers: Record<string, ProviderConfig>;
   quorumRule: QuorumRule;
   planQuorum: PlanQuorumPolicy;
   asymmetricRoles: AsymmetricRoles;
+  roleIsolation: RoleIsolation;
 }
 
 /**
@@ -134,11 +158,16 @@ interface RawAsymmetricRolesYaml {
   pairs?: { finder?: string; critic?: string }[];
 }
 
+interface RawRoleIsolationYaml {
+  pairs?: { worker?: string; auditor?: string }[];
+}
+
 interface RawCrosscheckYaml {
   providers?: Record<string, RawProviderYaml>;
   quorum_rule?: { agreement?: string; min_providers?: number };
   plan_quorum?: RawPlanQuorumYaml;
   asymmetric_roles?: RawAsymmetricRolesYaml;
+  role_isolation?: RawRoleIsolationYaml;
 }
 
 // Mirrors the shipped crosscheck.yml asymmetric_roles.pairs block, which in
@@ -148,6 +177,14 @@ interface RawCrosscheckYaml {
 const DEFAULT_ASYMMETRIC_PAIRS: readonly AsymmetricRolePair[] = [
   { finder: 'planner', critic: 'spec-reviewer' },
   { finder: 'reviewer', critic: 'verifier' },
+];
+
+// Mirrors the shipped crosscheck.yml role_isolation.pairs block. One entry,
+// and it is meant to stay one until a second role starts grading work it
+// could have written: every other grader in the pipeline is a judge, and a
+// judge cannot write at all (`role_write_scopes`, docs/standards/guardrails.md).
+const DEFAULT_ROLE_ISOLATION_PAIRS: readonly RoleIsolationPair[] = [
+  { worker: 'coder', auditor: 'tester' },
 ];
 
 const DEFAULT_MODEL_TIER = 'mid'; // taxonomy.yml model_tier — judges run sonnet-tier per architecture §4, external judges default to the same tier absent an override.
@@ -411,6 +448,40 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
   );
 }
 
+/**
+ * The isolation pair list, rebuilt entry by entry for quorumPairs()' reason:
+ * a half-readable list is the same hole as no list. An empty list stays legal
+ * and testerAudit answers it with one `unverifiable` check.
+ */
+function isolationPairs(field: string, value: readonly unknown[]): RoleIsolationPair[] {
+  if (!Array.isArray(value) || !value.every(isIsolationPair)) {
+    throw new CrosscheckError(
+      'crosscheck.invalid-policy',
+      `crosscheck.yml ${field} must be a list of { worker, auditor } maps naming two roles; got ${JSON.stringify(value)}. A pair the audit cannot read leaves the rule it names unchecked, and the audit still reports ok. ${DECIDES_DIFFERENTLY}`,
+      { field, value },
+    );
+  }
+  return value.map((pair) => ({ worker: pair.worker, auditor: pair.auditor }));
+}
+
+function isIsolationPair(entry: unknown): entry is RoleIsolationPair {
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return false;
+  const { worker, auditor } = entry as { worker?: unknown; auditor?: unknown };
+  return (
+    typeof worker === 'string' && worker !== '' && typeof auditor === 'string' && auditor !== ''
+  );
+}
+
+function parseRoleIsolation(raw: RawRoleIsolationYaml | undefined): RoleIsolation {
+  return {
+    // Copied, not aliased — same reason as parsePlanQuorum() above.
+    pairs: isolationPairs(
+      'role_isolation.pairs',
+      raw?.pairs ?? DEFAULT_ROLE_ISOLATION_PAIRS.map((p) => ({ ...p })),
+    ),
+  };
+}
+
 function parseAsymmetricRoles(raw: RawAsymmetricRolesYaml | undefined): AsymmetricRoles {
   return {
     // This one's wrong-shape direction is benign -- a truthy string keeps the
@@ -469,6 +540,7 @@ export function parseCrosscheckPolicy(
     },
     planQuorum: parsePlanQuorum(doc.plan_quorum),
     asymmetricRoles: parseAsymmetricRoles(doc.asymmetric_roles),
+    roleIsolation: parseRoleIsolation(doc.role_isolation),
   };
 }
 
