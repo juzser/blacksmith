@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { SEVERITY_POLICY_PATH } from '../src/paths.js';
 import {
   decide,
   LESSON_SCOPES,
   type LessonRule,
+  loadSeverityPolicy,
   parseLessons,
   parseSeverityPolicy,
   type SeverityPolicy,
@@ -392,5 +395,16 @@ _(none yet)_
       expect(lesson.statement).not.toBe('');
       expect(LESSON_SCOPES).toContain(lesson.scope);
     }
+  });
+});
+
+describe('loadSeverityPolicy', () => {
+  // The convention budgets.test.ts, crosscheck.test.ts and scheduler.test.ts
+  // all keep: the loader's default and the paths.ts constant must name one
+  // file. severity.ts could not be held to it until now, because it declared
+  // its own copy of the path rather than importing one.
+  it('reads the same file SEVERITY_POLICY_PATH points to', () => {
+    const text = readFileSync(SEVERITY_POLICY_PATH, 'utf8');
+    expect(parseSeverityPolicy(text)).toEqual(loadSeverityPolicy());
   });
 });

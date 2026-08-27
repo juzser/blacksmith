@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
 import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
+import { loadSchedulerPolicy } from '../../../factory/orchestrator/src/scheduler.js';
 import {
   buildFixture,
   EPIC_ID,
@@ -480,6 +481,55 @@ describe('ui/server app.ts', () => {
       novelty_override: true,
       duplicate_of: 'lesson-1',
     });
+  });
+
+  // D-159 at the UI door. cli.ts made every CLI path into the novelty gate
+  // read factory/policies/scheduler.yml; this route still fell through to
+  // lessons.ts's own constants, and the two agree today only because the
+  // shipped numbers equal the defaults. Nothing here asserts a specific
+  // number -- the point is that moving the FILE moves the gate.
+  //
+  // One statement, two policies, opposite answers. The refusal runs FIRST
+  // because it writes nothing: reversing the order would put the statement
+  // into the corpus and make the second call a duplicate under any bar.
+  it('runs the novelty gate at scheduler.yml lessons bar, not lessons.ts defaults (D-159)', async () => {
+    // Overlaps the fixture's lesson-1 ("Always check the upper loop bound
+    // against array length, not a hardcoded value.") enough to score above a
+    // floor-level bar (0.24) and nowhere near the shipped 0.8. It carries the
+    // same negation on purpose: checkNovelty keeps a scored duplicate novel
+    // when the polarity conflicts, so a statement that drops the "not" comes
+    // back novel under every bar and this test would prove nothing.
+    const statement = 'Always check the upper loop bound when a rebuild is not incremental.';
+    await seedCandidate(SESSION_ID, 'lesson-ui-1', 'Something else entirely, for now.');
+
+    const shipped = loadSchedulerPolicy();
+    const strict = createApp({
+      dbPath,
+      stateDir,
+      roadmapPath,
+      schedulerPolicy: {
+        ...shipped,
+        lessons: { ...shipped.lessons, noveltyJaccardThreshold: 0.01 },
+      },
+    });
+    const refused = await strict.app.request('/api/lessons/lesson-ui-1/edit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: SESSION_ID, statement }),
+    });
+    expect(refused.status).toBe(409);
+    expect((await json<{ error: { code: string } }>(refused)).error.code).toBe(
+      'lessons.edit-not-novel',
+    );
+    closeApp(strict);
+
+    // Same statement, shipped policy: novel, so the edit lands. Without the
+    // wiring both calls answer this way and the test above proves nothing.
+    const accepted = await post('/api/lessons/lesson-ui-1/edit', {
+      sessionId: SESSION_ID,
+      statement,
+    });
+    expect(accepted.status).toBe(200);
   });
 
   it('POST /api/lessons/:id/* writes to the lesson OWN session log, never the one the body names (P9-36)', async () => {

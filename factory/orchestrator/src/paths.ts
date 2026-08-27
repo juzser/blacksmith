@@ -39,6 +39,16 @@ export const SENSITIVE_PATHS_POLICY_PATH = path.join(
 export const GUARDRAILS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'guardrails.yml');
 
 /**
+ * The S1-S4 ladder and which levels block a merge (severity.ts).
+ *
+ * Declared here like every other policy file rather than inside severity.ts,
+ * which held its own `${REPO_ROOT}/factory/policies/severity.yml` — a second
+ * spelling of a path this module exists to spell once, and the only one built
+ * by interpolation instead of path.join.
+ */
+export const SEVERITY_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'severity.yml');
+
+/**
  * The operator's stack answers, recorded at install time (stack.ts).
  *
  * A declaration, not state: it is what this operator said they build with,

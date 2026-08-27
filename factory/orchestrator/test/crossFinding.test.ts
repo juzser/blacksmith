@@ -235,6 +235,84 @@ describe('crossFinding.ts reconcile — the additive direction', () => {
     expect(report.severity_raises).toHaveLength(0);
   });
 
+  // The other half of NativeFindingRecord.file_path's claim: such a record
+  // "can still be corroborated -- the fingerprint is a digest of the path it
+  // was raised on". Only the never-co-located half was pinned, and the two
+  // halves fail in opposite directions. If corroboration ever started reading
+  // the path column instead of the fingerprint, this record would come back
+  // `native-only` alongside an `independent-only` mint -- the factory raising
+  // a duplicate of a finding it already holds, with no test going red.
+  it('corroborates a pathless native record whose fingerprint still matches', () => {
+    const report = reconcile({
+      taskId: 'epic-1/task-1',
+      native: [
+        // Raised on src/a.ts, so the digest is over that path; the column
+        // itself is what a pre-P9-15 record lacks.
+        native({
+          file_path: undefined,
+          fingerprint: computeFingerprint({
+            filePath: 'src/a.ts',
+            category: 'correctness',
+            summary: 'off-by-one in the retry loop',
+          }),
+        }),
+      ],
+      independent: [run({ evidence: [evidence({ severity: 'S2-major' })] })],
+      policy: finder(),
+    });
+
+    expect(report.entries).toHaveLength(1);
+    expect(report.entries[0]).toMatchObject({
+      outcome: 'corroborated',
+      effect: 'raise-severity',
+      native_severity: 'S3-minor',
+      resolved_severity: 'S2-major',
+      applied: true,
+      // The independent group's path, not the record's: the entry reports
+      // where the finder looked, and the record says nowhere.
+      file_path: 'src/a.ts',
+    });
+    expect(report.severity_raises).toHaveLength(1);
+  });
+
+  // ...and never co-located, even when the path it was raised on is exactly
+  // the one the finder is describing. Co-location keys on the column, so the
+  // record is invisible to it; the previous test's record could have been
+  // excluded by its empty-path digest instead, which is why this one carries
+  // a real path in its fingerprint and still does not co-locate.
+  it('never co-locates a pathless native record, whatever it was raised on', () => {
+    const report = reconcile({
+      taskId: 'epic-1/task-1',
+      native: [
+        native({
+          file_path: undefined,
+          fingerprint: computeFingerprint({
+            filePath: 'src/a.ts',
+            category: 'correctness',
+            summary: 'off-by-one in the retry loop',
+          }),
+        }),
+      ],
+      // Same file, same category, different wording: co-location's exact
+      // shape. A record carrying file_path: 'src/a.ts' would land here.
+      independent: [
+        run({ evidence: [evidence({ summary: 'the retry loop runs one time short' })] }),
+      ],
+      policy: finder(),
+    });
+
+    expect(report.entries.map((e) => e.outcome).sort()).toEqual([
+      'independent-only',
+      'native-only',
+    ]);
+    expect(report.counts['co-located']).toBe(0);
+    // And the additive side still fires: the finder's claim is minted, which
+    // is the cost of a record with no path -- a duplicate, not a silence.
+    expect(report.entries.find((e) => e.outcome === 'independent-only')?.effect).toBe(
+      'raise-finding',
+    );
+  });
+
   it('folds two providers on one fingerprint into one entry naming both', () => {
     const report = reconcile({
       taskId: 'epic-1/task-1',

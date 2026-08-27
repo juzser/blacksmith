@@ -6,8 +6,11 @@
  * the orchestrator's compiled output (`ui/tsconfig.json` scopes to `ui/`,
  * and the browser build must not pull in better-sqlite3), so the choice is
  * between a copy that a test pins and an inline literal that nothing pins.
- * `ui/test/waivable.test.ts` asserts both lists element-for-element; if the
- * policy moves, that test goes red rather than the UI going quietly wrong.
+ * `ui/test/waivable.test.ts` re-derives both lists from waivers.ts's source
+ * text and asserts them element-for-element; if the policy moves, that test
+ * goes red rather than the UI going quietly wrong. It reads the file rather
+ * than re-typing the values, because a guard that restates what it guards
+ * only pins the copy to itself.
  *
  * Sources, in order of authority:
  *   - `factory/policies/severity.yml` waiver_semantics -- "Only S3/S4

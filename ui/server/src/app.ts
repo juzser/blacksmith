@@ -50,6 +50,8 @@ import type {
 } from '../../../factory/orchestrator/dist/lessons.js';
 import { transitionLesson } from '../../../factory/orchestrator/dist/lessons.js';
 import { STATE_EVENTS_DIR } from '../../../factory/orchestrator/dist/paths.js';
+import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
+import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 
@@ -60,6 +62,12 @@ export interface AppOpts {
   specsDir?: string;
   /** Root of the built Vue app (ui/dist) to static-serve; omitted in tests (API-only). */
   uiDistDir?: string;
+  /**
+   * Injected only by tests that need a specific novelty bar. Production omits
+   * it and createApp() reads factory/policies/scheduler.yml — see the
+   * lessonsPolicy comment in createApp().
+   */
+  schedulerPolicy?: SchedulerPolicy;
 }
 
 export interface AppHandle {
@@ -373,6 +381,17 @@ export function createApp(opts: AppOpts): AppHandle {
   const handle = openDb(opts.dbPath);
   const dbOpts = dbOptsFrom(opts);
   const eventOpts: EventOpts = opts.stateDir ? { stateDir: opts.stateDir } : {};
+  // D-159 again, at the door P9-36 opened. cli.ts fixed the CLI's paths into
+  // the novelty gate to read factory/policies/scheduler.yml; this one still
+  // fell through to lessons.ts's own constants, so Approve and Edit scored
+  // duplicates against a bar the operator's policy file could not move. The
+  // two agree today only because the shipped numbers equal the defaults.
+  //
+  // Read once at startup, not per request: a malformed file is a loud
+  // `scheduler.invalid-policy` when the server boots, not a 500 the first
+  // operator to click Approve discovers. Unguarded for the same reason
+  // noveltyOptsFromFlags() is — a missing policy is an error, not a default.
+  const lessonsPolicy = (opts.schedulerPolicy ?? loadSchedulerPolicy()).lessons;
 
   const app = new Hono();
 
@@ -539,6 +558,12 @@ export function createApp(opts: AppOpts): AppHandle {
     const result = await transitionLesson(lessonId, toStatus, ctx, eventOpts, {
       ...extra,
       ...(body.note ? { note: body.note } : {}),
+      // Last, as cli.ts spreads noveltyOptsFromFlags() last: one place
+      // answers "what threshold is in effect" and no route can take the
+      // gate's shape from the request body.
+      noveltyThreshold: lessonsPolicy.noveltyJaccardThreshold,
+      shingleSize: lessonsPolicy.shingleSize,
+      noveltyLengthAware: lessonsPolicy.noveltyLengthAware,
     });
     await applyDb(opts.dbPath, ctx.sessionId, dbOpts);
     return { lessonId, status: result.lessonStatus, novelty: result.novelty };
