@@ -58,6 +58,20 @@
 //      same token pairs only at the 3:1 UI-graphics floor, which is not the
 //      floor that applies to text — so all three are re-checked here at
 //      4.5:1. They pass, but that is a measurement, not an assumption.
+//   9. Shell liveness round: SidebarNav.vue gained arrival badges
+//      (ui/src/lib/navBadges.ts). Two new pairings — the expanded pill's
+//      --ds-text-on-bold count on --ds-info-bold, which is real TEXT and so
+//      takes the 4.5:1 floor; and the collapsed rail's dot, --ds-info-bold as
+//      a UI graphic against --ds-surface-sunken. The dot's ring is painted in
+//      that same sunken surface precisely so this is the pair that applies:
+//      the dot can sit on an active item, whose --ds-primary-subtle tint puts
+//      info-bold at 2.84:1 in dark theme, under the floor. --ds-info-bold is
+//      also why the badge is not --ds-primary: identical in light theme, but
+//      --ds-primary lightens in dark and takes white text to 3.68:1.
+//      The same round put the factory-pulse readout in the topbar
+//      (--ds-text-subtle on --ds-surface, App.vue). It is small text that
+//      reports a real fact, so it is measured at the text floor rather than
+//      waved through as decoration.
 //
 // Exit 0 = every pair clears its floor. Exit 1 otherwise (prints the
 // failing pair so it's actionable, not just "gate failed").
@@ -172,6 +186,9 @@ for (const [theme, tokens] of [
   check('LiveStatus dot — lagging', 'warning-bold', 'surface', theme, tokens);
   check('LiveStatus dot — stale', 'danger-bold', 'surface', theme, tokens);
   check('Live node border/ring (inward)', 'info-bold', 'surface', theme, tokens);
+  check('Nav badge count', 'text-on-bold', 'info-bold', theme, tokens, TEXT_FLOOR, 'AA normal text');
+  check('Nav badge dot (collapsed)', 'info-bold', 'surface-sunken', theme, tokens);
+  check('Topbar factory pulse', 'text-subtle', 'surface', theme, tokens, TEXT_FLOOR, 'AA normal text');
 }
 
 console.log(rows.join('\n'));

@@ -895,6 +895,59 @@ requires `--plan` — the merge is logged under the id the plan declares, or
 not at all. Every refusal exits `1` with a `queue.adopt-*` code and writes
 no event: a mistyped sha is an operator error, not a blocked task.
 
+### 4b. `--select-test-cmd` — paying for the tests the change can reach
+
+The queue is serial and the regression gate is cumulative, so N tasks each
+pay for the whole suite: the honest thing, and a quadratic one. `--select-test-cmd`
+narrows the *gate*, never the contract.
+
+```bash
+smith queue run epic-1 \
+  --project workspaces/my-project \
+  --test-cmd "pnpm test" \
+  --select-test-cmd "pnpm vitest run {files}" \
+  --tasks tasks.json
+```
+
+After the rebase — so the change set is the task's commits replayed on the
+current integration head — the queue diffs the worktree against
+`smith/<epic>/integration`, builds the same symbol graph `smith claims impact`
+uses, and walks `dependents` out from the changed files until the frontier
+stops growing. Whatever test files that reaches is what runs, through your
+template with `{files}` replaced by the shell-quoted list.
+
+Every ambiguity resolves to running everything. A changed file the scanner has
+never seen, cannot read, or that is not source at all (a `.yml`, a lockfile, a
+fixture) can affect anything; a module with a computed `import()` or an import
+that never resolved is treated as reached by every change, because the scanner
+cannot prove it is not; and a change that reaches *no* test is far more likely
+a stale graph than genuinely uncovered code. In each case the run falls back to
+`--test-cmd` with the reason attached rather than reporting a narrow pass.
+
+That fallback is the whole design. A test gate that skips on error is not a
+gate, so there is no path where a failure to build the graph turns into fewer
+tests run — only into the full command, plus a line saying why.
+
+Each outcome carries what actually happened, which is the part to read:
+
+```json
+{ "outcome": "merged", "taskId": "task-3",
+  "tests": { "mode": "selected", "ran": ["src/config.test.ts"], "known": 41 } }
+```
+
+`mode: "full"` arrives with `reasons` when something forced it — `known` is
+how many test files the graph knows about, so `ran: 1 of 41` is legible
+without trusting the selection blindly. Drop `--select-test-cmd` and the
+`tests` key disappears entirely: its presence means selection ran, its absence
+means the full command was the only command there ever was.
+
+Two things it deliberately does not do. It never narrows a typecheck: `tsc -p`
+is a whole-program question, and a subset of files is a different, weaker one —
+so keep `tsc` in `--test-cmd`, not in the selective template. And it never
+invents the command: a `--select-test-cmd` without a `{files}` placeholder is
+refused before the queue starts (`test-select.no-files-placeholder`) rather
+than silently running your full suite and reporting it as a selective run.
+
 ## 5. `smith gate run`
 
 The composed gate pipeline for one task: **schema check → artifact check →
@@ -1335,6 +1388,146 @@ uses. Omitting it is legal — a criterion can be reworded without moving a
 task — but it is also the shape a forgotten `--changes` takes, so an amendment
 whose diff moves no task prints a `warning` in the JSON and a line on stderr
 rather than silently cutting an identical version.
+
+## 6b. Worker-proposed spec changes — the third exit
+
+§6a assumes a judge found the wrong criterion. Usually the worker finds it
+first, and until now that worker had nowhere to put it. A spec-scoped finding
+can only be minted by a judge dispatched with `--scope spec` against a plan
+version, a coder mid-flight is not one, and a worker cannot emit an event at
+all — so a wrong criterion had two outcomes, both bad: a worker quietly
+widening it to something it could satisfy, or a coder bounced a defect it had
+nothing to fix (D-33).
+
+The worker's exit is a returned field, the same shape `research_request`
+takes and for the same reason — a worker that stops mid-flight cannot emit
+anything, so the only signal that survives its own failure case is one it
+returns. It commits what is green, stops with `run_status: dead`, and puts a
+`spec_change_request` in `structured_output`:
+`{criterion_ref, assumption, evidence, changes, sites, blocking}`, schema at
+`factory/specs/schema/spec-change-request.schema.json`. `sites` is **every**
+place that wrong assumption's shape occurs, not only the one it hit — the
+worker just read that code and you did not (D-123).
+
+The node that dispatched it records the request. This writes no plan version:
+
+```bash
+smith plan propose --plan factory/specs/active/epic-1/plan-v1.json \
+  --task epic-1/task-1b-parse-quotes --proposed-by coder \
+  --request worker-request.json \
+  --session envkit-quotes --causal-parent envkit-quotes#0
+```
+
+`--request` is a file rather than a flag soup because `changes` is a nested
+object and the worker already returned the whole request as JSON; re-typing it
+into flags would be asking the dispatcher to paraphrase the worker. The
+command validates the diff the way `plan amend` does — by drafting the next
+version and running the plan's own validator over it — so a proposal that
+could never be applied is refused before it reaches your queue rather than
+after. On success it raises the spec-scoped finding an approval will later
+cite, writes `spec-change-proposed`, and prints the proposal back with the
+`diff` it computed (`changes` elided below — it is the worker's whole task
+spec):
+
+```json
+{"proposalId":"envkit-quotes#2","epicId":"epic-1","taskId":"epic-1/task-1b-parse-quotes",
+ "baseVersion":1,"proposedBy":"coder","findingId":"f-epic-1/task-1b-parse-quotes-4dde708d",
+ "criterionRef":"epic-1/task-1b-parse-quotes:criterion-1",
+ "assumption":"a .env value never spans two physical lines",
+ "evidence":"src/parse/env.ts:41 reads line by line and never rewinds",
+ "sites":["src/parse/env.ts","src/lex/scan.ts"],"changes":{"supersede":{"…":{}}},
+ "diff":{"added":[],"removed":[],"superseded":["epic-1/task-1b-parse-quotes"],
+         "carried":["epic-1/task-1a-lex"]},
+ "blocking":true,"severity":"S2-major","status":"open","decision":null,
+ "ts":"2026-08-27T11:42:52.072Z"}
+```
+
+The `proposalId` is the id of the `spec-change-proposed` event itself, which is
+why it is what `approve` and `reject` take: the thing being answered is the
+record of the ask, not a row in a side table that could disagree with the log.
+`severity` is the dispatcher's default (`S2-major`) unless the worker had a
+view — deliberately above the waivable band, so a proposal cannot be silenced
+by an existing waiver (D-196).
+
+What is waiting:
+
+```bash
+smith plan proposals --session envkit-quotes [--epic epic-1] [--status open]
+```
+
+`--status` is `open`, `approved`, `rejected` or **`stale`**. Stale is the
+second question, and the one only this command answers: the proposal was
+written against v1, an amendment has since cut v2, and the diff no longer
+describes the plan it would be applied to. Staleness is computed against the
+plan on disk, not stamped at proposal time, so a proposal that was open this
+morning is stale this afternoon without anything having been written to it —
+and the refusal is at approval, where it can still stop you:
+
+```json
+{"error":{"code":"spec-change.approval-stale","message":"Spec change proposal
+envkit-quotes#7 was drafted against \"epic-1\" v1, and the plan has since moved
+to v2. Its diff has not been checked against the newer version — re-propose
+against v2 rather than applying it blind.","details":{"proposalId":
+"envkit-quotes#7","baseVersion":1,"planVersion":1,"latestVersion":2}}}
+```
+
+Ask the worker again against the version that now exists. The listing prints
+each proposal whole, diff included, because your next move is a yes or a no on
+a plan diff and a listing that made you go and read the event by hand would
+have answered the wrong question.
+
+Answering is one command each:
+
+```bash
+smith plan approve envkit-quotes#2 --plan factory/specs/active/epic-1/plan-v1.json \
+  --decided-by operator [--rationale "the parser is right and the criterion is not"] \
+  --session envkit-quotes --causal-parent envkit-quotes#2
+
+smith plan reject envkit-quotes#2 --decided-by operator \
+  --rationale "criterion-1 is right; the parser is what is wrong" \
+  --session envkit-quotes --causal-parent envkit-quotes#2
+```
+
+Approval prints what the amendment did, in `plan amend`'s own shape:
+
+```json
+{"proposalId":"envkit-quotes#2","epic":"epic-1","version":2,"previousVersion":1,
+ "findingIds":["f-epic-1/task-1b-parse-quotes-4dde708d"],
+ "sites":["src/parse/env.ts","src/lex/scan.ts"],"sitesUnclaimed":["src/lex/scan.ts"],
+ "diff":{"added":[],"removed":[],"superseded":["epic-1/task-1b-parse-quotes"],
+         "carried":["epic-1/task-1a-lex"]}}
+```
+
+Read `sitesUnclaimed` before you move on. The worker named two places the wrong
+assumption's shape occurs and the amended plan only claims one of them, so
+`src/lex/scan.ts` has the same bug and no task pointed at it. That is printed at
+approval and not only recorded, because you are the one who just agreed the
+assumption was wrong and are best placed to say whether the second site is a
+deliberate call or a forgotten one.
+
+Rejection prints the proposal, now `"status":"rejected"` and carrying a
+`decision` whose `planVersion` is `null` — the shape of "answered, cut
+nothing". Approval runs `plan amend` with the worker's own finding, sites and
+diff, and no guard is relaxed to do it: the amendment still cites a spec
+finding, still carries a rationale, still names sites, and still refuses to
+obligate nothing (D-127). The version is cut by `plan amend` alone, so every
+version stays immutable and every one of them is in the log — approval is what
+*calls* the amendment, not a second way to write one. `--rationale` is optional
+here and falls back to the argument the worker recorded, because approving is
+agreeing with it; on `reject` it is required, since the log already holds the
+case for and a rejection is the only place the case against gets written down.
+A rejection refutes the finding and cuts no version.
+
+Both decisions write `spec-change-decided`, which is what closes the proposal.
+`smith daemon` reports an unanswered one — `attention` when the worker called
+it `blocking` and `info` when it did not (`docs/runbooks/ops.md`). In the log,
+an approval is four events in this order: `spec-change-proposed`,
+`plan-version-created`, `finding-transitioned`, `spec-change-decided` — the
+decision is written last, after the version it authorised exists, so a crash
+between them leaves a proposal still open against a plan that already moved,
+which is the `stale` case above and not a silent double-apply. A rejection is
+`spec-change-proposed`, `spec-change-decided`, `finding-transitioned`, and no
+version. The dashboard's **Plan changes** filter selects all of them.
 
 ## 7. `smith plan quorum` + `smith epic verdict`
 
@@ -1929,8 +2122,10 @@ and exited 0. That is the false clean this command exists to refuse.
 
 ### Limits, stated plainly
 
-- It reads the log; it does not stop anything. There is no dispatch daemon to
-  refuse the next wave, so acting on `alarm` is still your call.
+- It reads the log; it does not stop anything. `smith daemon` re-runs the same
+  fold on an interval so an alarm reaches you without an open session
+  ([`../runbooks/ops.md`](../runbooks/ops.md)), but it does not dispatch and so
+  cannot refuse the next wave either — acting on `alarm` is still your call.
 - The projection prices each unmeasured dispatch at its role's *cap*. That is an
   upper bound by construction, so `at-risk` means "could cross", not "will".
 - Judge tokens are never recorded anywhere, at any budget. Until a dispatch
@@ -2316,23 +2511,77 @@ distilled without a `finding_category` compiles to an entry the severity gate
 can never reach. Until those entries carry one, `kpi same-mistake` above is
 reading a number the corpus could not have moved.
 
+## 11. `smith daemon` — the same folds, without an open session
+
+Everything above is a command you run. Most of them answer a question that has
+a shelf life: is the epic over its cap, did an agent that was dispatched ever
+come back, is a recheck due. Asking them means being at the terminal.
+
+```bash
+smith daemon start                  # detached, logs to state/daemon/daemon.log
+smith daemon status                 # exit 1 when nothing is watching
+smith daemon stop
+smith daemon run --once             # one tick in the foreground, for cron
+```
+
+A tick reads the event log, runs the same folds `smith budget alarm` (§9a) and
+`smith scheduler run --dry` run plus the live-agent fold behind `/bs status`,
+refreshes the SQLite read-model the dashboard serves, and writes the result to
+`state/daemon/status.json`:
+
+```json
+{
+  "at": "2026-08-27T09:00:00.000Z",
+  "sessions": ["sess-7"],
+  "findings": [
+    {
+      "kind": "stale-agent",
+      "severity": "attention",
+      "sessionId": "sess-7",
+      "subject": "task-4",
+      "detail": "coder (claude/mid) has been live for 6.2h with no result, error or supersession — past the 4h threshold. Dispatched 2026-08-27T02:48:00.000Z."
+    }
+  ],
+  "attention": 1,
+  "projected": 1
+}
+```
+
+Two things make it safe to leave running. It never dispatches — that is
+architecture §12's rule for the scheduler it wraps, applied to a process that
+outlives your terminal — and its entire write surface is `state/daemon/` and
+`state/smith.db`, both derived, both git-ignored, both rebuildable from the
+log it only ever reads. It cannot merge, cannot touch a worktree, and cannot
+spend a token.
+
+Because it re-runs the same folds rather than reimplementing them, it and
+those commands cannot disagree. The full operator story — every flag, the
+finding kinds, launchd/systemd/cron units, the health check, what to back up —
+is [`../runbooks/ops.md`](../runbooks/ops.md).
+
 ## Limitations today
 
-- **Dispatch orchestration is skill-guided, not yet a daemon.** Phase 7
-  ships `.claude/skills/bs/SKILL.md` — the operator runs `/bs new|plan|run|
-  status|ui|waivers|lessons|report` in a Claude Code session inside this
-  repo, and that session follows the skill's playbooks: it dispatches
-  planner/coder/tester/reviewer/etc. sessions from `.claude/agents/`
-  itself and drives them through the real `smith` commands in sequence.
-  There is **no standalone background process** that watches the event log
-  and dispatches on its own — the operator (or their Claude Code session)
-  is still the loop that keeps calling `/bs run <epic>` until the epic is
-  done. Every deterministic mechanic the skill relies on — plan/wave
-  validation, worktree lifecycle, the gate pipeline, the merge queue,
-  findings/waivers, the scheduler, the lessons pipeline, the event log —
-  is built, tested, and CLI-accessible; only the "always-on daemon that
-  needs no human in the loop at all" framing from architecture §16's later
-  phases is still ahead (Phase 9 hardening).
+- **Dispatch orchestration is skill-guided; the background process watches,
+  it does not drive.** Phase 7 ships `.claude/skills/bs/SKILL.md` — the
+  operator runs `/bs new|plan|run|status|ui|waivers|lessons|report` in a
+  Claude Code session inside this repo, and that session follows the skill's
+  playbooks: it dispatches planner/coder/tester/reviewer/etc. sessions from
+  `.claude/agents/` itself and drives them through the real `smith` commands
+  in sequence. Phase 10 adds `smith daemon`
+  ([`../runbooks/ops.md`](../runbooks/ops.md)): a standalone background
+  process that folds the event log on an interval and reports budget alarms,
+  agents that never came back, and rechecks and cadences that are due, so
+  *knowing* what the factory needs no longer takes an open session. It
+  **never dispatches** — that is architecture §12's rule for the scheduler it
+  wraps ("it never dispatches an agent itself"), applied to a process that
+  outlives your terminal. The operator (or their Claude Code session) is
+  still the loop that keeps calling `/bs run <epic>` until the epic is done.
+  Every deterministic mechanic the skill relies on — plan/wave validation,
+  worktree lifecycle, the gate pipeline, the merge queue, findings/waivers,
+  the scheduler, the lessons pipeline, the event log — is built, tested, and
+  CLI-accessible; only the "always-on daemon that needs no human in the loop
+  at all" framing from architecture §16's later phases is still ahead, and it
+  is not a line the watcher is allowed to cross on its own.
 - **Nothing runs the integration-root check for you, and it is the only
   check that sees the assembled branch.** Every automatic gate runs inside a
   task worktree (§7a). `smith integration check` is operator-invoked, and it

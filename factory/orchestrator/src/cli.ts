@@ -2,7 +2,8 @@
 // Thin CLI router: one subcommand per orchestrator module operation. No
 // framework — plain argv parsing. Logic lives in the modules; this file only
 // wires stdin/argv to them and prints JSON.
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ParsedArgs, parseArgs } from './args.js';
@@ -29,6 +30,16 @@ import {
   reconcile,
   runIndependentFinder,
 } from './crossFinding.js';
+import {
+  DaemonError,
+  DEFAULT_DAEMON_DIR,
+  DEFAULT_INTERVAL_SECONDS,
+  daemonStatus,
+  readLock,
+  runDaemon,
+  stopDaemon,
+  type TickOptions,
+} from './daemon.js';
 import { apply as applyDb, type DbOpts, openDb, rebuild as rebuildDb } from './db/projector.js';
 import {
   analytics,
@@ -138,6 +149,14 @@ import {
 } from './security.js';
 import { parseLessons } from './severity.js';
 import { amendPlan, recordSpecReview } from './spec.js';
+import {
+  approveSpecChange,
+  listSpecChanges,
+  proposeSpecChange,
+  rejectSpecChange,
+  type SpecChangeRequest,
+  type SpecChangeStatus,
+} from './specChange.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import {
   emitEdgesRecorded,
@@ -148,6 +167,7 @@ import {
 } from './taskEvents.js';
 import { checkTesterIsolation } from './testerAudit.js';
 import type { CheckCommand } from './testgate.js';
+import { assertSelectableTestCmd } from './testSelect.js';
 import {
   COMMANDS,
   type CommandDoc,
@@ -1065,6 +1085,105 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // The worker's half of the same wall. A coder cannot emit an event and
+  // cannot mint a spec-scoped finding, so it returns a spec_change_request in
+  // its structured_output and the node that dispatched it runs this. Nothing
+  // here writes a plan file: `plan amend` above stays the only path to a
+  // version, and this only records that someone asked for one.
+  if (namespace === 'plan' && action === 'propose') {
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    // A file, not a flag soup: `changes` alone is a nested object, and the
+    // worker already returned the whole request as JSON. Asking the dispatcher
+    // to re-type it into flags would be asking it to paraphrase the worker.
+    const request = readJsonFile<SpecChangeRequest>(requireFlag(flags, 'request'));
+    const proposal = await proposeSpecChange(
+      {
+        plan,
+        taskId: requireFlag(flags, 'task'),
+        proposedBy: requireFlag(flags, 'proposed-by'),
+        ...(flags['proposed-by-provider']
+          ? { proposedByProvider: flags['proposed-by-provider'] }
+          : {}),
+        request,
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    printJson(proposal);
+    return 0;
+  }
+
+  if (namespace === 'plan' && action === 'proposals') {
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    // Same P9-28 rule the findings verbs follow: an empty list is an answer
+    // about the proposals, and it must not double as the answer about a
+    // session that was never opened.
+    requireSession(sessionId, eventOpts);
+    const proposals = await listSpecChanges(
+      sessionId,
+      {
+        epicId: flags.epic,
+        taskId: flags.task,
+        status: flags.status as SpecChangeStatus | undefined,
+      },
+      { ...eventOpts, ...planOptsFromFlags(flags) },
+    );
+    // Printed whole, diff included. The operator's next move is a yes or a no
+    // on a plan diff, and a listing that made them go and read the proposal
+    // event by hand to see it would have answered the wrong question.
+    printJson(proposals);
+    return 0;
+  }
+
+  // "Duyệt nhanh" is one command, and it is one command without any guard
+  // being relaxed: `amendPlan` still demands a rationale, findings, and
+  // sites. Approval supplies them from what the worker already recorded.
+  if (namespace === 'plan' && action === 'approve') {
+    const [proposalId] = requirePositionals(positional, usageFor('plan approve')) as [string];
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const result = await approveSpecChange(
+      {
+        proposalId,
+        plan,
+        decidedBy: requireFlag(flags, 'decided-by'),
+        ...(flags.rationale ? { rationale: flags.rationale } : {}),
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    printJson({
+      proposalId,
+      epic: result.plan.epic_id,
+      version: result.plan.version,
+      previousVersion: plan.version,
+      findingIds: [result.proposal.findingId],
+      sites: result.proposal.sites,
+      sitesUnclaimed: result.sitesUnclaimed,
+      diff: result.diff,
+    });
+    return 0;
+  }
+
+  if (namespace === 'plan' && action === 'reject') {
+    const [proposalId] = requirePositionals(positional, usageFor('plan reject')) as [string];
+    // --rationale is required here and optional on approve, which is not an
+    // inconsistency: approval can fall back to the worker's own argument
+    // because approval agrees with it. A rejection is the operator saying
+    // something the log does not already contain.
+    const proposal = await rejectSpecChange(
+      {
+        proposalId,
+        decidedBy: requireFlag(flags, 'decided-by'),
+        rationale: requireFlag(flags, 'rationale'),
+      },
+      eventContextFromFlags(flags),
+      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+    );
+    printJson(proposal);
+    return 0;
+  }
+
   if (namespace === 'wave' && action === 'check') {
     // `required: 1` — the variadic tail has its own, better message below.
     const [planFile] = requirePositionals(positional, usageFor('wave check'), 1) as [string];
@@ -1293,6 +1412,118 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // The background watcher (Phase 10). Four verbs and one invariant: none of
+  // them dispatches an agent, merges a branch or writes to a worktree. A
+  // process that outlives the operator's terminal is the last place to relax
+  // the rule that a human admits work.
+  if (namespace === 'daemon' && action === 'run') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    const interval =
+      flags.interval === undefined ? DEFAULT_INTERVAL_SECONDS : Number(flags.interval);
+    if (!Number.isInteger(interval) || interval <= 0) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--interval must be a whole number of seconds greater than zero, got "${flags.interval}".`,
+        { flag: 'interval', value: flags.interval ?? null },
+      );
+    }
+    const tickOpts: TickOptions = {
+      ...eventOptsFromFlags(flags),
+      ...(flags.project ? { projectDir: flags.project } : {}),
+      ...(flags.db ? { dbPath: flags.db } : {}),
+      ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
+    };
+
+    // SIGTERM has to reach the sleep, not just the flag: a daemon woken only
+    // by the next tick would ignore `smith daemon stop` for up to an interval,
+    // and an operator who waits that long reaches for `kill -9` — which is
+    // exactly the exit that strands the lock.
+    let stopping = false;
+    let wake: (() => void) | null = null;
+    const requestStop = (): void => {
+      stopping = true;
+      wake?.();
+    };
+    process.once('SIGTERM', requestStop);
+    process.once('SIGINT', requestStop);
+
+    const reports = await runDaemon({
+      dir,
+      intervalSeconds: interval,
+      ...tickOpts,
+      ...(flags.once === 'true' ? { once: true } : {}),
+      shouldContinue: () => !stopping,
+      sleep: (ms: number) =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            wake = null;
+            resolve();
+          }, ms);
+          wake = () => {
+            clearTimeout(timer);
+            wake = null;
+            resolve();
+          };
+        }),
+    });
+    const last = reports[reports.length - 1];
+    printJson({ ticks: reports.length, dir, ...(last === undefined ? {} : { last }) });
+    return 0;
+  }
+
+  if (namespace === 'daemon' && action === 'start') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    const held = readLock(dir);
+    if (held !== null) {
+      // Let acquireLock own the liveness question — one implementation of
+      // "is that pid still there" rather than a second opinion here.
+      throw new DaemonError(
+        'daemon.already-running',
+        `A daemon (pid ${held.pid}, started ${held.startedAt}) already holds ${dir}. ` +
+          'Run `smith daemon stop` first, or `smith daemon status` to see what it last found.',
+        { pid: held.pid, dir },
+      );
+    }
+    mkdirSync(dir, { recursive: true });
+    // `ignore` would discard the one account of why a detached daemon died.
+    const logFd = openSync(path.join(dir, 'daemon.log'), 'a');
+    const argv = [
+      'daemon',
+      'run',
+      '--dir',
+      dir,
+      ...(flags.interval === undefined ? [] : ['--interval', flags.interval]),
+      ...(flags.project === undefined ? [] : ['--project', flags.project]),
+      ...(flags.db === undefined ? [] : ['--db', flags.db]),
+      ...(flags['no-db'] === 'true' ? ['--no-db'] : []),
+      ...(flags['state-dir'] === undefined ? [] : ['--state-dir', flags['state-dir']]),
+    ];
+    const child = spawn(process.execPath, [process.argv[1] as string, ...argv], {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+    });
+    child.unref();
+    // The child writes the lock under its OWN pid; this one is the spawn's
+    // answer, and `smith daemon status` is what confirms the lock exists.
+    printJson({ started: true, pid: child.pid ?? null, dir, log: path.join(dir, 'daemon.log') });
+    return 0;
+  }
+
+  if (namespace === 'daemon' && action === 'status') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    const report = daemonStatus(dir);
+    printJson(report);
+    // Exit 1 when nothing is watching, so a health check is `smith daemon
+    // status >/dev/null` rather than a JSON parse in a shell script.
+    return report.running ? 0 : 1;
+  }
+
+  if (namespace === 'daemon' && action === 'stop') {
+    const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
+    printJson(stopDaemon(dir));
+    return 0;
+  }
+
   if (namespace === 'worktree' && action === 'create') {
     const [projectDir, epic, taskId] = requirePositionals(
       positional,
@@ -1410,6 +1641,12 @@ async function main(): Promise<number> {
     const projectDir = requireFlag(flags, 'project');
     const testCmd = requireFlag(flags, 'test-cmd');
     const tasksFile = requireFlag(flags, 'tasks');
+    // D-260: the narrowed command is validated here, once, before any git
+    // runs. A template with no `{files}` would otherwise render as the full
+    // suite on every task while the outcome said `selected` — a gate that
+    // lies about its own coverage is worse than a slow one.
+    const selectTestCmd = flags['select-test-cmd'] as string | undefined;
+    if (selectTestCmd !== undefined) assertSelectableTestCmd(selectTestCmd);
     const tasks =
       readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
     // D-46/P9-29: the queue is the only component that knows a branch landed,
@@ -1464,6 +1701,7 @@ async function main(): Promise<number> {
         projectDir,
         epic,
         testCmd,
+        ...(selectTestCmd !== undefined ? { selectTestCmd } : {}),
         ...(events ? { events } : {}),
       });
       outcomes.push(outcome);

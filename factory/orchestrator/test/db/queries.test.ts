@@ -12,9 +12,11 @@ import {
   LESSON_BUCKET_FOR_STATUS,
   lessonsPage,
   overview,
+  pulse,
   taskDetail,
   timeline,
 } from '../../src/db/queries.js';
+import { eventsRaw } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
 import { raiseFinding, transition } from '../../src/findings.js';
@@ -28,6 +30,12 @@ async function lastEventId(opts: EventOpts): Promise<string> {
   const last = events[events.length - 1];
   if (!last) throw new Error('expected at least one event in the log');
   return last.event_id;
+}
+
+/** The projection's own row count, so the pulse assertion is not a magic number
+ * that has to be re-counted every time the fixture grows an event. */
+function readEventCount(handle: DbHandle): number {
+  return handle.db.select().from(eventsRaw).all().length;
 }
 
 describe('db/queries.ts', () => {
@@ -423,6 +431,62 @@ describe('db/queries.ts', () => {
       ]);
       expect(result.byDay).toHaveLength(1);
       expect(result.byDay[0]?.count).toBe(1);
+    });
+  });
+
+  describe('pulse()', () => {
+    it('names the newest event and counts what the shell watches for arrivals', () => {
+      const result = pulse(handle.db);
+
+      // The same event overview()'s session row reports as the fixture's last.
+      expect(result.lastEventType).toBe('finding-transitioned');
+      expect(result.lastEventAt).not.toBeNull();
+      expect(result.counts.events).toBe(readEventCount(handle));
+      expect(result.counts.errors).toBe(1); // the one error errorsPage() groups
+      // lesson-1 is approved and lesson-2 invalidated — nothing is waiting.
+      expect(result.lessonsPending).toBe(0);
+    });
+
+    it('answers for an empty scope without pretending the log said something', () => {
+      const result = pulse(handle.db, { sessionId: 'no-such-session' });
+      expect(result).toEqual({
+        lastEventAt: null,
+        lastEventType: null,
+        counts: { events: 0, errors: 0 },
+        lessonsPending: 0,
+      });
+    });
+
+    it('counts a lesson still waiting on the operator', async () => {
+      const parent = await lastEventId({ stateDir });
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'scribe',
+          event_type: 'lesson-candidate-raised',
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            lesson_id: 'lesson-3',
+            lesson_type: 'rule',
+            lesson_level: 'principle',
+            lesson_status: 'candidate',
+            lesson_scope: 'stack-wide',
+            statement: 'Read the tail of check.sh, not its exit code.',
+            valid_from: '2026-08-27T00:00:00.000Z',
+            provenance_event_ids: [parent],
+          },
+        },
+        { stateDir },
+      );
+      const dbPath = path.join(dbDir, 'smith-pulse.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const fresh = openDb(dbPath);
+      try {
+        expect(pulse(fresh.db).lessonsPending).toBe(1);
+      } finally {
+        fresh.sqlite.close();
+      }
     });
   });
 

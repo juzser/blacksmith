@@ -27,6 +27,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Recheck/maintenance/growth scheduler (`smith scheduler run`) | `factory/orchestrator/src/scheduler.ts`, `factory/policies/scheduler.yml` |
 | Lessons pipeline (novelty gate, compile, `smith dream`) | `factory/orchestrator/src/lessons.ts` |
 | Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge preflight`, `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
+| Background watcher (`smith daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
 
 ## Operating rules
 

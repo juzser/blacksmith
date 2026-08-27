@@ -461,6 +461,7 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 
 - **No auth.** Local-first, single operator, no login page, no Template 4 usage. Cloudflare Access is future work per §10/§14 — out of this spec entirely.
 - **No WebSockets — poll, stated per surface:**
+  - **The app shell** (`/api/pulse`, added by §A.6): poll every **5s** on every page. This is the only poll that is not a page's own — it carries the freshness indicator and the nav arrival badges, both of which have to be true on pages that do not poll at all.
   - **Overview** (stat row + live-agents feed): poll every **5s** — this is explicitly the "what's running right now" page (§7 of the architecture doc), the one place sub-10s freshness matters.
   - **Timeline, Kanban**: poll every **15s**, paused via the Page Visibility API when the tab is hidden, plus a manual `Button` "Refresh" in the Toolbar (`Toolbar.prompt.md`'s documented `end` slot pattern) for on-demand freshness.
   - **Task detail, Lessons, Errors, Analytics**: **manual refresh only**, no auto-poll — these are pages the operator is actively reading/deciding on; a table or findings list re-sorting under their cursor mid-read is a worse UX than a slightly stale view with an explicit Refresh button.
@@ -702,3 +703,61 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      "in-progress" in words. Under `prefers-reduced-motion` the ring is
      *frozen*, not removed: dropping it would leave the live node less
      prominent for reduced-motion users than for everyone else.
+
+---
+
+### A.6 Operator directive 9 (shell liveness round)
+
+9. **The toast question, answered no** — "Có nên thêm toast thông báo khi có
+   event, trigger hoặc dispatch vừa xảy ra, để hệ thống có cảm giác đang
+   chạy?" The need is real and the mechanism was wrong. What shipped instead
+   keeps the feeling of a running system on a surface the operator can come
+   back to.
+
+   - **No toast on an event, a trigger or a dispatch.** `useToast` already
+     means exactly one thing — *your* action landed — and it is used only by
+     Task detail's waive/deny and Lessons' approve/reject. A toast the
+     operator did not cause would overload that. Three further objections are
+     properties of this transport, not matters of taste: the data arrives by
+     poll (§8), so a toast fired off a diff reports when the *poll* noticed,
+     not when the thing happened; a wave that lands ten events between two
+     ticks either storms the corner or lies about the count; and `usePoll`
+     pauses while the tab is hidden, which makes a toast lossy for something
+     the event log records durably. The argument is kept in
+     `ui/src/lib/navBadges.ts` rather than only here, next to the code that
+     would have to be undone to reverse it.
+   - **The freshness indicator moved into the topbar.** `LiveStatus` was
+     Overview-only (§A.4 round 7). Every page polls, and on the other nine a
+     frozen server was indistinguishable from a quiet factory — the exact
+     confusion Overview had already fixed for itself. It now sits in the
+     shell, fed by the shell's own 5s poll.
+   - **Two clocks, not one.** Beside it, `last event <age> ago`.
+     `livenessLabel()` answers "is my screen current"; `lastEventLabel()`
+     answers "is the factory moving". They come apart in precisely the case
+     the indicator exists for: a healthy server polled every five seconds
+     reports `Live` indefinitely over a factory that has emitted nothing since
+     Tuesday. Both are shown because neither implies the other. Hidden below
+     768px, where the topbar has no room.
+   - **Arrival badges on the nav rail.** Timeline and Errors badge *arrivals*
+     — the difference between the current poll and the counter as of the last
+     time the operator opened that page. Only monotonic counters qualify:
+     subtract a level and the operator clearing one item produces a negative
+     arrival. Lessons badges its pending *level*, rendered as itself. The
+     count is capped at `99+`; the collapsed 64px rail has no room for that,
+     so it draws a dot and the number reaches a screen reader through the
+     button's accessible name instead — "Timeline, 3 new", never a bare `3`.
+     The badge is `--ds-info-bold`, not `--ds-primary`: identical in light
+     theme, but `--ds-primary` lightens in dark and takes `--ds-text-on-bold`
+     to 3.68:1. Both new pairs are in `scripts/design/contrast_check.mjs`.
+   - **The shell's Refresh refreshes the page, not just the shell.** Moving
+     `LiveStatus` above the router made its Refresh button a lie — it would
+     have reloaded the shell's pulse and left the page under it untouched.
+     Rather than teach the shell what each page fetches, `usePoll` gained a
+     module-level refresh signal that every mounted poller watches, so all
+     four polling pages answer it with no per-page wiring. The watcher is
+     registered inside `usePoll`'s setup call, so Vue's effect scope disposes
+     it with the component and an unmounted page cannot be woken by it.
+   - **Supersedes §2's "Right: theme toggle only."** The topbar's right side
+     now carries the pulse readout, `LiveStatus`, the project `Select` (§A.1)
+     and the theme toggle. Still no user menu and no masking toggle — the
+     reasoning there is unchanged.

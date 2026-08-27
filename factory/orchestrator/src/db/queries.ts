@@ -2169,6 +2169,106 @@ export function providerAgreement(
     }));
 }
 
+// ---------------------------------------------------------------------------
+// pulse()
+// ---------------------------------------------------------------------------
+
+/**
+ * The counters the app shell watches for movement.
+ *
+ * Only monotonic quantities belong here. A nav badge reading "3 new" is a
+ * claim that three things *arrived*, and a difference between two polls only
+ * means that if the underlying number can never fall — subtract a *level*
+ * (open tasks, pending lessons) and the operator clearing one produces a
+ * negative "arrival" count. Both fields below are counts of rows projected
+ * from an append-only log, so a poll-over-poll delta is always an arrival.
+ */
+export interface PulseCounts {
+  /** Every projected event — the universe the Timeline page lists. */
+  events: number;
+  /** Every projected error row — what the Errors page aggregates. */
+  errors: number;
+}
+
+export interface PulseResult {
+  /** ISO ts of the newest projected event; `null` when nothing is projected. */
+  lastEventAt: string | null;
+  /** That event's type — the last thing the factory actually did. */
+  lastEventType: string | null;
+  counts: PulseCounts;
+  /**
+   * Lessons still waiting on an operator decision. A *level*, not a counter:
+   * it falls when the operator approves one, so the shell renders the number
+   * itself rather than a delta (see PulseCounts). Never project-scoped — the
+   * `lessons` table carries no project column (schema.ts), and filtering it
+   * here would be a claim the projection cannot back.
+   */
+  lessonsPending: number;
+}
+
+/**
+ * One cheap read the app shell polls from every page: "is the factory still
+ * moving, and what has arrived since I looked?"
+ *
+ * It exists so liveness is a *shell* fact rather than an Overview fact. Every
+ * page polls its own data, and on nine of them a frozen server was
+ * indistinguishable from a quiet factory — which is precisely the confusion
+ * ui/src/lib/liveness.ts was written to end, on the one page that had it.
+ *
+ * This changes nothing about the transport: design-spec.md §8 ("No
+ * WebSockets") still holds, and this is the same polling contract asked once
+ * for the frame instead of once more per page. It is deliberately not a push
+ * and deliberately not a toast — an arrival the operator did not cause
+ * belongs on a surface they can come back to, not in something that expires.
+ *
+ * Column-projected on purpose: `events_raw.payload` holds every event body,
+ * and nothing here reads one, so a 5s shell poll never pulls the log's bodies
+ * into memory just to count its rows.
+ */
+export function pulse(db: SmithDb, scope: Scope = {}): PulseResult {
+  const eventCols = {
+    ts: eventsRaw.ts,
+    eventType: eventsRaw.eventType,
+    project: eventsRaw.project,
+  };
+  const allEvents = scope.sessionId
+    ? db.select(eventCols).from(eventsRaw).where(eq(eventsRaw.sessionId, scope.sessionId)).all()
+    : db.select(eventCols).from(eventsRaw).all();
+  const events = filterByProject(allEvents, scope);
+
+  const errorCols = { project: errors.project };
+  const allErrors = scope.sessionId
+    ? db.select(errorCols).from(errors).where(eq(errors.sessionId, scope.sessionId)).all()
+    : db.select(errorCols).from(errors).all();
+
+  const lessonCols = { lessonStatus: lessons.lessonStatus };
+  const lessonRows = scope.sessionId
+    ? db.select(lessonCols).from(lessons).where(eq(lessons.sessionId, scope.sessionId)).all()
+    : db.select(lessonCols).from(lessons).all();
+
+  // Max over `ts`, not "the last row": rows land in the order the projector
+  // folded them, and a rebuild folds one session to completion before it
+  // starts the next — so the final row is the newest event of the last
+  // session, which is not the newest event.
+  let newest: { ts: string; eventType: string } | null = null;
+  for (const e of events) {
+    if (newest === null || e.ts > newest.ts) newest = { ts: e.ts, eventType: e.eventType };
+  }
+
+  return {
+    lastEventAt: newest?.ts ?? null,
+    lastEventType: newest?.eventType ?? null,
+    counts: {
+      events: events.length,
+      errors: filterByProject(allErrors, scope).length,
+    },
+    // An unrecognised status is not pending — same reading as lessonsPage(),
+    // which buckets it as `closed`.
+    lessonsPending: lessonRows.filter((r) => LESSON_BUCKET_FOR_STATUS[r.lessonStatus] === 'pending')
+      .length,
+  };
+}
+
 // Re-exported for callers that only need the raw prompt/edge/waiver rows
 // (e.g. a future UI's simpler list views) without the composed pages above.
 export { edges, prompts, waivers };

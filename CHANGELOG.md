@@ -421,6 +421,154 @@ than appearing in it.
   checkout the graph is read from, and prints its verdict as `symbolImpact`
   beside the claim result. 27 impact tests, 47 scanner tests, 7 CLI tests.
 
+- **A merge queue that pays for the tests the change can actually reach** —
+  `factory/orchestrator/src/testSelect.ts`, wired into the queue and surfaced as
+  `smith queue run --select-test-cmd '<cmd> {files}'`. The serial queue ran the
+  full cumulative suite once per task, so a wave of ten tasks paid for the whole
+  suite ten times over changes that were often disjoint. Selection reuses the
+  symbol graph `smith claims impact` already builds: it takes the files the task
+  actually committed (`git diff --name-only <integration>...HEAD`), walks the
+  dependents edge backwards to closure, and keeps whatever in that closure looks
+  like a test file. The chosen files are substituted into the operator's own
+  template at `{files}` — the module never invents a command, because a test
+  runner's invocation is not something a fold over a graph is entitled to guess.
+
+  Every ambiguity resolves to running everything, and each fallback carries a
+  reason: an unparseable file in the graph, a changed file the graph does not
+  know, a change to a config or lockfile, an empty selection, a template that
+  fails to render. A `TestRunReport` — `{ mode: 'selected' | 'full', ran, known,
+  reasons }` — rides in the queue's per-task result whenever selection ran, so a
+  selective run is never silently indistinguishable from a full one in the log;
+  without `--select-test-cmd` the key is absent and the result shape is exactly
+  what it was before. Two things it
+  deliberately does not do: it never narrows a typecheck, which is whole-program
+  by nature and cheap next to a suite; and a template without `{files}` is
+  refused before the queue starts (`test-select.no-files-placeholder`) rather
+  than quietly running the full suite and reporting it as a selective run.
+  Selection happens *after* the rebase, so it sees the files the task will
+  actually merge. 19 selection tests, 4 queue tests, plus CLI coverage.
+
+- **`smith daemon` — the folds, without an open session** (Phase 10):
+  `factory/orchestrator/src/daemon.ts` and the runbook that operates it,
+  [`docs/runbooks/ops.md`](docs/runbooks/ops.md). Until now, *knowing* what the
+  factory needed meant keeping a terminal open and re-running `smith budget
+  alarm`, `smith scheduler run --dry` and `/bs status` by hand. The daemon runs
+  those same folds on an interval — it does not reimplement them, so it and
+  those commands cannot disagree — and writes what it found to
+  `state/daemon/status.json`. Four verbs: `run` in the foreground (or `--once`),
+  `start` detached, `status` (exit 1 when it is not running, so it drops into a
+  health check), `stop`.
+
+  A tick reports findings, each one `info` or `attention`: an epic over or near
+  its budget cap, spend the log cannot attribute, an agent live past four hours
+  with no result, error or supersession, a recheck or a cadence that is due,
+  a log it could not read, a SQLite projection that failed. It also refreshes
+  the read-model the dashboard serves, so an unattended dashboard stops going
+  stale.
+
+  **It watches; it does not drive.** It never dispatches an agent, never enters
+  the merge queue, and never writes outside `state/daemon/` and the derived
+  SQLite database — architecture §12 says a scheduler run "never dispatches an
+  agent itself", and a process that outlives the operator's terminal is the last
+  place to relax that. Dispatch stays skill-guided through `/bs run`. Phase 10's
+  other half, the Cloudflare port of the dashboard, stays deferred and unspecced
+  rather than being quietly counted as done. 30 daemon tests, 6 CLI tests.
+  Documented for operators in `docs/guide/operator-guide.md` §4b and §11 and in
+  the ops runbook, which carries the launchd, systemd and cron recipes.
+
+- **A dashboard that shows its own pulse, without a toast** — the freshness
+  indicator moved out of Overview and into the app shell (`ui/src/App.vue`,
+  `composables/usePulse.ts`, `lib/navBadges.ts`), and the shell now polls
+  `/api/pulse` every 5s on every page. It carries two clocks, because they
+  answer two different questions and neither implies the other: `livenessLabel`
+  says whether the *screen* is current, and the new `lastEventLabel` says how
+  long ago the *factory* last emitted. On the nine pages that were not Overview,
+  a frozen server used to look exactly like a quiet factory — the confusion
+  Overview had already fixed for itself. The sidebar gained arrival badges
+  (`Timeline 3`, `Errors 1`) counted from the first poll after you last visited
+  that page; the collapsed rail draws a dot and puts the number in the
+  accessible name instead. Only monotonic counters get one, so a badge can never
+  disagree with itself; Lessons badges its pending *level* rather than an
+  arrival count. The shell's Refresh reaches every mounted poller through a
+  signal in `usePoll`, so it refreshes the page you are on rather than only the
+  pulse.
+
+  **Toasts on events, triggers and dispatches were considered and rejected.**
+  `useToast` currently means one thing — *your own action landed* — and a toast
+  fired from a diff between polls would mean something else while looking
+  identical. It would also misreport *when*: the UI polls at 5s and 15s, so the
+  toast times the poll, not the event, and a wave would storm the corner of the
+  screen with ten of them at once. `usePoll` pauses while the tab is hidden, so
+  those toasts would be lossy for something the event log records durably —
+  a badge that is still there when you come back is the honest surface. And a
+  *dispatch* toast would imply the dashboard drives the factory, which is
+  exactly the line the daemon above is not allowed to cross. The reasoning is
+  recorded where it will be found again: `lib/navBadges.ts`'s header,
+  `ui/docs/design-spec.md` §A.6, and the `ui/docs/DESIGN.md` decision log.
+  24 badge tests, plus `lastEventLabel` coverage; three new contrast pairs
+  (48 checked, 0 failures). The wiring is asserted where only a browser can
+  see it, in the new `ui/e2e/shell.spec.ts`: that the shell polls on a page
+  that has no poll of its own, that its Refresh refetches the page you are on
+  rather than only the indicator beside it, and that a counter growing while
+  you were elsewhere reaches the rail and clears when you read it. A fold that
+  is correct and never mounted still leaves you staring at a frozen server.
+
+- **A worker can now argue with the spec, and only an operator can change it**
+  — `factory/orchestrator/src/specChange.ts`, four operator verbs (`smith plan
+  propose | proposals | approve | reject`), and a request schema at
+  `factory/specs/schema/spec-change-request.schema.json`.
+  A plan version was immutable and a worker that found the criterion itself
+  wrong had two exits: build the wrong thing, or fail against a clause it had
+  already disproved. There is now a third. A worker returns a
+  `spec_change_request` in its `structured_output` — the criterion, the
+  assumption that criterion makes, the evidence against it, the diff it
+  proposes in `PlanChanges` shape, every other site with the same shape, and
+  whether it is blocking. It rides in a returned field rather than an emitted
+  event because **a worker cannot emit an event — only the node that
+  dispatched it can** (architecture §15), so a returned field is the only
+  signal that survives the worker dying mid-flight. It is the same shape, and
+  the same reason, as `research_request`.
+
+  **Immutability is not relaxed; the approval path is added.** A proposal moves
+  no plan file. `spec-change-proposed` is data, not a command (D-33): no worker,
+  judge or scheduler can approve one, `smith plan approve` is an operator
+  command, and approving is what calls the existing `plan amend` with no guard
+  loosened. Every version is still cut by `plan amend` alone and still recorded
+  as `plan-version-created`. A proposal's diff is validated at *proposal* time
+  — drafted onto the next version and run through the plan's own validator — so
+  a diff that could never be applied is refused while the worker is still there
+  to be told, rather than landing in an operator's queue to be discovered later.
+  Twelve refusals carry codes, among them `spec-change.proposal-without-sites`,
+  `.proposal-without-argument`, `.rejection-without-rationale` and
+  `.approval-stale`.
+
+  Four decisions worth naming. `sites` is asked of the worker and not typed at
+  approval, because the worker is the one who just read the code (D-123);
+  approval prints `sitesUnclaimed`, the sites the amended plan claims no task
+  for, at the moment the operator is best placed to say whether that is a
+  deliberate call. A proposal defaults to `S2-major`, deliberately above the
+  `S3`/`S4` band `raiseFinding` consults the waiver list for, so a standing
+  waiver cannot silence one (D-196). `--rationale` is required to reject and
+  optional to approve: approval can fall back to the worker's own argument
+  because it agrees with it, while a rejection is the operator saying something
+  the log does not already contain. And staleness is computed against the plan
+  on disk rather than stamped at proposal time, so a proposal that was open
+  this morning is stale this afternoon with nothing written to it — refused at
+  approval, where it can still stop you, and never applied blind.
+
+  The event order is load-bearing. An approval is `spec-change-proposed`,
+  `plan-version-created`, `finding-transitioned`, `spec-change-decided` — the
+  decision written *last*, after the version it authorised exists, so a crash
+  between them leaves a proposal still open against a plan that already moved,
+  which is the stale case above and not a silent double-apply. A rejection is
+  `spec-change-proposed`, `spec-change-decided`, `finding-transitioned`, and no
+  version. Taxonomy v7 adds both types to `graph_event`; `smith daemon` reports
+  an unanswered proposal as a finding — `attention` when the worker called it
+  blocking, `info` when it did not — and the dashboard's timeline reads them in
+  the worker's own words behind a new **Plan changes** filter. 25 module tests,
+  6 CLI tests, 4 daemon tests, 7 timeline tests. Documented in
+  `docs/guide/operator-guide.md` §6b, with every command and every JSON body in
+  that section copied from a real run against the built CLI.
 
 ### Changed
 
@@ -622,12 +770,15 @@ than appearing in it.
   and TypeScript 7's native port does not expose one. UI logic lives in
   `ui/src/lib/*.ts` — checked, linted and unit-tested — to keep the hole small.
 
-## Phase 10 — Deployment + ops — planned
+## Phase 10 — Deployment + ops — in progress
 
-Recorded as deferred, not specced: runbooks beyond
-`docs/runbooks/providers.md`, the Cloudflare port of the dashboard (local-only
-today), and an always-on dispatch daemon (dispatch is still skill-guided
-through `/bs`).
+Three items were recorded here as deferred and not specced. Two have since
+landed and are described under *Unreleased*: the ops runbook
+(`docs/runbooks/ops.md`) and the background process, which shipped as the
+`smith daemon` watcher rather than the always-on *dispatch* daemon this entry
+first named — dispatch is still skill-guided through `/bs`. The Cloudflare
+port of the dashboard stays deferred and unspecced; the dashboard is
+local-only today.
 
 ## Phase 9 — Hardening — 2026-08-10
 

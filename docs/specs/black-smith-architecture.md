@@ -429,7 +429,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 6
+version: 7
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -468,7 +468,15 @@ edge_provenance: [observed, declared, inferred]
                   # inferred — reconstructed after the fact (lowest trust)
 graph_event:     [plan-version-created, plan-version-superseded,
                   task-added, task-split, task-superseded, edge-recorded,
-                  wave-admitted, wave-merged]
+                  wave-admitted, wave-merged,
+                  spec-change-proposed, spec-change-decided]
+                  # spec-change-proposed — a worker hit a wrong assumption and
+                  #                      returned a spec diff. Data, not a
+                  #                      command: no plan file moves (D-33)
+                  # spec-change-decided  — the operator approved or rejected
+                  #                      one. Approval is what calls the
+                  #                      amendment; the version is still cut
+                  #                      by `plan amend` alone
 
 # ── Gates (event-log first-class, §11 — added Phase 4) ───────────────
 gate_event:      [schema-check-result, artifact-check-result,
@@ -895,6 +903,24 @@ mutating the live graph:
   pause. (There is deliberately no `research-request` event type: a worker
   that dies mid-flight cannot emit anything, so signalling through a returned
   field is the only shape that survives its own failure case.)
+- **Living spec: worker-proposed amendments.** The same exit carries the other
+  mid-flight blocker. A worker that finds an acceptance criterion the code
+  contradicts returns a `spec_change_request` in `structured_output` —
+  `{criterion_ref, assumption, evidence, changes, sites, blocking}` — and the
+  dispatcher records it with `smith plan propose`. That writes a
+  `spec-change-proposed` event and raises the finding the amendment will
+  later cite, and it writes **no plan version**: the proposal is data, not a
+  command. `smith plan proposals` lists what is waiting with its diff;
+  `smith plan approve <id>` runs `plan amend` with the worker's own finding,
+  sites and rationale — one command, no guard relaxed — and `smith plan
+  reject <id>` refutes the finding with the operator's reasons. Approval is
+  what calls the amendment; the version is still cut by `plan amend` alone,
+  so every version stays immutable and every one of them is in the log. A
+  proposal written against a version a later amendment has already overtaken
+  is **stale** and is refused rather than applied blind. This is rung three
+  of the escalation ladder (§17) made reachable from inside a task: a
+  spec-scoped finding can only be minted by a judge dispatched against a plan
+  version, and a coder mid-flight is not one (D-33/P9-9).
 - **Recheck scheduling** (`factory/scheduler/`, implementation at
   `factory/orchestrator/src/scheduler.ts`). Every completed feature gets
   a recheck policy: re-open a `recheck` task when (a) N later merges touch its
@@ -1045,8 +1071,10 @@ each mapped to a Blacksmith mechanism:
    candidates`/`compile`, `smith dream [--since]`), and the `.claude/
    skills/bs/SKILL.md` operator console tying the deterministic mechanics
    above to the agent templates. Dispatch itself is skill-guided from the
-   operator's Claude Code session, not yet a standalone daemon
-   (`docs/guide/operator-guide.md` "Limitations today").
+   operator's Claude Code session; the Phase 10 `smith daemon` is a standalone
+   background process, but a watcher — it folds the log and reports, and never
+   dispatches (`docs/guide/operator-guide.md` "Limitations today",
+   `docs/runbooks/ops.md`).
 8. **Cross-provider judges** — provider adapters (codex, deepseek), quorum
    policy, disagreement analytics.
 9. **Hardening** — escalation ladders, budget alarms, same-mistake KPI,

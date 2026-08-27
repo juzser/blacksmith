@@ -80,6 +80,35 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Cut a new plan version against the spec findings that forced it. No finding, no amendment. --sites is every place the shape occurs, not only where it was reported.',
   },
   {
+    command: 'plan propose',
+    positionals: '',
+    flags: `--plan <plan.json> --task <task-id> --proposed-by <role> --request <request.json> [--proposed-by-provider <name>] [--specs-dir <dir>] ${EVENTS_DIR}`,
+    summary:
+      "Record a worker's spec_change_request: the criterion it found wrong and the plan diff it proposes. Validated against the plan's own validator now, so an unappliable proposal never reaches your queue. Writes no plan version.",
+  },
+  {
+    command: 'plan proposals',
+    positionals: '',
+    flags:
+      '--session <id> [--epic <id>] [--task <task-id>] [--status <status>] [--specs-dir <dir>] [--state-dir <dir>]',
+    summary:
+      'List spec change proposals with their diffs. --status is open, approved, rejected or stale; stale means a newer plan version has already overtaken the one the proposal was written against.',
+  },
+  {
+    command: 'plan approve',
+    positionals: '<proposal-id>',
+    flags: `--plan <plan.json> --decided-by <role> [--rationale <text>] [--specs-dir <dir>] ${EVENTS_DIR}`,
+    summary:
+      "Approve a proposal and cut the version it asks for. Runs `plan amend` with the worker's own finding, sites and diff; --rationale overrides the argument it recorded.",
+  },
+  {
+    command: 'plan reject',
+    positionals: '<proposal-id>',
+    flags: `--decided-by <role> --rationale <text> [--specs-dir <dir>] ${EVENTS_DIR}`,
+    summary:
+      'Reject a proposal and refute the finding it raised. --rationale is required: the log already holds the case for, and a rejection is the only place the case against is written down.',
+  },
+  {
     command: 'plan ingest',
     positionals: '<plan.json>',
     flags: EVENTS_DIR,
@@ -121,6 +150,32 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Check a research brief cites what it claims. Exit 1 on an uncited claim.',
   },
   {
+    command: 'daemon run',
+    positionals: '',
+    flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    summary:
+      'Watch the event log in the foreground: budgets, stale agents, work that is due. ' +
+      'Never dispatches.',
+  },
+  {
+    command: 'daemon start',
+    positionals: '',
+    flags: `[--interval <seconds>] [--dir <dir>] [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    summary: 'Spawn `daemon run` detached, logging to <dir>/daemon.log. Prints the spawned pid.',
+  },
+  {
+    command: 'daemon status',
+    positionals: '',
+    flags: '[--dir <dir>]',
+    summary: 'Print whether a daemon holds the lock and what its last tick found. Exit 1 if none.',
+  },
+  {
+    command: 'daemon stop',
+    positionals: '',
+    flags: '[--dir <dir>]',
+    summary: 'SIGTERM the daemon the lock names and clear the lock, live or already dead.',
+  },
+  {
     command: 'scheduler run',
     positionals: '',
     flags: `[--dry] [--now <iso>] [--project <dir>] ${EVENTS_DIR}`,
@@ -160,7 +215,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--select-test-cmd <cmd>] [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
     summary: 'Serially rebase, test, and merge task branches into the integration branch.',
   },
   {

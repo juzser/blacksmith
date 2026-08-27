@@ -50,6 +50,17 @@
   dispatcher reads it, dispatches the researcher, and re-dispatches the worker
   with the brief attached; committing first is what makes that a resume rather
   than a redo.
+- **Spec discipline.** The same return path carries the other kind of blocker:
+  not an unknown, but a criterion the code contradicts. A worker that finds one
+  commits what is green and returns a `spec_change_request` —
+  `{criterion_ref, assumption, evidence, changes, sites, blocking}`, schema at
+  `factory/specs/schema/spec-change-request.schema.json` — rather than coding
+  to its own reading of what the spec meant. The dispatcher records it with
+  `smith plan propose`; that writes no plan version, and the operator's
+  `smith plan approve` is what cuts one. This is rung three of the escalation
+  ladder made reachable from inside a task: without it a wrong criterion has
+  only two outcomes, a worker quietly widening it or a coder bounced a defect
+  it has nothing to fix (D-33).
 - **Enforcement:** token/diff caps enforced by the loop runner (mechanical);
   YAGNI enforced by the reviewer's `over-engineering` lens — findings are
   **`S3-minor`** (waiver batch, with a proposed simplification) and escalate

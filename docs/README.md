@@ -16,8 +16,9 @@ Read on demand — nothing here is meant to be preloaded (`AGENTS.md`
 | [`guide/operator-loop.md`](guide/operator-loop.md) | The six steps of the operator loop, in the order you meet them: plan, sign off, run, waivers, review the PR, lessons — with the S1–S4 severity contract | operator |
 | [`guide/operator-guide.md`](guide/operator-guide.md) | Deep operator walkthrough: real `smith` commands end to end, gate outcomes, severity/waiver semantics, budget escalation ladder, lesson approval, current limitations | operator |
 | [`guide/dashboard.md`](guide/dashboard.md) | Dashboard tour: the eleven pages and what each answers, how to serve it, why the screenshots are committed e2e fixtures, rebuilding the projection | operator |
-| [`guide/status.md`](guide/status.md) | What is built vs. planned, phase by phase, and the four caveats that matter before you rely on it (no daemon, operator-invoked checks, shadow judges, prompt-level budgets) | operator |
+| [`guide/status.md`](guide/status.md) | What is built vs. planned, phase by phase, and the four caveats that matter before you rely on it (the daemon watches but never dispatches, operator-invoked checks, shadow judges, admission-time budget caps) | operator |
 | [`guide/extending.md`](guide/extending.md) | Contributor guide: add an agent template, change the taxonomy, add a policy, docs-mirror invariants, event-log vs projections, test conventions | contributor |
+| [`runbooks/ops.md`](runbooks/ops.md) | Phase 10 background watcher: what `smith daemon` does and refuses to do, the four verbs, finding kinds, its lock/status/log files, launchd + systemd + cron recipes, the exit-1 health check, state backup | operator |
 | [`runbooks/providers.md`](runbooks/providers.md) | Phase 8 cross-provider judges: Codex/DeepSeek key + auth setup, enabling, shadow-mode calibration procedure, promotion, rollback, cost, security | operator |
 
 ## `factory/policies/` (machine-read at runtime)

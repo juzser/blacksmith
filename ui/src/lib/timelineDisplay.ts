@@ -240,6 +240,29 @@ export const KIND_OPTIONS: readonly KindOption[] = [
     label: 'Scheduler',
     types: ['recheck-proposed', 'maintenance-proposed', 'growth-review-due'],
   },
+  // The plan graph — the whole `graph_event` dimension in taxonomy order, on
+  // the same rule the gate chip learned the hard way (D-162): the chip is a
+  // copy of a closed list, so a test derives the assertion from the yml rather
+  // than trusting the copy. Without it a worker's spec-change proposal, the
+  // operator's answer and the plan version their approval cut were reachable
+  // only by scrolling the unfiltered log — the same hole the scheduler chip
+  // was cut to close, one dimension over.
+  {
+    value: 'graph',
+    label: 'Plan changes',
+    types: [
+      'plan-version-created',
+      'plan-version-superseded',
+      'task-added',
+      'task-split',
+      'task-superseded',
+      'edge-recorded',
+      'wave-admitted',
+      'wave-merged',
+      'spec-change-proposed',
+      'spec-change-decided',
+    ],
+  },
   { value: 'error-logged', label: 'Errors', types: ['error-logged'] },
 ];
 
@@ -312,6 +335,34 @@ export function iconFor(entry: TimelineEntry): string {
       return 'refresh-cw';
     case 'growth-review-due':
       return 'map';
+    // The plan graph. Shape over source: a row here says what happened to the
+    // plan, and the glyph says which shape of change it was — added, removed,
+    // linked, admitted, merged — because that is what an operator scanning a
+    // plan's history is reading for. `wave-merged` shares `epic-closed`'s
+    // glyph on purpose: both rows are a merge landing, at different scopes.
+    case 'plan-version-created':
+    case 'plan-version-superseded':
+      return 'kanban';
+    case 'task-added':
+    case 'task-split':
+      return 'plus';
+    case 'task-superseded':
+      return 'minus';
+    case 'edge-recorded':
+      return 'chevron-right';
+    case 'wave-admitted':
+      return 'inbox';
+    case 'wave-merged':
+      return 'git-merge';
+    // A worker's proposal is a document — the spec glyph taxonomy.ts already
+    // uses for the `spec` error group — and the operator's answer to it is a
+    // verdict, which is the scale the judges get. The split is the point: one
+    // row is an ask and the other is the decision, and they are the two rows
+    // an operator has to tell apart at a glance to answer the first quickly.
+    case 'spec-change-proposed':
+      return 'file-text';
+    case 'spec-change-decided':
+      return 'scale';
     default:
       return 'history';
   }
@@ -518,6 +569,56 @@ export function titleFor(entry: TimelineEntry): string {
     case 'growth-review-due': {
       const since = p.lastReviewAt ? `, last ${String(p.lastReviewAt).slice(0, 10)}` : '';
       return `Growth review due — every ${String(p.cadenceDays ?? '?')} days${since}`;
+    }
+    // The plan graph, the dimension the Plan chip selects. `task-added` was
+    // already here; the rest reached the timeline and rendered as their own
+    // event_type, which is the defect D-153 and D-162 are both recorded for —
+    // a row an operator can now filter for and still not read.
+    case 'plan-version-created': {
+      const amends = Array.isArray(p.amends) ? p.amends.length : 0;
+      const from = p.previous_version == null ? '' : ` amends v${String(p.previous_version)}`;
+      const why = p.rationale ? `: ${String(p.rationale)}` : '';
+      return `Plan v${String(p.version ?? '?')}${from} — ${amends} finding${amends === 1 ? '' : 's'} cited${why}`;
+    }
+    case 'plan-version-superseded':
+      return `Plan v${String(p.version ?? '?')} superseded`;
+    case 'task-split':
+      return `Task split — ${String(entry.taskId ?? '')}`;
+    case 'task-superseded':
+      return `Task superseded — ${String(entry.taskId ?? '')}`;
+    case 'edge-recorded':
+      return `Edge — ${String(entry.taskId ?? '')} depends on ${String(p.depends_on ?? '')}`;
+    case 'wave-admitted': {
+      const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
+      const shown = ids.slice(0, 3).join(', ');
+      const rest = ids.length - Math.min(ids.length, 3);
+      return `Wave admitted — ${ids.length} task${ids.length === 1 ? '' : 's'}${shown ? ` (${shown}${rest > 0 ? ` +${rest}` : ''})` : ''}`;
+    }
+    case 'wave-merged': {
+      // One event per task, carrying a single-element task_ids (taskEvents.ts),
+      // so the row names the task rather than counting a wave that never
+      // reaches this event whole.
+      const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
+      const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
+      const detail = files === null ? '' : ` — ${files} file${files === 1 ? '' : 's'} changed`;
+      return `Merged ${ids.join(', ') || String(entry.taskId ?? '')}${detail}`;
+    }
+    // The worker's own words, in the worker's own order: which criterion, what
+    // it assumed, and how much of the codebase has that shape (D-123). The
+    // operator is being asked to overturn the assumption, so the assumption is
+    // the sentence — not the diff, which the proposals view renders in full.
+    case 'spec-change-proposed': {
+      const sites = Array.isArray(p.sites) ? p.sites.length : 0;
+      const blocking = p.blocking ? 'blocking' : 'non-blocking';
+      return `Spec change proposed by ${String(p.proposed_by ?? 'worker')} — ${String(p.criterion_ref ?? '')}: ${String(p.assumption ?? '')} (${blocking}, ${sites} site${sites === 1 ? '' : 's'})`;
+    }
+    // A rejection carries no plan version by design — refusing a proposal cuts
+    // nothing — so the version is named only when there is one, and the
+    // operator's reasons ride along either way.
+    case 'spec-change-decided': {
+      const version = p.plan_version == null ? '' : ` — plan v${String(p.plan_version)}`;
+      const why = p.rationale ? `: ${String(p.rationale)}` : '';
+      return `Spec change ${String(p.decision ?? 'decided')}${version}${why}`;
     }
     default:
       return entry.eventType;

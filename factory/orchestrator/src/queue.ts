@@ -1,10 +1,13 @@
 import { execFileSync } from 'node:child_process';
+import { collectCommittedChanges } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
 import type { EventOpts } from './events.js';
 import { runGit } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
+import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
+import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
 import { integrationBranchName } from './worktree.js';
 
 export class QueueError extends SmithError {}
@@ -44,6 +47,14 @@ export interface StepOptions {
   epic: string;
   testCmd: string;
   /**
+   * Optional narrowed test command carrying a `{files}` placeholder. When set,
+   * the queue runs only the tests reachable from this task's diff, and falls
+   * back to `testCmd` whenever the symbol graph cannot prove that safe. The
+   * template is validated by the caller — `step` will not narrow a run it
+   * cannot render.
+   */
+  selectTestCmd?: string;
+  /**
    * Where to write this step's outcome (D-46/P9-29). Omit and the step runs
    * exactly as before, silently — kept optional because a dry run and the
    * unit tests have no session to write into, not because logging is a
@@ -52,12 +63,41 @@ export interface StepOptions {
   events?: EventOpts & { ctx: TaskEventContext };
 }
 
+/**
+ * How the task was tested, so a reader of the queue's output can tell a full
+ * run from a narrowed one without re-deriving it. `mode: 'full'` with no other
+ * field means no selection was ever attempted.
+ */
+export interface TestRunReport {
+  mode: TestSelectStatus;
+  /** The tests actually run. Only set when the run was narrowed. */
+  ran?: string[];
+  /** How many test files the symbol graph knew. Only set when selection ran. */
+  known?: number;
+  /** Why the narrowing was refused. Only set on a fallback to the full command. */
+  reasons?: string[];
+}
+
 export type StepOutcome =
-  | { outcome: 'merged'; taskId: string }
-  | { outcome: 'rebase-conflict'; taskId: string; conflictingFiles: string[] }
-  | { outcome: 'tests-failed'; taskId: string; outputTail: string }
+  /** `tests` is present only when `--select-test-cmd` asked for a selection. */
+  | { outcome: 'merged'; taskId: string; tests?: TestRunReport }
+  | {
+      outcome: 'rebase-conflict';
+      taskId: string;
+      conflictingFiles: string[];
+      /** No test ran: the rebase failed first. */
+      tests?: undefined;
+    }
+  | { outcome: 'tests-failed'; taskId: string; outputTail: string; tests?: TestRunReport }
   /** The task has no commit for the queue to merge — see the guard in `step` (D-30). */
-  | { outcome: 'nothing-to-merge'; taskId: string; reason: CommitBlockReason; dirty: string[] };
+  | {
+      outcome: 'nothing-to-merge';
+      taskId: string;
+      reason: CommitBlockReason;
+      dirty: string[];
+      /** No test ran: there was nothing to test. */
+      tests?: undefined;
+    };
 
 const OUTPUT_TAIL_LINES = 50;
 
@@ -127,11 +167,17 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     return { outcome: 'rebase-conflict', taskId: task.taskId, conflictingFiles: files };
   }
 
-  const testOutcome = runTestCmd(opts.testCmd, task.worktreeDir);
+  const plan = planTestRun(task.worktreeDir, opts);
+  const testOutcome = runTestCmd(plan.cmd, task.worktreeDir);
   if (!testOutcome.passed) {
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
     await logBlocked('execution.test-failure', outputTail);
-    return { outcome: 'tests-failed', taskId: task.taskId, outputTail };
+    return {
+      outcome: 'tests-failed',
+      taskId: task.taskId,
+      outputTail,
+      ...(plan.report ? { tests: plan.report } : {}),
+    };
   }
 
   execFileSync('git', ['checkout', integrationBranch], { cwd: opts.projectDir, stdio: 'pipe' });
@@ -146,7 +192,7 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(opts.projectDir));
   }
 
-  return { outcome: 'merged', taskId: task.taskId };
+  return { outcome: 'merged', taskId: task.taskId, ...(plan.report ? { tests: plan.report } : {}) };
 }
 
 export type AdoptTask = Omit<QueueTask, 'worktreeDir'>;
@@ -315,6 +361,45 @@ function mergedFiles(projectDir: string, merge = 'HEAD'): string[] | undefined {
       .filter((f) => f.length > 0);
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Decide what to run. Any failure to build the graph — an unreadable worktree,
+ * a git call that did not answer — falls back to the operator's full command
+ * with the reason attached, because a test gate that skips on error is not a
+ * gate.
+ */
+function planTestRun(
+  worktreeDir: string,
+  opts: StepOptions,
+): { cmd: string; report?: TestRunReport } {
+  const template = opts.selectTestCmd;
+  // No template means selection was never asked for, so there is nothing to
+  // report: `tests` present in a result means selection ran, and its absence
+  // means the operator's full command was the only command there ever was.
+  if (template === undefined) return { cmd: opts.testCmd };
+
+  try {
+    const changed = collectCommittedChanges(worktreeDir);
+    const graph = buildSymbolGraph(collectSources(worktreeDir));
+    const selection = selectTests(graph, changed);
+    if (selection.status === 'selected') {
+      return {
+        cmd: renderSelectedTestCmd(template, selection.tests),
+        report: { mode: 'selected', ran: selection.tests, known: selection.allTests.length },
+      };
+    }
+    return {
+      cmd: opts.testCmd,
+      report: { mode: 'full', known: selection.allTests.length, reasons: selection.reasons },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      cmd: opts.testCmd,
+      report: { mode: 'full', reasons: [`selection failed: ${message}`] },
+    };
   }
 }
 

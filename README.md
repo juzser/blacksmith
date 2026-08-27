@@ -249,11 +249,14 @@ a public issue.
 
 Phases 1–9 are built and merged: loop runner, worktree engine, gates, state and
 analytics, dashboard, self-extension, cross-provider judges, hardening. Phase 10
-— an always-on dispatch daemon and a hosted UI — is planned, unspecced.
+is half in: `smith daemon` watches the factory in the background and its ops
+runbook is written; the hosted UI stays deferred.
 
-The one thing to know up front: **there is no daemon yet.** `/bs run` is a
-playbook your Claude Code session follows; close the session and nothing
-advances.
+The one thing to know up front: **the daemon watches, it does not drive.** It
+tells you what the factory needs — budget alarms, agents that never came back,
+rechecks and cadences that are due — without an open session. Doing the work is
+still `/bs run`, a playbook your Claude Code session follows; close the session
+and nothing advances.
 
 → **[What is built, what is not](docs/guide/status.md)**, and the unflinching
 version in
@@ -271,6 +274,7 @@ version in
 | [`docs/guide/extending.md`](docs/guide/extending.md) | Adding agents, policies, taxonomy values |
 | [`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md) | Why it is shaped this way |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
+| [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `smith daemon` unattended |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
 
 Agents read [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) instead — this

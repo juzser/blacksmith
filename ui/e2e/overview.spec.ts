@@ -25,7 +25,10 @@ test.describe('Overview', () => {
     // Round 7 ("một dạng real-time update, để ý đến các mốc thời gian"): the
     // page has polled every 5s since 6a, but nothing on screen said so. The
     // label starts at "Connecting…" and must resolve to a real state once the
-    // first fetch lands — that transition IS the feature.
+    // first fetch lands — that transition IS the feature. The indicator itself
+    // has since moved into the app shell and reads /api/pulse, so this is the
+    // shell's; ui/e2e/shell.spec.ts covers it on the nine pages that are not
+    // Overview. It stays asserted here because Overview is where it was born.
     await page.goto('/overview');
     await expect(page.locator('.live-status__label')).toHaveText(/^Live · updated /);
     await expect(page.getByRole('button', { name: 'Refresh now' })).toBeVisible();

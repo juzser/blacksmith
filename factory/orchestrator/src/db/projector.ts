@@ -32,7 +32,7 @@
 // fold is forward-compatible with whatever Phase 7 emits, since it only
 // depends on the taxonomy's already-existing lesson_type/lesson_level/
 // lesson_status/lesson_scope vocabulary, not on any new taxonomy value.
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
@@ -47,6 +47,7 @@ import {
 import {
   type EventRecord,
   eventTaskId,
+  listSessionIds,
   mergeSessionLogs,
   readEvents,
   type SessionLog,
@@ -1509,14 +1510,6 @@ function projectFindings(
     for (const row of rows) txDb.insert(schema.findings).values(row).run();
   });
   return skipped;
-}
-
-function listSessionIds(stateDir: string): string[] {
-  if (!existsSync(stateDir)) return [];
-  return readdirSync(stateDir)
-    .filter((f) => f.endsWith('.jsonl'))
-    .map((f) => f.slice(0, -'.jsonl'.length))
-    .sort();
 }
 
 /**

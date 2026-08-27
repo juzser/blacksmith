@@ -21,6 +21,15 @@
 // of freezing between fetches, and per-agent runtimes in the Live agents card
 // (LiveAgentGroupRow). Still polling, not sockets — design-spec §8.
 //
+// The LiveStatus indicator has since moved into the app shell (App.vue,
+// composables/usePulse.ts): every page polls, and on the other nine a frozen
+// server looked exactly like a quiet factory — the confusion this page had
+// already fixed for itself. The shell's Refresh reaches this page's `load`
+// through usePoll's global refresh signal, so nothing here had to know. What
+// stays page-local is the Banner: a failing fetchOverview against a server
+// that still answers /api/pulse is a page problem, not a liveness one, and
+// the Banner is the surface that says so.
+//
 // Phase 6b round 9 (operator directive: "trong phần overview, tôi muốn thấy
 // cái gì đang running ... thêm animation nhỏ cho các indicator ở chip với các
 // agent đang thực sự hoạt động. Các update hoặc block cần động hơn để thấy
@@ -50,7 +59,6 @@ import StatCard from '../components/hds/StatCard.vue';
 import TwoColumn from '../components/hds/TwoColumn.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import LiveAgentGroupRow, { type LiveAgentGroupUI } from '../components/LiveAgentGroupRow.vue';
-import LiveStatus from '../components/LiveStatus.vue';
 import ProgressBar from '../components/ProgressBar.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useFlashOnChange } from '../composables/useFlashOnChange.js';
@@ -93,21 +101,17 @@ const loading = ref(true);
 // or failed. Not a count, and never rendered as one (D-225).
 const pendingLessons = ref<number | null>(null);
 const lessonsFailed = ref(false);
-// Set only on a SUCCESSFUL fetch: a failed poll must age the indicator, not
-// reset it — that failure is precisely what the operator needs to see.
-const lastUpdatedAt = ref<string | null>(null);
 const now = useNow(1000);
 
 async function load() {
-  // Cleared on success, not on attempt -- the same rule `lastUpdatedAt` below
-  // already follows, for the same reason. This page polls every POLL_MS and
+  // Cleared on success, not on attempt -- the same rule the shell's freshness
+  // indicator follows, for the same reason. This page polls every POLL_MS and
   // deliberately does not raise `loading` when it does, so clearing here took
   // the danger banner off the screen for the length of every unattended
   // attempt and put nothing in its place: a dashboard whose server is down
   // spent most of each interval looking like a healthy one (D-226, D-240).
   try {
     data.value = await fetchOverview(undefined, project.value);
-    lastUpdatedAt.value = new Date().toISOString();
     error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -417,11 +421,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
 
 <template>
   <div class="app-page">
-    <PageHeader :title="project ? `${project} · Overview` : 'Overview (all projects)'">
-      <template #actions>
-        <LiveStatus :last-updated-at="lastUpdatedAt" :now="now" :interval-ms="POLL_MS" @refresh="load" />
-      </template>
-    </PageHeader>
+    <PageHeader :title="project ? `${project} · Overview` : 'Overview (all projects)'" />
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 

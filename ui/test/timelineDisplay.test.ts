@@ -370,6 +370,118 @@ describe('lib/timelineDisplay.ts', () => {
   // own words. It reached neither the filter (queries.ts) nor a case here, so
   // the one lens an operator opens to re-read their own decisions showed none
   // of them.
+  // The plan graph. `task-added` was the only one of the ten with a title, so
+  // the nine others reached the timeline and rendered as their own event_type
+  // — the D-153/D-162 defect, one dimension over. The two the factory writes
+  // for a living spec are the reason it was worth closing now: an operator who
+  // is asked to answer a proposal quickly has to be able to read it.
+  describe('the plan graph', () => {
+    it("reads a worker proposal in the worker's own words, with the site count", () => {
+      const e = entry({
+        eventType: 'spec-change-proposed',
+        payload: {
+          proposed_by: 'coder',
+          criterion_ref: 'epic-1/task-2:criterion-1',
+          assumption: 'every value is single-line',
+          sites: ['src/parse.ts', 'src/emit.ts'],
+          blocking: true,
+        },
+      });
+      expect(iconFor(e)).toBe('file-text');
+      expect(titleFor(e)).toBe(
+        'Spec change proposed by coder — epic-1/task-2:criterion-1: every value is single-line (blocking, 2 sites)',
+      );
+    });
+
+    it('says non-blocking when the worker can keep going without the amendment', () => {
+      const title = titleFor(
+        entry({
+          eventType: 'spec-change-proposed',
+          payload: { criterion_ref: 'c-1', assumption: 'a', sites: ['x'], blocking: false },
+        }),
+      );
+      expect(title).toContain('(non-blocking, 1 site)');
+      expect(title).toContain('proposed by worker');
+    });
+
+    // A rejection cuts no version, so naming one would be a lie the row tells
+    // by default. Both decisions carry the operator's reasons.
+    it('names the version an approval cut, and none on a rejection', () => {
+      const approved = entry({
+        eventType: 'spec-change-decided',
+        payload: { decision: 'approved', plan_version: 2, rationale: 'the parser is right' },
+      });
+      expect(iconFor(approved)).toBe('scale');
+      expect(titleFor(approved)).toBe('Spec change approved — plan v2: the parser is right');
+      expect(
+        titleFor(
+          entry({
+            eventType: 'spec-change-decided',
+            payload: { decision: 'rejected', plan_version: null, rationale: 'read it again' },
+          }),
+        ),
+      ).toBe('Spec change rejected: read it again');
+    });
+
+    it('says what a new plan version amends and why', () => {
+      const e = entry({
+        eventType: 'plan-version-created',
+        payload: {
+          version: 2,
+          previous_version: 1,
+          amends: [{ finding_id: 'F-1' }],
+          rationale: 'quoted newlines are legal',
+        },
+      });
+      expect(iconFor(e)).toBe('kanban');
+      expect(titleFor(e)).toBe('Plan v2 amends v1 — 1 finding cited: quoted newlines are legal');
+    });
+
+    it('reads the graph rows the plan ingest writes', () => {
+      expect(
+        titleFor(
+          entry({ eventType: 'edge-recorded', taskId: 'e/t2', payload: { depends_on: 'e/t1' } }),
+        ),
+      ).toBe('Edge — e/t2 depends on e/t1');
+      expect(
+        titleFor(
+          entry({ eventType: 'wave-admitted', payload: { task_ids: ['a', 'b', 'c', 'd'] } }),
+        ),
+      ).toBe('Wave admitted — 4 tasks (a, b, c +1)');
+      expect(
+        titleFor(
+          entry({
+            eventType: 'wave-merged',
+            payload: { task_ids: ['a'], files_changed: ['x.ts'] },
+          }),
+        ),
+      ).toBe('Merged a — 1 file changed');
+      expect(titleFor(entry({ eventType: 'wave-merged', payload: { task_ids: ['a'] } }))).toBe(
+        'Merged a',
+      );
+      expect(titleFor(entry({ eventType: 'task-superseded', taskId: 'e/t9' }))).toBe(
+        'Task superseded — e/t9',
+      );
+    });
+
+    /**
+     * The guard, not the examples, and the whole dimension rather than the
+     * types this feature happened to add: a graph_event the taxonomy grows
+     * later is selectable by the Plan chip the day it is declared, and would
+     * render as its own event_type under an icon that draws nothing.
+     */
+    it('gives every graph_event a title of its own and an icon the registry has', () => {
+      const dimension = loadTaxonomy().dimensions.graph_event ?? [];
+      expect(dimension.length).toBeGreaterThan(0);
+      expect(
+        dimension.filter((eventType) => !(iconFor(entry({ eventType })) in ICON_PATHS)),
+      ).toEqual([]);
+      expect(dimension.filter((eventType) => titleFor(entry({ eventType })) === eventType)).toEqual(
+        [],
+      );
+    });
+  });
+
   describe('operator-note', () => {
     it('titles the note by its own text, not by its event type', () => {
       const e = entry({
@@ -549,6 +661,18 @@ describe('lib/timelineDisplay.ts', () => {
       const chip = KIND_OPTIONS.find((option) => option.value === 'scheduler')?.types ?? [];
       expect(emitted.length).toBe(3);
       expect([...chip].sort()).toEqual([...emitted].sort());
+    });
+
+    // Same rule as the gate chip, same reason: the browser cannot read the
+    // yml, so the chip is a copy and the assertion is what holds the copy to
+    // the source. The dimension gained two members the day the factory learned
+    // to take spec changes from workers, and a chip that had been hand-listed
+    // would have hidden exactly the rows the operator is being asked to answer.
+    it('gives the plan chip the whole graph_event dimension', () => {
+      const dimension = loadTaxonomy().dimensions.graph_event ?? [];
+      const chip = KIND_OPTIONS.find((option) => option.value === 'graph')?.types ?? [];
+      expect(dimension.length).toBeGreaterThan(0);
+      expect([...chip].sort()).toEqual([...dimension].sort());
     });
 
     // A type claimed by two chips renders under two labels, so deselecting the
