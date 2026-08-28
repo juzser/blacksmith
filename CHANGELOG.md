@@ -899,6 +899,26 @@ than appearing in it.
 
 ### Fixed
 
+- **`scripts/check.sh` failed on a clean checkout, for reasons no contributor
+  had caused.** `vitest.config.ts` set no `testTimeout`, so the 5s default —
+  sized for in-process unit tests — governed `cli.test.ts` and
+  `guardHook.test.ts`, which drive the built binary through `spawnSync`. One
+  `node dist/cli.js` boot costs ~1.4s before the command runs (module loading;
+  `drizzle-orm/better-sqlite3` is ~0.9s of it), so a test that spawns
+  twenty-three times spends ~35s on node startup with nothing wrong. On an
+  ordinary machine that produced ~80 failures, every one a wall-clock timeout
+  and not one an assertion — in the gate `AGENTS.md` tells every contributor to
+  run before opening a PR. The suite already knew: twenty-six tests and hooks
+  carried hand-written 20-40s overrides, one naming the cause outright ("ten
+  sequential CLI process spawns — over vitest's 5s default on a CI runner").
+  Those were twenty-six correct diagnoses of one global misconfiguration, and
+  the spawning tests that never got one simply failed. `testTimeout` and
+  `hookTimeout` are now set once, in `vitest.config.ts`, with the reason and
+  the measurement written next to them; the twenty-six local overrides are
+  gone, since a budget stated in twenty-seven places is twenty-six copies that
+  drift. The budget is a hang-detector, not a performance assertion — it is
+  loose on purpose, for the reason `policyHookEntry.test.ts` already gives for
+  refusing to time the hook.
 - **The guard hook loaded the entire orchestrator to answer a question about
   a command.** `.claude/hooks/guard.sh` fires on every `Bash`/`Write`/`Edit`/
   `MultiEdit`/`NotebookEdit` call an agent makes, which makes whatever it

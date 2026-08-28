@@ -217,6 +217,17 @@ page load.
   covered by `test/cli.test.ts`'s integration-style tests instead of unit
   coverage). This mirrors `agent-constraints.md`'s "80% floor on claimed
   logic paths" for target-repo code the coder produces.
+- **Tests that spawn the CLI are slow, and that is not a bug to patch
+  locally.** `cli.test.ts` and `guardHook.test.ts` drive the built binary
+  through `spawnSync`, and one `node dist/cli.js` boot costs ~1.4s of module
+  loading before the command runs. A test with a dozen spawns spends ~17s on
+  node startup with nothing wrong. `vitest.config.ts` sets `testTimeout` and
+  `hookTimeout` globally to absorb this — deliberately loose, because the
+  budget is a hang-detector and not an assertion about speed. **Do not add a
+  per-test timeout argument** (`}, 20_000)`); the suite carried twenty-six of
+  those, each a local patch for one global misconfiguration, and they were
+  removed when the global budget was set. If a test genuinely needs longer than
+  the global, the spawn count is the thing to question.
 - **Mutation-probe habit.** A green test suite proves nothing about a test
   that never actually exercises the failure path — after writing a test,
   break the implementation on purpose once (invert a condition, return the
