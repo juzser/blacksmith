@@ -679,16 +679,15 @@ than appearing in it.
   matched by name at the top of whichever repository the command runs in —
   the git toplevel of its working directory, never this clone — so inside a
   task worktree, where a worker spends the whole task, neither root exists and
-  every `rm` the rule matches is refused, its own `node_modules` included,
+  every recursive-force `rm` is refused, its own `node_modules` included,
   while a project carrying its own top-level `state/` has the bound applied
   there instead. And "equivalents" claimed a reach the rule has never had: it
   reads the shape of an `rm` invocation as written, so `rimraf`, an
   `fs.rmSync` script, and `git clean` pass it untouched. Both halves were
   reproduced against real git fixtures through the context `smith policy
-  hook` builds, rather than read off the source. No matcher, root, or
-  verdict changed — the divergence
-  was in the sentence, and `guardrails.yml`'s comment above `allowed_roots`
-  carried the same one.
+  hook` builds, rather than read off the source. No matcher, root, or verdict
+  changed — the divergence was in the sentence, and `guardrails.yml`'s comment
+  above `allowed_roots` carried the same one.
 - **A project driven by Blacksmith no longer has to live under
   `workspaces/`.** Nothing in the runtime ever required it: every verb that
   touches a project's git takes the directory itself — `<project-dir>` as a
@@ -871,6 +870,24 @@ than appearing in it.
 
 ### Fixed
 
+- **The recursive-force `rm` gate read two flag spellings out of the many
+  that mean the same removal** (rule 6, `unbounded-rm`). It matched the flags
+  as a literal run directly after `rm` — `r` and `f` inside one lowercase
+  token, or the two long flags side by side — so `rm -Rf src`, `rm -r -f src`
+  and `rm --recursive -f src` deleted trees outside `workspaces/` and
+  `state/` with the gate's blessing. `-R` is POSIX's own recursive spelling,
+  and bundling is a convenience rather than part of what makes the removal
+  dangerous. Detection is now two halves: is `rm` invoked in this chain
+  segment, and do its flag tokens carry both recursive and force — read
+  across the invocation instead of out of a single token — which also reads
+  flags written after the path, where a shell accepts them and the old anchor
+  did not look. Eleven cases in `policy.test.ts` pin the spellings, three of
+  them the ones that must stay allowed (`-r` without force, `-f` without
+  recursion, a command whose name merely ends in `rm`) so the gate did not
+  widen past what it names, and thirty-two verdicts were re-driven through
+  the context `smith policy hook` builds. The doc bullet under **Changed**
+  was written one commit earlier and described the trigger as it then stood;
+  it now says both flags, however spelled.
 - **A playbook told an agent to run a verb that has never existed** (D-259).
   Step 14 of `.claude/skills/bs/SKILL.md`'s run playbook — the spec-vs-goal
   check that closes an epic — named `smith dispatch audit`. The verb is

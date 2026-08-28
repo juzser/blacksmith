@@ -665,9 +665,40 @@ function checkHistoryRewriteOnProtected(
   return violation(rule, renderBranch(rule.reason, branch));
 }
 
-/** Rule 6 detection: `rm -rf`/`-fr`/`--recursive --force`/`--force --recursive`. No `-i`, matching guard.sh. */
-const RM_DETECT_RE =
-  /(^|[;&|]|\s)rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|-[a-zA-Z]*f[a-zA-Z]*r[a-zA-Z]*|--recursive\s+--force|--force\s+--recursive)\b/;
+/** Rule 6 detection, half one: is `rm` invoked as a command in this segment? Looser than "first token", so `sudo rm …` still matches; stricter than a bare substring, so the `rm` inside `charm`/`confirm` is not this rule's business. */
+const RM_INVOKE_RE = /(^|[;&|]|\s)rm\s+/;
+/** A bundled short-flag token (`-rf`, `-Rvf`) as opposed to a long flag (`--force`) or a path. */
+const RM_SHORT_FLAG_RE = /^-[a-zA-Z]+$/;
+
+/**
+ * Rule 6 detection, half two: does this `rm` carry both recursive and force?
+ *
+ * Read across the invocation's flag tokens rather than out of a single one,
+ * because the spellings that mean the same removal are one case, not four:
+ * bundled (`-rf`), split (`-r -f`), long (`--recursive --force`), and mixed
+ * (`--recursive -f`). The predecessor of this function matched the flags as a
+ * literal run directly after `rm`, which read `-rf` and `-fr` and nothing
+ * else — so `rm -Rf src` and `rm -r -f src` were recursive-force removals the
+ * gate did not see. `-R` counts: it is POSIX's own recursive spelling and
+ * does exactly what `-r` does.
+ *
+ * `-i` is still ignored, matching guard.sh — an interactive prompt is not a
+ * bound the factory can hold an agent to.
+ */
+function hasRecursiveForce(tokens: readonly string[]): boolean {
+  let recursive = false;
+  let force = false;
+  for (const token of tokens) {
+    if (token === '--recursive') recursive = true;
+    else if (token === '--force') force = true;
+    else if (RM_SHORT_FLAG_RE.test(token)) {
+      if (token.includes('r') || token.includes('R')) recursive = true;
+      if (token.includes('f')) force = true;
+    }
+  }
+  return recursive && force;
+}
+
 /** The `rm <args>` run up to the next chain separator, ported from guard.sh's `grep -Eo 'rm[[:space:]]+[^;&|]*'`. Applied per chain segment (see `checkUnboundedRm`), so "up to the next separator" and "to the end of the string" mean the same thing by the time this runs. */
 const RM_ARGS_RE = /rm\s+([^;&|]*)/;
 
@@ -731,7 +762,8 @@ function isAllowedRemovalPath(normalizedPath: string, policy: GuardrailPolicy): 
 }
 
 /**
- * Rule 6: `rm -rf`/`-fr`/`--recursive --force` outside `allowed_roots`.
+ * Rule 6: a recursive-force `rm` outside `allowed_roots`, however the two
+ * flags are spelled (see `hasRecursiveForce`).
  *
  * Checks every chain segment independently, not just the first `rm` in the
  * whole command. guard.sh's own `grep -Eo 'rm[[:space:]]+[^;&|]*'` — and this
@@ -748,8 +780,10 @@ function checkUnboundedRm(
   policy: GuardrailPolicy,
 ): PolicyViolation | null {
   const outOfBounds = splitChainSegments(command).some((segment) => {
-    if (!RM_DETECT_RE.test(segment)) return false;
-    return extractRmArgs(segment).some((tok) => {
+    if (!RM_INVOKE_RE.test(segment)) return false;
+    const args = extractRmArgs(segment);
+    if (!hasRecursiveForce(args)) return false;
+    return args.some((tok) => {
       if (tok.startsWith('-')) return false;
       return !isAllowedRemovalPath(normalizeRemovalPath(tok, repoRoot), policy);
     });
