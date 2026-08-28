@@ -8098,8 +8098,10 @@ describe('cli.ts (built binary)', () => {
   });
 
   describe('policy hook', () => {
-    // `policy hook` is what `.claude/hooks/guard.sh` execs into for every
-    // PreToolUse call. Its contract with the shim is exit-code-driven: exit 0
+    // `policy hook` is the CLI route to the decision `.claude/hooks/guard.sh`
+    // makes on every PreToolUse call; the shim itself execs the leaner
+    // `dist/policyHook.js`, and both call the same decideHookPayload, so this
+    // pins the contract for both. That contract is exit-code-driven: exit 0
     // means a decision was reached, carrying a deny envelope on stdout or
     // nothing at all, and anything the shim must treat as "could not evaluate
     // this, fail closed" — a payload that does not even parse as JSON, here —

@@ -22,8 +22,10 @@ import type { SandboxLease } from './sandbox.js';
  * and that same normalization is `path.sep`-aware rather than bash's
  * `/`-only `case` glob — see `normalizeRemovalPath`.
  *
- * `smith policy check` and `smith policy hook` (cli.ts) are the two callers;
- * `policy hook` is what `.claude/hooks/guard.sh` now execs into.
+ * `smith policy check` and `smith policy hook` (cli.ts) are the two CLI
+ * callers, both routed through `hookDecision.ts`; `.claude/hooks/guard.sh`
+ * execs `dist/policyHook.js`, an entry point over that same decision whose
+ * import graph is only what deciding needs.
  */
 export class PolicyError extends SmithError {}
 

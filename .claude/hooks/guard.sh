@@ -16,8 +16,8 @@
 # factory/orchestrator/test/policy.test.ts) — not fixed in place, ported.
 #
 # This file is what is left: plumbing. It reads the PreToolUse payload from
-# stdin, hands it to `node dist/cli.js policy hook` unchanged, and relays
-# that command's decision. The one piece of judgment still made here is
+# stdin, hands it to `node dist/policyHook.js` unchanged, and relays that
+# command's decision. The one piece of judgment still made here is
 # deliberate and load-bearing: this shim tells apart three outcomes where the
 # old one had two. The bug above got its blast radius from a hook that had
 # exactly one failure mode — quietly allow — for every reason it could fail,
@@ -27,6 +27,18 @@
 # deny" (relayed verbatim) and "the policy layer could not answer at all"
 # (escalated to the operator — see `unavailable` below) are three separate
 # code paths, and only the first is silent.
+#
+# What it execs is a dedicated entry point rather than the `smith` CLI, and
+# that is a performance decision with a correctness edge to it. This hook runs
+# in front of every Bash/Write/Edit/MultiEdit/NotebookEdit call an agent
+# makes, so its startup cost is paid more often than any other code here.
+# `dist/cli.js` is a router with 64 top-level imports, drizzle-orm among them
+# via the database layer, and loading that graph measured ~1.3s in front of
+# ~39ms of actual policy work. `dist/policyHook.js` imports only what deciding
+# needs. The correctness edge: several tests shell out to the built binary
+# against a per-test time budget, and a 1.3s spawn the hook never needed was
+# eating it. `smith policy hook` still exists and still works — both call the
+# same decideHookPayload, so there is no second copy to drift.
 #
 # Kept in plain, POSIX-portable bash on purpose, and only the constructs
 # actually run and verified on this machine (bash 3.2.57 / BSD userland) — no
@@ -40,7 +52,7 @@ set -u
 set -o pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CLI="$REPO_ROOT/factory/orchestrator/dist/cli.js"
+HOOK="$REPO_ROOT/factory/orchestrator/dist/policyHook.js"
 
 # Emits a decision envelope and exits 0 — Claude Code's PreToolUse hook
 # protocol has no separate "error" outcome, only allow/deny/ask, and a
@@ -52,7 +64,7 @@ decide() {
 }
 
 # For the three ways the policy layer can be *unavailable* rather than
-# unhappy: dist/cli.js not built, node not on PATH, or the CLI exiting
+# unhappy: dist/policyHook.js not built, node not on PATH, or the hook exiting
 # without a decision. None of these is a rule violation — nothing has judged
 # the command either way — so the honest answer is neither "allow" (which is
 # F0's bug exactly: one indistinguishable silent yes for both "no rule
@@ -79,39 +91,40 @@ unavailable() {
 
 INPUT="$(cat)"
 
-if [ ! -f "$CLI" ]; then
-  # dist/cli.js missing means "nobody has run `pnpm run build` yet" (a fresh
-  # clone, or a pull that touched src/ without a rebuild) — the policy layer
-  # cannot be consulted at all, so this escalates rather than guessing.
-  unavailable "Blacksmith's guard hook cannot check this command: its policy layer is not built ($CLI missing). Run 'pnpm run build' to restore automatic checking; until then every command needs your approval."
+if [ ! -f "$HOOK" ]; then
+  # dist/policyHook.js missing means "nobody has run `pnpm run build` yet"
+  # (a fresh clone, or a pull that touched src/ without a rebuild) — the
+  # policy layer cannot be consulted at all, so this escalates rather than
+  # guessing.
+  unavailable "Blacksmith's guard hook cannot check this command: its policy layer is not built ($HOOK missing). Run 'pnpm run build' to restore automatic checking; until then every command needs your approval."
 fi
 
 if ! command -v node >/dev/null 2>&1; then
   unavailable "Blacksmith's guard hook cannot check this command: node is not on PATH, so its policy layer cannot run. Until it can, every command needs your approval."
 fi
 
-OUTPUT="$(printf '%s' "$INPUT" | node "$CLI" policy hook)"
+OUTPUT="$(printf '%s' "$INPUT" | node "$HOOK")"
 STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
-  # `smith policy hook` (cli.ts) always exits 0 when it reaches a decision,
-  # allow or deny — it only exits non-zero when it could not reach one at
-  # all (an unparseable payload, or an unexpected error while evaluating).
-  # That is precisely the case this hook must not treat as "nothing to
-  # inspect, therefore fine": escalate, name the fix, and let a human or a
-  # rebuild resolve it.
+  # policyHook.js always exits 0 when it reaches a decision, allow or deny —
+  # it only exits non-zero when it could not reach one at all (an unparseable
+  # payload, or an unexpected error while evaluating). That is precisely the
+  # case this hook must not treat as "nothing to inspect, therefore fine":
+  # escalate, name the fix, and let a human or a rebuild resolve it.
   unavailable "Blacksmith's guard hook cannot check this command: its policy layer exited ${STATUS} instead of returning a decision (dist/ may be stale, or the payload could not be evaluated). Run 'pnpm run build'; if that does not fix it, investigate. Until then every command needs your approval."
 fi
 
-# Relay verbatim. `smith policy hook` prints a deny envelope, or nothing at
-# all when no rule fires — never an allow envelope, because Claude Code reads
-# an explicit allow as "bypass the permission system", which would make this
-# hook a blanket auto-approver for every command outside guardrails.yml (see
-# cli.ts's `policy hook` for the full reasoning). So there is nothing to
-# filter here and this shim does not second-guess the layer that owns the
-# decision: a filter would only hide a regression in it. test/cli.test.ts
-# asserts the silent allow directly, where breaking it fails a test instead
-# of being quietly absorbed by plumbing.
+# Relay verbatim. policyHook.js prints a deny envelope, or nothing at all when
+# no rule fires — never an allow envelope, because Claude Code reads an
+# explicit allow as "bypass the permission system", which would make this hook
+# a blanket auto-approver for every command outside guardrails.yml (see
+# hookDecision.ts for the full reasoning). So there is nothing to filter here
+# and this shim does not second-guess the layer that owns the decision: a
+# filter would only hide a regression in it. The tests in
+# test/policyHookEntry.test.ts and test/cli.test.ts assert the silent allow
+# directly, where breaking it fails a test instead of being quietly absorbed
+# by plumbing.
 if [ -n "$OUTPUT" ]; then
   printf '%s\n' "$OUTPUT"
 fi

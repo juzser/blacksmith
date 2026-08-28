@@ -63,8 +63,9 @@ text* and *things that execute*:
   [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "No secrets
   in outputs".
 - **The guard hook.** `.claude/hooks/guard.sh` — a transport shim over
-  `smith policy hook` — and the deny list in `.claude/settings.json` block
-  pushes to `main`, force-pushes, history rewriting, and unbounded deletion.
+  `dist/policyHook.js`, the same decision as `smith policy hook` — and the
+  deny list in `.claude/settings.json` block pushes to `main`, force-pushes,
+  history rewriting, and unbounded deletion.
   A bypass is in scope, and so is a shim that fails *open*: when the policy
   layer cannot answer, the hook escalates to the operator and never emits an
   `allow` envelope, because a hook's `allow` outranks the operator's own deny
