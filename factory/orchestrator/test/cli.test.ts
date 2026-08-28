@@ -814,7 +814,7 @@ describe('cli.ts (built binary)', () => {
         expect(parsed.error.code).toBe('cli.invalid-flag');
         expect(parsed.error.message).toContain('--n');
       }
-    }, 30_000);
+    });
 
     it('still tails exactly what a real count asks for, and clamps above the log', () => {
       const sessionId = `cli-tail-n-ok-${Date.now()}`;
@@ -844,7 +844,7 @@ describe('cli.ts (built binary)', () => {
         expect(read.status, `--n ${literal}`).toBe(0);
         expect(JSON.parse(read.stdout)).toHaveLength(5);
       }
-    }, 30_000);
+    });
 
     it('ui serve --port names the flag instead of leaking a Node RangeError', () => {
       // `serve()` handed NaN to net.Server.listen, which threw
@@ -857,7 +857,7 @@ describe('cli.ts (built binary)', () => {
       expect(parsed.error.code).toBe('cli.invalid-flag');
       expect(parsed.error.message).toContain('--port');
       expect(JSON.stringify(parsed)).not.toContain('node_modules');
-    }, 20_000);
+    });
   });
 
   // D-210 named a class and fixed one member of it. Its own corollary says why
@@ -949,7 +949,7 @@ describe('cli.ts (built binary)', () => {
         // The operator's own text, echoed back: `got "3.9"`, not `got null`.
         expect(parsed.error.message).toContain(`got "${bad}"`);
       }
-    }, 40_000);
+    });
 
     it('refuses the same --round on judge report, where a wrong one blames the round', () => {
       // `judge report --round abc` said "is on round 1, not round NaN" -- an
@@ -979,7 +979,7 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('cli.invalid-flag');
       expect(parsed.error.message).toContain('--round');
-    }, 20_000);
+    });
 
     it('records the round the notation actually says', () => {
       // The half of D-210's choice that is not an error: 1e2 is an unambiguous
@@ -994,7 +994,7 @@ describe('cli.ts (built binary)', () => {
       const bare = dispatch(sessionId, eventsDir, []);
       expect(bare.status).toBe(0);
       expect(JSON.parse(bare.stdout).record.payload.round).toBe(1);
-    }, 20_000);
+    });
 
     it('refuses a --plan-version it cannot read, instead of stamping one nobody typed', () => {
       const { sessionId, eventsDir } = seedJudgeSession('planver');
@@ -1009,7 +1009,7 @@ describe('cli.ts (built binary)', () => {
         expect(parsed.error.code).toBe('cli.invalid-flag');
         expect(parsed.error.message).toContain('--plan-version');
       }
-    }, 40_000);
+    });
 
     it('still stamps the plan version it was given, and still defaults to 1', () => {
       const { sessionId, eventsDir } = seedJudgeSession('planver-ok');
@@ -1020,7 +1020,7 @@ describe('cli.ts (built binary)', () => {
       const bare = dispatch(sessionId, eventsDir, []);
       expect(bare.status).toBe(0);
       expect(JSON.parse(bare.stdout).record.plan_version).toBe(1);
-    }, 20_000);
+    });
   });
 
   it('event append + tail round-trips through a --state-dir override (never touches the real state/events dir)', () => {
@@ -1573,7 +1573,7 @@ describe('cli.ts (built binary)', () => {
       eventsApplied: 2,
       skippedFindings: [],
     });
-  }, 20_000); // several sequential CLI process spawns
+  });
 
   /**
    * Both db verbs rebuild the ENTIRE milestones table from a roadmap file
@@ -1629,7 +1629,7 @@ describe('cli.ts (built binary)', () => {
     expect(roadmapResult.status).toBe(0);
     const milestones = JSON.parse(roadmapResult.stdout) as Array<{ milestoneId: string }>;
     expect(milestones.map((m) => m.milestoneId)).toEqual(['phase-z']);
-  }, 20_000); // three sequential CLI process spawns
+  });
 
   it('new: scaffolds a project and registers it in an overridden roadmap.md, never the real one', () => {
     const targetDir = path.join(scratchDir, 'wt', 'cli-new-project');
@@ -1691,7 +1691,7 @@ describe('cli.ts (built binary)', () => {
     // The tree survives its own red gate — deleting it would delete the
     // evidence the operator needs to fix it.
     expect(existsSync(path.join(targetDir, 'package.json'))).toBe(true);
-  }, 20_000); // spawns the CLI against a scaffolded tree
+  });
 
   it('mcp init: layers the surface onto a scaffolded project and makes the milestone due', () => {
     const targetDir = path.join(scratchDir, 'wt', 'cli-mcp-project');
@@ -1728,7 +1728,7 @@ describe('cli.ts (built binary)', () => {
       'cli-mcp-project',
     );
     expect(readFileSync(roadmapPath, 'utf8')).toContain('## cli-mcp-project — mcp surface');
-  }, 20_000); // two sequential CLI process spawns
+  });
 
   // The exit code is the whole interface for CI: a gate that only prints its
   // verdict is a gate whose caller has to parse JSON to find out it failed.
@@ -1786,7 +1786,7 @@ describe('cli.ts (built binary)', () => {
     expect(JSON.parse(red.stdout).violations.map((v: { rule: string }) => v.rule)).toEqual([
       'MCP-P1',
     ]);
-  }, 30_000); // four sequential CLI process spawns
+  });
 
   it('scheduler run --dry computes proposals without appending events', () => {
     const sessionId = `cli-scheduler-${Date.now()}`;
@@ -1886,7 +1886,7 @@ describe('cli.ts (built binary)', () => {
         expect(error.code).toBe('cli.invalid-flag');
         expect(error.message).toContain('now');
       }
-    }, 20_000);
+    });
 
     it('scheduler run --now still moves the clock a valid ISO instant asks it to', () => {
       const sessionId = `cli-now-good-${Date.now()}`;
@@ -1954,7 +1954,7 @@ describe('cli.ts (built binary)', () => {
         (p: { kind: string }) => p.kind === 'recheck',
       );
       expect(now).toBeUndefined();
-    }, 20_000);
+    });
 
     it('dream --since and stats providers --since are held to the same form', () => {
       const sessionId = `cli-since-bad-${Date.now()}`;
@@ -1992,7 +1992,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(stats.status).toBe(1);
       expect(JSON.parse(stats.stdout).error.code).toBe('cli.invalid-flag');
-    }, 20_000);
+    });
   });
 
   it('dream + lessons candidates/compile: end-to-end through a gate block', () => {
@@ -2161,7 +2161,7 @@ describe('cli.ts (built binary)', () => {
     });
     expect(audit.reach).toMatchObject({ total: 1, escalating: 0, withoutCategory: 1 });
     expect(audit.counts.retire).toBe(0);
-  }, 35_000); // ten sequential CLI process spawns — over vitest's 5s default on a CI runner
+  });
 
   // D-159. The novelty gate's cutoff is documented as living in
   // factory/policies/scheduler.yml: architecture §9.3 points operators at it,
@@ -2281,7 +2281,7 @@ describe('cli.ts (built binary)', () => {
     const corrected = dreamUnder(policyAt(0.6, true), 'corrected');
     expect(corrected.raised).toHaveLength(1);
     expect(corrected.noveltyRejected).toHaveLength(1);
-  }, 30_000); // nine sequential CLI process spawns
+  });
 
   // D-208. The same number has two doors and only one of them was locked.
   // Through factory/policies/scheduler.yml, parseSchedulerPolicy refuses
@@ -2421,7 +2421,7 @@ describe('cli.ts (built binary)', () => {
 
       // Refused before the gate, so the duplicate never reached the log.
       expect(eventCount(s)).toBe(before);
-    }, 25_000); // ten sequential CLI process spawns
+    });
 
     it('still lets a legal override beat the policy file', () => {
       // A rejected candidate is logged either way, so each threshold gets its
@@ -2459,7 +2459,7 @@ describe('cli.ts (built binary)', () => {
         novel: false,
         status: 1,
       });
-    }, 40_000); // twelve sequential CLI process spawns
+    });
 
     it('holds the approve door to the same range as the raise door', () => {
       const s = seed('approve');
@@ -2496,7 +2496,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(accepted.status).toBe(0);
       expect(JSON.parse(accepted.stdout)).toMatchObject({ lessonStatus: 'approved' });
-    }, 20_000); // four sequential CLI process spawns
+    });
   });
 
   it('lessons for-dispatch: scopes the block to the task claims, and fails loudly', () => {
@@ -6865,7 +6865,7 @@ describe('cli.ts (built binary)', () => {
       await writeFile(path.join(repoDir, 'README.md'), '# scratch\n');
       runOrThrow('git', ['add', '.'], { cwd: repoDir });
       runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: repoDir });
-    }, 30_000);
+    });
 
     afterAll(async () => {
       if (repoDir) await rm(repoDir, { recursive: true, force: true });
@@ -7019,7 +7019,7 @@ describe('cli.ts (built binary)', () => {
       await writeFile(path.join(repoDir, 'src/c.ts'), 'export const c = 1;\n');
       planPath = path.join(repoDir, 'plan.json');
       await writeFile(planPath, JSON.stringify(IMPACT_PLAN));
-    }, 30_000);
+    });
 
     afterAll(async () => {
       if (repoDir) await rm(repoDir, { recursive: true, force: true });
@@ -7128,7 +7128,7 @@ describe('cli.ts (built binary)', () => {
           specPath,
           JSON.stringify({ task_id: 'epic-1/task-1', claims: ['src/a.ts'] }),
         );
-      }, 30_000);
+      });
 
       afterAll(async () => {
         if (worktree) await rm(worktree, { recursive: true, force: true });
@@ -7361,7 +7361,7 @@ describe('cli.ts (built binary)', () => {
       runOrThrow('git', ['add', '.'], { cwd: repoDir });
       runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: repoDir });
       fingerprintPath = path.join(scratchDir, 'before.json');
-    }, 30_000);
+    });
 
     afterAll(async () => {
       if (repoDir) await rm(repoDir, { recursive: true, force: true });
@@ -7737,7 +7737,7 @@ describe('cli.ts (built binary)', () => {
       await writeFile(path.join(projectDir, 'README.md'), '# quiet\n');
       runOrThrow('git', ['add', '.'], { cwd: projectDir });
       runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
-    }, 30_000);
+    });
 
     it('worktree create says nothing on stderr', () => {
       const { stderr, status } = runCli(['worktree', 'create', projectDir, 'epic-1', 'task-1']);
