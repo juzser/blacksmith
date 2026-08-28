@@ -936,6 +936,29 @@ than appearing in it.
   `cli.js policy hook` case by case, and a structural assertion that the
   hook's import graph cannot silently regain the database layer.
 
+- **The independent finder picked a vendor for operators who had named
+  none.** `crosscheck.ts` defaulted `independent_finder.providers` to
+  `['codex']`, so a `crosscheck.yml` that omitted the key — or a project whose
+  policy file was written from scratch — got a finder pointed at one specific
+  third-party CLI it had never been told about. On a box without that binary
+  the failure then read `independent_finder.providers names "codex", and
+  crosscheck.yml enables none of them`: a sentence quoting a choice the
+  operator never made. The default is now the empty list, matching the OFF
+  position `enabled`, `mode` and `send_diff` already ship in, and it is the
+  last hardcoded vendor name in `factory/orchestrator/src/`. The shipped
+  `factory/policies/crosscheck.yml` still names `codex` — explicitly, in the
+  file an operator edits, where a vendor choice belongs.
+
+  `runIndependentFinder()` refuses an empty list in its own words, before the
+  loop. It used to reach the bottom of that loop having skipped nobody and
+  render *"independent_finder.providers names , and crosscheck.yml enables
+  none of them"* — a hole exactly where the operator's own words go. Naming
+  nobody and naming only disabled providers are different mistakes with
+  different repairs, and they now say so separately. Validation stays at run
+  time, not parse time: as `IndependentFinder.providers` has always said, a
+  policy naming a provider this box has not configured is still a readable
+  policy, and one unusable feature should not fail the whole file.
+
 - **The recursive-force `rm` gate read two flag spellings out of the many
   that mean the same removal** (rule 6, `unbounded-rm`). It matched the flags
   as a literal run directly after `rm` — `r` and `f` inside one lowercase

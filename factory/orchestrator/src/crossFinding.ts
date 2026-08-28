@@ -557,6 +557,19 @@ export async function runIndependentFinder(
     );
   }
 
+  // Before the native check, because "names nobody" is not a wrong name -- and
+  // before the loop, because an empty list reaches the bottom of it having
+  // skipped no one, where the "named them, none are enabled" sentence renders
+  // with a hole where the operator's own words belong. Two mistakes, two
+  // repairs: add a name here, or enable one over in `providers:`.
+  if (finder.providers.length === 0) {
+    throw new CrossFindingError(
+      'crossfind.no-providers',
+      "crosscheck.yml independent_finder.enabled is true but independent_finder.providers is empty, so there was nobody to ask and no finder ran. Name at least one external provider from this file's `providers:` map. There is no default: which vendors this box can reach is something only the operator knows.",
+      { taskId: input.taskId },
+    );
+  }
+
   const nativeName = nativeProviderName(policy);
   if (finder.providers.includes(nativeName)) {
     throw new CrossFindingError(

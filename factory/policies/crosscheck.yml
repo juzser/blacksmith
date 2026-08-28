@@ -200,6 +200,9 @@ independent_finder:
   #    unshared opinion still has to survive a refute pass before it blocks.
   enabled: false     # ships off: this is the one judge call that costs a diff
   mode: shadow       # reconciliations are recorded and gate nothing; flip to `active` only after a calibration pass (docs/runbooks/providers.md)
+  # No code default: crosscheck.ts falls back to an EMPTY list, so this line is
+  # the only place a vendor is ever chosen. Delete it and the finder refuses by
+  # name rather than picking one for you.
   providers: [codex] # must be external and must not be the native provider — a "second opinion" from the same model is one opinion billed twice
   # THE OPERATOR MANDATE. A critic judges a CLAIM, so quorum.ts can send the
   # summary and the failure scenario and never the source. A finder cannot: it

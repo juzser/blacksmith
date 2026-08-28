@@ -187,6 +187,28 @@ providers:
     expect(policy.quorumRule).toEqual({ agreement: '2-of-3', minProviders: 2 });
   });
 
+  it('defaults independent_finder to naming no provider at all', () => {
+    // Not `[codex]`. A default that names a vendor is a default that dispatches
+    // one: an operator who writes `independent_finder: { enabled: true }` and
+    // nothing else would spawn a CLI they may never have installed, and then
+    // read `independent_finder.providers names "codex"` in the failure -- a
+    // sentence about a choice they never made. This repo cannot know which
+    // vendors a box has, so the honest fallback is the empty list, matching the
+    // OFF position `enabled` and `send_diff` already default to.
+    const policy = parseCrosscheckPolicy(`
+providers:
+  claude: { kind: native, enabled: true }
+`);
+    expect(policy.independentFinder).toEqual({
+      enabled: false,
+      mode: 'shadow',
+      providers: [],
+      sendDiff: false,
+      maxDiffBytes: 120_000,
+      severityResolution: 'highest-wins',
+    });
+  });
+
   it('throws on an empty providers block', () => {
     expect(() => parseCrosscheckPolicy('providers: {}')).toThrow(CrosscheckError);
   });

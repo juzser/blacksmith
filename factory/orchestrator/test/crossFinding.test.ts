@@ -602,6 +602,35 @@ describe('crossFinding.ts runIndependentFinder', () => {
     ).rejects.toMatchObject({ code: 'crossfind.native-finder' });
   });
 
+  it('refuses an enabled finder that names nobody, and says so in those words', async () => {
+    // Naming nobody and naming only disabled providers are different mistakes
+    // with different repairs, and the empty case used to fall through to the
+    // second sentence -- which rendered as `providers names , and crosscheck.yml
+    // enables none of them`, a hole exactly where the operator's own words are
+    // supposed to be.
+    const failure = await runIndependentFinder(
+      {
+        taskId: 'epic-1/task-1',
+        request: request(),
+        native: [],
+        policy: policyWith(codexFixture('/nonexistent', 'active'), { providers: [] }),
+      },
+      ctx(),
+      { stateDir },
+    ).then(
+      () => null,
+      (err: Error & { code?: string }) => err,
+    );
+
+    expect(failure?.code).toBe('crossfind.no-providers');
+    expect(failure?.message).toContain('independent_finder.providers is empty');
+    expect(failure?.message).not.toContain('names ,');
+
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.some((e) => e.record.event_type === CROSS_FINDING_EVENT_TYPE)).toBe(false);
+    expect(events.some((e) => e.record.event_type === 'judge-verdict')).toBe(false);
+  });
+
   it('refuses when every named provider is disabled, and writes no events', async () => {
     const codex = codexFixture('/nonexistent', 'active');
     codex.enabled = false;

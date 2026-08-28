@@ -224,9 +224,16 @@ const DEFAULT_ROLE_ISOLATION_PAIRS: readonly RoleIsolationPair[] = [
 
 // Mirrors the shipped crosscheck.yml independent_finder block. Every default
 // here is the OFF position: a file that omits the block entirely gets a finder
-// that is disabled, gates nothing if enabled, and refuses to send a diff. The
-// only way to any of the three powers is an operator writing it down.
-const DEFAULT_INDEPENDENT_FINDER_PROVIDERS: readonly string[] = ['codex'];
+// that is disabled, names nobody, gates nothing if enabled, and refuses to send
+// a diff. The only way to any of the four powers is an operator writing it down.
+//
+// `providers` is empty rather than a name because this file is the fallback for
+// a policy that did not say, and nothing here knows which vendors a given box
+// has. A default naming one would dispatch a CLI the operator may never have
+// installed, and then report `independent_finder.providers names "<vendor>"`
+// back to someone who named no vendor at all. Empty says the true thing: nobody
+// was asked. runIndependentFinder() refuses on it in those words.
+const DEFAULT_INDEPENDENT_FINDER_PROVIDERS: readonly string[] = [];
 const DEFAULT_INDEPENDENT_FINDER_MAX_DIFF_BYTES = 120_000;
 
 const DEFAULT_MODEL_TIER = 'mid'; // taxonomy.yml model_tier — judges run sonnet-tier per architecture §4, external judges default to the same tier absent an override.
