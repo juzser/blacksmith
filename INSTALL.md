@@ -328,21 +328,30 @@ See the first entry under [Known gaps](#known-platform-gaps) for why
 
 ### Cross-provider judges (Phase 8)
 
-Both external providers ship `enabled: true` but `mode: shadow` in
-[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml): their
-verdicts are recorded and **gate nothing** until an operator promotes one to
-`mode: active`. Credentials decide only whether they answer — without them,
-every quorum case records a caught transport failure and the gate holds on
-the native verdict alone.
+Both external providers ship `enabled: false` in
+[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml), so
+neither is invoked until you switch on the one this machine actually has.
+Which of them that is — if either — is a fact about this box, not about the
+repo, which is why the repo does not guess. One you switch on arrives in
+`mode: shadow`: its verdicts are recorded and **gate nothing** until an
+operator promotes it to `mode: active`.
 
 - **Codex** — install the Codex CLI and run `codex login` once on this
-  machine; auth is a ChatGPT subscription, no API key.
+  machine; auth is a ChatGPT subscription, no API key. Then set
+  `providers.codex.enabled: true` in that file.
 - **DeepSeek** — put `DEEPSEEK_API_KEY` in `.env`. Copy `.env.example` as the
   starting point. `.env` is gitignored and the event logger redacts
-  credential-shaped values before write; never commit a key.
-- **Skipping this is a supported choice.** To stop the failed attempts as
-  well, set both providers to `enabled: false` in that file, or pass
-  `SMITH_CROSSCHECK_OFFLINE=1` on the command you are running.
+  credential-shaped values before write; never commit a key. Then set
+  `providers.deepseek.enabled: true`.
+- **Then check it before a gate does.** `smith judge preflight` reports,
+  without spending a call, whether each enabled provider can be reached from
+  here — the key's variable name, never its value, and whether the CLI is on
+  PATH. Exit 1 means something you switched on cannot answer.
+- **Skipping this is a supported choice, and the default.** Leave both
+  `enabled: false` and no external judge is ever called: no spend, no
+  transport failures, the gate on the native verdict alone. To force that for
+  one command on a box where a provider *is* switched on, pass
+  `SMITH_CROSSCHECK_OFFLINE=1`.
 
 The full procedure — setup, shadow-mode calibration, promotion, rollback — is
 [`docs/runbooks/providers.md`](docs/runbooks/providers.md).

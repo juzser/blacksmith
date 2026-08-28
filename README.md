@@ -107,8 +107,10 @@ into one waiver question per epic. Only S3 and S4 are ever waivable.
 
 The factory grades its own judgment calls against models from a different
 vendor — Codex over its CLI, DeepSeek over its API, beside the native Claude
-judge. They ship enabled but in **shadow mode**: every verdict is recorded,
-none of them gates anything, until you have read the numbers and promoted one
+judge. They ship switched off — which of them a machine can actually
+call is a fact about that machine, not about this repo — and the one you
+switch on arrives in **shadow mode**: every verdict recorded, none of them
+gating anything, until you have read the numbers and promoted it
 deliberately.
 
 </td>

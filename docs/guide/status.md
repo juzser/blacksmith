@@ -21,7 +21,7 @@ dashboard's Roadmap page parses.
 | 5. State + analytics | SQLite projections, `smith db` / `smith stats` | Built, merged |
 | 6. UI | Overview, Timeline, Kanban, Roadmap, Flow, Lessons, Errors, Analytics | Built, merged |
 | 7. Self-extension | Scaffolder, `/bs` operator skill, scheduler, lessons compilation | Built, merged |
-| 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — the judges ship powerless, the finder ships off |
+| 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — every external ships off, and one you switch on is still powerless until promoted |
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
 | 10. Deployment + ops | A background watcher (`smith daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
 
@@ -45,14 +45,17 @@ operator-invoked. Same for the closing spec review. Skipping them no longer
 buys a green epic — `smith epic verdict` holds without them — but nothing
 runs them on your behalf.
 
-**3. The cross-provider judges ship enabled and powerless.** Both Codex and
-DeepSeek are `enabled: true` in
-[`crosscheck.yml`](../../factory/policies/crosscheck.yml) but `mode: shadow`:
+**3. The cross-provider judges ship off, and powerless after that.** Both
+Codex and DeepSeek are `enabled: false` in
+[`crosscheck.yml`](../../factory/policies/crosscheck.yml), so neither is
+invoked at all — the tier is built and shipped inert, because which of the two
+a machine can actually call is a fact about the machine and the repo has never
+met yours. Switch on the one you have and it arrives in `mode: shadow`:
 verdicts are recorded, and the factory still decides on the native Claude
 judge alone. That is deliberate — you calibrate against recorded disagreement
-before you give a second vendor a vote. Note that *enabled* is not the same as
-*inert*: with no credentials configured, each case records a caught transport
-failure. See [`../runbooks/providers.md`](../runbooks/providers.md).
+before you give a second vendor a vote. `smith judge preflight` says
+beforehand whether one you switched on can be reached at all. See
+[`../runbooks/providers.md`](../runbooks/providers.md).
 
 **4. The epic cap blocks at admission; nothing stops a dispatch mid-flight.**
 `smith wave check` now refuses to admit a wave whose declared cost will not
