@@ -379,6 +379,14 @@ independent_finder:
   severity_resolution: highest-wins
 ```
 
+**`providers` has no code default.** Omit the key and the fallback is the
+empty list: the finder names nobody and refuses in those words, rather than
+choosing a vendor on your behalf. `codex` above is what *this* repo's
+`crosscheck.yml` happens to configure — a worked example, like everything else
+named in this runbook, not a value the code falls back to. The other three
+knobs do have defaults, and all of them are the off position: `enabled: false`,
+`mode: shadow`, `send_diff: false`.
+
 ### The four outcomes
 
 Every reconciled pair lands in exactly one bucket, and only one of them
