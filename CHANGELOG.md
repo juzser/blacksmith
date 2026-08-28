@@ -851,17 +851,23 @@ than appearing in it.
   are about code — nothing read the prose as a command line, so the one
   surface an agent is handed was the only one where a verb's name was checked
   against nothing. `factory/orchestrator/test/docCommands.test.ts` now reads
-  it as argv: every `smith …` invocation in every backtick span and fenced
-  block of every markdown file, resolved against the same `COMMANDS` table
-  `--help` prints, flags included. Table cells naming a command family, prose
-  brackets and trailing punctuation are handled rather than reported; the
-  scanner is line-anchored so a command cannot swallow the next line's flags;
-  `CHANGELOG.md` and `docs/specs/` are excluded as records of the past, where
-  a dead verb is the point rather than the defect — this entry among them.
-  Everything else is in by default, files added tomorrow included. The parser
-  is pinned against a fixture rather than the repo, and a floor assertion
-  fails if it ever stops reading. This is the converse of D-191, and the
-  half that bites harder: a verb named in no document reaches no agent, but a
+  it as argv: every `smith …` invocation — and every `node …/cli.js …` one,
+  which is how the pre-install guide has to write them — in every backtick
+  span and fenced block of every instruction file, resolved against the same
+  `COMMANDS` table `--help` prints, flags included. 423 of them across 43
+  files. A pipe between two words names a command family rather than a
+  pipeline, escaped or not; prose brackets and trailing punctuation are
+  dropped; an inline span that wraps across a line break is still one span,
+  which is how a tenth of these invocations are written; fenced lines stay
+  line-anchored so a command cannot swallow the next line's flags. Runtime
+  state and the records of the past are excluded by shape rather than by
+  name — `docs/specs/dogfood-*`, `docs/specs/evidence/`, `*punch-list.md`,
+  `CHANGELOG.md`, this entry among them — so tomorrow's record drops out on
+  its own while tomorrow's governing spec is in by default. The parser is
+  pinned against fixtures rather than the repo, the exclusion rule is
+  asserted directly rather than sampled, and a floor assertion fails if the
+  scanner ever stops reading. This is the converse of D-191, and the half
+  that bites harder: a verb named in no document reaches no agent, but a
   verb the document invents reaches one and then fails in its hands.
 - **D-159 again, at the door P9-36 opened: the dashboard ran the lesson
   novelty gate on library defaults, not on the operator's policy file.**

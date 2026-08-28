@@ -797,9 +797,9 @@ below the floor.
     `smith dispatch check` refuses to let one dispatch answer for both.
     Dispatch it *after* step 13's record is written, not alongside it — a
     dispatch that predates the previous record has already answered for that
-    one, so two sessions fired up front leave this record unaccounted for
-    (it reports the record `unverifiable`). Take back one verdict per clause,
-    in the goal's order, and record it:
+    one, so two sessions fired up front leave this record unaccounted for and
+    `smith dispatch check` reports that record `unverifiable`. Take back one
+    verdict per clause, in the goal's order, and record it:
 
     ```bash
     smith epic goal-check --epic <epic> \
