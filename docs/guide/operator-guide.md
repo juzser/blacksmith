@@ -611,6 +611,11 @@ root configs while all six per-task lint gates were green (D-42). The returned
 `workspaces/<project>/workspaces/<project>/wt/<task>` on disk while the printed
 path claimed otherwise (D-40).
 
+Nothing requires the project to sit under `workspaces/`. That is only where
+`smith new` puts one when no `--target-dir` says otherwise; `projectDir` is
+read as a path, so a clone anywhere on disk works, and because the worktree is
+a sibling it is created beside that clone rather than under this repo.
+
 `smith worktree stale <projectDir> <epic>` lists worktrees
 that should have been cleaned up (a stale worktree is a bug, not a feature);
 `smith worktree rm <projectDir> <epic> <taskId>` removes one after merge.

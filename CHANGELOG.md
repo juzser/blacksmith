@@ -673,6 +673,21 @@ than appearing in it.
 
 ### Changed
 
+- **A project driven by Blacksmith no longer has to live under
+  `workspaces/`.** Nothing in the runtime ever required it: every verb that
+  touches a project's git takes the directory itself — `<project-dir>` as a
+  positional on the `worktree` family, `--project <dir>` everywhere else —
+  `smith new --target-dir` puts a new project wherever it is told, and since
+  D-42 a worktree is a sibling of the project directory rather than a child,
+  so it follows a clone that sits outside this repo. The instruction surface
+  did require it. Seven command lines in the `/bs` playbook wrote
+  `workspaces/<project>` where the CLI takes a path, which is the path an
+  agent then typed, and `worktree create` was among them. The playbook now
+  asks where the project lives once, at the top of a run, and carries that
+  one answer through every command below; `AGENTS.md`, the `coder` role and
+  the operator guide state `workspaces/` as an instance of the rule rather
+  than as the rule. `smith new` still lands there when no `--target-dir` says
+  otherwise, and this repo's own `workspaces/` is unchanged.
 - **Nothing prescribes a design system any more, and the dashboard stopped
   naming a private one.** This repo's own kit was called HDS, after the
   private design system it was ported from, and the name had leaked into

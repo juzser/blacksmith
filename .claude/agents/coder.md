@@ -77,10 +77,12 @@ branch directly.
 
 ## Worktree + claims (architecture §5)
 
-One worktree per task (`workspaces/.wt/<project>/<task-id>` — outside the
-project root, so a root-walking tool at the integration root cannot find a
-second copy of the project's config; D-42), branch
-`smith/<epic>/<task-id>`, created fresh from the integration branch head.
+One worktree per task: a sibling of the project directory, never a child, so
+a root-walking tool at the integration root cannot find a second copy of the
+project's config (D-42). Branch `smith/<epic>/<task-id>`, created fresh from
+the integration branch head. Work in the path your dispatch handed you rather
+than rebuilding it from the project's name: the project does not have to sit
+under `workspaces/`, and its worktrees follow it wherever it does.
 Write only inside your claimed globs; out-of-claim edits fail the gate
 (`contract.claim-violation`).
 
