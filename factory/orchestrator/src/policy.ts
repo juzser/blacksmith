@@ -586,6 +586,60 @@ function violation(rule: GuardrailRule, reason: string = rule.reason): PolicyVio
   return { ruleId: rule.id, severity: rule.severity, reason };
 }
 
+/**
+ * Blank the payload of git's message flags before the six rules below scan a
+ * command for refs and command words.
+ *
+ * A commit or merge message is git's own free-text field: its words are prose,
+ * never a ref and never a command. Scanning them anyway is how a commit whose
+ * message *described a rule* came to be refused for breaking it — five of the
+ * six rules could be tripped by a sentence alone, with no push, merge, deploy
+ * or removal anywhere in the command. That is the false deny this file already
+ * names twice as the one worth engineering against (see `isGitSubcommand`'s
+ * hyphen carve-out and `stripQuotedSpans`): the kind that teaches an agent to
+ * route around the gate rather than trust it.
+ *
+ * Deliberately narrower than `stripQuotedSpans`, which blanks every quoted
+ * span. Only a message payload goes, so a quoted *ref* is still read: `git
+ * merge "main"` is still a merge into main and `wrangler "deploy"` is still a
+ * deploy. Hiding a real target in here would mean passing it where git reads
+ * prose, which costs the target its meaning — so the blanking buys no way past
+ * any rule.
+ *
+ * Narrow in three more ways, each one a place where `-m` is not prose:
+ *
+ * - **Only where git spends `-m` on a message**, named subcommand by
+ *   subcommand. `git rebase -m <upstream>` spells `--merge` and `git revert -m
+ *   <parent-number>` picks a mainline, so their argument is a ref or a number
+ *   that later scans must still see; `mkdir -m 755 <dir>` and `gh pr merge -m
+ *   <branch>` are not git at all. A subcommand missing from this list is only
+ *   scanned as it is today — the failure is a false deny, which is the
+ *   direction this file errs in on purpose.
+ * - **Segment by segment**, so `git commit -m "…" && git push origin main`
+ *   blanks the message and still reads the push.
+ * - **The flag must be followed by `=` or whitespace**, so `-m"main"` is left
+ *   alone rather than treated as a message.
+ *
+ * The value is blanked rather than deleted, so token boundaries survive for
+ * the scans that read the last token of a segment.
+ */
+const MESSAGE_FLAG_RE = /(^|\s)(-m|--message)(=|\s+)("[^"]*"|'[^']*'|\S+)/g;
+
+/** The git subcommands whose `-m`/`--message` takes free text, and nothing else. */
+const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
+
+function stripMessageFlagValues(command: string): string {
+  // Split keeping the separators, so the segments can be rejoined untouched.
+  return command
+    .split(/([;&|])/)
+    .map((segment) =>
+      MESSAGE_SUBCOMMANDS.some((sub) => isGitSubcommand(segment, sub))
+        ? segment.replace(MESSAGE_FLAG_RE, '$1$2$3""')
+        : segment,
+    )
+    .join('');
+}
+
 /** Rule 1: push to main/master — destination ref, checked precisely; or a bare push while already on a protected branch. */
 function checkPushToProtected(
   command: string,
@@ -1014,7 +1068,9 @@ function checkJudgeWrite(
 /**
  * Blank out quoted spans before scanning a segment for command words.
  *
- * Only the write-scope rule needs this, and only because the role it governs
+ * Only the write-scope rule needs this *blanket* form — the six base rules
+ * take the narrower `stripMessageFlagValues` above, which spares a quoted ref.
+ * The write-scope rule needs the wider net because the role it governs
  * commits: `git commit -m "test: cover the restore path"` is a tester doing
  * exactly what its output contract asks, and refusing it because the message
  * says "restore" is the same class of false deny as refusing `git merge-base`
@@ -1148,13 +1204,20 @@ export function evaluateCommand(
     return { allowed: true, violations: [] };
   }
   const { command, branch, repoRoot } = context;
+  // The six base rules look for refs and command words, so they read the
+  // command with its message payloads blanked — see `stripMessageFlagValues`.
+  // The lease rules below keep the raw string: they read *targets* off the
+  // command, and `-m` is not always prose down there (`mkdir -m 755 <dir>`
+  // spends it on a mode), so blanking it could put an empty token where a
+  // path belongs.
+  const scanned = stripMessageFlagValues(command);
   const checks: Array<() => PolicyViolation | null> = [
-    () => checkPushToProtected(command, branch, policy),
-    () => checkForcePush(command, policy),
-    () => checkMergeIntoProtected(command, branch, policy),
-    () => checkDeployCommand(command, policy),
-    () => checkHistoryRewriteOnProtected(command, branch, policy),
-    () => checkUnboundedRm(command, repoRoot, policy),
+    () => checkPushToProtected(scanned, branch, policy),
+    () => checkForcePush(scanned, policy),
+    () => checkMergeIntoProtected(scanned, branch, policy),
+    () => checkDeployCommand(scanned, policy),
+    () => checkHistoryRewriteOnProtected(scanned, branch, policy),
+    () => checkUnboundedRm(scanned, repoRoot, policy),
   ];
   // The judge rules are additive: a judge is bound by everything an ordinary
   // session is bound by, and by these on top. They are appended rather than

@@ -17,6 +17,16 @@
 > violation through. They live in tested TypeScript rather than as regexes in
 > YAML because the bash predecessor silently allowed everything on macOS for
 > eight phases and no test noticed.
+>
+> One span is exempt from that looseness, because it is not command text at
+> all: the payload of `-m`/`--message` on the git subcommands that spend it on
+> free text (`commit`, `merge`, `tag`, `stash`, `notes`). A message is git's own
+> prose field, so the rules blank it before they scan, and a commit that merely
+> *describes* a rule is not refused for breaking it. Only that payload goes: a
+> quoted ref is still a ref (`git merge "main"` is still denied), and a `-m`
+> that is not a message keeps its argument, whether it is a mode (`mkdir -m
+> 755`), a mainline parent (`git revert -m 1`), or another flag's short spelling
+> (`git rebase -m`).
 
 ## Secrets, keys, tokens
 

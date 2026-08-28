@@ -899,6 +899,27 @@ than appearing in it.
 
 ### Fixed
 
+- **A commit that described a guardrail was refused for breaking it.** The
+  policy matchers scanned the whole command string for refs and command words,
+  including the payload of `-m`/`--message` — which is git's own free-text
+  field and never a ref. Five of the six base rules could be tripped by a
+  sentence alone, with no push, merge, deploy or removal anywhere in the
+  command: a commit message mentioning `push origin main` was a push to main, a
+  message naming a deploy command was a deploy, `git merge <side-branch> -m
+  "…onto main…"` was a merge into main (the word `merge` inside a message was
+  enough to make an ordinary `git commit` one), and on a protected branch a
+  message saying "rebase" was a history rewrite. This is the false deny the
+  file already engineers against twice — the kind that teaches an agent to
+  route around the gate rather than trust it — and it was found the hard way,
+  by the hook refusing three of this change's own commands, once while writing
+  the tests that now pin it. `stripMessageFlagValues` blanks the payload before
+  the six rules scan, and only where git spends the flag on free text —
+  `commit`, `merge`, `tag`, `stash`, `notes` — so a `-m` that means something
+  else keeps its argument (`mkdir -m 755`, `git revert -m 1`, `git rebase -m`).
+  It is deliberately narrower than the existing `stripQuotedSpans` in the same
+  file: only a message goes, so a quoted *ref* is still read and `git merge
+  "main"` is still denied. Fifteen tests, six of them asserting what a real
+  command still trips.
 - **`scripts/check.sh` failed on a clean checkout, for reasons no contributor
   had caused.** `vitest.config.ts` set no `testTimeout`, so the 5s default —
   sized for in-process unit tests — governed `cli.test.ts` and

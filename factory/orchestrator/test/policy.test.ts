@@ -685,6 +685,147 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
   });
 });
 
+// A commit or merge message is git's own free-text field. Every case in the
+// first half is an agent doing exactly what its output contract asks — writing
+// down what it did — and every one of them was refused before this block
+// existed, because the matchers scanned the message as if its words were refs
+// and command words. The second half is the other half of the property:
+// blanking the payload must not buy a way past any rule, so a quoted *ref* is
+// still read.
+describe('evaluateCommand — a message payload is prose, not a command', () => {
+  it('allows a commit whose message describes the push rule it is obeying', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit -m "docs: never push origin main"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('allows a commit whose message mentions a force push', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git commit -m "docs: explain why push --force is refused"',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('allows a merge of a side branch whose message happens to name main', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git merge origin/feature -m "reconciled onto main after #21"',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('allows a commit whose message merely contains the word merge and a branch name', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit -m "fix: the merge queue picks up main"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('allows a commit whose message documents a deploy command', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git commit -m "chore: document wrangler deploy steps"',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('allows a commit on a protected branch whose message merely says rebase', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit -m "docs: note about rebase"', branch: 'main' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('allows a commit whose message quotes an unbounded rm', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit -m "docs: never run rm -rf / by hand"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('reads --message= the same way as -m', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit --message="docs: never push origin main"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('blanks every message when a commit carries more than one', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git commit -m "docs: never push origin main" -m "and never wrangler deploy"',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // --- the payload buys nothing: a real target is still read ---
+
+  it('still denies a merge whose destination ref is merely quoted', () => {
+    const d = evaluateCommand(ctx({ command: 'git merge "main"', branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
+  it('still denies a deploy whose subcommand is merely quoted', () => {
+    const d = evaluateCommand(ctx({ command: 'wrangler "deploy"', branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toEqual(['deploy-command']);
+  });
+
+  it('still denies a real push to main chained after a commit that talks about one', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git commit -m "docs: never push origin main" && git push origin main',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['push-to-protected']);
+  });
+
+  it('still denies a merge naming main outside the message it also carries', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git merge origin/main -m "routine update"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
+  it('does not treat -m as a message flag when it takes a mode, not prose', () => {
+    const d = evaluateCommand(ctx({ command: 'mkdir -m 755 workspaces/x' }), policy);
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // `git push` has no `-m`, so this exact command is one git would reject too.
+  // It is here for the property, which a real command could reach: outside the
+  // handful of subcommands that spend `-m` on free text, its argument is a ref
+  // or a number the rules must still read.
+  it('does not blank a -m on a git subcommand that has no message field', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin -m main', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['push-to-protected']);
+  });
+});
+
 describe('evaluateCommand — cross-cutting', () => {
   it('ignores tool calls that are not Bash entirely', () => {
     const d = evaluateCommand(
