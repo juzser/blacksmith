@@ -673,6 +673,22 @@ than appearing in it.
 
 ### Changed
 
+- **`guardrails.md` now states the removal rule the matcher actually
+  enforces.** The contract read "`rm -rf` and equivalents are blocked outside
+  `workspaces/` and `state/`", and two things make that untrue. The roots are
+  matched by name at the top of whichever repository the command runs in —
+  the git toplevel of its working directory, never this clone — so inside a
+  task worktree, where a worker spends the whole task, neither root exists and
+  every `rm` the rule matches is refused, its own `node_modules` included,
+  while a project carrying its own top-level `state/` has the bound applied
+  there instead. And "equivalents" claimed a reach the rule has never had: it
+  reads the shape of an `rm` invocation as written, so `rimraf`, an
+  `fs.rmSync` script, and `git clean` pass it untouched. Both halves were
+  reproduced against real git fixtures through the context `smith policy
+  hook` builds, rather than read off the source. No matcher, root, or
+  verdict changed — the divergence
+  was in the sentence, and `guardrails.yml`'s comment above `allowed_roots`
+  carried the same one.
 - **A project driven by Blacksmith no longer has to live under
   `workspaces/`.** Nothing in the runtime ever required it: every verb that
   touches a project's git takes the directory itself — `<project-dir>` as a

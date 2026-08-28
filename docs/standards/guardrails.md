@@ -57,7 +57,21 @@
 - Workers write only inside their assigned worktree, and only within their
   spec's path claims (out-of-claim edits fail the gate — S3 `claim-violation`
   unless the edit touches guardrail-protected files, then S1).
-- `rm -rf` and equivalents are blocked outside `workspaces/` and `state/`.
+- **Recursive-force `rm` is bounded to `workspaces/` and `state/`.** The
+  trigger is the flags as written — one bundled `-rf`/`-fr`, or
+  `--recursive --force` — and every path that `rm` names must then resolve
+  under one of `destructive_removal.allowed_roots`, each `;`/`&`/`|` segment
+  of a chain judged on its own. The roots are matched by name at the top of
+  whichever repository the command runs in — the git toplevel of its working
+  directory, not this clone — so where the bound lands depends on where the
+  command is typed. From the clone root it is the two directories this
+  document means. Inside a task worktree the toplevel *is* the worktree,
+  which has neither, so nothing qualifies there and a worker is refused every
+  `rm` the rule matches, its own `node_modules` included. Run from outside a
+  git repository the check refuses the same way.
+- The rule reads the shape of an `rm` invocation, not deletion in general —
+  the same tree removed by `rimraf`, an `fs.rmSync` script, or `git clean` is
+  not something it sees.
 
 ## Deploy + outbound
 

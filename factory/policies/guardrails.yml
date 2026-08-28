@@ -41,8 +41,11 @@ protected_branches:
   patterns: ["smith/*/integration"]
 
 destructive_removal:
-  # rule 6: `rm -rf`/equivalents are allowed only under one of these
-  # repo-root-relative directories (guardrails.md "Filesystem").
+  # rule 6: a recursive-force `rm` is allowed only under one of these
+  # directories, matched by name at the top of whichever repository the
+  # command runs in — its cwd's git toplevel, not this clone. Inside a task
+  # worktree that is the worktree, which has neither, so nothing qualifies
+  # there (guardrails.md "Filesystem").
   allowed_roots: [workspaces, state]
 
 deploy_commands:
