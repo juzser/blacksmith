@@ -840,6 +840,35 @@ than appearing in it.
 
 ### Fixed
 
+- **A playbook told an agent to run a verb that has never existed** (D-259).
+  Step 14 of `.claude/skills/bs/SKILL.md`'s run playbook — the spec-vs-goal
+  check that closes an epic — named `smith dispatch audit`. The verb is
+  `smith dispatch check`; typing what the playbook said produced
+  `Unknown command: dispatch audit` and exit 1, in the step a session reaches
+  last. The wrong name came from the CLI's own file layout: the module behind
+  the verb is `dispatchAudit.ts`. `usage.ts` and `cli.ts`'s dispatcher are
+  pinned to each other from both directions and both were green, because both
+  are about code — nothing read the prose as a command line, so the one
+  surface an agent is handed was the only one where a verb's name was checked
+  against nothing. `factory/orchestrator/test/docCommands.test.ts` now reads
+  it as argv: every `smith …` invocation — and every `node …/cli.js …` one,
+  which is how the pre-install guide has to write them — in every backtick
+  span and fenced block of every instruction file, resolved against the same
+  `COMMANDS` table `--help` prints, flags included. 423 of them across 43
+  files. A pipe between two words names a command family rather than a
+  pipeline, escaped or not; prose brackets and trailing punctuation are
+  dropped; an inline span that wraps across a line break is still one span,
+  which is how a tenth of these invocations are written; fenced lines stay
+  line-anchored so a command cannot swallow the next line's flags. Runtime
+  state and the records of the past are excluded by shape rather than by
+  name — `docs/specs/dogfood-*`, `docs/specs/evidence/`, `*punch-list.md`,
+  `CHANGELOG.md`, this entry among them — so tomorrow's record drops out on
+  its own while tomorrow's governing spec is in by default. The parser is
+  pinned against fixtures rather than the repo, the exclusion rule is
+  asserted directly rather than sampled, and a floor assertion fails if the
+  scanner ever stops reading. This is the converse of D-191, and the half
+  that bites harder: a verb named in no document reaches no agent, but a
+  verb the document invents reaches one and then fails in its hands.
 - **D-159 again, at the door P9-36 opened: the dashboard ran the lesson
   novelty gate on library defaults, not on the operator's policy file.**
   `cli.ts` closed every CLI path into that gate against

@@ -35,16 +35,16 @@ difference is what you read alongside the spec, and that at close a finding
 you raise blocks the epic verdict until the planner amends the plan
 (`smith plan amend` cuts v(n+1) citing your finding) or the operator waives it.
 
-**The spec-vs-goal check**, also at close, and a *separate* dispatch — the
-dispatch audit refuses to let one session answer for both, because a reader
-who has just argued the spec is sound is the worst reader to ask whether it
-was the right spec. Here the reference text is the only one in the epic the
-planner did not write: the `- goal:` line of the roadmap milestone that owns
-the epic. Every other gate reads something derived from the plan, so a plan
-that decomposes the wrong goal perfectly passes all of them and the epic
-closes green having built the wrong thing. You answer one question per goal
-clause — which live task delivers it — and you return a coverage map rather
-than evidence. See **Output contract — the spec-vs-goal check**.
+**The spec-vs-goal check**, also at close, and a *separate* dispatch —
+`smith dispatch check` refuses to let one session answer for both, because a
+reader who has just argued the spec is sound is the worst reader to ask
+whether it was the right spec. Here the reference text is the only one in the
+epic the planner did not write: the `- goal:` line of the roadmap milestone
+that owns the epic. Every other gate reads something derived from the plan, so
+a plan that decomposes the wrong goal perfectly passes all of them and the
+epic closes green having built the wrong thing. You answer one question per
+goal clause — which live task delivers it — and you return a coverage map
+rather than evidence. See **Output contract — the spec-vs-goal check**.
 
 ## You never modify the worktree
 

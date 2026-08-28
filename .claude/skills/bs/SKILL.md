@@ -794,12 +794,12 @@ below the floor.
 
     Hand those clauses and the live plan to a **`spec-reviewer`** session —
     a fresh one, never the planner's, and never the same dispatch as step 13:
-    the audit refuses to let one dispatch answer for both. Dispatch it *after*
-    step 13's record is written, not alongside it — a dispatch that predates
-    the previous record has already answered for that one, so two sessions
-    fired up front leave this record unaccounted for
-    (`smith dispatch audit` reports it `unverifiable`). Take back one verdict
-    per clause, in the goal's order, and record it:
+    `smith dispatch check` refuses to let one dispatch answer for both.
+    Dispatch it *after* step 13's record is written, not alongside it — a
+    dispatch that predates the previous record has already answered for that
+    one, so two sessions fired up front leave this record unaccounted for and
+    `smith dispatch check` reports that record `unverifiable`. Take back one
+    verdict per clause, in the goal's order, and record it:
 
     ```bash
     smith epic goal-check --epic <epic> \

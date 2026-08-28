@@ -12986,3 +12986,116 @@ It does not know that `:count="'3'"` passed a string to a `number`. That
 remains the gap SECURITY.md states, now one bullet narrower.
 
 **Related:** [[D-229]], [[D-235]].
+
+## D-259 — a playbook told an agent to run a verb that has never existed
+
+**Severity:** S2 (major) — the instruction is unrunnable, and it sits in the
+step that closes an epic. The session that follows it does not misbehave
+subtly; it runs a command, gets `Unknown command`, and is left holding a gate
+it was told to satisfy and cannot.
+
+**Where:** `.claude/skills/bs/SKILL.md:801` (step 14 of the run playbook, the
+spec-vs-goal check), the same claim restated as prose in
+`.claude/agents/spec-reviewer.md`, and the guard that now reads both,
+`factory/orchestrator/test/docCommands.test.ts`.
+
+Step 14 dispatches a fresh `spec-reviewer` and warns that the dispatch must
+come *after* step 13's record is written, because two sessions fired up front
+leave one record unaccounted for. To name the thing that reports that, it
+wrote:
+
+```
+(`smith dispatch audit` reports it `unverifiable`)
+```
+
+There is no `smith dispatch audit`. There never was. The verb is
+`smith dispatch check`, declared at `usage.ts:297` and dispatched at
+`cli.ts:1841`. Typing what the playbook says produces exactly this:
+
+```
+Usage: smith dispatch <action> [args] [--flags]
+
+  smith dispatch check <session-id> [--task <id>] [--policy <path>] …
+      Assert crosscheck.yml's role asymmetry against the log. …
+{"error":{"message":"Unknown command: dispatch audit"}}
+```
+
+and exit 1.
+
+**Where the wrong name came from.** The module implementing the verb is
+`dispatchAudit.ts`, and its test file is `dispatchAudit.test.ts`. The prose
+drifted toward the name of the thing it describes rather than the name the
+operator types — the CLI's own file layout supplied a plausible verb, and
+plausible is all a document needs to be to pass every check this repo had.
+
+**Why every layer stayed quiet.** The table and the dispatcher are pinned to
+each other from both directions: `usage.ts` documents every command, and
+`test/usage.test.ts` parses `cli.ts`'s dispatcher to assert the reverse
+inclusion, so a command cannot be dispatched without a usage line and cannot
+be documented without a branch. Both halves were green here, because both
+halves are about code. Nothing read the *prose* as a command line, so the one
+surface an agent is actually handed — the playbooks — was the only surface
+where a verb's name was never checked against anything.
+
+**The converse of D-191, and the harder half.** [[D-191]] found
+`smith findings for-dispatch` shipped end to end and named in exactly one
+document, and drew the rule that a verb no governing document names reaches
+no agent. This is the mirror: a verb a governing document names but the CLI
+does not ship *does* reach an agent — and then fails in its hands, mid-run,
+with the operator watching. D-191's failure is silent and costs a feature;
+this one is loud and costs a gate at the worst moment to lose one.
+
+**The gate.** `docCommands.test.ts` reads the instruction surface as argv.
+Every `smith …` invocation in every backtick span and every fenced block of
+every instruction file in the repo is parsed and resolved against the same
+`COMMANDS` table `--help` prints and `cli.ts` parses with, flags included via
+`flagSpecFor`. Both spellings count — the linked `smith` shim, and the
+`node <path>/cli.js` form `docs/guide/operator-guide.md` declares canonical
+for all of its examples, necessarily, since the pre-install docs run before
+the shim exists. Anchoring on `smith` alone would leave the one document a
+new operator reads first outside the guard.
+
+Four markdown shapes are handled rather than reported. A pipe between two
+words names a command family rather than a pipeline: `smith daemon
+run\|start\|stop` is three commands, and so is `smith mcp init|check` — only
+a table cell has to escape the pipe, and prose does not bother — while a pipe
+with spaces around it is a real pipeline and ends the command line. Brackets
+and trailing punctuation come from prose, not from argv. A bare namespace
+with no action — "the `smith epic` verbs" — names a family and passes. And an
+inline span that wraps across a line break is still one span, which is how a
+tenth of this repo's invocations are written: 42 of 423 are invisible to a
+scanner that reads prose a line at a time.
+
+Fenced lines stay line-anchored, because there a newline really does end the
+command unless the line says otherwise with a trailing backslash — the one
+case joined. An earlier cut let a whole fenced block be one string, and a
+command at the end of one line swallowed the flags on the next, inventing
+invocations that appear nowhere and reporting them as defects.
+
+What is excluded is excluded by shape rather than by name, so tomorrow's
+record drops out without anyone remembering to add it and tomorrow's
+governing spec is in by default. Out: runtime state (`state/`, `workspaces/`,
+`.agents/generated/`), and the records of the past, where a dead verb is the
+point rather than the defect — `docs/specs/dogfood-*` (several findings quote
+a command that never existed *as* the finding, and this entry is now one of
+them), `docs/specs/evidence/`, any `*punch-list.md`, and `CHANGELOG.md`,
+where the entry that shipped a since-renamed verb stays true about the old
+name forever. The rest of `docs/specs/` is in: the architecture and interview
+specs are documents `AGENTS.md` routes an agent into, not history. An
+allowlist would let a new document escape the guard by being new, which is
+the direction drift actually travels.
+
+A sweep that has never failed is a sweep nobody has proven fires, so the
+guard is pinned three ways. Its parser is tested against fixtures rather than
+the repo, so editing the repo's prose can never quietly relax the parser it
+is being checked by. A floor assertion fails if the scanner ever stops
+reading — it resolves 415 of the 423 invocations it finds across 43
+instruction files, counting invocations that reached a namespace rather than
+spans that matched, and the three files an agent is actually dispatched with
+must each contribute at least one. And the exclusion rule is asserted
+directly rather than sampled, because the cheapest way to silence a noisy
+failure is to widen the exclusion until a governing document falls out of the
+surface, and a test that spot-checks a few paths stays green while it
+happens.
+
+**Related:** [[D-191]].
