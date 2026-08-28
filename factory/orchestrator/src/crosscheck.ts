@@ -5,10 +5,11 @@
 //
 // `kind: native` (claude) has no transport at all — it's the in-process
 // judge already wired through gate.ts/findings.ts, never dispatched through
-// providers/index.ts. Codex and DeepSeek each declare a `transport` field
+// providers/index.ts. Every other provider declares a `transport` field
 // (Phase 8) that selects which transport module (cli-transport.ts /
-// api-transport.ts) runs them; `kind: api` is kept on both for backward
-// compatibility with the Phase-1 scaffold (it predates the transport
+// api-transport.ts) runs it — whatever the provider is called, since nothing
+// downstream dispatches on the name. `kind: api` is kept on those for
+// backward compatibility with the Phase-1 scaffold (it predates the transport
 // split and no longer carries meaning on its own — `transport` is now the
 // field that actually selects behavior).
 import { readFileSync } from 'node:fs';

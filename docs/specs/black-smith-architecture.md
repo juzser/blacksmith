@@ -246,11 +246,17 @@ therefore **provider-agnostic by contract**: reviewer/verifier are defined by
 their I/O contract (input: diff + spec + prior findings; output: findings
 JSON per schema), so any model that can honor the contract can serve.
 
-- **Adapter layer** `factory/orchestrator/providers/`: `claude` (native,
-  phase 1), `codex` (CLI/API), `deepseek` (API), extensible. Adapters
-  normalize output to the findings schema; a schema-validating shim retries or
-  rejects malformed responses. All external calls go through the same event
-  log and budget accounting as native dispatches.
+- **Adapter layer** `factory/orchestrator/providers/`: two transports, not a
+  file per vendor. `claude` is native and in-process; every other provider is
+  a `crosscheck.yml` entry whose `transport` selects `cli-transport.ts` (a
+  command that reads a prompt and writes a verdict) or `api-transport.ts` (an
+  OpenAI-compatible chat-completions endpoint). Provider names are data — they
+  select a config entry and label a verdict, and nothing dispatches on them —
+  so adding a provider is config alone, and `codex`/`deepseek` in the shipped
+  file are worked examples rather than reserved names. A schema-validating
+  shim normalizes output to the findings schema and rejects malformed
+  responses. All external calls go through the same event log and budget
+  accounting as native dispatches.
 - **Cross-check policy** (`crosscheck.yml`) — when a second opinion fires:
   - any S1/S2 finding before it blocks a task (a false blocker is expensive);
   - planner verdicts below a confidence threshold;

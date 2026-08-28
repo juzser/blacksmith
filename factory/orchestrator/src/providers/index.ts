@@ -1,12 +1,28 @@
-// Provider registry (architecture §6: "extensible" — adding a provider is
-// config + a thin binding, not a redesign). Keyed by crosscheck.yml's
-// provider names; `claude` (kind: native) is never dispatched through here —
-// it's the in-process judge already wired through gate.ts/findings.ts.
+// Provider registry (architecture §6: the judge tier is "provider-agnostic by
+// contract", so "any model that can honor the contract can serve"). Adding a
+// provider is a crosscheck.yml entry and nothing else — no file here, no
+// branch below.
+//
+// It did not start that way. This function used to open with two name-keyed
+// branches, `codex` and `deepseek`, each dispatching to a one-line module that
+// forwarded to the same generic transport this file ends with, and each
+// refusing to run if its name was paired with the other transport. The
+// forwarding modules added no behaviour, and the refusals were the real cost:
+// they turned two ordinary strings into reserved words with opinions. An
+// operator reaching Codex over an OpenAI-compatible endpoint, or running
+// DeepSeek's open weights as a local command, wrote a correct config and was
+// told it was misconfigured — and an operator whose own provider happened to
+// be called either name inherited a vendor's transport by coincidence of
+// spelling. Both are configurations someone will write, and neither is wrong.
+//
+// So the name is now data all the way through: it selects a config entry and
+// labels the result, and `transport` alone decides what runs. Keyed by
+// crosscheck.yml's provider names; `claude` (kind: native) is never dispatched
+// through here — it's the in-process judge already wired through
+// gate.ts/findings.ts.
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from '../crosscheck.js';
 import { runApiJudge } from './api-transport.js';
 import { runCliJudge } from './cli-transport.js';
-import { runCodexJudge } from './codex.js';
-import { runDeepseekJudge } from './deepseek.js';
 import type { JudgeRequest, JudgeResult } from './types.js';
 import { ProviderError } from './types.js';
 
@@ -45,30 +61,10 @@ export async function runJudge(
     );
   }
 
-  // Named bindings for the two Phase-8 providers (their own thin config
-  // files, per the architecture doc); any FUTURE provider name resolves
-  // purely by its declared transport — no per-provider binding required.
-  if (providerName === 'codex') {
-    if (config.transport !== 'cli') {
-      throw new ProviderError(
-        'provider.misconfigured',
-        'Provider "codex" must be configured with transport: cli.',
-        { provider: providerName },
-      );
-    }
-    return runCodexJudge(config, request);
-  }
-  if (providerName === 'deepseek') {
-    if (config.transport !== 'api') {
-      throw new ProviderError(
-        'provider.misconfigured',
-        'Provider "deepseek" must be configured with transport: api.',
-        { provider: providerName },
-      );
-    }
-    return runDeepseekJudge(config, request, opts.fetchImpl);
-  }
-
+  // Every enabled, non-native provider lands here, whatever it is called.
+  // `transport` is validated when crosscheck.yml is parsed, so the two arms
+  // below are exhaustive and a provider that reached this point has the fields
+  // its arm reads.
   if (config.transport === 'cli') {
     return runCliJudge(providerName, { command: config.command, args: config.args }, request);
   }

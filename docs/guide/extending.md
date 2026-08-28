@@ -1,8 +1,8 @@
 # Extending Blacksmith
 
-Contributor guide: how to add an agent template, change the taxonomy, add a
-policy, and what invariants `scripts/check.sh` enforces so a docs/code
-mismatch fails CI instead of drifting silently.
+Contributor guide: how to add an agent template, add a judge provider, change
+the taxonomy, add a policy, and what invariants `scripts/check.sh` enforces so
+a docs/code mismatch fails CI instead of drifting silently.
 
 ## Add an agent template
 
@@ -37,6 +37,89 @@ To add one:
 Run `bash scripts/check.sh` before opening a PR — it catches all of the
 above mechanically; don't rely on review to catch a taxonomy/template
 mismatch.
+
+## Add a judge provider
+
+There is no code step. The judge tier is provider-agnostic by contract
+(architecture §6): reviewer and verifier are defined by their I/O contract —
+in, a diff plus spec plus prior findings; out, findings JSON per schema — so
+any model that can honor it can serve. A provider is a `crosscheck.yml` entry
+and nothing else. No file under `factory/orchestrator/src/providers/`, no
+branch in its `index.ts`, no taxonomy edit.
+
+`transport` picks which of the two transports runs it, and it is the only
+thing that does. **The names in the shipped file — `codex`, `deepseek` — are
+worked examples, not reserved words.** Call your provider anything; pair any
+name with either transport. If the model you want is reachable both ways, the
+choice is yours and the factory has no opinion about it.
+
+(`kind: api` on a non-native provider is vestigial — it predates the
+transport split and carries no meaning of its own. Write it; `transport` is
+what decides.)
+
+**`transport: api` — anything speaking the OpenAI chat-completions shape.**
+That covers most hosted vendors, most gateways and proxies, and local servers
+like Ollama, llama.cpp or vLLM in their OpenAI-compatible mode.
+
+```yaml
+providers:
+  my-judge:
+    kind: api
+    transport: api
+    base_url: https://api.example.com/v1  # the transport appends `/chat/completions` and nothing else, so include the vendor's version prefix here if it has one
+    model: some-model-name
+    api_key_env: MY_JUDGE_API_KEY       # the NAME of an env var, never a key
+    response_format_json_object: true   # false if the endpoint rejects the response_format param
+    model_tier: mid
+    enabled: true
+    mode: shadow
+```
+
+**`transport: cli` — anything that reads a prompt and writes a verdict to
+stdout.** A vendor CLI, a local binary, or your own wrapper script.
+
+```yaml
+providers:
+  my-cli-judge:
+    kind: api
+    transport: cli
+    command: my-judge-cli
+    args: ["exec", "--color", "never"]
+    model_tier: mid
+    enabled: true
+    mode: shadow
+```
+
+Then, in order:
+
+1. **Set the key** if it is an API provider. `api_key_env` names an
+   environment variable; the value never enters this repo. Add the name to
+   `.env.example` with no value, per `docs/standards/guardrails.md`.
+2. **Check it before you spend a call** — `smith judge preflight` reports
+   auth/reachability per enabled provider, and says nothing about providers
+   you left off.
+3. **Start in `mode: shadow`.** Shadow verdicts are recorded and gate
+   *nothing*. This is not ceremony: an unfamiliar model's disagreement rate
+   against your codebase is unknown until you have measured it, and a judge
+   promoted straight to `active` can block a correct task on day one.
+4. **Calibrate, then promote** to `mode: active` — the procedure, and what to
+   look for in `smith stats providers`, is
+   [`docs/runbooks/providers.md`](../runbooks/providers.md).
+
+Rollback is the same file: `mode: shadow` removes its gating power,
+`enabled: false` stops it being invoked at all. Neither is ever written at
+runtime — a provider's power changes only when an operator edits this file.
+
+Two things the transports assume, worth knowing before you debug one:
+
+- **The verdict must be JSON matching the requested schema.** The extractor
+  scans for the first *validating* JSON in the output, not the first
+  parseable one, because CLI judges routinely echo the prompt to stderr and a
+  prompt containing `[]` plants a decoy ahead of the real answer.
+- **A provider that fails is dropped, not fatal.** Quorum catches transport
+  errors, files them as provider errors, and decides on whoever answered — so
+  a misconfigured judge degrades the quorum instead of stopping the run. Check
+  `smith stats providers` if a judge seems to have no effect.
 
 ## Change the taxonomy
 

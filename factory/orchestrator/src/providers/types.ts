@@ -47,6 +47,11 @@ export const JUDGE_TRANSPORT_FAILURE_CODES: ReadonlySet<string> = new Set([
   'provider.cli-unavailable',
   'provider.disabled',
   'provider.http-error',
+  // Nothing raises this any more: it was the registry's refusal to run a
+  // provider whose name it recognised but whose transport it disagreed with,
+  // and names no longer decide transports. Kept because event logs written
+  // before that change still carry it, and a stats query over them should
+  // classify it rather than fall through to the default.
   'provider.misconfigured',
   'provider.missing-api-key',
   'provider.network-error',
