@@ -6,9 +6,15 @@
 # `src/quorum.ts`) wires it up for real: `transport` selects which
 # transport module runs a provider (cli-transport.ts / api-transport.ts),
 # `mode` gates how much power its verdict has (see below). `enabled: false`
-# means never invoked at all, regardless of `mode`; both external providers
-# shipped that way and are now `enabled: true` in `mode: shadow`, so their
-# verdicts are recorded and gate nothing — see each one's PRECONDITION note.
+# means never invoked at all, regardless of `mode`, and both external
+# providers ship that way. Not a judgement about them: `enabled` is the one
+# field in this file that describes a MACHINE rather than the contract — it
+# answers "does this box have that judge", and for a box the repo has never
+# seen the honest answer is no. Switched on where the precondition is unmet a
+# provider does not fail loudly; it spends a doomed call on every quorum
+# trigger, has it caught, and leaves a failure row that reads like an outage.
+# So turn on the one you actually have — a one-line edit, runbook §2, and
+# `smith judge preflight` says beforehand whether it will work.
 # Full setup/calibration/promotion procedure: docs/runbooks/providers.md.
 #
 # Shadow mode (Phase 8 design decision): `mode: shadow` means a provider's
@@ -44,11 +50,13 @@ providers:
     # args, re-run that comparison rather than reasoning about it.
     args: ["exec", "--color", "never"]
     model_tier: mid          # taxonomy.yml model_tier — judge tier, architecture §4
-    # PRECONDITION: `codex login` must have run on every machine that dispatches
-    # a quorum trigger. Without it the CLI transport still spawns, fails, and
-    # quorum.ts records a provider error per trigger — caught, so nothing gates
-    # on it, but it is latency and noise. Set back to `false` to roll that back.
-    enabled: true
+    # PRECONDITION: `codex` on PATH, and `codex login` run on every machine
+    # that dispatches a quorum trigger. Without either the CLI transport still
+    # spawns, fails, and quorum.ts records a provider error per trigger —
+    # caught, so nothing gates on it, but it is latency and noise.
+    # `smith judge preflight` checks the first half locally; only a real call
+    # can check the second.
+    enabled: false     # ships off: shipping it on would be a guess about someone else's PATH
     mode: shadow       # flip to `active` only after a calibration pass (docs/runbooks/providers.md)
   deepseek:
     kind: api
@@ -62,8 +70,9 @@ providers:
     # Without it api-transport.ts throws `Environment variable "DEEPSEEK_API_KEY"
     # is not set` on every quorum trigger; quorum.ts catches it, so the gate
     # holds on the native verdict alone, but each trigger records a provider
-    # error. Set back to `false` on any runner that has no key.
-    enabled: true
+    # error. `smith judge preflight` reports the name it looked for and never
+    # the value it found, so it is safe to run anywhere.
+    enabled: false     # ships off: the key belongs to a runner, and the repo has never met one
     mode: shadow       # flip to `active` only after a calibration pass (docs/runbooks/providers.md)
 
 quorum_triggers:

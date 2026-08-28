@@ -230,4 +230,20 @@ describe('judgePreflight()', () => {
     expect(report.gating.minProviders).toBe(2);
     for (const problem of report.problems) expect(typeof problem).toBe('string');
   });
+
+  it('leaves the repo policy sound on a box that has nothing', () => {
+    // The one verdict about the real file that reads the same on every box,
+    // and the reason it is safe to assert where pinning `enabled` was not: it
+    // says the policy is SOUND for whoever runs it, never that it switches
+    // anything on. An operator who enabled a provider they have passes; a
+    // clone that enabled none passes; the only configuration refused is one
+    // enabled where it cannot be called -- which is what `problems` is for and
+    // what `smith judge preflight` already exits 1 on.
+    //
+    // It failed the day it was written. The shipped file carried both
+    // externals `enabled: true`, so a clone with no DeepSeek key and no
+    // `codex` on PATH -- every fresh clone of a public repo -- spent two
+    // doomed calls on every quorum trigger and logged two failures for them.
+    expect(judgePreflight().problems).toEqual([]);
+  });
 });

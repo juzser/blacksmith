@@ -156,6 +156,11 @@ Zero active externals is the shipped default and is reported, never
 flagged. Exactly **one** is flagged — see §4 for why that configuration
 pays for a gating provider and gets no gating.
 
+A fresh clone passes this command with nothing to say: both externals ship
+`enabled: false`, so there is no precondition left to miss. It earns its
+keep the moment you switch one on (§2) — run it then, before the first
+quorum trigger does it for you at the cost of a call.
+
 ## 2. Enabling a provider
 
 Edit `factory/policies/crosscheck.yml` — never a runtime write, always a
@@ -531,9 +536,9 @@ Either edit takes effect on the next case; nothing to restart.
   distinguishes "this provider was never invoked" from "this provider was
   never configured" — true of `enabled: false` in the file as well, but the
   file at least leaves a diff. Today it cannot change any gate outcome:
-  both providers are `mode: shadow`, and with no active external
-  participant `computeQuorum()` returns the same native-only decision it
-  always did. The moment one is promoted (§4), an ambient
+  both providers ship `enabled: false`, and one you switch on arrives in
+  `mode: shadow`, so with no active external participant `computeQuorum()`
+  returns the same native-only decision it always did. The moment one is promoted (§4), an ambient
   `SMITH_CROSSCHECK_OFFLINE` in a gating environment would silently
   downgrade real quorum cases back to native-only. So: pass it per command,
   and if you ever promote a provider, check for it in the environment that

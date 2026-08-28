@@ -919,6 +919,26 @@ than appearing in it.
   drift. The budget is a hang-detector, not a performance assertion — it is
   loose on purpose, for the reason `policyHookEntry.test.ts` already gives for
   refusing to time the hook.
+- **A public repo shipped two vendor judges switched on, for machines that
+  have neither.** `crosscheck.yml` carried `codex` and `deepseek` at
+  `enabled: true`, and `enabled` is the one field in that file that describes
+  a *machine* rather than the contract — it answers "does this box have that
+  judge", and for a box the repo has never seen the honest answer is no. The
+  repo's own diagnostic said as much: `smith judge preflight` exited 1 on a
+  fresh clone, naming a precondition unmet for a provider nobody had asked
+  for. Nothing failed loudly, which was the problem — `quorum.ts` catches a
+  provider error, and in `mode: shadow` the verdict gates nothing — so the
+  cost was paid quietly: every quorum trigger, and `gate.ts` raises one on
+  every blocking finding, spent two doomed calls and left two failure rows
+  that read like an outage. Both now ship `enabled: false`, so nothing is
+  invoked until an operator switches on the provider their own box actually
+  has — which is the behaviour `enabledExternalProviders` already promised in
+  its own doc comment ("an all-disabled policy (the shipped default) returns
+  [] … no judge call, no events, no spend"). `judgePreflight.test.ts` pins the
+  one verdict about the real file that reads the same on every box: the
+  shipped policy is sound with nothing installed. The file's header, both
+  PRECONDITION notes, the operator guide, the provider runbook and the Phase 8
+  roadmap goal said the old default out loud and now say this one.
 - **The guard hook loaded the entire orchestrator to answer a question about
   a command.** `.claude/hooks/guard.sh` fires on every `Bash`/`Write`/`Edit`/
   `MultiEdit`/`NotebookEdit` call an agent makes, which makes whatever it
@@ -1146,9 +1166,10 @@ Provider adapters (Codex CLI, DeepSeek API), quorum policy, disagreement
 analytics, and shadow-mode calibration. All four `crosscheck.yml` quorum
 triggers have a host: blocking-finding and same-mistake fire automatically
 from the gate; `smith epic verdict` and `smith plan quorum` are
-operator-invoked. Both providers shipped `enabled: false` in this phase;
-they are `enabled: true` in `mode: shadow` today — see **Unreleased**, and
-`docs/runbooks/providers.md` for the promotion procedure.
+operator-invoked. Both providers shipped `enabled: false` in this phase, were
+switched on for a while, and ship `enabled: false` again today — see
+**Unreleased** for why, and `docs/runbooks/providers.md` for the enabling and
+promotion procedure.
 
 ## Phase 7 — Self-extension — 2026-08-05
 

@@ -1537,14 +1537,15 @@ version. The dashboard's **Plan changes** filter selects all of them.
 ## 7. `smith plan quorum` + `smith epic verdict`
 
 The gate raises its own quorum cases; these two are the ones you invoke.
-Both decide nothing until a provider is promoted: `crosscheck.yml` ships
-`codex` and `deepseek` at `enabled: true` but `mode: shadow`, so each one runs,
-records a `judge-verdict`, and leaves the outcome resting on the native verdict
-alone (`docs/runbooks/providers.md`). They are not free, though: with no
-credentials configured they still run and each records a caught transport
-failure, so a `transportFailureRate` of 1.0 here means "never authenticated",
-not "never invoked". To make them true no-ops, set `enabled: false` in that
-file or pass `SMITH_CROSSCHECK_OFFLINE=1` on the command.
+Both decide nothing until a provider is promoted, and out of the box there
+is nothing to promote: `crosscheck.yml` ships `codex` and `deepseek` at
+`enabled: false`, so neither is invoked at all — no call, no `judge-verdict`
+row, no spend — and the outcome rests on the native verdict alone
+(`docs/runbooks/providers.md`). Turn on the one this box actually has and it
+arrives in `mode: shadow`: it runs and records, and the outcome still rests
+on the native verdict. `smith judge preflight` says beforehand whether a
+provider you switched on can be called at all, and
+`SMITH_CROSSCHECK_OFFLINE=1` forces every external off for one command.
 
 ```bash
 smith plan quorum --epic epic-1 --plan-version 1 \
@@ -2634,12 +2635,13 @@ is [`../runbooks/ops.md`](../runbooks/ops.md).
   transports (Codex via `codex exec`, DeepSeek via its
   OpenAI-compatible API), the quorum engine, `smith judge run`, and `smith
   stats providers`. What ships with *gating power* is nothing:
-  `crosscheck.yml` has `codex`/`deepseek` at `enabled: true` but
-  `mode: shadow`, so their verdicts are recorded and the factory still
-  decides Claude-only until an operator promotes one to `mode: active`
-  (`docs/runbooks/providers.md`). Enabled is not the same as harmless: with
-  no credentials each case records a caught transport failure rather than
-  making no call at all. All four `quorum_triggers` now have a
+  `crosscheck.yml` has `codex`/`deepseek` at `enabled: false`, so nothing is
+  invoked until you switch on the provider your own box has — and one you
+  switch on arrives in `mode: shadow`, recorded, with the factory still
+  deciding Claude-only until an operator promotes it to `mode: active`
+  (`docs/runbooks/providers.md`). `smith judge preflight` checks, without
+  spending a call, that a provider you switched on can be reached at all.
+  All four `quorum_triggers` now have a
   host, but only two are automatic: an S1/S2 finding before it blocks and a
   same-mistake finding, both from `gate.ts`'s `intakeAndDecide()`. The other
   two are operator-invoked — `smith epic verdict` (`epic.ts`) before an
@@ -2649,9 +2651,10 @@ is [`../runbooks/ops.md`](../runbooks/ops.md).
   `mode: active` provider changes no outcomes — `finder_ne_critic` excludes
   the claim's finder (the native reviewer today), leaving a below-quorum
   pool that escalates instead of deciding; you need two.
-- **The independent finder ships off, not merely powerless.** Every external
-  provider in `crosscheck.yml` ships `enabled: true, mode: shadow` — it runs,
-  it is recorded, and it gates nothing. `independent_finder` is `enabled: false`,
+- **The independent finder stays off even after you enable a provider.**
+  Switching one on in `crosscheck.yml` buys a judge in `mode: shadow` — it
+  runs on quorum triggers, it is recorded, and it gates nothing. It does not
+  buy `independent_finder`, which is `enabled: false` on its own account,
   because it is the one call that would send the diff rather than a claim, and
   `send_diff: false` is a second lock on the same door. Turning it on is two
   edits and a decision about which vendor sees this repository's source; until
