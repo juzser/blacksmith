@@ -37,10 +37,12 @@ This repo is self-governing: its rules live here, not in any other repo.
   `smith/<epic>/<task-id>`); tasks on `smith/<epic>/<task-id>`. Never push to
   `main`; `main` changes only via a reviewed PR. Never force-push shared
   branches.
-- **Worktrees.** Workers operate only inside their assigned worktree
-  (`workspaces/.wt/<project>/<task-id>`, a sibling of the project rather than
-  a child of it — D-42) and only within their spec's path
-  claims. Out-of-claim edits fail the gate.
+- **Worktrees.** Workers operate only inside their assigned worktree, and
+  only within their spec's path claims; out-of-claim edits fail the gate. A
+  worktree is a sibling of the project directory rather than a child of it
+  (D-42), so it follows the project wherever that directory is: a project
+  under `workspaces/` yields `workspaces/.wt/<project>/<task-id>`, and a
+  project outside this repo yields the same shape beside itself.
 - **Specs are contracts.** No dispatch without objective, output schema,
   acceptance criteria, tool allowlist, and budget.
 - **Declarations vs state.** Committed files are declarations. `state/`,

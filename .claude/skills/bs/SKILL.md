@@ -17,6 +17,17 @@ templates own that; duplicating them here would let this file drift out of
 sync with the real contracts. Cite policy files (`factory/policies/*.yml`)
 rather than restating their numbers.
 
+**The project directory is an answer you ask for, not a path this file
+knows.** A target project does not have to live under `workspaces/` — that is
+only where `smith new` puts one when no `--target-dir` says otherwise, and
+nothing downstream reads that location. Every verb that touches the project's
+git takes the directory itself: `<project-dir>` as a positional on the
+`worktree` family, `--project <dir>` on everything else. A task's worktrees
+are placed beside whatever directory it was handed, so a project outside this
+repo keeps its worktrees outside it too (`AGENTS.md` "Worktrees"). Ask for it
+once, at the top of a run, and carry that one answer through every command
+below — `<project-dir>` here means that answer, never a fixed path.
+
 Every write command needs an event-log envelope: `--session <id>
 --plan-version <n> --causal-parent <event-id> [--actor operator]`. Seed a
 session with `smith event append '{"session_id":"...","actor":"operator",
@@ -386,13 +397,17 @@ fail-closed contract, and the two are not substitutes.
 
 ## `/bs new <project> [--ui]`
 
-1. Run `smith new <project> [--ui]`. This copies `factory/scaffold/` (TS
-   strict, Biome, Vitest, CI) and layers whatever `factory/policies/stack.yml`
-   answered for — `--ui` adds the frontend, generates `src/styles/main.css`,
-   and vendors the named design system into `design/` if there is one. Then it
-   installs and runs the project's own gates, commits it on a `setup` branch,
-   and registers a bootstrap milestone in `factory/specs/roadmap.md` — all in
-   one call.
+1. Ask where the project should live, then run `smith new <project> [--ui]
+   [--target-dir <dir>]`. Without `--target-dir` it lands in
+   `workspaces/<project>` inside this repo, which is a default rather than a
+   requirement — the answer becomes the `<project-dir>` every later command
+   takes, so take it here rather than assuming it six steps in. The call
+   copies `factory/scaffold/` (TS strict, Biome, Vitest, CI) and layers
+   whatever `factory/policies/stack.yml` answered for: `--ui` adds the
+   frontend, generates `src/styles/main.css`, and vendors the named design
+   system into `design/` if there is one. Then it installs and runs the
+   project's own gates, commits it on a `setup` branch, and registers a
+   bootstrap milestone in `factory/specs/roadmap.md` — all in one call.
    An answer the templates cannot build (`frontend: react`) makes it **refuse
    before creating anything**, rather than quietly handing over the frontend
    they do ship. `smith stack check` says in advance which answers are
@@ -565,7 +580,7 @@ below the floor.
      edge the plan declared no dependency for. Split the wave and run the
      producer first — there is no override for a crossing, because the
      declared-edge case is already refused above it (operator-guide §2).
-2. Per admitted task: `smith worktree create workspaces/<project> <epic>
+2. Per admitted task: `smith worktree create <project-dir> <epic>
    <task-id>`.
 3. Pre-code, if the task needs it: dispatch `researcher` for an unknown, or
    `uiux` (`.claude/agents/uiux.md`) for any UI-affecting acceptance
@@ -685,7 +700,7 @@ below the floor.
     still imports — and that is a bounce to the coder, not a merge. A
     `possible` / `signature-changed` entry exits 0 and is a note: the
     scanner reads text, not types (operator-guide §2). Then admit into the
-    merge queue: `smith queue run <epic> --project workspaces/<project>
+    merge queue: `smith queue run <epic> --project <project-dir>
     --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
     `rebase-conflict` outcome, dispatch **`merger`**
     (`.claude/agents/merger.md`) with both diffs + specs, and note three
@@ -736,7 +751,7 @@ below the floor.
     command refuses to move your working tree, and refuses a dirty one):
 
     ```bash
-    smith integration check --epic <epic> --project workspaces/<project> \
+    smith integration check --epic <epic> --project <project-dir> \
       --checks <checks.json> \
       --session <session-id> --causal-parent <event-id>
     ```
@@ -755,7 +770,7 @@ below the floor.
     `criterion_ref` it is against — to:
 
     ```bash
-    smith epic spec-review --epic <epic> --project workspaces/<project> \
+    smith epic spec-review --epic <epic> --project <project-dir> \
       --plan factory/specs/active/<epic>/plan-vN.json \
       --reviewed-by spec-reviewer \
       [--evidence state/results/<epic>.spec-review-close-vN.json] \
@@ -827,7 +842,7 @@ below the floor.
     integrable at all:
 
     ```bash
-    smith epic verdict --epic <epic> --project workspaces/<project> \
+    smith epic verdict --epic <epic> --project <project-dir> \
       --session <session-id> --causal-parent <event-id>
     ```
 
@@ -842,7 +857,7 @@ below the floor.
     nothing; `epic close` is what makes it a fact in the log (D-43):
 
     ```bash
-    smith epic close --epic <epic> --project workspaces/<project> \
+    smith epic close --epic <epic> --project <project-dir> \
       --session <session-id> --causal-parent <event-id>
     ```
 
@@ -982,7 +997,7 @@ duties, v3.2)"), plus running the scheduler first — a report that omits
 pending proposals lets them sit invisible instead of surfacing them.
 
 1. **Run the scheduler first.** `smith scheduler run [--dry] --session
-   <id> [--project workspaces/<project>]` — a deterministic pass over the
+   <id> [--project <project-dir>]` — a deterministic pass over the
    event log, it never dispatches an agent itself
    (`factory/policies/scheduler.yml`, architecture §12). Read its
    `proposals` and route each kind before writing the digest:
