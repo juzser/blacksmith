@@ -632,6 +632,44 @@ than appearing in it.
     `new show` while losing the real `new`. The extractor in `usage.test.ts`
     now reads pair-form arms as well as bare ones, so only a bare namespace
     can own a nested action.
+- **`WAIVABLE_SEVERITIES` is now pinned to the `blocks_merge` column it was
+  always a restatement of.** `severity.yml` declares which levels block a
+  merge and states the rule in its own `waiver_semantics` ("Only S3/S4
+  findings are ever waived"); `waivers.ts` re-typed the answer as a literal,
+  so an operator flipping a level's `blocks_merge` would move the merge gate
+  and leave the waiver path answering from the old shape — a finding that no
+  longer blocks a merge yet cannot be waived either. A drift guard rather
+  than a runtime read on purpose: threading a `SeverityPolicy` through every
+  `applyBatch` call site would let the merge axis decide the waiver axis by
+  fiat, and the two are equal today by coincidence, not by definition. A
+  second test asserts the comparison walks every level `severity.yml`
+  declares, so a level missing from `SEVERITY_ORDER` cannot be silently
+  excluded from the guard that is supposed to read it.
+- **`paths.ts` now has to name every file in `factory/policies/`.** Ten of the
+  eleven policy files had a constant there; `severity.yml` did not, because
+  `severity.ts` spelled `${REPO_ROOT}/factory/policies/severity.yml` itself —
+  the only path in the repo assembled by interpolation rather than
+  `path.join`, and so the one loader that could not be held to the convention
+  `budgets.test.ts`, `crosscheck.test.ts` and `scheduler.test.ts` all keep
+  ("the loader's default and the paths.ts constant name one file"). The
+  constant moved, `severity.ts` imports it, and that convention test now
+  covers it. A new `paths.test.ts` compares the directory listing against the
+  constants as sorted arrays — so both a policy file no module can name and
+  two constants pointing at one file go red — plus a second test pinning that
+  every policy path is built with `path.join`, because the first one keys on
+  `path.dirname` and a stray separator would drop a constant out of the
+  comparison unnoticed.
+- **Two tests for the half of `NativeFindingRecord.file_path`'s claim that
+  nothing checked.** The doc comment promises both that a pre-P9-15 record
+  with no path is never co-located *and* that it "can still be corroborated —
+  the fingerprint is a digest of the path it was raised on". Only the first
+  half was pinned, and the two fail in opposite directions: if corroboration
+  ever started reading the path column instead of the fingerprint, such a
+  record would come back `native-only` beside an `independent-only` mint —
+  the factory raising a duplicate of a finding it already holds — with no test
+  going red. The second test carries a real path inside its fingerprint and
+  still refuses to co-locate, so the first cannot be passing for the
+  uninteresting reason that its digest was over an empty path.
 
 ### Changed
 
@@ -802,6 +840,32 @@ than appearing in it.
 
 ### Fixed
 
+- **D-159 again, at the door P9-36 opened: the dashboard ran the lesson
+  novelty gate on library defaults, not on the operator's policy file.**
+  `cli.ts` closed every CLI path into that gate against
+  `factory/policies/scheduler.yml` — the file `architecture` §9.3 and
+  `LessonsSchedulerPolicy` both call the single source of truth. Then P9-36
+  gave the UI three lesson routes onto the same `transitionLesson()`, and that
+  path never got the fix: Approve and Edit scored duplicates against
+  `lessons.ts`'s own constants, so lowering the threshold in the policy file
+  moved the CLI and left the dashboard where it was. Latent only because the
+  shipped numbers happen to equal the defaults, which is precisely the state
+  D-159 named a knob wired to nothing. `createApp()` now reads the policy once
+  at startup and spreads it last into every transition, so a malformed file is
+  a loud failure when the server boots rather than a 500 the first operator to
+  click Approve discovers, and no request body can take the gate's shape.
+  Tests may inject a policy; production omits it and reads the file.
+- **A drift guard that could not detect drift.** `ui/test/waivable.test.ts`
+  ran two tests titled "matches factory/orchestrator/src/waivers.ts …" that
+  compared the UI's copy against a literal spelled out three lines above them
+  — pinning the copy to itself. Editing `WAIVABLE_SEVERITIES` in the
+  orchestrator left both green, which is the one thing the copy exists to make
+  loud. The guards now re-derive the lists from `waivers.ts`'s source text
+  (the UI bundle still cannot import the orchestrator, and `WAIVABLE_STATUSES`
+  is not exported there — reading the file is what is left), and a third test
+  pins the parse itself, so a regex that quietly stops matching cannot turn
+  both guards into `[] === []`. The docblock in `ui/src/lib/waivable.ts` that
+  claimed the protection was real is now a description of what happens.
 - **Eight cards asked to be small and eight `<div>`s got an attribute**
   (D-258). `<Card size="sm">` at eight call sites in `AnalyticsPage.vue`,
   `OverviewPage.vue` and `TaskDetailPage.vue`, where `Card.vue` declares

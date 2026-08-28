@@ -2,11 +2,10 @@ import { readFileSync } from 'node:fs';
 import picomatch from 'picomatch';
 import { parse as parseYaml } from 'yaml';
 import { SmithError } from './errors.js';
-import { REPO_ROOT } from './paths.js';
+import { SEVERITY_POLICY_PATH } from './paths.js';
 
 export class SeverityError extends SmithError {}
 
-const SEVERITY_POLICY_PATH = `${REPO_ROOT}/factory/policies/severity.yml`;
 /** Escalation order, worst first — the same order severity.yml/taxonomy.yml document values in. */
 export const SEVERITY_ORDER: readonly string[] = [
   'S1-stop-the-line',

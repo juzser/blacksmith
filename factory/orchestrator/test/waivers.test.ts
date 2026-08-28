@@ -10,12 +10,14 @@ import {
   reverifyFinding,
   transition,
 } from '../src/findings.js';
+import { loadSeverityPolicy, SEVERITY_ORDER } from '../src/severity.js';
 import {
   applyBatch,
   denyWaiver,
   grantWaiver,
   isWaived,
   pendingBatch,
+  WAIVABLE_SEVERITIES,
   WaiverError,
 } from '../src/waivers.js';
 
@@ -523,5 +525,33 @@ describe('waivers.ts', () => {
         ).resolves.toBe(true);
       });
     });
+  });
+});
+
+describe('WAIVABLE_SEVERITIES', () => {
+  // The list is a hardcoded restatement of something severity.yml already
+  // declares: `blocks_merge: false` IS "waivable", per that file's own
+  // waiver_semantics rule ("Only S3/S4 findings are ever waived. S1/S2
+  // cannot be waived."). Nothing re-derived it, so an operator flipping a
+  // level's blocks_merge would move the gate and leave the waiver path
+  // answering from the old shape -- a finding that no longer blocks a merge
+  // yet cannot be waived either, or the reverse, which is worse.
+  //
+  // A drift guard rather than a runtime read: threading a SeverityPolicy
+  // through every applyBatch/transition call site would make severity.yml
+  // decide the waiver axis by fiat, and the two axes are only equal today.
+  // This keeps them equal on purpose instead of by accident.
+  it('is exactly the severity.yml levels that do not block a merge, worst first', () => {
+    const { levels } = loadSeverityPolicy();
+    const nonBlocking = SEVERITY_ORDER.filter((severity) => !levels[severity]?.blocksMerge);
+    expect([...WAIVABLE_SEVERITIES]).toEqual(nonBlocking);
+  });
+
+  // SEVERITY_ORDER is what the filter above walks, so a level declared in
+  // severity.yml but missing from it would be silently excluded from the
+  // comparison and the guard would pass over a policy it never read.
+  it('compares against every level severity.yml declares', () => {
+    const { levels } = loadSeverityPolicy();
+    expect(Object.keys(levels).sort()).toEqual([...SEVERITY_ORDER].sort());
   });
 });
