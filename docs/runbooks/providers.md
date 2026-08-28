@@ -7,6 +7,17 @@ finder, rollback, cost, and security. Companion to `docs/specs/black-smith-archi
 (`pnpm run build` → `factory/orchestrator/dist/cli.js`, substitute `smith`
 if linked).
 
+**These two are worked examples, not the supported set.** Nothing in the
+runtime knows either name: a provider is a `crosscheck.yml` entry, and its
+`transport` — `cli` (a command that reads a prompt on stdin and writes a
+verdict on stdout) or `api` (an OpenAI-compatible chat-completions endpoint)
+— is the whole of what decides how it is called. Any provider reachable
+either way slots in here with no code change; see
+[`docs/guide/extending.md`](../guide/extending.md#add-a-judge-provider) for
+the config shape. What is genuinely Codex- and DeepSeek-specific below is
+labelled as such, and everything from §2 (enabling) onward applies to
+whatever you configure.
+
 ## 1. Key / auth setup
 
 - **Codex — CLI transport, ChatGPT-subscription auth.** No API key. Run

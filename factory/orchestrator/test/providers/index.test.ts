@@ -107,7 +107,22 @@ describe('providers/index.ts runJudge', () => {
     expect(result.output).toEqual({ verdict: 'refute', rationale: 'ok' });
   });
 
-  it('rejects "codex" configured with the wrong transport', async () => {
+  // The names in the shipped crosscheck.yml are examples, not reservations.
+  // This registry used to hard-code `codex` -> cli and `deepseek` -> api and
+  // refuse any other pairing, which made two ordinary strings mean something
+  // to a public operator who had never heard of either vendor. Both of these
+  // are real configurations someone will write: Codex is reachable over an
+  // OpenAI-compatible endpoint, and a locally-run DeepSeek is a command.
+  it('runs a provider named "codex" over the API transport when that is what it declares', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"verdict":"confirm","rationale":"ok"}' } }],
+        }),
+        { status: 200 },
+      ),
+    );
+    process.env.TEST_INDEX_CODEX_KEY = 'k';
     const policy = policyWith({
       codex: {
         name: 'codex',
@@ -118,16 +133,16 @@ describe('providers/index.ts runJudge', () => {
         modelTier: 'mid',
         baseUrl: 'https://example.test',
         model: 'x',
-        apiKeyEnv: 'SOME_ENV',
+        apiKeyEnv: 'TEST_INDEX_CODEX_KEY',
         responseFormatJsonObject: true,
       },
     });
-    await expect(runJudge('codex', baseRequest(), { policy })).rejects.toMatchObject({
-      code: 'provider.misconfigured',
-    });
+    const result = await runJudge('codex', baseRequest(), { policy, fetchImpl: fetchMock });
+    expect(result.provider).toBe('codex');
+    expect(result.output).toMatchObject({ verdict: 'confirm' });
   });
 
-  it('rejects "deepseek" configured with the wrong transport', async () => {
+  it('runs a provider named "deepseek" over the CLI transport when that is what it declares', async () => {
     const policy = policyWith({
       deepseek: {
         name: 'deepseek',
@@ -140,9 +155,9 @@ describe('providers/index.ts runJudge', () => {
         args: [FIXTURE, 'success'],
       },
     });
-    await expect(runJudge('deepseek', baseRequest(), { policy })).rejects.toMatchObject({
-      code: 'provider.misconfigured',
-    });
+    const result = await runJudge('deepseek', baseRequest(), { policy });
+    expect(result.provider).toBe('deepseek');
+    expect(result.output).toMatchObject({ verdict: 'confirm' });
   });
 
   it('resolves a future, unnamed provider purely by its declared transport (generic api fallback)', async () => {

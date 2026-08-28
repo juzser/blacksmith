@@ -670,9 +670,38 @@ than appearing in it.
   going red. The second test carries a real path inside its fingerprint and
   still refuses to co-locate, so the first cannot be passing for the
   uninteresting reason that its digest was over an empty path.
+- **`docs/guide/extending.md` gained an "Add a judge provider" section** — the
+  page a public operator with a provider this repo has never heard of reaches
+  first, and the one extension point it did not cover. It states the shape of
+  both transport declarations, the four steps from key to promotion (name the
+  env var, `smith judge preflight`, start in `mode: shadow`, calibrate before
+  promoting), how to roll one back, and the two transport behaviours worth
+  knowing before writing a config: the extractor takes the first *validating*
+  JSON rather than the first parseable one, and a provider that fails is
+  dropped from the quorum rather than taking the run down, which is what
+  `smith stats providers` is for.
 
 ### Changed
 
+- **Judge providers are resolved by transport, not by name.** The architecture
+  says the judge tier is "provider-agnostic by contract" — "any model that can
+  honor the contract can serve" — and the registry contradicted it. Dispatch
+  opened with two name-keyed branches, `codex` and `deepseek`, each forwarding
+  to a one-line module that called the same generic transport the file already
+  ended with, and each refusing to run if its name was paired with the other
+  transport. The forwarding modules added no behaviour; the refusals were the
+  real cost, turning two ordinary strings into reserved words with opinions.
+  An operator reaching Codex over an OpenAI-compatible endpoint, or running
+  DeepSeek's open weights as a local command, wrote a correct `crosscheck.yml`
+  and was told it was misconfigured — and an operator whose own provider
+  happened to be called either name inherited a vendor's transport by
+  coincidence of spelling. Both are configurations someone will write, and
+  neither is wrong. The name is now data all the way through: it selects a
+  config entry and labels the verdict, and `transport` alone decides what
+  runs. `providers/codex.ts` and `providers/deepseek.ts` are deleted, adding a
+  provider is a config entry and nothing else, and the two names in the
+  shipped file are worked examples rather than reservations. No transport
+  behaviour changed.
 - **`guardrails.md` now states the removal rule the matcher actually
   enforces.** The contract read "`rm -rf` and equivalents are blocked outside
   `workspaces/` and `state/`", and two things make that untrue. The roots are
