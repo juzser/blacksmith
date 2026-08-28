@@ -1,6 +1,6 @@
 # WSL2 is the documented Windows path (INSTALL.md), and scripts/check.sh plus
-# .claude/hooks/guard.sh — the shim that pipes each Bash tool call into
-# `smith policy hook` — are read by bash. A CRLF checkout breaks both, so
+# .claude/hooks/guard.sh — the shim that pipes each guarded tool call into
+# `dist/policyHook.js` — are read by bash. A CRLF checkout breaks both, so
 # normalise on the way in and check out LF everywhere.
 * text=auto eol=lf
 

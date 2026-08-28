@@ -870,6 +870,23 @@ than appearing in it.
 
 ### Fixed
 
+- **The guard hook loaded the entire orchestrator to answer a question about
+  a command.** `.claude/hooks/guard.sh` fires on every `Bash`/`Write`/`Edit`/
+  `MultiEdit`/`NotebookEdit` call an agent makes, which makes whatever it
+  execs the most frequently run code in the repo. It execed
+  `dist/cli.js policy hook`, and `cli.ts` is a router with 64 top-level
+  imports — `db/projector.js`, and so `drizzle-orm`, among them. Loading that
+  graph measured ~1.63s in front of ~39ms of actual policy work: a database
+  layer loaded and thrown away once per guarded action, in front of every
+  action every agent takes. The shim now execs `dist/policyHook.js`, an entry
+  point whose import graph is the decision's alone, and the same payload
+  through the same shim measures ~0.20s. `smith policy hook` still exists and
+  behaves identically — both routes call `decideHookPayload` in the new
+  `hookDecision.ts`, so there is no second copy of the decision to drift.
+  `policyHookEntry.test.ts` pins both halves of that: parity with
+  `cli.js policy hook` case by case, and a structural assertion that the
+  hook's import graph cannot silently regain the database layer.
+
 - **The recursive-force `rm` gate read two flag spellings out of the many
   that mean the same removal** (rule 6, `unbounded-rm`). It matched the flags
   as a literal run directly after `rm` — `r` and `f` inside one lowercase

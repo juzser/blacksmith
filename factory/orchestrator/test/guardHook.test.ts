@@ -55,7 +55,7 @@ function guardRootedAt(root: string): string {
 
 /**
  * Opens and closes a judge lease through the built binary, the way the
- * orchestrator does — and deliberately with no `--lease-dir`. `policy hook`
+ * orchestrator does — and deliberately with no `--lease-dir`. The guard hook
  * has no such flag, so the only leases it can ever see are the real ones under
  * state/; a test that pointed the lease somewhere else would be testing a path
  * the hook does not take.
@@ -155,7 +155,10 @@ describe('guard.sh (PreToolUse transport shim)', () => {
       const guard = guardRootedAt(root);
       const dist = path.join(root, 'factory', 'orchestrator', 'dist');
       mkdirSync(dist, { recursive: true });
-      writeFileSync(path.join(dist, 'cli.js'), 'process.exit(1)\n');
+      // The file guard.sh actually execs — `policyHook.js`, not `cli.js`.
+      // Writing the wrong name here would exercise the "not built" path above
+      // instead of this one, and the two escalate with different wording.
+      writeFileSync(path.join(dist, 'policyHook.js'), 'process.exit(1)\n');
 
       const decision = decisionOf(askGuard(payload('echo hi'), guard).stdout);
       expect(decision.permissionDecision).toBe('ask');

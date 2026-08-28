@@ -84,6 +84,7 @@ import {
 } from './findings.js';
 import { runGate } from './gate.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
+import { decideHookPayload } from './hookDecision.js';
 import {
   checkWorktreeImmutable,
   fingerprintWorktree,
@@ -123,7 +124,6 @@ import {
   detectRepoRoot,
   evaluateCommand,
   loadGuardrailPolicy,
-  type PolicyContext,
 } from './policy.js';
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
@@ -2130,100 +2130,21 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'policy' && action === 'hook') {
-    // The PreToolUse hook body `.claude/hooks/guard.sh` execs into. This
-    // command signals its outcome one of two ways, and the shim (guard.sh)
-    // tells them apart by exit code:
-    //   - a reachable decision: exit 0, one JSON hookSpecificOutput object
-    //     on stdout, `permissionDecision` either "deny" or "allow".
-    //   - could not reach a decision at all: an uncaught throw, left to
-    //     propagate to main()'s top-level catch (exitCode 1).
-    // A malformed payload takes the second path on purpose. guard.sh's own
-    // `extract_field` used to return '' on anything it could not parse,
-    // which read as "no tool_name" and let every rule fall through as a
-    // silent allow — invisibly, since a BSD-vs-GNU `sed` incompatibility
-    // meant this had been happening on every macOS run since Phase 2 (see
-    // guard.sh's header). "cannot parse the input" and "nothing to inspect"
-    // must never look the same again: the first is failure, the second is a
-    // real allow, and only guard.sh's fail-closed handling of a non-zero
-    // exit is allowed to turn "failure" into a denial.
-    const raw = readFileSync(0, 'utf8');
-    const payload = JSON.parse(raw) as {
-      tool_name?: unknown;
-      tool_input?: { command?: unknown; file_path?: unknown };
-      cwd?: unknown;
-    };
-    const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
-    const command =
-      typeof payload.tool_input?.command === 'string' ? payload.tool_input.command : '';
-    // A `Write`/`Edit`/`MultiEdit` payload carries no command; its target is
-    // `tool_input.file_path`, absolute. Bash was the only tool worth
-    // inspecting while every leased role was a judge, since judges hold no
-    // file tools and a shell was their only write path. A tester holds both,
-    // so watching only Bash would leave the rule to be routed around with
-    // the tool the role was handed. Same shape as `command`: a missing or
-    // non-string field reads as absent, never as a guess.
-    const filePath =
-      typeof payload.tool_input?.file_path === 'string' ? payload.tool_input.file_path : null;
-    // Branch and repo root come from where the command would actually run,
-    // which the PreToolUse payload carries as `cwd`. Resolving them from this
-    // binary's own checkout instead would be wrong in the case this factory
-    // spends most of its time in: guard.sh always execs the main clone's
-    // dist/cli.js, while the session issuing the command is usually inside a
-    // per-task git worktree on a different branch. That gap is not academic —
-    // `git rebase` on smith/<epic>/integration is a rule-5 denial, and the
-    // merge queue performs rebases from a worktree standing on exactly that
-    // branch while the main clone stands elsewhere. The old bash hook got
-    // this right for free by running `git rev-parse` in its own inherited
-    // cwd; the port has to ask for it. process.cwd() is the fallback for a
-    // payload without the field (a hand-driven invocation, or an older
-    // client), and a cwd outside any repo resolves to ''/null, which denies
-    // an out-of-bounds `rm` rather than allowing it.
-    const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : process.cwd();
-    const context: PolicyContext = {
-      toolName,
-      command,
-      branch: detectCurrentBranch(cwd),
-      repoRoot: detectRepoRoot(cwd),
-      // Resolved from the same `cwd`, and for the same reason: the lease is
-      // keyed by the worktree a judge was handed, and `cwd` is the only thing
-      // in a PreToolUse payload that says where the command will run. No lease
-      // is the ordinary case and costs one directory read.
-      sandbox: activeSandboxFor(cwd),
-      filePath,
-    };
-    const decision = evaluateCommand(context, loadGuardrailPolicy());
-    if (!decision.allowed) {
-      // guard.sh only ever surfaced one reason: each rule below block()ed and
-      // exited immediately on its own match, sequentially, so the first rule
-      // in guard.sh's 1-6 order to fire is the only one an agent ever saw.
-      // evaluateCommand's checks array preserves that same order, so
-      // violations[0] reproduces guard.sh's exact visible behaviour even
-      // though evaluateCommand (policy check's diagnostic output) reports
-      // every rule that tripped, not just the first.
-      const first = decision.violations[0];
-      const reason = first ? first.reason : 'guardrails.yml denied this command.';
-      printJson({
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason: `BLOCKED: ${reason}`,
-        },
-      });
-      return 0;
-    }
-    // Allow prints NOTHING, on purpose, and this is not a cosmetic choice.
-    // Claude Code reads an explicit `permissionDecision: "allow"` from a hook
-    // as "skip the permission system for this call" — it outranks the
-    // operator's own `permissions.deny` list and suppresses the approval
-    // prompt. A guard hook that emitted it on every command it did not
-    // recognise would therefore not be a guard at all: it would be a blanket
-    // auto-approver for everything outside guardrails.yml's six rules, which
-    // is a strictly wider grant than the hook it replaces ever had. Empty
-    // stdout is the protocol's "no opinion, carry on with the normal
-    // permission flow", which is exactly what this layer means when no rule
-    // fires. The exit code still separates "no opinion" (0, silent) from
-    // "could not decide" (non-zero, and guard.sh turns that into a deny), so
-    // silence here is never load-bearing the way the old hook's was.
+    // The PreToolUse hook body, kept as a command because guard.sh's header,
+    // the docs and cli.test.ts all name it — but the shim no longer execs it.
+    // It execs `dist/policyHook.js`, an entry point over the same function
+    // whose import graph is the decision's alone; this router carries 64
+    // top-level imports, ~1.3s of them the database layer, in front of ~39ms
+    // of policy work, and the hook pays that on every guarded tool call. Both
+    // paths call decideHookPayload, so a second copy cannot drift out of
+    // agreement with the one actually guarding the repo.
+    //
+    // The contract, which policyHook.ts mirrors exactly: exit 0 with the deny
+    // envelope on stdout, exit 0 in silence for an allow, and let a malformed
+    // payload throw out through main()'s catch for a non-zero exit. See
+    // hookDecision.ts for why each of those three is what it is.
+    const output = decideHookPayload(readFileSync(0, 'utf8'), process.cwd());
+    if (output) printJson(output);
     return 0;
   }
 

@@ -5,8 +5,10 @@
 > [`factory/policies/guardrails.yml`](../../factory/policies/guardrails.yml)
 > and the matchers in `factory/orchestrator/src/policy.ts`;
 > [`.claude/hooks/guard.sh`](../../.claude/hooks/guard.sh) is a transport
-> shim that pipes each `Bash` tool call into `smith policy hook` and relays
-> the answer. Violations are S1 ("stop the line") unless stated otherwise.
+> shim that pipes each guarded tool call into `dist/policyHook.js` — the same
+> decision `smith policy hook` makes, as an entry point that loads only what
+> deciding needs — and relays the answer. Violations are S1 ("stop the line")
+> unless stated otherwise.
 >
 > To ask what the rules would say about a command without running it:
 > `smith policy check --command '<cmd>'` — exit 1 means denied, and the output

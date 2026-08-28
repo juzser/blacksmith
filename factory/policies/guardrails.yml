@@ -2,9 +2,9 @@
 #
 # docs/standards/guardrails.md is the contract; this file is the data half of
 # what enforces it. HOST: `smith policy check`/`smith policy hook`
-# (factory/orchestrator/src/policy.ts), and — via `policy hook` —
-# `.claude/hooks/guard.sh`, the PreToolUse gate on every Bash tool call an
-# agent session makes.
+# (factory/orchestrator/src/policy.ts), and — via `dist/policyHook.js` —
+# `.claude/hooks/guard.sh`, the PreToolUse gate on every guarded tool call
+# an agent session makes.
 #
 # What this file is NOT: a place for matchers. Deciding whether a command
 # trips a rule is deliberately NOT expressed here as regex-in-YAML — the
