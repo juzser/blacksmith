@@ -543,6 +543,67 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
     expect(d.allowed).toBe(true);
   });
 
+  // `-R` is POSIX's recursive flag and does exactly what `-r` does, so a rule
+  // that reads one spelling and not the other is a rule with a doorway in it.
+  it('recognizes the capital recursive flag -Rf and denies it out of bounds', () => {
+    const d = evaluateCommand(ctx({ command: 'rm -Rf src/b', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('allows -Rf under an allowed root', () => {
+    const d = evaluateCommand(ctx({ command: 'rm -Rf workspaces/foo', repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  // Bundling is a convenience, not part of what makes the removal dangerous:
+  // `rm -r -f x` and `rm -rf x` delete the same tree the same way.
+  it('recognizes short flags passed separately and denies them out of bounds', () => {
+    const d = evaluateCommand(ctx({ command: 'rm -r -f src/b', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('recognizes separate short flags in either order', () => {
+    const d = evaluateCommand(ctx({ command: 'rm -f -r src/b', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('allows separately-passed short flags under an allowed root', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -r -f workspaces/foo', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('recognizes a long recursive flag paired with a short force flag', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm --recursive -f src/b', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('recognizes a short recursive flag paired with a long force flag', () => {
+    const d = evaluateCommand(ctx({ command: 'rm -R --force src/b', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('does not trip the rule on -R without a force flag', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -R workspaces-sibling', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('does not trip the rule on -f without a recursive flag', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -f workspaces-sibling/file', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
   it('recognizes --recursive --force spelled out in full and denies it out of bounds', () => {
     const d = evaluateCommand(
       ctx({ command: 'rm --recursive --force src/b', repoRoot: '/repo' }),
@@ -594,6 +655,25 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
   it('does not trip the rule at all on rm -r without -f (recursive but not forced)', () => {
     const d = evaluateCommand(
       ctx({ command: 'rm -r workspaces-sibling', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // Reading the flags across the invocation rather than out of the token
+  // right after `rm` means they are also read where a shell would accept
+  // them: after the path. A gate that stopped at the first token would be
+  // reading a different command than the one that runs.
+  it('recognizes flags written after the path and denies them out of bounds', () => {
+    const d = evaluateCommand(ctx({ command: 'rm src/b -rf', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // What keeps that scan from reading an unrelated command's flags is that
+  // the segment has to invoke `rm` as a word, not merely contain the letters.
+  it('does not trip the rule on a command whose name merely ends in rm', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'charm --recursive --force src/b', repoRoot: '/repo' }),
       policy,
     );
     expect(d.allowed).toBe(true);
