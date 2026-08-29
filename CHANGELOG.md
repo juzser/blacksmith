@@ -984,6 +984,33 @@ than appearing in it.
   file: only a message goes, so a quoted *ref* is still read and `git merge
   "main"` is still denied. Fifteen tests, six of them asserting what a real
   command still trips.
+- **Four documents promised a force-push rule narrower than the one enforced,
+  and the denial itself was a dead end.** `AGENTS.md` said "never force-push
+  shared branches", `CONTRIBUTING.md` said "a branch someone else may have
+  pulled", `README.md` scoped it to "a protected branch", and
+  `guardrails.md` listed `push --force` inside the bullet about `main` being
+  untouchable — four ways of implying that a private branch is fair game. It
+  never was: `checkForcePush` matches `--force`/`-f`/`--force-with-lease` on
+  any `git push` and has since Phase 2, as `.claude/settings.json`'s deny list
+  does independently. The gap that made this bite was the other half of
+  `guardrails.md`, which allows `rebase`/`commit --amend` on a task branch
+  before the merge queue without saying that a task branch *already pushed*
+  therefore cannot be republished — so an agent could follow the documented
+  workflow into a branch it had no way to update, and read a refusal that
+  stopped at "never allowed" with no next move in it. The rules are unchanged,
+  because the matcher reads command text and cannot tell a private branch from
+  a shared one, and this is the deny gate where guessing wrong destroys work
+  that does not come back. What changed is that the documents now say what is
+  enforced — **a branch an agent has pushed is append-only**, review feedback
+  becomes another commit, and republishing rewritten history is an operator
+  action — and the `force-push` reason string says so at the moment it fires,
+  the way `push-to-protected` has always ended with "Push a side branch and
+  open a PR". Four new tests: three pinning that a task branch, an integration
+  branch and a branch nobody has ever fetched are refused identically, and one
+  reading the real `guardrails.yml` to hold the copy to naming a way forward.
+  The queue's own rebase is untouched and stays legal — it runs inside the
+  task's worktree and is never pushed anywhere, which is now written down as
+  the reason the two rules do not collide.
 - **`scripts/check.sh` failed on a clean checkout, for reasons no contributor
   had caused.** `vitest.config.ts` set no `testTimeout`, so the 5s default —
   sized for in-process unit tests — governed `cli.test.ts` and
