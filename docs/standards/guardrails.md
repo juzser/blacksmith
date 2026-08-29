@@ -166,7 +166,8 @@ sold as the other.
 
 ## CI
 
-- `pnpm install --frozen-lockfile` only — CI never resolves new dependency
-  versions.
+- Install from the lockfile only — `--frozen-lockfile`, or whatever the
+  equivalent is for the `package_manager` in `factory/policies/stack.yml`.
+  CI never resolves new dependency versions.
 - Gate parity: CI re-runs lint + typecheck + tests; a local-green/CI-red
   divergence blocks the queue until explained (error class `env-failure`).

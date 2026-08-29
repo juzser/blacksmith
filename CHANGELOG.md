@@ -899,6 +899,46 @@ than appearing in it.
 
 ### Fixed
 
+- **The agent prompts stopped answering the install interview for the
+  operator.** `factory/policies/stack.yml` made the stack an operator answer,
+  and one prompt out of twelve looked it up. Fourteen lines still named this
+  repo's own tools as if every project had them — eight in the prompts, four in
+  the standards those prompts cite, two in the policy files a judge reads as
+  its own definition of a severity. The coder was told "no style beyond the
+  scaffold's Biome config", the tester to "run Playwright e2e" and to file
+  "Playwright traces", the security reviewer that "gitleaks, pnpm audit already
+  ran". The reviewer's pair was worse than cosmetic: "No style commentary —
+  Biome's job" and `S4-nit` = "style/naming nits not caught by Biome"
+  contradict each other on a project that answered `lint: none`, where nothing
+  catches those nits and the reviewer had just been told to stay quiet about
+  them — an entire finding category disappearing on any project without that
+  one linter. Every line now points at the policy instead of guessing: the
+  linter is "whatever `factory/policies/stack.yml` answers for `lint`",
+  `test_e2e: none` is a complete answer that earns no e2e step rather than a
+  reach for a runner the project does not have, and the mechanical scanners are
+  named by what they do rather than by which binary this repo happens to run.
+  `docs/standards/stack.md` files `test_e2e` under "read by agents and by
+  nothing in the scaffold"; nothing read it, and now the tester does.
+- **`scripts/check.sh` now holds that line.** Its new `Agent templates: stack
+  neutrality` step reads the prompts, `docs/standards/`, and `severity.yml` and
+  `taxonomy.yml`, and allows a tool the operator gets to choose only in the
+  same block that names the policy doing the choosing — a block being one
+  bullet, one table row or one paragraph, because exempting a ten-bullet list
+  on the strength of a single citing bullet is not a rule. It reaches past the
+  prompts because the prompts quote those files, and fixing only the quote
+  leaves the drift in place one file over. The rest of `factory/policies/` is
+  deliberately out: `guardrails.yml` has to name npm, pnpm, yarn and bun in
+  order to match them, and a rule that fires on a matcher naming what it
+  matches is a rule about nothing. The vocabulary is tethered rather than
+  free-standing — every term it looks for must still appear in `stack.yml` — so
+  an option renamed there fails this check instead of quietly disarming it.
+- **Two tasks could edit a `yarn.lock` or a `bun.lock` at the same time.**
+  `worktree.yml`'s `serialize_always_globs` is what keeps concurrent tasks off
+  the shared-file hotspots, and it listed `pnpm-lock.yaml` and
+  `package-lock.json` — the two lockfiles this repo happens to write. On a yarn
+  or bun project the file two tasks collide over is theirs, and it was not on
+  the list. All five names are now.
+
 - **A commit that described a guardrail was refused for breaking it.** The
   policy matchers scanned the whole command string for refs and command words,
   including the payload of `-m`/`--message` — which is git's own free-text

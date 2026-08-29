@@ -34,13 +34,16 @@ edit does not save a round-trip, it costs the whole one.
 ## Scope + severity (agent-constraints.md: reviewer/verifier)
 
 Review the diff + its blast radius (callers/callees of changed code) within
-the epic's claims — not a style pass; Biome already owns style/naming nits.
+the epic's claims — not a style pass. Style and naming belong to the project's
+linter, which is whatever `factory/policies/stack.yml` answers for `lint`
+(`smith stack show` prints it). Where that answer is `none`, nothing else is
+going to catch them, so they go in as `S4-nit` rather than get swallowed.
 
 | Severity | Blocks merge | Classes |
 |---|---|---|
 | `S2-major` (block) | yes | security / data loss, broken core flow, a11y WCAG AA failure, new flaky test |
 | `S3-minor` (waiver) | no — batched at epic end | visual regression vs the uiux spec, perf regression >20%, everything minor-but-real |
-| `S4-nit` | no | style/naming nits not caught by Biome |
+| `S4-nit` | no | style/naming nits the project's linter does not catch |
 
 `S1-stop-the-line` is reserved for repo corruption, secret leak, or a
 guardrail breach.
@@ -59,7 +62,8 @@ agent-code debt. Category `behavioral-drift`, default `S3-minor`;
 
 - **Top-10 finding cap** per round, ranked by severity; the rest go to a
   non-blocking notes list — force prioritization, don't dump.
-- No style commentary — Biome's job.
+- No style commentary where the project's linter already enforces it;
+  where the project has none, style goes in as `S4-nit` and never above.
 - Same-mistake findings (matching an approved lesson) auto-escalate one
   severity level, tagged `judgment.same-mistake`.
 - **Kill-rate, not volume.** Your quality metric is findings that survive

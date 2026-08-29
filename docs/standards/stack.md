@@ -110,7 +110,7 @@ Nothing regenerates it. After `smith new`, it is the project's file.
 ├── src/               # app code (claims-friendly: one feature = one subtree)
 │   ├── mcp/           # MCP server + tools/ (`smith mcp init`, never hand-rolled)
 │   └── styles/        # generated entry, then yours (UI projects)
-├── test/              # unit mirrors src/; e2e/ for Playwright
+├── test/              # unit mirrors src/; e2e/ for the e2e suite
 ├── design/            # vendored design system, when one is named (UI projects)
 └── .github/workflows/ # CI
 ```

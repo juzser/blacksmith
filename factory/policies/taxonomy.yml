@@ -264,7 +264,7 @@ severity:         [S1-stop-the-line, S2-major, S3-minor, S4-nit]
                    # S2 — blocks merge (security/data-loss, broken core
                    #      flow, a11y AA failure, new flaky test)
                    # S3 — real but waivable; batched to operator at epic end
-                   # S4 — nits below Biome's radar; logged, never asked
+                   # S4 — nits the project's linter misses; logged, never asked
 
 # ── Lessons / memory (typed — one type per entry, never mixed) ──────
 lesson_type:   [fact, event, rule]
