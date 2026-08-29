@@ -899,6 +899,33 @@ than appearing in it.
 
 ### Fixed
 
+- **The merge rule read the wrong end of the command, so it refused the
+  routine refresh and waved through the act it exists to stop.** A merge has
+  exactly one destination and it is never on the command line: it is wherever
+  `HEAD` is, and every ref you type is a source. `checkMergeIntoProtected` read
+  it backwards, denying any `git merge` whose text named `main`/`master`
+  anywhere. One wrong assumption produced two opposite failures. The **false
+  deny**: `git merge origin/main` on a side branch — how you bring a stale pull
+  request up to date, and the exact opposite of merging into `main` — was
+  refused, with a message telling the agent it had merged into `main`. The
+  branch it hit hardest was a conflicted PR, where the fix is precisely that
+  merge and force-push is refused too, so a rebase produces an unpushable
+  branch: the gate left no legal move at all. The **false allow**: `git pull
+  origin feature-y` while standing on `main` merges a feature branch into
+  `main` and was permitted, because the rule only ever looked for the word
+  `merge` — the same act, spelled with the commoner verb. `git pull --rebase
+  origin main` on `main` slipped past rule 5 as well, since `bareWord` reads
+  `--rebase` as hyphenated and therefore a different word. The rule now asks
+  the one question it can answer honestly — *which branch am I standing on?* —
+  and covers `git pull` as the same landing. Names only, not
+  `protected_branches.patterns`, so the merge queue can keep landing task
+  branches on `smith/<epic>/integration`; and `bareWord` still keeps
+  `merge-base`, `merge-tree` and `pull-request` out. The copy names the branch
+  you are on and points at the move that works instead of ending at "never
+  allowed", the same standard the force-push entry below set. One consequence
+  for the entry that follows: `git merge "main"` is no longer denied on a side
+  branch — quoting hides nothing there either, but there is nothing left to
+  hide — so that test now makes its point with `git push origin "main"`.
 - **A commit that described a guardrail was refused for breaking it.** The
   policy matchers scanned the whole command string for refs and command words,
   including the payload of `-m`/`--message` — which is git's own free-text

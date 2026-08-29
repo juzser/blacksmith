@@ -34,8 +34,8 @@ rules:
     reason: force-push (--force/-f/--force-with-lease) is never allowed from an agent session.
   - id: merge-into-protected
     severity: S1
-    reason: merging into main/master is never allowed from an agent session; the operator merges integration PRs.
-    reason_on_current_branch: git merge while checked out on {branch} is never allowed from an agent session.
+    reason: a merge lands on the branch you are standing on, and that is never main/master in an agent session.
+    reason_on_current_branch: a merge lands on the branch you are standing on, and you are on {branch}; git pull is the same merge with a fetch in front. Check out a side branch and open a PR.
   - id: deploy-command
     severity: S1
     reason: deploy/publish commands require explicit operator approval; never autonomous.
@@ -395,17 +395,25 @@ describe('evaluateCommand — rule 2: force-push', () => {
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {
-  it('denies merging into main by name', () => {
-    const d = evaluateCommand(
-      ctx({ command: 'git merge origin/main', branch: 'feature-x' }),
-      policy,
-    );
-    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  // A merge has exactly one destination: the branch you are standing on.
+  // Every ref on the command line is a source. Refreshing a stale side branch
+  // from the base is the commonest thing an agent does to a pull request, and
+  // it is the opposite of the act this rule exists to refuse.
+  it.each([
+    ['git merge origin/main'],
+    ['git merge --no-ff origin/main'],
+    ['git merge upstream/main'],
+    ['git merge main'],
+    ['git merge "main"'],
+    ['git merge origin/main -m "routine update"'],
+  ])('allows %s on a side branch, where main is the source', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toEqual([]);
   });
 
-  it('denies merging into master by name', () => {
-    const d = evaluateCommand(ctx({ command: 'git merge master', branch: 'feature-x' }), policy);
-    expect(ruleIds(d)).toContain('merge-into-protected');
+  it('denies merging a side branch while checked out on master', () => {
+    const d = evaluateCommand(ctx({ command: 'git merge some-feature', branch: 'master' }), policy);
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
   });
 
   it('allows merging a branch not named main/master', () => {
@@ -419,7 +427,7 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
   it('denies any git merge while checked out on main, regardless of its argument (guard.sh has no exception here)', () => {
     const d = evaluateCommand(ctx({ command: 'git merge some-feature', branch: 'main' }), policy);
     expect(ruleIds(d)).toContain('merge-into-protected');
-    expect(d.violations[0]?.reason).toContain('checked out on main');
+    expect(d.violations[0]?.reason).toContain('you are on main');
   });
 
   it('allows a git merge on a non-protected branch merging a non-protected target', () => {
@@ -428,6 +436,53 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
       policy,
     );
     expect(d.allowed).toBe(true);
+  });
+
+  // `git pull` is `git fetch` followed by exactly the merge above. Reading
+  // only the word `merge` refused `git merge feature` on main and waved
+  // through `git pull origin feature` on main, which is the same act.
+  it.each([
+    ['git pull origin feature-y'],
+    ['git pull'],
+    ['git pull --rebase origin main'],
+  ])('denies %s while checked out on main, since a pull lands there', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
+  it('allows git pull on a side branch', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git pull origin feature-y', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // `patterns` widens rule 5 only. An integration branch is where the merge
+  // queue lands task branches, so a rule that refused merges there would stop
+  // the factory doing its one job.
+  it('allows a merge and a pull on an integration branch', () => {
+    for (const command of ['git merge task-3', 'git pull origin task-3']) {
+      const d = evaluateCommand(ctx({ command, branch: 'smith/epic-1/integration' }), policy);
+      expect(ruleIds(d)).toEqual([]);
+    }
+  });
+
+  it('does not read pull-request tooling as a pull', () => {
+    const d = evaluateCommand(ctx({ command: 'git pull-request --list', branch: 'main' }), policy);
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // Same reasoning as rule 2's copy test: a `reason` that ends at "never
+  // allowed" leaves an agent with nowhere to go, and the move that does work
+  // here is the one the old wording called a violation. Asserted against the
+  // real policy file, since that is the copy an operator reads.
+  it('points at the side branch rather than ending at "never allowed"', () => {
+    const real = loadGuardrailPolicy();
+    const d = evaluateCommand(ctx({ command: 'git merge some-feature', branch: 'main' }), real);
+    const reason = d.violations[0]?.reason ?? '';
+    expect(reason).toMatch(/you are on main/i);
+    expect(reason).toMatch(/side branch/i);
   });
 
   it('allows read-only merge-* plumbing naming a protected branch', () => {
@@ -816,9 +871,12 @@ describe('evaluateCommand — a message payload is prose, not a command', () => 
 
   // --- the payload buys nothing: a real target is still read ---
 
-  it('still denies a merge whose destination ref is merely quoted', () => {
-    const d = evaluateCommand(ctx({ command: 'git merge "main"', branch: 'feature-x' }), policy);
-    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  it('still denies a push whose destination ref is merely quoted', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin "main"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['push-to-protected']);
   });
 
   it('still denies a deploy whose subcommand is merely quoted', () => {
@@ -837,9 +895,9 @@ describe('evaluateCommand — a message payload is prose, not a command', () => 
     expect(ruleIds(d)).toEqual(['push-to-protected']);
   });
 
-  it('still denies a merge naming main outside the message it also carries', () => {
+  it('still denies a merge onto a protected branch that also carries a message', () => {
     const d = evaluateCommand(
-      ctx({ command: 'git merge origin/main -m "routine update"', branch: 'feature-x' }),
+      ctx({ command: 'git merge some-feature -m "routine update"', branch: 'main' }),
       policy,
     );
     expect(ruleIds(d)).toEqual(['merge-into-protected']);

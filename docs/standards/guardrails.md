@@ -61,8 +61,17 @@
   force-push, no merge by the factory — the operator is the only one who
   merges integration PRs into `main`. Enforced twice: GitHub branch
   protection (require PR, forbid force-push and deletion) + a local guard
-  hook that blocks `push origin main` and base-branch merges from any agent
-  session.
+  hook that blocks `push origin main`, and blocks `git merge` and `git pull`
+  whenever the session is standing on `main`/`master`.
+- **A merge is judged by where you are standing, not by what you name.** A
+  merge has exactly one destination and it is never on the command line: it
+  is wherever `HEAD` is, and every ref you type is a source. So
+  `git merge origin/main` **on a side branch is allowed** — that is how you
+  refresh a stale PR, and it is the opposite of the act the rule refuses.
+  `git pull` is `git fetch` plus that same merge, so it lands in the same
+  place and answers to the same rule. The plumbing that merely shares a
+  prefix — `git merge-base`, `git merge-tree`, `git pull-request` — is a
+  different command and stays allowed.
 - **Merge queue only.** Task branches merge into `smith/<epic>/integration`
   exclusively through the serial merge queue after gates pass — never by
   hand, never in parallel.

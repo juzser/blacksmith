@@ -77,11 +77,14 @@ rules:
   - id: merge-into-protected
     severity: S1
     reason: >-
-      merging into main/master is never allowed from an agent session; the
-      operator merges integration PRs.
+      a merge lands on the branch you are standing on, never on the branch you
+      name, and that is never main/master in an agent session; the operator
+      merges integration PRs.
     reason_on_current_branch: >-
-      git merge while checked out on {branch} is never allowed from an agent
-      session.
+      a merge lands on the branch you are standing on and you are on {branch};
+      git pull is the same merge with a fetch in front. Check out a side branch
+      instead — merging main into a side branch to refresh it is allowed, and
+      is how you get a stale PR up to date.
 
   - id: deploy-command
     severity: S1

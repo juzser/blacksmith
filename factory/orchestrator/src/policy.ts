@@ -670,26 +670,28 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   return violation(requireRule(policy, 'force-push'));
 }
 
-/** Rule 3: merge into main/master by name, or a bare merge while already on one. */
+/** Rule 3: `git merge` or `git pull` while standing on a protected branch — the only place a merge can land. */
 function checkMergeIntoProtected(
   command: string,
   branch: string,
   policy: GuardrailPolicy,
 ): PolicyViolation | null {
-  if (!isGitSubcommand(command, 'merge')) return null;
+  // A merge has exactly one destination and it is never on the command line:
+  // it is wherever HEAD is. Every ref you name is a source. So the only
+  // question this rule can answer honestly is which branch you are standing
+  // on. Reading an operand as the destination refused the routine
+  // `git merge <base>` that refreshes a stale side branch — the opposite act.
+  //
+  // `git pull` is `git fetch` followed by that same merge, and it lands in the
+  // same place, so it is the same rule. `bareWord` keeps `git merge-base`,
+  // `git merge-tree` and `git pull-request` out: hyphenated names are
+  // different commands, and the plumbing ones cannot merge anything.
+  if (!isGitSubcommand(command, 'merge') && !isGitSubcommand(command, 'pull')) return null;
+  // Names only, deliberately, not `protected_branches.patterns`: landing task
+  // branches on `smith/<epic>/integration` is the merge queue's whole job.
+  if (!isProtectedBranchName(branch, policy)) return null;
   const rule = requireRule(policy, 'merge-into-protected');
-  const namesAlt = policy.protectedBranchNames.map(escapeRegExp).join('|');
-  // Anchored the same way as the gate above, so a chained
-  // `git merge-base HEAD origin/main; git merge some-feature` does not read
-  // the plumbing call's argument as the real merge's destination.
-  const destRe = new RegExp(`${bareWord('merge')}.*\\b(${namesAlt})\\b`, 'i');
-  if (destRe.test(command)) {
-    return violation(rule);
-  }
-  if (isProtectedBranchName(branch, policy)) {
-    return violation(rule, renderBranch(rule.reasonOnCurrentBranch ?? rule.reason, branch));
-  }
-  return null;
+  return violation(rule, renderBranch(rule.reasonOnCurrentBranch ?? rule.reason, branch));
 }
 
 /** Rule 4: deploy/publish commands (`deploy_commands` in guardrails.yml — wrangler deploy/publish, pages publish today). */
