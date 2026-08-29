@@ -938,7 +938,70 @@ than appearing in it.
   `package-lock.json` — the two lockfiles this repo happens to write. On a yarn
   or bun project the file two tasks collide over is theirs, and it was not on
   the list. All five names are now.
+- **A commit message could run the push it was not allowed to make.** The
+  rules blank a `-m`/`--message` payload before scanning, on the stated ground
+  that a message is git's own prose field, so the blanking "buys no way past
+  any rule". That holds for every payload the shell hands over as it stands,
+  and fails for the one shape the shell runs first: a command substitution in a
+  double-quoted message is expanded *before* git is executed, so the command in
+  it really happens and its output is what becomes the message. The blanking
+  was deleting the only real command on the line and leaving the rules to read
+  the part that was genuinely prose — a protected push, a force push, a deploy
+  or an unbounded `rm` wrapped that way was allowed by all six. Backticks are
+  the same expansion in an older spelling, and an unquoted payload is expanded
+  too. The blanking now stops where the shell starts: single quotes, which are
+  the shell's own dividing line, so the test for "will this run" is the shell's
+  test rather than a guess layered on top of it. Reading a payload is not
+  refusing it — whatever the substitution contains is judged by the same six
+  rules, so a message substituting `date` stays allowed.
+- **The documented dry run was refused for every command worth asking about.**
+  `smith policy check --command '<cmd>'` is how `guardrails.md` says to ask
+  what the rules would say about a command *without running it*, and the guard
+  hook scans the whole Bash string — so asking about a force push read as a
+  force push, and asking about a protected push read as a protected push. The
+  answer was reachable only for commands that did not need it. A gate whose own
+  dry run is unreachable does not teach caution; it teaches an agent to find out
+  by doing. The payload of `--command` on a `policy check` invocation is now
+  blanked, resting on one fact and no other: that command parses, evaluates and
+  prints, and has no path that runs what it was handed. It is keyed on the
+  `policy check` subcommand pair rather than on a binary name, because the
+  caller's spelling is `smith`, a package-manager script or the built entry
+  point directly and a public repo cannot assume which — nor that an
+  installation has not aliased it. It is single-quoted payloads only, for the
+  same reason as above: `--command "$(...)"` is expanded by the caller's shell
+  first, which makes the question anything but hypothetical. A real command
+  chained after the question, or sharing its segment, is read as itself.
 
+- **A redirect turned off the push-to-main gate.** The rules that read a
+  command's *operands* — rule 1's destination ref, rule 6's `rm` paths — found
+  them by splitting on `;`, `&` and `|` and then reading the segment's last
+  whitespace-separated token. That is the destination only when the segment
+  ends at the push, and a segment ends at the push only when nothing at all
+  follows it. `git push origin main >` a log file handed the rule the log
+  file's name; a trailing `#` comment handed it the comment; a second line
+  handed it the last word of the second line; a command substitution handed it
+  the ref with the closing paren stuck to it, which is nothing's name. Every
+  one of those was allowed, on any branch, by the hook that exists to refuse
+  them. The first shape is the one that matters: it is not an evasion, it is
+  how anyone writes a quiet push, and a deny gate an ordinary redirect switches
+  off is not a deny gate. Two changes, because either alone leaves a hole: the
+  separator set widens from `;&|` to every character that ends the command a
+  segment is about (those three plus a newline, `(`, `)`, `{`, `}`, `<`, `>`,
+  `#` and a backtick), and the destination is now read as *every* non-flag
+  operand after the `push` word rather than as the last token — needed because
+  `2>&1` splits to a segment whose last token is `2`. Scanning all the operands
+  needs no guess about which one is the destination, and over-refuses at worst,
+  which is the direction this file errs in everywhere. The force-push and
+  deploy rules were never affected: they match on a regex over the segment, not
+  on its operands. One pre-existing **false** deny falls out of the same fix —
+  `rm -rf workspaces/scratch >` a log file was refused, because the redirect
+  target was read as one more path the `rm` was about and `/dev/null` is under
+  no allowed root. `stripMessageFlagValues` deliberately keeps the old narrow
+  split: parentheses are ordinary inside a commit message (`fix(policy): …`),
+  and that function is about prose, not refs. Thirteen tests, four of them
+  pinning what must still be allowed — a branch merely *containing* `main`, a
+  refspec whose remote side is unprotected, and the two bounded removals. The
+  187 policy tests that already existed pass unchanged.
 - **A commit that described a guardrail was refused for breaking it.** The
   policy matchers scanned the whole command string for refs and command words,
   including the payload of `-m`/`--message` — which is git's own free-text
@@ -960,6 +1023,33 @@ than appearing in it.
   file: only a message goes, so a quoted *ref* is still read and `git merge
   "main"` is still denied. Fifteen tests, six of them asserting what a real
   command still trips.
+- **Four documents promised a force-push rule narrower than the one enforced,
+  and the denial itself was a dead end.** `AGENTS.md` said "never force-push
+  shared branches", `CONTRIBUTING.md` said "a branch someone else may have
+  pulled", `README.md` scoped it to "a protected branch", and
+  `guardrails.md` listed `push --force` inside the bullet about `main` being
+  untouchable — four ways of implying that a private branch is fair game. It
+  never was: `checkForcePush` matches `--force`/`-f`/`--force-with-lease` on
+  any `git push` and has since Phase 2, as `.claude/settings.json`'s deny list
+  does independently. The gap that made this bite was the other half of
+  `guardrails.md`, which allows `rebase`/`commit --amend` on a task branch
+  before the merge queue without saying that a task branch *already pushed*
+  therefore cannot be republished — so an agent could follow the documented
+  workflow into a branch it had no way to update, and read a refusal that
+  stopped at "never allowed" with no next move in it. The rules are unchanged,
+  because the matcher reads command text and cannot tell a private branch from
+  a shared one, and this is the deny gate where guessing wrong destroys work
+  that does not come back. What changed is that the documents now say what is
+  enforced — **a branch an agent has pushed is append-only**, review feedback
+  becomes another commit, and republishing rewritten history is an operator
+  action — and the `force-push` reason string says so at the moment it fires,
+  the way `push-to-protected` has always ended with "Push a side branch and
+  open a PR". Four new tests: three pinning that a task branch, an integration
+  branch and a branch nobody has ever fetched are refused identically, and one
+  reading the real `guardrails.yml` to hold the copy to naming a way forward.
+  The queue's own rebase is untouched and stays legal — it runs inside the
+  task's worktree and is never pushed anywhere, which is now written down as
+  the reason the two rules do not collide.
 - **`scripts/check.sh` failed on a clean checkout, for reasons no contributor
   had caused.** `vitest.config.ts` set no `testTimeout`, so the 5s default —
   sized for in-process unit tests — governed `cli.test.ts` and

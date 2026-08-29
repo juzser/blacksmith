@@ -18,15 +18,58 @@
 > YAML because the bash predecessor silently allowed everything on macOS for
 > eight phases and no test noticed.
 >
-> One span is exempt from that looseness, because it is not command text at
-> all: the payload of `-m`/`--message` on the git subcommands that spend it on
-> free text (`commit`, `merge`, `tag`, `stash`, `notes`). A message is git's own
-> prose field, so the rules blank it before they scan, and a commit that merely
-> *describes* a rule is not refused for breaking it. Only that payload goes: a
-> quoted ref is still a ref (`git merge "main"` is still denied), and a `-m`
-> that is not a message keeps its argument, whether it is a mode (`mkdir -m
-> 755`), a mainline parent (`git revert -m 1`), or another flag's short spelling
-> (`git rebase -m`).
+> A tool call is one shell command only by accident, so the rules judge it a
+> *segment* at a time. A segment ends at anything that ends a command: `;`,
+> `&`, `|`, a newline, a `#` comment, a redirection (`<`, `>`), and the
+> brackets that open or close a substitution, subshell or group (`(`, `)`,
+> `{`, `}`, and a backtick). Both halves of that matter. A rule reading a
+> command's operands — which ref a push names, which paths an `rm` names —
+> must not read the next command's words as this one's, or the gate goes off
+> whenever anything follows; and every segment is judged, so burying a
+> forbidden command in a substitution or on a later line refuses exactly as
+> the bare command does. Splitting stays naive about quoting, so a separator
+> inside a quoted string splits anyway — over-refusing again, on purpose.
+>
+> Two spans are exempt from that looseness, because neither is a command the
+> tool call runs.
+>
+> The first is the payload of `-m`/`--message` on the git subcommands that
+> spend it on free text (`commit`, `merge`, `tag`, `stash`, `notes`). A message
+> is git's own prose field, so the rules blank it before they scan, and a commit
+> that merely *describes* a rule is not refused for breaking it. Only that
+> payload goes: a quoted ref is still a ref (`git merge "main"` is still
+> denied), and a `-m` that is not a message keeps its argument, whether it is a
+> mode (`mkdir -m 755`), a mainline parent (`git revert -m 1`), or another
+> flag's short spelling (`git rebase -m`).
+>
+> The second is the payload of `--command` on `smith policy check` itself. The
+> question above — *what would the rules say about this?* — was refused by the
+> rule it asked about, for every command worth asking about, which left the
+> documented dry run reachable only for commands that did not need it. The
+> exemption rests on `policy check` having no path that runs what it is handed:
+> it parses, evaluates, prints. It is keyed on the `policy check` subcommand
+> pair rather than on a binary name, so it works however the caller spells the
+> invocation, and `--command` on anything else means nothing here.
+>
+> **Both exemptions stop where the shell starts.** A payload is blanked only
+> where the shell hands it over as it stands — in practice, single quotes.
+> `-m "$(...)"` and `` -m "`...`" `` are not descriptions of a command: the
+> shell expands them *before* git runs, so the command in there really executes
+> and its output is what becomes the message. Same for `--command "$(...)"`:
+> that question is not hypothetical. Those are read as the commands they are.
+> An unquoted payload is read too, since where it ends is the caller's shell's
+> business, not the scanner's. So write the command you are asking about, or
+> the message you are writing, in single quotes — which is what you needed
+> anyway for the shell to leave it alone.
+>
+> They stop at their own payload as well, and that boundary is worth knowing
+> before you trip over it rather than after. Everywhere else, prose that
+> quotes a forbidden command is still command text: a heredoc that writes
+> *documentation* about a force-push is refused exactly like the force-push,
+> because a heredoc is just as able to be a script that runs one. Writing that
+> file is a job for the `Write`/`Edit` tools, where the rules read the path
+> being written and not the bytes going into it. This document is edited that
+> way, for that reason.
 
 ## Secrets, keys, tokens
 
@@ -52,14 +95,28 @@
   force-push, no merge by the factory — the operator is the only one who
   merges integration PRs into `main`. Enforced twice: GitHub branch
   protection (require PR, forbid force-push and deletion) + a local guard
-  hook that blocks `push origin main`, `push --force`, and base-branch
-  merges from any agent session.
+  hook that blocks `push origin main` and base-branch merges from any agent
+  session.
 - **Merge queue only.** Task branches merge into `smith/<epic>/integration`
   exclusively through the serial merge queue after gates pass — never by
   hand, never in parallel.
+- **Force-push is refused on every branch, not only the protected ones.**
+  `--force`, `-f` and `--force-with-lease` alike, whether the destination is
+  `main`, an integration branch, or a branch nobody else has ever fetched.
+  The matcher reads command text; it cannot tell a private branch from a
+  shared one, and a deny gate that guesses wrong here destroys work that
+  cannot be recovered, so it does not guess. What this means in practice is
+  that **a branch an agent has pushed is append-only**: review feedback
+  becomes another commit and the PR squashes at merge. History that is
+  already published gets rewritten by the operator or not at all.
 - **No history rewrite on shared branches.** `rebase`/`commit --amend` are
   allowed only on a task branch before it enters the merge queue; never on
-  `smith/<epic>/integration` or `main`.
+  `smith/<epic>/integration` or `main` — `protected_branches.patterns` adds
+  the integration shape to the names for this rule alone. That freedom and
+  the bullet above do not collide, because the rebase the merge queue runs
+  happens inside the task's own worktree and is never pushed anywhere. A
+  task branch an agent has published is the case where they meet, and there
+  the append-only rule wins.
 - **No destructive git ops** outside a worker's own worktree: no
   `reset --hard`, `clean -fdx`, or branch deletion beyond the worker's task
   branch after merge.
@@ -73,11 +130,13 @@
   trigger is both flags on one invocation, however they are spelled — bundled
   or separate, short or long, `-R` as readily as `-r` — and every path that
   `rm` names must then resolve under one of
-  `destructive_removal.allowed_roots`, each `;`/`&`/`|` segment of a chain
-  judged on its own. The roots are matched by name at the top of whichever
-  repository the command runs in — the git toplevel of its working directory,
-  not this clone — so where the bound lands depends on where the command is
-  typed. From the clone root it is the two directories this document means.
+  `destructive_removal.allowed_roots`, each segment of a chain judged on its
+  own (see the preamble for where a segment ends — notably, a redirect target
+  is not one of the paths the `rm` names). The roots are matched by name at
+  the top of whichever repository the command runs in — the git toplevel of
+  its working directory, not this clone — so where the bound lands depends on
+  where the command is typed. From the clone root it is the two directories
+  this document means.
   Inside a task worktree the toplevel *is* the worktree, which has neither,
   so nothing qualifies there and a worker is refused every recursive-force
   `rm`, its own `node_modules` included. Run from outside a git repository
