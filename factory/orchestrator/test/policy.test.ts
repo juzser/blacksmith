@@ -355,6 +355,43 @@ describe('evaluateCommand — rule 2: force-push', () => {
     );
     expect(d.allowed).toBe(true);
   });
+
+  // The rule takes no view on whether the ref is shared with anyone. AGENTS.md
+  // used to say "never force-push shared branches", which reads as a promise
+  // that a private branch is fair game, and guardrails.md allowed `rebase` on a
+  // task branch without saying that a task branch already pushed cannot then be
+  // republished. Both were narrower than what has been enforced here since
+  // Phase 2, so the breadth is pinned in a test rather than left to prose: a
+  // task branch, an integration branch and a branch nobody else has ever
+  // fetched are refused on identical terms.
+  it.each([['smith/epic-a/T-01'], ['smith/epic-a/integration'], ['scratch/mine']])(
+    'denies a force-push to %s — the rule is not scoped to shared refs',
+    (branch) => {
+      const d = evaluateCommand(
+        ctx({ command: `git push --force-with-lease origin ${branch}`, branch }),
+        policy,
+      );
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  // `push-to-protected` has ended with "Push a side branch and open a PR" since
+  // the bash predecessor, because a denial an agent cannot act on turns into a
+  // retry loop against a wall. This one ended at "never allowed" and left an
+  // agent holding a rebased branch with nowhere to put it. guardrails.yml calls
+  // its `reason` strings user-facing copy, so the two things this one has to
+  // carry are asserted against the real policy file, not the fixture: that the
+  // ban covers every branch, and that it names the move that does work.
+  it('tells the agent what to do instead, rather than ending at "never allowed"', () => {
+    const real = loadGuardrailPolicy();
+    const d = evaluateCommand(
+      ctx({ command: 'git push --force origin feature', branch: 'feature' }),
+      real,
+    );
+    const reason = d.violations[0]?.reason ?? '';
+    expect(reason).toMatch(/any branch/i);
+    expect(reason).toMatch(/add a commit/i);
+  });
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {
