@@ -863,6 +863,285 @@ describe('evaluateCommand — a message payload is prose, not a command', () => 
   });
 });
 
+// The block above blanks a message payload on the stated ground that the
+// payload is prose: git spends it on a free-text field, so a ref written in
+// there has already lost its meaning and the blanking "buys no way past any
+// rule". That is true of every payload the shell hands over literally. It is
+// false of the one shape the shell runs first:
+//
+//   git commit -m "$(git push origin main)"
+//
+// The push is not described here, it *happens* — bash expands `$( )` inside
+// double quotes before git is executed at all, and what git finally receives
+// as a message is the push's output. The rules were reading the one part of
+// that line that is genuinely prose and blanking the one part that is a
+// command. Backticks are the same expansion in older spelling, and an
+// unquoted payload is expanded too.
+//
+// Single quotes are the dividing line, because they are the shell's own: no
+// expansion happens inside them, so the payload really is the text it looks
+// like. That makes the test for "will this run" the same test the shell
+// applies, rather than a guess layered on top of it.
+describe('evaluateCommand — a message payload the shell expands is not prose', () => {
+  it.each([
+    ['a substitution in a double-quoted message', 'git commit -m "$(git push origin main)"'],
+    ['a backtick substitution', 'git commit -m "`git push origin main`"'],
+    ['an unquoted substitution', 'git commit -m $(git push origin main)'],
+    ['a nested substitution', 'git commit -m "$(echo $(git push origin main))"'],
+    ['a substitution in --message=', 'git commit --message="$(git push origin main)"'],
+  ])('denies a push to main run by %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toContain('push-to-protected');
+  });
+
+  // Every subcommand the blanking covers hands the same expansion to the same
+  // shell, so none of them may be the way through.
+  it('denies a force push run by a substitution in a merge message', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git merge -m "$(git push --force origin main)" topic', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it('denies a deploy run by a substitution in a tag message', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git tag -m "$(wrangler deploy)" v1.0.0', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('deploy-command');
+  });
+
+  it('denies an unbounded rm run by a substitution in a stash message', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git stash push -m "$(rm -rf /etc)"', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // The other half. Narrowing the blanking must not narrow it to nothing: a
+  // payload the shell hands over untouched is still the prose it was, and the
+  // agent writing down what it did is still the common case.
+  it('still allows a single-quoted payload, which the shell does not expand', () => {
+    const d = evaluateCommand(
+      ctx({ command: "git commit -m '$(git push origin main)'", branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('still allows a dollar sign that opens no substitution', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git commit -m "docs: $5 says nobody will push origin main"',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('still allows a parameter expansion, which runs no command', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: `git commit -m "docs: \${REVIEWER} says never push origin main"`,
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // Not a blanket ban on the syntax: an expansion is read, and read is all.
+  // What comes back is judged by the same six rules as any other command, so a
+  // substitution running something nobody guards stays allowed.
+  it('still allows a substitution that runs no guarded command', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git commit -m "release $(date +%F), never push origin main"',
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+});
+
+// Rules 1 and 6 read a segment's *operands* — the destination ref of a push,
+// the paths an `rm` names. Both used to find them by splitting the command on
+// `;&|` and reading the last whitespace-separated token, which is the ref only
+// when the segment happens to end at the push. Every shape below puts one more
+// word after it, and each one silently emptied the rule:
+//
+//   git push origin main > /dev/null      last token: /dev/null
+//   git push origin main # note           last token: note
+//   git push origin main\necho done       last token: done
+//   echo $(git push origin main)          last token: main)
+//
+// The first is the one that matters. It is not an evasion, it is how anyone
+// writes a quiet push, and a deny gate that a redirect turns off is not a deny
+// gate. The others are the same defect wearing different shell syntax, and a
+// separator list that stops at `;&|` cannot see any of them.
+describe('evaluateCommand — shell syntax after a ref does not hide the ref', () => {
+  it.each([
+    ['a redirect', 'git push origin main > /dev/null'],
+    ['a redirect with a duped descriptor', 'git push origin main 2>&1'],
+    ['a trailing comment', 'git push origin main # quiet'],
+    ['a newline and another command', 'git push origin main\necho done'],
+    ['a command substitution', 'echo $(git push origin main)'],
+    ['a backtick substitution', 'echo `git push origin main`'],
+    ['a subshell', '(git push origin main)'],
+    ['a nested substitution', 'echo $(echo $(git push origin main))'],
+  ])('denies a push to main followed by %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toContain('push-to-protected');
+  });
+
+  it('denies an unbounded rm hidden in a command substitution', () => {
+    const d = evaluateCommand(ctx({ command: 'echo $(rm -rf /etc)', branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // A bare push on a protected branch reads the segment's *end* for the same
+  // reason, so it went blind to exactly the same syntax.
+  it('denies a bare push from a protected branch that redirects its output', () => {
+    const d = evaluateCommand(ctx({ command: 'git push > /dev/null', branch: 'main' }), policy);
+    expect(ruleIds(d)).toContain('push-to-protected');
+  });
+
+  // The other half: widening what counts as a separator must not start
+  // refusing the commands these rules were always fine with.
+  it('still allows a push to a branch whose name merely contains main', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin fix-main-config > /dev/null', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('still allows a refspec whose remote side is not protected', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin main:feature-x 2> /dev/null', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // This one was a *false deny* before the split widened: the redirect target
+  // was read as one more path the `rm` was about, and `/dev/null` is not under
+  // an allowed root.
+  it('allows a bounded rm that redirects its output', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -rf workspaces/scratch > /dev/null', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+});
+
+// `smith policy check --command '<cmd>'` is the documented way to ask what
+// these rules say about a command *without running it* — guardrails.md leads
+// with it. For every rule worth asking about, the question was refused by the
+// rule it asked about: the hook scans the whole Bash string, quoted payload
+// included, so asking about a force-push read as a force-push. A gate whose
+// own dry run is unreachable teaches an agent to find out by doing.
+//
+// The exemption rests on one fact and no other: `policy check` parses,
+// evaluates and prints, and has no path that runs what it was handed. Not on
+// "quoted text is data" — the block above this one is where that broader claim
+// fails — so it holds for a single-quoted payload, which the shell hands over
+// as it stands, and stops there.
+describe('evaluateCommand — a policy check is a question, not the command it asks', () => {
+  it.each([
+    ['git push --force origin main'],
+    ['git push origin main'],
+    ['git merge feature-x'],
+    ['wrangler deploy'],
+    ['rm -rf /'],
+  ])('allows asking what the rules say about %s', (asked) => {
+    const d = evaluateCommand(
+      ctx({ command: `smith policy check --command '${asked}'`, branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // The binary is whatever the caller has on PATH — `smith`, a pnpm script, or
+  // the built entry point directly. Keying on the subcommand pair rather than
+  // on a binary name is what keeps this working for an installation that
+  // aliased it, which a public repo cannot assume anything about.
+  it.each([
+    ['smith policy check'],
+    ['node factory/orchestrator/dist/cli.js policy check'],
+    ['pnpm smith policy check'],
+  ])('recognises the question however %s is spelled', (invocation) => {
+    const d = evaluateCommand(
+      ctx({ command: `${invocation} --command 'git push origin main'`, branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // The question's other flags are a role name and a path, not commands, so
+  // they are not blanked — they only have to not obscure the one that is.
+  it('reads the question with its other flags in the way', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: "smith policy check --sandbox reviewer --command 'git push origin main'",
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // The second half of the property, exactly as the message block has it:
+  // blanking must not buy a way past any rule.
+  it('still denies a real command chained after the question', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: "smith policy check --command 'git status' && git push origin main",
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['push-to-protected']);
+  });
+
+  it('still denies a command substitution sharing the segment', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: "smith policy check --command 'git status' $(git push origin main)",
+        branch: 'feature-x',
+      }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('push-to-protected');
+  });
+
+  // `--command` is not a flag this repo owns. Something else spelling it is
+  // not asking a question, and its argument may well be run.
+  it('does not blank --command for anything that is not a policy check', () => {
+    const d = evaluateCommand(
+      ctx({ command: "some-runner --command 'git push origin main'", branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['push-to-protected']);
+  });
+
+  // Unquoted, the flag's value is the single word `git` and the rest is the
+  // caller's own shell mangling it. Over-refusing here is the direction this
+  // file errs in on purpose, and the fix is the quoting the docs already show.
+  it('over-refuses an unquoted payload rather than guessing where it ends', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'smith policy check --command git push origin main', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['push-to-protected']);
+  });
+});
+
 describe('evaluateCommand — cross-cutting', () => {
   it('ignores tool calls that are not Bash entirely', () => {
     const d = evaluateCommand(
