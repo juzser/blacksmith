@@ -27,6 +27,15 @@
 > that is not a message keeps its argument, whether it is a mode (`mkdir -m
 > 755`), a mainline parent (`git revert -m 1`), or another flag's short spelling
 > (`git rebase -m`).
+>
+> That exemption stops at the `-m` payload, and the boundary is worth knowing
+> before you trip over it rather than after. Everywhere else, prose that
+> quotes a forbidden command is still command text: a heredoc that writes
+> *documentation* about a force-push is refused exactly like the force-push,
+> because a heredoc is just as able to be a script that runs one. Writing that
+> file is a job for the `Write`/`Edit` tools, where the rules read the path
+> being written and not the bytes going into it. This document is edited that
+> way, for that reason.
 
 ## Secrets, keys, tokens
 
@@ -52,14 +61,28 @@
   force-push, no merge by the factory — the operator is the only one who
   merges integration PRs into `main`. Enforced twice: GitHub branch
   protection (require PR, forbid force-push and deletion) + a local guard
-  hook that blocks `push origin main`, `push --force`, and base-branch
-  merges from any agent session.
+  hook that blocks `push origin main` and base-branch merges from any agent
+  session.
 - **Merge queue only.** Task branches merge into `smith/<epic>/integration`
   exclusively through the serial merge queue after gates pass — never by
   hand, never in parallel.
+- **Force-push is refused on every branch, not only the protected ones.**
+  `--force`, `-f` and `--force-with-lease` alike, whether the destination is
+  `main`, an integration branch, or a branch nobody else has ever fetched.
+  The matcher reads command text; it cannot tell a private branch from a
+  shared one, and a deny gate that guesses wrong here destroys work that
+  cannot be recovered, so it does not guess. What this means in practice is
+  that **a branch an agent has pushed is append-only**: review feedback
+  becomes another commit and the PR squashes at merge. History that is
+  already published gets rewritten by the operator or not at all.
 - **No history rewrite on shared branches.** `rebase`/`commit --amend` are
   allowed only on a task branch before it enters the merge queue; never on
-  `smith/<epic>/integration` or `main`.
+  `smith/<epic>/integration` or `main` — `protected_branches.patterns` adds
+  the integration shape to the names for this rule alone. That freedom and
+  the bullet above do not collide, because the rebase the merge queue runs
+  happens inside the task's own worktree and is never pushed anywhere. A
+  task branch an agent has published is the case where they meet, and there
+  the append-only rule wins.
 - **No destructive git ops** outside a worker's own worktree: no
   `reset --hard`, `clean -fdx`, or branch deletion beyond the worker's task
   branch after merge.

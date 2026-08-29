@@ -35,8 +35,9 @@ This repo is self-governing: its rules live here, not in any other repo.
 - **Branches.** All work on `smith/<epic>/integration` integration branches
   (git ref constraint: `smith/<epic>` cannot coexist with
   `smith/<epic>/<task-id>`); tasks on `smith/<epic>/<task-id>`. Never push to
-  `main`; `main` changes only via a reviewed PR. Never force-push shared
-  branches.
+  `main`; `main` changes only via a reviewed PR. Never force-push at all — a
+  branch you have pushed is append-only, and republishing rewritten history
+  is the operator's call, not an agent's.
 - **Worktrees.** Workers operate only inside their assigned worktree, and
   only within their spec's path claims; out-of-claim edits fail the gate. A
   worktree is a sibling of the project directory rather than a child of it
