@@ -199,7 +199,9 @@ From [`AGENTS.md`](AGENTS.md):
 - **Commits.** Subject ≤ 72 characters, imperative mood, and **why-focused**:
   say what forced the change, not what the diff already shows.
 - **Branches.** Never push to `main`; `main` changes only through a reviewed
-  PR. Never force-push a branch someone else may have pulled.
+  PR. Don't force-push a branch someone else may have pulled — and note that
+  an agent session is refused force-push on *every* branch, so a PR branch a
+  Claude Code session opened here is append-only.
 
 Good: `fix(registry): close the judge that answered`
 Bad: `update registry.ts`

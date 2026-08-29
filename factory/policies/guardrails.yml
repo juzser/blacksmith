@@ -70,7 +70,9 @@ rules:
     severity: S1
     reason: >-
       force-push (--force/-f/--force-with-lease) is never allowed from an
-      agent session.
+      agent session, on any branch. A branch you have already pushed is
+      append-only here: add a commit. Rewriting history that is published
+      is an operator action.
 
   - id: merge-into-protected
     severity: S1

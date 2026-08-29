@@ -233,9 +233,10 @@ runs, plus branch protection — not by trust. Full rules:
 - **Secrets are environment-only.** `.env.example` is the only committed env
   file (variable names, never values), and the event logger redacts
   credential-shaped strings before write.
-- **Only you merge to `main`.** No agent may push, force-push or merge to a
-  protected branch; task branches reach the integration branch solely through
-  the serial merge queue.
+- **Only you merge to `main`.** No agent may push or merge to a protected
+  branch, and force-push is refused on every branch, protected or not — an
+  agent's pushed branch is append-only. Task branches reach the integration
+  branch solely through the serial merge queue.
 - **No autonomous deploy or outbound sends.** Deploys, publishes and message
   sends each need per-invocation approval.
 - **Budgets are declared per role.** 4M tokens per epic with an alarm at 70%;
