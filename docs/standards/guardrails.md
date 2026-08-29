@@ -18,6 +18,18 @@
 > YAML because the bash predecessor silently allowed everything on macOS for
 > eight phases and no test noticed.
 >
+> A tool call is one shell command only by accident, so the rules judge it a
+> *segment* at a time. A segment ends at anything that ends a command: `;`,
+> `&`, `|`, a newline, a `#` comment, a redirection (`<`, `>`), and the
+> brackets that open or close a substitution, subshell or group (`(`, `)`,
+> `{`, `}`, and a backtick). Both halves of that matter. A rule reading a
+> command's operands — which ref a push names, which paths an `rm` names —
+> must not read the next command's words as this one's, or the gate goes off
+> whenever anything follows; and every segment is judged, so burying a
+> forbidden command in a substitution or on a later line refuses exactly as
+> the bare command does. Splitting stays naive about quoting, so a separator
+> inside a quoted string splits anyway — over-refusing again, on purpose.
+>
 > One span is exempt from that looseness, because it is not command text at
 > all: the payload of `-m`/`--message` on the git subcommands that spend it on
 > free text (`commit`, `merge`, `tag`, `stash`, `notes`). A message is git's own
@@ -73,11 +85,13 @@
   trigger is both flags on one invocation, however they are spelled — bundled
   or separate, short or long, `-R` as readily as `-r` — and every path that
   `rm` names must then resolve under one of
-  `destructive_removal.allowed_roots`, each `;`/`&`/`|` segment of a chain
-  judged on its own. The roots are matched by name at the top of whichever
-  repository the command runs in — the git toplevel of its working directory,
-  not this clone — so where the bound lands depends on where the command is
-  typed. From the clone root it is the two directories this document means.
+  `destructive_removal.allowed_roots`, each segment of a chain judged on its
+  own (see the preamble for where a segment ends — notably, a redirect target
+  is not one of the paths the `rm` names). The roots are matched by name at
+  the top of whichever repository the command runs in — the git toplevel of
+  its working directory, not this clone — so where the bound lands depends on
+  where the command is typed. From the clone root it is the two directories
+  this document means.
   Inside a task worktree the toplevel *is* the worktree, which has neither,
   so nothing qualifies there and a worker is refused every recursive-force
   `rm`, its own `node_modules` included. Run from outside a git repository

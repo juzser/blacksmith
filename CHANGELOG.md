@@ -899,6 +899,36 @@ than appearing in it.
 
 ### Fixed
 
+- **A redirect turned off the push-to-main gate.** The rules that read a
+  command's *operands* — rule 1's destination ref, rule 6's `rm` paths — found
+  them by splitting on `;`, `&` and `|` and then reading the segment's last
+  whitespace-separated token. That is the destination only when the segment
+  ends at the push, and a segment ends at the push only when nothing at all
+  follows it. `git push origin main >` a log file handed the rule the log
+  file's name; a trailing `#` comment handed it the comment; a second line
+  handed it the last word of the second line; a command substitution handed it
+  the ref with the closing paren stuck to it, which is nothing's name. Every
+  one of those was allowed, on any branch, by the hook that exists to refuse
+  them. The first shape is the one that matters: it is not an evasion, it is
+  how anyone writes a quiet push, and a deny gate an ordinary redirect switches
+  off is not a deny gate. Two changes, because either alone leaves a hole: the
+  separator set widens from `;&|` to every character that ends the command a
+  segment is about (those three plus a newline, `(`, `)`, `{`, `}`, `<`, `>`,
+  `#` and a backtick), and the destination is now read as *every* non-flag
+  operand after the `push` word rather than as the last token — needed because
+  `2>&1` splits to a segment whose last token is `2`. Scanning all the operands
+  needs no guess about which one is the destination, and over-refuses at worst,
+  which is the direction this file errs in everywhere. The force-push and
+  deploy rules were never affected: they match on a regex over the segment, not
+  on its operands. One pre-existing **false** deny falls out of the same fix —
+  `rm -rf workspaces/scratch >` a log file was refused, because the redirect
+  target was read as one more path the `rm` was about and `/dev/null` is under
+  no allowed root. `stripMessageFlagValues` deliberately keeps the old narrow
+  split: parentheses are ordinary inside a commit message (`fix(policy): …`),
+  and that function is about prose, not refs. Thirteen tests, four of them
+  pinning what must still be allowed — a branch merely *containing* `main`, a
+  refspec whose remote side is unprotected, and the two bounded removals. The
+  187 policy tests that already existed pass unchanged.
 - **A commit that described a guardrail was refused for breaking it.** The
   policy matchers scanned the whole command string for refs and command words,
   including the payload of `-m`/`--message` — which is git's own free-text

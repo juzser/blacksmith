@@ -826,6 +826,78 @@ describe('evaluateCommand — a message payload is prose, not a command', () => 
   });
 });
 
+// Rules 1 and 6 read a segment's *operands* — the destination ref of a push,
+// the paths an `rm` names. Both used to find them by splitting the command on
+// `;&|` and reading the last whitespace-separated token, which is the ref only
+// when the segment happens to end at the push. Every shape below puts one more
+// word after it, and each one silently emptied the rule:
+//
+//   git push origin main > /dev/null      last token: /dev/null
+//   git push origin main # note           last token: note
+//   git push origin main\necho done       last token: done
+//   echo $(git push origin main)          last token: main)
+//
+// The first is the one that matters. It is not an evasion, it is how anyone
+// writes a quiet push, and a deny gate that a redirect turns off is not a deny
+// gate. The others are the same defect wearing different shell syntax, and a
+// separator list that stops at `;&|` cannot see any of them.
+describe('evaluateCommand — shell syntax after a ref does not hide the ref', () => {
+  it.each([
+    ['a redirect', 'git push origin main > /dev/null'],
+    ['a redirect with a duped descriptor', 'git push origin main 2>&1'],
+    ['a trailing comment', 'git push origin main # quiet'],
+    ['a newline and another command', 'git push origin main\necho done'],
+    ['a command substitution', 'echo $(git push origin main)'],
+    ['a backtick substitution', 'echo `git push origin main`'],
+    ['a subshell', '(git push origin main)'],
+    ['a nested substitution', 'echo $(echo $(git push origin main))'],
+  ])('denies a push to main followed by %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toContain('push-to-protected');
+  });
+
+  it('denies an unbounded rm hidden in a command substitution', () => {
+    const d = evaluateCommand(ctx({ command: 'echo $(rm -rf /etc)', branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // A bare push on a protected branch reads the segment's *end* for the same
+  // reason, so it went blind to exactly the same syntax.
+  it('denies a bare push from a protected branch that redirects its output', () => {
+    const d = evaluateCommand(ctx({ command: 'git push > /dev/null', branch: 'main' }), policy);
+    expect(ruleIds(d)).toContain('push-to-protected');
+  });
+
+  // The other half: widening what counts as a separator must not start
+  // refusing the commands these rules were always fine with.
+  it('still allows a push to a branch whose name merely contains main', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin fix-main-config > /dev/null', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it('still allows a refspec whose remote side is not protected', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin main:feature-x 2> /dev/null', branch: 'feature-x' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  // This one was a *false deny* before the split widened: the redirect target
+  // was read as one more path the `rm` was about, and `/dev/null` is not under
+  // an allowed root.
+  it('allows a bounded rm that redirects its output', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -rf workspaces/scratch > /dev/null', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+});
+
 describe('evaluateCommand — cross-cutting', () => {
   it('ignores tool calls that are not Bash entirely', () => {
     const d = evaluateCommand(

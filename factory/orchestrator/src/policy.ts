@@ -451,23 +451,37 @@ function bareWord(word: string): string {
  */
 function gitSegmentsFor(command: string, word: string): string[] {
   const re = new RegExp(`\\bgit\\b.*${bareWord(word)}`, 'i');
-  return command.split(/[;&|]/).filter((s) => re.test(s));
+  return splitChainSegments(command).filter((s) => re.test(s));
 }
 
 /**
- * Last whitespace-separated token of a command segment, quotes stripped —
- * used to read the destination ref/refspec of a push precisely (last token,
- * or the right-hand side of a `<local>:<remote>` refspec) rather than a loose
- * substring match that would false-block e.g. `git push origin
- * fix-main-config`. Ported from guard.sh's `last_token`.
+ * The refs a `git push` names: every token after the `push` word that is not a
+ * flag, quotes stripped, so `isProtectedRef` can read a destination precisely
+ * rather than by a substring match that would false-block `git push origin
+ * fix-main-config`.
+ *
+ * Replaces guard.sh's `last_token`, which this file ported and which read the
+ * destination as the segment's *last* whitespace-separated token. That is the
+ * ref only when the segment ends at the push, and a segment ends at the push
+ * only when nothing follows it — no redirect, no comment, no closing `)` of a
+ * substitution. `git push origin main > /dev/null` handed the rule
+ * `/dev/null`, and the most ordinary way to write a quiet push turned the gate
+ * off. Reading every operand instead needs no guess about which one is the
+ * destination: if any of them is a protected ref, the push is refused.
+ *
+ * Flags are dropped rather than paired with their values, so a flag that takes
+ * one (`git push --repo main ...`) leaves that value in the list. That
+ * over-refuses on a value spelled exactly `main`, which is the direction this
+ * file errs in everywhere else.
  */
-function lastToken(segment: string): string {
-  const tokens = segment
+function pushOperands(segment: string): string[] {
+  const match = new RegExp(`${bareWord('push')}(.*)$`, 'i').exec(segment);
+  if (!match) return [];
+  return (match[1] ?? '')
     .trim()
     .split(/\s+/)
-    .filter((t) => t !== '');
-  const token = tokens[tokens.length - 1] ?? '';
-  return token.replace(/^["']/, '').replace(/["']$/, '');
+    .filter((t) => t !== '' && !t.startsWith('-'))
+    .map((t) => t.replace(/^["']/, '').replace(/["']$/, ''));
 }
 
 /**
@@ -649,7 +663,9 @@ function checkPushToProtected(
   if (!isGitSubcommand(command, 'push')) return null;
   const rule = requireRule(policy, 'push-to-protected');
   const pushSegments = gitSegmentsFor(command, 'push');
-  if (pushSegments.some((segment) => isProtectedRef(lastToken(segment), policy))) {
+  if (
+    pushSegments.some((segment) => pushOperands(segment).some((ref) => isProtectedRef(ref, policy)))
+  ) {
     return violation(rule);
   }
   if (
@@ -755,8 +771,43 @@ function hasRecursiveForce(tokens: readonly string[]): boolean {
   return recursive && force;
 }
 
-/** The `rm <args>` run up to the next chain separator, ported from guard.sh's `grep -Eo 'rm[[:space:]]+[^;&|]*'`. Applied per chain segment (see `checkUnboundedRm`), so "up to the next separator" and "to the end of the string" mean the same thing by the time this runs. */
-const RM_ARGS_RE = /rm\s+([^;&|]*)/;
+/**
+ * Every character that ends the command a segment is about. `;&|` are the
+ * three guard.sh knew, and for a long time this file knew no others — which
+ * left the rules that read a segment's *operands* (rule 1's destination ref,
+ * rule 6's paths) reading whatever the next piece of shell syntax put in
+ * front of them:
+ *
+ * - `>` `<` start a redirection, whose target is a file the command writes,
+ *   never one of its operands. This is the one that mattered: `git push
+ *   origin main > /dev/null` is not an evasion, it is how a quiet push is
+ *   written, and it was allowed.
+ * - `(` `)` open and close a substitution or subshell — `echo $(git push
+ *   origin main)` is a real push in a real tool call, and the `)` stuck to
+ *   the ref made it `main)`, which is nothing's name.
+ * - A backtick is the older spelling of the same thing.
+ * - `#` starts a comment; everything after it is not a command at all.
+ * - A newline separates two commands exactly as `;` does. A multi-line Bash
+ *   payload is one tool call, and every line in it runs.
+ * - `{` `}` group commands.
+ *
+ * Splitting stays naive about quoting, the same trade-off guard.sh made: a
+ * separator inside a quoted string splits anyway. That direction over-refuses,
+ * which is the one this file chooses everywhere.
+ */
+const SEPARATOR_CHARS = ';&|\\n(){}<>#`';
+
+/**
+ * Every separated segment of a command, so a chain can be inspected one
+ * invocation at a time — and so a rule reading a segment's operands is looking
+ * at that command's operands and nothing else.
+ */
+function splitChainSegments(command: string): string[] {
+  return command.split(new RegExp(`[${SEPARATOR_CHARS}]`));
+}
+
+/** The `rm <args>` run up to the next separator, ported from guard.sh's `grep -Eo 'rm[[:space:]]+[^;&|]*'` and widened with it. Applied per chain segment (see `checkUnboundedRm`), so "up to the next separator" and "to the end of the string" mean the same thing by the time this runs — the negated class is belt and braces, kept in step with the split so the two can never disagree about where a command ends. */
+const RM_ARGS_RE = new RegExp(`rm\\s+([^${SEPARATOR_CHARS}]*)`);
 
 function extractRmArgs(segment: string): string[] {
   const match = RM_ARGS_RE.exec(segment);
@@ -765,16 +816,6 @@ function extractRmArgs(segment: string): string[] {
     .trim()
     .split(/\s+/)
     .filter((t) => t !== '');
-}
-
-/**
- * Every `;`/`&`/`|`-separated segment of a command, so a chained-rm command
- * can be inspected one `rm` invocation at a time. Splitting is naive (it does
- * not understand quoting), the same trade-off guard.sh's own chain-separator
- * handling made everywhere else in this module.
- */
-function splitChainSegments(command: string): string[] {
-  return command.split(/[;&|]/);
 }
 
 /**
