@@ -2,12 +2,23 @@
 // Thin CLI router: one subcommand per orchestrator module operation. No
 // framework — plain argv parsing. Logic lives in the modules; this file only
 // wires stdin/argv to them and prints JSON.
+//
+// One rule about the import list below: **nothing that reaches the database
+// layer is imported at module scope.** `db/schema.js` pulls in drizzle-orm,
+// which roughly triples what booting this file costs, and a static import here
+// charges that to every invocation of the binary — `smith --help` and `smith
+// policy check` as much as `smith stats overview`. The nine modules that reach
+// it (`attribution`, `daemon`, `db/projector`, `db/queries`, `epic`, `gate`,
+// `lessonAudit`, `lessons`, `scheduler`) are `await import()`ed inside the
+// branches that use them, which is why `main()` is async. Type-only imports of
+// the same modules are fine and stay up here: tsc erases them, so they cost
+// nothing at runtime. `test/cliBoot.test.ts` reads the built graph and fails if
+// the database layer creeps back into it.
 import { spawn } from 'node:child_process';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ParsedArgs, parseArgs } from './args.js';
-import { recordReattribution, routeFindings } from './attribution.js';
 import { checkBudgetAlarm } from './budgetAlarm.js';
 import type { TaskBudget } from './budgets.js';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
@@ -30,32 +41,10 @@ import {
   reconcile,
   runIndependentFinder,
 } from './crossFinding.js';
-import {
-  DaemonError,
-  DEFAULT_DAEMON_DIR,
-  DEFAULT_INTERVAL_SECONDS,
-  daemonStatus,
-  readLock,
-  runDaemon,
-  stopDaemon,
-  type TickOptions,
-} from './daemon.js';
-import { apply as applyDb, type DbOpts, openDb, rebuild as rebuildDb } from './db/projector.js';
-import {
-  analytics,
-  errorsPage,
-  kanban,
-  lessonsPage,
-  overview,
-  providerAgreement,
-  roadmapPage,
-  taskDetail,
-  timeline,
-  timelineEventTypes,
-} from './db/queries.js';
+import type { TickOptions } from './daemon.js';
+import type { DbOpts } from './db/projector.js';
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { loadEffortPolicy, resolveEffort } from './effort.js';
-import { closeEpic, runEpicVerdict } from './epic.js';
 import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
 import {
@@ -82,7 +71,6 @@ import {
   SPEC_FINDING_SCOPE,
   transition as transitionFinding,
 } from './findings.js';
-import { runGate } from './gate.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
 import { decideHookPayload } from './hookDecision.js';
 import {
@@ -99,14 +87,6 @@ import {
   recordJudgeDispatch,
   recordJudgeReport,
 } from './judges.js';
-import { auditLessons } from './lessonAudit.js';
-import {
-  compileLessons,
-  dream,
-  lessonsForDispatch,
-  raiseLessonCandidate,
-  transitionLesson,
-} from './lessons.js';
 import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import { LESSONS_MD_PATH, REPO_ROOT, SANDBOX_LEASE_DIR, STATE_DB_PATH } from './paths.js';
 import {
@@ -141,7 +121,6 @@ import {
   type SandboxLease,
 } from './sandbox.js';
 import { registerProjectInRoadmap, scaffoldProject } from './scaffold.js';
-import { computeProposals, loadSchedulerPolicy, runScheduler } from './scheduler.js';
 import {
   loadSensitivePathsPolicy,
   type SecurityTriggerTask,
@@ -546,12 +525,15 @@ function dbOptsFromFlags(flags: Record<string, string>): DbOpts {
  * unknown-flag guard throws in main() before any handler runs, so reading it
  * here cannot smuggle the flag into a command that does not advertise it.
  */
-function noveltyOptsFromFlags(flags: Record<string, string>): {
+async function noveltyOptsFromFlags(flags: Record<string, string>): Promise<{
   noveltyThreshold: number;
   shingleSize: number;
   noveltyLengthAware: boolean;
-} {
+}> {
   const override = noveltyThresholdOverride(flags);
+  // Async only to keep scheduler.ts out of the boot graph — see the header.
+  // Every caller is a lessons/dream branch that is already awaiting something.
+  const { loadSchedulerPolicy } = await import('./scheduler.js');
   const { noveltyJaccardThreshold, shingleSize, noveltyLengthAware } = loadSchedulerPolicy(
     flags.policy,
   ).lessons;
@@ -1388,6 +1370,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'scheduler' && action === 'run') {
+    const { computeProposals, runScheduler } = await import('./scheduler.js');
     const sessionId = requireFlag(flags, 'session');
     const dry = flags.dry === 'true';
     requireSession(sessionId, eventOptsFromFlags(flags));
@@ -1425,6 +1408,7 @@ async function main(): Promise<number> {
   // process that outlives the operator's terminal is the last place to relax
   // the rule that a human admits work.
   if (namespace === 'daemon' && action === 'run') {
+    const { DEFAULT_DAEMON_DIR, DEFAULT_INTERVAL_SECONDS, runDaemon } = await import('./daemon.js');
     const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
     const interval =
       flags.interval === undefined ? DEFAULT_INTERVAL_SECONDS : Number(flags.interval);
@@ -1480,6 +1464,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'daemon' && action === 'start') {
+    const { DaemonError, DEFAULT_DAEMON_DIR, readLock } = await import('./daemon.js');
     const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
     const held = readLock(dir);
     if (held !== null) {
@@ -1518,6 +1503,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'daemon' && action === 'status') {
+    const { DEFAULT_DAEMON_DIR, daemonStatus } = await import('./daemon.js');
     const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
     const report = daemonStatus(dir);
     printJson(report);
@@ -1527,6 +1513,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'daemon' && action === 'stop') {
+    const { DEFAULT_DAEMON_DIR, stopDaemon } = await import('./daemon.js');
     const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
     printJson(stopDaemon(dir));
     return 0;
@@ -1770,6 +1757,12 @@ async function main(): Promise<number> {
     // from the factory's own operator skill, receipted every one as success,
     // and none of the 25 records ever reached the screen. Exit stays 0: the
     // write worked, and refusing it is precisely what the open side prevents.
+    // Loaded here rather than at the top of the branch, for the reason `ui
+    // serve` states below: the append is the command, and a malformed payload
+    // should cost a message rather than the module loading it never needed.
+    // `timelineEventTypes()` reads the taxonomy and no database, but it lives
+    // beside the queries that do.
+    const { timelineEventTypes } = await import('./db/queries.js');
     const onTimeline = timelineEventTypes().includes(result.record.event_type);
     if (!onTimeline) {
       process.stderr.write(
@@ -2149,6 +2142,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'gate' && action === 'run') {
+    const { runGate } = await import('./gate.js');
     const [taskId] = requirePositionals(positional, usageFor('gate run')) as [string];
     const worktreeDir = requireFlag(flags, 'worktree');
     const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
@@ -2378,6 +2372,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'epic' && action === 'verdict') {
+    const { runEpicVerdict } = await import('./epic.js');
     const epicId = requireFlag(flags, 'epic');
     // --project is required (D-42/P9-26): the verdict cannot be rendered
     // without knowing where the integration branch actually is, and an
@@ -2407,6 +2402,7 @@ async function main(): Promise<number> {
   // --override-rationale, and then the log carries the machine's verdict, the
   // blockers overridden, and the human's reason.
   if (namespace === 'epic' && action === 'close') {
+    const { closeEpic } = await import('./epic.js');
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
     const ctx = eventContextFromFlags(flags);
@@ -2527,6 +2523,7 @@ async function main(): Promise<number> {
   // meant blocking a diff that could not contain the fix. This raises the
   // finding on its own, routed to whoever claims the file.
   if (namespace === 'findings' && action === 'raise') {
+    const { recordReattribution, routeFindings } = await import('./attribution.js');
     const plan = flags.plan ? readJsonFile<PlanFile>(flags.plan) : undefined;
     // Ownership has to come from somewhere. --task names it outright; --plan
     // makes the epic the fallback owner, which resolveFindingOwner can only
@@ -2797,6 +2794,8 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'lessons' && action === 'candidates') {
+    const { openDb } = await import('./db/projector.js');
+    const { lessonsPage } = await import('./db/queries.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
     const handle = openDb(dbPath);
     try {
@@ -2814,6 +2813,7 @@ async function main(): Promise<number> {
   // novelty check at all. Exit 1 on a novelty rejection: the candidate is
   // logged either way, but the operator must look before assuming it landed.
   if (namespace === 'lessons' && action === 'raise') {
+    const { raiseLessonCandidate } = await import('./lessons.js');
     const eventOpts = eventOptsFromFlags(flags);
     const ctx = eventContextFromFlags(flags);
     requireSession(ctx.sessionId, eventOpts);
@@ -2836,7 +2836,7 @@ async function main(): Promise<number> {
       },
       ctx,
       eventOpts,
-      noveltyOptsFromFlags(flags),
+      await noveltyOptsFromFlags(flags),
     );
     printJson(result);
     return result.novel ? 0 : 1;
@@ -2854,6 +2854,7 @@ async function main(): Promise<number> {
   // Exit 1 when the text that just landed in memory is not novel: it landed
   // either way, but that is a "look at this", not a clean run.
   if (namespace === 'lessons' && (action === 'approve' || action === 'reject')) {
+    const { transitionLesson } = await import('./lessons.js');
     const [lessonId] = requirePositionals(positional, usageFor(`lessons ${action}`)) as [string];
     const eventOpts = eventOptsFromFlags(flags);
     const ctx = eventContextFromFlags(flags);
@@ -2873,7 +2874,7 @@ async function main(): Promise<number> {
           caseType: flags['case-type'],
         },
         acceptDuplicate: flags['accept-duplicate'] === 'true',
-        ...noveltyOptsFromFlags(flags),
+        ...(await noveltyOptsFromFlags(flags)),
       },
     );
     printJson(row);
@@ -2881,6 +2882,9 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'lessons' && action === 'compile') {
+    const { openDb } = await import('./db/projector.js');
+    const { lessonsPage } = await import('./db/queries.js');
+    const { compileLessons } = await import('./lessons.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
     const outPath = flags.out ?? LESSONS_MD_PATH;
     const handle = openDb(dbPath);
@@ -2912,6 +2916,7 @@ async function main(): Promise<number> {
   // value per flag, and a claim glob may itself contain a comma (`src/{a,b}/**`),
   // so neither repetition nor splitting can carry a claims list faithfully.
   if (namespace === 'lessons' && action === 'for-dispatch') {
+    const { lessonsForDispatch } = await import('./lessons.js');
     const [role] = requirePositionals(positional, usageFor('lessons for-dispatch')) as [string];
     printJson(
       lessonsForDispatch(role, claimsForDispatch(flags), {
@@ -2931,6 +2936,7 @@ async function main(): Promise<number> {
   // anything but `clean`, for the same reason `kpi same-mistake` does: a corpus
   // that cannot be read is not a corpus that is fine.
   if (namespace === 'lessons' && action === 'audit') {
+    const { auditLessons } = await import('./lessonAudit.js');
     const [sessionId] = requirePositionals(positional, usageFor('lessons audit'), 1) as [string];
     requireSession(sessionId, eventOptsFromFlags(flags));
     // Lineage-wide (D-119), and here the reason is sharper than elsewhere: the
@@ -2944,6 +2950,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'dream') {
+    const { dream } = await import('./lessons.js');
     const sessionId = requireFlag(flags, 'session');
     // Before the lineage read, so a typo costs a message and not a full log walk.
     const since = isoDateFlag(flags, 'since')?.toISOString();
@@ -2965,7 +2972,7 @@ async function main(): Promise<number> {
         actor: ctx.actor,
       },
       eventOpts,
-      { since, ...noveltyOptsFromFlags(flags) },
+      { since, ...(await noveltyOptsFromFlags(flags)) },
     );
     printJson(result);
     return 0;
@@ -3196,6 +3203,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'db' && action === 'rebuild') {
+    const { rebuild: rebuildDb } = await import('./db/projector.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
     const sessions = flags.session ? [flags.session] : 'all';
     // A named session must exist; `all` legitimately finds nothing (P9-28).
@@ -3206,6 +3214,7 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'db' && action === 'apply') {
+    const { apply: applyDb } = await import('./db/projector.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
     const sessionId = requireFlag(flags, 'session');
     // Applying a session that has no log would report 0 events applied and
@@ -3218,6 +3227,18 @@ async function main(): Promise<number> {
   }
 
   if (namespace === 'stats') {
+    const { openDb } = await import('./db/projector.js');
+    const {
+      analytics,
+      errorsPage,
+      kanban,
+      lessonsPage,
+      overview,
+      providerAgreement,
+      roadmapPage,
+      taskDetail,
+      timeline,
+    } = await import('./db/queries.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
     const handle = openDb(dbPath);
     try {

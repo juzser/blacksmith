@@ -1,17 +1,21 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { bareSpecifiersFrom } from './helpers/moduleGraph.js';
 import { runProcess } from './helpers/process.js';
 
 // `.claude/hooks/guard.sh` runs on every Bash/Write/Edit/MultiEdit/NotebookEdit
 // call an agent session makes, so whatever it execs is the single hottest path
 // in this factory — it runs more often than any other code here, by orders of
-// magnitude. It used to exec `dist/cli.js policy hook`, and cli.ts imports the
-// whole orchestrator at module scope: 64 top-level imports, `db/projector.js`
-// among them, which pulls in drizzle-orm. Measured on the machine this was
-// written on, that cost 1.38s per tool call to perform ~39ms of policy work —
-// the other 1.3s was a database layer the hook never touches, loaded and
-// discarded on every single guarded action.
+// magnitude. It used to exec `dist/cli.js policy hook`, and cli.ts was then a
+// router that imported the whole orchestrator at module scope: 64 top-level
+// imports, `db/projector.js` among them, which pulls in drizzle-orm. Measured
+// on the machine this was written on, that cost 1.38s per tool call to perform
+// ~39ms of policy work — the other 1.3s was a database layer the hook never
+// touches, loaded and discarded on every single guarded action. (cli.ts has
+// since stopped paying that itself; `cliBoot.test.ts` pins it. A separate entry
+// point is still the right shape here, because parity is the property this file
+// tests and a shared route cannot drift.)
 //
 // `dist/policyHook.js` is that path with nothing else attached. These tests pin
 // the two properties that make it worth having: it must decide *exactly* what
@@ -35,39 +39,6 @@ function runHook(input: string): { stdout: string; status: number } {
 function runCli(input: string): { stdout: string; status: number } {
   const run = runProcess('node', [CLI_PATH, 'policy', 'hook'], { input });
   return { stdout: run.stdout.trim(), status: run.status as number };
-}
-
-/**
- * Walks the built ESM graph from `entry`, following relative specifiers only,
- * and returns every bare (package) specifier reachable from it.
- *
- * Static rather than timed on purpose. The property under test is "the hook
- * does not load the database layer", and a wall-clock assertion would express
- * that as "the hook is fast", which is a different claim that a loaded CI box
- * can falsify without anything being wrong. Reading the graph answers the
- * actual question and cannot flake.
- */
-function bareSpecifiersFrom(entry: string): Set<string> {
-  const seen = new Set<string>();
-  const bare = new Set<string>();
-  const queue = [entry];
-  while (queue.length > 0) {
-    const file = queue.pop() as string;
-    if (seen.has(file) || !existsSync(file)) continue;
-    seen.add(file);
-    const src = readFileSync(file, 'utf8');
-    // Matches `from '…'` in both static imports and re-exports, which is every
-    // form tsc emits for this codebase.
-    for (const m of src.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) {
-      const spec = m[1] as string;
-      if (spec.startsWith('.')) {
-        queue.push(path.resolve(path.dirname(file), spec));
-      } else if (!spec.startsWith('node:')) {
-        bare.add(spec);
-      }
-    }
-  }
-  return bare;
 }
 
 describe('dist/policyHook.js — the guard hook entry point', () => {

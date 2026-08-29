@@ -976,6 +976,31 @@ than appearing in it.
   `policyHookEntry.test.ts` pins both halves of that: parity with
   `cli.js policy hook` case by case, and a structural assertion that the
   hook's import graph cannot silently regain the database layer.
+- **Every `smith` invocation loaded the database layer, including the ones
+  that have nothing to do with a database.** `cli.ts` is a router, and it
+  imported all sixty-odd of its modules at module scope — nine of which reach
+  `db/schema.js`, and so drizzle-orm. That is a graph a CLI walks in full to
+  answer `smith --help`, and it is the same defect the guard-hook entry above
+  fixed by routing around `cli.ts` rather than by fixing `cli.ts`. The nine
+  (`attribution`, `daemon`, `db/projector`, `db/queries`, `epic`, `gate`,
+  `lessonAudit`, `lessons`, `scheduler`) are now `await import()`ed inside the
+  branches that use them; `main()` was already async, so nothing else moved.
+  Measured warm, median of five: `smith --help` 0.314s → **0.106s** and `smith
+  policy check` 0.339s → **0.124s**, against an empty-node baseline of 0.027s —
+  roughly two-thirds of the boot was a database nobody had asked for. `smith
+  daemon status` stays at ~0.31s, which is the design and not a shortfall: it
+  needs the layer, so it loads it, and it loads it exactly once. The effect
+  compounds where the binary is spawned in a loop — `cli.test.ts` and
+  `guardHook.test.ts` together run the same 248 tests in **159.7s** where they
+  took **227.1s**, an A/B on one machine with only `cli.ts` swapped.
+  Type-only imports of the same nine stay at the top of the file: tsc erases
+  them, so `TickOptions` and `DbOpts` cost nothing at runtime and reading the
+  file is no worse for having them. `test/cliBoot.test.ts` pins the result the
+  way `policyHookEntry.test.ts` pins the hook's — by reading the built module
+  graph rather than by timing it, because "it is fast" is a claim a loaded CI
+  box can falsify without anything being wrong, while "it does not import the
+  database layer" is the property actually wanted. The graph walker both tests
+  use now lives once, in `test/helpers/moduleGraph.ts`.
 
 - **The independent finder picked a vendor for operators who had named
   none.** `crosscheck.ts` defaulted `independent_finder.providers` to
