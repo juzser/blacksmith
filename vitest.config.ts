@@ -12,12 +12,15 @@ export default defineConfig({
     //
     // vitest's 5s default is sized for in-process unit tests. Much of this
     // suite is not that: `cli.test.ts` and `guardHook.test.ts` drive the built
-    // binary through `spawnSync`, and a single `node dist/cli.js` boot costs
-    // ~1.4s before the code under test runs — the same figure
-    // `policyHookEntry.test.ts` measured, and it is module loading, not the
-    // command. `drizzle-orm/better-sqlite3` alone is ~0.9s of it. A test that
-    // spawns twenty-three times therefore spends ~35s on node startup and
-    // nothing has gone wrong.
+    // binary through `spawnSync`, and every spawn pays a `node dist/cli.js`
+    // boot before the code under test runs. That boot is module loading, not
+    // the command, and it is far cheaper than it was — `cli.ts` no longer
+    // imports the database layer at module scope, so `smith --help` measures
+    // ~0.11s where it used to measure ~0.31s (`cliBoot.test.ts` has the
+    // method, and pins the graph that keeps it true). What did not change is
+    // the arithmetic: a command that *does* need the database layer still
+    // loads drizzle on demand at ~0.31s, and a test that spawns twenty-three
+    // times still spends seconds on node startup with nothing wrong.
     //
     // The suite already knew this. Twenty-six tests and hooks carried
     // hand-written 20-40s overrides, several naming the cause outright ("ten

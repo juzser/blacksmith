@@ -219,9 +219,11 @@ page load.
   logic paths" for target-repo code the coder produces.
 - **Tests that spawn the CLI are slow, and that is not a bug to patch
   locally.** `cli.test.ts` and `guardHook.test.ts` drive the built binary
-  through `spawnSync`, and one `node dist/cli.js` boot costs ~1.4s of module
-  loading before the command runs. A test with a dozen spawns spends ~17s on
-  node startup with nothing wrong. `vitest.config.ts` sets `testTimeout` and
+  through `spawnSync`, and every spawn pays a `node dist/cli.js` boot of module
+  loading before the command runs — ~0.11s for a command that needs nothing
+  from the database layer, ~0.31s for one that does and so loads drizzle on
+  demand. A test with a dozen spawns spends seconds on node startup with
+  nothing wrong. `vitest.config.ts` sets `testTimeout` and
   `hookTimeout` globally to absorb this — deliberately loose, because the
   budget is a hang-detector and not an assertion about speed. **Do not add a
   per-test timeout argument** (`}, 20_000)`); the suite carried twenty-six of
