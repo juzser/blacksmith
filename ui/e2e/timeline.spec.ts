@@ -21,7 +21,9 @@ test.describe('Timeline', () => {
     await page.setViewportSize(VIEWPORTS.desktop);
     await page.goto('/timeline');
     await expect(page.locator('h1')).toHaveText('Timeline');
-    await page.getByLabel('Search prompts and dispatch reasons').fill('Judge verdict');
+    await page
+      .getByLabel('Search prompts and dispatch reasons', { exact: true })
+      .fill('Judge verdict');
     const missingKey = page.getByText(
       'Judge verdict — failed: provider.missing-api-key (verifier/deepseek)',
     );
@@ -43,7 +45,7 @@ test.describe('Timeline', () => {
   }) => {
     await page.goto('/timeline');
     await page
-      .getByLabel('Search prompts and dispatch reasons')
+      .getByLabel('Search prompts and dispatch reasons', { exact: true })
       .fill('no such event exists anywhere');
     await expect(page.getByText('No events match these filters.')).toBeVisible();
     await page.getByRole('button', { name: 'Clear filters' }).click();
