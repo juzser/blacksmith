@@ -50,7 +50,9 @@ test.describe('Roadmap', () => {
 
   test('search filters the milestone list', async ({ page }) => {
     await page.goto('/roadmap');
-    await page.getByLabel('Search milestone name').fill('no such milestone exists');
+    await page
+      .getByLabel('Search milestone name', { exact: true })
+      .fill('no such milestone exists');
     await expect(page.getByText('No milestones match these filters.')).toBeVisible();
   });
 
