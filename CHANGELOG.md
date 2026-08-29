@@ -899,6 +899,36 @@ than appearing in it.
 
 ### Fixed
 
+- **The e2e suite was green on every developer machine and red on CI, on a
+  test that no CI-red change had touched.** `page.getByLabel('Epic')` in the
+  Kanban spec matched two elements — the `<select aria-label="Epic">` it meant,
+  and the `<section aria-label="All epics lane">` the board draws — because
+  Playwright's label match is a case-insensitive *substring* by default, so a
+  short accessible name is contained in every longer one on the page. That
+  makes it a race rather than a failure: the locator resolves to one element
+  before the board paints and to two after it, so the suite passed where it was
+  watched and failed where it was not, and the diff that went red on it had not
+  touched the UI at all. Six of the suite's ten label locators already carried
+  `exact: true`, so the rule was known and merely unenforced anywhere; the
+  other four now carry it, and `ui/test/e2eLabelLocators.test.ts` holds the
+  rule for the ones written next. It is a source scan rather than another
+  Playwright test on purpose — the ambiguity is only observable while the
+  colliding element happens to be on screen, so no run of the suite can be
+  trusted to reveal it, and reading the call is the only way to be sure. The 64
+  `getByRole(…, { name })` locators are deliberately left alone: a role already
+  narrows the match, and rewriting all 64 is not this change.
+- **The same test also asserted nothing.** `selectedEpic` starts at `ALL_EPICS`
+  (`''`), so from a bare `/kanban` the test named *"All epics" option boards
+  tasks across every epic* selected the option that was already selected and
+  asserted a lane that was already on screen. It passed over any board the page
+  cared to draw, an empty one included, and the behaviour in its title had
+  never been exercised. It now deep-links to a single epic, proves every card
+  on the board belongs to that epic, and only then widens the picker — where it
+  requires a card from an epic in a *different project* to appear, which is
+  what makes "across every epic" a thing a card can be counted for rather than
+  a heading to read. Checked by mutation rather than by passing: pointing the
+  switch back at the scoped epic makes it fail, which the test it replaces
+  could not detect.
 - **A commit that described a guardrail was refused for breaking it.** The
   policy matchers scanned the whole command string for refs and command words,
   including the payload of `-m`/`--message` — which is git's own free-text

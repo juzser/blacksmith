@@ -1,6 +1,12 @@
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
+// Two epics from two different projects. A bare /kanban carries no project
+// scope, so both are on the same board — which is what makes "every epic"
+// something a card can be counted for rather than only a heading to read.
+const SCOPED_EPIC = 'epic-9'; // multiProjectFixture.ts, project demo-hub
+const EPIC_OUTSIDE_IT = 'epic-1'; // db/fixtures.ts, project black-smith
+
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {
     await page.goto('/kanban');
@@ -20,10 +26,30 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('tablist', { name: 'Task detail sections' })).toBeVisible();
   });
 
+  // Entered on `?epic=`, not on a bare /kanban, because `selectedEpic` starts
+  // at ALL_EPICS: from a bare /kanban this test selected the option that was
+  // already selected and asserted a lane that was already on screen, so it
+  // passed over any board the page cared to draw. Deep-linking to one epic
+  // first is what makes the switch a switch, and the epic-9 card the proof
+  // that widening the picker widened the board rather than only its heading.
   test('"All epics" option boards tasks across every epic', async ({ page }) => {
-    await page.goto('/kanban');
-    await page.getByLabel('Epic').selectOption('');
+    const cardIds = () => page.locator('.kanban-card__id').allTextContents();
+
+    await page.goto(`/kanban?epic=${SCOPED_EPIC}`);
+    await expect(page.getByRole('region', { name: `${SCOPED_EPIC} lane` })).toBeVisible();
+    // Scoped: the other epic is in the same unfiltered board's data but not on
+    // this one. Asserted before the switch, so "it appeared" means something.
+    await expect.poll(cardIds).not.toEqual([]);
+    expect((await cardIds()).every((id) => id.startsWith(`${SCOPED_EPIC}/`))).toBe(true);
+
+    // exact, or this also resolves to the <section aria-label="All epics
+    // lane"> the switch is about to put on the page (D-249).
+    await page.getByLabel('Epic', { exact: true }).selectOption('');
+
     await expect(page.getByRole('region', { name: 'All epics lane' })).toBeVisible();
+    await expect
+      .poll(cardIds)
+      .toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^${EPIC_OUTSIDE_IT}/`))]));
   });
 
   test('never sits on the skeleton when the epic list is what failed', async ({ page }) => {
