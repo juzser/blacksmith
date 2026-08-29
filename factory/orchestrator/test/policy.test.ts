@@ -441,14 +441,13 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
   // `git pull` is `git fetch` followed by exactly the merge above. Reading
   // only the word `merge` refused `git merge feature` on main and waved
   // through `git pull origin feature` on main, which is the same act.
-  it.each([
-    ['git pull origin feature-y'],
-    ['git pull'],
-    ['git pull --rebase origin main'],
-  ])('denies %s while checked out on main, since a pull lands there', (command) => {
-    const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
-    expect(ruleIds(d)).toEqual(['merge-into-protected']);
-  });
+  it.each([['git pull origin feature-y'], ['git pull'], ['git pull --rebase origin main']])(
+    'denies %s while checked out on main, since a pull lands there',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+      expect(ruleIds(d)).toEqual(['merge-into-protected']);
+    },
+  );
 
   it('allows git pull on a side branch', () => {
     const d = evaluateCommand(
