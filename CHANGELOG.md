@@ -899,6 +899,40 @@ than appearing in it.
 
 ### Fixed
 
+- **A commit message could run the push it was not allowed to make.** The
+  rules blank a `-m`/`--message` payload before scanning, on the stated ground
+  that a message is git's own prose field, so the blanking "buys no way past
+  any rule". That holds for every payload the shell hands over as it stands,
+  and fails for the one shape the shell runs first: a command substitution in a
+  double-quoted message is expanded *before* git is executed, so the command in
+  it really happens and its output is what becomes the message. The blanking
+  was deleting the only real command on the line and leaving the rules to read
+  the part that was genuinely prose — a protected push, a force push, a deploy
+  or an unbounded `rm` wrapped that way was allowed by all six. Backticks are
+  the same expansion in an older spelling, and an unquoted payload is expanded
+  too. The blanking now stops where the shell starts: single quotes, which are
+  the shell's own dividing line, so the test for "will this run" is the shell's
+  test rather than a guess layered on top of it. Reading a payload is not
+  refusing it — whatever the substitution contains is judged by the same six
+  rules, so a message substituting `date` stays allowed.
+- **The documented dry run was refused for every command worth asking about.**
+  `smith policy check --command '<cmd>'` is how `guardrails.md` says to ask
+  what the rules would say about a command *without running it*, and the guard
+  hook scans the whole Bash string — so asking about a force push read as a
+  force push, and asking about a protected push read as a protected push. The
+  answer was reachable only for commands that did not need it. A gate whose own
+  dry run is unreachable does not teach caution; it teaches an agent to find out
+  by doing. The payload of `--command` on a `policy check` invocation is now
+  blanked, resting on one fact and no other: that command parses, evaluates and
+  prints, and has no path that runs what it was handed. It is keyed on the
+  `policy check` subcommand pair rather than on a binary name, because the
+  caller's spelling is `smith`, a package-manager script or the built entry
+  point directly and a public repo cannot assume which — nor that an
+  installation has not aliased it. It is single-quoted payloads only, for the
+  same reason as above: `--command "$(...)"` is expanded by the caller's shell
+  first, which makes the question anything but hypothetical. A real command
+  chained after the question, or sharing its segment, is read as itself.
+
 - **A redirect turned off the push-to-main gate.** The rules that read a
   command's *operands* — rule 1's destination ref, rule 6's `rm` paths — found
   them by splitting on `;`, `&` and `|` and then reading the segment's last

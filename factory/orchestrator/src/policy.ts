@@ -620,7 +620,10 @@ function violation(rule: GuardrailRule, reason: string = rule.reason): PolicyVio
  * prose, which costs the target its meaning — so the blanking buys no way past
  * any rule.
  *
- * Narrow in three more ways, each one a place where `-m` is not prose:
+ * That last sentence holds only for a payload the shell hands over as it
+ * stands, which is why `shellExpandsPayload` below gets to veto the blanking.
+ *
+ * Narrow in four more ways, each one a place where `-m` is not prose:
  *
  * - **Only where git spends `-m` on a message**, named subcommand by
  *   subcommand. `git rebase -m <upstream>` spells `--merge` and `git revert -m
@@ -633,6 +636,9 @@ function violation(rule: GuardrailRule, reason: string = rule.reason): PolicyVio
  *   blanks the message and still reads the push.
  * - **The flag must be followed by `=` or whitespace**, so `-m"main"` is left
  *   alone rather than treated as a message.
+ * - **Only where the shell hands the payload over untouched** — see
+ *   `shellExpandsPayload`. A payload the shell expands first is not the
+ *   message, it is a command that has already run.
  *
  * The value is blanked rather than deleted, so token boundaries survive for
  * the scans that read the last token of a segment.
@@ -642,13 +648,103 @@ const MESSAGE_FLAG_RE = /(^|\s)(-m|--message)(=|\s+)("[^"]*"|'[^']*'|\S+)/g;
 /** The git subcommands whose `-m`/`--message` takes free text, and nothing else. */
 const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
 
+/**
+ * True when the shell runs part of this payload *before* handing the rest
+ * over — the one case where blanking a payload hides a command rather than
+ * prose.
+ *
+ * A message payload holding a command substitution does not *describe* that
+ * command, it runs it: bash expands `$( )` inside double quotes before git is
+ * executed at all, so the substituted command happens and its *output* is what
+ * finally becomes the message. Blanking such a payload deleted the only real
+ * command on the line and left the rules reading the part that was genuinely
+ * prose. Backticks are the same expansion in an older spelling, and an
+ * unquoted payload is expanded too.
+ *
+ * Single quotes are the dividing line because they are the shell's own: no
+ * expansion of any kind happens inside them, so the payload is exactly the
+ * text it looks like. Asking "will the shell run this" with the shell's own
+ * rule is what keeps the answer from being a guess layered on top of it.
+ *
+ * Two deliberate imprecisions, both erring toward reading more rather than
+ * less, which is the direction the six rules are safe in:
+ *
+ * - `${VAR}` is left alone. A parameter expansion substitutes a value and runs
+ *   no command, so it is prose with a hole in it.
+ * - An escaped `\$(` inside double quotes is a literal `$(` to the shell, and
+ *   is read here as live anyway. The cost is a false deny on a message that
+ *   both escapes a substitution and spells out a guarded command, and the fix
+ *   for it is the single quotes that were already the clearer way to write it.
+ *
+ * Reading a payload is not refusing it. Whatever the expansion contains is
+ * judged by the same six rules as any other command, so a message that
+ * substitutes `date` stays allowed: `date` is nobody's guarded command.
+ */
+function shellExpandsPayload(payload: string): boolean {
+  // Single-quoted: literal to the shell, so nothing in it can run.
+  if (payload.length >= 2 && payload.startsWith("'") && payload.endsWith("'")) return false;
+  return payload.includes('$(') || payload.includes('`');
+}
+
 function stripMessageFlagValues(command: string): string {
   // Split keeping the separators, so the segments can be rejoined untouched.
   return command
     .split(/([;&|])/)
     .map((segment) =>
       MESSAGE_SUBCOMMANDS.some((sub) => isGitSubcommand(segment, sub))
-        ? segment.replace(MESSAGE_FLAG_RE, '$1$2$3""')
+        ? segment.replace(MESSAGE_FLAG_RE, (match, lead, flag, sep, payload) =>
+            shellExpandsPayload(payload) ? match : `${lead}${flag}${sep}""`,
+          )
+        : segment,
+    )
+    .join('');
+}
+
+/**
+ * `smith policy check --command '<cmd>'` is how anyone asks what these rules
+ * say about a command *without running it*. `guardrails.md` leads with it, and
+ * the six rules refused it: the hook scans the whole Bash string, so asking
+ * about a force push read as a force push and asking about a protected push
+ * read as a protected push. Every command worth asking about was a command you
+ * could not ask about. A gate whose own dry run is unreachable does not teach
+ * caution, it teaches an agent to find out by doing.
+ *
+ * The exemption rests on one fact and no other: `policy check` parses,
+ * evaluates and prints. It has no path that executes what it was handed — see
+ * its handler in cli.ts. That is a narrower claim than "quoted text is data",
+ * and it is the reason this cannot be widened to any other flag or binary.
+ *
+ * Narrow in four ways, each closing a way the exemption could be borrowed:
+ *
+ * - **Single-quoted payloads only.** `--command "$(…)"` is expanded by the
+ *   shell before this binary is reached, so the command in it really runs and
+ *   the question is not hypothetical. Same dividing line, and the same reason,
+ *   as `shellExpandsPayload` above.
+ * - **Segment by segment**, so a real command chained after the question is
+ *   read as itself. Whatever shares the segment is read too: the payload is
+ *   blanked, not the segment.
+ * - **On the `policy check` subcommand pair, not on a binary name.** The
+ *   caller's spelling is `smith`, a package-manager script, or the built entry
+ *   point directly, and a public repo cannot assume which — or that an
+ *   installation has not aliased it. Keying on the pair also keeps `--command`
+ *   from meaning anything here when some other tool spells it.
+ * - **An unquoted payload is left alone**, since where it ends is the caller's
+ *   shell's business rather than this scanner's. Over-refusing is the
+ *   direction this file errs in on purpose, and the fix is the quoting the
+ *   docs already show.
+ */
+const POLICY_CHECK_RE = /(^|\s)policy\s+check(\s|$)/;
+
+/** Only `--command` carries a command; `--file` carries a path and `--sandbox` a role name. */
+const POLICY_CHECK_PAYLOAD_RE = /(^|\s)(--command)(=|\s+)('[^']*')/g;
+
+function stripPolicyCheckPayloads(command: string): string {
+  // Split keeping the separators, so the segments can be rejoined untouched.
+  return command
+    .split(/([;&|])/)
+    .map((segment) =>
+      POLICY_CHECK_RE.test(segment)
+        ? segment.replace(POLICY_CHECK_PAYLOAD_RE, "$1$2$3''")
         : segment,
     )
     .join('');
@@ -1246,12 +1342,17 @@ export function evaluateCommand(
   }
   const { command, branch, repoRoot } = context;
   // The six base rules look for refs and command words, so they read the
-  // command with its message payloads blanked — see `stripMessageFlagValues`.
+  // command with its message payloads blanked — see `stripMessageFlagValues` —
+  // and with the payload of a `policy check` question blanked too, since
+  // asking what a rule says is not doing the thing it says no to.
   // The lease rules below keep the raw string: they read *targets* off the
   // command, and `-m` is not always prose down there (`mkdir -m 755 <dir>`
   // spends it on a mode), so blanking it could put an empty token where a
   // path belongs.
-  const scanned = stripMessageFlagValues(command);
+  // Outermost quoting wins, so the question is blanked before the message
+  // payloads inside it are looked at: `policy check --command 'git commit -m
+  // "…"'` is one inert span, not a commit with a message.
+  const scanned = stripMessageFlagValues(stripPolicyCheckPayloads(command));
   const checks: Array<() => PolicyViolation | null> = [
     () => checkPushToProtected(scanned, branch, policy),
     () => checkForcePush(scanned, policy),

@@ -30,15 +30,37 @@
 > the bare command does. Splitting stays naive about quoting, so a separator
 > inside a quoted string splits anyway — over-refusing again, on purpose.
 >
-> One span is exempt from that looseness, because it is not command text at
-> all: the payload of `-m`/`--message` on the git subcommands that spend it on
-> free text (`commit`, `merge`, `tag`, `stash`, `notes`). A message is git's own
-> prose field, so the rules blank it before they scan, and a commit that merely
-> *describes* a rule is not refused for breaking it. Only that payload goes: a
-> quoted ref is still a ref (`git merge "main"` is still denied), and a `-m`
-> that is not a message keeps its argument, whether it is a mode (`mkdir -m
-> 755`), a mainline parent (`git revert -m 1`), or another flag's short spelling
-> (`git rebase -m`).
+> Two spans are exempt from that looseness, because neither is a command the
+> tool call runs.
+>
+> The first is the payload of `-m`/`--message` on the git subcommands that
+> spend it on free text (`commit`, `merge`, `tag`, `stash`, `notes`). A message
+> is git's own prose field, so the rules blank it before they scan, and a commit
+> that merely *describes* a rule is not refused for breaking it. Only that
+> payload goes: a quoted ref is still a ref (`git merge "main"` is still
+> denied), and a `-m` that is not a message keeps its argument, whether it is a
+> mode (`mkdir -m 755`), a mainline parent (`git revert -m 1`), or another
+> flag's short spelling (`git rebase -m`).
+>
+> The second is the payload of `--command` on `smith policy check` itself. The
+> question above — *what would the rules say about this?* — was refused by the
+> rule it asked about, for every command worth asking about, which left the
+> documented dry run reachable only for commands that did not need it. The
+> exemption rests on `policy check` having no path that runs what it is handed:
+> it parses, evaluates, prints. It is keyed on the `policy check` subcommand
+> pair rather than on a binary name, so it works however the caller spells the
+> invocation, and `--command` on anything else means nothing here.
+>
+> **Both exemptions stop where the shell starts.** A payload is blanked only
+> where the shell hands it over as it stands — in practice, single quotes.
+> `-m "$(...)"` and `` -m "`...`" `` are not descriptions of a command: the
+> shell expands them *before* git runs, so the command in there really executes
+> and its output is what becomes the message. Same for `--command "$(...)"`:
+> that question is not hypothetical. Those are read as the commands they are.
+> An unquoted payload is read too, since where it ends is the caller's shell's
+> business, not the scanner's. So write the command you are asking about, or
+> the message you are writing, in single quotes — which is what you needed
+> anyway for the shell to leave it alone.
 
 ## Secrets, keys, tokens
 
