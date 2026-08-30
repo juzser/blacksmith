@@ -899,6 +899,55 @@ than appearing in it.
 
 ### Fixed
 
+- **Correct about where a merge lands, and still one act too wide: the
+  catch-up that lands nothing.** Rule 3 judges a merge by the branch you are
+  standing on, which is right, and then refused every merge there, which swept
+  in the one that brings no work: `git pull --ff-only origin main` while on
+  `main`. No commit is written and nothing arrives that the remote does not
+  already publish — the pointer moves up to what has already been reviewed and
+  merged. The cost was not theoretical. A local `main` could not be refreshed
+  at all from inside a session: `git fetch origin` was allowed and moved only
+  the remote-tracking ref, while every spelling that moved `main` itself was
+  S1, so the ordinary act of getting current had to happen outside the gate.
+  `checkMergeIntoProtected` now allows a segment that proves, in the command
+  text alone, every part of a fast-forward to its own upstream: a plain
+  `git merge`/`git pull`, with nothing spliced in front of the subcommand;
+  `--ff-only` and no other flag; a source naming *this* branch on a remote
+  listed in the new `catch_up_remotes` in `guardrails.yml` — `origin main`,
+  or `origin/main` as one ref; and no second operand, since a second source
+  is a second thing landing. The flags are an allowlist rather than a test
+  for `--ff-only`, because the exception's own spelling is a prefix of
+  commands that do the opposite: `git pull --ff-only origin main --no-ff`
+  writes a real merge commit, the later flag winning. A flag the hook has
+  not read is a claim it cannot make, so it is a denial — and so is
+  `git -c merge.ff=false pull ...`, which is why the shape check wants the
+  subcommand first. `catch_up_remotes` holds `origin` alone by default and
+  the key is optional, so a guardrails.yml written before it existed gets
+  that same strict reading rather than losing the rule. The branch comes from `HEAD` rather than a list, so
+  the exception is `git pull --ff-only origin master` on `master`, and is not
+  `origin main` there. Everything the rule exists for is untouched:
+  `git merge feature-y`, `git pull origin feature-y`, a bare `git pull`, and
+  `git merge --ff-only main` — a local ref that merely shares the name — are
+  all still S1 on `main`, and so is a chain, because each segment is judged
+  separately: `git pull --ff-only origin main && git merge feature-y` is
+  refused on its second half rather than excused by its first. What the
+  exception deliberately does not cover is a bare `git pull --ff-only`, whose
+  source is `branch.<name>.merge` in a config file the hook cannot read. It is
+  almost always the same catch-up, and "almost always" is the reasoning rule 3
+  was corrected out of in **The merge rule read the wrong end of the command**
+  below; an operator gets a spelling that is true on its face instead. Nor
+  can it vouch for the remote beyond its name: `git remote set-url origin`
+  points that name wherever it likes, and the hook reads the command line,
+  not `.git/config` — which is why the allowlist is one entry long and
+  widening it is a statement about the whole factory. The
+  exception is live rather than shadowed only because **The same rule, written
+  twice, and the copy that wins is the one that cannot see `HEAD`** below took
+  the merge globs out of `permissions.deny` first — a matcher over command
+  text would have gone on refusing `git merge --ff-only origin/main` for
+  containing the word `main`. The deny message now names the allowed spelling,
+  so a session that trips the rule is told the move that works, and
+  `renderBranch` substitutes every `{branch}` rather than the first, which
+  that message is the first message to need.
 - **The same rule, written twice, and the copy that wins is the one that
   cannot see `HEAD`.** `.claude/settings.json` kept `Bash(git merge*main*)`
   and `Bash(git merge*master*)` in `permissions.deny` — the merge rule spelled

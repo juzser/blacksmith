@@ -26,8 +26,8 @@
 # have a second trigger — a *bare* `git push`/`git merge` while already
 # checked out on a protected branch, where the bash's message named the
 # branch the agent was standing on rather than the ref it typed. `{branch}`
-# in either reason is substituted with the branch policy.ts resolved, not
-# rendered literally.
+# in either reason is substituted — at every occurrence — with the branch
+# policy.ts resolved, not rendered literally.
 
 protected_branches:
   # Literal branch names `push`/`merge` refuse as a destination or as the
@@ -39,6 +39,19 @@ protected_branches:
   # shape is "smith/<epic>/integration", never a bare "smith/<epic>".
   names: [main, master]
   patterns: ["smith/*/integration"]
+
+catch_up_remotes:
+  # rule 3's one exception: the remotes a protected branch is allowed to
+  # fast-forward *itself* to, as `git pull --ff-only <remote> <branch>` or
+  # `git merge --ff-only <remote>/<branch>`. Nothing lands that the remote
+  # does not already have, so the gate has nothing to protect.
+  #
+  # This vouches for a name, not a URL — `git remote add` and `git remote
+  # set-url` can point any name anywhere, and this gate reads the command
+  # line, not .git/config. So keep the list to remotes whose name means the
+  # same thing everywhere the factory runs. Omit the key entirely and you get
+  # [origin]; an empty list turns the exception off.
+  - origin
 
 destructive_removal:
   # rule 6: a recursive-force `rm` is allowed only under one of these
@@ -84,7 +97,9 @@ rules:
       a merge lands on the branch you are standing on and you are on {branch};
       git pull is the same merge with a fetch in front. Check out a side branch
       instead — merging main into a side branch to refresh it is allowed, and
-      is how you get a stale PR up to date.
+      is how you get a stale PR up to date. To catch {branch} itself up to the
+      remote, `git pull --ff-only origin {branch}` is allowed: it moves the
+      pointer and lands nothing the remote does not already have.
 
   - id: deploy-command
     severity: S1

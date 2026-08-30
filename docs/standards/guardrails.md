@@ -96,7 +96,8 @@
   merges integration PRs into `main`. Enforced twice: GitHub branch
   protection (require PR, forbid force-push and deletion) + a local guard
   hook that blocks `push origin main`, and blocks `git merge` and `git pull`
-  whenever the session is standing on `main`/`master`.
+  whenever the session is standing on `main`/`master` — with one exception,
+  the fast-forward two bullets down, which lands nothing.
 - **A merge is judged by where you are standing, not by what you name.** A
   merge has exactly one destination and it is never on the command line: it
   is wherever `HEAD` is, and every ref you type is a source. So
@@ -106,6 +107,30 @@
   place and answers to the same rule. The plumbing that merely shares a
   prefix — `git merge-base`, `git merge-tree`, `git pull-request` — is a
   different command and stays allowed.
+- **The one merge that lands nothing: a fast-forward to your own upstream.**
+  `git pull --ff-only origin main` **on `main` is allowed**. It writes no
+  commit and brings nothing the remote does not already publish — the
+  pointer catches up, and the act the rule refuses has not happened.
+  `git merge --ff-only origin/main` is the same catch-up spelled as one ref.
+  The exception is read off the command line, the way the rule is, so it
+  holds only where the text itself proves every part: a plain `git merge`/
+  `git pull`, with nothing spliced in front of the subcommand; `--ff-only`
+  and **no other flag**, since a flag the hook has not read is a claim it
+  cannot make — `--no-ff` after `--ff-only` wins, and writes exactly the
+  merge commit the rule refuses; a source naming *this* branch on a remote
+  in `catch_up_remotes` (`origin` by default); and no second operand, since
+  a second source is a second thing landing. A bare `git pull --ff-only` is
+  therefore still refused — its source is `branch.<name>.merge`, in a config
+  file the hook cannot read. And every command in a chain is judged
+  separately, so an allowed catch-up in front of `&& git merge feature-y`
+  buys the merge nothing.
+
+  What the exception cannot prove, and does not claim to: a remote is a
+  *name* on the command line, and `git remote set-url origin <anywhere>`
+  makes that name point where it likes. The allowlist buys a name the
+  operator controls, not a URL the hook has verified — which is why it is
+  one entry long by default, and why widening it is a statement about the
+  whole factory rather than a convenience.
 - **Merge queue only.** Task branches merge into `smith/<epic>/integration`
   exclusively through the serial merge queue after gates pass — never by
   hand, never in parallel.
