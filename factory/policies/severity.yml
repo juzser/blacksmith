@@ -55,7 +55,7 @@ levels:
     blocks_merge: false
     semantics: logged, never asked
     classes:
-      - style/naming nits not caught by Biome
+      - style/naming nits the project's linter does not catch
     on_trigger: log only; no operator interaction.
 
 rules:

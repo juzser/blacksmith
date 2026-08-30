@@ -899,6 +899,75 @@ than appearing in it.
 
 ### Fixed
 
+- **The agent prompts stopped answering the install interview for the
+  operator.** `factory/policies/stack.yml` made the stack an operator answer,
+  and one prompt out of twelve looked it up. Fourteen lines still named this
+  repo's own tools as if every project had them — eight in the prompts, four in
+  the standards those prompts cite, two in the policy files a judge reads as
+  its own definition of a severity. The coder was told "no style beyond the
+  scaffold's Biome config", the tester to "run Playwright e2e" and to file
+  "Playwright traces", the security reviewer that "gitleaks, pnpm audit already
+  ran". The reviewer's pair was worse than cosmetic: "No style commentary —
+  Biome's job" and `S4-nit` = "style/naming nits not caught by Biome"
+  contradict each other on a project that answered `lint: none`, where nothing
+  catches those nits and the reviewer had just been told to stay quiet about
+  them — an entire finding category disappearing on any project without that
+  one linter. Every line now points at the policy instead of guessing: the
+  linter is "whatever `factory/policies/stack.yml` answers for `lint`",
+  `test_e2e: none` is a complete answer that earns no e2e step rather than a
+  reach for a runner the project does not have, and the mechanical scanners are
+  named by what they do rather than by which binary this repo happens to run.
+  `docs/standards/stack.md` files `test_e2e` under "read by agents and by
+  nothing in the scaffold"; nothing read it, and now the tester does.
+- **`scripts/check.sh` now holds that line.** Its new `Agent templates: stack
+  neutrality` step reads the prompts, `docs/standards/`, and `severity.yml` and
+  `taxonomy.yml`, and allows a tool the operator gets to choose only in the
+  same block that names the policy doing the choosing — a block being one
+  bullet, one table row or one paragraph, because exempting a ten-bullet list
+  on the strength of a single citing bullet is not a rule. It reaches past the
+  prompts because the prompts quote those files, and fixing only the quote
+  leaves the drift in place one file over. The rest of `factory/policies/` is
+  deliberately out: `guardrails.yml` has to name npm, pnpm, yarn and bun in
+  order to match them, and a rule that fires on a matcher naming what it
+  matches is a rule about nothing. The vocabulary is tethered rather than
+  free-standing — every term it looks for must still appear in `stack.yml` — so
+  an option renamed there fails this check instead of quietly disarming it.
+- **Two tasks could edit a `yarn.lock` or a `bun.lock` at the same time.**
+  `worktree.yml`'s `serialize_always_globs` is what keeps concurrent tasks off
+  the shared-file hotspots, and it listed `pnpm-lock.yaml` and
+  `package-lock.json` — the two lockfiles this repo happens to write. On a yarn
+  or bun project the file two tasks collide over is theirs, and it was not on
+  the list. All five names are now.
+- **The e2e suite was green on every developer machine and red on CI, on a
+  test that no CI-red change had touched.** `page.getByLabel('Epic')` in the
+  Kanban spec matched two elements — the `<select aria-label="Epic">` it meant,
+  and the `<section aria-label="All epics lane">` the board draws — because
+  Playwright's label match is a case-insensitive *substring* by default, so a
+  short accessible name is contained in every longer one on the page. That
+  makes it a race rather than a failure: the locator resolves to one element
+  before the board paints and to two after it, so the suite passed where it was
+  watched and failed where it was not, and the diff that went red on it had not
+  touched the UI at all. Six of the suite's ten label locators already carried
+  `exact: true`, so the rule was known and merely unenforced anywhere; the
+  other four now carry it, and `ui/test/e2eLabelLocators.test.ts` holds the
+  rule for the ones written next. It is a source scan rather than another
+  Playwright test on purpose — the ambiguity is only observable while the
+  colliding element happens to be on screen, so no run of the suite can be
+  trusted to reveal it, and reading the call is the only way to be sure. The 64
+  `getByRole(…, { name })` locators are deliberately left alone: a role already
+  narrows the match, and rewriting all 64 is not this change.
+- **The same test also asserted nothing.** `selectedEpic` starts at `ALL_EPICS`
+  (`''`), so from a bare `/kanban` the test named *"All epics" option boards
+  tasks across every epic* selected the option that was already selected and
+  asserted a lane that was already on screen. It passed over any board the page
+  cared to draw, an empty one included, and the behaviour in its title had
+  never been exercised. It now deep-links to a single epic, proves every card
+  on the board belongs to that epic, and only then widens the picker — where it
+  requires a card from an epic in a *different project* to appear, which is
+  what makes "across every epic" a thing a card can be counted for rather than
+  a heading to read. Checked by mutation rather than by passing: pointing the
+  switch back at the scoped epic makes it fail, which the test it replaces
+  could not detect.
 - **The merge rule read the wrong end of the command, so it refused the
   routine refresh and waved through the act it exists to stop.** A merge has
   exactly one destination and it is never on the command line: it is wherever

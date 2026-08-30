@@ -49,8 +49,13 @@ serialize_always_globs:
   # shared-file hotspots (architecture §5.5) — any task touching these is
   # never scheduled concurrently with another such task.
   globs:
+    # Every lockfile, not just the two this repo happens to write: on a
+    # yarn or bun project the file two tasks collide over is theirs.
     - "**/pnpm-lock.yaml"
     - "**/package-lock.json"
+    - "**/yarn.lock"
+    - "**/bun.lock"
+    - "**/bun.lockb"
     - "**/*.generated.*"
     - "**/dist/**"
     - "db/migrations/**"
