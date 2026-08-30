@@ -899,6 +899,30 @@ than appearing in it.
 
 ### Fixed
 
+- **The same rule, written twice, and the copy that wins is the one that
+  cannot see `HEAD`.** `.claude/settings.json` kept `Bash(git merge*main*)`
+  and `Bash(git merge*master*)` in `permissions.deny` — the merge rule spelled
+  a second time, one layer above the code, in a matcher that reads command
+  text. That copy outranks the hook, so the fix in **The merge rule read the
+  wrong end of the command** below did not take effect:
+  `checkMergeIntoProtected` began judging a merge by the branch you are
+  standing on while the glob went on judging it by whether the text said
+  `main`. The deadlock that entry describes — a conflicted pull request whose
+  one remedy is `git merge origin/main`, with force-push refused so a rebase
+  leaves an unpushable branch — was still live on the branch that carried the
+  cure, which is how this was found. The entries are removed rather than
+  narrowed, because there is no narrower spelling to write: every ref a glob
+  can see in a `git merge` is a source. What they matched was the refresh,
+  merges *from* `main`, while `git merge feature-y` on `main` — the act they
+  existed to stop — never contained the word and always passed. Inverted, not
+  narrow, and worth nothing as a backstop. What is left states one principle:
+  deny where the command text names a destination, which `git push origin
+  main` does and `git merge` never can. Coverage goes up rather than down,
+  since the hook also refuses `git pull origin feature-y` on `main`, which no
+  entry here ever matched. `SECURITY.md` already describes this list as
+  blocking "pushes to `main`, force-pushes, history rewriting, and unbounded
+  deletion" — merges were never in its inventory, so the setting was the
+  outlier and the document needed no edit.
 - **The agent prompts stopped answering the install interview for the
   operator.** `factory/policies/stack.yml` made the stack an operator answer,
   and one prompt out of twelve looked it up. Fourteen lines still named this
@@ -968,6 +992,35 @@ than appearing in it.
   a heading to read. Checked by mutation rather than by passing: pointing the
   switch back at the scoped epic makes it fail, which the test it replaces
   could not detect.
+- **The merge rule read the wrong end of the command, so it refused the
+  routine refresh and waved through the act it exists to stop.** A merge has
+  exactly one destination and it is never on the command line: it is wherever
+  `HEAD` is, and every ref you type is a source. `checkMergeIntoProtected` read
+  it backwards, denying any `git merge` whose text named `main`/`master`
+  anywhere. One wrong assumption produced two opposite failures. The **false
+  deny**: `git merge origin/main` on a side branch — how you bring a stale pull
+  request up to date, and the exact opposite of merging into `main` — was
+  refused, with a message telling the agent it had merged into `main`. The
+  branch it hit hardest was a conflicted PR, where the fix is precisely that
+  merge and force-push is refused too, so a rebase produces an unpushable
+  branch: the gate left no legal move at all. The **false allow**: `git pull
+  origin feature-y` while standing on `main` merges a feature branch into
+  `main` and was permitted, because the rule only ever looked for the word
+  `merge` — the same act, spelled with the commoner verb. `git pull --rebase
+  origin main` on `main` slipped past rule 5 as well, since `bareWord` reads
+  `--rebase` as hyphenated and therefore a different word. The rule now asks
+  the one question it can answer honestly — *which branch am I standing on?* —
+  and covers `git pull` as the same landing. Names only, not
+  `protected_branches.patterns`, so the merge queue can keep landing task
+  branches on `smith/<epic>/integration`; and `bareWord` still keeps
+  `merge-base`, `merge-tree` and `pull-request` out. The copy names the branch
+  you are on and points at the move that works instead of ending at "never
+  allowed", the same standard the force-push entry below set. One consequence
+  for **A commit that described a guardrail was refused for breaking it**
+  below: `git merge "main"` is no longer denied on a side branch — quoting
+  hides nothing there either, but there is nothing left to hide — so that test,
+  and the two prose copies of the same illustration in `guardrails.md` and
+  `policy.ts`, now make the point with `git push origin "main"`.
 - **A commit message could run the push it was not allowed to make.** The
   rules blank a `-m`/`--message` payload before scanning, on the stated ground
   that a message is git's own prose field, so the blanking "buys no way past
