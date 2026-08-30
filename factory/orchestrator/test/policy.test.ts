@@ -35,7 +35,7 @@ rules:
   - id: merge-into-protected
     severity: S1
     reason: a merge lands on the branch you are standing on, and that is never main/master in an agent session.
-    reason_on_current_branch: a merge lands on the branch you are standing on, and you are on {branch}; git pull is the same merge with a fetch in front. Check out a side branch and open a PR.
+    reason_on_current_branch: a merge lands on the branch you are standing on, and you are on {branch}; git pull is the same merge with a fetch in front. Check out a side branch and open a PR. To catch {branch} itself up to the remote, \`git pull --ff-only origin {branch}\` is allowed.
   - id: deploy-command
     severity: S1
     reason: deploy/publish commands require explicit operator approval; never autonomous.
@@ -424,7 +424,7 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
     expect(d.allowed).toBe(true);
   });
 
-  it('denies any git merge while checked out on main, regardless of its argument (guard.sh has no exception here)', () => {
+  it('denies a git merge on main whatever ref it names, since no ref there is where it lands', () => {
     const d = evaluateCommand(ctx({ command: 'git merge some-feature', branch: 'main' }), policy);
     expect(ruleIds(d)).toContain('merge-into-protected');
     expect(d.violations[0]?.reason).toContain('you are on main');
@@ -457,6 +457,103 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
     expect(ruleIds(d)).toEqual([]);
   });
 
+  // The one thing a merge can do that lands nothing new: fast-forward the
+  // branch you are standing on to what its own remote already has. No commit
+  // is created and no work arrives that was not already published, so the act
+  // this rule exists to refuse has not happened. The exception is written the
+  // way the rule is written — out of what the command line actually says —
+  // so it holds only where the text itself proves the source.
+  it.each([['git pull --ff-only origin main'], ['git merge --ff-only origin/main']])(
+    'allows %s on main, a catch-up to what the remote already has',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+      expect(ruleIds(d)).toEqual([]);
+    },
+  );
+
+  // The mini policy has no `catch_up_remotes`, so these two also prove the
+  // default: a guardrails.yml written before the key existed gets [origin],
+  // the strict reading, rather than losing the rule or the exception.
+  it('reads the remote allowlist from the policy, and denies the rest', () => {
+    const widened = parseGuardrailPolicy(
+      MINI_POLICY_YAML.replace(
+        'destructive_removal:',
+        'catch_up_remotes: [origin, upstream]\n\ndestructive_removal:',
+      ),
+    );
+    const command = 'git merge --ff-only upstream/main';
+    expect(ruleIds(evaluateCommand(ctx({ command, branch: 'main' }), policy))).toEqual([
+      'merge-into-protected',
+    ]);
+    expect(ruleIds(evaluateCommand(ctx({ command, branch: 'main' }), widened))).toEqual([]);
+  });
+
+  it('turns the exception off entirely on an empty allowlist', () => {
+    const off = parseGuardrailPolicy(
+      MINI_POLICY_YAML.replace(
+        'destructive_removal:',
+        'catch_up_remotes: []\n\ndestructive_removal:',
+      ),
+    );
+    const d = evaluateCommand(
+      ctx({ command: 'git pull --ff-only origin main', branch: 'main' }),
+      off,
+    );
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
+  it('reads the catch-up against the branch you are on, not a fixed name', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git pull --ff-only origin master', branch: 'master' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual([]);
+  });
+
+  it.each([
+    // Without --ff-only a diverged branch takes a real merge commit.
+    ['git pull origin main'],
+    // And with it, if a later flag overrules it: --no-ff wins over --ff-only,
+    // and git really does write a merge commit. The exception reads flags as
+    // an allowlist for exactly this — its own spelling can be a prefix of a
+    // command that does the thing it exists to refuse.
+    ['git pull --ff-only origin main --no-ff'],
+    ['git merge --ff-only --no-ff origin/main'],
+    // Every other flag is unread, and unread is denied, not waved through.
+    ['git merge --ff-only --squash origin/main'],
+    ['git merge --ff-only -X theirs origin/main'],
+    ['git pull --ff-only --rebase origin main'],
+    // A remote outside `catch_up_remotes` is a name the policy never vouched for.
+    ['git merge --ff-only upstream/main'],
+    ['git pull --ff-only evil-remote main'],
+    // Anything spliced before the subcommand is a command the shape check has
+    // not read: `git -c ...` can set merge config the exception knows nothing of.
+    ['git -c merge.ff=false pull --ff-only origin main'],
+    // Sources that are not this branch on a remote: an ordinary landing.
+    ['git pull --ff-only origin feature-y'],
+    ['git merge --ff-only origin/feature-y'],
+    ['git pull --ff-only origin master'],
+    // A local ref that merely shares the name is not the remote's copy.
+    ['git merge --ff-only main'],
+    // The upstream of a bare pull lives in config, which the rule cannot read.
+    ['git pull --ff-only'],
+    // A URL is not a remote name this rule can vouch for.
+    ['git pull --ff-only https://example.invalid/repo.git main'],
+  ])('still denies %s on main', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
+  // Every segment of a chain runs, so every segment is judged. An allowed
+  // catch-up in front of an ordinary merge buys the merge nothing.
+  it('denies a chain that hides an ordinary merge behind an allowed catch-up', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git pull --ff-only origin main && git merge feature-y', branch: 'main' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
   // `patterns` widens rule 5 only. An integration branch is where the merge
   // queue lands task branches, so a rule that refused merges there would stop
   // the factory doing its one job.
@@ -482,6 +579,17 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
     const reason = d.violations[0]?.reason ?? '';
     expect(reason).toMatch(/you are on main/i);
     expect(reason).toMatch(/side branch/i);
+  });
+
+  // The message now names the catch-up too, so `{branch}` appears in it more
+  // than once — and a renderer that substituted only the first occurrence
+  // would hand the operator a command with a literal `{branch}` in it.
+  it('names the catch-up spelling, with every {branch} rendered', () => {
+    const real = loadGuardrailPolicy();
+    const d = evaluateCommand(ctx({ command: 'git merge some-feature', branch: 'master' }), real);
+    const reason = d.violations[0]?.reason ?? '';
+    expect(reason).toContain('git pull --ff-only origin master');
+    expect(reason).not.toContain('{branch}');
   });
 
   it('allows read-only merge-* plumbing naming a protected branch', () => {

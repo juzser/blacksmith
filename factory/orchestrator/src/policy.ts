@@ -99,6 +99,8 @@ export interface GuardrailRule {
 export interface GuardrailPolicy {
   readonly protectedBranchNames: readonly string[];
   readonly protectedBranchPatterns: readonly string[];
+  /** Remotes a protected branch may fast-forward itself to — rule 3's one exception. */
+  readonly catchUpRemotes: readonly string[];
   readonly allowedRemovalRoots: readonly string[];
   readonly deployCommands: readonly DeployCommandSpec[];
   readonly judgeSandbox: JudgeSandboxPolicy;
@@ -110,6 +112,7 @@ export interface GuardrailPolicy {
 
 interface RawGuardrailsYaml {
   protected_branches?: { names?: unknown; patterns?: unknown };
+  catch_up_remotes?: unknown;
   destructive_removal?: { allowed_roots?: unknown };
   deploy_commands?: unknown;
   judge_sandbox?: {
@@ -292,6 +295,9 @@ function parseRoleWriteScopes(raw: unknown, judgeRoles: readonly string[]): Role
   return scopes;
 }
 
+/** What `catch_up_remotes` means when guardrails.yml does not say — the strict reading. */
+const DEFAULT_CATCH_UP_REMOTES: readonly string[] = ['origin'];
+
 export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
   const doc = (parseYaml(yamlText) ?? {}) as RawGuardrailsYaml;
 
@@ -307,6 +313,18 @@ export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
     throw new PolicyError(
       'policy.invalid-document',
       'guardrails.yml is missing protected_branches.patterns (a string list).',
+    );
+  }
+  // The one optional key in this file. Every other field throws when it is
+  // missing, because a policy that silently loses a rule is worse than one
+  // that refuses to load — but this key only ever *narrows* rule 3, and a
+  // guardrails.yml written before it existed should keep working. Absent
+  // means the strict reading, not the permissive one.
+  const catchUpRemotes = doc.catch_up_remotes ?? DEFAULT_CATCH_UP_REMOTES;
+  if (!isStringArray(catchUpRemotes)) {
+    throw new PolicyError(
+      'policy.invalid-document',
+      'guardrails.yml has a catch_up_remotes that is not a string list.',
     );
   }
   const allowedRoots = doc.destructive_removal?.allowed_roots;
@@ -377,6 +395,7 @@ export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
   return {
     protectedBranchNames: names,
     protectedBranchPatterns: patterns,
+    catchUpRemotes,
     allowedRemovalRoots: allowedRoots,
     deployCommands,
     judgeSandbox,
@@ -475,13 +494,35 @@ function gitSegmentsFor(command: string, word: string): string[] {
  * file errs in everywhere else.
  */
 function pushOperands(segment: string): string[] {
-  const match = new RegExp(`${bareWord('push')}(.*)$`, 'i').exec(segment);
+  return gitOperands(segment, 'push');
+}
+
+/**
+ * The same read, for any subcommand: every token after the subcommand word
+ * that is not a flag, quotes stripped. `pushOperands` is this function under
+ * the name rule 1 reads it by, and rule 3 reads a catch-up's source with it.
+ * One parser, because a second copy of a rule's reading is a copy that drifts
+ * out of step with the first.
+ */
+function gitOperands(segment: string, word: string): string[] {
+  return gitTokens(segment, word)
+    .filter((t) => !t.startsWith('-'))
+    .map((t) => t.replace(/^["']/, '').replace(/["']$/, ''));
+}
+
+/**
+ * Every token after the subcommand word, flags included and quotes intact.
+ * Rule 3's exception needs to see the flags, not only the operands: a flag it
+ * does not recognise is a command doing something the exception has not
+ * proved.
+ */
+function gitTokens(segment: string, word: string): string[] {
+  const match = new RegExp(`${bareWord(word)}(.*)$`, 'i').exec(segment);
   if (!match) return [];
   return (match[1] ?? '')
     .trim()
     .split(/\s+/)
-    .filter((t) => t !== '' && !t.startsWith('-'))
-    .map((t) => t.replace(/^["']/, '').replace(/["']$/, ''));
+    .filter((t) => t !== '');
 }
 
 /**
@@ -513,8 +554,14 @@ function isProtectedForHistoryRewrite(branch: string, policy: GuardrailPolicy): 
   return policy.protectedBranchPatterns.some((pattern) => picomatch(pattern)(branch));
 }
 
+/**
+ * `replaceAll`, not `replace`: a template author writing `{branch}` twice
+ * should get the branch twice, not the branch and then a literal `{branch}`
+ * in the operator's face. Every message in guardrails.yml used it once, so
+ * this changes no text today and stops the second use being a trap.
+ */
 function renderBranch(template: string, branch: string): string {
-  return template.replace('{branch}', branch);
+  return template.replaceAll('{branch}', branch);
 }
 
 // ---------------------------------------------------------------------------
@@ -802,8 +849,85 @@ function checkMergeIntoProtected(
   // Names only, deliberately, not `protected_branches.patterns`: landing task
   // branches on `smith/<epic>/integration` is the merge queue's whole job.
   if (!isProtectedBranchName(branch, policy)) return null;
+  // One exception, and it is the one act of merging that lands nothing:
+  // fast-forwarding this branch to its own copy on a remote. No commit is
+  // created and no work arrives that was not already published, so refusing
+  // it protected nothing and cost the operator the ordinary refresh of a
+  // local `main` — the only way to do it was outside the gate entirely.
+  //
+  // Judged per segment, because every command in a chain runs: an allowed
+  // catch-up in front of `&& git merge feature-y` buys the merge nothing.
+  const segments = [...gitSegmentsFor(command, 'merge'), ...gitSegmentsFor(command, 'pull')];
+  if (
+    segments.length > 0 &&
+    segments.every((segment) => isUpstreamCatchUp(segment, branch, policy))
+  ) {
+    return null;
+  }
   const rule = requireRule(policy, 'merge-into-protected');
   return violation(rule, renderBranch(rule.reasonOnCurrentBranch ?? rule.reason, branch));
+}
+
+/**
+ * The only flag rule 3's exception knows how to read. Everything else — even
+ * something harmless — falls back to the deny, because the exception's claim
+ * is that the command lands nothing, and a flag it has never seen is a claim
+ * it cannot make. `--no-ff` is the reason this is an allowlist and not a
+ * `--ff-only` presence test: `git pull --ff-only origin main --no-ff` has the
+ * exception's exact spelling in it and still writes a merge commit, since the
+ * later flag wins.
+ */
+const CATCH_UP_FLAGS: readonly string[] = ['--ff-only'];
+
+/** `git merge` / `git pull` and nothing in between — no `git -c ...`, no env prefix, no wrapper. */
+const CATCH_UP_SHAPE_RE = /^git\s+(merge|pull)(?:\s|$)/;
+
+/**
+ * Is this segment a fast-forward of the branch you are standing on to its own
+ * copy on a remote?
+ *
+ * The rule reads what the command line says, so the exception does too, and it
+ * allows a segment only where the text itself proves every part: the command
+ * is a plain `git merge`/`git pull` with nothing spliced in front of the
+ * subcommand; its only flag is `--ff-only`; its source names *this* branch on
+ * a remote the policy lists; and there is no other operand, since a second
+ * source is a second thing landing. Anything the exception has not read is a
+ * denial, not a shrug — that is the difference between a proof and a guess.
+ *
+ * What it deliberately leaves out is a bare `git pull --ff-only`, whose source
+ * is `branch.<name>.merge` in a config file this rule cannot read. It is
+ * almost always the same catch-up, and "almost always" is the reasoning rule 3
+ * was just corrected out of — the operator gets a spelling that is true on its
+ * face instead.
+ *
+ * And what it cannot prove even so: a remote is a name here, and `git remote
+ * set-url origin <anywhere>` makes that name point wherever it likes. The
+ * allowlist buys the operator a name they control, not a URL this gate has
+ * verified — see docs/standards/guardrails.md.
+ */
+function isUpstreamCatchUp(segment: string, branch: string, policy: GuardrailPolicy): boolean {
+  const subcommand = CATCH_UP_SHAPE_RE.exec(segment.trim())?.[1];
+  if (!subcommand) return false;
+  const tokens = gitTokens(segment, subcommand);
+  const flags = tokens.filter((t) => t.startsWith('-'));
+  if (!flags.includes('--ff-only')) return false;
+  if (flags.some((flag) => !CATCH_UP_FLAGS.includes(flag))) return false;
+  const operands = tokens
+    .filter((t) => !t.startsWith('-'))
+    .map((t) => t.replace(/^["']/, '').replace(/["']$/, ''));
+  if (subcommand === 'pull') {
+    // `git pull <remote> <branch>`: the source is two operands, spelled apart.
+    return operands.length === 2 && isCatchUpRemote(operands[0], policy) && operands[1] === branch;
+  }
+  // `git merge <remote>/<branch>`: the same source, spelled as one ref. A bare
+  // `main` is not it — that is a local ref that merely shares the name.
+  if (operands.length !== 1) return false;
+  const [remote, ...rest] = (operands[0] ?? '').split('/');
+  return isCatchUpRemote(remote, policy) && rest.join('/') === branch;
+}
+
+function isCatchUpRemote(token: string | undefined, policy: GuardrailPolicy): boolean {
+  return token !== undefined && policy.catchUpRemotes.includes(token);
 }
 
 /** Rule 4: deploy/publish commands (`deploy_commands` in guardrails.yml — wrangler deploy/publish, pages publish today). */
