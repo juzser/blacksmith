@@ -899,6 +899,30 @@ than appearing in it.
 
 ### Fixed
 
+- **The same rule, written twice, and the copy that wins is the one that
+  cannot see `HEAD`.** `.claude/settings.json` kept `Bash(git merge*main*)`
+  and `Bash(git merge*master*)` in `permissions.deny` — the merge rule spelled
+  a second time, one layer above the code, in a matcher that reads command
+  text. That copy outranks the hook, so the fix in **The merge rule read the
+  wrong end of the command** below did not take effect:
+  `checkMergeIntoProtected` began judging a merge by the branch you are
+  standing on while the glob went on judging it by whether the text said
+  `main`. The deadlock that entry describes — a conflicted pull request whose
+  one remedy is `git merge origin/main`, with force-push refused so a rebase
+  leaves an unpushable branch — was still live on the branch that carried the
+  cure, which is how this was found. The entries are removed rather than
+  narrowed, because there is no narrower spelling to write: every ref a glob
+  can see in a `git merge` is a source. What they matched was the refresh,
+  merges *from* `main`, while `git merge feature-y` on `main` — the act they
+  existed to stop — never contained the word and always passed. Inverted, not
+  narrow, and worth nothing as a backstop. What is left states one principle:
+  deny where the command text names a destination, which `git push origin
+  main` does and `git merge` never can. Coverage goes up rather than down,
+  since the hook also refuses `git pull origin feature-y` on `main`, which no
+  entry here ever matched. `SECURITY.md` already describes this list as
+  blocking "pushes to `main`, force-pushes, history rewriting, and unbounded
+  deletion" — merges were never in its inventory, so the setting was the
+  outlier and the document needed no edit.
 - **The agent prompts stopped answering the install interview for the
   operator.** `factory/policies/stack.yml` made the stack an operator answer,
   and one prompt out of twelve looked it up. Fourteen lines still named this
