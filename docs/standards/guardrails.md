@@ -125,6 +125,14 @@
   separately, so an allowed catch-up in front of `&& git merge feature-y`
   buys the merge nothing.
 
+  Redirections are plumbing, and the exception reads past them: `2>&1`,
+  `>/dev/null` and their kin are taken out of the command before it is
+  judged, so `git pull --ff-only origin main 2>&1 | tail` is the same
+  catch-up as the one written without the pipe. Taken out, note, rather than
+  treated as the end of the command — everything after a `>` is still part
+  of it, and `git pull --ff-only origin main >/dev/null --no-ff` is a merge
+  commit wearing the exception's spelling.
+
   What the exception cannot prove, and does not claim to: a remote is a
   *name* on the command line, and `git remote set-url origin <anywhere>`
   makes that name point where it likes. The allowlist buys a name the
