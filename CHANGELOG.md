@@ -899,6 +899,35 @@ than appearing in it.
 
 ### Fixed
 
+- **A redirection ends a command's arguments, not the command — and rule 3's
+  exception read it as the end of everything.** `splitChainSegments` cuts a
+  command at `<` and `>` as well as at `;&|`, and for every rule that
+  *denies* that is the safe direction: a rule shown less of a command refuses
+  more of it. The catch-up exception is the one rule that *allows*, and there
+  the same cut is a hole. It judged `git pull --ff-only origin main
+  >/dev/null --no-ff` on the text up to the `>` — which is exactly the
+  catch-up it exists to permit — while the command git actually ran carried
+  `--no-ff` and wrote the merge commit rule 3 exists to refuse. The flag
+  allowlist in the entry below had just closed that spelling; a `>` in front
+  of it re-opened it, and `git merge --ff-only origin/main >/dev/null
+  --squash` with it. The same cut failed in the other direction too, on the
+  first thing an operator types after a catch-up ships: `git pull --ff-only
+  origin main 2>&1 | tail -6` split into a segment ending `main 2`, whose
+  stray descriptor read as a third operand, so the exception refused its own
+  ordinary use. `stripRedirections` now takes redirections and their targets
+  out of the command *before* the exception splits it, and the exception
+  splits on `COMMAND_SEPARATOR_CHARS` — the separators without `<>`. The
+  order is the point: the `&` in `2>&1` belongs to the redirection, and only
+  a reader that has already recognised it can tell it from the `&&` that
+  really does start a second command, which is why
+  `git pull --ff-only origin main 2>&1 && git merge feature-y` is still
+  refused on its second half. Plumbing that hides nothing is allowed with the
+  command it plumbs — `2>&1`, `>>log`, `</dev/null`, `&>/dev/null`, a pipe
+  into `tail`. A descriptor spelled apart from its operator is not plumbing
+  and is not treated as any: `git pull --ff-only origin main 2 > x` passes
+  git a refspec called `2`, and stays refused. Every other rule still splits
+  the old way, `<` and `>` included, because truncation is what they want.
+
 - **Correct about where a merge lands, and still one act too wide: the
   catch-up that lands nothing.** Rule 3 judges a merge by the branch you are
   standing on, which is right, and then refused every merge there, which swept

@@ -471,6 +471,24 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
     },
   );
 
+  // A redirection is shell plumbing: it moves the command's streams, it is
+  // not an operand and it is not a flag. `2>&1` changes nothing about what a
+  // merge lands, and the most ordinary way to run a catch-up from a session —
+  // piping it somewhere to read the tail — must not read as a different
+  // command than the one without the pipe.
+  it.each([
+    ['git pull --ff-only origin main 2>&1'],
+    ['git pull --ff-only origin main 2>&1 | tail -6'],
+    ['git merge --ff-only origin/main 2>/dev/null'],
+    ['git pull --ff-only origin main >>/tmp/catch-up.log 2>&1'],
+    ['git pull --ff-only origin main </dev/null'],
+    // `&>` is one redirection, not a chain: the `&` belongs to the operator.
+    ['git pull --ff-only origin main &>/dev/null'],
+  ])('allows %s on main, plumbing and all', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+    expect(ruleIds(d)).toEqual([]);
+  });
+
   // The mini policy has no `catch_up_remotes`, so these two also prove the
   // default: a guardrails.yml written before the key existed gets [origin],
   // the strict reading, rather than losing the rule or the exception.
@@ -539,6 +557,18 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
     ['git pull --ff-only'],
     // A URL is not a remote name this rule can vouch for.
     ['git pull --ff-only https://example.invalid/repo.git main'],
+    // And a redirection must never hide the flags behind it. Reading a
+    // command only up to its first `>` truncates it, and an allowlist cannot
+    // vouch for text it never saw: every one of these really does write a
+    // merge commit, with the exception's own spelling in front of it.
+    ['git pull --ff-only origin main >/dev/null --no-ff'],
+    ['git pull --ff-only origin main > /tmp/x.log --no-ff'],
+    ['git merge --ff-only origin/main >/dev/null --squash'],
+    ['git pull --ff-only origin main 2>&1 --no-ff'],
+    ['git pull --ff-only origin main <&- --no-ff'],
+    // A descriptor spelled apart from its operator is not plumbing at all —
+    // `2` is an argument, and git reads it as a refspec.
+    ['git pull --ff-only origin main 2 > x'],
   ])('still denies %s on main', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
     expect(ruleIds(d)).toEqual(['merge-into-protected']);
@@ -549,6 +579,19 @@ describe('evaluateCommand — rule 3: merge-into-protected', () => {
   it('denies a chain that hides an ordinary merge behind an allowed catch-up', () => {
     const d = evaluateCommand(
       ctx({ command: 'git pull --ff-only origin main && git merge feature-y', branch: 'main' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['merge-into-protected']);
+  });
+
+  // Stripping the plumbing must not cost the split: the `&` of `2>&1` belongs
+  // to the redirection, the `&&` after it still separates two commands.
+  it('denies a chain whose separator sits behind a redirection', () => {
+    const d = evaluateCommand(
+      ctx({
+        command: 'git pull --ff-only origin main 2>&1 && git merge feature-y',
+        branch: 'main',
+      }),
       policy,
     );
     expect(ruleIds(d)).toEqual(['merge-into-protected']);

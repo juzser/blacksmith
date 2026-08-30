@@ -857,7 +857,7 @@ function checkMergeIntoProtected(
   //
   // Judged per segment, because every command in a chain runs: an allowed
   // catch-up in front of `&& git merge feature-y` buys the merge nothing.
-  const segments = [...gitSegmentsFor(command, 'merge'), ...gitSegmentsFor(command, 'pull')];
+  const segments = catchUpSegments(command);
   if (
     segments.length > 0 &&
     segments.every((segment) => isUpstreamCatchUp(segment, branch, policy))
@@ -994,16 +994,11 @@ function hasRecursiveForce(tokens: readonly string[]): boolean {
 }
 
 /**
- * Every character that ends the command a segment is about. `;&|` are the
- * three guard.sh knew, and for a long time this file knew no others — which
- * left the rules that read a segment's *operands* (rule 1's destination ref,
- * rule 6's paths) reading whatever the next piece of shell syntax put in
- * front of them:
- *
- * - `>` `<` start a redirection, whose target is a file the command writes,
- *   never one of its operands. This is the one that mattered: `git push
- *   origin main > /dev/null` is not an evasion, it is how a quiet push is
- *   written, and it was allowed.
+ * The characters that separate one command in a chain from the next. `;&|`
+ * are the three guard.sh knew, and for a long time this file knew no others
+ * — which left the rules that read a segment's *operands* (rule 1's
+ * destination ref, rule 6's paths) reading whatever the next piece of shell
+ * syntax put in front of them:
  * - `(` `)` open and close a substitution or subshell — `echo $(git push
  *   origin main)` is a real push in a real tool call, and the `)` stuck to
  *   the ref made it `main)`, which is nothing's name.
@@ -1017,7 +1012,25 @@ function hasRecursiveForce(tokens: readonly string[]): boolean {
  * separator inside a quoted string splits anyway. That direction over-refuses,
  * which is the one this file chooses everywhere.
  */
-const SEPARATOR_CHARS = ';&|\\n(){}<>#`';
+const COMMAND_SEPARATOR_CHARS = ';&|\\n(){}#`';
+
+/**
+ * `>` `<` start a redirection, whose target is a file the command writes,
+ * never one of its operands. This is the one that mattered: `git push
+ * origin main > /dev/null` is not an evasion, it is how a quiet push is
+ * written, and it was allowed.
+ *
+ * They are kept apart from the separators above because cutting a command
+ * here does not separate two commands, it *truncates* one — and the two
+ * cuts differ on whether that is safe. A rule that refuses on what it sees
+ * refuses more when it sees less, so every deny rule may cut here freely.
+ * `checkMergeIntoProtected`'s exception *allows* on what it sees, and text
+ * it never read is a claim it must not make: see `stripRedirections`.
+ */
+const REDIRECTION_CHARS = '<>';
+
+/** Every character that ends the command a segment is about — what the deny rules split on. */
+const SEPARATOR_CHARS = `${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}`;
 
 /**
  * Every separated segment of a command, so a chain can be inspected one
@@ -1026,6 +1039,54 @@ const SEPARATOR_CHARS = ';&|\\n(){}<>#`';
  */
 function splitChainSegments(command: string): string[] {
   return command.split(new RegExp(`[${SEPARATOR_CHARS}]`));
+}
+
+/**
+ * A redirection, with its target: an optional file descriptor or `&`, one of
+ * the redirection operators, and then either a descriptor to duplicate
+ * (`2>&1`, `<&-`) or a word to redirect to, glued or spaced (`>/dev/null`,
+ * `> out`). The target stops at a separator so that `>out; git merge x` gives
+ * back the `;` it was written with.
+ *
+ * Longest operators first: `>>` before `>`, `<<<` before `<<` before `<`.
+ */
+const REDIRECTION_RE = new RegExp(
+  `(?:&|\\d*)(?:>>|>|<<<|<<-?|<>|<)(?:&\\d*-?|\\s*[^\\s${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}]*)`,
+  'g',
+);
+
+/**
+ * The command with its plumbing taken out — `git pull --ff-only origin main
+ * 2>&1 | tail` becomes `git pull --ff-only origin main   | tail`.
+ *
+ * Removing redirections *before* splitting is the point, and the order is what
+ * makes it correct: the `&` in `2>&1` belongs to the redirection, and only a
+ * reader that has already recognised it can tell it from the `&&` that really
+ * does start a second command.
+ *
+ * This is the exception's reading and nothing else's. Every deny rule keeps
+ * splitting on `<` and `>`, where truncating a command is the safe direction.
+ */
+function stripRedirections(command: string): string {
+  return command.replace(REDIRECTION_RE, ' ');
+}
+
+/**
+ * The `git merge`/`git pull` commands in a chain, read for rule 3's exception:
+ * plumbing removed, then split on the characters that actually separate two
+ * commands.
+ *
+ * `gitSegmentsFor` is the same read for every rule that denies, and it would
+ * hand this one a lie: `git pull --ff-only origin main >/dev/null --no-ff`
+ * splits at the `>` into a segment that ends at `main`, which is exactly the
+ * catch-up the exception allows — while the command git actually runs has
+ * `--no-ff` on it and writes a merge commit.
+ */
+function catchUpSegments(command: string): string[] {
+  const re = new RegExp(`\\bgit\\b.*(?:${bareWord('merge')}|${bareWord('pull')})`, 'i');
+  return stripRedirections(command)
+    .split(new RegExp(`[${COMMAND_SEPARATOR_CHARS}]`))
+    .filter((s) => re.test(s));
 }
 
 /** The `rm <args>` run up to the next separator, ported from guard.sh's `grep -Eo 'rm[[:space:]]+[^;&|]*'` and widened with it. Applied per chain segment (see `checkUnboundedRm`), so "up to the next separator" and "to the end of the string" mean the same thing by the time this runs — the negated class is belt and braces, kept in step with the split so the two can never disagree about where a command ends. */
