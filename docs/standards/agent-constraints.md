@@ -26,7 +26,9 @@
   is an operator question. The allowlist grows only via approved lessons.
   Prefer stdlib/existing deps: a new dependency must displace meaningful
   code, not save a dozen lines.
-- Comments/docs: English only; no style beyond the scaffold's Biome config.
+- Comments/docs: English only. Style beyond that is the project's
+  formatter's call — `factory/policies/stack.yml` names it under `lint`,
+  and where the answer is `none` the surrounding code is the style guide.
 
 ### Effort discipline (anti-over-engineering, defaults applied 2026-08-03)
 
@@ -85,7 +87,7 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
 |---|---|---|
 | **`S2-major`** (block) | yes | security / data loss · broken core flow · **a11y WCAG AA failure** · **new flaky test** |
 | **`S3-minor`** (waiver) | no — batched question at epic end | visual regression vs the uiux spec · perf regression >20% · everything minor-but-real |
-| **`S4-nit`** | no | style/naming nits not caught by Biome |
+| **`S4-nit`** | no | style/naming nits the project's linter does not catch |
 
 - `S1-stop-the-line` remains reserved for exactly that (repo corruption,
   secret leak).
@@ -116,8 +118,8 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
   security-tagged; scheduled recheck of sensitive claim paths.
 - Read-only tools; kill mandate — findings need a concrete attack
   scenario (attacker input → effect) or they die before the queue.
-- Mechanical scanners (gitleaks, pnpm audit) are the always-on layer and
-  their output is not repeated as findings.
+- Mechanical scanners (secret scanning, dependency audit) are the always-on
+  layer and their output is not repeated as findings.
 
 ## scribe (digest duties, v3.2)
 

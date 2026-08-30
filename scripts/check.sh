@@ -173,6 +173,113 @@ PY
 [ $? -eq 0 ] || FAIL=1
 
 echo
+echo "-- Agent templates: stack neutrality --"
+# An agent prompt is dispatched against the operator's project, not against
+# this clone. So a prompt that says "Biome already owns style" or "run the
+# Playwright e2e" has answered the install interview on the operator's behalf,
+# and answered it wrong for anyone whose stack.yml says eslint-prettier,
+# cypress, or none. It is the defect docs/standards/stack.md had before the
+# answers became data: one operator's setup shipped as if it were the product.
+#
+# The rule: a prompt may name a tool the operator gets to choose only where it
+# also points at the policy that does the choosing. That keeps "whatever
+# `factory/policies/stack.yml` answers for `lint`" legal and "Biome's job" not.
+#
+# It covers docs/standards/ as well as the prompts, because the prompts cite it
+# -- fixing only the prompt leaves the standard it quotes still saying the old
+# thing, which is the drift, just moved. Same reason for severity.yml and
+# taxonomy.yml: a judge reads those class descriptions as its own definition of
+# the severity, so "nits not caught by Biome" is the reviewer prompt's Biome
+# again, one file down. The rest of factory/policies/ is deliberately out --
+# guardrails.yml has to name npm, pnpm, yarn and bun to match them, and a rule
+# that fires on a matcher naming what it matches is a rule about nothing. So is
+# stack.md/stack.yml, where enumerating the options is the whole job.
+#
+# The vocabulary is tethered rather than free-standing -- every term below must
+# still appear in stack.yml -- so an option renamed there fails this check
+# instead of quietly disarming it.
+python3 - "$REPO_ROOT" <<'PY'
+import sys, glob, os, re
+
+root = sys.argv[1]
+fail = False
+
+# term -> the token that must still be in stack.yml for the term to be an
+# answer the operator gets to give at all.
+TERMS = {
+    "biome": "biome",
+    "eslint": "eslint-prettier",
+    "prettier": "eslint-prettier",
+    "vitest": "vitest",
+    "jest": "jest",
+    "playwright": "playwright",
+    "cypress": "cypress",
+    "pnpm": "pnpm",
+    "npm": "npm",
+    "yarn": "yarn",
+    "bun": "bun",
+}
+# Naming a tool is fine when the same breath names the policy -- that is a
+# pointer to the answer rather than an assumption about it.
+POINTERS = ("stack.yml", "stack show")
+
+with open(os.path.join(root, "factory", "policies", "stack.yml")) as fh:
+    policy = fh.read()
+stale = sorted({t for t, token in TERMS.items() if token not in policy})
+if stale:
+    print(f"FAIL factory/policies/stack.yml: no longer offers {stale} - this "
+          f"check's vocabulary has drifted from the policy it guards")
+    fail = True
+
+
+def blocks(lines):
+    """(first line number, lines) per block, a block being the unit a pointer
+    licenses. A blank line ends one; so does the start of a bullet, a table
+    row or a heading, because a whole ten-bullet list is far too much to
+    exempt on the strength of one bullet citing the policy. Continuation
+    lines stay with the bullet they belong to, so the pointer may wrap."""
+    cur, start = [], 0
+    for i, line in enumerate(lines + [""]):
+        opens = re.match(r"\s*([-*|#]|\d+\.)", line) is not None
+        if (not line.strip() or opens) and cur:
+            yield start, cur
+            cur = []
+        if line.strip():
+            if not cur:
+                start = i
+            cur.append(line)
+    if cur:
+        yield start, cur
+
+
+scanned = sorted(glob.glob(os.path.join(root, ".claude", "agents", "*.md"))
+                 + glob.glob(os.path.join(root, "docs", "standards", "*.md"))
+                 + [os.path.join(root, "factory", "policies", n)
+                    for n in ("severity.yml", "taxonomy.yml")])
+for f in scanned:
+    rel = os.path.relpath(f, root)
+    if os.path.basename(f) == "stack.md":
+        continue
+    bad = []
+    for start, block in blocks(open(f).read().split("\n")):
+        if any(p in "\n".join(block) for p in POINTERS):
+            continue
+        for j, line in enumerate(block):
+            for term in TERMS:
+                if re.search(rf"\b{re.escape(term)}\b", line, re.I):
+                    bad.append(f"{start + j + 1}: {term} - {line.strip()[:64]}")
+    if bad:
+        for b in bad:
+            print(f"FAIL {rel}:{b}")
+        fail = True
+    else:
+        print(f"OK   {rel}")
+
+sys.exit(1 if fail else 0)
+PY
+[ $? -eq 0 ] || FAIL=1
+
+echo
 echo "-- bash -n on hooks --"
 shopt -s nullglob
 hook_files=(.claude/hooks/*.sh)

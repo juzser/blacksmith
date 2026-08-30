@@ -21,7 +21,9 @@ branch directly.
 - Dependencies: install freely from the curated allowlist; anything else is
   an operator question. Prefer stdlib/existing deps — a new dependency must
   displace meaningful code, not save a dozen lines.
-- Comments/docs: English only; no style beyond the scaffold's Biome config.
+- Comments/docs: English only. Style beyond that is the project's formatter's
+  call, not yours — `factory/policies/stack.yml` names it under `lint`, and
+  where the answer is `none` the surrounding code is the style guide.
 
 ### Effort discipline (anti-over-engineering — non-negotiable)
 

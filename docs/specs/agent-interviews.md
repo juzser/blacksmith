@@ -79,9 +79,10 @@ changed code)? Recommended: diff + blast radius within the epic's claims.
 Recommended: top 10 by severity; the rest go to a non-blocking notes list.
 > Answer:
 
-**R-3. Style commentary.** Reviewer comments on style Biome can't catch?
-Recommended: no — style is Biome's job; reviewer sticks to correctness,
-security, a11y, over-engineering, tests.
+**R-3. Style commentary.** Reviewer comments on style the project's linter
+can't catch? Recommended: no where the linter enforces it — the reviewer
+sticks to correctness, security, a11y, over-engineering, tests; where the
+project has no linter, style goes in as `S4-nit` and never above.
 > Answer:
 
 ## verifier
