@@ -63,7 +63,7 @@
     "ajv-formats": "3.0.1",
     "better-sqlite3": "13.0.2",
     "drizzle-orm": "0.45.2",
-    "hono": "4.13.3",
+    "hono": "4.13.5",
     "picomatch": "4.0.5",
     "vue": "3.5.41",
     "vue-router": "5.2.0",
