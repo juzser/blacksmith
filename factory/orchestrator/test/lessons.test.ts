@@ -156,6 +156,37 @@ describe('checkNovelty', () => {
     expect(result.polarityConflict).toBe(false);
     expect(result.novel).toBe(false);
   });
+
+  it('reads an intensifier as the same instruction, not its opposite', () => {
+    // "always X" and a bare "X" both tell you to do X. The guard compares
+    // polarity against absence, and absence of a PROHIBITION is an opposition
+    // -- absence of an intensifier is not, it is the same instruction said
+    // with less force. Left as a difference, every near-duplicate that merely
+    // dropped the "always" was called a contradiction of the rule it restates,
+    // escaped the redundancy gate it should have been caught by, and had
+    // `contradiction_of` written onto its lesson-candidate-raised event.
+    const result = checkNovelty(
+      'Always retry the request automatically on a network timeout before giving up.',
+      ['Retry the request automatically on a network timeout before giving up.'],
+      0.8,
+    );
+    expect(result.mostSimilar?.score).toBeGreaterThanOrEqual(0.8);
+    expect(result.polarityConflict).toBe(false);
+    expect(result.novel).toBe(false);
+  });
+
+  it('still reads a bare statement as the opposite of the prohibition of it', () => {
+    // The other half of "vs their absence", and the half that is real: this is
+    // the row that fails if the fix above is taken as "absence never differs".
+    const result = checkNovelty(
+      'Never retry the request automatically on a network timeout before giving up.',
+      ['Retry the request automatically on a network timeout before giving up.'],
+      0.8,
+    );
+    expect(result.mostSimilar?.score).toBeGreaterThanOrEqual(0.8);
+    expect(result.polarityConflict).toBe(true);
+    expect(result.novel).toBe(true);
+  });
 });
 
 describe('length-aware novelty (P9-35 (a))', () => {

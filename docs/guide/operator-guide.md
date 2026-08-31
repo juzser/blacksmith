@@ -2325,9 +2325,10 @@ the lesson it matched (e.g. "always retry X" vs "never retry X") — it stays
 a pending candidate with a `possible_contradiction_of` note instead, so a
 genuine correction never gets silently swallowed as a duplicate (§9.6). The
 polarity check itself is a small fixed marker list
-(never/always/not/don't/do not/no longer/must not), read for the polarity it
-carries rather than for the word — "must not" against "do not" is one lesson
-spelled twice, not a contradiction. A contradiction phrased another way
+(never/not/don't/do not/no longer/must not), read for whether the statement
+prohibits rather than for the word — "must not" against "do not" is one lesson
+spelled twice, not a contradiction, and "always retry X" against a bare "retry
+X" is one instruction said with more force, not its opposite. A contradiction phrased another way
 (e.g. "avoid" vs "prefer") is not caught and can still auto-novelty-reject
 silently. Review the "possible contradiction" notes
 Lessons candidates carry; don't assume every genuine contradiction is

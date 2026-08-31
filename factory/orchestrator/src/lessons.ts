@@ -6,7 +6,7 @@
 //       upgrade, not built here (architecture §9.3). Known residual
 //       limitation: the polarity-conflict guard (checkNovelty's
 //       `polarityConflict`) only catches contradictions phrased with one of
-//       a small fixed marker list (never/always/not/don't/...) — a
+//       a small fixed marker list (never/not/don't/...) — a
 //       same-shingle-shape contradiction phrased another way (e.g. "avoid"
 //       vs "prefer") still auto-novelty-rejects silently. Documented, not
 //       hidden — see docs/guide/operator-guide.md.
@@ -153,9 +153,11 @@ export interface NoveltyResult {
   /**
    * True when the nearest match scored >= threshold (would otherwise be
    * auto-rejected as redundant) BUT the candidate's and the match's
-   * imperative polarity markers (never/always/not/don't, vs their absence)
-   * differ — a same-shape STATEMENT CONTRADICTION ("always retry X" vs
-   * "never retry X"), not a duplicate. Callers must treat this as novel
+   * exactly one of the candidate and the match prohibits what it is about
+   * (never/not/don't, vs their absence) — a same-shape STATEMENT
+   * CONTRADICTION ("always retry X" vs "never retry X"), not a duplicate.
+   * An intensifier is not an opposition: "always retry X" against a bare
+   * "retry X" is one instruction said with more force, and stays a duplicate. Callers must treat this as novel
    * (never auto-reject it) and surface it to a human instead, per
    * architecture §9.6 (bi-temporal supersession needs a human's "this
    * contradicts an earlier lesson" call, not a silent merge).
@@ -164,57 +166,61 @@ export interface NoveltyResult {
 }
 
 /**
- * Crude, deliberately cheap polarity signal: which polarity a small fixed set
- * of markers puts on `text` (word-boundary, case-insensitive). This is NOT
- * real negation detection — it will miss contradictions phrased without one of
- * these words (e.g. "avoid" vs "prefer") and can occasionally flag two
- * statements that share a polarity for unrelated reasons as a false "no
- * conflict". Residual limitation, documented rather than hidden: see this
- * file's header comment and docs/guide/operator-guide.md.
+ * Crude, deliberately cheap prohibition signal: whether `text` forbids what it
+ * is about, by a small fixed set of markers (word-boundary, case-insensitive).
+ * This is NOT real negation detection — it will miss a prohibition phrased
+ * without one of these words (e.g. "avoid" vs "prefer"). Residual limitation,
+ * documented rather than hidden: see this file's header comment and
+ * docs/guide/operator-guide.md.
  *
- * What is compared is the `polarity`, not the marker word. English spells a
- * prohibition four ways in this list alone, and comparing the words made a
- * candidate saying "must not" read as a contradiction of the corpus entry
- * saying "do not" — the redundant candidate this gate exists to reject,
- * relabelled as its opposite. `contradiction_of` is written onto the
- * lesson-candidate-raised event, so that mislabel is persisted, not merely
- * displayed.
+ * What is compared is WHETHER a statement prohibits, not which word it
+ * prohibits with. English spells a prohibition four ways in this list alone,
+ * and comparing the words made a candidate saying "must not" read as a
+ * contradiction of the corpus entry saying "do not" — the redundant candidate
+ * this gate exists to reject, relabelled as its opposite. `contradiction_of`
+ * is written onto the lesson-candidate-raised event, so that mislabel is
+ * persisted, not merely displayed.
  */
-const POLARITY_MARKERS: ReadonlyArray<{ marker: string; polarity: 'negative' | 'absolute' }> = [
-  { marker: 'never', polarity: 'negative' },
-  { marker: 'not', polarity: 'negative' },
-  { marker: "don't", polarity: 'negative' },
-  { marker: 'do not', polarity: 'negative' },
-  { marker: 'no longer', polarity: 'negative' },
-  { marker: 'must not', polarity: 'negative' },
-  { marker: 'always', polarity: 'absolute' },
+const PROHIBITION_MARKERS: readonly string[] = [
+  'never',
+  'not',
+  "don't",
+  'do not',
+  'no longer',
+  'must not',
 ];
 
-function polaritiesIn(text: string): Set<string> {
+function prohibits(text: string): boolean {
   const lower = text.toLowerCase();
-  const found = new Set<string>();
-  for (const { marker, polarity } of POLARITY_MARKERS) {
-    const pattern = new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
-    if (pattern.test(lower)) found.add(polarity);
-  }
-  return found;
+  return PROHIBITION_MARKERS.some((marker) =>
+    new RegExp(`\\b${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lower),
+  );
 }
 
 /**
- * Symmetric difference of the two statements' polarity sets is non-empty —
- * "always X" against "never X", and either against a bare "X", still differ.
+ * Exactly one of the two statements prohibits what it is about — "never X"
+ * against "always X", and either against a bare "X".
+ *
+ * "always" was a marker here once, carrying its own `absolute` polarity, and
+ * the comparison was a symmetric set difference — so its ABSENCE read as an
+ * opposing polarity. But "always X" and a bare "X" both tell you to do X: an
+ * intensifier is the same instruction said with more force, not the opposite
+ * one. Every near-duplicate that merely dropped the word was called a
+ * contradiction of the rule it restates, which let it past the redundancy gate
+ * and persisted `contradiction_of` against it. Dropping the marker costs
+ * nothing on the case it was there for, because "always X" against "never X"
+ * is already an opposition — exactly one of them prohibits.
  *
  * Exported for `lessonAudit.ts`, which asks the same question of two APPROVED
  * statements rather than of a candidate against the corpus, and pairs it with
  * its own similarity bar — see `TOPIC_SIMILARITY_THRESHOLD` there for why the
- * novelty threshold in front of `checkNovelty` is the wrong one for that.
+ * novelty threshold in front of `checkNovelty` is the wrong one for that. That
+ * bar is the looser of the two, which is what made the intensifier read most
+ * expensive: there it forced `review` over a `keep` and reported the whole
+ * corpus defective.
  */
 export function polarityDiffers(a: string, b: string): boolean {
-  const polaritiesA = polaritiesIn(a);
-  const polaritiesB = polaritiesIn(b);
-  for (const polarity of polaritiesA) if (!polaritiesB.has(polarity)) return true;
-  for (const polarity of polaritiesB) if (!polaritiesA.has(polarity)) return true;
-  return false;
+  return prohibits(a) !== prohibits(b);
 }
 
 /**

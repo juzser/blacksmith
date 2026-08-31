@@ -899,6 +899,25 @@ than appearing in it.
 
 ### Fixed
 
+- **An intensifier is not an opposition.** `polarityDiffers` — the predicate
+  that decides whether two lessons say opposite things — sorted marker words
+  into polarities and reported a difference whenever the two sets differed.
+  `always` sat in a polarity of its own, so **"Always retry the request on a
+  network timeout" against a bare "Retry the request on a network timeout" was
+  read as a contradiction**: one instruction said with more force, scored as
+  its own reversal. The cost is not cosmetic. A contradiction sets
+  `recommendationFor` to `review` overriding every other reading of the entry,
+  and a single one makes the whole audit report `defective` — so a corpus could
+  be declared structurally broken over an adverb. The predicate now asks one
+  question of each statement — does it prohibit what it is about (`never`,
+  `not`, `don't`, `do not`, `no longer`, `must not`) — and calls the pair an
+  opposition only when exactly one of the two does. Dropping the `always`
+  marker costs nothing on the case it was there for: `always X` against
+  `never X` is still an opposition, because exactly one of them prohibits.
+  Both consumers move together — the novelty gate's `polarityConflict`, which
+  lets a genuine reversal through as novel instead of swallowing it as a
+  duplicate, and `auditLessons`' all-pairs contradiction scan, where the same
+  pair had been reported at 62% topic similarity.
 - **Four refusals that read a spelling instead of a shape.** Every guardrail
   in this file errs toward denying, and that is the right direction — but a
   denial of something harmless is still a defect, and four of them had

@@ -242,6 +242,45 @@ describe('auditLessons — contradiction', () => {
     expect(entryFor(report, 'b').contradicts).toEqual([]);
   });
 
+  it('does not flag an intensifier against the bare form of the same instruction', () => {
+    // Both entries say to widen the claim. At the 0.5 unigram bar this pass
+    // reads at, "exactly one of them says always" describes a great many pairs
+    // that agree, and calling them opposite costs more here than in the
+    // novelty gate: it forces `review` over a `keep`, and one such pair alone
+    // reports the whole corpus defective.
+    const report = auditLessons(
+      [],
+      [
+        rule({ lessonId: 'a', claimPath: 'src/a/**', statement: ALWAYS }),
+        rule({
+          lessonId: 'b',
+          claimPath: 'src/a/**',
+          statement: 'widen a claim to make a conflict go away',
+        }),
+      ],
+      OPTS,
+    );
+    expect(entryFor(report, 'a').contradicts).toEqual([]);
+    expect(report.contradictions).toEqual([]);
+  });
+
+  it('does flag a prohibition against the bare form of the same instruction', () => {
+    const report = auditLessons(
+      [],
+      [
+        rule({ lessonId: 'a', claimPath: 'src/a/**', statement: NEVER }),
+        rule({
+          lessonId: 'b',
+          claimPath: 'src/a/**',
+          statement: 'widen a claim to make a conflict go away',
+        }),
+      ],
+      OPTS,
+    );
+    expect(entryFor(report, 'a').contradicts).toEqual(['b']);
+    expect(report.contradictions).toHaveLength(1);
+  });
+
   it('a contradiction outranks the entry also being shadowed', () => {
     const report = auditLessons(
       [],
