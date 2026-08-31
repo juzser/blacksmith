@@ -1176,6 +1176,65 @@ describe('evaluateCommand — a message payload the shell expands is not prose',
   });
 });
 
+// The block above asks "will the shell run this" and answers it with the
+// shell's own rule, which is the right question. It then looks for `$( )` and
+// backticks — the two spellings of *command* substitution — and stops there.
+//
+// There is a third spelling, and it runs a command just as eagerly:
+//
+//   git commit -m <(wrangler deploy)
+//
+// bash forks `wrangler deploy`, hands git the path `/dev/fd/63`, and the
+// deploy has already happened by the time git has a message to read. What git
+// receives is a filename; the payload scanner read it as prose and blanked it.
+//
+// The blanking removes one whitespace-delimited token, so what went here was
+// `<(wrangler` — the binary — and ` deploy)` stayed behind. That is why the
+// rules that key on an operand *after* a subcommand (rule 1 reading a ref)
+// came through this hole intact while the rule that keys on a binary *and* its
+// subcommand (rule 4) lost the half it needed. Surviving by which half of your
+// match happened to be deleted is not coverage.
+//
+// Quoting still decides it, and the dividing line is not the same one: bash
+// performs command substitution inside double quotes but not process
+// substitution, so `"<( )"` really is the text it looks like and stays prose.
+describe('evaluateCommand — a message payload the shell runs is not prose', () => {
+  it.each([
+    ['a commit message', 'git commit -m <(wrangler deploy)'],
+    ['the output form of the same syntax', 'git commit -m >(wrangler deploy)'],
+    ['--message=', 'git commit --message=<(wrangler deploy)'],
+    ['a tag message', 'git tag -m <(wrangler deploy) v1.0.0'],
+    ['a merge message', 'git merge topic -m <(wrangler deploy)'],
+    ['a stash message', 'git stash push -m <(wrangler deploy)'],
+    ['a notes message', 'git notes add -m <(wrangler deploy) HEAD'],
+  ])('denies a deploy run by a process substitution in %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toContain('deploy-command');
+  });
+
+  it('denies an unbounded rm run by a process substitution in a message', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit -m <(rm -rf /etc)', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // The other half. Both quote styles suppress process substitution, so
+  // neither spelling may become a false deny — and each case below would trip
+  // rule 4 if the quoting were ignored.
+  it.each([
+    ['double quotes, which bash does not substitute inside', 'git commit -m "<(wrangler deploy)"'],
+    ['single quotes, which expand nothing at all', "git commit -m '<(wrangler deploy)'"],
+    ['prose explaining the syntax', 'git commit -m "docs: never run <(wrangler deploy) by hand"'],
+    ['a less-than that opens no substitution', 'git commit -m "docs: a < b in the deploy table"'],
+    ['an unquoted word with no paren after it', 'git commit -m fix<n'],
+  ])('still allows %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+    expect(ruleIds(d)).toEqual([]);
+  });
+});
+
 // Rules 1 and 6 read a segment's *operands* — the destination ref of a push,
 // the paths an `rm` names. Both used to find them by splitting the command on
 // `;&|` and reading the last whitespace-separated token, which is the ref only

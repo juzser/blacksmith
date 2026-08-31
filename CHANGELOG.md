@@ -899,6 +899,30 @@ than appearing in it.
 
 ### Fixed
 
+- **A message payload the shell *runs* is not prose — and `<( )` is a third
+  way to run one.** Blanking a `-m` payload before the rules scan it rests on
+  one claim: the shell hands that text to git as it stands, so nothing in it
+  executes. `shellExpandsPayload` checked the claim by looking for `$( )` and
+  backticks, and stopped there. Process substitution runs a command just as
+  eagerly — `git commit -m <(wrangler deploy)` forks the deploy, hands git the
+  path `/dev/fd/63`, and the deploy has already happened by the time git has a
+  message to read — so the scanner blanked a live command as free text and
+  rule 4 saw nothing. Both spellings (`<( )` and `>( )`), all five subcommands
+  whose `-m` is prose (`commit`, `merge`, `tag`, `stash`, `notes`), and
+  `--message=` with them; an `rm -rf` written the same way went past rule 6
+  too. Rules 1 and 3 came through the identical payload untouched, but by
+  accident rather than by coverage: the blanking eats one whitespace-delimited
+  token, so what it removed was `<(wrangler` — the binary — and ` deploy)`
+  stayed behind, which is fatal to a rule keyed on a binary *and* its
+  subcommand and harmless to one keyed on an operand *after* a subcommand.
+  `shellExpandsPayload` now asks the question in two parts, because quoting
+  answers them along different lines: bash substitutes commands inside double
+  quotes but does not substitute processes, so `-m "$(...)"` is still read as
+  the command it is while `-m "<(...)"` is left as the prose it looks like,
+  and single quotes go on silencing both. The other blanked span — the
+  `--command` payload of `smith policy check` — never had the hole, because it
+  accepts single-quoted payloads only; that narrowness is now the thing
+  keeping it closed, and it is unchanged.
 - **A redirection ends a command's arguments, not the command — and rule 3's
   exception read it as the end of everything.** `splitChainSegments` cuts a
   command at `<` and `>` as well as at `;&|`, and for every rule that
