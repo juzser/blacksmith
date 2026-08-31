@@ -1806,3 +1806,139 @@ describe('role write scopes', () => {
     });
   });
 });
+
+describe('evaluateCommand — a false deny is a bug too', () => {
+  // Four shapes the scanner refused because it recognised one spelling of a
+  // thing and not the rest of them. Every row below that says "allows" was red
+  // before the fix; the rows that say "denies" were green before it and after,
+  // and they are here to prove each widening bought nothing for an attacker.
+  //
+  // Each "denies" row was checked by breaking the fix it guards and watching it
+  // go red: blanking a `policy check` payload unconditionally, blanking a
+  // message payload unconditionally, filtering the stash out of the whole
+  // command rather than one segment, and letting the `m` sit anywhere in a flag
+  // cluster. Two rows are marked below as regression guards instead, because no
+  // mutation reddens them — that is a fact about what these rules read, and
+  // saying so beats implying coverage.
+
+  describe('the flag is `-m`, however it was clustered or attached', () => {
+    it.each([
+      ['clustered with -a', 'git commit -am "chore: document wrangler deploy"'],
+      ['clustered with -s and -a', 'git commit -sam "chore: document wrangler deploy"'],
+      ['attached to its value', 'git commit -m"chore: document wrangler deploy"'],
+      ['clustered on a tag', 'git tag -am "notes on wrangler deploy" v1.0.0'],
+    ])('allows a message %s', (_label, command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+      expect(ruleIds(d)).toEqual([]);
+    });
+
+    it.each([
+      ['a command substitution runs inside double quotes', 'git commit -am "$(wrangler deploy)"'],
+      ['so does a backtick', 'git commit -am "`wrangler deploy`"'],
+      ['an attached payload runs just the same', 'git commit -m"$(wrangler deploy)"'],
+      ['a process substitution needs no quotes to run', 'git commit -am <(wrangler deploy)'],
+    ])('still denies a clustered payload the shell runs — %s', (_label, command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+      expect(ruleIds(d)).toContain('deploy-command');
+    });
+
+    // Where the cluster ends, and the one row that proves it. Git reads `-ma` as
+    // message `a`, so the quoted tail is a separate operand and stays visible.
+    // Let the `m` sit anywhere in the cluster instead and `-ma` swallows the
+    // tail as its payload — inert on its face, so it gets blanked, and the push
+    // inside it is never read.
+    it('reads the tail of -ma as an operand, because the message is `a`', () => {
+      const d = evaluateCommand(
+        ctx({ command: 'git commit -ma "git push origin main"', branch: 'feature-x' }),
+        policy,
+      );
+      expect(ruleIds(d)).toContain('push-to-protected');
+    });
+
+    // A regression guard, not a witness. `stripMessageFlagValues` splits the
+    // chain before blanking, but removing that split changes no verdict this
+    // engine can reach: its own gate cannot cross a `;&|` either, and the rules
+    // that could have read a hidden operand judge by the branch you stand on.
+    // The row is here because this shape is the common one, not because it
+    // discriminates.
+    it('still reads the push in a segment after a clustered message', () => {
+      const d = evaluateCommand(
+        ctx({ command: 'git commit -am "wip" && git push origin main', branch: 'feature-x' }),
+        policy,
+      );
+      expect(ruleIds(d)).toContain('push-to-protected');
+    });
+  });
+
+  describe('`git stash push` is a stash, not a push', () => {
+    it.each([
+      ['bare, on a protected branch', 'git stash push', 'main'],
+      ['with a pathspec that happens to be named main', 'git stash push main', 'feature-x'],
+    ])('allows a stash %s', (_label, command, branch) => {
+      const d = evaluateCommand(ctx({ command, branch }), policy);
+      expect(ruleIds(d)).toEqual([]);
+    });
+
+    // Already allowed before this change, and only by accident: the blanking
+    // appended `""` so the bare-push heuristic missed the end of the segment.
+    // A regression guard, not a witness — it stays green either way.
+    it('keeps allowing a stash that was passed a message', () => {
+      const d = evaluateCommand(
+        ctx({ command: 'git stash push -m "wip"', branch: 'main' }),
+        policy,
+      );
+      expect(ruleIds(d)).toEqual([]);
+    });
+
+    it.each([
+      ['a bare push while standing on it', 'git push', 'main'],
+      ['a push chained after a stash', 'git stash push && git push', 'main'],
+      ['a push naming it', 'git push origin main', 'feature-x'],
+    ])('still denies %s', (_label, command, branch) => {
+      const d = evaluateCommand(ctx({ command, branch }), policy);
+      expect(ruleIds(d)).toContain('push-to-protected');
+    });
+  });
+
+  describe('an escaped quote does not end a double-quoted message', () => {
+    it('allows a message containing an escaped quote', () => {
+      const command = 'git commit -m "he said \\" and then ran wrangler deploy"';
+      const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+      expect(ruleIds(d)).toEqual([]);
+    });
+
+    it('still denies a substitution in the tail after an escaped quote', () => {
+      const command = 'git commit -m "he said \\" and then $(wrangler deploy)"';
+      const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
+      expect(ruleIds(d)).toContain('deploy-command');
+    });
+  });
+
+  describe('the dry run answers a double-quoted question too', () => {
+    it.each([
+      [
+        'a process substitution, inert in double quotes',
+        'smith policy check --command "<(wrangler deploy)"',
+      ],
+      ["zsh's opener, equally inert there", 'smith policy check --command "=(wrangler deploy)"'],
+      ['a push to a protected branch', 'smith policy check --command "git push origin main"'],
+    ])('allows asking about %s', (_label, command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+      expect(ruleIds(d)).toEqual([]);
+    });
+
+    it('still denies a question whose payload the shell runs first', () => {
+      const command = 'smith policy check --command "$(wrangler deploy)"';
+      const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+      expect(ruleIds(d)).toContain('deploy-command');
+    });
+
+    // Unquoted stays refused on purpose: where the payload ends is the calling
+    // shell's business, not this scanner's. Documented, not overlooked.
+    it('still refuses an unquoted payload', () => {
+      const command = 'smith policy check --command git push origin main';
+      const d = evaluateCommand(ctx({ command, branch: 'main' }), policy);
+      expect(ruleIds(d)).toContain('push-to-protected');
+    });
+  });
+});

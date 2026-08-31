@@ -899,6 +899,39 @@ than appearing in it.
 
 ### Fixed
 
+- **Four refusals that read a spelling instead of a shape.** Every guardrail
+  in this file errs toward denying, and that is the right direction — but a
+  denial of something harmless is still a defect, and four of them had
+  accumulated where a matcher learned one way to write a thing and treated the
+  rest as unfamiliar. **`git commit -am "…"`** was denied for the words in its
+  own message: the message exemption required whitespace before `-m`, so every
+  clustered short flag missed it, as did git's attached `-mx`. The flag is now
+  matched however git accepts it, with the `m` required to end the cluster —
+  git's own rule, since `-am` takes the next argument and `-ma` takes `a`.
+  **`git stash push` was read as a push to a protected branch**, because the
+  word is right there and rule 1's subcommand match is deliberately loose. A
+  stash reaches no remote. The pair `stash push` is now excluded, matched as
+  that adjacency and nothing wider, per segment — so `git push origin stash`
+  is still a push and so is the second half of `git stash push && git push`.
+  This one had a tell worth recording: `git stash push -m "wip"` was *allowed*,
+  because blanking the message appended `""` and pushed the segment's end out
+  of reach of the bare-push heuristic. Whether the stash was refused turned on
+  whether it carried a message, which is the kind of coincidence that says a
+  rule is keying on the wrong thing. **An escaped quote ended a message
+  early** — `"[^"]*"` stopped at the `\"` in `-m "he said \" and then …"`,
+  leaving the tail to be scanned as if it were a command. The double-quoted
+  form now counts `\"` as content, the way a shell does; the single-quoted
+  form is left exact, because inside those a backslash really is just a
+  backslash. **`smith policy check --command "<(...)"` was refused**, which
+  closes the asymmetry the entry below left open: that span accepted
+  single-quoted payloads only, and the single quote was standing in for the
+  question actually being asked — does the shell run this before the binary
+  sees it? Both blanked spans now ask `shellExpandsPayload` directly, so
+  `--command "$(...)"` is still read as the command it really is while
+  `--command "<(...)"` is answered instead of refused, on the one command whose
+  entire job is answering without running. Unquoted payloads stay refused on
+  purpose. Each widening carries a deny-direction test that was checked by
+  breaking the fix it guards and watching it go red.
 - **A message payload the shell *runs* is not prose — and process
   substitution is a third way to run one.** Blanking a `-m` payload before the
   rules scan it rests on one claim: the shell hands that text to git as it
