@@ -681,16 +681,28 @@ function violation(rule: GuardrailRule, reason: string = rule.reason): PolicyVio
  *   direction this file errs in on purpose.
  * - **Segment by segment**, so `git commit -m "…" && git push origin main`
  *   blanks the message and still reads the push.
- * - **The flag must be followed by `=` or whitespace**, so `-m"main"` is left
- *   alone rather than treated as a message.
  * - **Only where the shell hands the payload over untouched** — see
  *   `shellExpandsPayload`. A payload the shell expands first is not the
  *   message, it is a command that has already run.
  *
+ * It is deliberately *not* narrow about how `-m` was spelled. Git takes the
+ * message from `-m x`, `-m=x`, `-mx` and `-amx` alike, so a scanner that only
+ * knows the spaced form calls the other three prose-that-wasn't-exempted and
+ * denies a commit for the words in its message. `git commit -am "…"` is the
+ * common one, and it was denied. The letters before the `m` are matched as a
+ * cluster and the `m` must end it, which is git's own rule: in `-am` the value
+ * follows, in `-ma` the value *is* `a`.
+ *
+ * The double-quoted form counts an escaped quote as part of the payload, since
+ * a shell does. Stopping at the `\"` in `-m "he said \" then ran it"` left the
+ * tail exposed and the commit denied for it. Single quotes are left exact:
+ * inside them a backslash is a backslash, so `'[^']*'` is already right and
+ * teaching it about escapes would be teaching it a falsehood.
+ *
  * The value is blanked rather than deleted, so token boundaries survive for
  * the scans that read the last token of a segment.
  */
-const MESSAGE_FLAG_RE = /(^|\s)(-m|--message)(=|\s+)("[^"]*"|'[^']*'|\S+)/g;
+const MESSAGE_FLAG_RE = /(^|\s)(-[a-zA-Z]*m|--message)(=|\s+|)("(?:\\.|[^"\\])*"|'[^']*'|\S+)/g;
 
 /** The git subcommands whose `-m`/`--message` takes free text, and nothing else. */
 const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
@@ -809,10 +821,16 @@ function stripMessageFlagValues(command: string): string {
  *
  * Narrow in four ways, each closing a way the exemption could be borrowed:
  *
- * - **Single-quoted payloads only.** `--command "$(…)"` is expanded by the
- *   shell before this binary is reached, so the command in it really runs and
- *   the question is not hypothetical. Same dividing line, and the same reason,
- *   as `shellExpandsPayload` above.
+ * - **Quoted payloads only, and only the quoting that leaves them inert.**
+ *   `--command "$(…)"` is expanded by the shell before this binary is reached,
+ *   so the command in it really runs and the question is not hypothetical.
+ *   That is a fact about the payload, not about which quote surrounds it:
+ *   double quotes stop a *process* substitution and not a *command* one, so
+ *   the same predicate that rules on a message payload rules here —
+ *   `shellExpandsPayload`. Keying on the single quote instead was a stand-in
+ *   for that predicate, and it refused `--command "<(…)"`, which runs nothing:
+ *   an over-refusal on the one command whose whole job is answering without
+ *   running.
  * - **Segment by segment**, so a real command chained after the question is
  *   read as itself. Whatever shares the segment is read too: the payload is
  *   blanked, not the segment.
@@ -829,7 +847,7 @@ function stripMessageFlagValues(command: string): string {
 const POLICY_CHECK_RE = /(^|\s)policy\s+check(\s|$)/;
 
 /** Only `--command` carries a command; `--file` carries a path and `--sandbox` a role name. */
-const POLICY_CHECK_PAYLOAD_RE = /(^|\s)(--command)(=|\s+)('[^']*')/g;
+const POLICY_CHECK_PAYLOAD_RE = /(^|\s)(--command)(=|\s+)('[^']*'|"(?:\\.|[^"\\])*")/g;
 
 function stripPolicyCheckPayloads(command: string): string {
   // Split keeping the separators, so the segments can be rejoined untouched.
@@ -837,11 +855,25 @@ function stripPolicyCheckPayloads(command: string): string {
     .split(/([;&|])/)
     .map((segment) =>
       POLICY_CHECK_RE.test(segment)
-        ? segment.replace(POLICY_CHECK_PAYLOAD_RE, "$1$2$3''")
+        ? segment.replace(POLICY_CHECK_PAYLOAD_RE, (match, lead, flag, sep, payload) =>
+            shellExpandsPayload(payload) ? match : `${lead}${flag}${sep}''`,
+          )
         : segment,
     )
     .join('');
 }
+
+/**
+ * `git stash push` writes to the stash. It reaches no remote, so nothing about
+ * it is a push to a protected branch — but the word is right there, and the
+ * loose `isGitSubcommand` read that this file wants everywhere else found it.
+ *
+ * Matched as the adjacent pair only, never as "a segment mentioning stash", so
+ * `git push origin stash` is still read as the push it is. Filtering happens
+ * per segment after the chain is split, so the second half of `git stash push
+ * && git push` is untouched by this and still denied.
+ */
+const STASH_PUSH_RE = /\bgit\b[^;&|]*\bstash\s+push\b/i;
 
 /** Rule 1: push to main/master — destination ref, checked precisely; or a bare push while already on a protected branch. */
 function checkPushToProtected(
@@ -851,7 +883,7 @@ function checkPushToProtected(
 ): PolicyViolation | null {
   if (!isGitSubcommand(command, 'push')) return null;
   const rule = requireRule(policy, 'push-to-protected');
-  const pushSegments = gitSegmentsFor(command, 'push');
+  const pushSegments = gitSegmentsFor(command, 'push').filter((s) => !STASH_PUSH_RE.test(s));
   if (
     pushSegments.some((segment) => pushOperands(segment).some((ref) => isProtectedRef(ref, policy)))
   ) {

@@ -42,6 +42,13 @@
 > mode (`mkdir -m 755`), a mainline parent (`git revert -m 1`), or another
 > flag's short spelling (`git rebase -m`).
 >
+> The flag counts however git accepts it: `-m x`, `-m=x`, `-mx`, and clustered
+> as `-am x`. A scanner that knew only the spaced form denied `git commit -am
+> "…"` for the words in its own message, which is the same commit as its
+> spaced twin. The `m` has to end the cluster, which is git's rule too — in
+> `-am` the value follows, in `-ma` the value *is* `a`. Inside double quotes an
+> escaped `\"` belongs to the message rather than ending it.
+>
 > The second is the payload of `--command` on `smith policy check` itself. The
 > question above — *what would the rules say about this?* — was refused by the
 > rule it asked about, for every command worth asking about, which left the
@@ -52,7 +59,13 @@
 > invocation, and `--command` on anything else means nothing here.
 >
 > **Both exemptions stop where the shell starts.** A payload is blanked only
-> where the shell hands it over as it stands — in practice, single quotes.
+> where the shell hands it over as it stands. Which payloads those are is a
+> question about the text, not about the quote character around it, and both
+> spans put it to the same predicate rather than guessing at it: keying on the
+> single quote instead was a stand-in that refused `--command "<(...)"`, a
+> question whose answer runs nothing. An unquoted payload is still left alone
+> either way — where one of those ends is the calling shell's business, not
+> this scanner's, and the fix is the quoting shown above.
 > `-m "$(...)"` and `` -m "`...`" `` are not descriptions of a command: the
 > shell expands them *before* git runs, so the command in there really executes
 > and its output is what becomes the message. Same for `--command "$(...)"`:
@@ -109,6 +122,12 @@
   hook that blocks `push origin main`, and blocks `git merge` and `git pull`
   whenever the session is standing on `main`/`master` — with one exception,
   the fast-forward two bullets down, which lands nothing.
+- **`git stash push` is a stash.** It writes to the stash and reaches no
+  remote, so it is allowed on `main` like anywhere else. The rule reads the
+  pair `stash push` and only that pair — `git push origin stash` is still the
+  push it looks like, and a real push chained after a stash
+  (`git stash push && git push`) is still refused, because the two are
+  separate segments and only the first one is a stash.
 - **A merge is judged by where you are standing, not by what you name.** A
   merge has exactly one destination and it is never on the command line: it
   is wherever `HEAD` is, and every ref you type is a source. So
