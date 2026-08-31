@@ -708,10 +708,23 @@ const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
  * prose. Backticks are the same expansion in an older spelling, and an
  * unquoted payload is expanded too.
  *
- * Single quotes are the dividing line because they are the shell's own: no
- * expansion of any kind happens inside them, so the payload is exactly the
- * text it looks like. Asking "will the shell run this" with the shell's own
- * rule is what keeps the answer from being a guess layered on top of it.
+ * `<( )` and `>( )` are a third spelling and run a command just as eagerly.
+ * `git commit -m <(wrangler deploy)` forks the deploy, hands git the path
+ * `/dev/fd/63`, and the deploy has already happened by the time git has a
+ * message to read. What was blanked there is one whitespace-delimited token —
+ * `<(wrangler`, the binary — leaving ` deploy)` behind, so rule 4 went looking
+ * for a binary that had been deleted out from under it. The rules that read an
+ * operand *after* a subcommand came through the same deletion intact, which is
+ * a fact about which half of the match was eaten and not about coverage.
+ *
+ * Quoting decides both, and not along the same line, so the two are asked
+ * separately. Single quotes are the shell's own: no expansion of any kind
+ * happens inside them, so the payload is exactly the text it looks like.
+ * Double quotes are narrower — bash still substitutes `$( )` inside them, but
+ * does not perform process substitution — so `"$( )"` is a command and
+ * `"<( )"` is the prose it appears to be. Asking "will the shell run this"
+ * with the shell's own rule is what keeps the answer from being a guess
+ * layered on top of it.
  *
  * Two deliberate imprecisions, both erring toward reading more rather than
  * less, which is the direction the six rules are safe in:
@@ -727,10 +740,19 @@ const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
  * judged by the same six rules as any other command, so a message that
  * substitutes `date` stays allowed: `date` is nobody's guarded command.
  */
+/** Is the payload wrapped in this quote character — its own pair, not one borrowed from the text around it? */
+function isQuotedWith(payload: string, quote: string): boolean {
+  return payload.length >= 2 && payload.startsWith(quote) && payload.endsWith(quote);
+}
+
 function shellExpandsPayload(payload: string): boolean {
   // Single-quoted: literal to the shell, so nothing in it can run.
-  if (payload.length >= 2 && payload.startsWith("'") && payload.endsWith("'")) return false;
-  return payload.includes('$(') || payload.includes('`');
+  if (isQuotedWith(payload, "'")) return false;
+  // Command substitution, which double quotes do not suppress.
+  if (payload.includes('$(') || payload.includes('`')) return true;
+  // Process substitution, which they do.
+  if (isQuotedWith(payload, '"')) return false;
+  return payload.includes('<(') || payload.includes('>(');
 }
 
 function stripMessageFlagValues(command: string): string {

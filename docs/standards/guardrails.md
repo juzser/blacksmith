@@ -57,6 +57,12 @@
 > shell expands them *before* git runs, so the command in there really executes
 > and its output is what becomes the message. Same for `--command "$(...)"`:
 > that question is not hypothetical. Those are read as the commands they are.
+> `-m <(...)` and `-m >(...)` are the same thing in a third spelling: bash forks
+> the command, hands git a path like `/dev/fd/63`, and the deploy or the removal
+> has already happened before git has a message to read. Quoting still settles
+> it, along a different line for each — bash substitutes *commands* inside
+> double quotes but not *processes*, so `-m "$(...)"` is a command while
+> `-m "<(...)"` is the prose it looks like, and single quotes silence both.
 > An unquoted payload is read too, since where it ends is the caller's shell's
 > business, not the scanner's. So write the command you are asking about, or
 > the message you are writing, in single quotes — which is what you needed
