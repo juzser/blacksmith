@@ -696,6 +696,26 @@ const MESSAGE_FLAG_RE = /(^|\s)(-m|--message)(=|\s+)("[^"]*"|'[^']*'|\S+)/g;
 const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
 
 /**
+ * Does the payload open and close with this quote character?
+ *
+ * First and last character only. That is enough for the payloads
+ * `MESSAGE_FLAG_RE` hands over and no more: it cannot tell a true pair from
+ * one whose closing quote is a backslash-escaped literal, and it does not try.
+ * Being wrong there costs a false deny, never a false allow, which is the
+ * direction this file errs in everywhere else too.
+ */
+function isQuotedWith(payload: string, quote: string): boolean {
+  return payload.length >= 2 && payload.startsWith(quote) && payload.endsWith(quote);
+}
+
+/**
+ * Every opener that forks a command and substitutes a path to its stream. The
+ * first two are bash's and zsh's alike; `=(` is zsh's own, and zsh is the shell
+ * behind the agent's Bash tool, so it is the one most likely to be typed here.
+ */
+const PROCESS_SUBSTITUTIONS = ['<(', '>(', '=('];
+
+/**
  * True when the shell runs part of this payload *before* handing the rest
  * over — the one case where blanking a payload hides a command rather than
  * prose.
@@ -708,23 +728,32 @@ const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
  * prose. Backticks are the same expansion in an older spelling, and an
  * unquoted payload is expanded too.
  *
- * `<( )` and `>( )` are a third spelling and run a command just as eagerly.
+ * Process substitution is a third spelling and runs a command just as eagerly.
  * `git commit -m <(wrangler deploy)` forks the deploy, hands git the path
  * `/dev/fd/63`, and the deploy has already happened by the time git has a
  * message to read. What was blanked there is one whitespace-delimited token —
  * `<(wrangler`, the binary — leaving ` deploy)` behind, so rule 4 went looking
- * for a binary that had been deleted out from under it. The rules that read an
- * operand *after* a subcommand came through the same deletion intact, which is
- * a fact about which half of the match was eaten and not about coverage.
+ * for a binary that had been deleted out from under it. Rules 1, 2, 3 and 5
+ * came through the same deletion intact for the unremarkable reason that what
+ * each of them keys on — a ref, a `--force` flag, a `merge`/`rebase`
+ * subcommand — happened not to be the token that got eaten. That is a fact
+ * about this payload's word order, not a property any of them hold.
  *
- * Quoting decides both, and not along the same line, so the two are asked
- * separately. Single quotes are the shell's own: no expansion of any kind
- * happens inside them, so the payload is exactly the text it looks like.
- * Double quotes are narrower — bash still substitutes `$( )` inside them, but
- * does not perform process substitution — so `"$( )"` is a command and
- * `"<( )"` is the prose it appears to be. Asking "will the shell run this"
- * with the shell's own rule is what keeps the answer from being a guess
- * layered on top of it.
+ * All three openers are listed in `PROCESS_SUBSTITUTIONS`, because which ones
+ * exist is a fact about the shell that will run the command, not about bash.
+ * The agent's shell here is zsh, which has bash's `<( )` and `>( )` and one
+ * more of its own: `=(cmd)` runs cmd, writes its output to a temp file and
+ * substitutes *that* path. It is the spelling most likely to be reached on
+ * this machine and the one a bash-only reading of the problem misses.
+ *
+ * Quoting decides both kinds, and not along the same line, so the two are
+ * asked separately. Single quotes are every shell's own: no expansion of any
+ * kind happens inside them, so the payload is exactly the text it looks like.
+ * Double quotes are narrower — a command substitution still happens inside
+ * them, a process substitution does not — so `"$( )"` is a command while
+ * `"<( )"`, `">( )"` and `"=( )"` are the prose they appear to be. Asking
+ * "will the shell run this" with the shell's own rule is what keeps the answer
+ * from being a guess layered on top of it.
  *
  * Two deliberate imprecisions, both erring toward reading more rather than
  * less, which is the direction the six rules are safe in:
@@ -740,19 +769,14 @@ const MESSAGE_SUBCOMMANDS = ['commit', 'merge', 'tag', 'stash', 'notes'];
  * judged by the same six rules as any other command, so a message that
  * substitutes `date` stays allowed: `date` is nobody's guarded command.
  */
-/** Is the payload wrapped in this quote character — its own pair, not one borrowed from the text around it? */
-function isQuotedWith(payload: string, quote: string): boolean {
-  return payload.length >= 2 && payload.startsWith(quote) && payload.endsWith(quote);
-}
-
 function shellExpandsPayload(payload: string): boolean {
-  // Single-quoted: literal to the shell, so nothing in it can run.
+  // Single-quoted: literal to every shell, so nothing in it can run.
   if (isQuotedWith(payload, "'")) return false;
   // Command substitution, which double quotes do not suppress.
   if (payload.includes('$(') || payload.includes('`')) return true;
   // Process substitution, which they do.
   if (isQuotedWith(payload, '"')) return false;
-  return payload.includes('<(') || payload.includes('>(');
+  return PROCESS_SUBSTITUTIONS.some((opener) => payload.includes(opener));
 }
 
 function stripMessageFlagValues(command: string): string {

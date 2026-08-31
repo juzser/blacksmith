@@ -1199,36 +1199,46 @@ describe('evaluateCommand — a message payload the shell expands is not prose',
 // performs command substitution inside double quotes but not process
 // substitution, so `"<( )"` really is the text it looks like and stays prose.
 describe('evaluateCommand — a message payload the shell runs is not prose', () => {
+  // Three spellings, one behaviour: each forks a command and hands git a path.
+  // `=( )` is zsh's, and zsh is what the agent's shell actually is here, so it
+  // is not the exotic one of the three — it is the likeliest.
   it.each([
-    ['a commit message', 'git commit -m <(wrangler deploy)'],
-    ['the output form of the same syntax', 'git commit -m >(wrangler deploy)'],
+    ['the input form', 'git commit -m <(wrangler deploy)'],
+    ['the output form', 'git commit -m >(wrangler deploy)'],
+    ["zsh's temp-file form", 'git commit -m =(wrangler deploy)'],
     ['--message=', 'git commit --message=<(wrangler deploy)'],
     ['a tag message', 'git tag -m <(wrangler deploy) v1.0.0'],
     ['a merge message', 'git merge topic -m <(wrangler deploy)'],
     ['a stash message', 'git stash push -m <(wrangler deploy)'],
     ['a notes message', 'git notes add -m <(wrangler deploy) HEAD'],
+    ['a tag message, zsh form', 'git tag -m =(wrangler deploy) v1.0.0'],
+    ['a notes message, zsh form', 'git notes add -m =(wrangler deploy) HEAD'],
   ])('denies a deploy run by a process substitution in %s', (_label, command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
     expect(ruleIds(d)).toContain('deploy-command');
   });
 
-  it('denies an unbounded rm run by a process substitution in a message', () => {
-    const d = evaluateCommand(
-      ctx({ command: 'git commit -m <(rm -rf /etc)', repoRoot: '/repo' }),
-      policy,
-    );
+  it.each([
+    ['the input form', 'git commit -m <(rm -rf /etc)'],
+    ["zsh's temp-file form", 'git commit -m =(rm -rf /etc)'],
+  ])('denies an unbounded rm run by a process substitution in %s', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
     expect(ruleIds(d)).toContain('unbounded-rm');
   });
 
-  // The other half. Both quote styles suppress process substitution, so
-  // neither spelling may become a false deny — and each case below would trip
-  // rule 4 if the quoting were ignored.
+  // The other half, and every row below is a witness rather than scenery: each
+  // one denies if the quoting branch it stands on is removed from
+  // `shellExpandsPayload`. An unquoted payload cannot appear here, because the
+  // blanking eats a single whitespace-delimited token and no guarded pattern
+  // fits in one token — so a row spelled that way would pass no matter what the
+  // predicate answered, and would only look like coverage.
   it.each([
-    ['double quotes, which bash does not substitute inside', 'git commit -m "<(wrangler deploy)"'],
+    ['double quotes, which suppress process substitution', 'git commit -m "<(wrangler deploy)"'],
+    ['the output form in double quotes', 'git commit -m ">(wrangler deploy)"'],
+    ["zsh's form in double quotes", 'git commit -m "=(wrangler deploy)"'],
     ['single quotes, which expand nothing at all', "git commit -m '<(wrangler deploy)'"],
+    ["zsh's form in single quotes", "git commit -m '=(wrangler deploy)'"],
     ['prose explaining the syntax', 'git commit -m "docs: never run <(wrangler deploy) by hand"'],
-    ['a less-than that opens no substitution', 'git commit -m "docs: a < b in the deploy table"'],
-    ['an unquoted word with no paren after it', 'git commit -m fix<n'],
   ])('still allows %s', (_label, command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature-x' }), policy);
     expect(ruleIds(d)).toEqual([]);

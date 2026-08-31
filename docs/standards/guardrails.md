@@ -57,12 +57,17 @@
 > shell expands them *before* git runs, so the command in there really executes
 > and its output is what becomes the message. Same for `--command "$(...)"`:
 > that question is not hypothetical. Those are read as the commands they are.
-> `-m <(...)` and `-m >(...)` are the same thing in a third spelling: bash forks
-> the command, hands git a path like `/dev/fd/63`, and the deploy or the removal
-> has already happened before git has a message to read. Quoting still settles
-> it, along a different line for each — bash substitutes *commands* inside
-> double quotes but not *processes*, so `-m "$(...)"` is a command while
-> `-m "<(...)"` is the prose it looks like, and single quotes silence both.
+> `-m <(...)`, `-m >(...)` and `-m =(...)` are the same thing in a third
+> spelling: the shell forks the command, hands git a path like `/dev/fd/63` (or
+> a temp file), and the deploy or the removal has already happened before git
+> has a message to read. Note the third opener. The shell behind the agent's
+> Bash tool is **zsh**, not bash, and `=(cmd)` is zsh's own — a rule written
+> from bash's syntax alone would leave the likeliest spelling on this machine
+> wide open, so check the shell you actually have before deciding what a
+> payload can do. Quoting still settles it, along a different line for each — a
+> *command* substitution happens inside double quotes and a *process*
+> substitution does not, so `-m "$(...)"` is a command while `-m "<(...)"` is
+> the prose it looks like, and single quotes silence both.
 > An unquoted payload is read too, since where it ends is the caller's shell's
 > business, not the scanner's. So write the command you are asking about, or
 > the message you are writing, in single quotes — which is what you needed
