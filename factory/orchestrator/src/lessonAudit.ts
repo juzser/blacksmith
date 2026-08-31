@@ -163,7 +163,7 @@ export interface LessonAuditOptions {
  * room on both sides.
  *
  * This does not make the polarity signal itself any better. Two statements that
- * contradict each other without using one of seven marker words are still
+ * contradict each other without using one of six marker words are still
  * invisible here, and always were.
  */
 const TOPIC_SIMILARITY_THRESHOLD = 0.5;

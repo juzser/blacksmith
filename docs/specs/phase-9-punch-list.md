@@ -3128,6 +3128,20 @@ different words is not flagged — it is not even compared. The approval-time
 review does surface it when it *does* fire: `possible_contradiction_of` lands on
 the `lesson-edited` payload naming the lesson the new text may contradict.
 
+> **Amended 2026-08-31**, on branch `fix/an-intensifier-is-not-an-opposition`.
+> The gating is still what this paragraph says — `polarityDiffers` runs only
+> once the score is above threshold (now `lessons.ts:254`) — but "left alone
+> deliberately" read as though the guard were known-correct and merely
+> unreachable, and it was not. It sorted marker words into polarities and put
+> `always` in one of its own, so an intensifier against the bare form of the
+> same instruction was reported as an opposition. It now asks whether a
+> statement prohibits what it is about, rather than which marker it carries.
+> The unreachability is also less total than this paragraph implies:
+> `auditLessons` runs the same predicate across the whole corpus at a looser
+> 0.5 unigram bar with no novelty gate in front of it, so a contradiction
+> written in different words is caught there — which is why a false one there
+> is expensive.
+
 ## P9-36 — The UI's edit route is a third door into memory, ungated
 
 Found while fixing P9-34. `POST /api/lessons/:id/edit` in `ui/server/src/app.ts`
@@ -3474,6 +3488,12 @@ Four things, each with a reason that is not "we ran out of time".
   was left alone for the same reason: `polarityDiffers` only runs when the
   score is already above threshold (`lessons.ts:147`), so a rule that flatly
   contradicts an approved one in different words is never compared.
+
+  > **Partly answered 2026-08-31**, on branch
+  > `fix/an-intensifier-is-not-an-opposition`. (a) has since landed and this
+  > bullet is stale on it; (b) is still open. The polarity sentence needed a
+  > correction rather than a closure — the guard was not merely unreachable, it
+  > was wrong where it did reach. See the amendment under P9-35 above.
 - **P9-36's two UI items.** The client does not display the `novelty` block it
   now receives, and `LessonsPage.vue` still offers Approve on a lesson that
   cannot legally be approved — the server refuses and the banner explains, but
