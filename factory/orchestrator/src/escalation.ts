@@ -32,7 +32,7 @@
 // dispatches there would have reported a task that plainly retried as one that
 // never did.
 import type { EscalationRung } from './budgets.js';
-import { eventTaskId, type StoredEvent } from './events.js';
+import { compareLogOrder, eventTaskId, isLaterEvent, type StoredEvent } from './events.js';
 import { bareTaskId, epicOfTaskId, isQualifiedTaskId, taskIdsMatch } from './taskId.js';
 
 /**
@@ -63,6 +63,12 @@ const OPERATOR_ANSWER_EVENTS: readonly string[] = Object.freeze([
 ]);
 
 export type EscalationCheckStatus = 'ok' | 'violation' | 'unverifiable' | 'not-applicable';
+
+/** The two fields it takes to say where in the log an event sits. */
+interface LoggedEvent {
+  eventId: string;
+  ts: string;
+}
 
 /** One `gate-outcome` event, whatever the outcome was. */
 export interface GateRound {
@@ -206,35 +212,53 @@ export function escalationRungFor(
   return reached;
 }
 
-/** The last builder dispatch at or before `ts`; null when none preceded it. */
+// Every question below is "which event is on which side of this round", and
+// `ts` alone cannot answer it. appendEvent stamps `new Date().toISOString()`,
+// so two writes in one millisecond share a timestamp, and a `gate-outcome`
+// and the `dispatch_decision` that answers it are written back to back. On a
+// tie a bare `<` or `>` is not a decision — it is whichever side the operator
+// happens to be told about. compareLogOrder falls through to the index behind
+// the event id, which is the line the log wrote, so it decides.
+//
+// The damage from not deciding is the D-249 inversion arriving by a second
+// road. A tied retry was dropped by dispatchAfter AND picked up by
+// dispatchBefore as the round's own failing dispatch, so the rung read "the
+// task neither was dispatched again nor reached the gate again" —
+// `not-applicable`, which counts as OK. A ladder skipped on the same tier
+// then exits 0, with the retry that skipped it sitting in the log.
+
+/** The last builder dispatch the log wrote before `round`; null when none did. */
 function dispatchBefore(
   dispatches: readonly BuilderDispatch[],
-  ts: string,
+  round: GateRound,
 ): BuilderDispatch | null {
   let best: BuilderDispatch | null = null;
   for (const d of dispatches) {
-    if (d.ts > ts) continue;
-    if (!best || d.ts >= best.ts) best = d;
+    if (compareLogOrder(d, round) >= 0) continue;
+    if (!best || isLaterEvent(d, best)) best = d;
   }
   return best;
 }
 
-/** The first builder dispatch strictly after `ts`. */
-function dispatchAfter(dispatches: readonly BuilderDispatch[], ts: string): BuilderDispatch | null {
+/** The first builder dispatch the log wrote after `round`. */
+function dispatchAfter(
+  dispatches: readonly BuilderDispatch[],
+  round: GateRound,
+): BuilderDispatch | null {
   let best: BuilderDispatch | null = null;
   for (const d of dispatches) {
-    if (d.ts <= ts) continue;
-    if (!best || d.ts < best.ts) best = d;
+    if (compareLogOrder(d, round) <= 0) continue;
+    if (!best || isLaterEvent(best, d)) best = d;
   }
   return best;
 }
 
-/** The first gate outcome strictly after `ts` — the task demonstrably ran again. */
-function gateRoundAfter(rounds: readonly GateRound[], ts: string): GateRound | null {
+/** The first gate outcome the log wrote after `round` — the task demonstrably ran again. */
+function gateRoundAfter(rounds: readonly GateRound[], round: GateRound): GateRound | null {
   let best: GateRound | null = null;
   for (const r of rounds) {
-    if (r.ts <= ts) continue;
-    if (!best || r.ts < best.ts) best = r;
+    if (compareLogOrder(r, round) <= 0) continue;
+    if (!best || isLaterEvent(best, r)) best = r;
   }
   return best;
 }
@@ -245,8 +269,8 @@ function checkModelTierRung(
   dispatches: readonly BuilderDispatch[],
   gateRounds: readonly GateRound[],
 ): EscalationCheck {
-  const failing = dispatchBefore(dispatches, trigger.ts);
-  const retry = dispatchAfter(dispatches, trigger.ts);
+  const failing = dispatchBefore(dispatches, trigger);
+  const retry = dispatchAfter(dispatches, trigger);
 
   if (!retry) {
     // Two different facts hide behind "no dispatch after the trigger". If the
@@ -255,7 +279,7 @@ function checkModelTierRung(
     // the record into a clean bill of health. This is not hypothetical —
     // dogfood-envkit-1's task-1b-parse-quotes blocked twice, then passed, with
     // no dispatch_decision event anywhere for the task.
-    const resumed = gateRoundAfter(gateRounds, trigger.ts);
+    const resumed = gateRoundAfter(gateRounds, trigger);
     if (resumed) {
       return {
         ...base,
@@ -321,16 +345,20 @@ function checkOperatorRung(
   trigger: FailedRound,
   dispatches: readonly BuilderDispatch[],
   gateRounds: readonly GateRound[],
-  operatorAnswers: readonly string[],
+  operatorAnswers: readonly LoggedEvent[],
 ): EscalationCheck {
   // Either kind of event proves the factory carried on: a builder dispatch, or
   // a gate outcome for a round whose dispatch went unrecorded. The bound is
   // breached by the work continuing, not by which event happened to capture it,
   // so take whichever came first.
-  const retry = dispatchAfter(dispatches, trigger.ts);
-  const resumed = gateRoundAfter(gateRounds, trigger.ts);
+  const retry = dispatchAfter(dispatches, trigger);
+  const resumed = gateRoundAfter(gateRounds, trigger);
   const carriedOn =
-    retry && resumed ? (retry.ts <= resumed.ts ? retry : resumed) : (retry ?? resumed);
+    retry && resumed
+      ? compareLogOrder(retry, resumed) <= 0
+        ? retry
+        : resumed
+      : (retry ?? resumed);
 
   if (!carriedOn) {
     return {
@@ -341,7 +369,14 @@ function checkOperatorRung(
   }
   const evidence =
     carriedOn === retry ? `Dispatched again at ${carriedOn.ts}` : `Gated again at ${carriedOn.ts}`;
-  if (operatorAnswers.some((ts) => ts > trigger.ts && ts < carriedOn.ts)) {
+  // Log order at both ends, for the same reason the finders use it. An answer
+  // the operator typed in the millisecond the factory resumed in is an answer
+  // that came first if the log wrote it first, and a strict `<` on `ts` read it
+  // as no answer at all — a violation reported against an honest run.
+  const answered = operatorAnswers.some(
+    (a) => compareLogOrder(a, trigger) > 0 && compareLogOrder(a, carriedOn) < 0,
+  );
+  if (answered) {
     return {
       ...base,
       status: 'ok',
@@ -361,7 +396,7 @@ function checkOneRung(
   rounds: readonly FailedRound[],
   dispatches: readonly BuilderDispatch[],
   gateRounds: readonly GateRound[],
-  operatorAnswers: readonly string[],
+  operatorAnswers: readonly LoggedEvent[],
 ): EscalationCheck | null {
   const failedRounds = rounds.length;
   const base = {
@@ -439,7 +474,7 @@ export function checkEscalationLadder(
   const operatorAnswers = events
     .filter((e) => OPERATOR_ANSWER_EVENTS.includes(e.record.event_type))
     .filter((e) => e.record.event_type === 'user_prompt' || inScope(eventTaskId(e.record)))
-    .map((e) => e.record.ts ?? '');
+    .map((e) => ({ eventId: e.event_id, ts: e.record.ts ?? '' }));
 
   const report = (checks: EscalationCheck[]): EscalationReport => ({
     sessionId: options.sessionId,

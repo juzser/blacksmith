@@ -605,3 +605,157 @@ describe('checkEscalationLadder — task-id spelling (D-181)', () => {
     expect([...new Set(qualified.checks.map((c) => c.taskId))]).toEqual(['epic-1/task-1']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A round and the retry that answers it can land in one millisecond.
+//
+// appendEvent stamps `new Date().toISOString()`, so `ts` resolves to the
+// millisecond and two writes in one tick share it. The gate writes
+// `gate-outcome` and the orchestrator writes the retry's `dispatch_decision`
+// back to back, which is exactly the pair that ties — and every neighbour
+// finder in this module used to answer with a bare `<` or `>` on `ts`, so a
+// tie was not a decision, it was whichever side the operator happened to fall.
+//
+// The damage is the D-249 inversion from a different cause. A retry the log
+// plainly holds is dropped by `dispatchAfter` and picked up by
+// `dispatchBefore` as the round's OWN dispatch, and the rung then reports
+// "neither dispatched again nor reached the gate again" — `not-applicable`,
+// which counts as OK. A ladder skipped on the same tier exits 0.
+// ---------------------------------------------------------------------------
+
+/**
+ * `event`, restamped to the millisecond of one written earlier.
+ *
+ * The tie is built by copying a fixture's own `ts` rather than hand-writing
+ * one, so the timestamp and the event id cannot drift apart about which event
+ * the log wrote first — the id's index is the only thing left that knows.
+ */
+function sameMsAs(earlier: StoredEvent, event: StoredEvent): StoredEvent {
+  return { ...event, record: { ...event.record, ts: earlier.record.ts } };
+}
+
+/** A judge dispatch: no builder role, so nothing here counts it as a round. */
+function filler(): StoredEvent {
+  return dispatch('reviewer', 'mid');
+}
+
+describe('checkEscalationLadder — a round and its retry in one millisecond', () => {
+  it('rung 2 passes when the tier went up in the failed round’s own millisecond', () => {
+    seq = 0;
+    const opening = [dispatch('coder', 'mid'), blocked(), dispatch('coder', 'mid')];
+    const round = blocked();
+    const retry = sameMsAs(round, dispatch('coder', 'frontier'));
+    const report = checkEscalationLadder([...opening, round, retry], LADDER, OPTS);
+    const rung2 = report.checks.find((c) => c.rung === 2);
+    expect(rung2?.status).toBe('ok');
+    expect(rung2?.detail).toBe('Retried on frontier after failing on mid.');
+    expect(report.ok).toBe(true);
+  });
+
+  it('rung 2 is a violation when the same-millisecond retry stayed on the tier', () => {
+    seq = 0;
+    const opening = [dispatch('coder', 'mid'), blocked(), dispatch('coder', 'mid')];
+    const round = blocked();
+    const retry = sameMsAs(round, dispatch('coder', 'mid'));
+    const report = checkEscalationLadder([...opening, round, retry], LADDER, OPTS);
+    const rung2 = report.checks.find((c) => c.rung === 2);
+    expect(rung2?.status).toBe('violation');
+    expect(report.ok).toBe(false);
+  });
+
+  it('rung 2 reads the tier off a same-millisecond retry rather than calling it unrecorded', () => {
+    seq = 0;
+    const opening = [dispatch('coder', 'mid'), blocked(), dispatch('coder', 'mid')];
+    const round = blocked();
+    const retry = sameMsAs(round, dispatch('coder', 'frontier'));
+    const report = checkEscalationLadder([...opening, round, retry, passed()], LADDER, OPTS);
+    const rung2 = report.checks.find((c) => c.rung === 2);
+    expect(rung2?.status).toBe('ok');
+    expect(rung2?.detail).toBe('Retried on frontier after failing on mid.');
+  });
+
+  it('rung 3 is a violation when the task was dispatched again in the third round’s millisecond', () => {
+    seq = 0;
+    const opening = [
+      dispatch('coder', 'mid'),
+      blocked(),
+      dispatch('coder', 'frontier'),
+      blocked(),
+      dispatch('coder', 'frontier'),
+    ];
+    const round = blocked();
+    const retry = sameMsAs(round, dispatch('coder', 'frontier'));
+    const report = checkEscalationLadder([...opening, round, retry], LADDER, OPTS);
+    expect(report.checks.find((c) => c.rung === 3)?.status).toBe('violation');
+    expect(report.ok).toBe(false);
+  });
+
+  it('rung 3 holds when the operator’s answer shares a millisecond with the retry it released', () => {
+    seq = 0;
+    const opening = [
+      dispatch('coder', 'mid'),
+      blocked(),
+      dispatch('coder', 'frontier'),
+      blocked(),
+      dispatch('coder', 'frontier'),
+      blocked(),
+    ];
+    const answer = operatorAnswer();
+    const retry = sameMsAs(answer, dispatch('coder', 'frontier'));
+    const report = checkEscalationLadder([...opening, answer, retry], LADDER, OPTS);
+    expect(report.checks.find((c) => c.rung === 3)?.status).toBe('ok');
+    expect(report.ok).toBe(true);
+  });
+
+  // Which carry-on the bound is measured against is its own question. When the
+  // gate ran again and a dispatch answered it inside one millisecond, the
+  // operator's answer can land between the two, and only the earlier one is the
+  // moment the factory stopped waiting. Measured against the later one the
+  // answer looks like it arrived in time, and a breached bound reports `ok`.
+  it('rung 3 measures the bound against the first carry-on, not the last', () => {
+    seq = 0;
+    const opening = [
+      dispatch('coder', 'mid'),
+      blocked(),
+      dispatch('coder', 'frontier'),
+      blocked(),
+      dispatch('coder', 'frontier'),
+      blocked(),
+    ];
+    const resumed = passed();
+    const answer = sameMsAs(resumed, operatorAnswer());
+    const retry = sameMsAs(resumed, dispatch('coder', 'frontier'));
+    const report = checkEscalationLadder([...opening, resumed, answer, retry], LADDER, OPTS);
+    const rung3 = report.checks.find((c) => c.rung === 3);
+    expect(rung3?.status).toBe('violation');
+    expect(report.ok).toBe(false);
+  });
+
+  // The index behind the event id has to be read as a number. Ordered as text
+  // — the shape a tiebreak on the raw id would take — `sess-1#10` sorts before
+  // `sess-1#9`, so the retry moves to the wrong side of the round and the rung
+  // inverts, but only once a session's log passes ten events. Six inert judge
+  // dispatches put this tie there; the five rows above all tie under index 10
+  // and would pass a fix that compared the ids as strings.
+  it('breaks the tie on the log index as a number, past the log’s tenth event', () => {
+    seq = 0;
+    const opening = [
+      dispatch('coder', 'mid'),
+      blocked(),
+      dispatch('coder', 'mid'),
+      filler(),
+      filler(),
+      filler(),
+      filler(),
+      filler(),
+      filler(),
+    ];
+    const round = blocked();
+    const retry = sameMsAs(round, dispatch('coder', 'frontier'));
+    expect([round.event_id, retry.event_id]).toEqual(['sess-1#9', 'sess-1#10']);
+    const report = checkEscalationLadder([...opening, round, retry], LADDER, OPTS);
+    const rung2 = report.checks.find((c) => c.rung === 2);
+    expect(rung2?.status).toBe('ok');
+    expect(rung2?.detail).toBe('Retried on frontier after failing on mid.');
+  });
+});

@@ -11,7 +11,7 @@ import {
   liveAgents as foldLiveAgents,
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
-import { parseEventId } from '../events.js';
+import { compareLogOrder, isLaterEvent } from '../events.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
@@ -81,78 +81,6 @@ function filterByProject<T extends { project: string | null }>(rows: T[], scope:
   return scope.project !== undefined
     ? rows.filter((r) => projectOf(r.project) === scope.project)
     : rows;
-}
-
-/**
- * Where an event sits in the order the log actually wrote it.
- *
- * An event id is `<session-id>#<index>` and the index is the event's line in
- * its session's log, so within a session this *is* the order rather than a
- * proxy for it. Across sessions the logs are separate files that nothing
- * interleaves, so the session id is here to make the answer the same on every
- * call, not because one session precedes another.
- *
- * Total where parseEventId throws, and the fallback is unreachable by
- * construction — the projector copies `event_id` straight from readEvents(),
- * which builds every one of them as `<session>#<index>`. It is here because
- * `/api/pulse` polls this ordering every 5s on every page, and an id that
- * somehow would not parse should sort somewhere rather than 500 the shell.
- * Where it lands is deliberately modest: an event whose place in the log is
- * unreadable does not get to win a tie on it.
- */
-function logOrderOf(eventId: string): { sessionId: string; index: number } {
-  try {
-    return parseEventId(eventId);
-  } catch {
-    return { sessionId: eventId, index: -1 };
-  }
-}
-
-/**
- * The order the log wrote two events in: negative when `a` came first,
- * positive when `b` did, zero only for the same event.
- *
- * `ts` is stamped at millisecond resolution (events.ts's appendEvent), so a
- * burst of appends routinely shares one: the test fixture's own last two
- * events tie in roughly one build in three. `events_raw` carries no sequence
- * column, so on a tie `ts` has nothing left to say — and nothing downstream of
- * it does either. A `>` between two tied rows is not a decision, it is
- * whichever the scan reached first; `ORDER BY ts` is the same non-answer
- * spelled in SQL, since SQLite promises nothing about tied rows and hands them
- * back in physical order, which changes the moment a row is rewritten; and a
- * JS `.sort()` whose comparator returns 0 throughout is stable, so it keeps
- * that same scan order and passes it off as chronology.
- *
- * The log index behind the event id is what actually decides, and it has to be
- * read as a number: ordered as text — which is what `ORDER BY ts, event_id`
- * does — `#9` sorts after `#10`, so the tiebreaker inverts as soon as a
- * session's log passes ten events.
- *
- * Every ordering in this file that a reader would call chronological routes
- * through here, so that no two of them can answer the same question about the
- * same two events differently — which is exactly what happened when the
- * callers spelled the comparison themselves, with opposite operators.
- */
-function compareLogOrder(
-  a: { ts: string; eventId: string },
-  b: { ts: string; eventId: string },
-): number {
-  if (a.ts !== b.ts) return a.ts < b.ts ? -1 : 1;
-  const left = logOrderOf(a.eventId);
-  const right = logOrderOf(b.eventId);
-  if (left.sessionId !== right.sessionId) return left.sessionId < right.sessionId ? -1 : 1;
-  return left.index - right.index;
-}
-
-/**
- * Whether `a` is the later of two events — the one a reader means by "what
- * just happened".
- */
-function isLaterEvent(
-  a: { ts: string; eventId: string },
-  b: { ts: string; eventId: string },
-): boolean {
-  return compareLogOrder(a, b) > 0;
 }
 
 /** Rows in the order the log wrote them, oldest first. Never mutates the input. */
