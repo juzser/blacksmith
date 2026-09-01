@@ -18,9 +18,10 @@ sync with the real contracts. Cite policy files (`factory/policies/*.yml`)
 rather than restating their numbers.
 
 **The project directory is an answer you ask for, not a path this file
-knows.** A target project does not have to live under `workspaces/` — that is
-only where `smith new` puts one when no `--target-dir` says otherwise, and
-nothing downstream reads that location. Every verb that touches the project's
+knows.** A project this factory builds is not part of it: `smith new` puts one
+*beside* this clone when no `--target-dir` says otherwise, and nothing
+downstream reads that location — `workspaces/` inside the repo is still a legal
+answer, just no longer the assumed one. Every verb that touches the project's
 git takes the directory itself: `<project-dir>` as a positional on the
 `worktree` family, `--project <dir>` on everything else. A task's worktrees
 are placed beside whatever directory it was handed, so a project outside this
@@ -398,10 +399,10 @@ fail-closed contract, and the two are not substitutes.
 ## `/bs new <project> [--ui]`
 
 1. Ask where the project should live, then run `smith new <project> [--ui]
-   [--target-dir <dir>]`. Without `--target-dir` it lands in
-   `workspaces/<project>` inside this repo, which is a default rather than a
-   requirement — the answer becomes the `<project-dir>` every later command
-   takes, so take it here rather than assuming it six steps in. The call
+   [--target-dir <dir>]`. Without `--target-dir` it lands beside this repo, in
+   `<repo-parent>/<project>`, which is a default rather than a requirement —
+   the answer becomes the `<project-dir>` every later command takes, so take
+   it here rather than assuming it six steps in. The call
    copies `factory/scaffold/` (TS strict, Biome, Vitest, CI) and layers
    whatever `factory/policies/stack.yml` answered for: `--ui` adds the
    frontend, generates `src/styles/main.css`, and vendors the named design

@@ -41,8 +41,9 @@ text* and *things that execute*:
   (`wrapIngested`, `factory/orchestrator/src/provenance.ts`). A path where
   untrusted text reaches a dispatch unfenced is in scope.
 - **Escaping the worktree.** Workers are confined to
-  `workspaces/.wt/<project>/<task-id>` and to their spec's path claims. A way
-  for a task to write outside its claims without failing the gate is in scope.
+  `<project-parent>/.wt/<project>/<task-id>` and to their spec's path claims.
+  A way for a task to write outside its claims without failing the gate is in
+  scope.
 - **Bypassing a gate.** Anything that lets a task reach the merge queue with
   a failing schema check, a failing test gate, or an unresolved S1/S2 finding.
 - **Judge integrity.** A read-only judge that can mutate the tree it is

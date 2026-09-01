@@ -103,15 +103,17 @@ black-smith/
 │   ├── smith.db                  # SQLite — sessions, tasks, events, lessons
 │   └── events/*.jsonl            # append-only event log (source of truth)
 ├── ui/                           # HDS dashboard (§10)
-├── workspaces/                   # target-repo clones + worktrees (gitignored)
+├── workspaces/                   # legacy project home, still legal (gitignored)
 └── docs/
     └── standards/
         ├── stack.md              # unified stack standard (generated from interview)
         └── interview.md          # operator interview → constraints per agent (§14)
 ```
 
-Target projects live under `workspaces/<project>/` as clones of their own
-repos; Blacksmith never develops inside its own repo tree. Committed files
+Target projects live *beside* this clone, at `<repo-parent>/<project>/`, as
+clones of their own repos; Blacksmith never develops inside its own repo tree,
+and a project it builds is not a part of it. `workspaces/` inside the checkout
+is where they used to land and is still a legal `--target-dir`. Committed files
 are declarations; everything generated at runtime is gitignored (dotagents
 convention: tool-native/generated dirs are build outputs).
 
@@ -205,9 +207,9 @@ merge time.**
    at runtime: a post-run check diffs the worktree against its claims;
    out-of-claim edits fail the gate (error `contract.claim-violation`) and
    bounce back to the coder.
-2. **One worktree per task.** `workspaces/.wt/<project>/<task-id>/` on branch
-   `smith/<epic>/<task-id>`, created fresh from the integration branch head
-   (git ref constraint: `smith/<epic>` cannot coexist with
+2. **One worktree per task.** `<project-parent>/.wt/<project>/<task-id>/` on
+   branch `smith/<epic>/<task-id>`, created fresh from the integration branch
+   head (git ref constraint: `smith/<epic>` cannot coexist with
    `smith/<epic>/<task-id>` — see point 3), deleted after merge. Nothing
    long-lived; a stale worktree is a bug. The worktree is a **sibling** of the
    project, not a child of it: a worktree is a full checkout carrying the

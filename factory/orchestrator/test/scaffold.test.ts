@@ -269,13 +269,17 @@ describe('scaffold.ts', () => {
     );
   });
 
-  // P9-16(c). A scaffolded project lives at `workspaces/<name>` — INSIDE
-  // black-smith's own tree. pnpm decides which workspace it belongs to by
-  // walking UP until it finds a `pnpm-workspace.yaml`, so a project with no
-  // marker of its own silently joins the factory's workspace: `pnpm install`
-  // run in the new project writes black-smith's lockfile and links into
-  // black-smith's `node_modules`. Measured before the fix: `pnpm root -w` in
-  // a fresh scaffold answered `<black-smith>/node_modules`.
+  // P9-16(c). A scaffolded project used to live at `workspaces/<name>` —
+  // INSIDE black-smith's own tree. pnpm decides which workspace a directory
+  // belongs to by walking UP until it finds a `pnpm-workspace.yaml`, so a
+  // project with no marker of its own silently joined the factory's
+  // workspace: `pnpm install` run in the new project wrote black-smith's
+  // lockfile and linked into black-smith's `node_modules`. Measured before
+  // the fix: `pnpm root -w` in a fresh scaffold answered
+  // `<black-smith>/node_modules`. The default target now lands outside this
+  // clone, which removes that particular ancestor — but not the class: any
+  // `--target-dir` under a monorepo brings it straight back, which is what
+  // this asserts against.
   it('plants its own workspace root so pnpm stops at the project (P9-16c)', () => {
     const workDir = mkScratch('smith-scaffold-nested-');
     // Stand-in for black-smith: a workspace root ABOVE the scaffold target.
@@ -589,9 +593,9 @@ describe('the scaffold can run its own gates (P9-19)', () => {
     const targetDir = scaffold('smith-scaffold-ws-', 'acme-ws', false);
     const wsPath = path.join(targetDir, 'pnpm-workspace.yaml');
     expect(existsSync(wsPath), 'missing pnpm-workspace.yaml').toBe(true);
-    // The default target is REPO_ROOT/workspaces/<name>, and pnpm walks UP for
-    // a workspace root: without this file it finds black-smith's own, which
-    // declares no `packages`, and every install in a scaffolded project dies
+    // pnpm walks UP for a workspace root, and a project placed anywhere under
+    // a repo that has one joins it: without this file it finds black-smith's
+    // own, which declares no `packages`, and every install there dies
     // with ERR_PNPM_INVALID_WORKSPACE_CONFIGURATION before resolving a single
     // dependency (measured, P9-19). Declaring the project its own root is what
     // stops the walk.
@@ -1011,5 +1015,27 @@ describe('the built project carries no forge mark', () => {
         ),
       );
     expect(found).toEqual([]);
+  });
+});
+
+// Where a project lands when the operator names no directory. The old answer
+// was `workspaces/<name>` inside this clone, which put every built project
+// inside the factory that built it -- the one relationship the output is not
+// supposed to carry.
+describe('the default project directory', () => {
+  it('is the projects root, not a path under this clone', () => {
+    const projectsDir = mkScratch('smith-scaffold-default-');
+    const result = scaffoldProject({
+      projectName: 'acme-default',
+      ui: false,
+      projectsDir,
+      templateDir: SCAFFOLD_DIR,
+      repoRoot: REPO_ROOT,
+      skipGit: true,
+      skipToolchain: true,
+    });
+
+    expect(result.targetDir).toBe(path.join(projectsDir, 'acme-default'));
+    expect(existsSync(path.join(projectsDir, 'acme-default', 'package.json'))).toBe(true);
   });
 });

@@ -55,7 +55,7 @@ function scaffoldedProject(projectName = 'demo'): string {
 }
 
 /**
- * A workspaces/ root holding workspaces/<project> plus one task worktree per id,
+ * A projects root holding <root>/<project> plus one task worktree per id,
  * laid out exactly as worktree.ts does it: `.wt` is a *sibling* of the project
  * checkout, so a project's checkouts are enumerable without asking git.
  */
@@ -948,16 +948,21 @@ describe('runMcpCheck', () => {
       { id: 'demo-mcp-surface', project: 'demo', status: 'planned' },
     ]);
 
-    const report = runMcpCheck({ projectName: 'demo', roadmapPath, workspacesDir, cwd: project });
+    const report = runMcpCheck({
+      projectName: 'demo',
+      roadmapPath,
+      projectRoots: [workspacesDir],
+      cwd: project,
+    });
     expect(report.ok).toBe(true);
     expect(report.targetDir).toBe(project);
     expect(report.targetSource).toBe('cwd');
   });
 });
 
-// D-133. `mcp check <project>` resolved its target as workspaces/<project>,
+// D-133. `mcp check <project>` resolved its target as <root>/<project>,
 // which during an epic is a DIFFERENT valid checkout from the one the caller is
-// standing in: task work happens in workspaces/.wt/<project>/<task-id>. The
+// standing in: task work happens in <root>/.wt/<project>/<task-id>. The
 // wrong answer was well-formed — ok:true, violations:[], exit 0 — both before
 // and after the manifest edit the criterion existed to regression-check,
 // because in both cases it parsed a file the task never touched.
@@ -967,9 +972,15 @@ describe('resolveMcpTarget', () => {
     const worktree = path.join(workspacesDir, '.wt', 'demo', 'task-3-manifest-truth');
 
     expect(
-      resolveMcpTarget({ projectName: 'demo', workspacesDir, cwd: path.join(worktree, 'src') }),
+      resolveMcpTarget({
+        projectName: 'demo',
+        projectRoots: [workspacesDir],
+        cwd: path.join(worktree, 'src'),
+      }),
     ).toEqual({ targetDir: worktree, source: 'cwd' });
-    expect(resolveMcpTarget({ projectName: 'demo', workspacesDir, cwd: project })).toEqual({
+    expect(
+      resolveMcpTarget({ projectName: 'demo', projectRoots: [workspacesDir], cwd: project }),
+    ).toEqual({
       targetDir: project,
       source: 'cwd',
     });
@@ -983,7 +994,7 @@ describe('resolveMcpTarget', () => {
     const worktree = path.join(workspacesDir, '.wt', 'demo', 'task-3-manifest-truth');
 
     try {
-      resolveMcpTarget({ projectName: 'demo', workspacesDir, cwd: REPO_ROOT });
+      resolveMcpTarget({ projectName: 'demo', projectRoots: [workspacesDir], cwd: REPO_ROOT });
       expect.unreachable('resolveMcpTarget should refuse rather than pick one');
     } catch (err) {
       expect(err).toBeInstanceOf(McpError);
@@ -994,9 +1005,11 @@ describe('resolveMcpTarget', () => {
     }
   });
 
-  it('falls back to workspaces/<project> when it is the only checkout', () => {
+  it('falls back to <root>/<project> when it is the only checkout', () => {
     const { workspacesDir, project } = workspacesWith([]);
-    expect(resolveMcpTarget({ projectName: 'demo', workspacesDir, cwd: REPO_ROOT })).toEqual({
+    expect(
+      resolveMcpTarget({ projectName: 'demo', projectRoots: [workspacesDir], cwd: REPO_ROOT }),
+    ).toEqual({
       targetDir: project,
       source: 'default',
     });
@@ -1009,7 +1022,7 @@ describe('resolveMcpTarget', () => {
       resolveMcpTarget({
         projectName: 'demo',
         targetDir: elsewhere,
-        workspacesDir,
+        projectRoots: [workspacesDir],
         cwd: REPO_ROOT,
       }),
     ).toEqual({ targetDir: elsewhere, source: 'flag' });
@@ -1019,9 +1032,67 @@ describe('resolveMcpTarget', () => {
   // that merely starts with the same characters.
   it('does not read the cwd as a checkout it only resembles', () => {
     const { workspacesDir, project } = workspacesWith([]);
-    expect(resolveMcpTarget({ projectName: 'demo', workspacesDir, cwd: `${project}-ui` })).toEqual({
+    expect(
+      resolveMcpTarget({
+        projectName: 'demo',
+        projectRoots: [workspacesDir],
+        cwd: `${project}-ui`,
+      }),
+    ).toEqual({
       targetDir: project,
       source: 'default',
     });
+  });
+});
+
+// A project no longer lands inside this clone by default, but one scaffolded
+// before that change still sits under `workspaces/`. Both roots are searched,
+// or the move would strand every project already there.
+describe('resolveMcpTarget across project roots', () => {
+  it('still finds a project left in the legacy workspaces/ root', () => {
+    const { workspacesDir, project } = workspacesWith([]);
+    const projectsDir = mkScratch('bs-mcp-projects-');
+
+    expect(
+      resolveMcpTarget({
+        projectName: 'demo',
+        projectRoots: [projectsDir, workspacesDir],
+        cwd: REPO_ROOT,
+      }),
+    ).toEqual({ targetDir: project, source: 'default' });
+  });
+
+  it('refuses to guess when one name has a checkout under each root', () => {
+    const { workspacesDir, project } = workspacesWith([]);
+    const projectsDir = mkScratch('bs-mcp-projects-');
+    const beside = path.join(projectsDir, 'demo');
+    mkdirSync(beside, { recursive: true });
+
+    try {
+      resolveMcpTarget({
+        projectName: 'demo',
+        projectRoots: [projectsDir, workspacesDir],
+        cwd: REPO_ROOT,
+      });
+      expect.unreachable('two checkouts of one name is not something to pick between');
+    } catch (err) {
+      expect(err).toBeInstanceOf(McpError);
+      expect((err as SmithError).code).toBe('mcp.ambiguous-target');
+      expect((err as SmithError).message).toContain(beside);
+      expect((err as SmithError).message).toContain(project);
+    }
+  });
+
+  it('assumes the first root, which is where a new project lands', () => {
+    const projectsDir = mkScratch('bs-mcp-projects-');
+    const workspacesDir = mkScratch('bs-mcp-ws-empty-');
+
+    expect(
+      resolveMcpTarget({
+        projectName: 'demo',
+        projectRoots: [projectsDir, workspacesDir],
+        cwd: REPO_ROOT,
+      }),
+    ).toEqual({ targetDir: path.join(projectsDir, 'demo'), source: 'default' });
   });
 });

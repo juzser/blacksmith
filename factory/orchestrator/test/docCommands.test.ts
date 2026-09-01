@@ -30,7 +30,7 @@ const SKIP_DIRS = new Set(['.git', '.venv', 'coverage', 'dist', 'node_modules', 
  * these three.
  *
  * A name-matched entry cannot express it. A task worktree lives at
- * `workspaces/.wt/<project>/<task-id>` (`worktree.ts` `worktreePath`), so a
+ * `<project-parent>/.wt/<project>/<task-id>` (`worktree.ts` `worktreePath`), so a
  * `SKIP_DIRS` entry reading `worktrees` matches nothing and a dogfooded epic
  * drops N complete second checkouts into the walk — each with its own
  * mid-edit copy of these very documents. One stale worktree on disk would

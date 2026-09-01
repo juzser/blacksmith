@@ -18,7 +18,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { SmithError } from './errors.js';
-import { ROADMAP_PATH, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
+import { PROJECTS_DIR, ROADMAP_PATH, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
 import {
   loadRoadmap,
   type MilestoneDef,
@@ -304,8 +304,10 @@ export function checkManifest(manifest: unknown): McpCheckResult {
 
 export interface McpSurfaceOptions {
   projectName: string;
-  /** Defaults to REPO_ROOT/workspaces/<projectName>. */
+  /** Defaults to `<projectsDir>/<projectName>`. */
   targetDir?: string;
+  /** The root the project is looked for in; defaults to PROJECTS_DIR. */
+  projectsDir?: string;
   /** Defaults to factory/scaffold/. */
   templateDir?: string;
   roadmapPath?: string;
@@ -332,7 +334,7 @@ export function addMcpSurface(opts: McpSurfaceOptions): McpSurfaceResult {
   validateProjectName(opts.projectName);
 
   const templateDir = path.join(opts.templateDir ?? SCAFFOLD_DIR, 'mcp');
-  const targetDir = opts.targetDir ?? path.join(WORKSPACES_DIR, opts.projectName);
+  const targetDir = opts.targetDir ?? path.join(opts.projectsDir ?? PROJECTS_DIR, opts.projectName);
   const manifestPath = path.join(targetDir, 'mcp.manifest.json');
 
   if (!existsSync(path.join(targetDir, 'package.json'))) {
@@ -484,22 +486,44 @@ export interface McpTargetOptions {
   targetDir?: string;
   /** Defaults to `process.cwd()`. Injectable so tests need not chdir. */
   cwd?: string;
-  /** Defaults to REPO_ROOT/workspaces. Injectable for the same reason. */
-  workspacesDir?: string;
+  /**
+   * The roots a project's checkouts are looked for in, first one winning when
+   * nothing else answers. Defaults to PROJECTS_DIR then WORKSPACES_DIR: a
+   * project lands beside this clone now, but one scaffolded before that still
+   * sits under `workspaces/` and is not going to be forgotten for it.
+   * Injectable for the same reason as `cwd`.
+   */
+  projectRoots?: readonly string[];
 }
 
-/** Every checkout of `projectName`: workspaces/<p> plus each task worktree. */
-function projectCheckouts(projectName: string, workspacesDir: string): string[] {
-  const main = path.join(workspacesDir, projectName);
-  const worktreeRoot = path.join(workspacesDir, '.wt', projectName);
-  let worktrees: string[] = [];
-  if (existsSync(worktreeRoot)) {
-    worktrees = readdirSync(worktreeRoot, { withFileTypes: true })
+/**
+ * Every checkout of `projectName` across every root: `<root>/<p>` plus each
+ * task worktree beside it. Roots are searched in order and the result is
+ * deduplicated, so overlapping roots enlarge the search without doubling a
+ * candidate in the list an ambiguity refusal prints.
+ */
+function projectCheckouts(projectName: string, roots: readonly string[]): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const take = (dir: string): void => {
+    if (seen.has(dir)) return;
+    seen.add(dir);
+    found.push(dir);
+  };
+
+  for (const root of roots) {
+    const main = path.join(root, projectName);
+    if (existsSync(main)) take(main);
+    const worktreeRoot = path.join(root, '.wt', projectName);
+    if (!existsSync(worktreeRoot)) continue;
+    for (const entry of readdirSync(worktreeRoot, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => path.join(worktreeRoot, e.name))
-      .sort();
+      .sort()) {
+      take(entry);
+    }
   }
-  return [...(existsSync(main) ? [main] : []), ...worktrees];
+  return found;
 }
 
 /** True when `cwd` is `dir` or lives under it — path-segment-wise, not by prefix. */
@@ -511,9 +535,9 @@ function isWithin(dir: string, cwd: string): boolean {
 /**
  * D-133. Which checkout `smith mcp check <project>` is about.
  *
- * The old answer was `workspaces/<project>`, unconditionally. During an epic
- * that is a *different valid checkout* from the one the caller is standing in —
- * task work happens in `workspaces/.wt/<project>/<task-id>` — so the command
+ * The old answer was `<root>/<project>`, unconditionally. During an epic that
+ * is a *different valid checkout* from the one the caller is standing in —
+ * task work happens in `<root>/.wt/<project>/<task-id>` — so the command
  * parsed a manifest the task had never touched and returned `ok: true`,
  * `violations: []`, exit 0, both before and after the very edit the check
  * existed to grade. A well-formed wrong answer is worse than a refusal, because
@@ -521,14 +545,16 @@ function isWithin(dir: string, cwd: string): boolean {
  *
  * So: an explicit `--target-dir` wins; otherwise the caller's own checkout
  * answers it; otherwise, if more than one checkout exists, refuse and name them
- * all. `workspaces/<project>` is only assumed when it is the only candidate.
+ * all. The default root is only assumed when nothing else is a candidate — and
+ * "more than one" now spans every root, so a project that exists both beside
+ * this clone and under the legacy `workspaces/` is a refusal, not a coin flip.
  */
 export function resolveMcpTarget(opts: McpTargetOptions): McpTarget {
   if (opts.targetDir) return { targetDir: path.resolve(opts.targetDir), source: 'flag' };
 
-  const workspacesDir = opts.workspacesDir ?? WORKSPACES_DIR;
+  const roots = opts.projectRoots ?? [PROJECTS_DIR, WORKSPACES_DIR];
   const cwd = path.resolve(opts.cwd ?? process.cwd());
-  const checkouts = projectCheckouts(opts.projectName, workspacesDir);
+  const checkouts = projectCheckouts(opts.projectName, roots);
 
   // Deepest match wins: nothing nests today, but a checkout inside a checkout
   // should resolve to the inner one rather than to whichever came first.
@@ -547,7 +573,16 @@ export function resolveMcpTarget(opts: McpTargetOptions): McpTarget {
     );
   }
 
-  return { targetDir: path.join(workspacesDir, opts.projectName), source: 'default' };
+  // Exactly one checkout: that one, wherever it lives. Constructing
+  // `<first root>/<project>` instead would have named a directory that does not
+  // exist while a real one sat under the second root — the single-root code
+  // this replaced got away with it only because the two were always the same
+  // path. Nothing at all: the root a new project would land in, so the caller
+  // is told where the surface is expected rather than where it is missing from.
+  return {
+    targetDir: checkouts[0] ?? path.join(roots[0] ?? PROJECTS_DIR, opts.projectName),
+    source: 'default',
+  };
 }
 
 export interface McpCheckReport extends McpCheckResult {

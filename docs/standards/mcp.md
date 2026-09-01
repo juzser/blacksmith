@@ -166,12 +166,14 @@ Read-only is the default and the only class that ships without a signature.
    `smith mcp init` be skipped and then waived away as one more violation.
 
    **Which checkout it grades** (D-133): `--target-dir` if given, else the
-   checkout the caller is standing in — `workspaces/<project>` or any
-   `workspaces/.wt/<project>/<task-id>` — else, when more than one checkout
-   exists and the cwd is inside none of them, it refuses with
-   `mcp.ambiguous-target` and names every candidate. `workspaces/<project>` is
-   assumed only when it is the only one. The report carries `targetDir` and
-   `targetSource` so a verdict names its subject: during an epic the two
+   checkout the caller is standing in — `<root>/<project>` or any
+   `<root>/.wt/<project>/<task-id>`, across both the projects root beside this
+   clone and the legacy `workspaces/` inside it — else, when more than one
+   checkout exists and the cwd is inside none of them, it refuses with
+   `mcp.ambiguous-target` and names every candidate. A single checkout is
+   assumed only when it is the only one, wherever it lives. The report carries
+   `targetDir` and `targetSource` so a verdict names its subject: during an
+   epic the two
    checkouts hold different manifests, and an `ok: true` that does not say
    which file it parsed is not a verdict about the work under review.
 4. **`smith epic close` refuses while the check is red** for an epic under

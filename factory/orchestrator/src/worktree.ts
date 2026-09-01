@@ -90,7 +90,7 @@ function bareTaskId(epic: string, taskId: string): string {
  *
  * D-40: absolute, always. `git worktree add` resolves a relative path against
  * the git cwd — which is `projectDir` — so a relative `projectDir` used to
- * put the checkout at `workspaces/envkit/workspaces/envkit/wt/<task>` while
+ * put the checkout at `<root>/envkit/<root>/envkit/wt/<task>` while
  * the returned path claimed otherwise. Resolving up front means the string
  * this module returns is the string on disk.
  */
@@ -140,8 +140,10 @@ export interface TaskWorktree {
 }
 
 /**
- * Create a task worktree at workspaces/.wt/<project>/<task-id> (projectDir is
- * workspaces/<project>, so the worktree is its sibling — see taskWorktreeDir)
+ * Create a task worktree at `<projects root>/.wt/<project>/<task-id>` — a
+ * sibling of whatever directory the project was handed as, never a path of
+ * this module's own choosing, so a project outside this clone keeps its
+ * worktrees outside it too (see taskWorktreeDir)
  * on branch smith/<epic>/<task-id>, cut from the CURRENT head of
  * smith/<epic>/integration (creating the integration branch from the default
  * branch first if it doesn't exist yet).

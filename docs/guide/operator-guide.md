@@ -594,25 +594,25 @@ complementary, not substitutes.
 ## 3. `smith worktree create`
 
 ```bash
-smith worktree create workspaces/my-project epic-1 task-1
+smith worktree create ../my-project epic-1 task-1
 ```
 
 ```json
-{"worktreeDir":"/abs/path/workspaces/.wt/my-project/task-1","branch":"smith/epic-1/task-1","epic":"epic-1","taskId":"task-1"}
+{"worktreeDir":"/abs/path/.wt/my-project/task-1","branch":"smith/epic-1/task-1","epic":"epic-1","taskId":"task-1"}
 ```
 
-Creates `workspaces/.wt/<project>/<task-id>` on branch `smith/<epic>/<task-id>`,
-cut fresh from `smith/<epic>/integration`'s current head every time
-(`worktree.yml`). The worktree is a **sibling** of the project, never a child:
-each one is a full checkout carrying the project's own tool config, and six of
-them under the root made `pnpm lint` at the integration root exit 1 on nested
-root configs while all six per-task lint gates were green (D-42). The returned
-`worktreeDir` is always absolute — a relative `projectDir` used to produce
-`workspaces/<project>/workspaces/<project>/wt/<task>` on disk while the printed
-path claimed otherwise (D-40).
+Creates `<project-parent>/.wt/<project>/<task-id>` on branch
+`smith/<epic>/<task-id>`, cut fresh from `smith/<epic>/integration`'s current
+head every time (`worktree.yml`). The worktree is a **sibling** of the project,
+never a child: each one is a full checkout carrying the project's own tool
+config, and six of them under the root made `pnpm lint` at the integration root
+exit 1 on nested root configs while all six per-task lint gates were green
+(D-42). The returned `worktreeDir` is always absolute — a relative `projectDir`
+used to produce `../my-project/../my-project/wt/<task>` on disk while the
+printed path claimed otherwise (D-40).
 
-Nothing requires the project to sit under `workspaces/`. That is only where
-`smith new` puts one when no `--target-dir` says otherwise; `projectDir` is
+Nothing requires the project to sit anywhere in particular. `smith new` puts
+one beside this clone when no `--target-dir` says otherwise; `projectDir` is
 read as a path, so a clone anywhere on disk works, and because the worktree is
 a sibling it is created beside that clone rather than under this repo.
 
@@ -637,9 +637,9 @@ edit the code it was judging" was a sentence in a prompt. Now it is a check:
 fingerprint the worktree before dispatching the judge, verify it after.
 
 ```bash
-smith worktree fingerprint /abs/path/workspaces/.wt/my-project/task-1 > before.json
+smith worktree fingerprint /abs/path/.wt/my-project/task-1 > before.json
 # ... dispatch the judge ...
-smith worktree verify /abs/path/workspaces/.wt/my-project/task-1 --before before.json
+smith worktree verify /abs/path/.wt/my-project/task-1 --before before.json
 ```
 
 ```json
@@ -839,7 +839,7 @@ merge queue for one epic:
 
 ```bash
 smith queue run epic-1 \
-  --project workspaces/my-project \
+  --project ../my-project \
   --test-cmd "pnpm test" \
   --tasks tasks.json
 ```
@@ -876,7 +876,7 @@ That was D-137, found on `envkit-mcp-followup` with four such tasks.
 
 ```bash
 smith queue adopt task-4 \
-  --project workspaces/my-project \
+  --project ../my-project \
   --merge-commit 9f2c1ab \
   --plan plans/epic-1.json \
   --session sess-7 --causal-parent sess-7#0
@@ -908,7 +908,7 @@ narrows the *gate*, never the contract.
 
 ```bash
 smith queue run epic-1 \
-  --project workspaces/my-project \
+  --project ../my-project \
   --test-cmd "pnpm test" \
   --select-test-cmd "pnpm vitest run {files}" \
   --tasks tasks.json
@@ -983,7 +983,7 @@ way, which is the pre-D-34 pipeline.
 
 ```bash
 smith gate run epic-1/task-1 \
-  --worktree workspaces/.wt/my-project/task-1 \
+  --worktree ../.wt/my-project/task-1 \
   --base smith/epic-1/integration \
   --checks checks.json \
   --result result.json \
@@ -1596,7 +1596,7 @@ fail-closed case — exactly one active external provider can never form a
 quorum, because `finder_ne_critic` excludes the native claimant.
 
 ```bash
-smith epic verdict --epic epic-1 --project workspaces/my-project \
+smith epic verdict --epic epic-1 --project ../my-project \
   --session <session-id> --causal-parent <event-id>
 ```
 
@@ -1630,8 +1630,8 @@ happened because a human typed it.
 This is that run, made a logged fact:
 
 ```bash
-git -C workspaces/my-project checkout smith/epic-1/integration
-smith integration check --epic epic-1 --project workspaces/my-project \
+git -C ../my-project checkout smith/epic-1/integration
+smith integration check --epic epic-1 --project ../my-project \
   --checks checks.json \
   --session <session-id> --causal-parent <event-id>
 ```
@@ -1667,7 +1667,7 @@ verdict was ever run (D-43). `epic close` is the verb that makes the close a
 fact.
 
 ```bash
-smith epic close --epic epic-1 --project workspaces/my-project \
+smith epic close --epic epic-1 --project ../my-project \
   --session <session-id> --causal-parent <event-id>
 ```
 
@@ -1721,7 +1721,7 @@ that two criteria contradicted each other. So there is a second dispatch, at
 epic close, against composite behaviour:
 
 ```bash
-smith epic spec-review --epic epic-1 --project workspaces/my-project \
+smith epic spec-review --epic epic-1 --project ../my-project \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --reviewed-by spec-reviewer [--reviewed-by-provider anthropic:claude-opus-5] \
   [--evidence spec-findings.json] \

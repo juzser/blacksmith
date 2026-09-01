@@ -43,4 +43,14 @@ describe('paths.ts', () => {
       expect(`${name}: ${value}`).toBe(`${name}: ${path.normalize(String(value))}`);
     }
   });
+
+  // The factory builds projects; it does not house them. A project scaffolded
+  // under REPO_ROOT sits inside this clone's git tree, its ignore rules and its
+  // lint roots, and reads as part of the factory to every tool that walks up
+  // from a file inside it. `workspaces/` is still a legal place to put one with
+  // `--target-dir`; it is no longer where one goes when nothing says otherwise.
+  it('puts a project beside this clone rather than inside it', () => {
+    expect(paths.PROJECTS_DIR).toBe(path.dirname(paths.REPO_ROOT));
+    expect(path.relative(paths.REPO_ROOT, path.join(paths.PROJECTS_DIR, 'demo'))).toMatch(/^\.\./);
+  });
 });
