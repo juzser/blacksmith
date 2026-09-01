@@ -61,7 +61,7 @@
     "@vue-flow/core": "1.48.2",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "better-sqlite3": "13.0.2",
+    "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.5",
     "picomatch": "4.0.5",
