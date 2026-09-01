@@ -11,6 +11,7 @@ import {
   liveAgents as foldLiveAgents,
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
+import { parseEventId } from '../events.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
@@ -80,6 +81,55 @@ function filterByProject<T extends { project: string | null }>(rows: T[], scope:
   return scope.project !== undefined
     ? rows.filter((r) => projectOf(r.project) === scope.project)
     : rows;
+}
+
+/**
+ * Where an event sits in the order the log actually wrote it.
+ *
+ * An event id is `<session-id>#<index>` and the index is the event's line in
+ * its session's log, so within a session this *is* the order rather than a
+ * proxy for it. Across sessions the logs are separate files that nothing
+ * interleaves, so the session id is here to make the answer the same on every
+ * call, not because one session precedes another.
+ *
+ * Total where parseEventId throws, and the fallback is unreachable by
+ * construction — the projector copies `event_id` straight from readEvents(),
+ * which builds every one of them as `<session>#<index>`. It is here because
+ * `/api/pulse` polls this ordering every 5s on every page, and an id that
+ * somehow would not parse should sort somewhere rather than 500 the shell.
+ * Where it lands is deliberately modest: an event whose place in the log is
+ * unreadable does not get to win a tie on it.
+ */
+function logOrderOf(eventId: string): { sessionId: string; index: number } {
+  try {
+    return parseEventId(eventId);
+  } catch {
+    return { sessionId: eventId, index: -1 };
+  }
+}
+
+/**
+ * Whether `a` is the later of two events — the one a reader means by "what
+ * just happened".
+ *
+ * `ts` is stamped at millisecond resolution (events.ts's appendEvent), so a
+ * burst of appends routinely shares one: the test fixture's own last two
+ * events tie in roughly one build in three. `events_raw` carries no sequence
+ * column and is read without an ORDER BY, so on a tie neither `>` nor `>=` is
+ * a decision — it is whichever row the scan happened to reach first. Both
+ * callers below were spelling this comparison themselves, with opposite
+ * operators, and so gave opposite answers to the same question about the same
+ * two events.
+ */
+function isLaterEvent(
+  a: { ts: string; eventId: string },
+  b: { ts: string; eventId: string },
+): boolean {
+  if (a.ts !== b.ts) return a.ts > b.ts;
+  const left = logOrderOf(a.eventId);
+  const right = logOrderOf(b.eventId);
+  if (left.sessionId !== right.sessionId) return left.sessionId > right.sessionId;
+  return left.index > right.index;
 }
 
 /** Every distinct project value present across the row sets, DEFAULT_PROJECT-normalized, sorted. */
@@ -643,16 +693,22 @@ export function runningSessions(db: SmithDb, scope: Scope = {}): RunningSession[
 
   // What each session did most recently. events_raw is not guaranteed to come
   // back in ts order, so the latest row is chosen by comparison rather than by
-  // trusting scan order.
-  const lastEvent = new Map<string, { ts: string; eventType: string }>();
+  // trusting scan order — and isLaterEvent settles a tie on ts the same way
+  // pulse() does, which is what lets the two agree about one session.
+  const lastEvent = new Map<string, { ts: string; eventType: string; eventId: string }>();
   const eventQuery = db
-    .select({ sessionId: eventsRaw.sessionId, ts: eventsRaw.ts, eventType: eventsRaw.eventType })
+    .select({
+      sessionId: eventsRaw.sessionId,
+      ts: eventsRaw.ts,
+      eventType: eventsRaw.eventType,
+      eventId: eventsRaw.eventId,
+    })
     .from(eventsRaw);
   for (const e of scope.sessionId
     ? eventQuery.where(eq(eventsRaw.sessionId, scope.sessionId)).all()
     : eventQuery.all()) {
     const seen = lastEvent.get(e.sessionId);
-    if (seen === undefined || e.ts >= seen.ts) lastEvent.set(e.sessionId, e);
+    if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
   }
 
   return (
@@ -2230,6 +2286,7 @@ export function pulse(db: SmithDb, scope: Scope = {}): PulseResult {
     ts: eventsRaw.ts,
     eventType: eventsRaw.eventType,
     project: eventsRaw.project,
+    eventId: eventsRaw.eventId,
   };
   const allEvents = scope.sessionId
     ? db.select(eventCols).from(eventsRaw).where(eq(eventsRaw.sessionId, scope.sessionId)).all()
@@ -2249,10 +2306,11 @@ export function pulse(db: SmithDb, scope: Scope = {}): PulseResult {
   // Max over `ts`, not "the last row": rows land in the order the projector
   // folded them, and a rebuild folds one session to completion before it
   // starts the next — so the final row is the newest event of the last
-  // session, which is not the newest event.
-  let newest: { ts: string; eventType: string } | null = null;
+  // session, which is not the newest event. Ties on `ts` are common enough to
+  // need an answer of their own; isLaterEvent has it.
+  let newest: { ts: string; eventType: string; eventId: string } | null = null;
   for (const e of events) {
-    if (newest === null || e.ts > newest.ts) newest = { ts: e.ts, eventType: e.eventType };
+    if (newest === null || isLaterEvent(e, newest)) newest = e;
   }
 
   return {

@@ -32,6 +32,25 @@ async function lastEventId(opts: EventOpts): Promise<string> {
   return last.event_id;
 }
 
+/** A raw log line with the ts spelled out, so a tie is the test's and not the
+ * clock's — appendEvent() stamps the moment it is called. */
+function tiedLine(
+  eventType: string,
+  ts: string,
+  payload: Record<string, unknown>,
+  session: string = SESSION_ID,
+): string {
+  return `${JSON.stringify({
+    session_id: session,
+    actor: 'user',
+    event_type: eventType,
+    plan_version: 1,
+    causal_parent: eventType === 'session-start' ? null : `${session}#0`,
+    payload,
+    ts,
+  })}\n`;
+}
+
 /** The projection's own row count, so the pulse assertion is not a magic number
  * that has to be re-counted every time the fixture grows an event. */
 function readEventCount(handle: DbHandle): number {
@@ -445,6 +464,159 @@ describe('db/queries.ts', () => {
       expect(result.counts.errors).toBe(1); // the one error errorsPage() groups
       // lesson-1 is approved and lesson-2 invalidated — nothing is waiting.
       expect(result.lessonsPending).toBe(0);
+    });
+
+    it('breaks a tie on the log order, not on the order the rows come back', async () => {
+      // `ts` is stamped at millisecond resolution (events.ts), so events
+      // written in one burst routinely share one — the fixture's own last two
+      // do it in roughly one build of three. A strict `>` keeps whichever of
+      // the tied rows the scan reached first, which is not a decision anything
+      // made. Written raw rather than through appendEvent because the point is
+      // the tie, and appendEvent takes the clock rather than a stamp.
+      const logFile = path.join(stateDir, `${SESSION_ID}.jsonl`);
+      const tied = '2030-01-01T00:00:00.000Z';
+      await appendFile(
+        logFile,
+        tiedLine('operator-note', tied, { note_kind: 'scope-check', note: 'written first' }),
+        'utf8',
+      );
+      await appendFile(logFile, tiedLine('severity-decisions', tied, { decisions: [] }), 'utf8');
+
+      const dbPath = path.join(dbDir, 'tied.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const tiedHandle = openDb(dbPath);
+      try {
+        const result = pulse(tiedHandle.db);
+        expect(result.lastEventAt).toBe(tied);
+        // The later append is the later event: an event id is
+        // `<session>#<index>` and the index is its position in the log.
+        expect(result.lastEventType).toBe('severity-decisions');
+        // And both readings of "what just happened" name the same event, which
+        // is what the first assertion in this block has been assuming.
+        const row = overview(tiedHandle.db).runningSessions.find((s) => s.sessionId === SESSION_ID);
+        expect(row?.lastEventType).toBe('severity-decisions');
+      } finally {
+        tiedHandle.sqlite.close();
+      }
+    });
+
+    it('gives the same answer when the rows come back in another order', async () => {
+      // The row above proves a tie needs an answer of its own; this one proves
+      // where the answer comes from. `events_raw` has no sequence column and
+      // neither reader sorts, so "the last row" is whichever the scan reaches
+      // last — and SQLite is free to hand them back in any order it likes. So
+      // the tied pair is deliberately stored backwards here, and the log still
+      // decides.
+      const logFile = path.join(stateDir, `${SESSION_ID}.jsonl`);
+      const tied = '2030-01-01T00:00:00.000Z';
+      await appendFile(
+        logFile,
+        tiedLine('operator-note', tied, { note_kind: 'scope-check', note: 'written first' }),
+        'utf8',
+      );
+      await appendFile(logFile, tiedLine('severity-decisions', tied, { decisions: [] }), 'utf8');
+
+      const dbPath = path.join(dbDir, 'reordered.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const reordered = openDb(dbPath);
+      try {
+        // Rewriting the earlier row moves it to the end of the table. Every
+        // column is carried across by name so this keeps working when the
+        // table grows one.
+        const row = reordered.sqlite
+          .prepare(`select * from events_raw where ts = ? and event_type = 'operator-note'`)
+          .get(tied) as Record<string, unknown>;
+        const cols = Object.keys(row);
+        reordered.sqlite.prepare('delete from events_raw where event_id = ?').run(row.event_id);
+        reordered.sqlite
+          .prepare(
+            `insert into events_raw (${cols.join(', ')}) values (${cols.map(() => '?').join(', ')})`,
+          )
+          .run(...cols.map((c) => row[c]));
+
+        // Guard the guard: without this the row could go on passing for the
+        // wrong reason the day the rewrite stops reordering anything.
+        const scanned = reordered.sqlite
+          .prepare('select event_type from events_raw where ts = ?')
+          .all(tied)
+          .map((r) => (r as { event_type: string }).event_type);
+        expect(scanned).toEqual(['severity-decisions', 'operator-note']);
+
+        expect(pulse(reordered.db).lastEventType).toBe('severity-decisions');
+        const session = overview(reordered.db).runningSessions.find(
+          (s) => s.sessionId === SESSION_ID,
+        );
+        expect(session?.lastEventType).toBe('severity-decisions');
+      } finally {
+        reordered.sqlite.close();
+      }
+    });
+
+    it('breaks a tie across two logs the same way on every call', async () => {
+      // In global scope — the normal one, per this module's header — a tie can
+      // straddle two sessions, and there the index means nothing: the logs are
+      // separate files and nothing interleaves them. The session id is what
+      // makes the answer the same on every call instead of a re-roll of
+      // whatever order the rows arrived in. The session with the *shorter* log
+      // wins here, so index order and session order disagree and only one of
+      // them can be what decided it.
+      const tied = '2030-01-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${SESSION_ID}.jsonl`),
+        tiedLine('severity-decisions', tied, { decisions: [] }),
+        'utf8',
+      );
+      const other = 'sess-zzz'; // sorts after SESSION_ID, on two lines to its forty
+      await appendFile(
+        path.join(stateDir, `${other}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, other) +
+          tiedLine('operator-note', tied, { note_kind: 'scope-check', note: 'later' }, other),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'two-sessions.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const both = openDb(dbPath);
+      try {
+        const result = pulse(both.db);
+        expect(result.lastEventAt).toBe(tied);
+        expect(result.lastEventType).toBe('operator-note');
+      } finally {
+        both.sqlite.close();
+      }
+    });
+
+    it('sorts an unreadable event id low rather than throwing on it', async () => {
+      // `/api/pulse` is the app shell's poll, on every page, every 5s. An
+      // event id it cannot read is a corrupt row, and a corrupt row should
+      // cost the operator a wrong tie-break at worst — never the shell. The id
+      // here is a session id with its `#index` missing, which is the shape
+      // that makes the point: it parses far enough to tie on session and then
+      // has nothing left to say about order, so it loses to a row that does.
+      const logFile = path.join(stateDir, `${SESSION_ID}.jsonl`);
+      const tied = '2030-01-01T00:00:00.000Z';
+      await appendFile(
+        logFile,
+        tiedLine('operator-note', tied, { note_kind: 'scope-check', note: 'readable' }),
+        'utf8',
+      );
+      await appendFile(logFile, tiedLine('severity-decisions', tied, { decisions: [] }), 'utf8');
+
+      const dbPath = path.join(dbDir, 'corrupt-id.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const corrupt = openDb(dbPath);
+      try {
+        // Row 1 established that this is the event that wins the tie. Take its
+        // place in the log away and it should stop winning, not start.
+        corrupt.sqlite
+          .prepare(`update events_raw set event_id = ? where ts = ? and event_type = ?`)
+          .run(SESSION_ID, tied, 'severity-decisions');
+
+        expect(() => pulse(corrupt.db)).not.toThrow();
+        expect(pulse(corrupt.db).lastEventType).toBe('operator-note');
+      } finally {
+        corrupt.sqlite.close();
+      }
     });
 
     it('answers for an empty scope without pretending the log said something', () => {
