@@ -683,6 +683,30 @@ than appearing in it.
 
 ### Changed
 
+- **A new project lands beside this clone, not inside it.** `smith new` wrote
+  its output to `workspaces/<name>` — a path inside the factory's own git
+  tree, inside its ignore rules and its lint roots, and read as factory code
+  by every tool that walks up from a file within it. A project that takes no
+  dependency on the factory and carries no mark of it cannot begin life as a
+  directory in it. The default is now `<repo-parent>/<name>`, `PROJECTS_DIR`
+  in `paths.ts`, one level up from `REPO_ROOT`. Worktrees needed no change and
+  got none: `taskWorktreeDir` already places a worktree beside whatever
+  directory it is handed rather than at a path of its own choosing (D-42), so
+  they follow the project out. `workspaces/` stays legal and stays gitignored
+  — `--target-dir` still points anywhere — and the change that mattered was in
+  `resolveMcpTarget` (D-133), which assumed a single root: it now searches an
+  ordered list, the projects root then `workspaces/`, so a project scaffolded
+  before this change is still found where it sits, and a name that exists
+  under both roots is the ambiguity refusal it always should have been rather
+  than a coin flip. `McpTargetOptions.workspacesDir` became `projectRoots`.
+  One consequence is worth stating plainly because it reads backwards at
+  first: `destructive_removal.allowed_roots` matches `workspaces`/`state` by
+  name at the cwd's git toplevel, and a project outside this clone has
+  neither, so recursive-force removal inside it is refused outright. The move
+  tightens that surface rather than loosening it, and nothing in the factory
+  leans on the allowance — `worktree.ts` retires a worktree with `git worktree
+  remove`.
+
 - **A project this factory builds leaves carrying no mark of the factory.**
   The scaffold output advertised its origin in nine template files and in the
   git history it wrote: an `AGENTS.md` that opened by naming the tool that

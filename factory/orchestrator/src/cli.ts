@@ -1308,7 +1308,7 @@ async function main(): Promise<number> {
   if (namespace === 'new') {
     // `smith new <project> [--ui]` — action doubles as the positional
     // project name here (splitNamespaceAction), never a subcommand word.
-    // `--target-dir`/`--roadmap-path` override the real workspaces/ and
+    // `--target-dir`/`--roadmap-path` override the real projects root and
     // factory/specs/roadmap.md paths (same override pattern as
     // `--state-dir` elsewhere in this file) so tests never touch either.
     if (!action) {

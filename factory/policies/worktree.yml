@@ -5,8 +5,8 @@
 
 worktree:
   # D-42 correction (phase 9): worktrees live OUTSIDE the project root, as a
-  # sibling of it. They used to be at "workspaces/<project>/wt/<task-id>" —
-  # inside the root — and each one is a full checkout carrying the project's
+  # sibling of it. They used to be at "<project>/wt/<task-id>" — inside
+  # the root — and each one is a full checkout carrying the project's
   # own tool config. A tool that walks down from the project root therefore
   # found N+1 root configs and refused to run: the envkit epic's `pnpm lint`
   # exited 1 at the integration root without reading a source file, while all
@@ -14,7 +14,9 @@ worktree:
   # are not descendants, so no task gate could see it). A sibling path is one
   # no root-walking tool can reach without climbing up, which retires the
   # class rather than the one tool.
-  path_pattern: "workspaces/.wt/<project>/<task-id>"
+  # Relative to whatever directory the project was handed as, never to this
+  # clone: a project beside the repo keeps its worktrees beside the repo too.
+  path_pattern: "<project-parent>/.wt/<project>/<task-id>"
   branch_pattern: "smith/<epic>/<task-id>"
   created_from: integration branch head (smith/<epic>/integration), fresh each time
   lifecycle: deleted after merge — a stale worktree is a bug

@@ -64,7 +64,7 @@ describe('worktree.ts', () => {
 
   // D-40: `git worktree add` resolves a relative path against the git cwd,
   // which is projectDir — so a relative projectDir used to produce
-  // workspaces/envkit/workspaces/envkit/wt/<task> on disk while the returned
+  // <root>/envkit/<root>/envkit/wt/<task> on disk while the returned
   // path said otherwise. Every path this module hands out is absolute.
   it('resolves a relative projectDir instead of doubling it', () => {
     const relativeProject = path.relative(process.cwd(), projectDir);

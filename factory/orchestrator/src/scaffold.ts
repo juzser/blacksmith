@@ -24,7 +24,7 @@ import {
 import path from 'node:path';
 import { SmithError } from './errors.js';
 import { runGit as git } from './git.js';
-import { REPO_ROOT, ROADMAP_PATH, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
+import { PROJECTS_DIR, REPO_ROOT, ROADMAP_PATH, SCAFFOLD_DIR } from './paths.js';
 import { readRoadmapText, roadmapDeclaresId } from './roadmap.js';
 import { loadStackAnswers, requireScaffoldable, type StackAnswers } from './stack.js';
 
@@ -346,8 +346,14 @@ export interface ToolchainReport {
 export interface ScaffoldOptions {
   projectName: string;
   ui: boolean;
-  /** Defaults to REPO_ROOT/workspaces/<projectName>. */
+  /** Defaults to `<projectsDir>/<projectName>`. */
   targetDir?: string;
+  /**
+   * The root a project lands in when no `targetDir` says otherwise; defaults
+   * to PROJECTS_DIR. Injected by tests, which have no business scaffolding
+   * into the operator's real project directory.
+   */
+  projectsDir?: string;
   templateDir?: string; // defaults to factory/scaffold/
   /** Resolves a relative `design_system_source`; defaults to REPO_ROOT. */
   repoRoot?: string;
@@ -433,7 +439,7 @@ export function scaffoldProject(opts: ScaffoldOptions): ScaffoldResult {
   const templateDir = opts.templateDir ?? SCAFFOLD_DIR;
   const repoRoot = opts.repoRoot ?? REPO_ROOT;
   const designSystemDir = opts.ui ? resolveDesignSystemSource(stack, repoRoot) : null;
-  const targetDir = opts.targetDir ?? path.join(WORKSPACES_DIR, opts.projectName);
+  const targetDir = opts.targetDir ?? path.join(opts.projectsDir ?? PROJECTS_DIR, opts.projectName);
 
   if (existsSync(targetDir) && readdirSync(targetDir).length > 0) {
     throw new ScaffoldError(

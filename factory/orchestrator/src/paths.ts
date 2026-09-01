@@ -18,7 +18,23 @@ export const STATE_DAEMON_DIR = path.join(REPO_ROOT, 'state', 'daemon');
 export const DB_MIGRATIONS_DIR = path.join(REPO_ROOT, 'factory', 'orchestrator', 'drizzle');
 export const ROADMAP_PATH = path.join(REPO_ROOT, 'factory', 'specs', 'roadmap.md');
 export const SCAFFOLD_DIR = path.join(REPO_ROOT, 'factory', 'scaffold');
+/**
+ * `workspaces/` inside this clone. Still a legal place to keep a project, and
+ * still searched for ones already there -- no longer where a new one goes.
+ */
 export const WORKSPACES_DIR = path.join(REPO_ROOT, 'workspaces');
+/**
+ * Where a project lands when nothing says otherwise: beside this clone.
+ *
+ * A project this factory builds is not a part of it -- it takes no dependency
+ * on it and carries no mark of it -- and a project scaffolded under REPO_ROOT
+ * contradicted that from the first commit: inside this clone's git tree, its
+ * ignore rules and its lint roots, and read as factory code by every tool that
+ * walks up from a file inside it. Beside, not within. A task's worktrees follow
+ * it there on their own, since worktree.ts places them next to the project it
+ * is handed rather than at a path of its own choosing.
+ */
+export const PROJECTS_DIR = path.dirname(REPO_ROOT);
 export const SCHEDULER_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'scheduler.yml');
 export const LESSONS_MD_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'lessons.md');
 /** The shipped role templates — read at dispatch for their `<!-- LESSONS:<scope> -->` markers (P9-2). */

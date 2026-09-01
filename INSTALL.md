@@ -11,10 +11,11 @@ clone and say *"install Blacksmith"*. The session reads
 before anything that touches the machine outside the clone.
 
 Blacksmith runs **from a clone**, not as a globally installed package. The
-event log (`state/events/`), the SQLite projection (`state/smith.db`), and
-every worker worktree (`workspaces/`) live inside the checkout —
-`factory/orchestrator/src/paths.ts` resolves all of them relative to the repo
-root — so put the clone somewhere you're happy to keep it.
+event log (`state/events/`) and the SQLite projection (`state/smith.db`) live
+inside the checkout — `factory/orchestrator/src/paths.ts` resolves both
+relative to the repo root — while the projects it builds land *beside* the
+clone, with their worktrees beside them. So put the clone somewhere you're
+happy to keep it, in a directory you're happy to see projects appear in.
 
 ---
 

@@ -41,9 +41,9 @@ This repo is self-governing: its rules live here, not in any other repo.
 - **Worktrees.** Workers operate only inside their assigned worktree, and
   only within their spec's path claims; out-of-claim edits fail the gate. A
   worktree is a sibling of the project directory rather than a child of it
-  (D-42), so it follows the project wherever that directory is: a project
-  under `workspaces/` yields `workspaces/.wt/<project>/<task-id>`, and a
-  project outside this repo yields the same shape beside itself.
+  (D-42), so it follows the project wherever that directory is: the shape is
+  always `<project-parent>/.wt/<project>/<task-id>`, which for a project
+  beside this repo — where `smith new` puts one — is outside this repo too.
 - **Specs are contracts.** No dispatch without objective, output schema,
   acceptance criteria, tool allowlist, and budget.
 - **Declarations vs state.** Committed files are declarations. `state/`,
