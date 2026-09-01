@@ -1,5 +1,4 @@
 {
-  "$schema": "https://black-smith.dev/schema/mcp-manifest.schema.json",
   "name": "__PROJECT_NAME__",
   "version": "0.0.0",
   "protocolRevision": "2025-11-25",

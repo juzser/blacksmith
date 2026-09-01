@@ -175,6 +175,7 @@ describe('scaffold.ts', () => {
       'vitest.config.ts',
       '.gitignore',
       'AGENTS.md',
+      'README.md',
       '.github/workflows/ci.yml',
       'src/index.ts',
       'test/index.test.ts',
@@ -238,8 +239,9 @@ describe('scaffold.ts', () => {
     const log = git(targetDir, ['log', '--format=%an <%ae>']).trim();
     expect(log.split('\n').filter(Boolean)).toHaveLength(1);
     // A placeholder, and legibly one: nobody should read this as a person who
-    // reviewed the scaffold.
-    expect(log).toBe('black-smith <black-smith@localhost>');
+    // reviewed the scaffold — and nobody should read it as the tool that wrote
+    // it either, which is what the forge-mark scan below holds it to.
+    expect(log).toBe('setup <setup@localhost>');
   });
 
   it('leaves a configured identity alone — the fallback is a fallback', () => {
@@ -885,5 +887,129 @@ describe('registerProjectInRoadmap', () => {
     const missing = path.join(mkScratch('smith-scaffold-roadmap-'), 'nope.md');
 
     expect(() => registerProjectInRoadmap('acme-widgets', missing)).toThrow(RoadmapError);
+  });
+});
+
+/**
+ * The forge mark scan.
+ *
+ * A project this factory builds is meant to leave with nothing of the factory
+ * on it — no README pointing home, no comment naming the tool that wrote the
+ * file, no `$schema` resolving to a domain the project does not own. The one
+ * exception is a maker's line in its README, and it is an exception because
+ * the operator asked for exactly that one and nothing else.
+ *
+ * The scan runs against the template tree as well as a generated one on
+ * purpose. Templates are not implementation here: they are the artifact,
+ * copied out byte for byte, and the tree covers every layer — `mcp/`,
+ * `ui-tailwind/` — including the ones no test in this file scaffolds.
+ */
+const FORGE_MARKS: readonly { readonly name: string; readonly re: RegExp }[] = [
+  { name: 'the brand', re: /black-?smith/i },
+  { name: 'a factory CLI invocation', re: /\bsmith\s+(new|mcp|epic|plan|run|status|audit)\b/ },
+  { name: 'a factory-internal path', re: /\bfactory\/(policies|scaffold|orchestrator|specs)\b/ },
+  { name: 'the relationship in prose', re: /\bthe factory(?:'s)?\b/i },
+];
+
+/** The single line the operator sanctioned, and only where they sanctioned it. */
+const SANCTIONED_MARK = 'Built by blacksmith';
+
+const SCAN_SKIP = new Set(['.git', 'node_modules', 'dist', '.venv']);
+
+/**
+ * Every `rel:line: text` under `root` that names the forge.
+ *
+ * `sanctionedIn` is one exact path, not a filename: the mark is allowed in the
+ * README that lands at the project root and nowhere else, so the template tree
+ * names `base/README.md` and a generated tree names `README.md`. A `README.md`
+ * that appears deeper — `src/mcp/README.md` does — gets no exemption.
+ */
+function forgeMarks(root: string, sanctionedIn: string): string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (SCAN_SKIP.has(entry.name)) continue;
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+        continue;
+      }
+      const rel = path.relative(root, abs);
+      const isSanctioned = rel === sanctionedIn;
+      readFileSync(abs, 'utf8')
+        .split('\n')
+        .forEach((text, i) => {
+          if (isSanctioned && text.trim() === SANCTIONED_MARK) return;
+          for (const mark of FORGE_MARKS) {
+            if (mark.re.test(text)) found.push(`${rel}:${i + 1}: ${mark.name}: ${text.trim()}`);
+          }
+        });
+    }
+  };
+  walk(root);
+  return found;
+}
+
+describe('the built project carries no forge mark', () => {
+  it('finds none in the shipped templates, across every layer', () => {
+    expect(forgeMarks(SCAFFOLD_DIR, path.join('base', 'README.md'))).toEqual([]);
+  });
+
+  it('finds none in a generated project, and exactly one sanctioned line in its README', () => {
+    const workDir = mkScratch('smith-scaffold-marks-');
+    const targetDir = path.join(workDir, 'acme-widgets');
+    scaffoldProject({
+      projectName: 'acme-widgets',
+      targetDir,
+      ui: true,
+      stack: uiStack({ styling: 'tailwind' }),
+      skipGit: true,
+      templateDir: SCAFFOLD_DIR,
+      repoRoot: REPO_ROOT,
+      skipToolchain: true,
+    });
+
+    expect(forgeMarks(targetDir, 'README.md')).toEqual([]);
+
+    const readme = readFileSync(path.join(targetDir, 'README.md'), 'utf8');
+    expect(readme).toContain('acme-widgets');
+    expect(readme).not.toContain('__PROJECT_NAME__');
+    // One line, not a paragraph: the mark is a credit, not a relationship.
+    expect(readme.split('\n').filter((l) => l.trim() === SANCTIONED_MARK)).toHaveLength(1);
+  });
+
+  /**
+   * The half of a project a file scan cannot reach. `git log` is metadata: it
+   * survives every later edit, it is the first thing a new contributor reads,
+   * and no `rm` in the project tree touches it. The scaffolder writes both
+   * halves of it — the subject, and (on a machine with no identity of its own)
+   * the name that signs the commit.
+   */
+  it('finds none in the git history it writes — not in the subject, not in the author', () => {
+    const workDir = mkScratch('smith-scaffold-marks-git-');
+    const targetDir = path.join(workDir, 'wt', 'acme-anon');
+
+    // An identity-free sandbox, so the fallback fires: the case where the
+    // scaffolder, not the operator, chooses the name that lands in history.
+    withGitConfig(workDir, '[user]\n\tuseConfigOnly = true\n', () => {
+      scaffoldProject({
+        projectName: 'acme-anon',
+        ui: false,
+        targetDir,
+        templateDir: SCAFFOLD_DIR,
+        repoRoot: REPO_ROOT,
+        skipToolchain: true,
+      });
+    });
+
+    const meta = git(targetDir, ['log', '--format=%B%n%an%n%ae%n%cn%n%ce']);
+    const found = meta
+      .split('\n')
+      .flatMap((text, i) =>
+        FORGE_MARKS.filter((mark) => mark.re.test(text)).map(
+          (mark) => `${i + 1}: ${mark.name}: ${text.trim()}`,
+        ),
+      );
+    expect(found).toEqual([]);
   });
 });

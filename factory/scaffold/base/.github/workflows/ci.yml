@@ -3,10 +3,11 @@ name: CI
 on:
   pull_request:
   push:
-    # `setup` is the branch `smith new` creates and the operator first pushes;
-    # naming only `main` meant this workflow could not fire at all on a fresh
-    # project, because a fresh project has no main yet. Both are named so CI
-    # covers the scaffold's whole life, not just the half after the first merge.
+    # `setup` is the branch this project's first commit lands on, and the first
+    # one pushed; naming only `main` meant this workflow could not fire at all
+    # on a fresh project, because a fresh project has no main yet. Both are
+    # named so CI covers the whole life of the repo, not just the half after
+    # the first merge.
     branches: [main, setup]
 
 jobs:
@@ -19,8 +20,8 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # --frozen-lockfile is safe here: `smith new` installs before it commits,
-      # so pnpm-lock.yaml is in the scaffold's first commit.
+      # --frozen-lockfile is safe here: the install runs before the first
+      # commit, so pnpm-lock.yaml is already in it.
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run typecheck
@@ -28,6 +29,6 @@ jobs:
       # Runs the suite AND enforces the coverage floor vitest.config.ts
       # declares — a separate `pnpm run test` step would only pay for the suite
       # twice, and leaving coverage out is how a declared floor ends up enforced
-      # by nothing but the factory's own gate.
+      # by nothing at all.
       - run: pnpm run test:coverage
       - run: pnpm run build
