@@ -899,6 +899,43 @@ than appearing in it.
 
 ### Fixed
 
+- **A millisecond is not a side.** The escalation-ladder audit
+  (`factory/orchestrator/src/escalation.ts`) asks one question five times —
+  *which side of this failed round is that event on* — and answered it with a
+  bare `<` or `>` on `ts`. But `appendEvent` stamps `new Date().toISOString()`,
+  so two writes in one millisecond share a timestamp, and the two events this
+  audit reasons about are exactly the pair written back to back: a
+  `gate-outcome` and the `dispatch_decision` that answers it. On a tie the
+  comparison is not a decision, it is whichever side the operator happens to be
+  told about. Reproduced, the same one-line cause gave five different wrong
+  answers. A correct `mid -> frontier` escalation was reported
+  `not-applicable`, *"the rung was never exercised"* — the retry, tied with the
+  round, was dropped by the after-search and picked up by the before-search as
+  the round's own failing dispatch, so the rung read *"neither dispatched again
+  nor reached the gate again"*. That is the D-249 inversion arriving by a
+  second road, and `not-applicable` counts as OK: a ladder **retried on the
+  same tier** was reported `not-applicable` too, and the whole report came back
+  `ok: true`, so `smith audit escalation` exits 0 on a violated ladder. Rung 3
+  was worse in the same direction — a task dispatched again in the third failed
+  round's own millisecond, with no operator answer anywhere in the log, was
+  reported `ok`, *"the bound held"*: a clean bill of health issued over a
+  livelock. The errors run both ways. An operator answer sharing a millisecond
+  with the retry it released fell outside a strict `ts` interval and was
+  reported as a `violation` against an honest run, and a rung whose retry tied
+  with its round could report `unverifiable`, *"no builder dispatch is recorded
+  for that round"*, with the dispatch sitting in the log. All five sites now
+  route through `compareLogOrder`, which falls through to the numeric log index
+  — the line the log actually wrote. The comparator moved from
+  `factory/orchestrator/src/db/queries.ts` up to
+  `factory/orchestrator/src/events.ts`, beside `parseEventId`, so its promise
+  from the entry below — that no two readers can answer the same question about
+  the same two events differently — holds across the audits as well as the
+  dashboard. Seven rows carry the behaviour, five of them tied to a site by
+  breaking it: reverting any of the four dispatch/tiebreak/interval sites, or
+  reducing the comparator's index tiebreak to a string compare, reddens exactly
+  its own rows. The fifth site, the gate-round search, is changed by the same
+  rule with **no row of its own** — the tie it breaks is two gate outcomes for
+  one task inside one millisecond, which the gate cannot produce.
 - **A clock is not a sequence.** The entry below gave two readers a rule for a
   tied `ts`: go to the log — session id, then the *numeric* index behind the
   `<session-id>#<index>` event id. Six more orderings in
