@@ -899,6 +899,30 @@ than appearing in it.
 
 ### Fixed
 
+- **A tie is not a coin toss.** Event timestamps are ISO strings stamped to the
+  millisecond, and events appended in a burst routinely share one — in this
+  repo's own fixture the last two events tie in roughly three builds out of
+  eight, which is what made the `pulse()` row of the query suite flaky on
+  `main`. Nothing downstream had an answer for a tie: `events_raw` carries no
+  sequence column, and both readers `.all()` with no `ORDER BY`, so *the newest
+  event* was really *whichever tied row the scan happened to reach in the order
+  that suited the comparison*. The two callers spelled that comparison
+  differently — `pulse()` kept the first row it saw on a tie (`>`),
+  `runningSessions()` kept the last (`>=`) — which is **two opposite answers to
+  the same question about the same two events**, one feeding the dashboard
+  shell's five-second poll and the other the session list on the page under it.
+  A tie now goes to the log instead of to the scan, through one predicate both
+  callers share: an event id is `<session-id>#<index>` and that index *is* the
+  event's place in its session's log, so the tie is broken on session id, then
+  index. Across two sessions the session id settles nothing meaningful — they
+  are separate files and nothing interleaves them — it is there so the answer
+  is the same on every call rather than a re-roll of whatever order the rows
+  arrived in. An id that will not parse cannot come from the projector, which
+  copies `event_id` straight from `readEvents()`; it means a corrupt row, and it
+  sorts low rather than throwing, because `/api/pulse` is polled on every page
+  every five seconds and a bad row should cost the operator a wrong tie-break at
+  worst, never the shell. Four rows carry the behaviour, each checked by
+  breaking the fix it guards and watching it go red.
 - **An intensifier is not an opposition.** `polarityDiffers` — the predicate
   that decides whether two lessons say opposite things — sorted marker words
   into polarities and reported a difference whenever the two sets differed.
