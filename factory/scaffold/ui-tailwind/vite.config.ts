@@ -1,5 +1,5 @@
-// Overwrites factory/scaffold/ui/vite.config.ts when the operator answered
-// `styling: tailwind` (factory/policies/stack.yml). Identical to the plain
+// The Tailwind variant of this project's Vite config, chosen when the stack
+// answers named `styling: tailwind`. Identical to the plain
 // one but for the plugin — kept as a whole file rather than a patch because
 // `copyTemplateDir` layers files, and a config assembled from fragments is a
 // config nobody can read in one place.

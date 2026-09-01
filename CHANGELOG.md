@@ -683,6 +683,32 @@ than appearing in it.
 
 ### Changed
 
+- **A project this factory builds leaves carrying no mark of the factory.**
+  The scaffold output advertised its origin in nine template files and in the
+  git history it wrote: an `AGENTS.md` that opened by naming the tool that
+  scaffolded it and closed by pointing at the source repo's architecture spec,
+  a `package.json` description, CI comments that explained themselves in terms
+  of the factory's own bug reports, a `$schema` on `mcp.manifest.json`
+  resolving to a domain the project does not own, an `mcp/README.md` telling
+  the reader to run a factory CLI, and a first commit reading `Initial scaffold
+  from Blacksmith (factory/policies/stack.yml)` signed by
+  `black-smith <black-smith@localhost>`. None of it was actionable from inside
+  the project — a reader who followed any of it left the repo they were in —
+  and all of it made the output look like a dependent rather than a
+  deliverable. The prose now explains the same decisions on the project's own
+  terms, the manifest declares no schema it cannot serve, the first commit
+  reads `Initial project scaffold`, and the fallback identity is
+  `setup <setup@localhost>`, named for the branch it lands on. The one
+  sanctioned exception is a `Built by blacksmith` line at the foot of the
+  project's `README.md`, which is new — the scaffold shipped no README at all
+  before, so a generated project's front door was whatever GitHub renders for
+  a repo that has none. Two tests hold the line, and each is a distinct
+  witness: one scans the shipped template tree, which is the only coverage the
+  `mcp/` and `ui-tailwind/` layers get, and one scans a generated project,
+  which is the only coverage for content that no template contains because
+  code writes it — `src/styles/main.css` leaked a factory path that way, and
+  the file scan could not have seen it.
+
 - **Judge providers are resolved by transport, not by name.** The architecture
   says the judge tier is "provider-agnostic by contract" — "any model that can
   honor the contract can serve" — and the registry contradicted it. Dispatch

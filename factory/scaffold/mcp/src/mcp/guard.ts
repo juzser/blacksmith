@@ -1,12 +1,12 @@
 /**
  * The startup guard for this project's MCP surface.
  *
- * black-smith checks the manifest statically (`smith mcp check`, and the
- * epic-close gate). This is the runtime half: no tool reaches a client unless
- * the manifest declares it with the mutation class the code claims. The two
- * halves are deliberately separate — a static check the server can ignore is a
- * suggestion, and a runtime check nothing audits is unreviewable — and the
- * shared contract between them is mcp.manifest.json itself.
+ * The manifest is checked statically too, before any of this runs. This is
+ * the runtime half: no tool reaches a client unless the manifest declares it
+ * with the mutation class the code claims. The two halves are deliberately
+ * separate — a static check the server can ignore is a suggestion, and a
+ * runtime check nothing audits is unreviewable — and the shared contract
+ * between them is mcp.manifest.json itself.
  *
  * Fail closed: every failure here throws before `connect()`, so a
  * misconfigured surface never starts rather than starting with a hole.

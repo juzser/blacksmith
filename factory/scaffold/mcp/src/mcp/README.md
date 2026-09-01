@@ -1,8 +1,7 @@
 # The MCP surface
 
-This is `__PROJECT_NAME__`'s agent-callable face. Every project that leaves
-black-smith ships one, and it has to be green against
-`docs/standards/mcp.md` before the final milestone can close.
+This is `__PROJECT_NAME__`'s agent-callable face: the whole of what an MCP
+client can see, and the whole of what an agent can call.
 
 ## What is here
 
@@ -39,8 +38,9 @@ would actually see, not about what the manifest says.
    secret today; that is what keeps it holding when the payload grows.
 6. **Register it in `server.ts`** and add a case to `test/mcp/surface.test.ts`.
 
-Run `smith mcp check` (from the factory) to see the verdict the epic-close gate
-will see.
+`pnpm test test/mcp` is the verdict. `surface.test.ts` advertises exactly what
+the manifest declares and fails on anything else, so a tool registered without
+a declaration is caught there rather than by a client.
 
 ## Why stdio
 

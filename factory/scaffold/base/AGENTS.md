@@ -1,8 +1,7 @@
 # __PROJECT_NAME__ — Agent Router
 
 Thin router (progressive disclosure) — read detail files on demand, do not
-preload this repo's whole context. Scaffolded from black-smith's unified
-stack standard; every convention below traces back to that spec.
+preload this repo's whole context.
 
 ## Stack
 
@@ -26,6 +25,9 @@ GitHub Actions CI runs lint + typecheck + test + build on every PR
 - **Language.** Code, comments, and commits are English.
 - **Commits.** Subject <=72 chars, imperative, why-focused.
 
-This project is managed by the [black-smith](https://github.com) factory —
-tasks arrive as spec contracts from its planner; see the source repo's
-`docs/specs/black-smith-architecture.md` for the full loop.
+## Gate
+
+Every change clears the same five steps CI runs, and clears them locally
+first: `pnpm run lint`, `pnpm run typecheck`, `pnpm run typecheck:test`,
+`pnpm run test:coverage`, `pnpm run build`. Green here or it is not ready to
+propose.

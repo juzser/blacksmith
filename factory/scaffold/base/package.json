@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Scaffolded by Blacksmith from factory/policies/stack.yml.",
   "engines": {
     "node": ">=22"
   },
