@@ -109,27 +109,55 @@ function logOrderOf(eventId: string): { sessionId: string; index: number } {
 }
 
 /**
- * Whether `a` is the later of two events — the one a reader means by "what
- * just happened".
+ * The order the log wrote two events in: negative when `a` came first,
+ * positive when `b` did, zero only for the same event.
  *
  * `ts` is stamped at millisecond resolution (events.ts's appendEvent), so a
  * burst of appends routinely shares one: the test fixture's own last two
  * events tie in roughly one build in three. `events_raw` carries no sequence
- * column and is read without an ORDER BY, so on a tie neither `>` nor `>=` is
- * a decision — it is whichever row the scan happened to reach first. Both
- * callers below were spelling this comparison themselves, with opposite
- * operators, and so gave opposite answers to the same question about the same
- * two events.
+ * column, so on a tie `ts` has nothing left to say — and nothing downstream of
+ * it does either. A `>` between two tied rows is not a decision, it is
+ * whichever the scan reached first; `ORDER BY ts` is the same non-answer
+ * spelled in SQL, since SQLite promises nothing about tied rows and hands them
+ * back in physical order, which changes the moment a row is rewritten; and a
+ * JS `.sort()` whose comparator returns 0 throughout is stable, so it keeps
+ * that same scan order and passes it off as chronology.
+ *
+ * The log index behind the event id is what actually decides, and it has to be
+ * read as a number: ordered as text — which is what `ORDER BY ts, event_id`
+ * does — `#9` sorts after `#10`, so the tiebreaker inverts as soon as a
+ * session's log passes ten events.
+ *
+ * Every ordering in this file that a reader would call chronological routes
+ * through here, so that no two of them can answer the same question about the
+ * same two events differently — which is exactly what happened when the
+ * callers spelled the comparison themselves, with opposite operators.
+ */
+function compareLogOrder(
+  a: { ts: string; eventId: string },
+  b: { ts: string; eventId: string },
+): number {
+  if (a.ts !== b.ts) return a.ts < b.ts ? -1 : 1;
+  const left = logOrderOf(a.eventId);
+  const right = logOrderOf(b.eventId);
+  if (left.sessionId !== right.sessionId) return left.sessionId < right.sessionId ? -1 : 1;
+  return left.index - right.index;
+}
+
+/**
+ * Whether `a` is the later of two events — the one a reader means by "what
+ * just happened".
  */
 function isLaterEvent(
   a: { ts: string; eventId: string },
   b: { ts: string; eventId: string },
 ): boolean {
-  if (a.ts !== b.ts) return a.ts > b.ts;
-  const left = logOrderOf(a.eventId);
-  const right = logOrderOf(b.eventId);
-  if (left.sessionId !== right.sessionId) return left.sessionId > right.sessionId;
-  return left.index > right.index;
+  return compareLogOrder(a, b) > 0;
+}
+
+/** Rows in the order the log wrote them, oldest first. Never mutates the input. */
+function inLogOrder<T extends { ts: string; eventId: string }>(rows: readonly T[]): T[] {
+  return rows.slice().sort(compareLogOrder);
 }
 
 /** Every distinct project value present across the row sets, DEFAULT_PROJECT-normalized, sorted. */
@@ -852,12 +880,13 @@ const SNAPSHOT_EVENT_TYPES = REGISTRY_EVENT_TYPES as readonly string[];
 function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
   const conds = [lte(eventsRaw.ts, cutoffIso), inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES)];
   if (scope.sessionId) conds.push(eq(eventsRaw.sessionId, scope.sessionId));
-  const rows = db
-    .select()
-    .from(eventsRaw)
-    .where(and(...conds))
-    .orderBy(eventsRaw.ts)
-    .all();
+  const rows = inLogOrder(
+    db
+      .select()
+      .from(eventsRaw)
+      .where(and(...conds))
+      .all(),
+  );
   const storedEvents = rows.map((r) => ({
     event_id: r.eventId,
     record: {
@@ -944,15 +973,20 @@ function tokensBudgetedAt(
 ): number {
   const conds = [eq(eventsRaw.eventType, 'task-added'), lte(eventsRaw.ts, cutoffIso)];
   if (scope.sessionId) conds.push(eq(eventsRaw.sessionId, scope.sessionId));
-  const rows = db
-    .select()
-    .from(eventsRaw)
-    .where(and(...conds))
-    .orderBy(eventsRaw.ts, eventsRaw.eventId)
-    .all();
+  const rows = inLogOrder(
+    db
+      .select()
+      .from(eventsRaw)
+      .where(and(...conds))
+      .all(),
+  );
   const epicOf = epicResolver(epicByTask);
   // Last write per task wins, as the projector's fold does — a re-plan that
-  // re-states a task carries the budget it has from then on.
+  // re-states a task carries the budget it has from then on. Which write is
+  // last is the log's answer, not `ts`'s: this read used to break the tie on
+  // `event_id` as text, so within one re-plan's burst the eleventh task-added
+  // sorted before the ninth and a task could keep the budget it had been
+  // re-planned out of.
   const budgetByTask = new Map<string, number>();
   for (const r of rows) {
     if (!r.taskId || !epicOf(r.taskId)) continue;
@@ -999,9 +1033,14 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     ? db.select().from(dispatches).where(eq(dispatches.sessionId, scope.sessionId)).all()
     : db.select().from(dispatches).all();
   const scopedDispatches = filterByProject(dispatchRows, scope);
-  const recentDispatches: RecentDispatch[] = scopedDispatches
-    .slice()
-    .sort((a, b) => b.ts.localeCompare(a.ts))
+  // Newest first, then the top ten — so the tie has to be broken before the
+  // slice, not left to the sort's stability. A wave admits its whole cohort
+  // inside one millisecond, and a comparison that returned 0 across all of
+  // them left the rows in the ascending order they arrived in: the ten this
+  // then kept were the *oldest* ten of the burst, under a heading that says
+  // recent.
+  const recentDispatches: RecentDispatch[] = inLogOrder(scopedDispatches)
+    .reverse()
     .slice(0, RECENT_DISPATCHES_LIMIT)
     .map((d) => ({
       eventId: d.eventId,
@@ -1364,12 +1403,13 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   if (filter.sessionId) conditions.push(eq(eventsRaw.sessionId, filter.sessionId));
   if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
 
-  const rows = db
-    .select()
-    .from(eventsRaw)
-    .where(and(...conditions))
-    .orderBy(eventsRaw.ts)
-    .all();
+  const rows = inLogOrder(
+    db
+      .select()
+      .from(eventsRaw)
+      .where(and(...conditions))
+      .all(),
+  );
 
   let entries = rows.map(toEntry);
   entries = filterByProject(entries, filter);
@@ -1486,14 +1526,15 @@ export function kanban(db: SmithDb, epicId?: string, scope: Scope = {}): KanbanC
     : db.select().from(dispatches).all();
   const latestAgentRoleByTask = new Map<
     string,
-    { ts: string; agentRole: string; modelTier: string }
+    { ts: string; eventId: string; agentRole: string; modelTier: string }
   >();
   for (const d of dispatchRows) {
     if (!d.taskId) continue;
     const existing = latestAgentRoleByTask.get(d.taskId);
-    if (!existing || d.ts > existing.ts)
+    if (!existing || isLaterEvent(d, existing))
       latestAgentRoleByTask.set(d.taskId, {
         ts: d.ts,
+        eventId: d.eventId,
         agentRole: d.agentRole,
         modelTier: d.modelTier,
       });
@@ -1570,12 +1611,9 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
   const task = db.select().from(tasks).where(eq(tasks.taskId, taskId)).get();
   if (!task) return null;
 
-  const dispatchRows = db
-    .select()
-    .from(dispatches)
-    .where(eq(dispatches.taskId, taskId))
-    .orderBy(dispatches.ts)
-    .all();
+  const dispatchRows = inLogOrder(
+    db.select().from(dispatches).where(eq(dispatches.taskId, taskId)).all(),
+  );
   const agentRows = db.select().from(agents).where(eq(agents.taskId, taskId)).all();
   const agentByEventId = new Map(agentRows.map((a) => [a.id, a]));
   const attempts: TaskAttempt[] = dispatchRows.map((d) => {
