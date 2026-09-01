@@ -51,6 +51,73 @@ function tiedLine(
   })}\n`;
 }
 
+/**
+ * A session whose whole log is one burst: `count` operator-notes that all
+ * share a ts, so nothing but the log index separates them. The notes take
+ * indices 1..count (session-start takes #0), which is why the rows below ask
+ * for twelve — a burst that stops at nine cannot tell a tiebreak on the index
+ * as a number from a tiebreak on it as text.
+ */
+async function burstLog(dir: string, session: string, ts: string, count: number): Promise<void> {
+  let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+  for (let i = 1; i <= count; i += 1) {
+    body += tiedLine('operator-note', ts, { note_kind: 'scope-check', note: `note ${i}` }, session);
+  }
+  await appendFile(path.join(dir, `${session}.jsonl`), body, 'utf8');
+}
+
+/** The same burst, in task-added — the shape a re-plan writes, one budget per row. */
+async function budgetBurst(
+  dir: string,
+  session: string,
+  ts: string,
+  task: string,
+  budgets: readonly number[],
+): Promise<void> {
+  let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+  for (const budget of budgets) {
+    body += tiedLine('task-added', ts, { task_id: task, budget_tokens: budget }, session);
+  }
+  await appendFile(path.join(dir, `${session}.jsonl`), body, 'utf8');
+}
+
+/** The same burst, in dispatch_decision — the shape a wave admission writes. */
+async function dispatchBurst(
+  dir: string,
+  session: string,
+  ts: string,
+  rows: readonly { task: string; role: string; tier: string }[],
+): Promise<void> {
+  let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+  for (const r of rows) {
+    body += tiedLine(
+      'dispatch_decision',
+      ts,
+      { task_id: r.task, agent_role: r.role, provider: 'claude', model_tier: r.tier },
+      session,
+    );
+  }
+  await appendFile(path.join(dir, `${session}.jsonl`), body, 'utf8');
+}
+
+/**
+ * Move one row to the end of its table's physical order by deleting it and
+ * writing it back unchanged. Nothing about the row changes; the only thing
+ * that does is the order a scan reaches it in, which is the whole of what
+ * these rows are about.
+ */
+function rewriteLast(h: DbHandle, table: string, eventId: string): void {
+  const row = h.sqlite.prepare(`select * from ${table} where event_id = ?`).get(eventId) as
+    | Record<string, unknown>
+    | undefined;
+  if (row === undefined) throw new Error(`rewriteLast: no ${table} row for ${eventId}`);
+  const cols = Object.keys(row);
+  h.sqlite.prepare(`delete from ${table} where event_id = ?`).run(eventId);
+  h.sqlite
+    .prepare(`insert into ${table} (${cols.join(', ')}) values (${cols.map(() => '?').join(', ')})`)
+    .run(...cols.map((c) => row[c]));
+}
+
 /** The projection's own row count, so the pulse assertion is not a magic number
  * that has to be re-counted every time the fixture grows an event. */
 function readEventCount(handle: DbHandle): number {
@@ -111,6 +178,116 @@ describe('db/queries.ts', () => {
       const empty = overview(handle.db, { sessionId: 'no-such-session' });
       expect(empty.liveAgentCount).toBe(0);
       expect(empty.epicsInFlight).toEqual([]);
+    });
+
+    it('counts an agent dispatched after an epic closed in the same ms as live', async () => {
+      // The live-agent delta re-runs agents-registry.ts's fold over a slice of
+      // events_raw, and that fold is a state machine: `epic-closed` abandons
+      // whatever is open when it arrives, so when it arrives decides the
+      // answer. Ordered on `ts` alone the two tied rows arrive in whatever
+      // order the scan reaches them -- today that is grouped by event type,
+      // which puts every dispatch ahead of every terminal whatever the log
+      // says -- and the dispatch that in fact came *after* the verdict was
+      // swept closed by it. The historical half of the subtraction then
+      // disagreed with the agents table the projector folded from the same
+      // log, and the card announced an arrival that never happened.
+      const session = 'sess-live';
+      const tied = '2030-01-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('epic-closed', tied, { epic_id: 'epic-9' }, session) +
+          tiedLine(
+            'dispatch_decision',
+            tied,
+            {
+              task_id: 'epic-9/task-late',
+              agent_role: 'coder',
+              provider: 'claude',
+              model_tier: 'small',
+            },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'live.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const live = openDb(dbPath);
+      try {
+        // The cutoff is past every event in the log, so the snapshot is the
+        // present: the two halves of the subtraction have to agree.
+        expect(
+          overview(live.db, {}, { nowIso: '2031-01-01T00:00:00.000Z' }).liveAgentCountDelta5m,
+        ).toBe(0);
+      } finally {
+        live.sqlite.close();
+      }
+    });
+
+    it('reads the budget an hour ago from the log, not from the event id as text', async () => {
+      // The historical denominator behind the budget card's 1h delta folds
+      // `task-added` up to the cutoff, last write per task wins -- the fold the
+      // projector already did to fill `tasks.budget_tokens`. The tie between a
+      // re-plan's rows was broken on the event id as *text*, so `#9` came after
+      // `#12` and the two folds ended on different budgets. With the cutoff
+      // past every event in the log, nothing has happened in the last hour and
+      // the only honest reading is no change at all.
+      const session = 'sess-budget';
+      const tied = '2030-01-01T00:00:00.000Z';
+      await budgetBurst(
+        stateDir,
+        session,
+        tied,
+        `${EPIC_ID}/task-budget`,
+        Array.from({ length: 12 }, (_, i) => (i + 1) * 1000),
+      );
+
+      const dbPath = path.join(dbDir, 'budget.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const budget = openDb(dbPath);
+      try {
+        expect(
+          overview(budget.db, {}, { nowIso: '2031-01-01T00:00:00.000Z' }).budgetUsedPctPointDelta1h,
+        ).toBe(0);
+      } finally {
+        budget.sqlite.close();
+      }
+    });
+
+    it('reports the newest of a tied burst as recent, not the first ten of it', async () => {
+      // recentDispatches sorts newest-first and keeps ten. Array.prototype.sort
+      // is stable, so when a wave writes twelve dispatch_decisions inside one
+      // millisecond every comparison returns 0 and the list keeps the order the
+      // rows came back in -- ascending -- and the ten it then slices off the
+      // front are the *oldest* ten of the burst, under a heading that says
+      // recent. The two newest dispatches in the factory are the two the
+      // operator cannot see.
+      const session = 'sess-wave';
+      const tied = '2030-01-01T00:00:00.000Z';
+      await dispatchBurst(
+        stateDir,
+        session,
+        tied,
+        Array.from({ length: 12 }, (_, i) => ({
+          task: `epic-9/task-${i + 1}`,
+          role: 'coder',
+          tier: 'small',
+        })),
+      );
+
+      const dbPath = path.join(dbDir, 'wave.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const wave = openDb(dbPath);
+      try {
+        // The fixture's own dispatches are older than 2030, so the whole slice
+        // comes from the burst: #12 down to #3, newest first.
+        expect(overview(wave.db).recentDispatches.map((d) => d.eventId)).toEqual(
+          Array.from({ length: 10 }, (_, i) => `${session}#${12 - i}`),
+        );
+      } finally {
+        wave.sqlite.close();
+      }
     });
   });
 
@@ -222,6 +399,34 @@ describe('db/queries.ts', () => {
       // Every entry's causal_parent (except the root) is the previous entry's id.
       for (let i = 1; i < chain.length; i++) {
         expect(chain[i]?.causalParent).toBe(chain[i - 1]?.eventId);
+      }
+    });
+
+    it('orders a burst the way the log wrote it, not the way the rows come back', async () => {
+      // `ts` is stamped at millisecond resolution, so a burst of appends shares
+      // one and `ORDER BY ts` alone has nothing left to say about the rest.
+      // SQLite's sort is not stable and makes no promise here: the tied rows
+      // come back in whatever order the scan reached them, which is not a
+      // decision anything made and stops matching the log the moment a row is
+      // rewritten. Twelve notes rather than a handful, because the tiebreak has
+      // to read the log index as a number -- as text, `#9` sorts after `#10`.
+      const session = 'sess-burst';
+      const tied = '2030-01-01T00:00:00.000Z';
+      await burstLog(stateDir, session, tied, 12);
+
+      const dbPath = path.join(dbDir, 'burst.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const burst = openDb(dbPath);
+      try {
+        rewriteLast(burst, 'events_raw', `${session}#1`);
+        const notes = timeline(burst.db, { sessionId: session }).filter(
+          (e) => e.eventType === 'operator-note',
+        );
+        expect(notes.map((e) => e.eventId)).toEqual(
+          Array.from({ length: 12 }, (_, i) => `${session}#${i + 1}`),
+        );
+      } finally {
+        burst.sqlite.close();
       }
     });
   });
@@ -355,6 +560,36 @@ describe('db/queries.ts', () => {
         amendHandle.sqlite.close();
       }
     });
+
+    it('chips the later of two dispatches that share a ts', async () => {
+      // The chip names "the most recent dispatch_decision for this task". The
+      // fold walked the rows keeping a strict `>`, which on a tie keeps the
+      // first row the scan reached -- so the chip reported whichever of the two
+      // the store happened to hand over first, and the operator read a role the
+      // task had already left.
+      const session = 'sess-chip';
+      const tied = '2030-01-01T00:00:00.000Z';
+      // A task of its own: the fixture's tasks are written by another session,
+      // and the projector inserts a task row per session.
+      const task = `${EPIC_ID}/task-chip`;
+      await dispatchBurst(stateDir, session, tied, [
+        { task, role: 'coder', tier: 'small' },
+        { task, role: 'reviewer', tier: 'mid' },
+      ]);
+
+      const dbPath = path.join(dbDir, 'chip.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const chip = openDb(dbPath);
+      try {
+        const row = kanban(chip.db, EPIC_ID)
+          .flatMap((c) => c.tasks)
+          .find((t) => t.taskId === task);
+        expect(row?.agentRole).toBe('reviewer');
+        expect(row?.agentModelTier).toBe('mid');
+      } finally {
+        chip.sqlite.close();
+      }
+    });
   });
 
   describe('flowGraph() (Phase 6b Flow page)', () => {
@@ -401,6 +636,34 @@ describe('db/queries.ts', () => {
 
     it('returns null for an unknown task', () => {
       expect(taskDetail(handle.db, 'epic-1/does-not-exist')).toBeNull();
+    });
+
+    it('lists tied attempts in log order, not in the order the rows come back', async () => {
+      // A task's attempt list is a history, so its order is the whole of what
+      // it says. Ordered on `ts` alone, a re-dispatch inside the same
+      // millisecond as the one it replaces lands wherever the scan puts it.
+      const session = 'sess-attempts';
+      const tied = '2030-01-01T00:00:00.000Z';
+      const task = `${EPIC_ID}/task-attempts`;
+      await dispatchBurst(
+        stateDir,
+        session,
+        tied,
+        Array.from({ length: 12 }, () => ({ task, role: 'coder', tier: 'small' })),
+      );
+
+      const dbPath = path.join(dbDir, 'attempts.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const attemptsHandle = openDb(dbPath);
+      try {
+        rewriteLast(attemptsHandle, 'dispatches', `${session}#1`);
+        const tiedAttempts = taskDetail(attemptsHandle.db, task)?.attempts ?? [];
+        expect(tiedAttempts.map((a) => a.eventId)).toEqual(
+          Array.from({ length: 12 }, (_, i) => `${session}#${i + 1}`),
+        );
+      } finally {
+        attemptsHandle.sqlite.close();
+      }
     });
   });
 

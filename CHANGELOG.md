@@ -899,6 +899,37 @@ than appearing in it.
 
 ### Fixed
 
+- **A clock is not a sequence.** The entry below gave two readers a rule for a
+  tied `ts`: go to the log — session id, then the *numeric* index behind the
+  `<session-id>#<index>` event id. Six more orderings in
+  `factory/orchestrator/src/db/queries.ts` never got it, and each was its own
+  way of not answering. **Four asked SQL**: `ORDER BY ts` in the live-agent
+  fold, the timeline and a task's attempt list, and `ORDER BY ts, event_id` in
+  the budget-at read. SQLite promises nothing about tied rows — it hands them
+  back in whatever order the scan produced, which moves the moment a row is
+  rewritten or the planner picks a different index — and appending `event_id`
+  to the sort compares the log index as *text*, so `#9` lands after `#12` and
+  the tiebreak inverts as soon as a session's log passes ten events. **Two
+  asked JavaScript and got the same non-answer back.** `overview()`'s recent
+  dispatches sorted newest-first on `ts` alone, and `Array.prototype.sort` is
+  stable: a wave admitting twelve dispatches inside one millisecond compares 0
+  across all of them, keeps the ascending order the rows arrived in, and the
+  ten sliced off the front are the *oldest* ten of the burst — under a heading
+  that says recent, with the two newest dispatches in the factory the two the
+  operator cannot see. `kanban()` picked *the most recent dispatch for this
+  task* with a strict `>`, which on a tie keeps whichever row the store handed
+  over first, so a chip could name a role the task had already left. The
+  live-agent fold is the one where scan order was not even a coin toss: that
+  query rides `events_raw_type_idx`, which walks the `IN` list in alphabetical
+  order of type name, so `dispatch_decision` reached the fold ahead of every
+  terminal — `epic-closed` among them — whatever the log said. An agent
+  dispatched *after* its epic closed was swept closed by it, and the historical
+  half of the five-minute subtraction disagreed with the `agents` table the
+  projector had folded from the same log, so the card announced an arrival that
+  never happened. All six now route through the one comparator, so no two
+  readings of the same two events can disagree. Six rows carry the behaviour,
+  each checked by breaking the fix it guards: a mutation that restores any
+  single site reddens exactly its own row.
 - **A tie is not a coin toss.** Event timestamps are ISO strings stamped to the
   millisecond, and events appended in a burst routinely share one — in this
   repo's own fixture the last two events tie in roughly three builds out of
