@@ -65,8 +65,8 @@
     "drizzle-orm": "0.45.2",
     "hono": "4.13.3",
     "picomatch": "4.0.5",
-    "vue": "3.5.41",
-    "vue-router": "5.2.0",
+    "vue": "3.5.42",
+    "vue-router": "5.3.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
