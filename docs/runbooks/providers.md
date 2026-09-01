@@ -266,7 +266,9 @@ Every provider starts (and stays, until you promote it) `mode: shadow`:
 `src/quorum.ts`'s `computeQuorum()` records every shadow verdict as a
 `judge-verdict` event (provider tag, verdict, `agreement_with_native`,
 latency, and — on a run that reached no verdict — the provider error code
-that says why) but the **gating decision falls back to the native
+that says why; on such a run `agreement_with_native` is `null`, because
+there was no external verdict for the native one to agree with — rows
+written before 2026-09-02 spell that case `false`) but the **gating decision falls back to the native
 (Claude) verdict alone** whenever no provider in a case is `mode: active`.
 Nothing a shadow-mode provider says can block a task, gate an epic, or
 force an escalation.

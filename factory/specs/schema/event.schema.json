@@ -20,7 +20,11 @@
       "format": "date-time"
     },
     "session_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Names one event log file -- logPath() interpolates it into <dir>/<session_id>.jsonl -- and is also the key half of an event id, <session-id>#<index>. So it must be a single non-empty path segment. Structural, not a charset: '#' stays legal because parseEventId splits on the LAST one deliberately, and a '#' cannot move a file. This mirrors requireSessionIdShape() in events.ts, which guards every read and every write; an id that validator can already open satisfies this by construction, so no record on disk is rejected by it (D-197).",
+      "minLength": 1,
+      "pattern": "^[^/]+$",
+      "not": { "enum": [".", ".."] }
     },
     "actor": {
       "type": "string",
