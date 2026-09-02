@@ -1093,18 +1093,41 @@ pending proposals lets them sit invisible instead of surfacing them.
      where the planner reads the living spec/analytics/recheck outcomes
      and proposes new epics — the operator's tick is required regardless
      of confidence, same as any other plan sign-off.
-2. Gather `smith stats overview [--session <id>]` and `smith stats roadmap
+2. **Ask who may say yes.** `smith scheduler admit --session <id>
+   [--project <project-dir>]` re-reads the same proposals and classifies
+   each one `auto` or `operator` against `scheduler.yml`'s `autonomy:`
+   block (`src/autonomy.ts`). It enacts nothing — the split is printed so
+   it can be read and argued with before anything moves.
+   - `decision: auto` → dispatchable through `/bs run`'s ordinary wave
+     flow without a fresh sign-off. It is still a wave: same worktrees,
+     same gates, same reviewer, and the **PR is still merged by a
+     person**. That merge is the backstop that makes auto-dispatch safe
+     to widen, so never bypass it because the scheduler said `auto`.
+   - `decision: operator` → it waits, and `code` names the rule that held
+     it: `autonomy-disabled`, `growth-never-auto`, `kind-not-whitelisted`,
+     `reason-not-whitelisted`, `below-confidence-floor`, or
+     `security-surface`. Report the `reason` verbatim in the digest — it
+     is written in the terms an operator would use to argue with it.
+   - Every rule in that file can only **deny**. There is no branch that
+     promotes something the whitelist did not name, so "what runs without
+     me?" is answerable by reading `scheduler.yml` alone.
+   - **Never widen the whitelist to clear a denial mid-run.** Editing
+     `autonomy.auto_dispatch_kinds`, `auto_dispatch_recheck_reasons` or
+     `confidence_floor` is an operator decision about standing policy, not
+     a way past one proposal — and a `security-surface` denial is the one
+     nothing in the file can lift.
+3. Gather `smith stats overview [--session <id>]` and `smith stats roadmap
    [--session <id>]` (milestone progress + budget burn per milestone).
-3. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
-   JSON plus step 1's proposals as input: shipped / in-flight / blocked /
+4. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
+   JSON plus step 2's admissions as input: shipped / in-flight / blocked /
    budget burn / next milestone / **N rechecks pending, M maintenance
    bumps auto-schedulable** (never silently dropped), ≤300 words, linking
    into the dashboard (`smith ui serve`'s URL) — never paraphrase numbers
    the query didn't return.
-4. This fires automatically on a weekly cadence and immediately on any
+5. This fires automatically on a weekly cadence and immediately on any
    milestone completion (architecture §12) — for an ad hoc `/bs report`,
    the same digest, just on demand.
-5. Sending it to Slack is an **outbound send** — the permission layer
+6. Sending it to Slack is an **outbound send** — the permission layer
    prompts on the `curl`/webhook call; never fire it without that prompt
    resolving (`docs/standards/guardrails.md` "Deploy + outbound"). Print
    the digest to the operator regardless, whether or not the Slack send is

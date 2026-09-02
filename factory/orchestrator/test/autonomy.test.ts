@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { admitProposals, type AutonomyPolicy } from '../src/autonomy.js';
+import { type AutonomyPolicy, admitProposals } from '../src/autonomy.js';
 import type { SchedulerProposal } from '../src/scheduler.js';
 
 /** The shape the operator chose: rechecks and maintenance may run themselves, growth never. */

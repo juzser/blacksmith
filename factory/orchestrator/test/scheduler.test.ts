@@ -240,7 +240,9 @@ describe('parseSchedulerPolicy / loadSchedulerPolicy', () => {
     // this repo's answer to "what may run without me". Every default here
     // fails closed, so the only way to get auto-dispatch is to ask for it.
     it('defaults to nothing being auto-dispatchable when the block is absent', () => {
-      const policy = parseSchedulerPolicy(withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n'));
+      const policy = parseSchedulerPolicy(
+        withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n'),
+      );
       expect(policy.autonomy.enabled).toBe(false);
       expect(policy.autonomy.autoDispatchKinds).toEqual([]);
       expect(policy.autonomy.autoDispatchRecheckReasons).toEqual([]);

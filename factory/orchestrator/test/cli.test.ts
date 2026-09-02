@@ -1827,6 +1827,183 @@ describe('cli.ts (built binary)', () => {
     expect(JSON.parse(tailResult.stdout)).toHaveLength(1); // dry run appended nothing
   });
 
+  // `scheduler admit` is the second half of the same tick: `run --dry` says
+  // what is due, this says which of it may proceed without an operator. It is
+  // a report and only a report -- the whole point of splitting it out of
+  // `run` is that the classification can be read and argued with before
+  // anything moves, so it appends nothing and dispatches nothing.
+  it('scheduler admit classifies proposals and writes nothing', () => {
+    const sessionId = `cli-admit-${Date.now()}`;
+    const eventsDir = path.join(scratchDir, 'admit-events');
+
+    const rootResult = runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(rootResult.status).toBe(0);
+
+    const { stdout, status } = runCli([
+      'scheduler',
+      'admit',
+      '--session',
+      sessionId,
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(status).toBe(0);
+    const { admissions } = JSON.parse(stdout);
+    // Same input as the `--dry` test above, so the same single proposal --
+    // and growth review is the one kind autonomy.ts denies ahead of the
+    // whitelist, so a shipped policy with `enabled: true` still holds it.
+    expect(admissions).toHaveLength(1);
+    expect(admissions[0].proposal.kind).toBe('growth-review-due');
+    expect(admissions[0].decision).toBe('operator');
+    expect(admissions[0].code).toBe('growth-never-auto');
+    expect(admissions[0].subject).toContain('product-growth review');
+    expect(typeof admissions[0].reason).toBe('string');
+
+    const tailResult = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
+    expect(JSON.parse(tailResult.stdout)).toHaveLength(1); // admitting appended nothing
+  });
+
+  // The wiring the test above cannot see. A RecheckProposal names a task id and
+  // no paths, so the security match has nothing to read unless cli.ts folds the
+  // log's claims in and hands them over. Pass an empty map instead and this
+  // recheck comes back `auto` -- the task id "epic-1/task-1" matches no keyword,
+  // and `time-elapsed` is whitelisted below on purpose so that `auto` is exactly
+  // what a missing fold would produce. The claim is the only thing that holds it.
+  it("scheduler admit matches security keywords against the log's claims, not just the task id", () => {
+    const sessionId = `cli-admit-sec-${Date.now()}`;
+    const eventsDir = path.join(scratchDir, 'admit-sec-events');
+
+    const root = runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(root.status).toBe(0);
+    const rootId = JSON.parse(root.stdout).event_id as string;
+
+    for (const record of [
+      {
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-1/task-1',
+        payload: {
+          epic_id: 'epic-1',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          claims: ['src/auth/session.ts'],
+        },
+      },
+      {
+        actor: 'system',
+        event_type: 'wave-merged',
+        payload: { epic_id: 'epic-1', task_ids: ['epic-1/task-1'] },
+      },
+    ]) {
+      const appended = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          plan_version: 1,
+          causal_parent: rootId,
+          ...record,
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(appended.status).toBe(0);
+    }
+
+    // Its own policy rather than factory/policies/scheduler.yml: this asserts a
+    // wiring, and retuning the shipped whitelist must not be able to turn that
+    // assertion into a different one.
+    const policyPath = path.join(scratchDir, 'admit-sec-scheduler.yml');
+    writeFileSync(
+      policyPath,
+      [
+        'recheck:',
+        '  merge_threshold: 5',
+        '  days_elapsed: 14',
+        '  confidence_threshold: 0.6',
+        'maintenance:',
+        '  auto_schedule_confidence: 0.8',
+        // A cadence no fixture can reach, so the only proposal here is the recheck.
+        'growth:',
+        '  cadence_days: 36500',
+        'autonomy:',
+        '  enabled: true',
+        '  auto_dispatch_kinds: [recheck]',
+        '  auto_dispatch_recheck_reasons: [merge-threshold, time-elapsed]',
+        '  confidence_floor: 0.8',
+        '',
+      ].join('\n'),
+    );
+
+    // appendEvent stamps its own `ts`, so the fixture's merge is at real now;
+    // 30 days past it is the only spelling of "T days elapsed" that is not a
+    // fixed date waiting to expire.
+    const now = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { stdout, status } = runCli([
+      'scheduler',
+      'admit',
+      '--session',
+      sessionId,
+      '--state-dir',
+      eventsDir,
+      '--policy',
+      policyPath,
+      '--now',
+      now,
+    ]);
+    expect(status).toBe(0);
+
+    const { admissions } = JSON.parse(stdout);
+    const admission = admissions.find(
+      (a: { proposal: { kind: string } }) => a.proposal.kind === 'recheck',
+    );
+    expect(admission).toBeDefined();
+    expect(admission.proposal.reasons).toEqual(['time-elapsed']);
+    expect(admission.decision).toBe('operator');
+    expect(admission.code).toBe('security-surface');
+    // Names the claim that held it and the keyword it matched, so the operator
+    // can argue with the rule rather than guess at it.
+    expect(admission.reason).toContain('src/auth/session.ts');
+    expect(admission.reason).toContain('auth');
+
+    // A log with no growth review in it always proposes one, so the cadence
+    // above cannot suppress that second proposal -- but it can be read back off
+    // it. `--policy` has to govern which proposals EXIST as well as who may say
+    // yes to them; a file consulted only for `autonomy:` would answer 30 here,
+    // from the shipped scheduler.yml the operator did not point at.
+    const growth = admissions.find(
+      (a: { proposal: { kind: string } }) => a.proposal.kind === 'growth-review-due',
+    );
+    expect(growth.proposal.cadenceDays).toBe(36500);
+  });
+
   // D-209. Three flags are documented `<iso>` -- `scheduler run --now`,
   // `dream --since` and `stats providers --since` -- and not one of them read
   // the string it was handed. usage.ts says the flag column is "Documentation

@@ -90,7 +90,10 @@ interface SecurityHit extends Field {
   keyword: string;
 }
 
-function firstSecurityHit(fields: readonly Field[], keywords: readonly string[]): SecurityHit | null {
+function firstSecurityHit(
+  fields: readonly Field[],
+  keywords: readonly string[],
+): SecurityHit | null {
   for (const { field, value } of fields) {
     const haystack = value.toLowerCase();
     for (const keyword of keywords) {

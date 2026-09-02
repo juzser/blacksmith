@@ -192,6 +192,15 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Propose and enact the next scheduler moves for a session. --dry proposes only.',
   },
   {
+    command: 'scheduler admit',
+    positionals: '',
+    flags:
+      '--session <id> [--state-dir <dir>] [--now <iso>] [--project <dir>] ' +
+      '[--policy <file>] [--crosscheck <file>]',
+    summary:
+      "Classify what's due into auto or operator per scheduler.yml autonomy. Enacts nothing.",
+  },
+  {
     command: 'worktree create',
     positionals: '<project-dir> <epic> <task-id>',
     flags: '',

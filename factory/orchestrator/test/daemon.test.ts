@@ -50,6 +50,17 @@ const SCHEDULER: SchedulerPolicy = {
   },
   growth: { cadenceDays: 30 },
   lessons: { noveltyJaccardThreshold: 0.6, shingleSize: 3, noveltyLengthAware: true },
+  // Off, and it costs these fixtures nothing: the daemon never reads this
+  // block. Admission is decided by `smith scheduler admit`, and a watcher that
+  // dispatches nothing has nothing to admit. Present here only because the
+  // type requires it -- which is the point, since a fixture allowed to omit it
+  // would be a fixture that silently defaults.
+  autonomy: {
+    enabled: false,
+    autoDispatchKinds: [],
+    autoDispatchRecheckReasons: [],
+    confidenceFloor: 0.8,
+  },
 };
 
 const NOW = new Date('2026-08-20T12:00:00.000Z');

@@ -953,6 +953,25 @@ mutating the live graph:
   proposal itself). Product-growth proposals **always** wait for an
   operator tick regardless of confidence — the factory may propose scope,
   never widen it on its own.
+- **Autonomy admission** (`factory/orchestrator/src/autonomy.ts`, `smith
+  scheduler admit`). The scheduler decides *what is due*; `scheduler.yml`'s
+  `autonomy:` block decides *what may proceed without an operator tick*, and
+  the command applies it and prints the result. It enacts nothing — no event
+  appended, no agent started — so the classification can be read and argued
+  with before anything moves. Three properties make it auditable: every rule
+  can only **deny**, so nothing is promoted that the whitelist did not name
+  and "what runs without me?" is answerable from `scheduler.yml` alone;
+  `growth-review-due` is denied ahead of the whitelist, so the paragraph
+  above still holds whatever the file lists; and the security keywords come
+  from `crosscheck.yml`'s `plan_quorum.security_keywords` rather than a
+  second copy, so promoting a word moves the cross-check trigger and this
+  gate together. Rechecks are whitelisted by *reason*, not confidence — a
+  `RecheckProposal`'s confidence is the completed task's, and a low one is
+  the reason the recheck exists. Every default fails closed: an absent block
+  means off behind an empty whitelist, and a name outside the vocabulary
+  throws rather than matching nothing quietly. `auto` removes the tick, not
+  the gates: the work runs as an ordinary wave and its PR is still merged by
+  a person.
 - **Roadmap layer (v3.2).** `factory/specs/roadmap.md` maps milestones →
   epics with goal statements and completion criteria. The **planner
   maintains it** (updated at every epic verdict); any roadmap change is a

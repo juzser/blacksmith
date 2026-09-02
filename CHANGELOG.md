@@ -23,6 +23,28 @@ than appearing in it.
 
 ### Added
 
+- `scheduler.yml` `autonomy:` and `smith scheduler admit` — a name for what
+  the scheduler may run without a person. Until now every proposal waited on
+  the operator regardless of what it was, which is safe and does not scale: a
+  patch bump and an auth-path recheck cost the same tick of attention.
+  `src/autonomy.ts` classifies each proposal `auto` or `operator`, and every
+  rule in it can only **deny** — there is no branch that promotes something
+  the whitelist did not name, so "what runs without me?" is answerable by
+  reading `scheduler.yml` alone. Growth review is denied ahead of the
+  whitelist (architecture §12 keeps scope with the operator unconditionally),
+  so listing its kind changes nothing. Security keywords are read from
+  `crosscheck.yml` rather than copied, so promoting a word moves the
+  cross-check trigger and this gate together. Every default fails closed: an
+  absent block means off behind an empty whitelist, and a name outside the
+  vocabulary throws rather than matching nothing quietly. The command enacts
+  nothing — it prints the classification, appends no event and starts no
+  agent, which is the same invariant the daemon holds, now held by a command
+  a person types too. Rechecks are whitelisted by *reason*, never by
+  confidence: a `RecheckProposal`'s confidence is the completed task's, and a
+  low one is why the recheck exists, so gating on it would hold back exactly
+  the rechecks worth running. `--policy` points the whole command at one file:
+  it decides which proposals exist as well as who may say yes to them, so a
+  downstream project's scheduler.yml is never half-read.
 - `crosscheck.yml` `quorum_rule.accept_non_gating_actives`, and a `notes` list
   on `smith judge preflight` for the costs it covers. One external judge
   promoted to `active` against `min_providers: 2` cannot gate anything — the
