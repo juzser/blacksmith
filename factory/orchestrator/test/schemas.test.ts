@@ -357,3 +357,75 @@ describe('an x-taxonomy annotation the walker cannot reach', () => {
     expect(() => compileSchemas(taxonomy)).not.toThrow();
   });
 });
+
+// D-197. `requireSessionIdShape` (events.ts) has guarded the shape at `logPath`
+// since 2026-08-19, so it is on every read and every write -- but the schema
+// still typed `session_id` as a bare string, and a hand-written event was the
+// one door that skipped the check. Writing the same structural rule down here
+// costs nothing on the way past: an id the reader can already open satisfies it
+// by construction, so no record on disk can be rejected by adding it.
+describe('event.session_id names one log file', () => {
+  const taxonomy = loadTaxonomy();
+  const schemas = compileSchemas(taxonomy);
+
+  const event = (sessionId: unknown) => ({
+    ts: new Date().toISOString(),
+    session_id: sessionId,
+    actor: 'system',
+    event_type: 'session-start',
+    plan_version: 1,
+    causal_parent: null,
+    payload: {},
+  });
+
+  it.each([
+    ['a path separator', '../escape'],
+    ['a nested segment', 'a/b'],
+    ['a trailing separator', 'sess-1/'],
+    ['the empty string', ''],
+    ['a lone dot', '.'],
+    ['a lone dot-dot', '..'],
+  ])('rejects %s', (_label, sessionId) => {
+    expect(validateRecord(schemas, taxonomy, 'event', event(sessionId)).valid).toBe(false);
+  });
+
+  // Structural, not a charset -- the same non-over-reach events.ts pins. `#` is
+  // legal because parseEventId splits on the LAST one deliberately, and a `#`
+  // cannot move a file.
+  it.each([
+    ['a plain id', 'sess-1'],
+    ['one containing a hash', 'sess#1'],
+    ['one containing a dot', 'dogfood-4.1'],
+    ['one containing spaces', 'my session'],
+  ])('accepts %s', (_label, sessionId) => {
+    expect(validateRecord(schemas, taxonomy, 'event', event(sessionId)).valid).toBe(true);
+  });
+});
+
+// D-193. The gate refuses an empty artifact path, which is the right layer for
+// the containment half -- JSON Schema cannot express "inside this directory".
+// The empty string is the half it *can* express, and a worker deserves a
+// validation error at the envelope rather than a gate block one step later.
+describe('result.artifacts[].path is a path, not the empty string', () => {
+  const taxonomy = loadTaxonomy();
+  const schemas = compileSchemas(taxonomy);
+
+  const result = (artifactPath: string) => ({
+    task_id: 'epic-1/task-1',
+    run_status: 'done',
+    structured_output: {},
+    artifacts: [{ type: 'diff', path: artifactPath }],
+    token_usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+    agent: 'coder',
+    provider: 'claude',
+    model_tier: 'mid',
+  });
+
+  it('rejects an empty path', () => {
+    expect(validateRecord(schemas, taxonomy, 'result', result('')).valid).toBe(false);
+  });
+
+  it('accepts a relative path under the artifact home', () => {
+    expect(validateRecord(schemas, taxonomy, 'result', result('diff.patch')).valid).toBe(true);
+  });
+});

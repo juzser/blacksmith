@@ -320,7 +320,14 @@ export async function recordJudgeRun(
 
   const ok = input.run.outcome.ok;
   const verdict = ok ? deriveVerdict(input.run.outcome.result) : null;
-  const agreementWithNative = ok ? verdict?.verdict === input.native.verdict : false;
+  // A failed run produced no verdict, so there is nothing for the native one to
+  // agree or disagree with. `false` there would be a placeholder wearing an
+  // observation's clothes -- and a reader grouping by it counts a provider that
+  // never answered as one that dissented. `null` is how the record says the
+  // question has no answer, the same choice `latency_ms` below already makes
+  // (D-168). Rows written before this carry `false` permanently; providerAgreement()
+  // gates on `schema_failure` first for exactly that reason.
+  const agreementWithNative = ok ? verdict?.verdict === input.native.verdict : null;
 
   const verdictEvent = await appendEvent(
     {

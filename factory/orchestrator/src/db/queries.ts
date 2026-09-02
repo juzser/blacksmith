@@ -2084,7 +2084,7 @@ export interface ProviderAgreementStat {
 
 interface JudgeVerdictPayload {
   provider?: string;
-  agreement_with_native?: boolean;
+  agreement_with_native?: boolean | null;
   schema_failure?: boolean;
   error_code?: string | null;
   latency_ms?: number | null;
@@ -2135,11 +2135,12 @@ export function providerAgreement(
     };
     bucket.runs += 1;
     // D-168: `schema_failure` is the one predicate for "this run never came
-    // back with a verdict", so it decides both counters. recordJudgeRun()
-    // stamps `agreement_with_native: false` on a failed run — not because the
-    // provider dissented but because there was nothing to compare — and that
-    // false is on the log for good. Reading it as a disagreement is the
-    // reader's mistake to avoid, not the writer's to re-record.
+    // back with a verdict", so it decides both counters. recordJudgeRun() now
+    // writes `agreement_with_native: null` on a failed run — there was nothing
+    // to compare — but every row written before that carries `false`, and those
+    // are on the log for good. Reading either as a disagreement is the reader's
+    // mistake to avoid, which is why the branch below never looks at the field
+    // on a run that reached no verdict.
     if (p.schema_failure) {
       // D-253: which kind of failure is the error code's answer, not this
       // boolean's — it is true for an answer that would not parse and equally

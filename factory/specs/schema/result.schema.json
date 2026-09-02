@@ -37,7 +37,8 @@
           },
           "path": {
             "type": "string",
-            "description": "Under the task's artifact home, state/artifacts/<task_id>/ — relative to it by preference. JSON Schema cannot express \"inside this directory\", so the gate is the enforcer: it resolves each path in the home and blocks with reason 'artifacts-missing' if one is elsewhere or absent."
+            "minLength": 1,
+            "description": "Under the task's artifact home, state/artifacts/<task_id>/ — relative to it by preference. JSON Schema cannot express \"inside this directory\", so the gate is the enforcer: it resolves each path in the home and blocks with reason 'artifacts-missing' if one is elsewhere or absent. The empty string is the one part the schema can catch, and it does (D-193): a worker that names no path gets a validation error at the envelope rather than a gate block one step later."
           },
           "description": { "type": "string" }
         },

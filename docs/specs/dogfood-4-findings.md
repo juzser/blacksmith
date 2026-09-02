@@ -4466,7 +4466,7 @@ no projection.
 
 ## D-168 — a judge that never answered is scored as a judge that disagreed
 
-**Status: read path fixed 2026-08-19**
+**Status: read path fixed 2026-08-19; write path fixed 2026-09-02**
 
 `smith stats providers` is the instrument that decides whether an external
 judge gets promoted out of shadow mode. `docs/runbooks/providers.md`'s
@@ -4587,6 +4587,15 @@ The honest value is `null`, the same choice the line below it makes for
 the five events already on the log carry `false` permanently either way, so
 the reader has to know better regardless. Fixing the writer would stop the
 next reader inheriting the trap; it would not have saved this one.
+
+**Closed 2026-09-02.** `recordJudgeRun()` now writes `null` there, and
+`agreement_with_native` is typed `boolean | null`. The trap the deferral
+described is what made it safe: `providerAgreement()` reads the field only
+inside the `else` of its `schema_failure` branch, so a run that reached no
+verdict was never counted either way and `null` changes no total. The rows
+written before this still carry `false` permanently — that part the deferral
+got right, and it is why the reader keeps gating on `schema_failure` rather
+than on the value.
 
 **Nothing warns on a thin sample.** With `verdicts` on the row an operator
 can now see how much evidence a rate rests on, but one verdict that agreed
@@ -7870,6 +7879,10 @@ is the right layer — the schema genuinely cannot express the containment half
 — but the empty string is the one part the schema *could* have caught, and
 a worker gets a gate block where it could have had a validation error.
 
+**Closed 2026-09-02.** `artifacts[].path` now carries `minLength: 1`. Only
+the half the deferral named as catchable moved; containment is still the
+gate's question, because a schema cannot follow a link.
+
 **Rule candidate:** *a containment check and an existence check must ask the
 filesystem the same question. When one reasons about the string and the other
 follows the link, the gap between them is a path that is inside for the
@@ -8395,6 +8408,15 @@ rules are caught at. It is not done here because the schema is shared with
 every reader of a historical log, and a pattern that rejects an id already on
 disk turns a read of the past into an error — that trade needs its own change,
 not a rider on this one.
+
+**Closed 2026-09-02.** `session_id` now carries `minLength: 1`,
+`pattern: "^[^/]+$"` and `not: {enum: [".", ".."]}`. The risk the deferral
+stated turned out not to exist: `requireSessionIdShape()` is called from
+`logPath()`, which every read goes through as well as every write, so an id
+the current reader can open already satisfies the rule by construction. The
+schema mirrors a guard rather than adding one, and can reject nothing on disk
+that is still readable. The paragraph below still stands unchanged: `plan.ts`
+joins `epicId` into a path with no shape check at all.
 
 `plan.ts:183` joins `epicId` into a path the same way (`<dir>/<epicId>/plan-vN.json`)
 and has no shape check either. Not reproduced, so not filed.

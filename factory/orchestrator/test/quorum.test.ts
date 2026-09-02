@@ -365,6 +365,52 @@ describe('quorum.ts recordJudgeRun / runQuorumCase (integration)', () => {
     });
   });
 
+  // D-168. On a failed run there is no external verdict to compare, so
+  // `agreement_with_native: false` is not an observation -- it is a placeholder
+  // wearing an observation's clothes, and the next reader to group by it counts
+  // a provider that never answered as one that dissented. `null` is how a
+  // record says the question has no answer, the same choice the line below it
+  // already makes for `latency_ms`.
+  it('writes a null agreement, not false, when the run reached no verdict (D-168)', async () => {
+    await recordJudgeRun(
+      {
+        taskId: 'epic-1/task-1',
+        modelTier: 'mid',
+        model: 'codex:default',
+        kind: 'verify',
+        run: externalFailed('codex', 'active'),
+        native: native(),
+      },
+      ctx(),
+      { stateDir },
+    );
+
+    const events = await readEvents(sessionId, { stateDir });
+    const verdict = events.find((e) => e.record.event_type === 'judge-verdict');
+    const payload = verdict?.record.payload as { agreement_with_native: unknown };
+    expect(payload.agreement_with_native).toBeNull();
+  });
+
+  it('still writes a boolean agreement when the run did reach a verdict', async () => {
+    await recordJudgeRun(
+      {
+        taskId: 'epic-1/task-1',
+        modelTier: 'mid',
+        model: 'codex:default',
+        kind: 'verify',
+        run: externalOk('codex', 'active', 'confirm'),
+        native: native(),
+      },
+      ctx(),
+      { stateDir },
+    );
+
+    const events = await readEvents(sessionId, { stateDir });
+    const verdict = events.find((e) => e.record.event_type === 'judge-verdict');
+    const payload = verdict?.record.payload as { agreement_with_native: unknown };
+    expect(payload.agreement_with_native).toBe(true);
+  });
+
   // D-253. runQuorumCase()'s catch already computes a code for every failure
   // -- `provider.missing-api-key` reads nothing like `provider.invalid-output`
   // -- and recordJudgeRun() dropped it, leaving one boolean where fourteen
