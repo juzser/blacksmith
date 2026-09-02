@@ -39,6 +39,7 @@ import {
   runQuorumCase,
 } from './quorum.js';
 import { latestSpecReview, type SpecReviewStatus, specReviewBlockers } from './spec.js';
+import { auditWaveConcurrency, type WaveConcurrency, type WaveVerdict } from './waveConcurrency.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
 /**
@@ -184,6 +185,116 @@ export interface SatisfiedAmendment extends EpicFindingSummary {
   repairedObligationReason?: string;
 }
 
+/**
+ * How wide this epic actually ran, folded from the waves the log holds for it.
+ *
+ * The factory's central claim is that a project is built by many subagents
+ * running the plan's tasks in parallel. Three commands already interrogate it —
+ * `wave schedule` (how wide can this plan ever run), `wave check` (admit a
+ * wave), `wave audit` (did the admitted wave run as wide as admitted) — and
+ * every one of them is a command somebody has to remember to type, against a
+ * state dir that outlives nothing in particular. The close is the one moment
+ * no epic skips, and until this field it recorded every closure a person
+ * decided, every command the assembled branch ran, and nothing at all about
+ * the claim the factory exists to make. An epic that dispatched four admitted
+ * tasks strictly one at a time closed `go` on a record indistinguishable from
+ * one that ran four wide.
+ *
+ * NEVER a blocker, and the distinction is not squeamishness: width is not
+ * readiness. A plan whose tasks genuinely depend on each other has nothing to
+ * run side by side, and a gate that held such an epic would be refusing
+ * correct work for the shape of its dependency graph. This has exactly the
+ * standing `waivedTasks` and `discretionaryFindings` have — carried, shown to
+ * the judge, recorded in the close, enforced by nothing.
+ */
+export interface EpicConcurrency {
+  /** Waves admitted under this epic id. Zero means none was ever cut. */
+  waves: number;
+  /**
+   * How many of those waves came back with each verdict. Every verdict is
+   * keyed even at zero: "no wave ran in parallel" and "nobody counted" are
+   * different answers, and a map that omits its zeroes cannot tell them apart.
+   */
+  verdicts: Record<WaveVerdict, number>;
+  /** The widest wave admitted for this epic, against the most ever in flight. */
+  widest: { declared: number; observed: number };
+  /**
+   * The `wave-admitted` event ids the log holds no dispatch for at all. Named
+   * rather than counted because this is the one part of the fact a judge can
+   * act on: those tasks were admitted and nothing shows them running, which is
+   * a claim with nothing behind it rather than a narrow epic.
+   */
+  unobserved: string[];
+  /**
+   * Why the fold could not be rendered, or null when it was. `auditWaveConcurrency`
+   * refuses a `wave-admitted` event that names no tasks — correctly, for the
+   * command whose whole job is that record — and a throw reaching this gate
+   * would take down `smith epic verdict` and `smith epic close` over a fact
+   * that blocks nothing, which is the D-21 failure exactly. So the reader here
+   * catches it, the same way resolveMcpSurface reports an unreadable manifest
+   * instead of crashing the verdict meant to report it. When this is set the
+   * counts below it are zeros nobody measured, not zeros anybody counted.
+   */
+  problem: string | null;
+}
+
+const WAVE_VERDICTS: readonly WaveVerdict[] = [
+  'parallel',
+  'partial',
+  'serialized',
+  'single',
+  'unobserved',
+];
+
+/**
+ * Reduce one epic's waves to the fact a close records. Pure, and separate from
+ * `summariseWaveConcurrency` on purpose: that one scores an operator's audit
+ * across every epic in a log and returns an exit code, and this one answers a
+ * single epic with no verdict of its own to render.
+ */
+export function summariseEpicConcurrency(waves: readonly WaveConcurrency[]): EpicConcurrency {
+  const verdicts = Object.fromEntries(WAVE_VERDICTS.map((v) => [v, 0])) as Record<
+    WaveVerdict,
+    number
+  >;
+  for (const wave of waves) verdicts[wave.verdict] += 1;
+  return {
+    waves: waves.length,
+    verdicts,
+    widest: {
+      declared: waves.reduce((max, wave) => Math.max(max, wave.declared.length), 0),
+      observed: waves.reduce((max, wave) => Math.max(max, wave.peak), 0),
+    },
+    unobserved: waves.filter((wave) => wave.verdict === 'unobserved').map((wave) => wave.eventId),
+    problem: null,
+  };
+}
+
+/** Nothing the log could be folded into a width, and why. */
+const UNREADABLE_CONCURRENCY = (problem: string): EpicConcurrency => ({
+  waves: 0,
+  verdicts: Object.fromEntries(WAVE_VERDICTS.map((v) => [v, 0])) as Record<WaveVerdict, number>,
+  widest: { declared: 0, observed: 0 },
+  unobserved: [],
+  problem,
+});
+
+/**
+ * Fold the epic's waves off already-read events, reporting a refusal rather
+ * than propagating it. See {@link EpicConcurrency.problem}: width never blocks
+ * a close, so nothing about measuring it may be able to stop one.
+ */
+export function readEpicConcurrency(
+  events: readonly StoredEvent[],
+  epicId: string,
+): EpicConcurrency {
+  try {
+    return summariseEpicConcurrency(auditWaveConcurrency(events, { epicId }));
+  } catch (err) {
+    return UNREADABLE_CONCURRENCY(err instanceof Error ? err.message : String(err));
+  }
+}
+
 export interface EpicSummary {
   epicId: string;
   /** What the event log knows: one entry per folded task row. */
@@ -231,6 +342,12 @@ export interface EpicSummary {
   mcp: McpSurfaceStatus;
   specReview: SpecReviewStatus;
   goalCheck: GoalCheckStatus;
+  /**
+   * How wide this epic ran, or null when the caller measured nothing. Null is
+   * an answer — "nobody looked" must never read as "it ran fine". Never a
+   * blocker; see {@link EpicConcurrency}.
+   */
+  concurrency: EpicConcurrency | null;
   blockers: string[];
   mechanicallyReady: boolean;
 }
@@ -359,6 +476,12 @@ function integrationBlockers(epicId: string, integration: IntegrationStatus): st
  * manufacture a green — because omitting it leaves the gate exactly as
  * informed as it was before this parameter existed, and the one production
  * caller threads it from the same fold that produced `findings`.
+ *
+ * `concurrency` follows the same trailing-optional shape and for the same
+ * reason, but its default carries a stronger claim: `null` means nobody
+ * measured how wide this epic ran, and it is projected as `null` rather than
+ * dropped so it can never be read as "it ran fine". It contributes nothing to
+ * `blockers` — see {@link EpicConcurrency}.
  */
 export function summarizeEpic(
   epicId: string,
@@ -370,6 +493,7 @@ export function summarizeEpic(
   goalCheck: GoalCheckStatus,
   plan: EpicPlanRoster | null = null,
   quarantined: readonly SkippedFindingRecord[] = [],
+  concurrency: EpicConcurrency | null = null,
 ): EpicSummary {
   const taskSummaries: EpicTaskSummary[] = tasks.map((t) => ({
     taskId: t.taskId,
@@ -573,6 +697,7 @@ export function summarizeEpic(
     mcp,
     specReview,
     goalCheck,
+    concurrency,
     blockers,
     mechanicallyReady: blockers.length === 0,
   };
@@ -729,6 +854,32 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     ? '  This epic owes no MCP surface.'
     : `  Milestone ${summary.mcp.milestoneId ?? '(unnamed)'}, manifest ${summary.mcp.manifestPath ?? '(none)'}: ${mcpVerdict(summary.mcp)}`;
 
+  // The parallelism fact, stated whether or not it flatters the epic. Null is
+  // rendered rather than dropped: a missing section reads as an older prompt,
+  // and "nobody measured" is a different answer from "it ran one at a time".
+  const concurrency = summary.concurrency;
+  const concurrencyLines =
+    concurrency === null
+      ? ['  Nothing measured this. No wave record was read for this epic.']
+      : concurrency.problem !== null
+        ? [
+            `  The wave record could not be read, so nothing here is a count: ${concurrency.problem}`,
+          ]
+        : concurrency.waves === 0
+          ? ['  Waves admitted: 0 — no wave was ever cut under this epic id.']
+          : [
+              `  Waves admitted: ${concurrency.waves}`,
+              `  Width: ${concurrency.widest.declared} admitted at the widest, ${concurrency.widest.observed} ever in flight at once`,
+              `  Verdict per wave: ${WAVE_VERDICTS.map((v) => `${v} ${concurrency.verdicts[v]}`).join(', ')}`,
+              `  Waves with no dispatch on record: ${concurrency.unobserved.length}`,
+              ...listOr(
+                concurrency.unobserved.map(
+                  (id) => `  wave ${id}: admitted, and the log holds no dispatch on record for it`,
+                ),
+                '  (none — every admitted wave has work behind it)',
+              ),
+            ];
+
   const prompt = [
     'You are an adversarial critic in an automated epic-close gate.',
     `Epic "${summary.epicId}" is claimed ready to open its integration PR.`,
@@ -759,6 +910,15 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     'MCP surface:',
     mcpLine,
     '',
+    'How wide this epic ran — this factory claims a plan is built by many',
+    'agents working its tasks at the same time, and this is the log read back:',
+    ...concurrencyLines,
+    '  A narrow epic is not by itself a refutation: a plan whose tasks genuinely',
+    '  depend on one another has nothing to run side by side, and refuting on',
+    '  width alone would make your verdict a constant rather than a measurement.',
+    '  What is refutable here is a wave whose tasks were admitted and nothing',
+    '  shows them running: that is a declaration with no work behind it.',
+    '',
     'Discretionary closures — decided by a person, not shown by the machine:',
     `Tasks waived rather than completed: ${summary.waivedTasks.length}`,
     ...listOr(summary.waivedTasks.map((t) => `  ${t.taskId}`)),
@@ -782,7 +942,8 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     '',
     "What you have: the roster above and each task's status, the commands that",
     'ran against the assembled branch and whether each passed, the closing spec',
-    'review, the MCP surface verdict, and every closure a person decided.',
+    'review, the MCP surface verdict, how wide the waves ran, and every closure',
+    'a person decided.',
     'What you do NOT have: file contents, the diff for any task, or the output',
     'of any command — only its name and how it exited.',
     '',
@@ -977,6 +1138,10 @@ export async function runEpicVerdict(
     { check: latestGoalCheck(events, input.epicId), goal: input.goal },
     resolvePlanRoster(input.epicId, input.planOpts ?? {}),
     skipped,
+    // Off the same lineage `events` every other fact here came from — the
+    // wave record is in that log already, so measuring width costs this call
+    // no second read and no second command anyone has to remember to type.
+    readEpicConcurrency(events, input.epicId),
   );
 
   // Step 1 — mechanical_oracles_first, literally: a deterministic blocker is
@@ -1215,6 +1380,23 @@ function epicSummaryPayload(summary: EpicSummary): Record<string, unknown> {
             head_sha: review.headSha,
             reviewed_by: review.reviewedBy,
             finding_count: review.findingIds.length,
+          },
+    // Projected even at zero, and even as null, for the reason plan_version
+    // gives above. This is the only record that outlives the close, and the
+    // question it answers — did this epic actually run its plan in parallel,
+    // or did it run the plan one task at a time and call it a factory — has no
+    // other reader once the wave state dir is gone. Every key is spelled the
+    // same either side: the field names are single words, so there is no
+    // snake_case form of them to drift from.
+    concurrency:
+      summary.concurrency === null
+        ? null
+        : {
+            waves: summary.concurrency.waves,
+            verdicts: { ...summary.concurrency.verdicts },
+            widest: { ...summary.concurrency.widest },
+            unobserved: [...summary.concurrency.unobserved],
+            problem: summary.concurrency.problem,
           },
     mechanically_ready: summary.mechanicallyReady,
   };
