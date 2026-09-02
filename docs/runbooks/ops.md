@@ -76,7 +76,10 @@ Flags worth knowing:
 - `--project <dir>` enables the maintenance pass for that repo: a best-effort
   `pnpm outdated --json` in that directory. Omitted, the check does not run at
   all; present but with no pnpm or no lockfile, it returns nothing rather than
-  failing the tick.
+  failing the tick. **Repeat it once per repo** — `--project . --project
+  workspaces/envkit` watches the factory and one of the projects it built, and
+  each repo gets its own finding. One repo without a lockfile costs you that
+  repo's reading and nothing else.
 - `--no-db` skips the read-model refresh. The findings still come out; the
   dashboard just goes on serving whatever the last projection wrote. Use it if
   the SQLite file lives somewhere the daemon's user cannot write.
@@ -136,7 +139,7 @@ Finding kinds, and where each one comes from:
 | `stale-agent` | `attention` | An agent was dispatched and never came back inside the 4-hour stale window. |
 | `recheck` | `info` | Completed work `scheduler.yml`'s recheck policy says is due another look. |
 | `spec-change` | `attention` when the worker called it `blocking`, `info` otherwise | A worker proposed amending an acceptance criterion and nobody has answered. `detail` names the criterion, the assumption and both answering commands. |
-| `maintenance` | `info` | Dependencies `pnpm outdated` reports behind, with the scheduler's confidence. Needs `--project`; repo-scoped. |
+| `maintenance` | `info` | Dependencies `pnpm outdated` reports behind in one repo, with the scheduler's confidence. Needs `--project`; one finding per `--project`, and the subject names the repo. |
 | `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. |
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
 | `unreadable-log` | `attention` | A session log could not be read. |
@@ -164,9 +167,13 @@ a finding that changes severity has not changed what it is about.
 Two consequences worth knowing before you build an alert on this:
 
 - `unattributed-spend` and `maintenance` put a **count in their subject**
-  ("4 dispatch(es)", "3 package(s)"), so a growing count reads as a new
-  finding. That is intended — the count moved because something new went
+  ("4 dispatch(es)", "/repo/envkit: 3 package(s)"), so a growing count reads as
+  a new finding. That is intended — the count moved because something new went
   unattributed or another package fell behind, and that happened *now*.
+- `maintenance` also puts the **repo** in its subject, and has to: it is
+  repo-scoped, so its `sessionId` is `null`, and the subject is the only field
+  left that can tell two `--project` repos apart. Watch three repos that are
+  each one package behind without it and all three share one clock.
 - A finding that **cleared and came back is new again**. Its clock is not
   restored from before the fix, because "broken since March" is false about a
   factory that was fixed in April and broke again this morning.

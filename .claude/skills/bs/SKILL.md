@@ -1141,9 +1141,12 @@ duties, v3.2)"), plus running the scheduler first — a report that omits
 pending proposals lets them sit invisible instead of surfacing them.
 
 1. **Run the scheduler first.** `smith scheduler run [--dry] --session
-   <id> [--project <project-dir>]` — a deterministic pass over the
+   <id> [--project <dir>...]` — a deterministic pass over the
    event log, it never dispatches an agent itself
-   (`factory/policies/scheduler.yml`, architecture §12). Read its
+   (`factory/policies/scheduler.yml`, architecture §12). Repeat
+   `--project` once per repo the factory is responsible for — its own
+   clone and every project it built — because the maintenance pass reads
+   one lockfile per flag and reports one proposal per repo. Read its
    `proposals` and route each kind before writing the digest:
    - `recheck-proposed` → don't act on it silently; tick it into the next
      `/bs plan` sign-off as an `origin: recheck` task, same spec/sign-off
@@ -1151,7 +1154,9 @@ pending proposals lets them sit invisible instead of surfacing them.
      already-pending proposal for the same task (idempotent by design) —
      it re-proposes only after that recheck is resolved (a real recheck
      task created for it, or explicitly declined).
-   - `maintenance-proposed` → check `autoSchedulable`: `true` (patch/
+   - `maintenance-proposed` → read `projectDir` first: one pass can raise
+     several of these, one per `--project`, and they are not
+     interchangeable. Then check `autoSchedulable`: `true` (patch/
      minor-only version bumps, `scheduler.yml`'s
      `auto_schedule_confidence`) can go straight into the next `/bs plan`
      without a fresh conversation; `false` (a major-version bump is
@@ -1162,7 +1167,7 @@ pending proposals lets them sit invisible instead of surfacing them.
      and proposes new epics — the operator's tick is required regardless
      of confidence, same as any other plan sign-off.
 2. **Ask who may say yes.** `smith scheduler admit --session <id>
-   [--project <project-dir>]` re-reads the same proposals and classifies
+   [--project <dir>...]` re-reads the same proposals and classifies
    each one `auto` or `operator` against `scheduler.yml`'s `autonomy:`
    block (`src/autonomy.ts`). It enacts nothing — the split is printed so
    it can be read and argued with before anything moves.

@@ -31,6 +31,7 @@ const recheck = (over: Partial<SchedulerProposal> = {}): SchedulerProposal =>
 
 const maintenance = (packages: string[], confidence: number): SchedulerProposal => ({
   kind: 'maintenance',
+  projectDir: '/repo/a',
   packages: packages.map((name) => ({ name, current: '1.0.0', wanted: '1.1.0', latest: '1.1.0' })),
   confidence,
   autoSchedulable: confidence >= 0.8,

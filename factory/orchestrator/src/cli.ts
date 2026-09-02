@@ -1527,7 +1527,9 @@ async function main(): Promise<number> {
     // parent's proposals and re-proposes every recheck the epic already ran.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
     const now = isoDateFlag(flags, 'now') ?? new Date();
-    const input = { events, now, ...(flags.project ? { projectDir: flags.project } : {}) };
+    // `repeated`, not `flags`: --project may name several repos, and the
+    // last-occurrence-wins read would silently watch only the final one.
+    const input = { events, now, ...(repeated.project ? { projectDirs: repeated.project } : {}) };
 
     if (dry) {
       printJson({ proposals: computeProposals(input) });
@@ -1584,7 +1586,7 @@ async function main(): Promise<number> {
       events,
       now,
       policy,
-      ...(flags.project ? { projectDir: flags.project } : {}),
+      ...(repeated.project ? { projectDirs: repeated.project } : {}),
     });
 
     // A RecheckProposal names a task and no paths, so without this the
@@ -1626,7 +1628,7 @@ async function main(): Promise<number> {
     }
     const tickOpts: TickOptions = {
       ...eventOptsFromFlags(flags),
-      ...(flags.project ? { projectDir: flags.project } : {}),
+      ...(repeated.project ? { projectDirs: repeated.project } : {}),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
@@ -1691,7 +1693,9 @@ async function main(): Promise<number> {
       '--dir',
       dir,
       ...(flags.interval === undefined ? [] : ['--interval', flags.interval]),
-      ...(flags.project === undefined ? [] : ['--project', flags.project]),
+      // One `--project` per repo, so the detached child watches every repo the
+      // operator named rather than the last one they typed.
+      ...(repeated.project ?? []).flatMap((dir) => ['--project', dir]),
       ...(flags.db === undefined ? [] : ['--db', flags.db]),
       ...(flags['no-db'] === 'true' ? ['--no-db'] : []),
       ...(flags['state-dir'] === undefined ? [] : ['--state-dir', flags['state-dir']]),

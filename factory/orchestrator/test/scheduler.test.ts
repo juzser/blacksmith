@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { readEvents } from '../src/events.js';
 import { SCHEDULER_POLICY_PATH } from '../src/paths.js';
+import type { OutdatedPackage } from '../src/scheduler.js';
 import {
   computeProposals,
   loadSchedulerPolicy,
@@ -525,11 +526,12 @@ describe('parsePnpmOutdated / proposeMaintenance', () => {
   });
 
   it('returns null (never proposes) when there is nothing outdated', () => {
-    expect(proposeMaintenance([], POLICY.maintenance)).toBeNull();
+    expect(proposeMaintenance('/repo/a', [], POLICY.maintenance)).toBeNull();
   });
 
   it('is auto-schedulable at high confidence for patch/minor-only bumps', () => {
     const proposal = proposeMaintenance(
+      '/repo/a',
       [{ name: 'lodash', current: '4.17.20', wanted: '4.17.21', latest: '4.17.21' }],
       POLICY.maintenance,
     );
@@ -538,10 +540,22 @@ describe('parsePnpmOutdated / proposeMaintenance', () => {
 
   it('is NOT auto-schedulable when a major-version bump is present', () => {
     const proposal = proposeMaintenance(
+      '/repo/a',
       [{ name: 'vite', current: '5.0.0', wanted: '5.0.0', latest: '6.0.0' }],
       POLICY.maintenance,
     );
     expect(proposal).toMatchObject({ confidence: 0.5, autoSchedulable: false });
+  });
+
+  // A factory that builds N projects has N repos to keep current, and a
+  // proposal that does not say which one it is about cannot be acted on.
+  it('names the repo it is about, resolved to an absolute path', () => {
+    const proposal = proposeMaintenance(
+      'factory/orchestrator',
+      [{ name: 'lodash', current: '4.17.20', wanted: '4.17.21', latest: '4.17.21' }],
+      POLICY.maintenance,
+    );
+    expect(proposal?.projectDir).toBe(path.resolve('factory/orchestrator'));
   });
 });
 
@@ -566,7 +580,7 @@ describe('proposeGrowthReview', () => {
   });
 });
 
-describe('computeProposals (no projectDir -> maintenance pass skipped)', () => {
+describe('computeProposals (no projectDirs -> maintenance pass skipped)', () => {
   it('combines recheck + growth-review-due proposals, deterministically', () => {
     const events = [
       taskAdded('epic-1/task-1', ['src/a.ts']),
@@ -578,6 +592,47 @@ describe('computeProposals (no projectDir -> maintenance pass skipped)', () => {
       policy: POLICY,
     });
     expect(proposals.map((p) => p.kind).sort()).toEqual(['growth-review-due', 'recheck']);
+  });
+});
+
+describe('computeProposals (one maintenance proposal per repo)', () => {
+  const BEHIND: Record<string, OutdatedPackage[]> = {
+    [path.resolve('/repo/a')]: [
+      { name: 'lodash', current: '4.17.20', wanted: '4.17.21', latest: '4.17.21' },
+    ],
+    [path.resolve('/repo/b')]: [
+      { name: 'vite', current: '5.0.0', wanted: '5.0.0', latest: '6.0.0' },
+    ],
+  };
+  const readOutdated = (dir: string): OutdatedPackage[] | null => BEHIND[dir] ?? null;
+
+  it('proposes once per repo, in the order the repos were given', () => {
+    const proposals = computeProposals({
+      events: [],
+      now: new Date('2026-08-01T00:00:00.000Z'),
+      policy: POLICY,
+      projectDirs: ['/repo/b', '/repo/a'],
+      readOutdated,
+    });
+    const maintenance = proposals.filter((p) => p.kind === 'maintenance');
+    expect(maintenance.map((p) => p.projectDir)).toEqual([
+      path.resolve('/repo/b'),
+      path.resolve('/repo/a'),
+    ]);
+  });
+
+  // "When available" is per repo, not per pass: one child project without a
+  // lockfile must not cost the factory the reading on every other one.
+  it('skips a repo that answers nothing without losing the repos that answered', () => {
+    const proposals = computeProposals({
+      events: [],
+      now: new Date('2026-08-01T00:00:00.000Z'),
+      policy: POLICY,
+      projectDirs: ['/repo/a', '/repo/nowhere'],
+      readOutdated,
+    });
+    const maintenance = proposals.filter((p) => p.kind === 'maintenance');
+    expect(maintenance.map((p) => p.projectDir)).toEqual([path.resolve('/repo/a')]);
   });
 });
 

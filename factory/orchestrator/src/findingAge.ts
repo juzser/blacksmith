@@ -47,11 +47,18 @@ export type FindingMemory = Record<string, string>;
  *
  * `subject` IS included, and the consequence is worth stating rather than
  * hiding: two kinds put a count in their subject (`unattributed-spend`'s
- * "4 dispatch(es)", `maintenance`'s "3 package(s)"), so a growing count reads
- * as a new finding. That is the more useful of the two readings. The count
- * moved because something new went unattributed or another package fell
+ * "4 dispatch(es)", `maintenance`'s "/repo: 3 package(s)"), so a growing count
+ * reads as a new finding. That is the more useful of the two readings. The
+ * count moved because something new went unattributed or another package fell
  * behind, and an operator wants to be told that happened now — not shown a
  * six-day-old timestamp that quietly absorbed today's drift.
+ *
+ * The repo in front of `maintenance`'s count is load-bearing for the same
+ * reason. That finding carries a null `sessionId` because it is about a
+ * directory rather than a session, so the subject is the ONLY field left to
+ * tell two repos apart — and a factory watching itself and two children would
+ * otherwise file three repos that are each one package behind under one
+ * identity, with two of them inheriting the first one's clock.
  *
  * `severity` is excluded because a finding that changes severity has not
  * changed what it is about, and the current severity is reported either way.
