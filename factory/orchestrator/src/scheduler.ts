@@ -7,6 +7,7 @@
 // session to act on.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { AutonomyPolicy } from './autonomy.js';
 import { globsOverlap } from './claims.js';
@@ -509,6 +510,17 @@ function majorVersion(semver: string): number {
 
 export interface MaintenanceProposal {
   kind: 'maintenance';
+  /**
+   * The repo this proposal is about, as an absolute path.
+   *
+   * A factory that builds N projects has N+1 repos to keep current — its own
+   * and every child's — and a proposal that does not say which one it read
+   * cannot be acted on, or even told apart from the next one. Resolved rather
+   * than stored as written, for the same reason `taskWorktreeDir` resolves
+   * (D-42/P9-26): `.` and the absolute path name one repo, and a downstream
+   * reader that keys on the string would otherwise see two.
+   */
+  projectDir: string;
   packages: OutdatedPackage[];
   confidence: number;
   autoSchedulable: boolean;
@@ -516,6 +528,7 @@ export interface MaintenanceProposal {
 
 /** origin: inferred (agent-constraints.md "planner / Growth passes") — auto-schedulable only at high confidence. */
 export function proposeMaintenance(
+  projectDir: string,
   packages: readonly OutdatedPackage[],
   policy: MaintenancePolicy,
 ): MaintenanceProposal | null {
@@ -524,6 +537,7 @@ export function proposeMaintenance(
   const confidence = hasMajorBump ? policy.majorBumpConfidence : policy.minorOrPatchConfidence;
   return {
     kind: 'maintenance',
+    projectDir: path.resolve(projectDir),
     packages: [...packages],
     confidence,
     autoSchedulable: confidence >= policy.autoScheduleConfidence,
@@ -574,23 +588,43 @@ export interface SchedulerRunInput {
   events: readonly StoredEvent[];
   now?: Date;
   policy?: SchedulerPolicy;
-  /** Target-repo directory to run `pnpm outdated --json` in; omitted -> maintenance pass skipped entirely. */
-  projectDir?: string;
+  /**
+   * Every repo to run `pnpm outdated --json` in; empty or omitted -> the
+   * maintenance pass does not run at all.
+   *
+   * Plural because the factory's job is plural. Blacksmith builds projects
+   * that stand on their own, and "maintains itself and its children" is not a
+   * claim a single `--project` can carry: with one slot the operator chooses
+   * between watching the factory's dependencies or one child's, and whichever
+   * they do not choose goes unwatched with nothing saying so.
+   */
+  projectDirs?: readonly string[];
+  /**
+   * How to ask one repo what is behind. The single effect in an otherwise
+   * pure pass, named so a test can answer for a repo that does not exist --
+   * `pnpm outdated` needs a registry, and a test that reached one would be a
+   * test that fails when the network does.
+   */
+  readOutdated?: (projectDir: string) => OutdatedPackage[] | null;
 }
 
 /** Pure: computes every proposal this pass would make, without touching the event log. */
 export function computeProposals(input: SchedulerRunInput): SchedulerProposal[] {
   const policy = input.policy ?? loadSchedulerPolicy();
   const now = input.now ?? new Date();
+  const readOutdated = input.readOutdated ?? runPnpmOutdated;
 
   const proposals: SchedulerProposal[] = [...proposeRechecks(input.events, now, policy.recheck)];
 
-  if (input.projectDir) {
-    const outdated = runPnpmOutdated(input.projectDir);
-    if (outdated) {
-      const maintenance = proposeMaintenance(outdated, policy.maintenance);
-      if (maintenance) proposals.push(maintenance);
-    }
+  // In the order the repos were given, and one repo's silence costs only that
+  // repo: "when available" is a property of each lockfile, so a child project
+  // that has never been installed must not take the reading on all the others
+  // down with it.
+  for (const projectDir of input.projectDirs ?? []) {
+    const outdated = readOutdated(projectDir);
+    if (!outdated) continue;
+    const maintenance = proposeMaintenance(projectDir, outdated, policy.maintenance);
+    if (maintenance) proposals.push(maintenance);
   }
 
   const growth = proposeGrowthReview(input.events, now, policy.growth);

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BudgetPolicy } from '../src/budgets.js';
-import type { AdmissionLens } from '../src/daemon.js';
+import type { AdmissionLens, DaemonFinding } from '../src/daemon.js';
 import {
   acquireLock,
   DaemonError,
@@ -25,7 +25,7 @@ import {
 } from '../src/daemon.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
-import type { SchedulerPolicy } from '../src/scheduler.js';
+import type { OutdatedPackage, SchedulerPolicy } from '../src/scheduler.js';
 
 // ---------------------------------------------------------------------------
 // Phase 10's last deferred item. The daemon watches; it never dispatches —
@@ -1274,5 +1274,72 @@ describe('whether the watcher is actually watching', () => {
     const s = status();
     expect(s.running).toBe(true);
     expect(s.stale).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One factory, many repos. `maintenance` is the only finding kind that is
+// about a directory rather than about the log, so it is the only one a single
+// tick can ask twice -- and therefore the only one whose subject has to carry
+// which repo the answer came from.
+// ---------------------------------------------------------------------------
+
+describe('the maintenance pass across several repos', () => {
+  const BEHIND: Record<string, OutdatedPackage[]> = {
+    [path.resolve('/repo/self')]: [
+      { name: 'lodash', current: '4.17.20', wanted: '4.17.21', latest: '4.17.21' },
+    ],
+    [path.resolve('/repo/child')]: [
+      { name: 'zod', current: '3.0.0', wanted: '3.0.1', latest: '3.0.1' },
+    ],
+  };
+  const OPTS = {
+    now: NOW,
+    schedulerPolicy: SCHEDULER,
+    projectDirs: ['/repo/self', '/repo/child'],
+    readOutdated: (dir: string): OutdatedPackage[] | null => BEHIND[dir] ?? null,
+  };
+
+  it('reports one finding per repo, each naming the repo it is about', () => {
+    const maintenance = inspectFactory([], OPTS).filter((f) => f.kind === 'maintenance');
+    expect(maintenance).toHaveLength(2);
+    expect(maintenance[0]?.subject).toContain(path.resolve('/repo/self'));
+    expect(maintenance[1]?.subject).toContain(path.resolve('/repo/child'));
+  });
+
+  // The collision this pins: `findingIdentity` is [kind, sessionId, subject]
+  // and every maintenance finding carries a null sessionId, so two repos one
+  // package behind used to share the subject "1 package(s)" -- one entry in
+  // the tick-to-tick memory for two repos, and whichever was written second
+  // inherited the other's firstSeen.
+  it('gives two repos that are equally behind two different identities', () => {
+    const identities = inspectFactory([], OPTS)
+      .filter((f) => f.kind === 'maintenance')
+      .map(findingIdentity);
+    expect(new Set(identities).size).toBe(2);
+  });
+
+  // findingAge.ts argues the count belongs in the subject: a repo falling
+  // further behind is news, and absorbing it into a six-day-old timestamp
+  // hides the thing that just happened. Naming the repo must not cost that.
+  it('still reads as a new finding when the same repo falls further behind', () => {
+    const before = inspectFactory([], OPTS).filter((f) => f.kind === 'maintenance')[0];
+    const after = inspectFactory([], {
+      ...OPTS,
+      readOutdated: (): OutdatedPackage[] => [
+        { name: 'lodash', current: '4.17.20', wanted: '4.17.21', latest: '4.17.21' },
+        { name: 'vite', current: '5.0.0', wanted: '5.0.0', latest: '5.0.1' },
+      ],
+    }).filter((f) => f.kind === 'maintenance')[0];
+    expect(before).toBeDefined();
+    expect(after).toBeDefined();
+    expect(findingIdentity(before as DaemonFinding)).not.toBe(
+      findingIdentity(after as DaemonFinding),
+    );
+  });
+
+  it('runs no maintenance pass at all when no repo was named', () => {
+    const findings = inspectFactory([], { now: NOW, schedulerPolicy: SCHEDULER });
+    expect(findings.filter((f) => f.kind === 'maintenance')).toEqual([]);
   });
 });

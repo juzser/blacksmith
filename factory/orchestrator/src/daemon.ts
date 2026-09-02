@@ -46,6 +46,7 @@ import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
 import {
   computeProposals,
   loadSchedulerPolicy,
+  type OutdatedPackage,
   type SchedulerPolicy,
   type SchedulerProposal,
 } from './scheduler.js';
@@ -176,8 +177,14 @@ export interface InspectOptions {
   budgetPolicy?: BudgetPolicy;
   schedulerPolicy?: SchedulerPolicy;
   staleHours?: number;
-  /** Target repo for the maintenance pass; omitted -> `pnpm outdated` never runs. */
-  projectDir?: string;
+  /**
+   * Every repo the maintenance pass should read; empty or omitted -> `pnpm
+   * outdated` never runs. Plural, because a factory maintains the projects it
+   * built as well as itself -- see `SchedulerRunInput.projectDirs`.
+   */
+  projectDirs?: readonly string[];
+  /** Test seam, threaded straight through to `computeProposals`. */
+  readOutdated?: (projectDir: string) => OutdatedPackage[] | null;
   /**
    * Who may say yes. Omitted -> findings carry no `admission` at all; see the
    * field's note on why absent must not read as `auto`.
@@ -313,7 +320,8 @@ export function inspectFactory(
     events,
     now,
     policy,
-    ...(opts.projectDir === undefined ? {} : { projectDir: opts.projectDir }),
+    ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
+    ...(opts.readOutdated === undefined ? {} : { readOutdated: opts.readOutdated }),
   });
 
   const admissions = admitFor(proposals, events, opts.admission);
@@ -325,7 +333,7 @@ export function inspectFactory(
         kind: 'maintenance',
         severity: 'info',
         sessionId: null,
-        subject: `${proposal.packages.length} package(s)`,
+        subject: `${proposal.projectDir}: ${proposal.packages.length} package(s)`,
         detail:
           `${proposal.packages.map((p) => `${p.name} ${p.current}→${p.latest}`).join(', ')} ` +
           `(confidence ${proposal.confidence}, ` +
@@ -537,7 +545,8 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     ...(opts.budgetPolicy === undefined ? {} : { budgetPolicy: opts.budgetPolicy }),
     ...(opts.schedulerPolicy === undefined ? {} : { schedulerPolicy: opts.schedulerPolicy }),
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
-    ...(opts.projectDir === undefined ? {} : { projectDir: opts.projectDir }),
+    ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
+    ...(opts.readOutdated === undefined ? {} : { readOutdated: opts.readOutdated }),
   };
 
   const projectDb = opts.projectDb ?? true;
@@ -871,7 +880,7 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<TickReport[]> {
     ...(opts.budgetPolicy === undefined ? {} : { budgetPolicy: opts.budgetPolicy }),
     ...(opts.schedulerPolicy === undefined ? {} : { schedulerPolicy: opts.schedulerPolicy }),
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
-    ...(opts.projectDir === undefined ? {} : { projectDir: opts.projectDir }),
+    ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
     ...(opts.stateDir === undefined ? {} : { stateDir: opts.stateDir }),
     ...(opts.projectDb === undefined ? {} : { projectDb: opts.projectDb }),
     ...(opts.dbPath === undefined ? {} : { dbPath: opts.dbPath }),

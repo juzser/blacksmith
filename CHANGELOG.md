@@ -928,6 +928,34 @@ than appearing in it.
 
 ### Changed
 
+- **The maintenance pass now watches every repo the factory is responsible
+  for, and each finding says which one.** ⚠️ **Behaviour change to finding
+  identity:** the `maintenance` subject is now `"<repo>: N package(s)"` rather
+  than `"N package(s)"`, so every standing maintenance finding reads as new for
+  exactly one tick after this lands. `--project` was singular on `smith daemon
+  run|start` and `smith scheduler run|admit`, which made the operator choose
+  between watching Blacksmith's own dependencies and one child project's — and
+  a factory whose entire output is projects that stand on their own cannot
+  maintain them one at a time. The flag now repeats (`--project . --project
+  workspaces/envkit`), reads one lockfile per occurrence, and raises one
+  proposal per repo; a repo that answers nothing costs that repo's reading and
+  no other, because "when available" is a property of each lockfile rather than
+  of the pass. Naming the repo is not decoration. `findingIdentity` is
+  `[kind, sessionId, subject]` and every maintenance finding carries a null
+  `sessionId` — it is about a directory, not a session — so the subject is the
+  only field left that can tell two repos apart, and two repos one package
+  behind used to collide on `"1 package(s)"`: one entry in the tick-to-tick
+  memory for two repos, with whichever was written second inheriting the
+  other's `firstSeen`. The count stays in front of the repo on purpose
+  (`findingAge.ts`): a repo falling further behind is news, and absorbing it
+  into a six-day-old timestamp hides the thing that just happened.
+  `MaintenanceProposal` gains `projectDir`, resolved to an absolute path so `.`
+  and the path it expands to cannot split one repo into two identities (the
+  `taskWorktreeDir` precedent, D-42/P9-26); it reaches the append-only log
+  through `maintenance-proposed`. `SchedulerRunInput.projectDir` and
+  `InspectOptions.projectDir` are replaced by `projectDirs` outright rather
+  than kept beside it — one way to say a thing is one thing to keep true.
+
 - **`smith daemon status` no longer calls a wedged watcher healthy.** ⚠️
   **Behaviour change to a documented contract:** the health check
   `smith daemon status >/dev/null` now exits 1 for a daemon that holds its
