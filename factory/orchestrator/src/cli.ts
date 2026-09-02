@@ -96,6 +96,7 @@ import {
   type PlanFile,
   type PlanOpts,
   resolveTaskId,
+  type TaskSpecRecord,
   validatePlan,
 } from './plan.js';
 import { runPlanQuorum } from './planQuorum.js';
@@ -166,6 +167,7 @@ import {
   type ProposedWaveBudget,
   type WaveBudgetCheck,
 } from './waveBudget.js';
+import { computeNextWave, liveWaveTasks } from './waveNext.js';
 import {
   createTaskWorktree,
   listStale,
@@ -1303,6 +1305,92 @@ async function main(): Promise<number> {
     }
     printJson({ ...result, symbolImpact, budget });
     return result.valid && !coupled && !blocked ? 0 : 1;
+  }
+
+  if (namespace === 'wave' && action === 'next') {
+    const [planFile] = requirePositionals(positional, usageFor('wave next')) as [string];
+    const planOnDisk = readJsonFile<PlanFile>(planFile);
+    // D-48/P9-31, the rule `wave check` already follows: a follow-up minted by
+    // `findings raise` lives in the log and in no plan file. A scheduler that
+    // read only the plan would never propose it — the task would exist, be
+    // admissible by id, and be offered to nobody. The plan wins for an id both
+    // registers know, since a re-cut plan is the newer statement of its claims.
+    const events = flags.session
+      ? // Lineage-wide (D-119) for the same reason the budget check is: an
+        // epic's tasks are not confined to the session that happens to ask.
+        await readLineageEvents(flags.session as string, eventOptsFromFlags(flags))
+      : [];
+    // Imported here rather than at module scope: `db/projector.js` reaches
+    // `db/schema.js` and drizzle behind it, and cliBoot.test.ts holds that out
+    // of the graph every `smith` invocation pays — `smith --help` included.
+    // Without a session there are no events to fold, so the cost is not even
+    // paid by every `wave next`.
+    const statusById = new Map<string, string>();
+    if (events.length > 0) {
+      const { foldTasks } = await import('./db/projector.js');
+      for (const row of foldTasks(events)) statusById.set(row.taskId, row.taskStatus);
+    }
+    const logged = flags.session
+      ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
+      : [];
+    const planIds = new Set(planOnDisk.tasks.map((t) => t.task_id));
+    const followUps: TaskSpecRecord[] = logged
+      .filter((t) => !planIds.has(t.taskId))
+      .map((t) => ({
+        task_id: t.taskId,
+        // The log is the only register that holds this task's status, so a
+        // missing row means nobody has moved it — which is `todo`, not done.
+        task_status: statusById.get(t.taskId) ?? 'todo',
+        plan_version: planOnDisk.version,
+        // As written, never `?? []` (D-48): substituting an empty list for a
+        // claims value nothing can read hands the comparison the one claim set
+        // that overlaps nobody, and admits the unreadable task as a disjoint one.
+        claims: t.claims,
+      }));
+    const plan: PlanFile =
+      followUps.length > 0
+        ? { ...planOnDisk, tasks: [...planOnDisk.tasks, ...followUps] }
+        : planOnDisk;
+
+    // P9-3, the same second question `wave check` asks: two tasks whose claims
+    // are disjoint can still be coupled by an import edge between the files
+    // those claims match. `wave check` uses the answer to REFUSE a wave someone
+    // proposed; here it orders one instead — the producer is admitted and the
+    // consumer deferred with the crossing named, which is the remedy an
+    // operator would have applied by hand after the refusal.
+    //
+    // Through `liveWaveTasks` so the graph is handed claim sets read by the
+    // same function that refuses an unreadable one.
+    const graph = buildSymbolGraph(collectSources(flags.repo ?? REPO_ROOT));
+    const crossings = waveImpact(graph, liveWaveTasks(plan)).crossings;
+
+    const result = computeNextWave({
+      plan,
+      policy: loadWorktreePolicy(),
+      crossings,
+      // The log outranks the plan file on status (D-18b): `task_status` in a
+      // plan is the task's INITIAL status, and a plan read from disk hours
+      // into a run still says `todo` about work that finished.
+      statusById,
+    });
+    printJson(result);
+    // Writes nothing on purpose. `wave-admitted` is what moves a task to
+    // `ready`, and this command proposes rather than admits — recording an
+    // admission here would move tasks nobody had yet agreed to start, and
+    // leave `wave check` re-admitting what the log already said was admitted.
+    //
+    // The cost question is deliberately not asked here. `wave check` refuses a
+    // wave the epic cannot afford, and it stays the only place that verdict is
+    // rendered — a proposer that also priced the wave would be a second opinion
+    // about the same fact, and would have to decide which task to drop, which
+    // is an operator's call and not a graph's. So a proposed wave can still be
+    // refused for cost on the next line of the playbook; that is the gate
+    // working, not the proposal being wrong.
+    //
+    // Exit 1 names a stall, not an empty answer: work is left, and none of it
+    // can begin. A loop driving waves needs that distinguished from the epic
+    // simply being finished, which is an empty wave with nothing remaining.
+    return result.wave.length > 0 || result.remaining === 0 ? 0 : 1;
   }
 
   if (namespace === 'new') {
