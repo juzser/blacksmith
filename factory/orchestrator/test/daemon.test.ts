@@ -1343,3 +1343,135 @@ describe('the maintenance pass across several repos', () => {
     expect(findings.filter((f) => f.kind === 'maintenance')).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The claim the mandate makes -- this factory maintains itself AND the
+// projects it built -- checked instead of asserted. `--project` can name every
+// repo since the maintenance pass went plural; nothing until now noticed an
+// operator who named fewer than all of them, and silence is the whole failure
+// mode.
+// ---------------------------------------------------------------------------
+describe('the repos nothing is watching', () => {
+  const REFS = [
+    { name: 'black-smith', dir: '/repo/self', self: true },
+    { name: 'envkit', dir: '/repo/envkit', self: false },
+  ];
+  const OPTS = { now: NOW, schedulerPolicy: SCHEDULER, readProjects: () => REFS };
+  const unwatched = (opts: Partial<typeof OPTS> & Record<string, unknown> = {}): DaemonFinding[] =>
+    inspectFactory([], { ...OPTS, ...opts }).filter((f) => f.kind === 'unwatched-project');
+
+  it('names every responsible repo when no --project was given at all', () => {
+    expect(unwatched().map((f) => f.subject)).toEqual(['/repo/self', '/repo/envkit']);
+  });
+
+  // Clearable in one flag, which is the test `factory-width` sets for any new
+  // attention: an alarm that cannot return to zero teaches an operator to stop
+  // reading the number, and takes the real alarms with it.
+  it('drops a repo the moment the pass is pointed at it', () => {
+    expect(unwatched({ projectDirs: ['/repo/self'] }).map((f) => f.subject)).toEqual([
+      '/repo/envkit',
+    ]);
+  });
+
+  it('says nothing once every repo is named', () => {
+    expect(unwatched({ projectDirs: ['/repo/self', '/repo/envkit'] })).toEqual([]);
+  });
+
+  it('is attention, and about the repo rather than any session', () => {
+    const first = unwatched()[0];
+    expect(first?.severity).toBe('attention');
+    expect(first?.sessionId).toBeNull();
+  });
+
+  // The subject is the resolved directory because it is both the only field
+  // that can separate two repos -- sessionId is null, as it is for maintenance
+  // -- and the exact string the operator has to paste to clear the finding.
+  it('gives two unwatched repos two identities', () => {
+    expect(new Set(unwatched().map(findingIdentity)).size).toBe(2);
+  });
+
+  it('says which flag clears it, and which project it is about', () => {
+    const child = unwatched().find((f) => f.subject === '/repo/envkit');
+    expect(child?.detail).toContain('envkit');
+    expect(child?.detail).toContain('--project /repo/envkit');
+  });
+
+  // No register, no claim. inspectFactory reads policy files and the repos it
+  // was handed; it does not go looking for a roadmap nobody asked it to read,
+  // so a caller that supplies no reader gets the silence it had before.
+  it('raises nothing when no register was supplied', () => {
+    const findings = inspectFactory([], { now: NOW, schedulerPolicy: SCHEDULER });
+    expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+  });
+
+  // D-21: a watcher that dies over the fact it reports is silent exactly when
+  // somebody is mid-edit in roadmap.md. factoryProjects already refuses to
+  // throw; this pins that inspectFactory does not reintroduce the crash.
+  it('survives a register that throws', () => {
+    const findings = inspectFactory([], {
+      now: NOW,
+      schedulerPolicy: SCHEDULER,
+      readProjects: () => {
+        throw new Error('roadmap.md is half-written');
+      },
+    });
+    expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+  });
+});
+
+// The register has to survive every hop between the flag and the fold --
+// cli.ts -> runDaemon -> runTick -> inspectFactory -- and a dropped spread at
+// any one of them is silent: the tick simply reports nothing, which is exactly
+// what the finding exists to stop.
+describe('a tick carries the register down to the fold', () => {
+  let stateDir: string;
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'smith-register-'));
+    stateDir = path.join(dir, 'events');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      path.join(stateDir, 'sess-a.jsonl'),
+      `${JSON.stringify(record('sess-a', 'session-start', {}))}\n`,
+      'utf8',
+    );
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const OPTS = {
+    now: NOW,
+    budgetPolicy: BUDGET,
+    schedulerPolicy: SCHEDULER,
+    projectDb: false,
+    readProjects: () => [{ name: 'envkit', dir: '/repo/envkit', self: false }],
+  };
+
+  it('reports an unwatched repo from runTick', async () => {
+    const report = await runTick({ ...OPTS, stateDir });
+    const unwatched = report.findings.filter((f) => f.kind === 'unwatched-project');
+    expect(unwatched).toHaveLength(1);
+    expect(unwatched[0]?.subject).toBe('/repo/envkit');
+  });
+
+  // Both halves, because only the pair is evidence: a runDaemon that dropped
+  // the register would report nothing, and "nothing" is what the cleared case
+  // asserts on its own.
+  it('reports it from the loop too, and stops once the repo is named', async () => {
+    const [silent] = await runDaemon({ dir, intervalSeconds: 1, once: true, ...OPTS, stateDir });
+    expect(silent?.findings.filter((f) => f.kind === 'unwatched-project')).toHaveLength(1);
+
+    const [watched] = await runDaemon({
+      dir,
+      intervalSeconds: 1,
+      once: true,
+      ...OPTS,
+      stateDir,
+      projectDirs: ['/repo/envkit'],
+    });
+    expect(watched?.findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+  });
+});

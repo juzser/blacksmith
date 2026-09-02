@@ -1626,9 +1626,16 @@ async function main(): Promise<number> {
         { flag: 'interval', value: flags.interval ?? null },
       );
     }
+    // The register that judges `--project`, supplied here rather than defaulted
+    // inside the fold: this is where the flags are read, so this is where the
+    // list they should have covered belongs. A tick handed no register raises
+    // no `unwatched-project`, which keeps inspectFactory's answer a function of
+    // its arguments.
+    const { factoryProjects } = await import('./projects.js');
     const tickOpts: TickOptions = {
       ...eventOptsFromFlags(flags),
       ...(repeated.project ? { projectDirs: repeated.project } : {}),
+      readProjects: () => factoryProjects(),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
@@ -1729,6 +1736,27 @@ async function main(): Promise<number> {
     const { DEFAULT_DAEMON_DIR, stopDaemon } = await import('./daemon.js');
     const dir = flags.dir ?? DEFAULT_DAEMON_DIR;
     printJson(stopDaemon(dir));
+    return 0;
+  }
+
+  // What the factory is answerable for, read off the register it already keeps:
+  // `registerProjectInRoadmap` writes a `- project:` bullet for every project
+  // it scaffolds. Without this the `unwatched-project` finding would name a
+  // repo and leave the operator to reconstruct the rest of the list by hand.
+  if (namespace === 'projects' && action === 'list') {
+    const { factoryProjects } = await import('./projects.js');
+    const refs = factoryProjects(flags.roadmap === undefined ? {} : { roadmapPath: flags.roadmap });
+    const flagLine = refs.map((ref) => `--project ${ref.dir}`).join(' ');
+    if (flags.json) {
+      printJson({ projects: refs, flags: flagLine });
+    } else {
+      // The flag line last, because it is the line the operator copies, and a
+      // thing to copy is easier to find at the bottom than in the middle.
+      for (const ref of refs) {
+        process.stdout.write(`${ref.self ? '*' : ' '} ${ref.name}\t${ref.dir}\n`);
+      }
+      process.stdout.write(`\n${flagLine}\n`);
+    }
     return 0;
   }
 

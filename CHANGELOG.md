@@ -23,6 +23,26 @@ than appearing in it.
 
 ### Added
 
+- The factory can now answer **which repos it is answerable for**, and the
+  watcher notices when the answer and the flags disagree. `smith projects list`
+  reads the `- project:` bullets `smith new` writes into
+  `factory/specs/roadmap.md` when it scaffolds a project, and prints this clone
+  plus every declared project that has a checkout — ending in the `--project`
+  line to paste into `smith daemon run|start` and `smith scheduler run|admit`.
+  A repo on that list the daemon was not pointed at raises a new
+  `unwatched-project` finding naming the flag that clears it. Repeating
+  `--project` made the maintenance pass able to watch many repos; nothing
+  turned the register the factory already keeps into that list, so a child
+  project left off the line was not reported as missing — it read exactly like
+  a repo whose dependencies were all current, which is the silent-omission
+  failure one level up. This clone is always first and is never resolved by
+  name: the roadmap's project *name* is a directory name, and looking it up
+  beside this checkout can find an unrelated repository that happens to match,
+  which would have the factory read somebody else's lockfile while reporting
+  its own. A project the roadmap declares with no checkout is reported by
+  nothing — there is no lockfile to read, so no flag could ever clear it, and
+  an alarm that cannot return to zero is the thing the finding severities exist
+  to prevent.
 - The daemon now says **whose queue** each finding is in. Findings a scheduler
   proposal stands behind — `recheck`, `maintenance`, `growth-review` — carry an
   `admission` (`decision`, `code`, `reason`), and a tick reports `autoAdmitted`

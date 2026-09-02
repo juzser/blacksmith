@@ -46,6 +46,8 @@ smith daemon start  [--interval <seconds>] [--dir <dir>]
                     [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]
 smith daemon status [--dir <dir>]
 smith daemon stop   [--dir <dir>]
+
+smith projects list [--roadmap <file>] [--json]
 ```
 
 - **`run`** is the loop itself, in the foreground. This is what a service
@@ -62,6 +64,12 @@ smith daemon stop   [--dir <dir>]
   whether that watcher has gone quiet. Exit 1 unless one is watching *and*
   current (§6).
 - **`stop`** sends SIGTERM to the pid in the lock and clears the file.
+- **`projects list`** is not a daemon verb, it is the answer to the daemon's
+  hardest flag: every repo this factory is answerable for, itself first, then
+  each project its roadmap declares that has a checkout to read. It ends with
+  the `--project` line to paste into `run` or `start`. `--roadmap <file>` reads
+  a roadmap other than the shipped one; `--json` prints the same thing with the
+  flag line under `flags`.
 
 Flags worth knowing:
 
@@ -80,6 +88,12 @@ Flags worth knowing:
   workspaces/envkit` watches the factory and one of the projects it built, and
   each repo gets its own finding. One repo without a lockfile costs you that
   repo's reading and nothing else.
+
+  You do not have to remember the list. `smith projects list` reads the
+  roadmap's `- project:` bullets — the register `smith new` writes to
+  when it scaffolds a project — and prints the whole `--project` line for you
+  to paste. A repo it names and this pass does not gets an
+  `unwatched-project` finding, so forgetting one is loud rather than silent.
 - `--no-db` skips the read-model refresh. The findings still come out; the
   dashboard just goes on serving whatever the last projection wrote. Use it if
   the SQLite file lives somewhere the daemon's user cannot write.
@@ -142,6 +156,7 @@ Finding kinds, and where each one comes from:
 | `maintenance` | `info` | Dependencies `pnpm outdated` reports behind in one repo, with the scheduler's confidence. Needs `--project`; one finding per `--project`, and the subject names the repo. |
 | `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. |
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
+| `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
 | `unreadable-log` | `attention` | A session log could not be read. |
 | `projection-failed` | `attention` | A session's read-model refresh threw. |
 
@@ -201,6 +216,22 @@ same one: closes exist and none of them recorded how wide it ran, so the factory
 cannot say whether it builds in parallel. That is work to schedule — close a
 current epic, or read a live log back with `smith wave audit` — and never an
 alarm, because nothing here is known to be wrong.
+
+`unwatched-project` is the same rule applied to the flags rather than to the
+closes. The maintenance pass reads exactly the repos `--project` names, so a
+child project left off the line is not *reported as unwatched* — it is simply
+never mentioned again, which reads identically to a repo whose dependencies are
+all current. The finding turns that silence into a sentence, and it clears the
+only way it should: add the flag. Nothing here reports a project the roadmap
+declares but that has no checkout on this machine, because there would be no
+lockfile to read and therefore no flag that could make the finding go away.
+
+The factory's own clone is the first thing this kind will name, and that is
+deliberate — a factory that watched everything it built except itself has the
+same blind spot pointing the other way. It is also the one entry that is never
+resolved by name: this checkout is known, while the roadmap's project *name* is
+a directory name that may well match some unrelated repo sitting beside this
+one.
 
 The last two kinds are why a tick never aborts. One corrupt line, or one
 SQLite file the daemon cannot write, becomes a finding and the tick carries
