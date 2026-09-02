@@ -2691,6 +2691,18 @@ is [`../runbooks/ops.md`](../runbooks/ops.md).
   `maintenance-proposed`/`growth-review-due` events on a deterministic
   pass over the event log — turning a proposal into a real dispatch is
   still a `/bs plan`/`/bs run` the operator (or their session) initiates.
+- **`smith scheduler admit` says who may say yes, and still says only
+  that.** It re-reads the same proposals and classifies each `auto` or
+  `operator` against `scheduler.yml`'s `autonomy:` block, appending no
+  event and starting no agent. An `auto` classification removes the
+  operator's *tick*, not the gates: the work still goes through `/bs run`'s
+  ordinary wave — worktrees, tests, reviewer — and **the PR is still merged
+  by a person**, which is the backstop that makes widening the whitelist
+  safe. Every rule in `autonomy.ts` can only deny, growth review is denied
+  ahead of the whitelist, and a proposal whose claims, task id or package
+  names touch a `crosscheck.yml` security keyword is held whatever the
+  whitelist says — the claims are folded out of the event log, so a recheck
+  that names only an opaque task id is still matched on what it touches.
 - **The lessons loop's "distillation" step is a manual dispatch.**
   `smith dream [--since]` extracts decision checkpoints into raw candidate
   events tagged `needs_distillation: true`; turning one into a checkable,

@@ -23,6 +23,28 @@ than appearing in it.
 
 ### Added
 
+- `scheduler.yml` `autonomy:` and `smith scheduler admit` — a name for what
+  the scheduler may run without a person. Until now every proposal waited on
+  the operator regardless of what it was, which is safe and does not scale: a
+  patch bump and an auth-path recheck cost the same tick of attention.
+  `src/autonomy.ts` classifies each proposal `auto` or `operator`, and every
+  rule in it can only **deny** — there is no branch that promotes something
+  the whitelist did not name, so "what runs without me?" is answerable by
+  reading `scheduler.yml` alone. Growth review is denied ahead of the
+  whitelist (architecture §12 keeps scope with the operator unconditionally),
+  so listing its kind changes nothing. Security keywords are read from
+  `crosscheck.yml` rather than copied, so promoting a word moves the
+  cross-check trigger and this gate together. Every default fails closed: an
+  absent block means off behind an empty whitelist, and a name outside the
+  vocabulary throws rather than matching nothing quietly. The command enacts
+  nothing — it prints the classification, appends no event and starts no
+  agent, which is the same invariant the daemon holds, now held by a command
+  a person types too. Rechecks are whitelisted by *reason*, never by
+  confidence: a `RecheckProposal`'s confidence is the completed task's, and a
+  low one is why the recheck exists, so gating on it would hold back exactly
+  the rechecks worth running. `--policy` points the whole command at one file:
+  it decides which proposals exist as well as who may say yes to them, so a
+  downstream project's scheduler.yml is never half-read.
 - `enabled: auto` on an external provider in `crosscheck.yml`, resolved against
   that provider's precondition on the box reading the file: a `cli` provider is
   on if its `command` is runnable, an `api` provider is on if its `api_key_env`

@@ -1491,6 +1491,64 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // The other half of a scheduler tick. `run --dry` answers "what is due";
+  // this answers "which of that may proceed without me", and answers it out
+  // loud, in one place, from scheduler.yml's `autonomy:` block alone.
+  //
+  // It enacts nothing. Splitting the classification out of the dispatch is
+  // the whole safety property: an operator can read what the policy would
+  // have let run, and argue with it, before any of it moves. So this appends
+  // no event, writes no worktree and starts no agent -- exactly the daemon's
+  // invariant, held by the command a person types too.
+  if (namespace === 'scheduler' && action === 'admit') {
+    const { computeProposals, loadSchedulerPolicy } = await import('./scheduler.js');
+    const { admitProposals } = await import('./autonomy.js');
+    // Kept out of the boot graph on purpose: db/projector.js reaches
+    // db/schema.js, and test/cliBoot.test.ts pins that `smith --help` never
+    // pays for it. A top-level import here would be invisible until that test
+    // failed (P9-2).
+    const { foldTasks } = await import('./db/projector.js');
+
+    const sessionId = requireFlag(flags, 'session');
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage, for the same reason `run` reads it: proposal idempotency is
+    // positional, so a session-scoped read from a continuation would classify
+    // proposals the parent already resolved.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const now = isoDateFlag(flags, 'now') ?? new Date();
+    // Read once and passed down both halves. `--policy` has to govern which
+    // proposals exist as well as who may say yes to them: a file that retuned
+    // `recheck.days_elapsed` but was consulted only for `autonomy:` would
+    // classify proposals the operator's own policy never made.
+    const policy = loadSchedulerPolicy(flags.policy);
+    const proposals = computeProposals({
+      events,
+      now,
+      policy,
+      ...(flags.project ? { projectDir: flags.project } : {}),
+    });
+
+    // A RecheckProposal names a task and no paths, so without this the
+    // security match would see an opaque id and clear a recheck of
+    // src/auth/session.ts. The claims come from the log, through the same
+    // fold every other reader uses.
+    const claimsByTask = new Map<string, readonly string[]>();
+    for (const task of foldTasks(events)) {
+      if (task.claims && task.claims.length > 0) claimsByTask.set(task.taskId, task.claims);
+    }
+
+    const admissions = admitProposals(proposals, policy.autonomy, {
+      // One list, read from crosscheck.yml rather than copied into
+      // scheduler.yml: promoting a word has to move the cross-check trigger
+      // and this gate together, or a keyword added in one place quietly
+      // stops meaning anything in the other.
+      securityKeywords: loadCrosscheckPolicy(flags.crosscheck).planQuorum.securityKeywords,
+      claimsByTask,
+    });
+    printJson({ admissions });
+    return 0;
+  }
+
   // The background watcher (Phase 10). Four verbs and one invariant: none of
   // them dispatches an agent, merges a branch or writes to a worktree. A
   // process that outlives the operator's terminal is the last place to relax

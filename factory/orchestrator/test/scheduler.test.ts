@@ -228,6 +228,91 @@ describe('parseSchedulerPolicy / loadSchedulerPolicy', () => {
     const policy = loadSchedulerPolicy(SCHEDULER_POLICY_PATH);
     expect(policy.recheck.mergeThreshold).toBeGreaterThan(0);
     expect(policy.growth.cadenceDays).toBeGreaterThan(0);
+    // Pinned, not merely parsed: this list is the ceiling on what runs
+    // without a person, so widening it should have to argue with a test.
+    expect(policy.autonomy.autoDispatchKinds).not.toContain('growth-review-due');
+    expect(policy.autonomy.autoDispatchRecheckReasons).not.toContain('low-confidence');
+  });
+
+  describe('the autonomy block', () => {
+    // Absent means off, and off means empty: a clone that deletes the block,
+    // or a scheduler.yml written before autonomy existed, must not inherit
+    // this repo's answer to "what may run without me". Every default here
+    // fails closed, so the only way to get auto-dispatch is to ask for it.
+    it('defaults to nothing being auto-dispatchable when the block is absent', () => {
+      const policy = parseSchedulerPolicy(
+        withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n'),
+      );
+      expect(policy.autonomy.enabled).toBe(false);
+      expect(policy.autonomy.autoDispatchKinds).toEqual([]);
+      expect(policy.autonomy.autoDispatchRecheckReasons).toEqual([]);
+      expect(policy.autonomy.confidenceFloor).toBe(0.8);
+    });
+
+    it('reads a declared block', () => {
+      const policy = parseSchedulerPolicy(`
+recheck:
+  merge_threshold: 3
+maintenance:
+  auto_schedule_confidence: 0.8
+growth:
+  cadence_days: 30
+autonomy:
+  enabled: true
+  auto_dispatch_kinds: [recheck, maintenance]
+  auto_dispatch_recheck_reasons: [merge-threshold, time-elapsed]
+  confidence_floor: 0.9
+`);
+      expect(policy.autonomy).toEqual({
+        enabled: true,
+        autoDispatchKinds: ['recheck', 'maintenance'],
+        autoDispatchRecheckReasons: ['merge-threshold', 'time-elapsed'],
+        confidenceFloor: 0.9,
+      });
+    });
+
+    // `auto_dispatch_kinds: recheck` (no brackets) spreads to
+    // ['r','e','c','h','e','c','k'] — seven kinds that match nothing. It
+    // would fail closed, which is the safe direction and exactly why it
+    // needs to be loud: silence here reads as "autonomy is on" while
+    // nothing is ever admitted.
+    it('refuses a bare string where a list belongs', () => {
+      expect(() =>
+        parseSchedulerPolicy(
+          withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n') +
+            'autonomy:\n  auto_dispatch_kinds: recheck\n',
+        ),
+      ).toThrow(/auto_dispatch_kinds/);
+    });
+
+    // A closed vocabulary, so a typo is knowable. `maintenence` would
+    // otherwise disable maintenance auto-dispatch in silence.
+    it('refuses a kind or reason outside the vocabulary', () => {
+      expect(() =>
+        parseSchedulerPolicy(
+          withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n') +
+            'autonomy:\n  auto_dispatch_kinds: [maintenence]\n',
+        ),
+      ).toThrow(/maintenence/);
+      expect(() =>
+        parseSchedulerPolicy(
+          withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n') +
+            'autonomy:\n  auto_dispatch_recheck_reasons: [whenever]\n',
+        ),
+      ).toThrow(/whenever/);
+    });
+
+    // Same trap parseSchedulerPolicy already documents for the lessons flag:
+    // YAML 1.2 reads `off` as the string "off", and every non-empty string is
+    // truthy, so an operator switching autonomy off would have switched it on.
+    it('refuses a non-boolean enabled', () => {
+      expect(() =>
+        parseSchedulerPolicy(
+          withKnobs('  merge_threshold: 3\n', '  cadence_days: 30\n') +
+            'autonomy:\n  enabled: "off"\n',
+        ),
+      ).toThrow(/autonomy.enabled/);
+    });
   });
 });
 
