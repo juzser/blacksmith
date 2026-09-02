@@ -23,6 +23,34 @@ than appearing in it.
 
 ### Added
 
+- `smith wave audit` — the read-back that says whether a wave admitted N wide
+  actually *ran* N wide. The factory's central claim is that plan tasks are
+  executed by many agents at once, and until now nothing in the repo could
+  check it: `wave next` proposes a wave and `wave check` admits one, both
+  statements about the future, and `wave-admitted` records the width that was
+  *permitted*. A dispatcher that admits three tasks and then runs them one
+  after another wrote exactly the same log as one that ran all three together.
+  The evidence was already on the log, so this is a fold and not a new table —
+  `dispatch_decision` says when an agent went live, its terminal event says
+  when it stopped, and `agents-registry.ts` already folds that pair into
+  intervals (reusing it rather than reading raw dispatches is what keeps a
+  superseded or `epic-closed`-abandoned agent from leaving an interval open
+  forever and scoring every later wave as parallel). Peak overlap against
+  declared width gives the verdict. A task that ends at the instant the next
+  begins counts as a handoff and not as concurrency, because otherwise a
+  strictly serial dispatcher would score `parallel` on nothing but the clock's
+  granularity — the exact lie the command exists to catch. `serialized` (work
+  recorded, never once overlapping) and `unobserved` (a wave admitted with no
+  dispatch under it at all) are different facts and get exit `1` and exit `2`
+  respectively: scoring "cannot tell" as "ran narrow" would manufacture a
+  broken factory out of a `--state-dir` pointed at the wrong place. `partial`
+  deliberately does not fail — three admitted and two in flight is the factory
+  working, and an exit code that cried about it would be routed to `/dev/null`
+  inside a week, taking the `serialized` signal with it. Reads the whole
+  lineage rather than one session, for the reason `wave next` and the budget
+  check already do (D-119): a wave admitted in session 1 whose agents ran in
+  session 2 would otherwise read as `unobserved`, reporting the factory broken
+  on nothing but where the operator was standing. Writes nothing.
 - `smith judge escalations` — the ledger of cross-provider disagreements the
   operator is still owed. Every quorum already wrote a `quorum-decision` event
   on `escalate`, and nothing read them back: the gate returned its escalation

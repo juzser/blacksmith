@@ -647,6 +647,17 @@ below the floor.
    is the one thing that cannot be done in parallel, and it is already the
    one thing this playbook never asks you to.
 
+   **Then check that it did.** Once the wave's tasks reach a terminal
+   state, `smith wave audit --session <id> --epic <epic>` reads the log
+   back and reports the width the wave actually ran at, not the width it
+   was admitted at. Exit `1` is a wave whose tasks never once overlapped —
+   the three rules above were not followed, and the log will say so long
+   after this session has forgotten. Exit `2` means the wave was admitted
+   and no dispatch was recorded under it, which is usually the wrong
+   `--state-dir` rather than a stalled run. Ask before reporting the wave
+   done; a green gate on serialized work is exactly the outcome the
+   playbook above is written to prevent.
+
    Concurrency and the event log: `smith` reads (`wave next`, `status`,
    `budget alarm`) are free to run at any time. Writes to one session log are
    serialized by the log itself across processes, so a burst of parallel
@@ -1133,16 +1144,30 @@ pending proposals lets them sit invisible instead of surfacing them.
    `mode: shadow` disagreement, which the gate outcome never reported to
    anyone). Resolving one is an operator reading, never this session
    deciding on its own which provider was right.
-5. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
+5. **Read back the parallelism.** `smith wave audit --session <id>
+   [--epic <id>]` folds every `wave-admitted` against the
+   `dispatch_decision` intervals underneath it and says whether a wave
+   admitted N wide actually *ran* N wide. `wave check` only ever certified
+   that it *could*, so without this the digest reports a factory running
+   many agents in parallel on the strength of a permission slip. Exit `1`
+   is a wave whose tasks never once overlapped — report it with the epic
+   id, because a serialized run is the failure this whole design exists to
+   prevent, not a slow day. Exit `2` is a wave admitted with no dispatch
+   under it at all: that is "cannot tell", not "ran narrow", and it usually
+   means the wrong `--state-dir` or a run whose agents wrote elsewhere —
+   check before reporting it as a stall. A `partial` verdict is **not** a
+   finding; put `widest` in the digest as the one number that says how wide
+   this factory has ever actually run.
+6. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
    JSON plus step 2's admissions as input: shipped / in-flight / blocked /
    budget burn / next milestone / **N rechecks pending, M maintenance
    bumps auto-schedulable** (never silently dropped), ≤300 words, linking
    into the dashboard (`smith ui serve`'s URL) — never paraphrase numbers
    the query didn't return.
-6. This fires automatically on a weekly cadence and immediately on any
+7. This fires automatically on a weekly cadence and immediately on any
    milestone completion (architecture §12) — for an ad hoc `/bs report`,
    the same digest, just on demand.
-7. Sending it to Slack is an **outbound send** — the permission layer
+8. Sending it to Slack is an **outbound send** — the permission layer
    prompts on the `curl`/webhook call; never fire it without that prompt
    resolving (`docs/standards/guardrails.md` "Deploy + outbound"). Print
    the digest to the operator regardless, whether or not the Slack send is

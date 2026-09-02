@@ -135,6 +135,15 @@ export const COMMANDS: readonly CommandDoc[] = [
       'the checkout the symbol graph is read from.',
   },
   {
+    command: 'wave audit',
+    positionals: '',
+    flags: '--session <id> [--epic <id>] [--state-dir <dir>]',
+    summary:
+      'Read the log back and say whether the waves that were admitted N wide actually ran N ' +
+      'wide, or were dispatched one task at a time. Reads, never writes. Exit 1 on a wave that ' +
+      'ran strictly serially, 2 when a wave was admitted and the log shows no work for it.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',
