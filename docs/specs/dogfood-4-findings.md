@@ -8876,18 +8876,30 @@ indistinguishable silence, one field over.
 
 ### Named, not fixed
 
-- There is still no command that lists open escalations from the log. The
+- ~~There is still no command that lists open escalations from the log.~~ The
   `quorum-decision` event is written on every case, including the escalating
   ones, and `sameMistakeKpi.ts` reads that event type for its KPI — but nothing
   answers "which disagreements is the operator still owed?". The gate outcome
   is the only surface, which is why dropping it from two of three outcomes
   mattered as much as it did. `escalation.ts` is a different ladder entirely
   (the `budgets.yml` model tier), not this.
-- `crossCheckFinding` pushes an escalation only when `hadActiveJudge`, so a
-  shadow-only disagreement is recorded in the event and reported nowhere. That
-  is deliberate — shadow mode is meant to be silent — but it means `[]` on the
-  outcome does not distinguish "nothing disagreed" from "the disagreement was
-  shadow-only".
+  **Answered 2026-09-02** by `smith judge escalations`
+  (`src/quorumEscalations.ts`), which folds the lineage for the cases whose
+  latest word was `escalate`. It is a fold and not a projection table because
+  every fact it prints was already on the event; the three emitters' payload
+  shapes are told apart by the boolean each carries alone.
+- ~~`crossCheckFinding` pushes an escalation only when `hadActiveJudge`, so a
+  shadow-only disagreement is recorded in the event and reported nowhere.~~
+  That is deliberate — shadow mode is meant to be silent — but it means `[]`
+  on the outcome does not distinguish "nothing disagreed" from "the
+  disagreement was shadow-only".
+  **Answered 2026-09-02 by the same command, and this was the sharper half.**
+  `gate.ts` is unchanged: shadow mode stays silent *on the gate outcome*, which
+  is the contract it was written to. What changed is that the log is now read,
+  so a shadow-only disagreement has a surface it never had — and it arrives
+  with `held: false`, the flag for a case the quorum could not settle while the
+  work proceeded anyway. Silence on the outcome and silence everywhere are
+  different things, and only the second one was a defect.
 - `resolveTaxonomyAndSchemas` populates its module-level cache from disk even
   when the caller supplied `opts.taxonomy` and `opts.schemas`, so an injected
   pair still pays a `loadTaxonomy()` and still throws if the repo's taxonomy is

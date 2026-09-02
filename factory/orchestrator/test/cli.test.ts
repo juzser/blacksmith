@@ -2004,6 +2004,121 @@ describe('cli.ts (built binary)', () => {
     expect(growth.proposal.cadenceDays).toBe(36500);
   });
 
+  // D-201's tail. `quorum-decision` has been written on every cross-check case
+  // since the gate shipped and nothing read one back, so "which disagreements
+  // is the operator still owed?" had no answer at all. This is the answer, and
+  // the exit code is the half a script can read: 1 is a disagreement to settle,
+  // 2 is a config that gated nothing, and they are different jobs.
+  it('judge escalations lists open disagreements and scores them', () => {
+    const eventsDir = path.join(scratchDir, 'escalations-events');
+
+    function seed(sessionId: string, payloads: Record<string, unknown>[]): void {
+      const root = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(root.status).toBe(0);
+      const rootId = JSON.parse(root.stdout).event_id as string;
+
+      for (const payload of payloads) {
+        const appended = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'quorum-decision',
+            task_id: String(payload.task_id),
+            plan_version: 1,
+            causal_parent: rootId,
+            payload,
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(appended.status).toBe(0);
+      }
+    }
+
+    function escalation(over: Record<string, unknown>): Record<string, unknown> {
+      return {
+        task_id: 'epic-1/task-1',
+        finding_id: 'f1',
+        fingerprint: 'fp-1',
+        trigger_reason: 'severity-s1',
+        finder_provider: 'claude',
+        outcome: 'escalate',
+        escalation_reason: 'disagreement',
+        rationales: [{ provider: 'codex', verdict: 'refute', rationale: 'guarded above' }],
+        participants: [
+          {
+            provider: 'claude',
+            mode: 'native',
+            ok: true,
+            verdict: 'confirm',
+            excluded_as_finder: true,
+          },
+        ],
+        blocks: true,
+        ...over,
+      };
+    }
+
+    const mixed = `cli-esc-mixed-${Date.now()}`;
+    seed(mixed, [
+      escalation({}),
+      escalation({ fingerprint: 'fp-2', escalation_reason: 'insufficient-providers' }),
+      escalation({ fingerprint: 'fp-3', escalation_reason: 'insufficient-providers' }),
+      // Settled on a later run, so it is not owed any more.
+      escalation({ fingerprint: 'fp-4' }),
+      escalation({
+        fingerprint: 'fp-4',
+        outcome: 'decided',
+        escalation_reason: null,
+        blocks: false,
+      }),
+    ]);
+
+    const run = runCli(['judge', 'escalations', '--session', mixed, '--state-dir', eventsDir]);
+    expect(run.status).toBe(1);
+    const summary = JSON.parse(run.stdout);
+    expect(summary.disagreements).toHaveLength(1);
+    expect(summary.disagreements[0].fingerprint).toBe('fp-1');
+    expect(summary.disagreements[0].held).toBe(true);
+    expect(summary.ungated.count).toBe(2);
+    expect(summary.ungated.hint).toContain('crosscheck.yml');
+
+    // Nothing gated is not the same as nothing wrong, and 0 would have said it was.
+    const ungatedOnly = `cli-esc-ungated-${Date.now()}`;
+    seed(ungatedOnly, [escalation({ escalation_reason: 'insufficient-providers' })]);
+    const second = runCli([
+      'judge',
+      'escalations',
+      '--session',
+      ungatedOnly,
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(second.status).toBe(2);
+    expect(JSON.parse(second.stdout).disagreements).toEqual([]);
+
+    const clean = `cli-esc-clean-${Date.now()}`;
+    seed(clean, []);
+    const third = runCli(['judge', 'escalations', '--session', clean, '--state-dir', eventsDir]);
+    expect(third.status).toBe(0);
+    expect(JSON.parse(third.stdout).ungated.count).toBe(0);
+  });
+
   // D-209. Three flags are documented `<iso>` -- `scheduler run --now`,
   // `dream --since` and `stats providers --since` -- and not one of them read
   // the string it was handed. usage.ts says the flag column is "Documentation

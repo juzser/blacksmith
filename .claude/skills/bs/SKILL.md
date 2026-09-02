@@ -1118,16 +1118,31 @@ pending proposals lets them sit invisible instead of surfacing them.
      nothing in the file can lift.
 3. Gather `smith stats overview [--session <id>]` and `smith stats roadmap
    [--session <id>]` (milestone progress + budget burn per milestone).
-4. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
+4. **Read back the disagreements.** `smith judge escalations --session
+   <id>` folds the lineage for `quorum-decision` events whose latest word
+   was `escalate` — a gate finding, an epic verdict or a plan critique the
+   cross-provider quorum could not settle. It exits `1` on an open
+   `disagreement` and `2` when the only thing open is
+   `insufficient-providers`, so **exit 2 is not a failure to fix here**: it
+   is one fact about `crosscheck.yml`'s gating arithmetic, already collapsed
+   to `ungated.count` plus a hint, and it belongs in the digest as a single
+   line. Report each `disagreement` individually — two providers read the
+   same thing and said different words, and nothing else in the pipeline
+   will raise it again. An entry with `held: false` goes first: the quorum
+   did not settle it and the work went ahead regardless (that includes a
+   `mode: shadow` disagreement, which the gate outcome never reported to
+   anyone). Resolving one is an operator reading, never this session
+   deciding on its own which provider was right.
+5. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
    JSON plus step 2's admissions as input: shipped / in-flight / blocked /
    budget burn / next milestone / **N rechecks pending, M maintenance
    bumps auto-schedulable** (never silently dropped), ≤300 words, linking
    into the dashboard (`smith ui serve`'s URL) — never paraphrase numbers
    the query didn't return.
-5. This fires automatically on a weekly cadence and immediately on any
+6. This fires automatically on a weekly cadence and immediately on any
    milestone completion (architecture §12) — for an ad hoc `/bs report`,
    the same digest, just on demand.
-6. Sending it to Slack is an **outbound send** — the permission layer
+7. Sending it to Slack is an **outbound send** — the permission layer
    prompts on the `curl`/webhook call; never fire it without that prompt
    resolving (`docs/standards/guardrails.md` "Deploy + outbound"). Print
    the digest to the operator regardless, whether or not the Slack send is

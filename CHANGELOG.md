@@ -23,6 +23,30 @@ than appearing in it.
 
 ### Added
 
+- `smith judge escalations` — the ledger of cross-provider disagreements the
+  operator is still owed. Every quorum already wrote a `quorum-decision` event
+  on `escalate`, and nothing read them back: the gate returned its escalation
+  on the run's outcome, which is a moment and not a ledger, and it returned one
+  to the caller only when an *active* judge took part — so a disagreement
+  reached entirely in `mode: shadow` was recorded in the log and reported to
+  nobody. This is a fold over the lineage rather than a projection table,
+  because every fact it prints was already on the event and a second copy is a
+  copy that can disagree with the first, and the lineage rather than one
+  session because an escalation raised in one session is answered in the next
+  (the same reason `judge outstanding` reads it that way). The three emitters
+  write three payload shapes around one core, so they are told apart by the
+  boolean each carries alone — `blocks`, `ready`, `sound` — and those mean
+  opposite things, so they are normalised into one `held`: an escalation with
+  `held: false` is the one to read first, because the quorum could not settle
+  the case and the pipeline went ahead regardless. Findings are keyed on
+  `fingerprint`, not `finding_id`, so two runs of one gate report one
+  disagreement once. `disagreement` is listed case by case; the
+  `insufficient-providers` cases are collapsed to a count and a hint, because
+  that is one fact about `crosscheck.yml` repeated once per finding and listing
+  it would bury the disagreements that are about the code. Exit `2` for that
+  case exists so it cannot read as clean: with `min_providers: 2` and one
+  active external, every finding escalates ungated, and answering `0` there
+  would report the absence of a check as the absence of a problem.
 - `scheduler.yml` `autonomy:` and `smith scheduler admit` — a name for what
   the scheduler may run without a person. Until now every proposal waited on
   the operator regardless of what it was, which is safe and does not scale: a

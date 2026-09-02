@@ -441,6 +441,32 @@ Leave it unset (the shipped default) if you have not made that choice. It
 is not a way to make one active provider gate; there is no such way short
 of a second provider.
 
+### Reading back what that arithmetic cost — `smith judge escalations`
+
+`smith judge preflight` tells you *before* the run that a one-active-external
+configuration cannot gate. This tells you afterwards what it produced:
+
+```bash
+smith judge escalations --session <session-id>
+```
+
+It folds the lineage for `quorum-decision` events whose latest word was
+`escalate` and splits them by what answering costs. `disagreements` is the
+list a person has to read — two providers looked and said different words.
+`ungated` is `insufficient-providers`, collapsed to a count and a hint,
+because that is not one problem per finding: it is *this* section's arithmetic
+reported once per finding. Exit `1` on an open disagreement, **`2` when
+nothing was gated at all**, `0` only when there is genuinely nothing open — so
+a box running with one active external never reads as clean by accident. Full
+description in `docs/guide/operator-guide.md` §3c.
+
+The other reason it exists lives in `mode: shadow`. Promotion (§4) is what
+makes an escalation reach the caller: `gate.ts` returns one only when an
+active judge took part, so a shadow provider that flatly contradicted the
+native reviewer wrote its disagreement to the log and told nobody. During
+calibration (§3) that is the reading you want, and this is the command that
+surfaces it.
+
 ## 5. The independent finder — the additive direction
 
 Sections 1–4 describe a **subtractive** tier. `quorum.ts`'s vocabulary is
