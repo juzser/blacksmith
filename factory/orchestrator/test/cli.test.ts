@@ -3539,6 +3539,119 @@ describe('cli.ts (built binary)', () => {
       expect(JSON.parse(narrowed.stdout).waves).toEqual([]);
     });
 
+    // The fourth bracket, and the only one that is not about a session. The
+    // three above all answer "the log I am standing in"; this one answers "this
+    // workshop", and the flag semantics ARE the feature — so they are checked
+    // through the real CLI against a state dir holding two unrelated lineages,
+    // which is the only place the difference between the two scopes exists.
+    it('epic width: folds every session by default, and one lineage under --session', () => {
+      const eventsDir = path.join(
+        scratchDir,
+        `epic-width-${Math.random().toString(36).slice(2, 8)}`,
+      );
+
+      function closed(sessionId: string, epicId: string, concurrency: unknown): void {
+        const root = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'user',
+            event_type: 'session-start',
+            plan_version: 1,
+            causal_parent: null,
+            payload: {},
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(root.status).toBe(0);
+
+        const close = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'epic-closed',
+            plan_version: 1,
+            causal_parent: `${sessionId}#0`,
+            payload: {
+              epic_id: epicId,
+              closed_by: 'verdict',
+              machine_verdict: 'ready',
+              summary: { concurrency },
+            },
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(close.status).toBe(0);
+      }
+
+      const width = (...rest: string[]) =>
+        runCli(['epic', 'width', '--state-dir', eventsDir, ...rest]);
+
+      const counts = (over: Partial<Record<string, number>>) => ({
+        parallel: 0,
+        partial: 0,
+        serialized: 0,
+        single: 0,
+        unobserved: 0,
+        ...over,
+      });
+
+      closed('cli-width-wide', 'epic-wide', {
+        waves: 1,
+        verdicts: counts({ parallel: 1 }),
+        widest: { declared: 3, observed: 3 },
+        unobserved: [],
+        problem: null,
+      });
+      closed('cli-width-narrow', 'epic-narrow', {
+        waves: 1,
+        verdicts: counts({ serialized: 1 }),
+        widest: { declared: 2, observed: 1 },
+        unobserved: [],
+        problem: null,
+      });
+
+      // No --session: both lineages, and the narrow one still fails the run.
+      // A default scoped to one session would have reported this workshop as
+      // healthy or as broken depending on which terminal the operator was in.
+      const all = width();
+      expect(all.status).toBe(1);
+      const allSummary = JSON.parse(all.stdout);
+      expect(allSummary.epics.map((e: { epicId: string }) => e.epicId).sort()).toEqual([
+        'epic-narrow',
+        'epic-wide',
+      ]);
+      expect(allSummary.serialized).toEqual(['epic-narrow']);
+      expect(allSummary.widest).toEqual({ declared: 3, observed: 3 });
+
+      // --session narrows to one lineage, which is how an operator asks the
+      // old question. The wide session alone passes; the narrow one alone
+      // still fails, so the scope changes what is counted and not the rule.
+      const wide = width('--session', 'cli-width-wide');
+      expect(wide.status).toBe(0);
+      expect(JSON.parse(wide.stdout).epics.map((e: { epicId: string }) => e.epicId)).toEqual([
+        'epic-wide',
+      ]);
+
+      const narrow = width('--session', 'cli-width-narrow');
+      expect(narrow.status).toBe(1);
+      expect(JSON.parse(narrow.stdout).serialized).toEqual(['epic-narrow']);
+
+      // An unknown session is a typo, not an empty factory: reported as the
+      // error it is rather than folded into a confident "nothing here". Checked
+      // on the error code and not on the exit status, because a missing session
+      // and a serialized epic both leave 1 — the envelope is what tells them
+      // apart, and an operator scripting this reads the same field.
+      const missing = width('--session', 'cli-width-nobody');
+      expect(missing.status).not.toBe(0);
+      expect(JSON.parse(missing.stdout).error.code).toBe('events.unknown-session');
+    });
+
     // The third bracket on parallelism, driven through the real CLI. `wave
     // check` certifies a wave someone already picked; `wave audit` reads the
     // log back afterwards. Neither can say whether the plan could EVER have

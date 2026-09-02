@@ -479,6 +479,17 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Write the close down. A hold closes only with an operator rationale, recorded.',
   },
   {
+    command: 'epic width',
+    positionals: '',
+    flags: '[--session <id>] [--state-dir <dir>]',
+    summary:
+      'Read every epic close back and say whether this factory builds in parallel or one epic ' +
+      'at a time. Reads, never writes. Without --session it folds every session in the state ' +
+      'dir, because the question is about the workshop and not about where you are standing; ' +
+      'with one it folds that lineage alone. Exit 1 on a closed epic whose record holds a wave ' +
+      'admitted wide that ran narrow, 2 when nothing could be judged.',
+  },
+  {
     command: 'findings raise',
     positionals: '',
     flags: `[--task <task-id>] [--scope <diff|spec>] [--plan <file>] [--findings <file>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] ${EVENTS_DIR}`,
