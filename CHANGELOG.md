@@ -23,6 +23,21 @@ than appearing in it.
 
 ### Added
 
+- The daemon now knows **how long** each finding has been standing. Every
+  finding carries `firstSeen` and `isNew`, and a tick reports `newAttention`
+  beside `attention`: the number worth waking someone for, as against the
+  number worth looking at. Until now the watcher recomputed everything from
+  the log each tick and overwrote the last report, so a break thirty seconds
+  old and one six days old read identically — the very distinction
+  `FindingSeverity` draws one level up, missing at the level an operator
+  actually triages on. Two ticks agree a finding is the same one when `kind`,
+  `sessionId` and `subject` match; `detail` is excluded because it carries the
+  moving parts, and including it would restart the clock on the
+  longest-standing problems most often. The memory is one small, disposable
+  `state/daemon/findings.json` — missing or corrupt reads as empty rather than
+  failing a tick, because a watchdog that dies over its own scratch file is
+  silent exactly when something is wrong.
+
 - `smith epic width` — the first command in this repo that is not scoped to a
   session. Four commands now bracket parallelism (`wave schedule`, `wave
   check`, `wave audit`, and the width `epic close` writes permanently into

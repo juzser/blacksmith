@@ -94,10 +94,13 @@ Flags worth knowing:
       "severity": "attention",
       "sessionId": "dogfood-envkit-1",
       "subject": "envkit-config-loader",
-      "detail": "alarm: 412,000 tokens measured across 4 of 6 task(s), 486,000 projected, against a 400,000 alarm and a 500,000 cap. Measured spend alone has reached the alarm — re-plan the remaining work to fit, or ask the operator to extend. Unrecorded spend can only add to this."
+      "detail": "alarm: 412,000 tokens measured across 4 of 6 task(s), 486,000 projected, against a 400,000 alarm and a 500,000 cap. Measured spend alone has reached the alarm — re-plan the remaining work to fit, or ask the operator to extend. Unrecorded spend can only add to this.",
+      "firstSeen": "2026-08-25T14:00:00.000Z",
+      "isNew": false
     }
   ],
   "attention": 1,
+  "newAttention": 0,
   "projected": 1
 }
 ```
@@ -124,6 +127,31 @@ The `info` / `attention` split is the whole point of the `attention` count:
 `attention > 0` means something is wrong **now**, and it stops meaning that the
 moment a routine 30-day cadence is filed under the same word.
 
+### How long a finding has been standing
+
+Every finding also carries `firstSeen` and `isNew`, and the report carries
+`newAttention` beside `attention`. The distinction is the one you triage on: a
+daemon ticking every five minutes reports the same standing alarm 288 times a
+day, so `attention` is the number worth **looking at** and `newAttention` the
+number worth **waking someone for**. An alert rule wants `newAttention > 0`; a
+morning review wants `attention` and the oldest `firstSeen`.
+
+Two findings count as the same finding across ticks when their `kind`,
+`sessionId` and `subject` agree. `detail` is deliberately excluded — it carries
+the moving parts, and a `recheck` whose "N day(s) elapsed" climbs daily would
+otherwise report itself as new every day it stood. `severity` is excluded too:
+a finding that changes severity has not changed what it is about.
+
+Two consequences worth knowing before you build an alert on this:
+
+- `unattributed-spend` and `maintenance` put a **count in their subject**
+  ("4 dispatch(es)", "3 package(s)"), so a growing count reads as a new
+  finding. That is intended — the count moved because something new went
+  unattributed or another package fell behind, and that happened *now*.
+- A finding that **cleared and came back is new again**. Its clock is not
+  restored from before the fix, because "broken since March" is false about a
+  factory that was fixed in April and broke again this morning.
+
 `spec-change` is the one kind whose severity the *worker* chose: `blocking`
 means the task cannot go further without the amendment, so an unanswered
 blocking proposal is a stalled task rather than a queue item. The finding says
@@ -138,13 +166,14 @@ something is wrong.
 
 ## 4. Files the daemon owns
 
-All three live in `--dir` (default `state/daemon/`, git-ignored with the rest
+All four live in `--dir` (default `state/daemon/`, git-ignored with the rest
 of `state/`):
 
 | File | Written by | Lifetime |
 | --- | --- | --- |
 | `daemon.pid` | `run`, at startup | Removed by the daemon's own exit path, or by `stop`. |
 | `status.json` | `run`, after every tick | Overwritten each tick; survives the daemon. |
+| `findings.json` | `run`, after every tick | Overwritten each tick; survives the daemon. |
 | `daemon.log` | `start` only | Appended forever — see the rotation note below. |
 
 `daemon.pid` is a JSON document (`{pid, startedAt, intervalSeconds}`), taken
@@ -155,6 +184,15 @@ human to delete a file before the factory can watch itself again.
 
 `status.json` is written tmp-then-rename, so a reader polling it never sees
 half a document.
+
+`findings.json` is the daemon's only memory: finding identity to the timestamp
+it was first seen, and nothing else. It is what makes `firstSeen` possible at
+all, because the event log records what *happened* and not what the watcher
+*noticed*, so this one fact cannot be recomputed from scratch the way every
+other fact in this factory can. It is also deliberately disposable — deleting
+it costs one tick in which every standing finding reads as new, and nothing
+else. A missing or corrupt file is read as an empty memory rather than failing
+the tick, for the same reason `unreadable-log` is a finding and not a crash.
 
 `daemon.log` is only produced by `smith daemon start`, and **nothing rotates
 it**. Under launchd or systemd, let the service manager own the output stream

@@ -33,6 +33,7 @@ import {
   type SessionLog,
   type StoredEvent,
 } from './events.js';
+import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
 import { computeProposals, loadSchedulerPolicy, type SchedulerPolicy } from './scheduler.js';
 import { foldSpecChanges } from './specChange.js';
@@ -44,6 +45,7 @@ const ROOT_EVENT_TYPE = 'session-start';
 
 const LOCK_FILE = 'daemon.pid';
 const STATUS_FILE = 'status.json';
+const MEMORY_FILE = 'findings.json';
 
 export const DEFAULT_INTERVAL_SECONDS = 300;
 
@@ -255,15 +257,29 @@ export interface TickReport {
   at: string;
   /** Lineage leaves inspected, sorted. An ancestor session is covered by its leaf. */
   sessions: string[];
-  findings: DaemonFinding[];
-  /** How many findings are `attention` — the number worth waking someone for. */
+  /** Each finding, dated against what the previous tick remembered. */
+  findings: AgedFinding[];
+  /** How many findings are `attention` — the number worth looking at. */
   attention: number;
+  /**
+   * How many `attention` findings this tick is the first to see — the number
+   * worth WAKING someone for, as against `attention`, the number worth
+   * looking at. A daemon ticking every five minutes reports the same standing
+   * alarm 288 times a day, and an operator who has already seen it needs the
+   * two counts kept apart to tell today's break from last week's.
+   */
+  newAttention: number;
   /** Sessions whose SQLite projection this tick refreshed. */
   projected: number;
 }
 
 export interface TickOptions extends InspectOptions {
   stateDir?: string;
+  /**
+   * What the last tick saw. Omitted, every finding reads as new — which is the
+   * right answer for a one-off `--once` run with nothing before it.
+   */
+  memory?: FindingMemory;
   /** Refresh the read-model for every inspected session (default true). */
   projectDb?: boolean;
   dbPath?: string;
@@ -377,11 +393,13 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     findings.push(...inspectFactory(mergeSessionLogs(all), inspectOpts));
   }
 
+  const aged = ageFindings(opts.memory ?? {}, findings, now);
   return {
     at: now.toISOString(),
     sessions: leaves,
-    findings,
-    attention: findings.filter((f) => f.severity === 'attention').length,
+    findings: aged,
+    attention: aged.filter((f) => f.severity === 'attention').length,
+    newAttention: aged.filter((f) => f.severity === 'attention' && f.isNew).length,
     projected,
   };
 }
@@ -495,6 +513,36 @@ export function readStatus(dir: string): TickReport | null {
   return readJsonFile<TickReport>(statusPath(dir));
 }
 
+// ---------------------------------------------------------------------------
+// The finding memory
+// ---------------------------------------------------------------------------
+
+export function memoryPath(dir: string): string {
+  return path.join(dir, MEMORY_FILE);
+}
+
+/**
+ * The only state this daemon carries across ticks, and deliberately the least
+ * it could carry: identity -> when it was first seen.
+ *
+ * Missing or corrupt reads as empty rather than throwing, for the same reason
+ * `unreadable-log` is a finding and not a crash. A watchdog that dies over its
+ * own scratch file is silent exactly when something is wrong, and the cost of
+ * losing this one is a single tick that calls every standing finding new.
+ */
+export function readFindingMemory(dir: string): FindingMemory {
+  return readJsonFile<FindingMemory>(memoryPath(dir)) ?? {};
+}
+
+/** tmp-then-rename, like the status file: a half-written memory reads as none. */
+export function writeFindingMemory(dir: string, memory: FindingMemory): void {
+  mkdirSync(dir, { recursive: true });
+  const target = memoryPath(dir);
+  const tmp = `${target}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(memory, null, 2)}\n`, 'utf8');
+  renameSync(tmp, target);
+}
+
 export interface DaemonStatusReport {
   running: boolean;
   dir: string;
@@ -577,18 +625,24 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<TickReport[]> {
     ...(opts.dbOpts === undefined ? {} : { dbOpts: opts.dbOpts }),
   };
 
+  // Read from disk rather than held in a variable, so a daemon restarted by
+  // cron or by the operator picks up where the last process stopped. A tick
+  // knows nothing about the interval it runs on; this is what joins two.
+  const tickWithMemory = async (): Promise<TickReport> => {
+    const report = await tick({ ...tickOptions, memory: readFindingMemory(opts.dir) });
+    writeStatus(opts.dir, report);
+    writeFindingMemory(opts.dir, memoryOf(report.findings));
+    return report;
+  };
+
   const reports: TickReport[] = [];
   try {
     if (opts.once === true) {
-      const report = await tick(tickOptions);
-      writeStatus(opts.dir, report);
-      reports.push(report);
+      reports.push(await tickWithMemory());
       return reports;
     }
     while (shouldContinue()) {
-      const report = await tick(tickOptions);
-      writeStatus(opts.dir, report);
-      reports.push(report);
+      reports.push(await tickWithMemory());
       await sleep(intervalSeconds * 1000);
     }
     return reports;

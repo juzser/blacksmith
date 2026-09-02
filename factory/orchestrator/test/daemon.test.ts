@@ -12,15 +12,18 @@ import {
   inspectFactory,
   inspectSession,
   processIsAlive,
+  readFindingMemory,
   readLock,
   readStatus,
   releaseLock,
   runDaemon,
   runTick,
   stopDaemon,
+  writeFindingMemory,
   writeStatus,
 } from '../src/daemon.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
+import { findingIdentity } from '../src/findingAge.js';
 import type { SchedulerPolicy } from '../src/scheduler.js';
 
 // ---------------------------------------------------------------------------
@@ -433,9 +436,12 @@ describe('the status file', () => {
           sessionId: 'sess-1',
           subject: 'epic-1',
           detail: 'over',
+          firstSeen: NOW.toISOString(),
+          isNew: true,
         },
       ],
       attention: 1,
+      newAttention: 1,
       projected: 0,
     };
     writeStatus(dir, report);
@@ -451,10 +457,123 @@ describe('the status file', () => {
       sessions: [],
       findings: [],
       attention: 0,
+      newAttention: 0,
       projected: 0,
     });
     expect(existsSync(path.join(dir, 'status.json.tmp'))).toBe(false);
     expect(JSON.parse(readFileSync(path.join(dir, 'status.json'), 'utf8')).attention).toBe(0);
+  });
+});
+
+describe('how long a finding has been standing', () => {
+  // The watcher recomputes everything from the log every tick and overwrites
+  // the last report, so without a memory it can say what is wrong and never
+  // how long. These are about the one file that survives a tick.
+  const OPTS = { now: NOW, budgetPolicy: BUDGET, schedulerPolicy: SCHEDULER, projectDb: false };
+
+  const stateDir = (): string => {
+    const events = path.join(dir, 'events');
+    mkdirSync(events, { recursive: true });
+    return events;
+  };
+
+  /** A log that cannot be parsed — the cheapest way to make a tick find something. */
+  const brokenLog = (): string => {
+    const events = stateDir();
+    writeFileSync(path.join(events, 'sess-bad.jsonl'), '{ not json\n', 'utf8');
+    return events;
+  };
+
+  it('dates every finding to now on the first tick, and counts them all as new', async () => {
+    const report = await runTick({ ...OPTS, stateDir: brokenLog() });
+    const bad = report.findings.filter((f) => f.kind === 'unreadable-log');
+
+    expect(bad).toHaveLength(1);
+    expect(bad[0]?.firstSeen).toBe(NOW.toISOString());
+    expect(bad[0]?.isNew).toBe(true);
+    // On a first tick the two counts agree by definition. They stop agreeing
+    // the moment anything survives a tick, which is the point of having both:
+    // `attention` is the number worth looking at, `newAttention` the number
+    // worth waking someone for.
+    expect(report.newAttention).toBe(report.attention);
+  });
+
+  it('keeps the original date for a finding that was already standing', async () => {
+    const events = brokenLog();
+    const first = await runTick({ ...OPTS, stateDir: events });
+    const memory = {
+      [findingIdentity(first.findings[0] as (typeof first.findings)[number])]:
+        '2026-08-01T00:00:00.000Z',
+    };
+
+    const second = await runTick({ ...OPTS, stateDir: events, memory });
+    expect(second.findings[0]?.firstSeen).toBe('2026-08-01T00:00:00.000Z');
+    expect(second.findings[0]?.isNew).toBe(false);
+    // Still worth looking at, no longer worth waking for.
+    expect(second.attention).toBe(1);
+    expect(second.newAttention).toBe(0);
+  });
+
+  it('reads an absent memory as an empty one', () => {
+    // The first tick a daemon ever runs has no file to read, and that is not
+    // an error condition.
+    expect(readFindingMemory(dir)).toEqual({});
+  });
+
+  it('reads a corrupt memory as an empty one rather than failing the tick', () => {
+    // Same doctrine as `unreadable-log`: a watchdog that dies on a bad file is
+    // silent exactly when something is wrong. This file is disposable — losing
+    // it costs one tick of ages and nothing else — so it must never be able to
+    // stop a tick that would otherwise report a real problem.
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'findings.json'), '{ not json', 'utf8');
+    expect(readFindingMemory(dir)).toEqual({});
+  });
+
+  it('round-trips a memory through the disk', () => {
+    const memory = { '["budget","sess-1","epic-1"]': '2026-08-01T00:00:00.000Z' };
+    writeFindingMemory(dir, memory);
+    expect(readFindingMemory(dir)).toEqual(memory);
+    expect(existsSync(path.join(dir, 'findings.json.tmp'))).toBe(false);
+  });
+
+  it('carries the memory from one tick of the loop to the next', async () => {
+    // The loop is what makes the memory real: runTick is handed a memory and
+    // returns dated findings, and nothing else joins the two across an
+    // interval.
+    const events = brokenLog();
+    const reports = await runDaemon({
+      dir,
+      stateDir: events,
+      intervalSeconds: 0,
+      pid: 4242,
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+      projectDb: false,
+      isAlive: () => false,
+      sleep: async () => undefined,
+      shouldContinue: (() => {
+        let ticks = 0;
+        return () => ++ticks <= 2;
+      })(),
+    });
+
+    expect(reports).toHaveLength(2);
+    expect(reports[0]?.findings[0]?.isNew).toBe(true);
+    expect(reports[1]?.findings[0]?.isNew).toBe(false);
+    expect(reports[1]?.findings[0]?.firstSeen).toBe(reports[0]?.findings[0]?.firstSeen);
+    expect(reports[1]?.newAttention).toBe(0);
+  });
+
+  it('forgets a finding that has cleared, so its return reads as new', async () => {
+    const events = brokenLog();
+    const first = await runTick({ ...OPTS, stateDir: events });
+    writeFindingMemory(dir, {});
+
+    const back = await runTick({ ...OPTS, stateDir: events, memory: readFindingMemory(dir) });
+    expect(first.findings[0]?.isNew).toBe(true);
+    expect(back.findings[0]?.isNew).toBe(true);
   });
 });
 
@@ -629,7 +748,14 @@ describe('the seams the CLI runs through unmocked', () => {
         tick: async () => {
           ticks += 1;
           if (ticks > 2) throw new Error('enough');
-          return { at: NOW.toISOString(), sessions: [], findings: [], attention: 0, projected: 0 };
+          return {
+            at: NOW.toISOString(),
+            sessions: [],
+            findings: [],
+            attention: 0,
+            newAttention: 0,
+            projected: 0,
+          };
         },
       }),
     ).rejects.toThrow('enough');
