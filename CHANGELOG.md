@@ -23,6 +23,31 @@ than appearing in it.
 
 ### Added
 
+- `smith wave schedule` — the plan-time parallelism ceiling. Three commands
+  bracketed wave width and all three took the plan as given: `wave check` says
+  these tasks may run together, `wave next` says these can start now, and
+  `wave audit` says this is what ran. None could answer the question that
+  comes first — can this plan run wide *at all*? A plan whose tasks claim
+  overlapping globs has a ceiling of one however many agents are free, and
+  every gate downstream signs off on it: each wave of one is admitted, each
+  runs faithful to its admission, and the epic serializes with nothing
+  reporting a problem. The cost is decided at plan time and every check that
+  could name it ran too late. So this replays the dispatcher — the same
+  `computeNextWave` the real loop calls, its returned wave marked complete,
+  again until nothing can start — which is what makes the reported ceiling the
+  ceiling the dispatcher will hit rather than a second model of it that can
+  drift. The distinction that makes the output actionable is which deferrals
+  count: `dependency-pending` is the shape of the work and never a finding, so
+  a plan serialized purely by its own declared edges exits `0` with no
+  constraints; the other three reasons mean the task was ready that round and
+  was held back only by the planner's claim geometry, and only those are
+  collected. Exit 2 for width lost to something a re-slice could fix, exit 1
+  — which outranks it — for a plan that stalls and cannot be finished as
+  written. It deliberately computes no counterfactual depth: saying "re-slice
+  these two and it runs in three rounds" would mean inventing the claims the
+  planner would have drawn instead, and the dependency graph may bind next.
+  Reads and simulates, writes nothing — every round after the first is work
+  nobody did, and a log that recorded it would be claiming otherwise.
 - `smith wave audit` — the read-back that says whether a wave admitted N wide
   actually *ran* N wide. The factory's central claim is that plan tasks are
   executed by many agents at once, and until now nothing in the repo could

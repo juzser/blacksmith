@@ -3539,6 +3539,71 @@ describe('cli.ts (built binary)', () => {
       expect(JSON.parse(narrowed.stdout).waves).toEqual([]);
     });
 
+    // The third bracket on parallelism, driven through the real CLI. `wave
+    // check` certifies a wave someone already picked; `wave audit` reads the
+    // log back afterwards. Neither can say whether the plan could EVER have
+    // run wide, which is the only one of the three questions that is still
+    // answerable in time to change the plan.
+    it('wave schedule: reports a plan that runs in one wide round, and exits 0', async () => {
+      const { sessionId, eventsDir, planPath } = await session();
+      const result = runCli([
+        'wave',
+        'schedule',
+        planPath,
+        // The symbol graph is read from here rather than the checkout: these
+        // claims name no file in this repo, and scanning it would price a
+        // question the fixture does not ask.
+        '--repo',
+        scratchDir,
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(result.status).toBe(0);
+      const schedule = JSON.parse(result.stdout);
+      expect(schedule.epicId).toBe('epic-1');
+      expect(schedule.rounds).toHaveLength(1);
+      expect(schedule.rounds[0].tasks).toEqual(['epic-1/task-1', 'epic-1/task-2']);
+      expect(schedule.depth).toBe(1);
+      expect(schedule.widest).toBe(2);
+      expect(schedule.scheduled).toBe(2);
+      expect(schedule.stalled).toEqual([]);
+      expect(schedule.constraints).toEqual([]);
+      expect(schedule.hint).toBe('');
+    });
+
+    // Same two tasks, same dependency graph — nothing changed but where the
+    // planner drew the claims, and the plan lost half its width. This is the
+    // finding the command exists to make, and it is invisible to every other
+    // gate: each wave of one is admitted, and each runs faithfully.
+    it('wave schedule: exits 2 and names the pair when claim geometry costs the width', async () => {
+      const { sessionId } = await session();
+      const planPath = path.join(scratchDir, `${sessionId}-overlap.json`);
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          ...PLAN,
+          tasks: PLAN.tasks.map((task, index) => ({
+            ...task,
+            claims: index === 0 ? ['src/foo/**'] : ['src/foo/deep/*.ts'],
+          })),
+        }),
+      );
+
+      const result = runCli(['wave', 'schedule', planPath, '--repo', scratchDir]);
+      expect(result.status).toBe(2);
+      const schedule = JSON.parse(result.stdout);
+      expect(schedule.depth).toBe(2);
+      expect(schedule.widest).toBe(1);
+      expect(schedule.rounds[0].avoidable[0].taskId).toBe('epic-1/task-2');
+      expect(schedule.constraints).toHaveLength(1);
+      expect(schedule.constraints[0].reason).toBe('claim-overlap');
+      expect(schedule.constraints[0].tasks).toEqual(['epic-1/task-2']);
+      expect(schedule.constraints[0].blockedBy).toEqual(['epic-1/task-1']);
+      expect(schedule.hint).toContain('claim-overlap');
+    });
+
     // The bug the old filter hid: `taskIds.includes(t.task_id)` matched
     // nothing when the ids were spelled differently, validateWave([]) said
     // "valid", and an empty wave sailed through as if it had been checked.
