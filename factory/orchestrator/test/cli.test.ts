@@ -9246,6 +9246,32 @@ describe('cli.ts (built binary)', () => {
       expect(out.lastTick.sessions).toEqual(['sess-cli']);
     });
 
+    it('fails the health check for a daemon that holds the lock and has gone quiet', () => {
+      const { dir } = fixture();
+      // This test process is, definitionally, a live pid -- so `running` is
+      // true and `kill -0` says nothing is wrong. Nothing has ever ticked and
+      // the lock is dated hours back, which is what a watcher wedged mid-tick
+      // looks like from outside: up, holding its lock, and silent.
+      writeFileSync(
+        path.join(dir, 'daemon.pid'),
+        `${JSON.stringify({
+          pid: process.pid,
+          startedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
+          intervalSeconds: 300,
+        })}\n`,
+        'utf8',
+      );
+
+      const { stdout, status } = runCli(['daemon', 'status', '--dir', dir]);
+      const out = JSON.parse(stdout);
+      expect(out.running).toBe(true);
+      expect(out.stale).toBe(true);
+      // The point of the whole change: `smith daemon status >/dev/null` was a
+      // health check that passed for a watcher which had reported nothing
+      // since Tuesday.
+      expect(status).toBe(1);
+    });
+
     it('starts a detached daemon that takes the lock, and stops it again', async () => {
       const { dir, stateDir } = fixture();
       const started = JSON.parse(

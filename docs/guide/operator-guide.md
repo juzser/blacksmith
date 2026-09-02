@@ -2954,7 +2954,7 @@ come back, is a recheck due. Asking them means being at the terminal.
 
 ```bash
 smith daemon start                  # detached, logs to state/daemon/daemon.log
-smith daemon status                 # exit 1 when nothing is watching
+smith daemon status                 # exit 1 unless one is watching and current
 smith daemon stop
 smith daemon run --once             # one tick in the foreground, for cron
 ```
@@ -2995,6 +2995,15 @@ and `operatorHeld`. That is the split a morning triage actually turns on: how
 much of the list a `/bs report` wave drains on its own, and how much of it is
 yours whatever you do. `auto` remains a statement about policy — the daemon
 still dispatches nothing, and a person still starts the wave.
+
+`status` answers two questions, because one of them cannot be answered by the
+other. `running` says a process holds the lock and answers `kill -0`; `stale`
+says that process has published nothing for three of its own intervals. A
+daemon wedged mid-tick holds its lock and answers `kill -0` exactly like a
+healthy one, so `running` alone passed a watcher that had reported nothing for
+days — and the exit code now fails on either. `reportAgeSeconds` dates the
+last tick for a reader that has to decide how far to trust it, and is `null`
+rather than `0` when nothing has ever ticked.
 
 Because it re-runs the same folds rather than reimplementing them, it and
 those commands cannot disagree. The full operator story — every flag, the

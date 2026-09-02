@@ -697,7 +697,14 @@ describe('starting, reporting and stopping', () => {
   };
 
   it('reports not-running when nothing holds the lock', () => {
-    expect(daemonStatus(dir)).toEqual({ running: false, dir, lock: null, lastTick: null });
+    expect(daemonStatus(dir)).toEqual({
+      running: false,
+      stale: false,
+      dir,
+      lock: null,
+      lastTick: null,
+      reportAgeSeconds: null,
+    });
   });
 
   it('remembers the last tick after a one-shot run has exited', async () => {
@@ -1153,5 +1160,119 @@ describe('who has to say yes to a finding', () => {
     // itself, and how much is actually mine.
     expect(report.autoAdmitted).toBe(1);
     expect(report.operatorHeld).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `running` has always meant "a process holds the lock", which is not the same
+// claim as "something is watching". A daemon wedged mid-tick still holds its
+// lock and still answers to `kill -0`, so the health check ops.md documents --
+// `smith daemon status >/dev/null` -- passed for a watcher that had published
+// nothing since Tuesday. These are about the gap between holding the lock and
+// doing the job, and about a reader of `status.json` being told how old the
+// answer it just read actually is.
+// ---------------------------------------------------------------------------
+
+describe('whether the watcher is actually watching', () => {
+  const at = (secondsAgo: number): Date => new Date(NOW.getTime() - secondsAgo * 1000);
+
+  /** A lock held by a live process, started `secondsAgo` before NOW. */
+  function holding(secondsAgo: number, intervalSeconds = 300): void {
+    acquireLock(dir, { pid: 4242, startedAt: at(secondsAgo).toISOString(), intervalSeconds });
+  }
+
+  /** A published tick dated `secondsAgo` before NOW. */
+  function published(secondsAgo: number): void {
+    writeStatus(dir, {
+      at: at(secondsAgo).toISOString(),
+      sessions: [],
+      findings: [],
+      attention: 0,
+      newAttention: 0,
+      autoAdmitted: 0,
+      operatorHeld: 0,
+      projected: 0,
+    });
+  }
+
+  const status = (): ReturnType<typeof daemonStatus> =>
+    daemonStatus(dir, { isAlive: () => true, now: NOW });
+
+  it('says how old the last tick is, in the units an operator asks in', () => {
+    published(90);
+    expect(status().reportAgeSeconds).toBe(90);
+  });
+
+  it('reports no age at all when nothing has ever ticked', () => {
+    holding(5);
+    // Not zero. Zero is a real age and would read as "it just ticked" -- the
+    // one thing a daemon that has never published must not be able to claim.
+    expect(status().reportAgeSeconds).toBeNull();
+  });
+
+  it('calls a daemon healthy while its ticks are arriving', () => {
+    holding(3600);
+    published(120);
+    const s = status();
+    expect(s.running).toBe(true);
+    expect(s.stale).toBe(false);
+  });
+
+  it('calls a daemon stale once it has missed two whole intervals', () => {
+    holding(3600, 300);
+    // 3 intervals is 900s; one tick late is a slow fold, two missed is a fault.
+    published(901);
+    expect(status().stale).toBe(true);
+  });
+
+  it('dates a daemon that has not ticked yet from when it started', () => {
+    // No status file at all. A daemon three seconds old has not failed to
+    // publish -- it has not been asked to yet, and calling that stale would
+    // make every `daemon start` alarm on its own first second.
+    holding(3);
+    const s = status();
+    expect(s.lastTick).toBeNull();
+    expect(s.stale).toBe(false);
+  });
+
+  it('calls a daemon stale when it started long ago and never published', () => {
+    // The wedged-on-the-first-tick case, and the one a status file cannot show
+    // precisely because the wedge is what stopped the file existing.
+    holding(4000, 300);
+    expect(status().stale).toBe(true);
+  });
+
+  it('does not call a stopped daemon stale, but still dates its report', () => {
+    // `running: false` is the sharper statement, and a `stale` that also meant
+    // "nobody is home" would be a flag with two readings. The age stays, since
+    // a reader of the report still has to know how much to trust it.
+    published(99_999);
+    const s = daemonStatus(dir, { isAlive: () => false, now: NOW });
+    expect(s.running).toBe(false);
+    expect(s.stale).toBe(false);
+    expect(s.reportAgeSeconds).toBe(99_999);
+  });
+
+  it('gives a sub-minute interval a floor before calling it stale', () => {
+    // A tick's cost is not proportional to the interval -- folding the log
+    // takes what it takes -- so `--interval 1` would otherwise report a daemon
+    // as wedged for doing exactly the work it was configured to do too often.
+    holding(600, 1);
+    published(45);
+    expect(status().stale).toBe(false);
+  });
+
+  it('falls back to the default interval when the lock does not name one', () => {
+    // D-21: a report that only states a fact must not crash over that fact. A
+    // hand-edited pid file is a bad lock, not a reason to have no status.
+    writeFileSync(
+      path.join(dir, 'daemon.pid'),
+      `${JSON.stringify({ pid: 4242, startedAt: at(3600).toISOString() })}\n`,
+      'utf8',
+    );
+    published(2000);
+    const s = status();
+    expect(s.running).toBe(true);
+    expect(s.stale).toBe(true);
   });
 });

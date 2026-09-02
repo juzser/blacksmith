@@ -58,7 +58,9 @@ smith daemon stop   [--dir <dir>]
   stderr to `daemon.log`, and prints the child's pid. Use it when there is no
   service manager. It refuses (`daemon.already-running`, exit 1) while a live
   daemon holds the directory.
-- **`status`** prints the lock, the last tick, and whether anyone is watching.
+- **`status`** prints the lock, the last tick, whether anyone is watching and
+  whether that watcher has gone quiet. Exit 1 unless one is watching *and*
+  current (§6).
 - **`stop`** sends SIGTERM to the pid in the lock and clears the file.
 
 Flags worth knowing:
@@ -377,34 +379,70 @@ invocations refuse rather than interleave.
 
 ## 6. Health check
 
-`smith daemon status` **exits 1 when nothing is watching**. That is the whole
-probe — no JSON parsing in a shell script:
+`smith daemon status` **exits 1 unless a daemon is watching and current**.
+That is the whole probe — no JSON parsing in a shell script:
 
 ```bash
 smith daemon status >/dev/null || echo "blacksmith watcher is down"
 ```
 
-Exit 0 means the lock exists and names a live process. The JSON on stdout also
-carries the last tick either way, so a health check that *does* parse gets the
-findings for free:
+Exit 0 takes two facts, not one: the lock names a live process, **and** that
+process has published something inside its own interval budget. Holding the
+lock is not watching. A daemon wedged mid-tick answers `kill -0` exactly like
+a healthy one, so a probe that asked only "is the pid alive" passed a watcher
+that had published nothing since Tuesday — which is precisely the condition a
+watcher exists to break. It now fails the probe.
+
+The JSON keeps the two apart, for a check that does parse:
 
 ```console
 $ smith daemon status
 {
   "running": true,
+  "stale": false,
   "dir": "/srv/blacksmith/state/daemon",
   "lock": { "pid": 96054, "startedAt": "2026-08-27T09:00:00.000Z", "intervalSeconds": 300 },
-  "lastTick": { "at": "2026-08-27T09:35:00.000Z", "sessions": ["dogfood-envkit-1"], "findings": [], "attention": 0, "projected": 1 }
+  "lastTick": { "at": "2026-08-27T09:35:00.000Z", "sessions": ["dogfood-envkit-1"], "findings": [], "attention": 0, "newAttention": 0, "autoAdmitted": 0, "operatorHeld": 0, "projected": 1 },
+  "reportAgeSeconds": 120
 }
 ```
 
-Two states a single boolean would hide, and why the report keeps them apart:
+- **`running`** — a process holds the lock and answers `kill -0`. It has
+  always meant that, and it has never meant "something is watching".
+- **`stale`** — that process has published nothing for longer than
+  `max(intervalSeconds × 3, 60s)`. Three intervals is the miss-two-heartbeats
+  rule: one late tick is a slow fold of a long log, two in a row is a fault.
+  The 60-second floor exists because a tick costs what it costs regardless of
+  how often it is asked for, so `--interval 1` would otherwise report a daemon
+  as wedged for doing exactly what it was configured to do.
+
+  Measured against the freshest evidence of life — the last tick, or the
+  lock's `startedAt` when there is no tick yet. So a daemon three seconds old
+  is not stale for having published nothing, and one that started an hour ago
+  and still has not published *is*. That second case is the wedge on the very
+  first tick, which no `status.json` can show, precisely because the wedge is
+  what stopped the file existing.
+
+  Always `false` when nothing is running: `running: false` is the sharper
+  statement, and a flag that also meant "nobody is home" would carry two
+  readings.
+- **`reportAgeSeconds`** — how old `lastTick` is, in seconds. `null`, never
+  `0`, when nothing has ever ticked: zero is a real age and would read as "it
+  just ticked", the one claim a daemon that has published nothing must not be
+  able to make. Reported whether or not anything holds the lock, because a
+  reader has to know how far to trust what it just read regardless of who
+  wrote it or whether that writer is still alive.
+
+Three states a single boolean would hide:
 
 - `running: false` with a non-null `lastTick` — the daemon died, but its
-  findings are still the truth as of `lastTick.at`. Check that timestamp
-  before trusting them.
-- `running: true` with `attention: 0` — the watcher is up and the factory is
-  quiet. This is the only combination that means "nothing to do".
+  findings are still the truth as of `lastTick.at`, and `reportAgeSeconds`
+  says how old that truth is.
+- `running: true, stale: true` — worse than stopped, because the pid file
+  makes the box look tended. Read the tail of `daemon.log`: it is the tick
+  that never finished.
+- `running: true, stale: false, attention: 0` — the watcher is up and the
+  factory is quiet. This is the only combination that means "nothing to do".
 
 ## 7. Stopping it
 
