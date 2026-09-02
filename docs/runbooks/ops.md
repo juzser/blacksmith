@@ -97,10 +97,26 @@ Flags worth knowing:
       "detail": "alarm: 412,000 tokens measured across 4 of 6 task(s), 486,000 projected, against a 400,000 alarm and a 500,000 cap. Measured spend alone has reached the alarm — re-plan the remaining work to fit, or ask the operator to extend. Unrecorded spend can only add to this.",
       "firstSeen": "2026-08-25T14:00:00.000Z",
       "isNew": false
+    },
+    {
+      "kind": "recheck",
+      "severity": "info",
+      "sessionId": "dogfood-envkit-1",
+      "subject": "envkit-config-loader/task-3",
+      "detail": "Recheck due (merge-threshold): 6 later overlapping merge(s), 3 day(s) elapsed, confidence 0.9.",
+      "admission": {
+        "decision": "auto",
+        "code": "admitted",
+        "reason": "Every reason (merge-threshold) is whitelisted."
+      },
+      "firstSeen": "2026-08-27T09:00:00.000Z",
+      "isNew": true
     }
   ],
   "attention": 1,
   "newAttention": 0,
+  "autoAdmitted": 1,
+  "operatorHeld": 0,
   "projected": 1
 }
 ```
@@ -181,6 +197,58 @@ The last two kinds are why a tick never aborts. One corrupt line, or one
 SQLite file the daemon cannot write, becomes a finding and the tick carries
 on — a watchdog that dies on the first corrupt log is silent exactly when
 something is wrong.
+
+### Whose queue a finding is in
+
+Findings that a scheduler proposal stands behind — `recheck`, `maintenance`,
+`growth-review` — also carry an `admission`, and the report carries
+`autoAdmitted` and `operatorHeld` beside `attention`. This is the same verdict
+`smith scheduler admit --session <id>` renders (operator guide, *Limitations
+today*; step 2 of the `/bs report` playbook), computed against the same two
+files and reported per finding instead of per session:
+
+- `scheduler.yml` `autonomy:` — what may run unattended at all.
+- `crosscheck.yml` `plan_quorum.security_keywords` — which claimed paths make a
+  change a security surface.
+
+An `admission` has three fields: `decision` (`auto` or `operator`), `code`, and
+a `reason` written to be argued with. The codes are `autonomy.ts`'s, and every
+one of them can only **deny**:
+
+| `code` | Means |
+| --- | --- |
+| `admitted` | Nothing denied it. |
+| `autonomy-disabled` | `autonomy.enabled` is `false`. Nothing else was even read. |
+| `growth-never-auto` | A growth review proposes *scope*, which is the operator's regardless of the whitelist. |
+| `kind-not-whitelisted` | The proposal kind is not in `auto_dispatch_kinds`. |
+| `security-surface` | The task claims a path matching a security keyword. The one denial no edit to `scheduler.yml` can lift. |
+| `reason-not-whitelisted` | A recheck fired for a reason outside `auto_dispatch_recheck_reasons`. |
+| `below-confidence-floor` | The proposal's confidence is under `confidence_floor`. |
+
+Read the two counts as the split you actually triage on: `autoAdmitted` is how
+much of the list drains itself once you start a `/bs report` wave, and
+`operatorHeld` is how much of it is yours no matter how long you wait. A
+morning where `operatorHeld` is 0 is a morning you can skip.
+
+Three things `auto` does **not** mean:
+
+- **Not "it ran."** The daemon dispatches nothing; §1 is unchanged by this. An
+  `auto` is a statement about policy, and a person still has to start the wave.
+- **Not "it is safe."** It means no rule in `autonomy.ts` denied it. The rules
+  can only deny; none of them ever approves anything on the merits.
+- **Not the default.** A finding with **no** `admission` key at all is one no
+  proposal stands behind (a blown budget is a condition, not queued work), or a
+  call into `inspectSession` / `inspectFactory` that passed no policy. Absent
+  reads as *nobody asked* — never as *anything may run*. If you build an alert
+  on this, treat a missing `admission` as neither half of the split, which is
+  exactly what `autoAdmitted + operatorHeld < findings.length` is telling you.
+
+Editing `scheduler.yml` does **not** restart a finding's clock: `admission` is
+not part of the identity above, so a six-day-old recheck that flips from
+`operator` to `auto` keeps its `firstSeen`. And the standing rule from the
+`/bs report` playbook holds here too — widening `auto_dispatch_kinds`,
+`auto_dispatch_recheck_reasons` or `confidence_floor` to clear one denial is a
+decision about standing policy, not a way past one finding.
 
 ## 4. Files the daemon owns
 

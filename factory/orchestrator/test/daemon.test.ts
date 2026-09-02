@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BudgetPolicy } from '../src/budgets.js';
+import type { AdmissionLens } from '../src/daemon.js';
 import {
   acquireLock,
   DaemonError,
@@ -53,11 +54,14 @@ const SCHEDULER: SchedulerPolicy = {
   },
   growth: { cadenceDays: 30 },
   lessons: { noveltyJaccardThreshold: 0.6, shingleSize: 3, noveltyLengthAware: true },
-  // Off, and it costs these fixtures nothing: the daemon never reads this
-  // block. Admission is decided by `smith scheduler admit`, and a watcher that
-  // dispatches nothing has nothing to admit. Present here only because the
-  // type requires it -- which is the point, since a fixture allowed to omit it
-  // would be a fixture that silently defaults.
+  // Off, and every fixture below is dated against that. The daemon DOES read
+  // this block now -- `runTick` reports who may admit each finding -- so a
+  // fixture that left it out would be a fixture that read the operator's real
+  // scheduler.yml and changed verdict the day somebody edited it. Shut is also
+  // what makes the crosscheck.yml read `runTick` still does for security
+  // keywords inert here: `autonomy-disabled` is decided ahead of the keyword
+  // match, so no fixture's answer depends on that file's contents. The tests
+  // that care about admission pass their own lens instead.
   autonomy: {
     enabled: false,
     autoDispatchKinds: [],
@@ -546,6 +550,8 @@ describe('the status file', () => {
       ],
       attention: 1,
       newAttention: 1,
+      autoAdmitted: 0,
+      operatorHeld: 0,
       projected: 0,
     };
     writeStatus(dir, report);
@@ -562,6 +568,8 @@ describe('the status file', () => {
       findings: [],
       attention: 0,
       newAttention: 0,
+      autoAdmitted: 0,
+      operatorHeld: 0,
       projected: 0,
     });
     expect(existsSync(path.join(dir, 'status.json.tmp'))).toBe(false);
@@ -858,6 +866,8 @@ describe('the seams the CLI runs through unmocked', () => {
             findings: [],
             attention: 0,
             newAttention: 0,
+            autoAdmitted: 0,
+            operatorHeld: 0,
             projected: 0,
           };
         },
@@ -969,5 +979,179 @@ describe('the rechecks a tick surfaces', () => {
     expect(recheck[0]?.subject).toBe('epic-1/task-1');
     expect(recheck[0]?.detail).toContain('time-elapsed');
     expect(recheck[0]?.detail).toContain('19 day(s) elapsed');
+  });
+});
+
+describe('who has to say yes to a finding', () => {
+  // The watcher already says what is due. Until it also says who may admit it,
+  // a recheck that a `/bs report` wave will clear on its own and a growth
+  // review that is structurally the operator's read as the same grey line —
+  // and the operator's own answer to "what can run without me?" (scheduler.yml
+  // `autonomy:`) is visible only to somebody who types `smith scheduler admit`
+  // per session. These are about carrying that answer into the unattended
+  // surface, and about it staying a REPORT: nothing here dispatches.
+
+  /** A completed task old enough for the recheck policy to want another look. */
+  const rechecked = (claims: string[]): StoredEvent[] => [
+    stored(
+      'sess-a',
+      'task-added',
+      {
+        epic_id: 'epic-1',
+        case: 'feature',
+        origin: 'user',
+        task_status: 'todo',
+        claims,
+      },
+      { task_id: 'epic-1/task-1' },
+    ),
+    stored(
+      'sess-a',
+      'wave-merged',
+      { epic_id: 'epic-1', task_ids: ['epic-1/task-1'] },
+      { ts: '2026-08-01T00:00:00.000Z' },
+    ),
+  ];
+
+  /** Autonomy as an operator who has opted in would write it. */
+  const OPEN: AdmissionLens = {
+    autonomy: {
+      enabled: true,
+      autoDispatchKinds: ['recheck', 'maintenance', 'growth-review-due'],
+      autoDispatchRecheckReasons: ['merge-threshold', 'time-elapsed', 'low-confidence'],
+      confidenceFloor: 0.8,
+    },
+    securityKeywords: ['auth', 'secret'],
+  };
+
+  const SHUT: AdmissionLens = {
+    autonomy: { ...OPEN.autonomy, enabled: false },
+    securityKeywords: OPEN.securityKeywords,
+  };
+
+  const opts = (admission: AdmissionLens) => ({
+    now: NOW,
+    budgetPolicy: BUDGET,
+    schedulerPolicy: SCHEDULER,
+    admission,
+  });
+
+  it('says nothing about admission when nobody asked', () => {
+    // Absent has to read as "not consulted", never as "anything may run": the
+    // one direction a missing policy must not silently move a finding is
+    // towards auto.
+    const findings = inspectSession('sess-a', rechecked(['src/a.ts']), {
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+    });
+    const recheck = findings.find((f) => f.kind === 'recheck');
+    expect(recheck).toBeDefined();
+    expect(recheck?.admission).toBeUndefined();
+  });
+
+  it('admits a recheck whose every reason the operator whitelisted', () => {
+    const findings = inspectSession('sess-a', rechecked(['src/a.ts']), opts(OPEN));
+    const recheck = findings.find((f) => f.kind === 'recheck');
+    expect(recheck?.admission?.decision).toBe('auto');
+    expect(recheck?.admission?.code).toBe('admitted');
+  });
+
+  it('holds the same recheck when autonomy is switched off', () => {
+    const findings = inspectSession('sess-a', rechecked(['src/a.ts']), opts(SHUT));
+    const recheck = findings.find((f) => f.kind === 'recheck');
+    expect(recheck?.admission?.decision).toBe('operator');
+    expect(recheck?.admission?.code).toBe('autonomy-disabled');
+  });
+
+  it('holds a recheck of a security path even with every reason whitelisted', () => {
+    // The claims come from the log through the same fold the CLI uses. Without
+    // them a RecheckProposal names an opaque task id, and the watcher would
+    // report `auto` for a proposal `smith scheduler admit` holds — a watcher
+    // that contradicts the gate is worse than one that says nothing.
+    const findings = inspectSession('sess-a', rechecked(['src/auth/session.ts']), opts(OPEN));
+    const recheck = findings.find((f) => f.kind === 'recheck');
+    expect(recheck?.admission?.decision).toBe('operator');
+    expect(recheck?.admission?.code).toBe('security-surface');
+    expect(recheck?.admission?.reason).toContain('src/auth/session.ts');
+  });
+
+  it('holds a growth review even when the kind is whitelisted', () => {
+    const growth = inspectFactory([], { now: NOW, schedulerPolicy: SCHEDULER, admission: OPEN });
+    const finding = growth.find((f) => f.kind === 'growth-review');
+    expect(finding?.admission?.decision).toBe('operator');
+    expect(finding?.admission?.code).toBe('growth-never-auto');
+  });
+
+  it('leaves a finding no proposal stands behind unadmitted', () => {
+    // A blown budget is a condition, not work anything may schedule. Giving it
+    // an admission would invite an alert rule to read `operator` as "waiting on
+    // a wave" rather than "the cap is gone".
+    const narrowClose = stored(
+      'sess-1',
+      'epic-closed',
+      {
+        epic_id: 'epic-1',
+        closed_by: 'verdict',
+        machine_verdict: 'ready',
+        summary: {
+          concurrency: {
+            waves: 1,
+            verdicts: { parallel: 0, partial: 0, serialized: 1, single: 0, unobserved: 0 },
+            widest: { declared: 4, observed: 1 },
+            unobserved: [],
+            problem: null,
+          },
+        },
+      },
+      { ts: '2026-08-19T00:00:00.000Z' },
+    );
+    const findings = inspectFactory([narrowClose], {
+      now: NOW,
+      schedulerPolicy: SCHEDULER,
+      admission: OPEN,
+    });
+    const width = findings.find((f) => f.kind === 'factory-width');
+    expect(width).toBeDefined();
+    expect(width?.admission).toBeUndefined();
+  });
+
+  it('does not restart a finding clock when only its admission moves', () => {
+    // Identity is kind, session and subject. An operator who edits
+    // scheduler.yml changes who may say yes; the thing standing is the same
+    // thing, and a six-day-old recheck must not read as new because of it.
+    const open = inspectSession('sess-a', rechecked(['src/a.ts']), opts(OPEN));
+    const shut = inspectSession('sess-a', rechecked(['src/a.ts']), opts(SHUT));
+    const a = open.find((f) => f.kind === 'recheck');
+    const b = shut.find((f) => f.kind === 'recheck');
+    expect(a?.admission?.decision).not.toBe(b?.admission?.decision);
+    expect(findingIdentity(a as never)).toBe(findingIdentity(b as never));
+  });
+
+  it('counts a tick in the two halves an operator triages on', async () => {
+    const events = path.join(dir, 'events');
+    mkdirSync(events, { recursive: true });
+    writeFileSync(
+      path.join(events, 'sess-a.jsonl'),
+      `${rechecked(['src/a.ts'])
+        .map((e) => JSON.stringify(e.record))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    const report = await runTick({
+      stateDir: events,
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+      admission: OPEN,
+      projectDb: false,
+    });
+
+    // One recheck admitted; the growth review the empty cadence makes due is
+    // held. The two counts are the whole point: how much of this list drains
+    // itself, and how much is actually mine.
+    expect(report.autoAdmitted).toBe(1);
+    expect(report.operatorHeld).toBe(1);
   });
 });

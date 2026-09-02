@@ -20,10 +20,17 @@ import {
   detectStale,
   foldAgents,
 } from './agents-registry.js';
+import {
+  type AdmissionCode,
+  type AdmissionDecision,
+  type AutonomyPolicy,
+  admitProposals,
+} from './autonomy.js';
 import { checkBudgetAlarm } from './budgetAlarm.js';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
+import { loadCrosscheckPolicy } from './crosscheck.js';
 import type { DbOpts } from './db/projector.js';
-import { apply } from './db/projector.js';
+import { apply, foldTasks } from './db/projector.js';
 import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
 import { SmithError } from './errors.js';
 import {
@@ -36,7 +43,12 @@ import {
 } from './events.js';
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
-import { computeProposals, loadSchedulerPolicy, type SchedulerPolicy } from './scheduler.js';
+import {
+  computeProposals,
+  loadSchedulerPolicy,
+  type SchedulerPolicy,
+  type SchedulerProposal,
+} from './scheduler.js';
 import { foldSpecChanges } from './specChange.js';
 
 export class DaemonError extends SmithError {}
@@ -74,6 +86,28 @@ export type FindingKind =
  */
 export type FindingSeverity = 'info' | 'attention';
 
+/**
+ * Who has to say yes before a finding can clear — autonomy.ts's answer,
+ * carried into the surface that runs unattended.
+ *
+ * `smith scheduler admit` has answered this since Phase 9, per session, for
+ * somebody who types it. The watcher is where it was missing and where it is
+ * worth most: a recheck a `/bs report` wave will clear on its own and a growth
+ * review that is structurally the operator's are the same grey line in a
+ * status file, and the operator cannot tell which half of the list is theirs.
+ *
+ * Reporting only. This changes nothing about what the daemon does — it still
+ * never dispatches, never merges and never writes to a worktree — and an
+ * `auto` here is a statement about POLICY, not a thing that has happened or
+ * will happen on its own. Something a person starts still has to run the wave.
+ */
+export interface FindingAdmission {
+  decision: AdmissionDecision;
+  code: AdmissionCode;
+  /** Why, in the terms the operator would use to argue with it. */
+  reason: string;
+}
+
 export interface DaemonFinding {
   kind: FindingKind;
   severity: FindingSeverity;
@@ -81,6 +115,60 @@ export interface DaemonFinding {
   sessionId: string | null;
   subject: string;
   detail: string;
+  /**
+   * Set only on the findings a scheduler proposal stands behind — a recheck, a
+   * maintenance bump, a growth review. A blown budget or a stalled agent is a
+   * condition rather than work anything may schedule, and giving those an
+   * admission would invite an alert rule to read `operator` as "queued behind
+   * a person" when it means "the cap is gone".
+   *
+   * Absent also when no `AdmissionLens` was supplied. That reads as "nobody
+   * asked", never as "anything may run": the one direction a missing policy
+   * must not quietly move a finding is towards auto.
+   */
+  admission?: FindingAdmission;
+}
+
+/**
+ * What `admitProposals` needs that the event log cannot supply.
+ *
+ * Two files meet here and neither is copied into the other: scheduler.yml says
+ * what may run unattended, crosscheck.yml says which words make a change a
+ * security surface. `smith scheduler admit` composes exactly this pair, and
+ * the watcher has to compose the same one — a watcher that reported `auto` for
+ * a proposal the gate holds would be worse than a watcher that said nothing.
+ */
+export interface AdmissionLens {
+  /** scheduler.yml's `autonomy:` block, as `SchedulerPolicy.autonomy` carries it. */
+  autonomy: AutonomyPolicy;
+  /** crosscheck.yml `plan_quorum.security_keywords`, passed in, never copied. */
+  securityKeywords: readonly string[];
+}
+
+/**
+ * One admission per proposal, positionally — `admitProposals` returns them in
+ * the order given, which is the only reason the callers may index alongside
+ * their own loop.
+ *
+ * The claims are folded here rather than passed in because a `RecheckProposal`
+ * names a task and no paths: without them the security match sees an opaque id
+ * and clears a recheck of `src/auth/session.ts`. They come out of the same
+ * `foldTasks` the CLI reads, from the events the caller already holds.
+ */
+function admitFor(
+  proposals: readonly SchedulerProposal[],
+  events: readonly StoredEvent[],
+  lens: AdmissionLens | undefined,
+): (FindingAdmission | undefined)[] {
+  if (lens === undefined || proposals.length === 0) return proposals.map(() => undefined);
+  const claimsByTask = new Map<string, readonly string[]>();
+  for (const task of foldTasks(events)) {
+    if (task.claims && task.claims.length > 0) claimsByTask.set(task.taskId, task.claims);
+  }
+  return admitProposals(proposals, lens.autonomy, {
+    securityKeywords: lens.securityKeywords,
+    claimsByTask,
+  }).map(({ decision, code, reason }) => ({ decision, code, reason }));
 }
 
 export interface InspectOptions {
@@ -90,6 +178,11 @@ export interface InspectOptions {
   staleHours?: number;
   /** Target repo for the maintenance pass; omitted -> `pnpm outdated` never runs. */
   projectDir?: string;
+  /**
+   * Who may say yes. Omitted -> findings carry no `admission` at all; see the
+   * field's note on why absent must not read as `auto`.
+   */
+  admission?: AdmissionLens;
 }
 
 function staleSubject(agent: AgentRecord): string {
@@ -179,8 +272,11 @@ export function inspectSession(
     });
   }
 
-  for (const proposal of computeProposals({ events, now, policy: schedulerPolicy })) {
+  const proposals = computeProposals({ events, now, policy: schedulerPolicy });
+  const admissions = admitFor(proposals, events, opts.admission);
+  for (const [index, proposal] of proposals.entries()) {
     if (proposal.kind !== 'recheck') continue;
+    const admission = admissions[index];
     findings.push({
       kind: 'recheck',
       severity: 'info',
@@ -189,6 +285,7 @@ export function inspectSession(
       detail:
         `Recheck due (${proposal.reasons.join(', ')}): ${proposal.mergeCount} later overlapping ` +
         `merge(s), ${proposal.daysElapsed} day(s) elapsed, confidence ${proposal.confidence}.`,
+      ...(admission === undefined ? {} : { admission }),
     });
   }
 
@@ -219,7 +316,10 @@ export function inspectFactory(
     ...(opts.projectDir === undefined ? {} : { projectDir: opts.projectDir }),
   });
 
-  for (const proposal of proposals) {
+  const admissions = admitFor(proposals, events, opts.admission);
+
+  for (const [index, proposal] of proposals.entries()) {
+    const admission = admissions[index];
     if (proposal.kind === 'maintenance') {
       findings.push({
         kind: 'maintenance',
@@ -230,6 +330,7 @@ export function inspectFactory(
           `${proposal.packages.map((p) => `${p.name} ${p.current}→${p.latest}`).join(', ')} ` +
           `(confidence ${proposal.confidence}, ` +
           `${proposal.autoSchedulable ? 'auto-schedulable' : 'needs an operator'}).`,
+        ...(admission === undefined ? {} : { admission }),
       });
     } else if (proposal.kind === 'growth-review-due') {
       findings.push({
@@ -241,6 +342,7 @@ export function inspectFactory(
           `A product-growth review is due on the ${proposal.cadenceDays}-day cadence ` +
           `(last: ${proposal.lastReviewAt ?? 'never'}). The planner reads the living spec; ` +
           'this is the trigger, not the scope.',
+        ...(admission === undefined ? {} : { admission }),
       });
     }
     // Rechecks are deliberately dropped here: inspectSession already reports
@@ -317,6 +419,21 @@ export interface TickReport {
    * two counts kept apart to tell today's break from last week's.
    */
   newAttention: number;
+  /**
+   * How the findings split across the line the operator actually triages on:
+   * how many the whitelist would admit, and how many are held for a person.
+   *
+   * Both are derivable from `findings` — exposed for the same reason
+   * `attention` is, so an alert rule need not reimplement the fold and then
+   * disagree with the daemon about what it means. Findings no proposal stands
+   * behind count in neither: a blown budget is not queued behind anybody.
+   *
+   * `autoAdmitted` says the policy would allow it, NOT that it ran. The daemon
+   * still dispatches nothing.
+   */
+  autoAdmitted: number;
+  /** Findings a scheduler proposal stands behind that the policy holds. */
+  operatorHeld: number;
   /** Sessions whose SQLite projection this tick refreshed. */
   projected: number;
 }
@@ -401,8 +518,22 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     return chain.map((sessionId) => ({ sessionId, events: logs.get(sessionId) ?? [] }));
   };
 
+  // A tick reports the admission line by default, where `inspectSession` and
+  // `inspectFactory` stay silent unless asked. The asymmetry is deliberate: a
+  // caller who reaches for one function is answering their own question and
+  // may not want two policy files read, whereas the whole point of a tick is
+  // to be the surface nobody is watching — a status file that omitted the one
+  // column saying whose queue a finding is in would be omitting it precisely
+  // when it matters. Reading policy here also fails loudly at the top of the
+  // tick rather than silently downgrading a finding to unadmitted.
+  const admission = opts.admission ?? {
+    autonomy: (opts.schedulerPolicy ?? loadSchedulerPolicy()).autonomy,
+    securityKeywords: loadCrosscheckPolicy().planQuorum.securityKeywords,
+  };
+
   const inspectOpts: InspectOptions = {
     now,
+    admission,
     ...(opts.budgetPolicy === undefined ? {} : { budgetPolicy: opts.budgetPolicy }),
     ...(opts.schedulerPolicy === undefined ? {} : { schedulerPolicy: opts.schedulerPolicy }),
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
@@ -448,6 +579,8 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     findings: aged,
     attention: aged.filter((f) => f.severity === 'attention').length,
     newAttention: aged.filter((f) => f.severity === 'attention' && f.isNew).length,
+    autoAdmitted: aged.filter((f) => f.admission?.decision === 'auto').length,
+    operatorHeld: aged.filter((f) => f.admission?.decision === 'operator').length,
     projected,
   };
 }
