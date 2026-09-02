@@ -5,33 +5,42 @@ import { CROSSCHECK_POLICY_PATH } from '../src/paths.js';
 
 describe('crosscheck.ts', () => {
   it('parses the real repo crosscheck.yml', () => {
-    // parse, not load: `enabled` is the one field that tracks a machine rather
-    // than the repo — it declares which judge binaries this box actually has,
-    // and flipping it is a supported operator action (runbook §2). Asserting
-    // its value here made that action fail the suite. What is worth pinning is
-    // the SHAPE the code depends on, which is the same on every box.
+    // parse, not load: `enabled` and `mode` are the two fields that track a
+    // machine rather than the repo. `enabled` declares which judge binaries
+    // this box actually has; `mode` declares whether the operator has promoted
+    // one from shadow to gating. Flipping either is a supported operator
+    // action (runbook §2 and §3). Asserting their values here made those
+    // actions fail the suite. What is worth pinning is the SHAPE the code
+    // depends on, which is the same on every box.
     const policy = parseCrosscheckPolicy(readFileSync(CROSSCHECK_POLICY_PATH, 'utf8'));
     expect(policy.providers.claude).toMatchObject({ name: 'claude', kind: 'native' });
     expect(policy.providers.codex).toMatchObject({
       name: 'codex',
       kind: 'api',
       transport: 'cli',
-      mode: 'shadow',
       command: 'codex',
     });
     expect(policy.providers.deepseek).toMatchObject({
       name: 'deepseek',
       kind: 'api',
       transport: 'api',
-      mode: 'shadow',
       baseUrl: 'https://api.deepseek.com',
       model: 'deepseek-reasoner',
       apiKeyEnv: 'DEEPSEEK_API_KEY',
     });
     for (const [name, config] of Object.entries(policy.providers)) {
       expect(typeof config.enabled, `${name}.enabled`).toBe('boolean');
+      // The native judge has no `mode`: it is never an external participant
+      // that could be demoted to shadow, so there is nothing to declare.
+      if (config.kind !== 'native')
+        expect(['shadow', 'active'], `${name}.mode`).toContain(config.mode);
     }
-    expect(policy.quorumRule).toEqual({ agreement: '2-of-3', minProviders: 2 });
+    expect(policy.quorumRule).toEqual({
+      agreement: '2-of-3',
+      minProviders: 2,
+      // This box declares it; see the block comment in crosscheck.yml.
+      acceptNonGatingActives: true,
+    });
     expect(policy.planQuorum).toEqual({
       budgetRatio: 0.5,
       confidenceThreshold: 0.8,
@@ -184,7 +193,11 @@ providers:
     enabled: true
 `;
     const policy = parseCrosscheckPolicy(yamlText);
-    expect(policy.quorumRule).toEqual({ agreement: '2-of-3', minProviders: 2 });
+    expect(policy.quorumRule).toEqual({
+      agreement: '2-of-3',
+      minProviders: 2,
+      acceptNonGatingActives: false,
+    });
   });
 
   it('defaults independent_finder to naming no provider at all', () => {

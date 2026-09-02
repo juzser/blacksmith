@@ -25,7 +25,7 @@ function policyWith(overrides: CrosscheckPolicy['providers']): CrosscheckPolicy 
   return {
     ...crosscheckDefaults(),
     providers: { claude: { name: 'claude', kind: 'native', enabled: true }, ...overrides },
-    quorumRule: { agreement: '2-of-3', minProviders: 2 },
+    quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
   };
 }
 

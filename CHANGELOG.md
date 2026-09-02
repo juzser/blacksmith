@@ -23,6 +23,16 @@ than appearing in it.
 
 ### Added
 
+- `crosscheck.yml` `quorum_rule.accept_non_gating_actives`, and a `notes` list
+  on `smith judge preflight` for the costs it covers. One external judge
+  promoted to `active` against `min_providers: 2` cannot gate anything — the
+  finder is excluded and one active cannot meet two — so preflight reported it
+  as a problem and exited 1. The message already ended "or accept that these
+  calls are shadow runs that cost like gating ones", but there was nowhere to
+  say *accepted*, so a deliberate configuration failed its own health check
+  forever. Declaring it moves that one advisory to `notes`; an unmet
+  precondition stays a problem, and `gating.canDecide` still reports `false`,
+  because the arithmetic did not change.
 - `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
   a pull-request template, and this changelog.
 - A Quickstart in the README, plus a docs index covering

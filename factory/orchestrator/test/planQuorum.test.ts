@@ -95,7 +95,7 @@ function policyWith(...externals: ProviderConfig[]): CrosscheckPolicy {
       claude: { name: 'claude', kind: 'native', enabled: true },
       ...Object.fromEntries(externals.map((p) => [p.name, p])),
     },
-    quorumRule: { agreement: '2-of-3', minProviders: 2 },
+    quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
     planQuorum: testPlanQuorumPolicy,
   };
 }

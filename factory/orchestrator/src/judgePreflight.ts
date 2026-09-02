@@ -88,6 +88,12 @@ export interface JudgePreflight {
   gating: PreflightGating;
   /** Non-empty means exit 1: something is configured to cost more than it can deliver. */
   problems: string[];
+  /**
+   * Costs the operator has declared they accept (crosscheck.yml
+   * `quorum_rule.accept_non_gating_actives`). Reported for the same reason
+   * `problems` is — the arithmetic has not changed — but never exits 1.
+   */
+  notes: string[];
 }
 
 /** Is `command` runnable — an absolute path that exists, or a name on PATH? */
@@ -195,6 +201,7 @@ export function judgePreflight(policyPath: string = CROSSCHECK_POLICY_PATH): Jud
   const canDecide = activeExternal.length >= minProviders;
 
   const problems: string[] = [];
+  const notes: string[] = [];
   for (const p of providers) {
     if (p.status !== 'unmet') continue;
     problems.push(
@@ -203,10 +210,25 @@ export function judgePreflight(policyPath: string = CROSSCHECK_POLICY_PATH): Jud
   }
   // One promoted provider is the trap worth failing on. Zero is the shipped
   // default and a deliberate one, so it is reported and not complained about.
+  //
+  // Unless it was chosen: the sentence below has always ended "or accept
+  // that these calls are shadow runs that cost like gating ones", and
+  // `accept_non_gating_actives` is where that acceptance is now written down.
+  // Declared, the same sentence is a note — the cost is unchanged and still
+  // printed, but a command that reports a decision the operator already made
+  // has no business exiting 1 on it, and a scheduled health check cannot
+  // distinguish a permanent 1 from a new one.
   if (activeExternal.length > 0 && !canDecide) {
-    problems.push(
-      `${activeExternal.length} external provider(s) are mode: active but quorum_rule.min_providers is ${minProviders}. On a finding the native provider raised it is excluded as the finder, so the gating pool is the actives alone and every case returns insufficient-providers. Promote a second provider or accept that these calls are shadow runs that cost like gating ones.`,
-    );
+    const arithmetic = `${activeExternal.length} external provider(s) are mode: active but quorum_rule.min_providers is ${minProviders}. On a finding the native provider raised it is excluded as the finder, so the gating pool is the actives alone and every case returns insufficient-providers.`;
+    if (policy.quorumRule.acceptNonGatingActives) {
+      notes.push(
+        `${arithmetic} Accepted via quorum_rule.accept_non_gating_actives: the verdict still reaches the operator on the escalation, and enabling a second provider starts gating with no further edit.`,
+      );
+    } else {
+      problems.push(
+        `${arithmetic} Promote a second provider or accept that these calls are shadow runs that cost like gating ones.`,
+      );
+    }
   }
 
   const detail = canDecide
@@ -221,5 +243,6 @@ export function judgePreflight(policyPath: string = CROSSCHECK_POLICY_PATH): Jud
     providers,
     gating: { activeExternal, shadowExternal, minProviders, canDecide, detail },
     problems,
+    notes,
   };
 }

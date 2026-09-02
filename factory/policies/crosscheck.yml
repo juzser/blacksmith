@@ -56,8 +56,29 @@ providers:
     # caught, so nothing gates on it, but it is latency and noise.
     # `smith judge preflight` checks the first half locally; only a real call
     # can check the second.
-    enabled: false     # ships off: shipping it on would be a guess about someone else's PATH
-    mode: shadow       # flip to `active` only after a calibration pass (docs/runbooks/providers.md)
+    # Turned on for THIS box, 2026-09-02, by the operator who owns it: `codex`
+    # resolves on PATH and `codex login` is done, both checked by
+    # `smith judge preflight` and by a real `codex exec` call before the flip.
+    # This is the one field in the file that describes a machine, so a clone on
+    # a box without codex flips it back — that is the rollback, and it is a
+    # one-line edit either way.
+    enabled: true
+    # `active`, not `shadow`: the operator's call (docs/runbooks/providers.md
+    # §3 offers shadow-then-calibrate and this box declined it).
+    #
+    # Be exact about what that buys today, because it is less than it looks:
+    # a shadow provider is still CALLED and still recorded as a participant
+    # (quorum.ts header note) — shadow costs the same call and forfeits only
+    # gating power. With one external judge promoted and `min_providers: 2`,
+    # a finding claude raised escalates either way. The difference is where
+    # codex's rationale lands: under `gating.rationales` when active, only
+    # under `participants` when shadow.
+    #
+    # So the promotion is not what makes the cross-check real — a second
+    # provider is (see quorum_rule.accept_non_gating_actives). What it does
+    # is make this box gate the moment one is enabled, with no second edit
+    # and no second decision to remember. Rollback is `mode: shadow` here.
+    mode: active
   deepseek:
     kind: api
     transport: api
@@ -132,6 +153,24 @@ quorum_rule:
   min_providers: 2
   tie_break: a third provider breaks the tie, or the case escalates to the
     operator with both rationales side by side.
+  # This box promotes exactly one external judge (see providers.codex), and one
+  # cannot meet min_providers 2. On a finding claude raised — which is nearly
+  # all of them, since gate.ts defaults a finding's finder to the native
+  # provider — claude is excluded as the finder, the gating pool is [codex]
+  # alone, and the case escalates for insufficient-providers just as it did
+  # before the promotion, now having paid for the call.
+  #
+  # Set true because that is still the better trade here, not because the
+  # arithmetic is in doubt: the escalation now carries a second model's
+  # rationale instead of none, and the day a second provider is enabled the
+  # pool meets the rule with no further edit. What it buys today is a human
+  # deciding with two opinions in front of them rather than one — which is the
+  # whole point of the file — not an automatic override.
+  #
+  # It silences one advisory in `smith judge preflight` and nothing else. A
+  # provider enabled where it cannot be called is still a problem, and
+  # `gating.canDecide` still reports false, because it is false.
+  accept_non_gating_actives: true
 
 asymmetric_roles:
   finder_ne_critic: true

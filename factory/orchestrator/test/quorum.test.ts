@@ -504,7 +504,7 @@ describe('quorum.ts recordJudgeRun / runQuorumCase (integration)', () => {
           args: [FIXTURE, 'success'],
         },
       },
-      quorumRule: { agreement: '2-of-3', minProviders: 2 },
+      quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
     };
 
     const result = await runQuorumCase(
@@ -552,7 +552,7 @@ describe('quorum.ts recordJudgeRun / runQuorumCase (integration)', () => {
           args: [FIXTURE, 'success'],
         },
       },
-      quorumRule: { agreement: '2-of-3', minProviders: 2 },
+      quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
     };
 
     const result = await runQuorumCase(
