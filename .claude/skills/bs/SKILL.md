@@ -561,7 +561,8 @@ there means "not looked at", not "looked at and clean".
 
 ## `/bs run <epic>`
 
-The loop playbook (architecture §3, §5, §11), one wave at a time.
+The loop playbook (architecture §3, §5, §11): one wave at a time, and every
+task in the wave at once.
 
 Ask the epic's effort tier once, at the top of the run, and keep the answer
 for the whole epic — `smith effort show --plan
@@ -571,7 +572,31 @@ factory/specs/active/<epic>/plan-vN.json`. Steps 3, 6, 7 and 13 each name the
 is floored, and running it at the tier the file asked for would be running it
 below the floor.
 
-1. `smith wave check factory/specs/active/<epic>/plan-vN.json <task-id>...`
+1. Ask the graph how wide this wave can be, then ask the gate whether it may
+   be that wide. Two commands, two different questions — do not skip to the
+   second with a set you picked by eye.
+
+   ```bash
+   smith wave next factory/specs/active/<epic>/plan-vN.json \
+     --session <session-id> --repo <project-dir>
+   ```
+
+   `wave` is the widest set the plan admits right now: dependencies landed,
+   claims pairwise disjoint, no shared hotspot, producers ordered ahead of
+   the consumers that import them. Every task it left out is in `deferred`
+   with a reason (`dependency-pending`, `claim-overlap`, `serialize-hotspot`,
+   `symbol-coupled`) and the ids that held it back, so a short wave is always
+   a wave with an explanation. It reads and writes nothing — ask it again
+   whenever you want a fresh answer. `--session` is what lets it see live
+   task status and the follow-ups `findings raise` minted into the log but
+   into no plan file; without it you are scheduling from the plan as written
+   hours ago. Exit 1 means work remains and none of it can start — a stall
+   to report, not an empty answer. An empty `wave` with `remaining: 0` is the
+   epic finished.
+
+   Then put that proposal through the gate that actually admits it:
+
+   `smith wave check factory/specs/active/<epic>/plan-vN.json <task-id>...`
    — claims must be pairwise disjoint and share no `worktree.yml`
    `serialize_always_globs` hotspot. A violation means cut a dependency
    edge and run the pair serially instead of forcing the wave.
@@ -581,8 +606,58 @@ below the floor.
      edge the plan declared no dependency for. Split the wave and run the
      producer first — there is no override for a crossing, because the
      declared-edge case is already refused above it (operator-guide §2).
-2. Per admitted task: `smith worktree create <project-dir> <epic>
-   <task-id>`.
+   - `wave check` is also where the wave is priced and where
+     `max_in_flight_tasks` is enforced (`budgets.yml`, `over-fan-out`).
+     `wave next` deliberately asks neither question: a proposer that also
+     priced the wave would have to choose which task to drop, and that is an
+     operator's call. So a proposed wave can still be refused here. That is
+     the gate working, not the proposal being wrong — drop tasks from the
+     tail of `wave` and re-check.
+   - Never narrow a wave because a narrow one feels safer. A wave of one
+     passes every check in this file — one task is disjoint with nothing,
+     shares a hotspot with nothing, crosses no import edge — so `valid: true`
+     on a singleton is not evidence the wave was right, only that nothing
+     refused it. That is the failure this step exists to prevent: a factory
+     whose whole claim is parallel execution, running its plan one task at a
+     time and passing every gate while it does.
+
+   **Then run the whole wave at once.** The wave is the unit of work, not
+   the task. Three rules follow, and they are the difference between a
+   factory and a queue with extra steps:
+
+   - **One message, many dispatches.** When steps 3–7 reach a phase, issue
+     that phase for *every* task in the wave as parallel tool calls in a
+     single message. Five coders in one message is five agents working; five
+     messages of one coder is five agents waiting. The worktrees are
+     disjoint by construction — that is what `wave check` just certified —
+     so there is nothing for them to collide over.
+   - **No lockstep barrier.** Each task walks 3 → 7 at its own pace. Do not
+     hold a finished coder until its neighbours finish theirs; dispatch its
+     tester the moment it returns. Waiting for the slowest task at every
+     phase boundary costs the wave the difference between its longest task
+     and the sum of its phases, which is most of what parallelism buys.
+   - **A blocked task blocks itself.** Gate outcome `blocked` bounces to
+     *that* task's coder (step 9) while its neighbours carry on. One task
+     escalating to the operator does not stop the other four; report it and
+     keep the wave moving.
+
+   The single place the wave rejoins is step 10's merge queue, which is
+   serial on purpose — `smith queue run` rebases one task at a time onto
+   `smith/<epic>/integration` and runs the cumulative tests between. Merging
+   is the one thing that cannot be done in parallel, and it is already the
+   one thing this playbook never asks you to.
+
+   Concurrency and the event log: `smith` reads (`wave next`, `status`,
+   `budget alarm`) are free to run at any time. Writes to one session log are
+   serialized by the log itself across processes, so a burst of parallel
+   `smith` write-commands is safe — but each one's `event_id` comes back in
+   its own output, and **that is the only place to read it from**. Never
+   compute the next id by adding one: under fan-out the events between yours
+   belong to sibling tasks, and a `--causal-parent` you guessed will name a
+   real event that is not the parent, which validates and quietly mis-shapes
+   the lineage.
+2. Per admitted task, and for all of them together: `smith worktree create
+   <project-dir> <epic> <task-id>`.
 3. Pre-code, if the task needs it: dispatch `researcher` for an unknown, or
    `uiux` (`.claude/agents/uiux.md`) for any UI-affecting acceptance
    criterion — before the coder starts, not after.

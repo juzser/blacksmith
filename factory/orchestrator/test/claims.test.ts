@@ -89,12 +89,6 @@ describe('validateWave', () => {
   const policy = { serializeAlwaysGlobs: ['**/pnpm-lock.yaml', 'src/types/**'] };
 
   it('accepts a wave whose tasks have pairwise-disjoint claims and no serialize-always collisions', () => {
-    // Literal (non-glob) claims: a directory wildcard like "src/foo/**"
-    // could in principle also match a serialize-always basename guard like
-    // "**/pnpm-lock.yaml" (glob semantics don't know the real file list),
-    // so this fixture uses specific files to isolate "genuinely disjoint,
-    // no shared-hotspot risk" from that separate directory-wildcard case
-    // (covered in the globsOverlap table above).
     const result = validateWave(
       [
         { task_id: 'a', claims: ['src/foo/index.ts'] },
@@ -104,6 +98,38 @@ describe('validateWave', () => {
       [],
     );
     expect(result.valid).toBe(true);
+  });
+
+  it('admits two subtree claims that share no protected file', () => {
+    // The serialize-always rule asks containment, not intersection. A
+    // directory wildcard like "src/foo/**" could in principle hold a nested
+    // lockfile, and under an intersection test that hypothetical made every
+    // pair of subtree claims collide on the "**/pnpm-lock.yaml" guard — so
+    // the gate refused every realistic wave of two, which is every wave the
+    // factory would actually want to run.
+    const result = validateWave(
+      [
+        { task_id: 'a', claims: ['src/foo/**'] },
+        { task_id: 'b', claims: ['src/bar/**'] },
+      ],
+      policy,
+      [],
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('still serializes a task that claims the protected file itself', () => {
+    const result = validateWave(
+      [
+        { task_id: 'a', claims: ['src/foo/**', 'pnpm-lock.yaml'] },
+        { task_id: 'b', claims: ['src/bar/**', 'services/api/pnpm-lock.yaml'] },
+      ],
+      policy,
+      [],
+    );
+    const { serializeAlwaysViolations } = rejected(result);
+    expect(serializeAlwaysViolations).toHaveLength(1);
+    expect(serializeAlwaysViolations[0]).toMatchObject({ glob: '**/pnpm-lock.yaml' });
   });
 
   it('rejects a wave with overlapping claims', () => {

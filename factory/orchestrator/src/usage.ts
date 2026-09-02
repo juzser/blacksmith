@@ -125,6 +125,16 @@ export const COMMANDS: readonly CommandDoc[] = [
       'the human reason; --repo names the checkout the symbol graph is read from.',
   },
   {
+    command: 'wave next',
+    positionals: '<plan.json>',
+    flags: `[--repo <dir>] ${EVENTS_DIR}`,
+    summary:
+      'Compute the widest wave this plan admits right now, and name a reason for every task ' +
+      'left out. Reads, never writes: `wave check` stays the only command that admits a wave. ' +
+      '--session reads live task status and follow-up tasks from the lineage log; --repo names ' +
+      'the checkout the symbol graph is read from.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',

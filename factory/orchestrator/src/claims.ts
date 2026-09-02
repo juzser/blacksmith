@@ -66,6 +66,44 @@ function couldJointlyMatch(globA: string, globB: string, baseA: string, baseB: s
 }
 
 /**
+ * One concrete path a glob grants, for asking whether another glob grants it
+ * too. A literal pattern is its own path; anything else is its static base
+ * joined to a synthesized tail.
+ */
+function concretePath(glob: string): string {
+  const scan = picomatch.scan(glob);
+  if (!scan.isGlob) return glob;
+  return joinBaseAndTail(scan.base, syntheticTail(glob));
+}
+
+/**
+ * Does `outer` grant every path `inner` grants? Containment, not
+ * intersection — a strictly narrower question than `globsOverlap`, and the
+ * one the serialize-always rule actually asks.
+ *
+ * Approximated the way the rest of this file approximates glob algebra:
+ * `inner` must live under `outer`'s static root, and `outer` must accept a
+ * concrete path synthesized from `inner`'s own literal parts. Errs toward
+ * "no", which is the safe direction here because a false "yes" would
+ * serialize two tasks that never shared a file.
+ */
+function globContains(outer: string, inner: string): boolean {
+  if (outer === inner) return true;
+
+  const outerScan = picomatch.scan(outer);
+  if (!outerScan.isGlob) return false; // a literal grants only itself, and inner is not it
+
+  const outerBase = splitPathSegments(outerScan.base);
+  if (outerBase.length > 0) {
+    const innerBase = splitPathSegments(picomatch.scan(inner).base);
+    if (innerBase.length < outerBase.length) return false;
+    if (!isSegmentPrefix(outerBase, innerBase)) return false;
+  }
+
+  return picomatch(outer)(concretePath(inner));
+}
+
+/**
  * Practical glob-vs-glob overlap check: two globs overlap when one's static
  * (non-glob) root path is a path-segment prefix of the other's — the
  * standard "directory ownership" heuristic (claims are directory/file-
@@ -138,12 +176,35 @@ export function loadWorktreePolicy(filePath: string = WORKTREE_POLICY_PATH): Wor
   return { serializeAlwaysGlobs: globs.map(String) };
 }
 
-/** Which of the policy's serialize-always globs does this task's claim set touch? */
-function touchesSerializeAlways(task: ClaimedTask, serializeAlwaysGlobs: string[]): string[] {
+/**
+ * Which of the policy's serialize-always globs does this task's claim set
+ * touch?
+ *
+ * Containment in either direction, not overlap. The distinction is the
+ * difference between a gate that works and one that never opens: under
+ * `globsOverlap`, `src/a/**` "touches" `**\/pnpm-lock.yaml`, because a
+ * synthesized `src/a/pnpm-lock.yaml` satisfies both patterns at once. Every
+ * realistic claim is a subtree grant, so every pair of tasks touched the
+ * lockfile guard together and every wave of two was refused —
+ * `serializeAlwaysViolations` on claims that share no file and never would.
+ * The old fixture in claims.test.ts states the trap plainly and then steps
+ * around it by claiming individual files.
+ *
+ * A subtree grant is not a lockfile edit. A task that means to edit a
+ * protected file claims it (`pnpm-lock.yaml`), or claims a region that holds
+ * every such file (`**\/pnpm-lock.yaml`), or is itself inside the protected
+ * region (`src/types/foo.ts` under `src/types/**`). Those are the three
+ * shapes containment accepts, and they are the three shapes the policy in
+ * worktree.yml is written about.
+ */
+export function touchesSerializeAlways(
+  task: ClaimedTask,
+  serializeAlwaysGlobs: string[],
+): string[] {
   const touched = new Set<string>();
   for (const claim of task.claims) {
     for (const guard of serializeAlwaysGlobs) {
-      if (globsOverlap(claim, guard)) touched.add(guard);
+      if (globContains(claim, guard) || globContains(guard, claim)) touched.add(guard);
     }
   }
   return [...touched];
@@ -241,7 +302,7 @@ function describeType(value: unknown): string {
  * file content gets to appear (D-198) — the type is a closed vocabulary, the
  * value is not.
  */
-function readClaimList(task: ProposedWaveTask): WaveTask {
+export function readClaimList(task: ProposedWaveTask): WaveTask {
   const { claims } = task;
   if (!Array.isArray(claims)) {
     throw new ClaimsError(
@@ -286,7 +347,7 @@ function readClaimList(task: ProposedWaveTask): WaveTask {
  * The unreadable value is never quoted back (D-198): the type is a closed
  * vocabulary, plan-file content is not.
  */
-function readEdgeList(edges: unknown): WaveEdge[] {
+export function readEdgeList(edges: unknown): WaveEdge[] {
   if (!Array.isArray(edges)) {
     throw new ClaimsError(
       'claims.unreadable-edges',

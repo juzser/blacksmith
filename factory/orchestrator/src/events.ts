@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { SmithError } from './errors.js';
 import { STATE_EVENTS_DIR } from './paths.js';
@@ -280,11 +280,15 @@ async function readEventsAtPath(filePath: string, sessionId: string): Promise<St
 }
 
 /**
- * Per-log serialization: concurrent appendEvent calls on the same session
- * log must not derive the same line-count index or read a stale event list
- * for causal_parent lookup (TOCTOU). One promise chain per resolved file
- * path — sufficient for the single-process model this runtime is (queue,
- * gates, CLI all run in one process per factory session).
+ * Per-log serialization *inside one process*: concurrent appendEvent calls on
+ * the same session log must not derive the same line-count index or read a
+ * stale event list for causal_parent lookup (TOCTOU). One promise chain per
+ * resolved file path.
+ *
+ * This is the fast path, not the guarantee — see `withLogLock` below for the
+ * part that holds across processes. Keeping both matters: the queue means the
+ * common case of two appends in one process never touches the filesystem lock
+ * at all, so nothing polls when nothing is contended.
  */
 const fileQueues = new Map<string, Promise<unknown>>();
 
@@ -302,6 +306,106 @@ function enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
     ),
   );
   return next;
+}
+
+/**
+ * Cross-process serialization for one session log.
+ *
+ * `fileQueues` orders appends within a Node process, and for a long time that
+ * was the whole story: queue, gates and CLI ran as one process per factory
+ * session, so one promise chain was the only ordering anyone needed. Running a
+ * wave in parallel ends that assumption. An orchestrator that dispatches five
+ * tasks and records five events in five `smith` invocations has five
+ * processes, five queues, and five independent readers of `existing.length` —
+ * and they all read the same number.
+ *
+ * What that costs is subtle enough to be worth naming. The log survives: ids
+ * are derived from line position at read time (`readEventsAtPath`), so five
+ * concurrent appends leave five well-formed lines and the file reads back
+ * correctly. It is the id handed *back* to each caller that is wrong, and the
+ * caller feeds that id to the next command as `--causal-parent`. The wrong
+ * parent then names an event that genuinely exists, so `validateCausalParent`
+ * accepts it and the lineage is quietly mis-shaped. A wrong parent that
+ * validates is worse than one that fails.
+ *
+ * Hence a lock file beside the log. `open(..., 'wx')` is atomic on every
+ * filesystem this runs on: exactly one process creates it, everyone else gets
+ * EEXIST and waits. The whole read-validate-append sequence happens inside it,
+ * which is what makes the returned index true — it counts the lines another
+ * process wrote before us, because it is taken after that process let go.
+ *
+ * The lock is named `<session>.jsonl.lock`, which `listSessionIds` does not
+ * see: it selects on `.jsonl` as the suffix, and this is not one.
+ */
+const LOCK_POLL_MS = 12;
+
+/**
+ * A lock older than this belonged to a process that died holding it. The
+ * window is generous on purpose: breaking a live lock reintroduces exactly the
+ * race the lock exists to remove, while waiting too long only ever costs a
+ * stalled append that an operator can see and retry.
+ */
+const LOCK_STALE_MS = 30_000;
+
+/** How long to wait for a peer before calling the log jammed rather than busy. */
+const LOCK_TIMEOUT_MS = 60_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Age of the lock file in milliseconds, or `undefined` if it went away while
+ * we were asking — which is not an error but the good outcome: the holder
+ * finished, and the next acquire attempt is the one that succeeds.
+ */
+async function lockAgeMs(lockPath: string): Promise<number | undefined> {
+  try {
+    return Date.now() - (await stat(lockPath)).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
+async function withLogLock<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+  const lockPath = `${filePath}.lock`;
+  await mkdir(path.dirname(lockPath), { recursive: true });
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+
+  for (;;) {
+    let handle: Awaited<ReturnType<typeof open>>;
+    try {
+      handle = await open(lockPath, 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const age = await lockAgeMs(lockPath);
+      if (age !== undefined && age > LOCK_STALE_MS) {
+        // Best-effort: if a peer breaks it first, our next `wx` simply wins or
+        // waits again. `force` keeps that harmless.
+        await rm(lockPath, { force: true });
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new EventError(
+          'events.log-busy',
+          `Another process has held the log for ${filePath} longer than ${LOCK_TIMEOUT_MS}ms. ` +
+            'Nothing was written. If no `smith` process is running, delete the stale lock file.',
+          { lock_path: lockPath },
+        );
+      }
+      await sleep(LOCK_POLL_MS);
+      continue;
+    }
+
+    try {
+      // Written for a person reading a stuck lock, never read back by code.
+      await handle.writeFile(`${process.pid}\n`, 'utf8');
+      return await task();
+    } finally {
+      await handle.close();
+      await rm(lockPath, { force: true });
+    }
+  }
 }
 
 // event_type -> which taxonomy record type its payload must satisfy, and how
@@ -652,10 +756,17 @@ async function appendEventLocked(
  * enforces the causal_parent invariant (must reference a real prior event
  * in this session, null only for session-start), and serializes concurrent
  * appends to the same log — a rejected event never touches the log file.
+ *
+ * Serialized twice, deliberately: `enqueue` orders callers inside this
+ * process, `withLogLock` orders this process against every other `smith`
+ * running against the same log. A wave dispatched in parallel needs the
+ * second one; see its docblock for what a missing lock actually costs.
  */
 export async function appendEvent(input: EventInput, opts: EventOpts = {}): Promise<StoredEvent> {
   const filePath = logPath(input.session_id, opts);
-  return enqueue(filePath, () => appendEventLocked(input, opts, filePath));
+  return enqueue(filePath, () =>
+    withLogLock(filePath, () => appendEventLocked(input, opts, filePath)),
+  );
 }
 
 /** Convenience wrapper for edge-recorded events (edge_type + edge_provenance required). */

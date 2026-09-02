@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -655,6 +655,73 @@ describe('events.ts', () => {
       'race-sess#4',
       'race-sess#5',
     ]);
+  });
+
+  it('waits out a writer in another process, and numbers itself after the line that one wrote', async () => {
+    // The queue above orders appends inside ONE Node process, which was the
+    // whole model while the queue, the gates and the CLI ran as one. A wave
+    // dispatched in parallel ends that: every `smith` invocation is its own
+    // process with its own queue, so the only thing left that can order two of
+    // them is the log file itself. Holding the lock file and growing the log
+    // behind our back is precisely what the other process looks like from here.
+    const logFile = path.join(stateDir, 'cross-sess.jsonl');
+    const lockFile = `${logFile}.lock`;
+    await appendEvent(
+      {
+        session_id: 'cross-sess',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+
+    const foreign = await open(lockFile, 'wx');
+    let settled = false;
+    const pending = appendEvent(
+      {
+        session_id: 'cross-sess',
+        actor: 'system',
+        event_type: 'note',
+        plan_version: 1,
+        causal_parent: 'cross-sess#0',
+        payload: { from: 'us' },
+      },
+      { stateDir },
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+
+    await appendFile(
+      logFile,
+      `${JSON.stringify({
+        session_id: 'cross-sess',
+        actor: 'system',
+        event_type: 'note',
+        plan_version: 1,
+        causal_parent: 'cross-sess#0',
+        payload: { from: 'them' },
+        ts: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect(settled).toBe(false);
+
+    await foreign.close();
+    await rm(lockFile, { force: true });
+
+    // #2, not #1: the index is read after the lock is held, so it counts the
+    // line the other writer added. Returning #1 here is the whole bug — the id
+    // is wrong, it names an event that exists, and the next command's
+    // --causal-parent then points at the wrong parent and validates anyway.
+    expect((await pending).event_id).toBe('cross-sess#2');
+    const events = await readEvents('cross-sess', { stateDir });
+    expect(events.map((e) => e.record.payload.from)).toEqual([undefined, 'them', 'us']);
+    expect(existsSync(lockFile)).toBe(false);
   });
 
   it('rejects a dispatch_decision with a nonsense agent_role/provider/model_tier and writes nothing', async () => {
