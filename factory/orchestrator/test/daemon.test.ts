@@ -347,6 +347,110 @@ describe('what the factory-wide pass notices', () => {
     const events = [stored('sess-1', 'growth-review-due', {}, { ts: '2026-01-01T00:00:00.000Z' })];
     expect(inspectFactory(events, OPTS).filter((f) => f.kind === 'growth-review')).toHaveLength(1);
   });
+
+  // ------------------------------------------------------------------------
+  // The factory's own width. `smith epic width` answers this on demand over
+  // all of history; the daemon asks it of the newest close only, and the
+  // three tests after the first are all about that difference.
+  // ------------------------------------------------------------------------
+
+  const COUNTS = { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 };
+
+  /** An `epic-closed` carrying the concurrency block `epic close` writes. */
+  function closed(
+    epicId: string,
+    at: string,
+    concurrency: unknown,
+    sessionId = 'sess-1',
+  ): StoredEvent {
+    return stored(
+      sessionId,
+      'epic-closed',
+      {
+        epic_id: epicId,
+        closed_by: 'verdict',
+        machine_verdict: 'ready',
+        summary: { concurrency },
+      },
+      { ts: at },
+    );
+  }
+
+  const ran = (verdict: 'parallel' | 'serialized', declared: number, observed: number) => ({
+    waves: 1,
+    verdicts: { ...COUNTS, [verdict]: 1 },
+    widest: { declared, observed },
+    unobserved: [],
+    problem: null,
+  });
+
+  it('says nothing about width in a factory that has closed no epics', () => {
+    const events = [stored('sess-1', 'growth-review-due', {}, { ts: '2026-08-19T00:00:00.000Z' })];
+    expect(inspectFactory(events, OPTS).filter((f) => f.kind === 'factory-width')).toEqual([]);
+  });
+
+  it('raises attention when the epic this factory closed last ran narrow', () => {
+    const events = [closed('epic-1', '2026-08-19T00:00:00.000Z', ran('serialized', 4, 1))];
+    const width = inspectFactory(events, OPTS).filter((f) => f.kind === 'factory-width');
+
+    expect(width).toHaveLength(1);
+    // The one finding here that is a fault rather than work to schedule: a
+    // wave was admitted wide and then dispatched one task at a time, which is
+    // the repo's central claim not being met.
+    expect(width[0]?.severity).toBe('attention');
+    expect(width[0]?.subject).toBe('epic-1');
+    // A close is written wherever the epic finished; the fact is about the
+    // workshop, so attributing it to that session would report it as one
+    // session's problem and repeat it per session.
+    expect(width[0]?.sessionId).toBeNull();
+    expect(width[0]?.detail).toContain('4');
+  });
+
+  it('goes quiet again once a later epic closes wide, with the narrow one still in the log', () => {
+    // The load-bearing one. Closes are immutable and `smith epic width` folds
+    // all of them, so a daemon reporting that fold would raise the same
+    // attention every tick forever over an epic nobody can go back and fix —
+    // and an attention count that can never reach zero teaches an operator to
+    // stop reading it.
+    const events = [
+      closed('epic-1', '2026-08-18T00:00:00.000Z', ran('serialized', 4, 1)),
+      closed('epic-2', '2026-08-19T00:00:00.000Z', ran('parallel', 3, 3)),
+    ];
+    expect(inspectFactory(events, OPTS).filter((f) => f.kind === 'factory-width')).toEqual([]);
+  });
+
+  it('still raises the newest close when an older one ran wide', () => {
+    // The same rule in the other direction: recency is the rule, not "any
+    // parallel epic anywhere clears the factory".
+    const events = [
+      closed('epic-1', '2026-08-18T00:00:00.000Z', ran('parallel', 3, 3)),
+      closed('epic-2', '2026-08-19T00:00:00.000Z', ran('serialized', 4, 1)),
+    ];
+    const width = inspectFactory(events, OPTS).filter((f) => f.kind === 'factory-width');
+    expect(width).toHaveLength(1);
+    expect(width[0]?.subject).toBe('epic-2');
+  });
+
+  it('files a factory that has closed epics but never measured one as work to schedule', () => {
+    // Not `attention`: nothing is known to be wrong. What is wrong is that
+    // nothing is known — which is a different thing, and the reason
+    // summariseEpicWidth refuses to let an unmeasured factory exit 0.
+    const events = [closed('epic-1', '2026-08-19T00:00:00.000Z', undefined)];
+    const width = inspectFactory(events, OPTS).filter((f) => f.kind === 'factory-width');
+
+    expect(width).toHaveLength(1);
+    expect(width[0]?.severity).toBe('info');
+    expect(width[0]?.sessionId).toBeNull();
+    expect(width[0]?.detail).toContain('smith epic close');
+  });
+
+  it('does not call a factory unmeasured while one close still carries a width', () => {
+    const events = [
+      closed('epic-1', '2026-08-18T00:00:00.000Z', ran('parallel', 3, 3)),
+      closed('epic-2', '2026-08-19T00:00:00.000Z', undefined),
+    ];
+    expect(inspectFactory(events, OPTS).filter((f) => f.kind === 'factory-width')).toEqual([]);
+  });
 });
 
 describe('the tick that reads the disk', () => {
