@@ -46,3 +46,45 @@ lessons:
   # pair; below 2*shingle_size+1 words the correction stands aside either way,
   # because there a one-word edit and a coincidence score the same.
   novelty_length_aware: true
+
+autonomy:
+  # Who says yes to what this pass proposes. The scheduler decides WHAT is
+  # due; this block decides what may proceed without an operator tick, and
+  # `smith scheduler admit` (src/autonomy.ts) applies it. That command still
+  # enacts nothing — it prints the classification so it can be read and
+  # argued with before anything moves.
+  #
+  # The operator's standing decision, 2026-09-02: auto-dispatch with a
+  # whitelist. Rechecks and maintenance may run themselves; growth review
+  # and anything touching a security surface always wait; PRs are still
+  # merged by a person, which is the backstop that makes this safe to widen.
+  enabled: true
+
+  # Nothing outside this list is ever auto-dispatched, and listing
+  # `growth-review-due` would not change that: architecture §12 keeps scope
+  # with the operator unconditionally, so autonomy.ts denies it whatever this
+  # says. The list is a ceiling, never a floor.
+  auto_dispatch_kinds: [recheck, maintenance]
+
+  # Rechecks are whitelisted BY REASON, and this is the one knob in the file
+  # that is easy to get backwards. A RecheckProposal's `confidence` is the
+  # COMPLETED TASK's confidence, and a low one is why the recheck exists at
+  # all — gating rechecks on confidence the way maintenance is gated would
+  # hold back precisely the rechecks worth running. So:
+  #   merge-threshold  — N later merges touched its claims; re-running the
+  #                      same checks against moved ground is routine.
+  #   time-elapsed     — T days passed; likewise routine.
+  #   low-confidence   — the work itself was uncertain when it completed.
+  #                      Left out: that is a judgement about quality, and it
+  #                      is the operator who should read it first.
+  # One unlisted reason holds the whole proposal — a recheck is dispatched
+  # once and carries every reason with it.
+  auto_dispatch_recheck_reasons: [merge-threshold, time-elapsed]
+
+  # Maintenance only. Matches maintenance.auto_schedule_confidence above,
+  # repeated rather than imported for the same reason crosscheck.yml repeats
+  # its own copy: "auto-schedulable" and "may run unattended" are allowed to
+  # diverge later, and the day they do, one of them moving must not move the
+  # other by accident. scheduler.ts scores a major-version bump at 0.5
+  # precisely so a person reads it.
+  confidence_floor: 0.8

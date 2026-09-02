@@ -8,6 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
+import type { AutonomyPolicy } from './autonomy.js';
 import { globsOverlap } from './claims.js';
 import { foldTasks, type TaskFoldRow, taskIdCanonicalizer } from './db/projector.js';
 import { SmithError } from './errors.js';
@@ -49,6 +50,8 @@ export interface SchedulerPolicy {
   maintenance: MaintenancePolicy;
   growth: GrowthPolicy;
   lessons: LessonsSchedulerPolicy;
+  /** Who may say yes to what this pass proposes — see src/autonomy.ts. */
+  autonomy: AutonomyPolicy;
 }
 
 interface RawSchedulerYaml {
@@ -67,6 +70,14 @@ interface RawSchedulerYaml {
     novelty_jaccard_threshold?: number;
     shingle_size?: number;
     novelty_length_aware?: boolean;
+  };
+  // Deliberately typed loose: the whole job of the list checks below is to
+  // catch a document that does not match this shape.
+  autonomy?: {
+    enabled?: boolean;
+    auto_dispatch_kinds?: unknown;
+    auto_dispatch_recheck_reasons?: unknown;
+    confidence_floor?: number;
   };
 }
 
@@ -139,6 +150,48 @@ function flag(field: string, value: boolean, note: string): boolean {
   return value;
 }
 
+/**
+ * The closed vocabularies the `autonomy:` whitelists draw from. Closed on
+ * purpose: a name that matches nothing would fail closed, which is the safe
+ * direction and exactly why it has to be loud — `maintenence` would leave
+ * autonomy switched on and admitting nothing, and the log would say only that
+ * the operator was never asked.
+ */
+const PROPOSAL_KINDS: readonly SchedulerProposal['kind'][] = [
+  'recheck',
+  'maintenance',
+  'growth-review-due',
+];
+const RECHECK_REASONS: readonly RecheckReason[] = [
+  'merge-threshold',
+  'time-elapsed',
+  'low-confidence',
+];
+
+const A_LIST_IS_NOT_A_STRING =
+  'A bare scalar spreads into its characters here, so `recheck` would read as seven kinds that match nothing.';
+
+/** A whitelist: a list of strings, every one of them a name this code knows. */
+function vocabList(field: string, value: unknown, vocabulary: readonly string[]): string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new SchedulerError(
+      'scheduler.invalid-policy',
+      `scheduler.yml ${field} must be a list of strings; got ${JSON.stringify(value)}. ${A_LIST_IS_NOT_A_STRING}`,
+      { field, value },
+    );
+  }
+  const entries = value as string[];
+  const unknown = entries.filter((entry) => !vocabulary.includes(entry));
+  if (unknown.length > 0) {
+    throw new SchedulerError(
+      'scheduler.invalid-policy',
+      `scheduler.yml ${field} lists ${unknown.map((u) => JSON.stringify(u)).join(', ')}, which is not one of: ${vocabulary.join(', ')}. A name nothing matches disables silently.`,
+      { field, value: unknown },
+    );
+  }
+  return [...entries];
+}
+
 export function parseSchedulerPolicy(yamlText: string): SchedulerPolicy {
   const doc = (parseYaml(yamlText) ?? {}) as RawSchedulerYaml;
   if (!doc.recheck || !doc.maintenance || !doc.growth) {
@@ -171,6 +224,30 @@ export function parseSchedulerPolicy(yamlText: string): SchedulerPolicy {
       ),
     },
     growth: { cadenceDays: count('growth.cadence_days', doc.growth.cadence_days ?? 30) },
+    // Every default fails closed. A scheduler.yml written before autonomy
+    // existed, or one a downstream project trimmed, must not inherit this
+    // repo's answer to "what may run without me": absent means off, and off
+    // means an empty whitelist behind it.
+    autonomy: {
+      enabled: flag('autonomy.enabled', doc.autonomy?.enabled ?? false, TRUTHY_IS_NOT_TRUE),
+      autoDispatchKinds: vocabList(
+        'autonomy.auto_dispatch_kinds',
+        doc.autonomy?.auto_dispatch_kinds ?? [],
+        PROPOSAL_KINDS,
+      ),
+      autoDispatchRecheckReasons: vocabList(
+        'autonomy.auto_dispatch_recheck_reasons',
+        doc.autonomy?.auto_dispatch_recheck_reasons ?? [],
+        RECHECK_REASONS,
+      ),
+      confidenceFloor: checkKnob(
+        'autonomy.confidence_floor',
+        doc.autonomy?.confidence_floor ?? 0.8,
+        'a number in [0, 1]',
+        READS_SILENTLY,
+        (n) => n >= 0 && n <= 1,
+      ),
+    },
     lessons: {
       noveltyJaccardThreshold: checkKnob(
         'lessons.novelty_jaccard_threshold',
