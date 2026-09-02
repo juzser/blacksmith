@@ -50,10 +50,12 @@ describe('computeNextWave — the widest wave the graph allows', () => {
       { id: 't3', claims: ['src/b/**'] },
     ]);
     const result = computeNextWave({ plan, policy: POLICY });
-    const proposed = result.wave.map((id) => ({
-      task_id: id,
-      claims: (plan.tasks.find((t) => t.task_id === id) as { claims: unknown }).claims,
-    }));
+    const byId = new Map(liveWaveTasks(plan).map((task) => [task.task_id, task]));
+    const proposed = result.wave.flatMap((id) => {
+      const task = byId.get(id);
+      return task ? [task] : [];
+    });
+    expect(proposed).toHaveLength(result.wave.length);
     expect(validateWave(proposed, POLICY, plan.edges)).toEqual({ valid: true });
   });
 
