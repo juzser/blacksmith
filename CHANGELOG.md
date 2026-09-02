@@ -670,6 +670,45 @@ than appearing in it.
   going red. The second test carries a real path inside its fingerprint and
   still refuses to co-locate, so the first cannot be passing for the
   uninteresting reason that its digest was over an empty path.
+- **`smith wave next` — the wave computed instead of guessed.** `wave check`
+  answers a closed question, *may these ids run together*, and answers it well.
+  But it only ever sees a set someone already picked, and the safest set to
+  pick is always a set of one: a single task is disjoint with nothing, shares a
+  hotspot with nothing, and crosses no import edge with nothing, so it passes
+  every gate in the file. The gate cannot tell a deliberate wave of one from an
+  orchestrator that never thought to ask for more, and both come back
+  `valid: true`. So a factory whose whole claim is parallel execution had no
+  command that computes parallelism — it had one that declines to forbid it.
+  `waveLayers` in `graph.ts` already banded a plan by depth and its docblock
+  already said the band means "these can run in parallel right now", but
+  nothing outside the Flow page's layout ever imported it: the one function
+  that knew the answer only ever drew it. `wave next` returns the widest
+  admissible set, producers ordered ahead of the consumers that import them,
+  and every task it left out with one of four named reasons
+  (`dependency-pending`, `claim-overlap`, `serialize-hotspot`,
+  `symbol-coupled`) and the ids that held it back — so a short wave arrives
+  with its explanation rather than as a number to trust. It writes nothing and
+  prices nothing: `wave check` stays the single command that admits a wave and
+  the single place `max_in_flight_tasks` is enforced, because a proposer that
+  also priced would have to choose which task to drop, and that is an
+  operator's call. With `--session` it reads status from the lineage log rather
+  than the plan file — a plan read from disk hours into a run still says `todo`
+  about work that finished — and picks up the follow-ups `findings raise`
+  minted into the log and into no plan file: tasks that exist, are admissible,
+  and were being offered to nobody.
+- **`/bs run` dispatches the wave, not the task.** The playbook said "one wave
+  at a time" and then walked one task through the phases, which is a queue with
+  extra steps. It now states the three rules that make the difference: issue
+  each phase for every task in the wave as parallel tool calls in a single
+  message (five coders in one message is five agents working; five messages of
+  one coder is five agents waiting), let each task walk its phases at its own
+  pace rather than holding a finished coder at a barrier until its neighbours
+  catch up, and let a blocked task block only itself. The one place the wave
+  rejoins is the merge queue, which is serial on purpose. It also names the
+  rule that makes parallel `smith` writes safe to *use*: read each command's
+  `event_id` from its own output, never by adding one to the last, because
+  under fan-out the events in between belong to sibling tasks and a guessed
+  `--causal-parent` names a real event that is not the parent.
 - **`docs/guide/extending.md` gained an "Add a judge provider" section** — the
   page a public operator with a provider this repo has never heard of reaches
   first, and the one extension point it did not cover. It states the shape of
@@ -949,6 +988,42 @@ than appearing in it.
 
 ### Fixed
 
+- **The parallel gate that could only ever admit one task.** `wave check`
+  refuses a wave whose tasks share a `serialize_always_globs` hotspot, and it
+  decided that by asking whether two globs *could* both match some hypothetical
+  path. Under that reading `src/auth/**` shares a hotspot with
+  `**/pnpm-lock.yaml`, because the checker cannot prove no file under that
+  subtree will ever be named `pnpm-lock.yaml` — and subtree claims are the
+  normal way to scope a task. So every realistic pair collided on a lockfile
+  neither one touches, no wave wider than one was ever admissible, and the
+  failure was invisible in the worst way: the gate returned `valid: true` for
+  each singleton it was then handed. The check now asks whether a claim could
+  actually name a protected file — one glob has to contain the other's concrete
+  path. `src/auth/**` no longer collides; `packages/**/pnpm-lock.yaml` still
+  does, and so does `**`, since a claim on everything is a claim on the
+  lockfile too. The operator guide's advice to narrow claims to file extensions
+  to avoid "spurious flags" was a workaround for this bug and is gone with it.
+- **Five processes, five appends, one event id.** Event ids are derived on read
+  from line position, so the log file itself was never at risk — but
+  `appendEvent` returned an index it read *before* appending, and the promise
+  chain that serialized appends was per-process by construction, its own
+  docblock scoping it to "the single-process model this runtime is". Fanning
+  out a wave ends that model: five tasks recorded in five `smith` invocations
+  are five processes, five queues and five readers of the same line count.
+  Reproduced before fixing — five concurrent appends returned `race-1#1` five
+  times. What that costs is worse than a duplicate id. The caller feeds the
+  returned id to the next command as `--causal-parent`, so the wrong parent
+  names an event that genuinely exists, `validateCausalParent` accepts it, and
+  the lineage is quietly mis-shaped; a wrong parent that validates is worse
+  than one that fails. The read-validate-append sequence now happens inside a
+  lock file beside the log (`open(..., 'wx')`, atomic on every filesystem this
+  runs on), which is what makes the returned index true: it counts the lines
+  another process wrote before us, because it is taken after that process let
+  go. The in-process queue is kept as the fast path, so two appends in one
+  process never touch the filesystem at all. Verified with eight concurrent
+  `smith` processes: eight distinct ids, nine lines, no lock left behind. The
+  lock is named `<session>.jsonl.lock`, which `listSessionIds` cannot see — it
+  selects on `.jsonl` as the suffix, and this is not one.
 - **A millisecond is not a side.** The escalation-ladder audit
   (`factory/orchestrator/src/escalation.ts`) asks one question five times —
   *which side of this failed round is that event on* — and answered it with a

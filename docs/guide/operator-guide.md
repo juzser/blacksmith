@@ -161,12 +161,19 @@ refused with `claims.unreadable-edges` rather than checked, on the same
 principle as an unreadable claim set: an edge list that cannot be read is not
 an empty one, and empty is the answer that admits.
 
-The overlap check is
-deliberately conservative: a broad claim glob ending in `/**` can trip a
-`serializeAlwaysViolations` false-positive against an unrelated hotspot
-glob, because the checker can't prove no file under that subtree could ever
-be named `pnpm-lock.yaml`. Scope claims to file extensions or named files
-(`src/auth/*.ts`, not `src/auth/**`) to avoid spurious flags.
+The hotspot check asks whether a claim could actually name a protected file:
+one glob has to contain the other's concrete path. `src/auth/**` and
+`**/pnpm-lock.yaml` share no hotspot, because nothing `src/auth/**` matches is
+a lockfile the second glob is protecting. `packages/**/pnpm-lock.yaml` does,
+and so does `**` — a claim on everything is a claim on the lockfile too.
+
+It used to ask a looser question — whether the two globs *could* both match
+some hypothetical path — and under that reading every claim ending in `/**`
+shared every hotspot. The practical effect was invisible and total: realistic
+subtree claims are the normal way to scope a task, so no wave wider than one
+was ever admissible, and the gate said `valid: true` about each singleton it
+was handed. Claims no longer need to be narrowed to route around it; scope
+them to what the task writes.
 
 After a task runs, `smith claims check <worktree-dir> <spec.json>` classifies
 what that branch committed against the task's `claims[]`. The planner and the
@@ -185,6 +192,64 @@ comma-joining them — a glob may contain a comma. `--since` is optional and
 takes a sha captured before the dispatch: the planner holds `Bash`, so it can
 commit its own work and leave a clean tree that a working-tree-only check would
 call a pass.
+
+### `smith wave next` — the wave you did not have to guess
+
+`wave check` answers a closed question — may *these* task ids run together —
+and answers it well. But it only ever sees a set someone already picked, and
+the safest set to pick is always a set of one: a single task is disjoint with
+nothing, shares a hotspot with nothing, and crosses no import edge with
+nothing, so it passes every check above. The gate cannot tell a deliberate
+wave of one from an orchestrator that never thought to ask for more, and both
+come back `valid: true`. A factory whose whole claim is parallel execution
+therefore had no command that computes parallelism; it had a command that
+declines to forbid it.
+
+```bash
+smith wave next factory/specs/active/epic-1/plan-v1.json \
+  --session <session-id> --repo <project-dir>
+```
+
+```json
+{"epicId":"epic-1","wave":["task-3","task-4","task-6"],
+ "deferred":[
+   {"taskId":"task-1","reason":"symbol-coupled","blockedBy":["task-3"],
+    "detail":"Imports symbols from task-3, which has not merged: the producer runs first."},
+   {"taskId":"task-2","reason":"claim-overlap","blockedBy":["task-5"],
+    "detail":"Claims overlap task-5 (src/db/** vs src/db/schema.ts)."}],
+ "done":["task-7"],"occupied":["task-5"],"remaining":3}
+```
+
+`wave` is the widest set admissible right now, ordered so that a producer is
+offered ahead of the consumer that imports it. Every task left out is in
+`deferred` with one of four reasons — `dependency-pending`, `claim-overlap`,
+`serialize-hotspot`, `symbol-coupled` — and the ids that held it back, so a
+short wave always comes with its explanation. `done` is terminal work
+(`completed`, `waived`); `occupied` is everything non-terminal that is not a
+candidate, which includes `blocked` and `failed`: those are waiting on a
+person, not on nothing, and their worktrees still hold their claims.
+
+Three things it deliberately does not do.
+
+It **writes nothing**. `wave-admitted` is what moves a task to `ready`, and
+this command proposes rather than admits, so it is safe to ask at any moment
+and safe to ask twice. `wave check` stays the single place a wave is admitted.
+
+It **does not price the wave**. Cost and `max_in_flight_tasks` are `wave
+check`'s verdict, and a proposer that also priced would have to decide which
+task to drop — an operator's call, not a graph's. A proposed wave can still be
+refused for cost on the next line; that is the gate working.
+
+It **does not trust the plan file about status**. `task_status` in a plan is
+the task's *initial* status, and a plan read from disk hours into a run still
+says `todo` about work that finished. `--session` reads the live status from
+the lineage log, and picks up follow-up tasks that `findings raise` minted
+into the log and into no plan file — a task that exists, is admissible, and
+would otherwise be offered to nobody.
+
+Exit 1 means work remains and none of it can start: a stall worth reporting,
+distinguished from the epic simply being finished, which is an empty `wave`
+with `remaining: 0`.
 
 ### The blind spot a claim has by construction (P9-3)
 
