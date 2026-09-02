@@ -104,6 +104,69 @@ describe('judgePreflight()', () => {
     expect(report.problems).toEqual([]);
   });
 
+  // `enabled: auto` is the answer to a problem this file's own soundness test
+  // found the hard way. `enabled` describes a machine and crosscheck.yml is
+  // checked in, so `true` is a claim about every clone: promoting codex on the
+  // one box that had it made CI -- which has no `codex` -- fail the soundness
+  // check, correctly, for a line that was true where it was written.
+  describe('a provider the box decided about', () => {
+    it('is silent, not unmet, when auto found nothing to run', async () => {
+      const report = await preflight(
+        'auto-off',
+        `${NATIVE}  codex:
+    kind: api
+    transport: cli
+    enabled: auto
+    mode: active
+    model_tier: mid
+    command: smith-no-such-binary-6f3a1c
+    args: ["exec"]
+`,
+      );
+      const codex = report.providers.find((p) => p.provider === 'codex');
+      expect(codex).toMatchObject({ enabled: false, status: 'not-applicable' });
+      // The distinction the report exists to draw: this box has no codex, and
+      // that is not the same sentence as "your policy disabled codex".
+      expect(codex?.detail).toContain('enabled: auto');
+      expect(codex?.detail).not.toContain('Disabled in the policy');
+      // The whole point -- a policy naming a judge this box cannot run is
+      // sound here, and `smith judge preflight` still exits 0.
+      expect(report.problems).toEqual([]);
+    });
+
+    it('is a full gating participant when auto found the binary', async () => {
+      const report = await preflight(
+        'auto-on',
+        `${NATIVE}  codex:
+    kind: api
+    transport: cli
+    enabled: auto
+    mode: active
+    model_tier: mid
+    command: sh
+    args: ["exec"]
+`,
+      );
+      expect(report.providers.find((p) => p.provider === 'codex')).toMatchObject({
+        enabled: true,
+        status: 'ok',
+      });
+      expect(report.gating.activeExternal).toEqual(['codex']);
+    });
+
+    it('still nags a provider the operator enabled in so many words', async () => {
+      // `auto` is an escape hatch, not an amnesty: `enabled: true` over a
+      // binary that is not there is still the misconfiguration this command
+      // was written to catch, and still exits 1.
+      const report = await preflight(
+        'declared-unmet',
+        NATIVE + cliProvider('nope', 'shadow', 'smith-no-such-binary-6f3a1c'),
+      );
+      expect(report.providers.find((p) => p.provider === 'nope')?.status).toBe('unmet');
+      expect(report.problems).toHaveLength(1);
+    });
+  });
+
   it('fails an enabled CLI provider whose command is not on PATH', async () => {
     const report = await preflight(
       'missing-cli',

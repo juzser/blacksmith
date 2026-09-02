@@ -27,10 +27,10 @@
 // config check into a network dependency. This asks only what can be known
 // locally: is the key set, is the binary on PATH, and does the arithmetic of
 // the promotions add up.
-import { accessSync, constants, readFileSync } from 'node:fs';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { type CrosscheckPolicy, type ProviderConfig, parseCrosscheckPolicy } from './crosscheck.js';
 import { CROSSCHECK_POLICY_PATH } from './paths.js';
+import { apiKeyPresent, commandOnPath } from './preconditions.js';
 
 /**
  * `ok` — the precondition holds, or there is none. `unmet` — the provider is
@@ -96,24 +96,6 @@ export interface JudgePreflight {
   notes: string[];
 }
 
-/** Is `command` runnable — an absolute path that exists, or a name on PATH? */
-function onPath(command: string): boolean {
-  const executable = (candidate: string): boolean => {
-    try {
-      accessSync(candidate, constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  if (command.includes('/')) return executable(isAbsolute(command) ? command : join('.', command));
-  const path = process.env.PATH ?? '';
-  return path
-    .split(delimiter)
-    .filter((dir) => dir.length > 0)
-    .some((dir) => executable(join(dir, command)));
-}
-
 function inspect(config: ProviderConfig): ProviderPreflight {
   if (config.kind === 'native') {
     return {
@@ -136,14 +118,17 @@ function inspect(config: ProviderConfig): ProviderPreflight {
   } as const;
 
   if (config.transport === 'api') {
-    const set = (process.env[config.apiKeyEnv] ?? '').length > 0;
+    const set = apiKeyPresent(config.apiKeyEnv);
     if (!config.enabled) {
       return {
         ...base,
         transport: 'api',
         precondition: config.apiKeyEnv,
         status: 'not-applicable',
-        detail: `Disabled in the policy, so ${config.apiKeyEnv} is not read.`,
+        detail:
+          config.enabledSource === 'auto'
+            ? `enabled: auto, and ${config.apiKeyEnv} is unset here, so this box does not use it. Set the key to switch it on; nothing to edit.`
+            : `Disabled in the policy, so ${config.apiKeyEnv} is not read.`,
       };
     }
     return {
@@ -157,14 +142,17 @@ function inspect(config: ProviderConfig): ProviderPreflight {
     };
   }
 
-  const resolvable = onPath(config.command);
+  const resolvable = commandOnPath(config.command);
   if (!config.enabled) {
     return {
       ...base,
       transport: 'cli',
       precondition: config.command,
       status: 'not-applicable',
-      detail: `Disabled in the policy, so ${config.command} is never spawned.`,
+      detail:
+        config.enabledSource === 'auto'
+          ? `enabled: auto, and ${config.command} is not on PATH here, so this box does not use it. Install it to switch it on; nothing to edit.`
+          : `Disabled in the policy, so ${config.command} is never spawned.`,
     };
   }
   return {

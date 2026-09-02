@@ -544,6 +544,7 @@ describe('crossFinding.ts runIndependentFinder', () => {
       kind: 'api',
       transport: 'cli',
       enabled: true,
+      enabledSource: 'declared',
       mode,
       modelTier: 'mid',
       command: 'node',

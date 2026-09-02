@@ -1,14 +1,20 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CrosscheckError, loadCrosscheckPolicy, parseCrosscheckPolicy } from '../src/crosscheck.js';
+import {
+  CrosscheckError,
+  loadCrosscheckPolicy,
+  type ProviderConfig,
+  parseCrosscheckPolicy,
+} from '../src/crosscheck.js';
 import { CROSSCHECK_POLICY_PATH } from '../src/paths.js';
 
 describe('crosscheck.ts', () => {
   it('parses the real repo crosscheck.yml', () => {
     // parse, not load: `enabled` and `mode` are the two fields that track a
-    // machine rather than the repo. `enabled` declares which judge binaries
-    // this box actually has; `mode` declares whether the operator has promoted
-    // one from shadow to gating. Flipping either is a supported operator
+    // machine rather than the repo. `enabled` decides which judge binaries this
+    // box actually uses -- declared as a boolean, or `auto`, which asks the box
+    // and so resolves to a different value here than in CI; `mode` declares
+    // whether the operator has promoted one from shadow to gating. Flipping either is a supported operator
     // action (runbook §2 and §3). Asserting their values here made those
     // actions fail the suite. What is worth pinning is the SHAPE the code
     // depends on, which is the same on every box.
@@ -112,7 +118,13 @@ providers:
     it('changes nothing else about the provider it disables', () => {
       const online = parseCrosscheckPolicy(yamlText);
       const offline = parseCrosscheckPolicy(yamlText, { offline: true });
-      expect({ ...offline.providers.deepseek, enabled: true }).toEqual(online.providers.deepseek);
+      // `enabled` and `enabledSource` are one decision recorded twice -- the
+      // value and who set it -- so both are restored before the comparison.
+      // Everything else, and that is the point of the test, must survive the
+      // switch untouched: an operator reaching for the kill switch is not
+      // asking for a different model, a different tier, or a different key.
+      const restored = { ...offline.providers.deepseek, enabled: true, enabledSource: 'declared' };
+      expect(restored).toEqual(online.providers.deepseek);
     });
 
     it('is off by default, so the parser still reports the file as written', () => {
@@ -424,6 +436,99 @@ providers:
     expect(() => parseCrosscheckPolicy(withCodex('    enabled: no\n'))).toThrow(
       /providers\.codex\.enabled.*"no"/s,
     );
+  });
+
+  // `enabled` is the one field in this file that describes a MACHINE, and the
+  // file is checked in, so every value it can hold is shipped to every clone.
+  // `true` is therefore a claim about somebody else's box: the day codex was
+  // promoted here, CI -- which has no `codex` binary -- started failing
+  // judgePreflight's soundness check, correctly, for a line that was true
+  // where it was written. `auto` is the field finally saying what the
+  // operator means: use this judge on any box that can run it, and be silent
+  // on the ones that cannot.
+  describe('enabled: auto', () => {
+    // `enabledSource` lives on the external configs only: the native provider
+    // has no box to ask, so the union genuinely has no such field there and
+    // this narrows rather than casts.
+    const sourceOf = (provider: ProviderConfig | undefined): string | undefined =>
+      provider && provider.kind !== 'native' ? provider.enabledSource : undefined;
+
+    it('resolves to true where the command is on PATH and false where it is not', () => {
+      const present = parseCrosscheckPolicy(
+        `providers:\n  claude: { kind: native, enabled: true }\n  codex:\n    kind: api\n    transport: cli\n    command: sh\n    enabled: auto\n`,
+      );
+      expect(present.providers.codex?.enabled).toBe(true);
+
+      const absent = parseCrosscheckPolicy(
+        `providers:\n  claude: { kind: native, enabled: true }\n  codex:\n    kind: api\n    transport: cli\n    command: smith-no-such-binary-6f3a1c\n    enabled: auto\n`,
+      );
+      expect(absent.providers.codex?.enabled).toBe(false);
+    });
+
+    it('resolves an api provider against its key, not against a binary', () => {
+      const text = `providers:\n  claude: { kind: native, enabled: true }\n  vendor:\n    kind: api\n    transport: api\n    base_url: https://example.invalid\n    model: m\n    api_key_env: SMITH_TEST_AUTO_KEY\n    enabled: auto\n`;
+      delete process.env.SMITH_TEST_AUTO_KEY;
+      expect(parseCrosscheckPolicy(text).providers.vendor?.enabled).toBe(false);
+      process.env.SMITH_TEST_AUTO_KEY = 'sk-not-a-real-key';
+      expect(parseCrosscheckPolicy(text).providers.vendor?.enabled).toBe(true);
+      delete process.env.SMITH_TEST_AUTO_KEY;
+    });
+
+    it("records that the box decided, so nothing reports it as the operator's choice", () => {
+      // A provider `auto` switched off is not a provider somebody turned off,
+      // and `smith judge preflight` says so in different words. Without this
+      // field the report tells an operator their policy disabled a judge they
+      // never touched.
+      const off = parseCrosscheckPolicy(
+        `providers:\n  claude: { kind: native, enabled: true }\n  codex:\n    kind: api\n    transport: cli\n    command: smith-no-such-binary-6f3a1c\n    enabled: auto\n`,
+      );
+      expect(sourceOf(off.providers.codex)).toBe('auto');
+      expect(
+        sourceOf(parseCrosscheckPolicy(withCodex('    enabled: true\n')).providers.codex),
+      ).toBe('declared');
+    });
+
+    it('names the offline switch as the decider when the offline switch decided', () => {
+      // `sh` is on every box this suite runs on, so `auto` alone would resolve
+      // true here. Under SMITH_CROSSCHECK_OFFLINE it does not, and the reason
+      // is not the box: reporting `auto` for this row would send an operator
+      // to install a binary they already have.
+      const off = parseCrosscheckPolicy(
+        `providers:\n  claude: { kind: native, enabled: true }\n  codex:\n    kind: api\n    transport: cli\n    command: sh\n    enabled: auto\n`,
+        { offline: true },
+      );
+      expect(off.providers.codex?.enabled).toBe(false);
+      expect(sourceOf(off.providers.codex)).toBe('offline');
+      // The native judge is untouched by the switch, and keeps the source the
+      // file gave it.
+      expect(off.providers.claude?.enabled).toBe(true);
+    });
+
+    it('refuses auto on the native provider, which has no precondition to read', () => {
+      // There is nothing to probe: claude runs in this process. `auto` there
+      // would have to mean `true`, and a switch whose two settings do the same
+      // thing is a switch that reads as considered and is not.
+      expect(() =>
+        parseCrosscheckPolicy('providers:\n  claude: { kind: native, enabled: auto }\n'),
+      ).toThrow(/providers\.claude\.enabled/);
+    });
+
+    it('still refuses every near-miss, because only one string is a word here', () => {
+      // `auto` being legal must not widen the field back into truthiness: the
+      // YAML 1.1 spellings are exactly as wrong as they were.
+      //
+      // `"auto"` is absent from this list and cannot be added: quoting is a
+      // distinction YAML keeps only where the bare form is not a string, so
+      // `"false"` differs from `false` (boolean) while `"auto"` and `auto`
+      // arrive here as the same four characters. The parser is not being
+      // lenient about it -- there is nothing left to tell apart.
+      for (const literal of ['no', 'off', 'yes', 'Auto', 'AUTO', 'automatic']) {
+        expect(
+          () => parseCrosscheckPolicy(withCodex(`    enabled: ${literal}\n`)),
+          literal,
+        ).toThrow(CrosscheckError);
+      }
+    });
   });
 
   it('keeps every spelling of a real boolean working', () => {
