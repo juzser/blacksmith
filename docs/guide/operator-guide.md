@@ -897,6 +897,78 @@ Two shortcuts, both on `gate run` (§5):
   error (`cli.no-findings-needs-role`), not an attestation for a role called
   "true".
 
+### `smith judge escalations` — the disagreement nobody read back
+
+`judge outstanding` answers *which judge still owes me a file*. This one
+answers the question next to it, which the log could always have answered and
+no command asked: **which cross-provider disagreements is the operator still
+owed?**
+
+```bash
+smith judge escalations --session <session-id>
+```
+
+Every quorum writes a `quorum-decision` event, from whichever of the three
+places raised it — a gate finding (§5), an epic final verdict (§7b), a plan
+critique (§7). When the outcome is `escalate`, that event is the *only*
+durable record. The gate returns its escalation on the run's outcome, and a
+run's outcome is a moment, not a ledger: it is gone by the next run. Worse,
+the gate hands an escalation back to its caller only when an **active** judge
+took part, so a disagreement reached entirely in `mode: shadow` was written to
+the log and reported to nobody at all.
+
+This is a fold over the lineage, not a projection table — every fact it prints
+was already on the event when the quorum spoke, and a second copy is a copy
+that can disagree with the first. It reads the **lineage** and not one session
+for the same reason `judge outstanding` does: an escalation raised in one
+session is owed until it is answered, and the answer routinely lands in the
+next one. A case whose latest word was `decided` (or a plan quorum's
+`not-run`) is closed; a case that escalated *again* after being settled is
+open again. Findings are keyed on `fingerprint`, so two runs of the same gate
+report one disagreement once rather than twice. Oldest first, because the list
+is a debt and the oldest debt has been ignored longest.
+
+```json
+{
+  "disagreements": [
+    {"key":"finding:fp-1","subject":"finding","reason":"disagreement",
+     "taskId":"epic-1/task-1","fingerprint":"fp-1","finderProvider":"claude",
+     "held":true,"participants":[…],"rationales":[…],"ts":"…"}
+  ],
+  "ungated": {"count":2,"hint":"No quorum could be formed: …","cases":[…]},
+  "exitCode": 2
+}
+```
+
+The two halves are split by what answering them costs. A **disagreement** is a
+case each: two providers looked at the same thing and said different words,
+and a person has to read both. **`ungated`** is `insufficient-providers` —
+which is one fact about `crosscheck.yml` repeated once per finding, so it is
+collapsed to a count and a hint rather than listed as a backlog that would
+bury the real disagreements. The cases are still carried, so nothing is
+hidden; the count is the part meant to be read.
+
+`held` normalises the three emitters' opposite booleans (`blocks: true`,
+`ready: false`, `sound: false`) into one: `true` means the escalation stopped
+something. **`held: false` is the line to read first** — the quorum could not
+settle the case and the pipeline went ahead regardless.
+
+| Exit | Meaning |
+|---|---|
+| `0` | Nothing open |
+| `1` | At least one open disagreement — two providers, two answers, no verdict |
+| `2` | No disagreement, but something was never gated at all |
+
+Exit `2` exists because `0` there would be a false green. With
+`min_providers: 2` and one active external provider, the finder is excluded
+from its own case and the gating pool is one — so **every** finding escalates
+as `insufficient-providers` and the quorum decides nothing (the arithmetic is
+spelled out in `docs/runbooks/providers.md`). A command that answered "clean"
+in that configuration would be reporting the absence of a check as the absence
+of a problem. `smith judge preflight` (`docs/runbooks/providers.md` §1)
+tells you the same thing before the run; this one tells you what it already
+cost.
+
 ## 4. `smith queue run`
 
 Drives a set of already-merged-locally task branches through the serial

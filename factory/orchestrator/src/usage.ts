@@ -593,6 +593,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'List the judge turns still owed on a task. Exit 1 while the list is non-empty.',
   },
   {
+    command: 'judge escalations',
+    positionals: '',
+    flags: '--session <id> [--state-dir <dir>]',
+    summary:
+      'List the cross-provider disagreements still owed an answer. Exit 1 on an open disagreement, 2 when nothing was gated at all.',
+  },
+  {
     command: 'judge preflight',
     positionals: '',
     flags: '[--policy <file>]',

@@ -3184,6 +3184,26 @@ async function main(): Promise<number> {
     return open.length > 0 ? 1 : 0;
   }
 
+  if (namespace === 'judge' && action === 'escalations') {
+    // Kept out of the boot graph by habit rather than by need -- the module
+    // imports nothing at runtime -- so that a later dependency added to it
+    // cannot quietly cost `smith --help` a database (P9-2, test/cliBoot.test.ts).
+    const { openQuorumEscalations, summariseEscalations } = await import('./quorumEscalations.js');
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    // The lineage and not the session: an escalation raised in one operator
+    // session is owed until answered, and the answer routinely lands in the
+    // next one (judges.ts:248 -- an epic outgrowing one session is the
+    // recommended shape). Folding one session would report a settled case as
+    // open, and an open one as nothing at all.
+    const summary = summariseEscalations(
+      openQuorumEscalations(await readLineageEvents(sessionId, eventOpts)),
+    );
+    printJson(summary);
+    return summary.exitCode;
+  }
+
   if (namespace === 'judge' && action === 'preflight') {
     // The one provider question that can be answered without spending a call.
     // Deliberately ahead of `judge run` in this file for the same reason it is
