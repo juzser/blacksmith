@@ -156,10 +156,15 @@ Zero active externals is the shipped default and is reported, never
 flagged. Exactly **one** is flagged — see §4 for why that configuration
 pays for a gating provider and gets no gating.
 
-A fresh clone passes this command with nothing to say: both externals ship
-`enabled: false`, so there is no precondition left to miss. It earns its
-keep the moment you switch one on (§2) — run it then, before the first
-quorum trigger does it for you at the cost of a call.
+**This command answers about the box it runs on, and the answer differs
+between boxes on purpose.** What ships today is `deepseek: enabled: false`
+and `codex: enabled: auto, mode: active`, so the same commit reports two
+different sound configurations: on a box with no `codex` binary the
+provider is `not-applicable`, there are zero active externals, and there is
+nothing to say; on a box that has it, codex is the one active external and
+that advisory is printed under `notes`, because this repo declares
+`accept_non_gating_actives` (§4). Neither box exits 1, and neither box
+edits the file to get there.
 
 ## 2. Enabling a provider
 
@@ -176,6 +181,57 @@ codex:
 of `mode`. `enabled: true` + `mode: shadow` means it runs on every quorum
 case the factory actually raises today, and its verdict is recorded — but
 the gate never sees it (§3).
+
+### `enabled: auto` — the value that asks the box
+
+`enabled` takes a third value, and it is the one to reach for when the
+answer is "wherever this can run":
+
+```yaml
+codex:
+  enabled: auto     # this box has the binary, or it does not
+  mode: active
+```
+
+`enabled` is the one field in `crosscheck.yml` that describes a **machine**,
+and the file is checked in — so `true` there is a claim about every clone
+that will ever read it. That is not a hypothetical: the day codex was first
+promoted with a flat `enabled: true`, CI — a box with no `codex` binary —
+started failing `smith judge preflight`'s soundness check, correctly, for a
+line that was true where it was typed.
+
+`auto` resolves against the same precondition §1 reports on, evaluated on
+the box reading the file, at parse time:
+
+| provider | `auto` asks | resolves `true` when |
+| --- | --- | --- |
+| `transport: cli` | is `command` runnable | it is on `PATH`, or is a path that exists and is executable |
+| `transport: api` | is `api_key_env` set | the variable is set to something non-empty |
+
+Both probes are free — no process is spawned, no request is made — and
+that bounds what `auto` can know. It reads **installation, not
+authentication**: `codex` on `PATH` does not mean `codex login` was run, and
+a set `DEEPSEEK_API_KEY` does not mean the key is valid. A box with the
+binary and no session resolves `true`, spends a call per trigger, and
+records the failure like any other bad verdict. Only a real call knows the
+other half, and a check that spends one costs what it is trying to save.
+
+Two consequences worth knowing before you write it:
+
+- **`auto` is an escape hatch, not an amnesty.** A declared `enabled: true`
+  over a missing binary is still an unmet precondition and still a preflight
+  problem. `auto` changes what you *asked for*, not what the check enforces.
+- **A reader can tell the two apart.** Preflight reports a provider `auto`
+  switched off as "enabled: auto, and codex is not on PATH here, so this box
+  does not use it" — not "disabled in the policy", which would name a
+  decision nobody made. The parser records which decider settled it.
+
+`auto` is refused on `kind: native`: claude runs in this process and has no
+precondition to ask about, so `auto` there could only mean `true`, and a
+switch whose two settings do the same thing reads as considered and is not.
+Every other near-miss is refused as before — `yes`, `on`, `Auto` and
+`automatic` are all errors, because the whole reason this field is checked
+so strictly is that a near-miss here once left a judge switched on.
 
 ### Which `quorum_triggers` are wired
 
@@ -519,10 +575,12 @@ Two levers, same file, same "operator edit, never a runtime write" rule:
 - **`mode: active` → `mode: shadow`** — the provider keeps running and
   getting recorded, but instantly loses gating power again. Use this first;
   it's the low-friction lever and keeps calibration data flowing.
-- **`enabled: true` → `enabled: false`** — the provider stops being invoked
-  entirely (no cost, no events, no gating power). Use this for a hard stop
-  (e.g. a key was rotated and you haven't reconfigured yet, or the CLI
-  binary is misbehaving).
+- **`enabled: true` (or `auto`) → `enabled: false`** — the provider stops
+  being invoked entirely (no cost, no events, no gating power). Use this for
+  a hard stop (e.g. a key was rotated and you haven't reconfigured yet, or
+  the CLI binary is misbehaving). A declared `false` is never overridden by
+  a box that happens to have the binary — that is the whole difference
+  between `false` and `auto`.
 
 There is a third lever that is not this file: `SMITH_CROSSCHECK_OFFLINE=1`
 (§2) does what `enabled: false` on every provider does, for one command,
@@ -571,14 +629,15 @@ Either edit takes effect on the next case; nothing to restart.
   disabled provider before `recordJudgeRun()`, so nothing in the event log
   distinguishes "this provider was never invoked" from "this provider was
   never configured" — true of `enabled: false` in the file as well, but the
-  file at least leaves a diff. Today it cannot change any gate outcome:
-  both providers ship `enabled: false`, and one you switch on arrives in
-  `mode: shadow`, so with no active external participant `computeQuorum()`
-  returns the same native-only decision it always did. The moment one is promoted (§4), an ambient
-  `SMITH_CROSSCHECK_OFFLINE` in a gating environment would silently
-  downgrade real quorum cases back to native-only. So: pass it per command,
-  and if you ever promote a provider, check for it in the environment that
-  runs the gate before you do.
+  file at least leaves a diff. Today it still cannot change a gate outcome,
+  but for an arithmetic reason rather than a configuration one: codex ships
+  `enabled: auto, mode: active`, so on a box that has the binary there *is*
+  an active external — it just cannot reach `min_providers: 2` on findings
+  claude raised, and `computeQuorum()` escalates either way (§4). The moment
+  a second provider is enabled, an ambient `SMITH_CROSSCHECK_OFFLINE` in a
+  gating environment would silently downgrade real quorum cases back to
+  native-only. So: pass it per command, and before you enable a second
+  provider, check for it in the environment that runs the gate.
 - **The finder is the one provider call that sends source.** Everything in
   §2–§4 sends a claim: a summary, a category, a path, a failure scenario.
   `independent_finder` sends the diff, because a second eye has nothing else

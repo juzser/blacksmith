@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { SmithError } from './errors.js';
 import { CROSSCHECK_POLICY_PATH } from './paths.js';
+import { apiKeyPresent, commandOnPath } from './preconditions.js';
 
 export class CrosscheckError extends SmithError {}
 
@@ -27,11 +28,29 @@ export interface NativeProviderConfig {
   enabled: boolean;
 }
 
+/**
+ * Who decided a provider's `enabled`, so that a report can name the right
+ * decider instead of the nearest one.
+ *
+ * - `declared` — the file says true or false in so many words.
+ * - `auto` — the file said `auto` and THIS BOX answered, by having the binary
+ *   or the key, or by not having it.
+ * - `offline` — neither: `SMITH_CROSSCHECK_OFFLINE` forced the provider off as
+ *   the policy loaded, whatever the file said.
+ *
+ * Nothing gates on this. It exists because "your box has no codex", "your
+ * policy disabled codex" and "the offline switch is set" are three different
+ * sentences, at most one of them is true, and a report that picks the wrong
+ * one sends an operator to edit a file that is already correct.
+ */
+export type EnabledSource = 'declared' | 'auto' | 'offline';
+
 export interface CliProviderConfig {
   name: string;
   kind: 'api';
   transport: 'cli';
   enabled: boolean;
+  enabledSource: EnabledSource;
   mode: ProviderMode;
   modelTier: string;
   command: string;
@@ -45,6 +64,7 @@ export interface ApiProviderConfig {
   kind: 'api';
   transport: 'api';
   enabled: boolean;
+  enabledSource: EnabledSource;
   mode: ProviderMode;
   modelTier: string;
   baseUrl: string;
@@ -176,7 +196,8 @@ export function providerModel(config: ProviderConfig): string {
 interface RawProviderYaml {
   kind?: string;
   transport?: string;
-  enabled?: boolean;
+  /** `boolean` or the string `auto`; anything else is refused by parseEnabled. */
+  enabled?: boolean | string;
   mode?: string;
   model_tier?: string;
   command?: string;
@@ -357,11 +378,26 @@ function quorumBoolean(field: string, value: boolean): boolean {
   if (typeof value !== 'boolean') {
     throw new CrosscheckError(
       'crosscheck.invalid-policy',
-      `crosscheck.yml ${field} must be true or false; got ${JSON.stringify(value)}. This file is YAML 1.2, where no/off/yes/on are strings, and a non-empty string is truthy. ${DECIDES_DIFFERENTLY}`,
+      `crosscheck.yml ${field} must be true or false; got ${JSON.stringify(value)}. This file is YAML 1.2, where no/off/yes/on are strings, and a non-empty string is truthy. On an external provider's enabled the one other legal value is auto, unquoted and lowercase, which resolves against that provider's precondition on the box reading the file. ${DECIDES_DIFFERENTLY}`,
       { field, value },
     );
   }
   return value;
+}
+
+/**
+ * `enabled` reads one value more than the other booleans do. `auto` means
+ * "ask this box": the parser resolves it against the same precondition
+ * `smith judge preflight` reports on, so a policy that names a judge no box
+ * has to have is legal to ship, and silent where it cannot run.
+ *
+ * Only the exact lowercase word. `Auto` and a quoted `"auto"` are refused
+ * with everything else, because the whole reason this field is checked at all
+ * is that a near-miss here used to keep a judge switched on.
+ */
+function parseEnabled(field: string, value: boolean | string | undefined): boolean | 'auto' {
+  if (value === 'auto') return 'auto';
+  return quorumBoolean(field, value as boolean);
 }
 
 function quorumString(field: string, value: string): string {
@@ -443,10 +479,18 @@ function parsePlanQuorum(raw: RawPlanQuorumYaml | undefined): PlanQuorumPolicy {
 function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
   // `enabled` is checked before anything else this function does, because it
   // is the field that decides whether the rest of the config is ever used.
-  const enabled = quorumBoolean(`providers.${name}.enabled`, raw.enabled ?? false);
+  const declared = parseEnabled(`providers.${name}.enabled`, raw.enabled ?? false);
+  const enabledSource = declared === 'auto' ? 'auto' : 'declared';
 
   if (raw.kind === 'native') {
-    return { name, kind: 'native', enabled };
+    if (declared === 'auto') {
+      throw new CrosscheckError(
+        'crosscheck.invalid-provider',
+        `crosscheck.yml providers.${name}.enabled is auto, but "${name}" is kind: native — it runs in this process and has no precondition to ask about. Write true or false.`,
+        { provider: name, field: `providers.${name}.enabled` },
+      );
+    }
+    return { name, kind: 'native', enabled: declared };
   }
 
   // `mode` needs no check: anything that is not exactly 'active' becomes
@@ -466,14 +510,20 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
         { provider: name },
       );
     }
+    const command = quorumString(`providers.${name}.command`, raw.command);
     return {
       name,
       kind: 'api',
       transport: 'cli',
-      enabled,
+      // `auto` asks the same question judgePreflight reports on: is the
+      // binary runnable here. Not whether it is authenticated -- only a real
+      // call knows that, so `auto` can still resolve true on a box where
+      // `codex login` was never run, and the quorum records the failure.
+      enabled: declared === 'auto' ? commandOnPath(command) : declared,
+      enabledSource,
       mode,
       modelTier,
-      command: quorumString(`providers.${name}.command`, raw.command),
+      command,
       // spawn(command, 'exec') throws ERR_INVALID_ARG_TYPE at dispatch, which
       // quorum.ts catches and files as a provider error -- so the judge drops
       // out of the quorum and the run reads as if the policy said so.
@@ -490,16 +540,20 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
         { provider: name },
       );
     }
+    const apiKeyEnv = quorumString(`providers.${name}.api_key_env`, raw.api_key_env);
     return {
       name,
       kind: 'api',
       transport: 'api',
-      enabled,
+      // Set and non-empty, which is all that is knowable without spending a
+      // call; whether the key is VALID is not.
+      enabled: declared === 'auto' ? apiKeyPresent(apiKeyEnv) : declared,
+      enabledSource,
       mode,
       modelTier,
       baseUrl: quorumString(`providers.${name}.base_url`, raw.base_url),
       model: quorumString(`providers.${name}.model`, raw.model),
-      apiKeyEnv: quorumString(`providers.${name}.api_key_env`, raw.api_key_env),
+      apiKeyEnv,
       responseFormatJsonObject: quorumBoolean(
         `providers.${name}.response_format_json_object`,
         raw.response_format_json_object ?? true,
@@ -644,7 +698,12 @@ export function parseCrosscheckPolicy(
   for (const [name, raw] of Object.entries(doc.providers)) {
     const config = parseProvider(name, raw ?? {});
     providers[name] =
-      options.offline && config.kind !== 'native' ? { ...config, enabled: false } : config;
+      options.offline && config.kind !== 'native'
+        ? // The switch is the decider now, and says so: a reader that saw
+          // `auto` here would report a box that lacks the binary, which is a
+          // different fault with a different fix.
+          { ...config, enabled: false, enabledSource: 'offline' }
+        : config;
   }
 
   return {
