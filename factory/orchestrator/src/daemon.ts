@@ -24,6 +24,7 @@ import { checkBudgetAlarm } from './budgetAlarm.js';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import type { DbOpts } from './db/projector.js';
 import { apply } from './db/projector.js';
+import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
 import { SmithError } from './errors.js';
 import {
   listSessionIds,
@@ -61,6 +62,7 @@ export type FindingKind =
   | 'spec-change'
   | 'maintenance'
   | 'growth-review'
+  | 'factory-width'
   | 'unreadable-log'
   | 'projection-failed';
 
@@ -244,6 +246,52 @@ export function inspectFactory(
     // Rechecks are deliberately dropped here: inspectSession already reports
     // each against the session that owns it, and a second copy with no session
     // is a duplicate an operator cannot act on.
+  }
+
+  // The claim this repo rests on, watched instead of waited on. `smith epic
+  // width` answers it over all of history the moment somebody types it — and
+  // nobody types it, which is the gap a watcher exists to close.
+  //
+  // Of the NEWEST close only, and that restriction is the whole design.
+  // Closes are immutable and the fold covers every one of them, so reporting
+  // the fold here would raise the same `attention` every tick forever over an
+  // epic nobody can go back and fix. An attention count that cannot return to
+  // zero is precisely what the FindingSeverity note above forbids: it teaches
+  // an operator to stop reading the number, and takes the real alarms with it.
+  // The newest close is a statement about now — it clears itself the moment a
+  // wide epic closes, and all of the history stays one command away.
+  const width = summariseEpicWidth(events);
+  const newest = width.epics[0];
+  if (newest !== undefined) {
+    if (width.serialized.includes(newest.epicId)) {
+      // The summary's own rule, reused rather than restated, so the daemon and
+      // `smith epic width` cannot come to disagree about what narrow means.
+      findings.push({
+        kind: 'factory-width',
+        severity: 'attention',
+        sessionId: null,
+        subject: newest.epicId,
+        detail:
+          `The last epic this factory closed ran narrow: its widest wave was admitted for ` +
+          `${newest.widest.declared} tasks and ${newest.widest.observed} ran ` +
+          `(closed ${newest.closedAt}, ${width.serialized.length} of ${width.epics.length} ` +
+          'closes read here are narrow). `smith epic width` reads every close back; ' +
+          '`smith wave audit --session <id>` reads the waves behind a live one.',
+      });
+    } else if (width.hint === UNMEASURED_HINT) {
+      // Work to schedule, not a fault: nothing here is known to be wrong. What
+      // is wrong is that nothing is known, which is a different thing and the
+      // reason summariseEpicWidth refuses to let this state exit 0.
+      findings.push({
+        kind: 'factory-width',
+        severity: 'info',
+        sessionId: null,
+        subject: 'unmeasured',
+        detail:
+          `${width.epics.length} epic(s) closed here and none recorded how wide it ran. ` +
+          UNMEASURED_HINT,
+      });
+    }
   }
 
   return findings;

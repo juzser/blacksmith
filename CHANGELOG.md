@@ -38,6 +38,23 @@ than appearing in it.
   failing a tick, because a watchdog that dies over its own scratch file is
   silent exactly when something is wrong.
 
+- A `factory-width` daemon finding — the watcher now asks the question the
+  repo rests on. `smith epic width` can answer it, but only when somebody
+  types it, and a fact nobody is scheduled to look at is a fact the factory
+  does not actually hold. Each tick's factory-wide pass now reports when the
+  epic this factory closed **last** was admitted wide and dispatched serially
+  (`attention`), or when closes exist and not one of them recorded a width at
+  all (`info`). Deliberately the newest close and not the fold: closes are
+  immutable, so an epic that ran narrow in March is narrow forever, and a
+  finding over all of history would raise the same alarm every tick for the
+  life of the repo over something nobody can go back and fix. An attention
+  count that can never return to zero is worse than no count — it teaches an
+  operator to stop reading it, and takes the real alarms with it. The newest
+  close is a claim about now, it clears itself when a wide epic closes, and
+  the history stays one `smith epic width` away. The narrow rule is
+  `summariseEpicWidth`'s own, reused rather than restated, so the two can
+  never come to disagree about what narrow means.
+
 - `smith epic width` — the first command in this repo that is not scoped to a
   session. Four commands now bracket parallelism (`wave schedule`, `wave
   check`, `wave audit`, and the width `epic close` writes permanently into
