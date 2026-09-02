@@ -359,6 +359,32 @@ external with `min_providers: 2` is reported as a problem, because that
 configuration pays a gating provider's bill for a shadow provider's
 influence.
 
+### Running one active provider on purpose
+
+The problem above assumes you walked into it. If you read it and still want
+the configuration — the escalation carries a second model's rationale
+instead of none, and a second provider starts gating with no further edit —
+declare it:
+
+```yaml
+quorum_rule:
+  min_providers: 2
+  accept_non_gating_actives: true
+```
+
+Declared, the same sentence is reported under `notes` instead of
+`problems`, and `smith judge preflight` stops exiting 1. It silences that
+one advisory and nothing else: a provider enabled where it cannot be called
+is still a problem, and `gating.canDecide` still reports `false`, because
+nothing about the arithmetic changed — only whether the command treats a
+decision you already made as a fault. That distinction matters for anything
+that runs preflight on a schedule, which cannot tell a permanent exit 1
+from a new one.
+
+Leave it unset (the shipped default) if you have not made that choice. It
+is not a way to make one active provider gate; there is no such way short
+of a second provider.
+
 ## 5. The independent finder — the additive direction
 
 Sections 1–4 describe a **subtractive** tier. `quorum.ts`'s vocabulary is

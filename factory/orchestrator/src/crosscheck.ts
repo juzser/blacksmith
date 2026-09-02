@@ -58,6 +58,23 @@ export type ProviderConfig = NativeProviderConfig | CliProviderConfig | ApiProvi
 export interface QuorumRule {
   agreement: string;
   minProviders: number;
+  /**
+   * The operator has read the arithmetic and wants the calls anyway.
+   *
+   * With one external provider promoted to `active` and `min_providers: 2`,
+   * every case whose finder is the native judge escalates for
+   * insufficient-providers exactly as it would with none promoted — the
+   * finder is excluded, so the gating pool is the actives alone, and one
+   * cannot meet two. `smith judge preflight` calls that out, because walking
+   * into it unaware means paying gating latency for shadow-grade results.
+   *
+   * Setting this says it was not unaware: the second opinion still reaches
+   * the operator on the escalation, and the day a second provider is enabled
+   * the pool meets the rule with no further edit. It silences that one
+   * advisory and nothing else — an unmet precondition stays a problem, and
+   * `canDecide` keeps reporting what can actually gate.
+   */
+  acceptNonGatingActives: boolean;
 }
 
 // crosscheck.yml's plan_quorum block — the machine-readable form of its own
@@ -198,7 +215,7 @@ interface RawIndependentFinderYaml {
 
 interface RawCrosscheckYaml {
   providers?: Record<string, RawProviderYaml>;
-  quorum_rule?: { agreement?: string; min_providers?: number };
+  quorum_rule?: { agreement?: string; min_providers?: number; accept_non_gating_actives?: boolean };
   plan_quorum?: RawPlanQuorumYaml;
   asymmetric_roles?: RawAsymmetricRolesYaml;
   role_isolation?: RawRoleIsolationYaml;
@@ -635,6 +652,10 @@ export function parseCrosscheckPolicy(
     quorumRule: {
       agreement: doc.quorum_rule?.agreement ?? '2-of-3',
       minProviders: quorumNumber('quorum_rule.min_providers', doc.quorum_rule?.min_providers ?? 2),
+      acceptNonGatingActives: quorumBoolean(
+        'quorum_rule.accept_non_gating_actives',
+        doc.quorum_rule?.accept_non_gating_actives ?? false,
+      ),
     },
     planQuorum: parsePlanQuorum(doc.plan_quorum),
     asymmetricRoles: parseAsymmetricRoles(doc.asymmetric_roles),

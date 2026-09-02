@@ -561,7 +561,7 @@ describe('crossFinding.ts runIndependentFinder', () => {
         claude: { name: 'claude', kind: 'native', enabled: true },
         codex,
       },
-      quorumRule: { agreement: '2-of-3', minProviders: 2 },
+      quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
       independentFinder: finder(overrides),
     };
   }
