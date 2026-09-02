@@ -847,6 +847,44 @@ than appearing in it.
 
 ### Changed
 
+- **An epic close states how wide the epic actually ran.** The factory's
+  central claim is that a plan is built by many agents working its tasks at
+  the same time, and three commands interrogate it — `wave schedule` (can this
+  plan run wide at all), `wave check` (admit a wave), `wave audit` (did the
+  admitted wave run as wide as admitted). Every one of them is a command
+  somebody has to remember to type, against a state dir that outlives nothing
+  in particular. The close is the one moment no epic skips, and it recorded
+  every closure a person decided, every command the assembled branch ran, the
+  surface verdict and the goal coverage — and not one word about the claim the
+  whole factory rests on. An epic that dispatched four admitted tasks strictly
+  one at a time closed `go` on a record indistinguishable from one that ran
+  four wide, and afterwards there was nothing left to ask. `EpicSummary` now
+  carries a `concurrency` field — waves admitted, the count of each wave
+  verdict including its zeros, the widest wave admitted against the most ever
+  in flight, and the ids of the waves the log holds no dispatch for — folded
+  by `auditWaveConcurrency` off the same lineage events the verdict already
+  read, so it costs no second read and no second command. `smith epic verdict`
+  prints it, `smith epic close` writes it into the `epic-closed` payload, and
+  the judge prompt states it. It is **never a blocker**: width is not
+  readiness, a plan whose tasks genuinely depend on one another has nothing to
+  run side by side, and a gate that held such an epic would be refusing
+  correct work for the shape of its dependency graph — so it has exactly the
+  standing `waivedTasks` and `discretionaryFindings` have. The prompt carries
+  that caveat explicitly, for the D-120 reason on a new axis: handed the
+  number without it, a judge taking its refute mandate seriously would refute
+  every narrow epic forever, which makes the verdict a constant rather than a
+  measurement. What it names as refutable instead is a wave whose tasks were
+  admitted and nothing shows them running. `null` is projected rather than
+  dropped, because "nobody measured" must never read as "it ran fine". And
+  because it blocks nothing, measuring it may not block either: `wave audit`
+  refuses a `wave-admitted` event naming no tasks — right for the command
+  whose whole job is that record, and a crash for a gate that only reports it
+  — so the reader catches that refusal into a `problem` string and the epic
+  closes, the way `resolveMcpSurface` reports an unreadable manifest instead
+  of crashing the verdict meant to report it (D-21). When `problem` is set the
+  counts beside it are zeros nobody measured, and the judge is told the record
+  could not be read rather than handed a confident zero.
+
 - **A new project lands beside this clone, not inside it.** `smith new` wrote
   its output to `workspaces/<name>` — a path inside the factory's own git
   tree, inside its ignore rules and its lint roots, and read as factory code

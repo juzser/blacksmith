@@ -1980,6 +1980,46 @@ the close can be audited later without re-deriving state that has since moved.
 An empty or whitespace-only rationale is refused: an override with no reason is
 a `go` wearing a costume.
 
+That summary now also states **how wide the epic actually ran**, folded from
+the same lineage the verdict already read:
+
+```json
+{"concurrency":{"waves":3,"verdicts":{"parallel":1,"partial":0,"serialized":2,"single":0,"unobserved":0},"widest":{"declared":4,"observed":1},"unobserved":[],"problem":null}}
+```
+
+`widest` reads "4 tasks admitted at the widest, 1 ever in flight at once" —
+which is the shape of an epic that declared parallelism and then ran its plan
+one task at a time. `smith wave audit` could always say that, and `smith wave
+schedule` could say it before the run, but both are commands somebody has to
+remember to type against a state dir that outlives nothing; the close is the
+one moment no epic skips. `null` here means nobody measured — it is projected
+rather than dropped so it can never be read as "it ran fine" — and `waves: 0`
+means no wave was ever cut.
+
+It is **never a blocker**, and the judge prompt says so out loud. Width is not
+readiness: a plan whose tasks genuinely depend on one another has nothing to
+run side by side, and a gate that held it would be refusing correct work for
+the shape of its dependency graph. What the judge is told it *may* refute on
+is a wave in `unobserved` — tasks that were admitted with no dispatch on record
+at all, which is a declaration with no work behind it.
+
+Because it never blocks, nothing about measuring it is allowed to block either.
+`smith wave audit` *refuses* a `wave-admitted` event that names no tasks, which
+is right for the command whose whole job is to judge that record; here the same
+refusal would take down the close over a fact that decides nothing. So it is
+caught and reported instead, in `problem`:
+
+```json
+{"concurrency":{"waves":0,"verdicts":{"parallel":0,"partial":0,"serialized":0,"single":0,"unobserved":0},"widest":{"declared":0,"observed":0},"unobserved":[],"problem":"wave-concurrency.missing-task-ids: wave-admitted \"sess-1#4\" names no tasks"}}
+```
+
+Read those zeros as *nobody counted*, not as *nothing happened*: when `problem`
+is set the counts beside it were never measured. The judge is told the record
+could not be read rather than handed a confident `Waves admitted: 0`, and the
+epic still closes. Fix the malformed event and the next `smith epic verdict`
+reads it — the close does not need re-running to learn the width, because the
+width was never what the close turned on.
+
 Closing against a session id with no event log is refused too, rather than
 minting a fresh log whose first line is "this epic is closed" (D-45):
 

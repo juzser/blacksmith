@@ -10,13 +10,19 @@ import type {
   ProviderConfig,
 } from '../src/crosscheck.js';
 import type { TaskFoldRow } from '../src/db/projector.js';
-import type { EpicPlanRoster, EpicTaskRow, IntegrationStatus } from '../src/epic.js';
+import type {
+  EpicConcurrency,
+  EpicPlanRoster,
+  EpicTaskRow,
+  IntegrationStatus,
+} from '../src/epic.js';
 import {
   closeEpic,
   EPIC_CLOSED_EVENT_TYPE,
   EpicCloseError,
   epicVerdictJudgeRequest,
   runEpicVerdict,
+  summariseEpicConcurrency,
   summarizeEpic,
   withGateEvidence,
 } from '../src/epic.js';
@@ -35,6 +41,7 @@ import { type EpicGoalStatus, type GoalCheckStatus, goalDigest } from '../src/go
 import type { IntegrationCheckRecord } from '../src/integration.js';
 import { MCP_SURFACE_NOT_REQUIRED, type McpSurfaceStatus } from '../src/mcp.js';
 import type { SpecReviewStatus } from '../src/spec.js';
+import type { WaveConcurrency } from '../src/waveConcurrency.js';
 import { crosscheckDefaults } from './helpers/crosscheckPolicy.js';
 
 // ---------------------------------------------------------------------------
@@ -1643,6 +1650,44 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     );
   }
 
+  /**
+   * A wave admitted `taskIds` wide, plus one dispatch per task in `ran`. The
+   * two are separate on purpose: an admission is a declaration and a dispatch
+   * is state, and every interesting case here is one without the other.
+   */
+  async function addWave(taskIds: string[], ran: string[] = taskIds) {
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'orchestrator',
+        event_type: 'wave-admitted',
+        plan_version: 1,
+        causal_parent: `${sessionId}#0`,
+        payload: { epic_id: epicId, task_ids: taskIds },
+      },
+      { stateDir },
+    );
+    for (const taskId of ran) {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'orchestrator',
+          event_type: 'dispatch_decision',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'frontier',
+            model: 'claude-opus-5',
+          },
+        },
+        { stateDir },
+      );
+    }
+  }
+
   async function closedEvents() {
     const events = await readEvents(sessionId, { stateDir });
     return events.filter((e) => e.record.event_type === EPIC_CLOSED_EVENT_TYPE);
@@ -1692,6 +1737,108 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       { task_id: 'epic-1/task-2', task_status: 'waived' },
     ]);
     expect((summary.integration as Record<string, unknown>).head_sha).toBe(HEAD_SHA);
+  });
+
+  // The close is the only moment nobody skips. `wave audit` can answer "did
+  // this run wide?" for as long as the state dir survives and somebody thinks
+  // to ask; the epic-closed event is what is left when neither holds. Without
+  // this, an epic that dispatched its whole plan one task at a time closed on
+  // a record indistinguishable from one that ran four wide.
+  it('records how wide the epic ran, derived from the same log the verdict read', async () => {
+    // In log order, as a real run writes it: admitted two wide, then the log
+    // holds a dispatch for one of them, then both come back completed. Nothing
+    // shows the second one ever running.
+    await addWave(['epic-1/task-1', 'epic-1/task-2'], ['epic-1/task-1']);
+    await addTask('epic-1/task-1', 'completed');
+    await addTask('epic-1/task-2', 'completed');
+    await addIntegrationCheck();
+    await addSpecReview();
+    await addGoalCheck();
+
+    const record = await closeEpic(
+      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      ctx(),
+      { stateDir },
+    );
+
+    // Width is not readiness — the epic still closes.
+    expect(record.machineVerdict).toBe('go');
+    expect(record.summary.concurrency?.waves).toBe(1);
+    expect(record.summary.concurrency?.verdicts.serialized).toBe(1);
+    expect(record.summary.concurrency?.widest).toEqual({ declared: 2, observed: 1 });
+
+    const payload = (await closedEvents())[0]?.record.payload as Record<string, unknown>;
+    const summary = payload.summary as Record<string, unknown>;
+    expect(summary.concurrency).toEqual({
+      waves: 1,
+      verdicts: { parallel: 0, partial: 0, serialized: 1, single: 0, unobserved: 0 },
+      widest: { declared: 2, observed: 1 },
+      unobserved: [],
+      problem: null,
+    });
+  });
+
+  // Projected even when the epic never cut a wave, for the reason the D-126
+  // comment beside plan_version gives: an absent key reads as an older event
+  // rather than as nothing to report.
+  it('reports zero waves rather than omitting the fact when none was ever admitted', async () => {
+    await addTask('epic-1/task-1', 'completed');
+    await addIntegrationCheck();
+    await addSpecReview();
+    await addGoalCheck();
+
+    const record = await closeEpic(
+      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      ctx(),
+      { stateDir },
+    );
+
+    expect(record.summary.concurrency).toEqual({
+      waves: 0,
+      verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 },
+      widest: { declared: 0, observed: 0 },
+      unobserved: [],
+      problem: null,
+    });
+  });
+
+  // A malformed record is not a reason to lose the close. `readAdmission`
+  // refuses a `wave-admitted` naming no tasks — right for `wave audit`, whose
+  // whole job is to judge the wave record, and wrong here, where the width is
+  // explicitly never a blocker. D-21 caught this exact shape once already on
+  // the MCP manifest: a gate that crashes over the fact it was built to report
+  // has stopped being a gate. So the refusal is stated and the epic closes.
+  it('reports an unreadable wave record instead of crashing the close over it', async () => {
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'orchestrator',
+        event_type: 'wave-admitted',
+        plan_version: 1,
+        causal_parent: `${sessionId}#0`,
+        payload: { epic_id: epicId, task_ids: [] },
+      },
+      { stateDir },
+    );
+    await addTask('epic-1/task-1', 'completed');
+    await addIntegrationCheck();
+    await addSpecReview();
+    await addGoalCheck();
+
+    const record = await closeEpic(
+      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      ctx(),
+      { stateDir },
+    );
+
+    expect(record.machineVerdict).toBe('go');
+    expect(record.summary.concurrency?.problem).toMatch(/names no tasks/);
+    // Zeroed rather than guessed: nothing was counted, so nothing is claimed.
+    expect(record.summary.concurrency?.waves).toBe(0);
+
+    const payload = (await closedEvents())[0]?.record.payload as Record<string, unknown>;
+    const summary = payload.summary as Record<string, unknown>;
+    expect((summary.concurrency as Record<string, unknown>).problem).toMatch(/names no tasks/);
   });
 
   // D-120 gives the judge every closure a person decided rather than earned —
@@ -2859,6 +3006,210 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       expect(request.prompt).toMatch(/REFUTE/);
       expect(request.schemaName).toBe('judge-verdict');
       expect(request.taskId).toBe('epic-1/integration');
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// How wide the epic actually ran.
+//
+// `wave schedule` says how wide a plan can ever run, `wave check` admits a
+// wave, `wave audit` reads the log back to see whether it ran as wide as it
+// was admitted. Three commands, and all three are commands somebody has to
+// remember to type. The epic close is the one moment nobody skips — and it
+// recorded every closure a person decided, every command the assembled branch
+// ran, the surface verdict, the goal coverage, and not one word about the
+// claim this whole factory rests on. An epic that took four admitted tasks
+// strictly one at a time closed `go` on a perfect record, and afterwards
+// nothing in the log could be asked about it.
+// ---------------------------------------------------------------------------
+describe('epic.ts — how wide the epic ran', () => {
+  function wave(overrides: Partial<WaveConcurrency> = {}): WaveConcurrency {
+    return {
+      eventId: 'e1',
+      admittedAt: '2026-09-02T00:00:00.000Z',
+      epicId: 'epic-1',
+      declared: ['epic-1/task-1', 'epic-1/task-2'],
+      observed: [],
+      unobserved: [],
+      peak: 2,
+      verdict: 'parallel',
+      ...overrides,
+    };
+  }
+
+  describe('summariseEpicConcurrency (pure)', () => {
+    it('counts every verdict, including the ones that did not happen', () => {
+      const concurrency = summariseEpicConcurrency([
+        wave({ verdict: 'parallel' }),
+        wave({ eventId: 'e2', verdict: 'serialized', peak: 1 }),
+        wave({ eventId: 'e3', verdict: 'serialized', peak: 1 }),
+      ]);
+
+      expect(concurrency.waves).toBe(3);
+      // A zero is an answer. Reporting only the verdicts that occurred would
+      // make "no wave ran in parallel" indistinguishable from "nobody counted".
+      expect(concurrency.verdicts).toEqual({
+        parallel: 1,
+        partial: 0,
+        serialized: 2,
+        single: 0,
+        unobserved: 0,
+      });
+    });
+
+    it('reports the widest wave admitted against the most ever in flight', () => {
+      const concurrency = summariseEpicConcurrency([
+        wave({ declared: ['a', 'b', 'c', 'd'], peak: 1, verdict: 'serialized' }),
+        wave({ eventId: 'e2', declared: ['a', 'b'], peak: 2 }),
+      ]);
+
+      expect(concurrency.widest).toEqual({ declared: 4, observed: 2 });
+    });
+
+    it('names the waves the log holds no work for, since those are the refutable ones', () => {
+      const concurrency = summariseEpicConcurrency([
+        wave({ eventId: 'e1', verdict: 'unobserved', peak: 0 }),
+        wave({ eventId: 'e2', verdict: 'parallel' }),
+        wave({ eventId: 'e3', verdict: 'unobserved', peak: 0 }),
+      ]);
+
+      expect(concurrency.unobserved).toEqual(['e1', 'e3']);
+    });
+
+    it('answers an epic that never cut a wave with zero rather than with nothing', () => {
+      const concurrency = summariseEpicConcurrency([]);
+
+      expect(concurrency.waves).toBe(0);
+      expect(concurrency.widest).toEqual({ declared: 0, observed: 0 });
+      expect(concurrency.unobserved).toEqual([]);
+    });
+  });
+
+  describe('summarizeEpic', () => {
+    const ready = () => [taskRow({ taskStatus: 'completed' })];
+
+    it('leaves concurrency null when the caller measured nothing', () => {
+      const summary = summarizeEpic(
+        'epic-1',
+        ready(),
+        [],
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        okSpecReview(),
+        okGoalCheck(),
+      );
+
+      // Null is "nobody looked", and it must not read as "it ran fine".
+      expect(summary.concurrency).toBe(null);
+    });
+
+    // Width is not readiness. A plan whose four tasks genuinely depend on each
+    // other has nothing to run side by side, and an epic gate that held such a
+    // plan would be refusing correct work. The fact is carried, never enforced
+    // — the same standing `waivedTasks` and `discretionaryFindings` have.
+    it('never blocks on an epic that ran strictly one task at a time', () => {
+      const summary = summarizeEpic(
+        'epic-1',
+        ready(),
+        [],
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        okSpecReview(),
+        okGoalCheck(),
+        null,
+        [],
+        summariseEpicConcurrency([
+          wave({ declared: ['a', 'b', 'c'], peak: 1, verdict: 'serialized' }),
+        ]),
+      );
+
+      expect(summary.mechanicallyReady).toBe(true);
+      expect(summary.blockers).toEqual([]);
+      expect(summary.concurrency?.verdicts.serialized).toBe(1);
+      expect(summary.concurrency?.widest).toEqual({ declared: 3, observed: 1 });
+    });
+  });
+
+  describe('epicVerdictJudgeRequest', () => {
+    const BUDGET = { timeout_ms: 1_000, max_output_bytes: 4_096 };
+
+    function promptWith(concurrency: EpicConcurrency | null): string {
+      return epicVerdictJudgeRequest(
+        summarizeEpic(
+          'epic-1',
+          [taskRow({ taskStatus: 'completed' })],
+          [],
+          okIntegration(),
+          MCP_SURFACE_NOT_REQUIRED,
+          okSpecReview(),
+          okGoalCheck(),
+          null,
+          [],
+          concurrency,
+        ),
+        BUDGET,
+      ).prompt;
+    }
+
+    it('states the width that was admitted against the width that ran', () => {
+      const prompt = promptWith(
+        summariseEpicConcurrency([
+          wave({ declared: ['a', 'b', 'c'], peak: 1, verdict: 'serialized' }),
+          wave({ eventId: 'e2', declared: ['a', 'b'], peak: 2, verdict: 'parallel' }),
+        ]),
+      );
+      const flat = prompt.replace(/\s+/g, ' ');
+
+      expect(flat).toMatch(/Waves admitted: 2/);
+      expect(flat).toMatch(/3 admitted at the widest, 2 ever in flight at once/);
+    });
+
+    it('says plainly that nobody measured it, rather than omitting the section', () => {
+      const flat = promptWith(null).replace(/\s+/g, ' ');
+
+      expect(flat).toMatch(/how wide this epic ran/i);
+      expect(flat).toMatch(/Nothing measured/i);
+    });
+
+    it('distinguishes an epic that ran narrow from one whose waves have no work on record', () => {
+      const flat = promptWith(
+        summariseEpicConcurrency([wave({ eventId: 'e7', verdict: 'unobserved', peak: 0 })]),
+      ).replace(/\s+/g, ' ');
+
+      expect(flat).toMatch(/no dispatch on record/i);
+      expect(flat).toMatch(/e7/);
+    });
+
+    // Zero waves and an unreadable record both fold to zero counts, and they
+    // are opposite facts: one says the epic never cut a wave, the other says
+    // nobody can tell. A prompt that renders them the same way hands the judge
+    // a confident zero it has no basis for.
+    it('tells the judge the record could not be read, rather than reporting zero waves', () => {
+      const flat = promptWith({
+        waves: 0,
+        verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 },
+        widest: { declared: 0, observed: 0 },
+        unobserved: [],
+        problem: 'wave-concurrency.missing-task-ids: wave-admitted "e1" names no tasks',
+      }).replace(/\s+/g, ' ');
+
+      expect(flat).toMatch(/could not be read/i);
+      expect(flat).toMatch(/names no tasks/);
+      expect(flat).not.toMatch(/Waves admitted: 0/);
+    });
+
+    // The D-120 trap, on a new axis: a fact every epic shares distinguishes
+    // nothing, and most epics run narrow for honest reasons. Handed the number
+    // without the caveat, a judge that took the refute mandate seriously would
+    // refute every narrow epic forever.
+    it('forbids refuting on narrowness alone, and names what is refutable instead', () => {
+      const flat = promptWith(
+        summariseEpicConcurrency([wave({ peak: 1, verdict: 'serialized' })]),
+      ).replace(/\s+/g, ' ');
+
+      expect(flat).toMatch(/not by itself a refutation/i);
+      expect(flat).toMatch(/admitted and nothing shows them running/i);
     });
   });
 });
