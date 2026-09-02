@@ -1713,8 +1713,12 @@ async function main(): Promise<number> {
     const report = daemonStatus(dir);
     printJson(report);
     // Exit 1 when nothing is watching, so a health check is `smith daemon
-    // status >/dev/null` rather than a JSON parse in a shell script.
-    return report.running ? 0 : 1;
+    // status >/dev/null` rather than a JSON parse in a shell script. A stale
+    // daemon fails it too: one wedged mid-tick still holds its lock and still
+    // answers `kill -0`, so a probe that only asked `running` reported the
+    // silence as fine -- which is the exact condition a watcher exists to
+    // break. The JSON still separates the two, for a reader that cares which.
+    return report.running && !report.stale ? 0 : 1;
   }
 
   if (namespace === 'daemon' && action === 'stop') {

@@ -724,24 +724,96 @@ export function writeFindingMemory(dir: string, memory: FindingMemory): void {
   renameSync(tmp, target);
 }
 
+/**
+ * How long a daemon may go quiet before the silence is itself the finding.
+ *
+ * Three intervals is the miss-two-heartbeats rule: one late tick is a slow fold
+ * of a long log, two in a row is a fault. The floor is there because a tick's
+ * cost is not proportional to the interval -- folding the event log takes what
+ * it takes -- so `--interval 1` would otherwise report a daemon as wedged for
+ * doing exactly the work it was told to do too often.
+ */
+const STALE_INTERVALS = 3;
+const STALE_FLOOR_SECONDS = 60;
+
+function staleToleranceSeconds(lock: DaemonLock): number {
+  // D-21: a report that only states a fact must not crash over that fact, and a
+  // hand-edited pid file is a bad lock rather than a reason to have no status.
+  const interval =
+    typeof lock.intervalSeconds === 'number' && lock.intervalSeconds > 0
+      ? lock.intervalSeconds
+      : DEFAULT_INTERVAL_SECONDS;
+  return Math.max(interval * STALE_INTERVALS, STALE_FLOOR_SECONDS);
+}
+
+/** Seconds since `iso`, or null when there is no readable timestamp to date. */
+function ageSeconds(now: Date, iso: string | undefined): number | null {
+  if (iso === undefined) return null;
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return null;
+  return Math.round((now.getTime() - then) / 1000);
+}
+
 export interface DaemonStatusReport {
+  /** A process holds the lock and answers `kill -0`. Not the same as watching. */
   running: boolean;
+  /**
+   * A daemon holds the lock and has published nothing within its own interval
+   * budget -- the wedged watcher, which `running` alone cannot see, because a
+   * daemon stuck mid-tick still answers `kill -0` exactly like a healthy one.
+   *
+   * Measured against the freshest evidence of life: the last tick, or the
+   * lock's `startedAt` when there is no tick yet. So a daemon three seconds old
+   * is not stale for having published nothing, and one that started an hour ago
+   * and still has not published is -- which is the wedge a status file cannot
+   * show, precisely because the wedge is what stopped the file existing.
+   *
+   * False when nothing is running. `running: false` is the sharper statement,
+   * and a flag that also meant "nobody is home" would carry two readings.
+   */
+  stale: boolean;
   dir: string;
   lock: DaemonLock | null;
   lastTick: TickReport | null;
+  /**
+   * Seconds between the last published tick and now -- null when nothing has
+   * ever ticked, which is NOT zero: zero is a real age and would read as "it
+   * just ticked", the one claim a daemon that has published nothing must not
+   * be able to make.
+   *
+   * Reported whether or not anything holds the lock, because a reader of
+   * `status.json` has to know how much to trust what it just read regardless
+   * of who wrote it or whether that writer is still alive.
+   */
+  reportAgeSeconds: number | null;
 }
 
 export function daemonStatus(
   dir: string,
-  opts: { isAlive?: (pid: number) => boolean } = {},
+  opts: { isAlive?: (pid: number) => boolean; now?: Date } = {},
 ): DaemonStatusReport {
   const isAlive = opts.isAlive ?? processIsAlive;
+  const now = opts.now ?? new Date();
   const lock = readLock(dir);
+  const lastTick = readStatus(dir);
+  const running = lock !== null && isAlive(lock.pid);
+  const reportAge = ageSeconds(now, lastTick?.at);
+
+  // The freshest thing this daemon is known to have done. `min` rather than the
+  // tick alone: a daemon that restarted after a long quiet spell has done
+  // something more recent than its predecessor's last report, and dating it
+  // from that report would alarm on a watcher that is two seconds old.
+  const lockAge = lock === null ? null : ageSeconds(now, lock.startedAt);
+  const ages = [reportAge, lockAge].filter((a): a is number => a !== null);
+  const quietFor = ages.length === 0 ? null : Math.min(...ages);
+
   return {
-    running: lock !== null && isAlive(lock.pid),
+    running,
+    stale: running && lock !== null && quietFor !== null && quietFor > staleToleranceSeconds(lock),
     dir,
     lock,
-    lastTick: readStatus(dir),
+    lastTick,
+    reportAgeSeconds: reportAge,
   };
 }
 

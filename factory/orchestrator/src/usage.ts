@@ -196,7 +196,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'daemon status',
     positionals: '',
     flags: '[--dir <dir>]',
-    summary: 'Print whether a daemon holds the lock and what its last tick found. Exit 1 if none.',
+    summary:
+      'Print whether a daemon holds the lock, whether it has gone quiet, and what its last tick found. Exit 1 unless one is watching and current.',
   },
   {
     command: 'daemon stop',

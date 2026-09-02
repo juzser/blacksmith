@@ -928,6 +928,47 @@ than appearing in it.
 
 ### Changed
 
+- **`smith daemon status` no longer calls a wedged watcher healthy.** ⚠️
+  **Behaviour change to a documented contract:** the health check
+  `smith daemon status >/dev/null` now exits 1 for a daemon that holds its
+  lock but has gone quiet, where it previously exited 0. Existing monitoring
+  will start alarming on watchers it used to pass — that is the point.
+  `running` has always meant *a process holds the lock and answers `kill -0`*,
+  which is not the claim *something is watching*: a daemon wedged mid-tick
+  answers `kill -0` exactly like a healthy one, so the probe ops.md documents
+  passed for a watcher that had published nothing since Tuesday, which is
+  precisely the condition a watcher exists to break. The report gains `stale`
+  — true when a running daemon has published nothing for
+  `max(intervalSeconds × 3, 60s)` — and the exit code is now `running &&
+  !stale`. Three intervals is the miss-two-heartbeats rule, and the
+  sixty-second floor is there because a tick costs what it costs however often
+  it is asked for, so `--interval 1` must not report a daemon as wedged for
+  doing exactly what it was told. Staleness is measured against the freshest
+  evidence of life, the last tick **or** the lock's `startedAt`, so a daemon
+  three seconds old is not stale for having published nothing while one that
+  started an hour ago and never published is — the wedge on the first tick,
+  which no `status.json` can show precisely because the wedge is what stopped
+  the file existing. `stale` is always `false` when nothing is running, since
+  `running: false` is the sharper statement and a flag with two readings is
+  worse than none. The lock already carried `intervalSeconds`, so nothing
+  about the pid file changed. `status.json` also gains `reportAgeSeconds`,
+  `null` rather than `0` when nothing has ever ticked — zero is a real age
+  and would read as *it just ticked*, the one claim a daemon that has
+  published nothing must not be able to make.
+- **`/bs status` asks the watcher before it folds the log.** The daemon has
+  written `state/daemon/status.json` every tick since Phase 10, and nothing
+  outside its own tests had ever read it: `.claude/skills/bs/SKILL.md` did not
+  contain the word *daemon*. So the one surface that runs while no session is
+  open reported to a console that never asked, and an operator opening
+  `/bs status` after a weekend saw a live fold of the log with no way to know
+  whether anything had been watching it. The playbook now runs
+  `smith daemon status` first and renders `running`, `stale`,
+  `reportAgeSeconds` and the last tick's `attention` / `newAttention` /
+  `autoAdmitted` / `operatorHeld` before the `smith stats overview` digest —
+  the triage split shipped for exactly this screen — with the standing rule
+  that a `lastTick` from a stopped or stale daemon is never rendered as though
+  it were current.
+
 - **An epic close states how wide the epic actually ran.** The factory's
   central claim is that a plan is built by many agents working its tasks at
   the same time, and three commands interrogate it — `wave schedule` (can this
