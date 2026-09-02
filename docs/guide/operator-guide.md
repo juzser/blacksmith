@@ -2038,6 +2038,10 @@ is still `todo`:
 A closed epic stays selectable in the Kanban and Flow epic pickers — a close
 makes the board historical, not unreachable.
 
+One close speaks for one epic. `smith epic width` (§7f) reads every close in
+the state dir back and answers the question no single close can — whether this
+factory builds in parallel, or has been narrow all along.
+
 ## 7c. `smith epic spec-review` — reading the plan against the code that exists
 
 The spec-reviewer runs before the code is written, which is the only time it
@@ -2276,6 +2280,87 @@ Like `epic spec-review`, it exits **0 even when it raises findings** — the
 check ran, and what it found blocks the plan, not this command. And like it,
 the event is written even when every clause is covered: "ran and was clean" and
 "never ran" are different facts, and only the first one closes an epic.
+
+## 7f. `smith epic width` — does this factory build in parallel?
+
+```bash
+smith epic width [--session <session-id>] [--state-dir <dir>]
+```
+
+Reads, never writes. Every command in §2 answers half a question about one
+run: `wave schedule` says how wide a plan *could* go, `wave check` admits a
+wave, `wave audit` reads the log back to see whether the admission was
+honoured, and `epic close` copies that reading permanently into `epic-closed`.
+All four are scoped to the session you happen to be standing in. The claim this
+repo makes — that a project here is built by many agents working a plan's tasks
+at the same time — is a claim about the *workshop*, and until now nothing could
+be asked it.
+
+**So the default is every session in the state dir**, which no other read
+command here does, and it is the whole point. A close is written wherever the
+epic finished; a lineage-scoped default would answer the factory question with
+whatever slice of its own history the operator's terminal happened to be inside
+— and report a workshop of one narrow epic and forty wide ones as narrow.
+`--session` narrows back to one lineage for anyone who wants the old question.
+
+```json
+{"epics":[{"epicId":"epic-1","eventId":"sess-2#31","closedAt":"2026-09-02T11:04:00.000Z","sessionId":"sess-2","project":"../my-project","closedBy":"verdict","machineVerdict":"go","verdict":"parallel","waves":3,"byVerdict":{"parallel":2,"partial":1,"serialized":0,"single":0,"unobserved":0},"widest":{"declared":4,"observed":4},"unobserved":[],"problem":null}],"verdicts":{"parallel":1,"partial":0,"serialized":0,"single":0,"unobserved":0,"unwaved":0,"unmeasured":0,"unreadable":0},"widest":{"declared":4,"observed":4},"serialized":[],"unobserved":[],"unmeasured":[],"hint":"","exitCode":0}
+```
+
+It folds the closes rather than re-deriving from the waves, for two reasons and
+the second is the one that matters. A close **outlives its lineage**: the
+`wave-admitted` and `dispatch_decision` events behind it sit in whichever
+session ran the build, and the width was copied into the close precisely so it
+would still be there afterwards. And re-deriving **cannot see a close that
+measured nothing** — `wave audit` reports the waves that exist, and has no way
+to report an epic whose close carried no width at all. Those closes are the
+honest answer to "how much of this do you actually know", and a summary that
+omitted them would report a factory of three measured epics exactly as
+confidently as a factory of three hundred.
+
+Each epic gets one verdict. Five of them are `wave audit`'s, read off the
+record rather than recomputed; three are answers no wave can give:
+
+| Verdict | What it means |
+| --- | --- |
+| `parallel` / `partial` / `serialized` / `single` / `unobserved` | The wave verdicts of §2, as the close recorded them. |
+| `unwaved` | The close measured, and this epic never cut a wave. Never a fault — a one-task epic has no wave to cut. |
+| `unmeasured` | The close carried no width. Nobody looked. This is not a narrow epic, it is an unknown one. |
+| `unreadable` | A width was recorded that could not be read — either `epic close` already reported a `problem` folding it, or the payload is not the shape it should be. |
+
+The epic's verdict is the **best** verdict any of its waves reached, not the
+worst. The question is whether the epic ever ran wide; an epic that ran three
+waves in parallel and one serially is the factory working, and grading it by
+its narrowest wave would report every real build as a failure — which is how a
+signal becomes a constant and then becomes noise. The narrow wave is not
+thereby hidden: `serialized` names the epic, and the exit code still fails on
+it.
+
+Exit codes are `wave audit`'s, deliberately — an operator who learned that code
+has learned this one, and a second rule for the same failure is a second answer
+waiting to disagree:
+
+- **1** — a closed epic whose record holds a wave that was admitted wider than
+  one task and never ran two at once.
+- **2** — nothing could be judged: an admitted wave with no work behind it, or
+  no close carrying a width at all.
+- **0** — otherwise.
+
+What is **not** exit 1, and the discipline the whole command depends on: a
+narrow epic. `unwaved` and `single` are not faults. Failing on those would fire
+on every honest serial build in the repo, and a code that fires on everything
+is routed to `/dev/null` inside a week — taking the serialized one with it.
+
+Exit 2 with an empty `epics` list, or with every epic in `unmeasured`, is the
+state a fresh factory is in, and it says so rather than passing:
+
+```json
+{"hint":"No close read here carried a width. Either these epics were closed before `smith epic close` recorded one, or the closes were written by hand — close a current epic with `smith epic close`, or read a live log back with `smith wave audit --session <id>`."}
+```
+
+"Every epic closed narrow" and "no epic was ever measured" are opposite states
+of knowledge, and a factory that has never measured itself must not be able to
+read as a healthy one.
 
 ## 8. Severity + waiver semantics, from the operator's chair
 

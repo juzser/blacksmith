@@ -23,6 +23,36 @@ than appearing in it.
 
 ### Added
 
+- `smith epic width` — the first command in this repo that is not scoped to a
+  session. Four commands now bracket parallelism (`wave schedule`, `wave
+  check`, `wave audit`, and the width `epic close` writes permanently into
+  `epic-closed`), and every one of them answers about the log the operator
+  happens to be standing in. The claim the repo actually makes — that a project
+  here is built by many agents working a plan's tasks at the same time — is a
+  claim about the workshop, and nothing could be asked it. So this folds every
+  session in the state dir by default: a close is written wherever the epic
+  finished, and a lineage-scoped default would answer the factory question with
+  whatever slice of its own history the terminal happened to be inside,
+  reporting a workshop of one narrow epic and forty wide ones as narrow.
+  `--session` narrows back for anyone who wants the old question. It reads the
+  closes rather than re-deriving from the waves, and the second reason is the
+  one that matters: re-deriving cannot see a close that measured *nothing* —
+  `wave audit` reports the waves that exist and has no way to report an epic
+  whose close carried no width at all. Those closes are the honest answer to
+  "how much of this do you actually know", so they get their own verdicts
+  (`unmeasured`, `unreadable`) beside the wave ones and a hint that says so out
+  loud, because "every epic closed narrow" and "no epic was ever measured" are
+  opposite states of knowledge and a factory that has never measured itself
+  must not read as a healthy one. An epic is graded on the *best* verdict its
+  waves reached, not the worst — an epic that ran three waves wide and one
+  serially is the factory working, and grading by the narrowest would report
+  every real build as a failure — while `serialized` still names the epic and
+  still fails the run. Exit codes are `wave audit`'s (1 on admitted-wide-ran-
+  narrow, 2 when nothing could be judged), deliberately: a second rule for the
+  same failure is a second answer waiting to disagree. `unwaved` and `single`
+  are never faults, because a code that fires on every honest serial build is
+  routed to /dev/null inside a week, taking the serialized one with it.
+
 - `smith wave schedule` — the plan-time parallelism ceiling. Three commands
   bracketed wave width and all three took the plan as given: `wave check` says
   these tasks may run together, `wave next` says these can start now, and

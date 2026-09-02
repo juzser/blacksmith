@@ -51,8 +51,12 @@ import {
   appendEvent,
   type EventOpts,
   filterEvents,
+  listSessionIds,
+  mergeSessionLogs,
+  readEvents,
   readLineageEvents,
   requireSession,
+  type StoredEvent,
   sessionLineage,
   tailEvents,
 } from './events.js';
@@ -2716,6 +2720,40 @@ async function main(): Promise<number> {
     const epicId = requireFlag(flags, 'epic');
     printJson(epicGoalFor(epicId, flags));
     return 0;
+  }
+
+  if (namespace === 'epic' && action === 'width') {
+    // Dynamic for P9-2 (test/cliBoot.test.ts): epicWidth.js reaches
+    // waveConcurrency.js and through it agents-registry.js, and nothing only
+    // this command needs belongs on the path every `smith --help` walks.
+    const { summariseEpicWidth } = await import('./epicWidth.js');
+    const eventOpts = eventOptsFromFlags(flags);
+    const sessionId = typeof flags.session === 'string' ? flags.session : null;
+
+    // The default is every session, which no other read command here does, and
+    // it is the whole point: `wave audit` answers "did the waves in the log I
+    // am standing in run wide", and this answers "does this factory build in
+    // parallel". A close is written wherever the epic finished, so a
+    // lineage-scoped default would answer the factory question with whatever
+    // subset of its own history the operator happened to be inside — and
+    // report a workshop of one narrow epic and forty parallel ones as narrow.
+    // --session narrows back to one lineage for anyone who wants that instead.
+    let events: StoredEvent[];
+    if (sessionId === null) {
+      const ids = listSessionIds(eventOpts.stateDir);
+      events = mergeSessionLogs(
+        await Promise.all(
+          ids.map(async (id) => ({ sessionId: id, events: await readEvents(id, eventOpts) })),
+        ),
+      );
+    } else {
+      requireSession(sessionId, eventOpts);
+      events = await readLineageEvents(sessionId, eventOpts);
+    }
+
+    const summary = summariseEpicWidth(events);
+    printJson(summary);
+    return summary.exitCode;
   }
 
   // D-41/P9-24: a finding can exist without a gate run. The wave-4 security

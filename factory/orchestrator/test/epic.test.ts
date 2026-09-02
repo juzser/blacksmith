@@ -26,6 +26,7 @@ import {
   summarizeEpic,
   withGateEvidence,
 } from '../src/epic.js';
+import { summariseEpicWidth } from '../src/epicWidth.js';
 import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
 import {
   AMEND_PENDING_STATUS,
@@ -1776,6 +1777,39 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       unobserved: [],
       problem: null,
     });
+  });
+
+  // Producer and reader, checked against each other rather than each against
+  // a fixture. `smith epic width` folds these payloads months after the state
+  // dir that held the waves is gone, and its only contract with the close is
+  // the shape of this one key — so a fixture standing in for the close here
+  // would let the two drift apart and both keep passing.
+  it('writes a width that summariseEpicWidth can read back off the close alone', async () => {
+    await addWave(['epic-1/task-1', 'epic-1/task-2']);
+    await addTask('epic-1/task-1', 'completed');
+    await addTask('epic-1/task-2', 'completed');
+    await addIntegrationCheck();
+    await addSpecReview();
+    await addGoalCheck();
+
+    await closeEpic(
+      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      ctx(),
+      { stateDir },
+    );
+
+    // Only the close events — the waves behind them are deliberately not in
+    // what the reader is handed, because in the case it exists for they no
+    // longer exist either.
+    const width = summariseEpicWidth(await closedEvents());
+
+    expect(width.epics).toHaveLength(1);
+    expect(width.epics[0]?.epicId).toBe(epicId);
+    expect(width.epics[0]?.verdict).toBe('parallel');
+    expect(width.epics[0]?.waves).toBe(1);
+    expect(width.epics[0]?.closedBy).toBe('verdict');
+    expect(width.unmeasured).toEqual([]);
+    expect(width.exitCode).toBe(0);
   });
 
   // Projected even when the epic never cut a wave, for the reason the D-126
