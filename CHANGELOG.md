@@ -23,6 +23,40 @@ than appearing in it.
 
 ### Added
 
+- The daemon now says **whose queue** each finding is in. Findings a scheduler
+  proposal stands behind — `recheck`, `maintenance`, `growth-review` — carry an
+  `admission` (`decision`, `code`, `reason`), and a tick reports `autoAdmitted`
+  and `operatorHeld` beside `attention`. `smith scheduler admit` has rendered
+  that verdict since Phase 9, per session, for somebody who types it; the
+  watcher is the surface that runs unattended and it was the one place the
+  answer was missing, so a recheck a `/bs report` wave clears on its own and a
+  growth review that is structurally the operator's read as the same grey line.
+  It is the same call into `autonomy.ts` against the same two files —
+  `scheduler.yml`'s `autonomy:` and `crosscheck.yml`'s
+  `plan_quorum.security_keywords` — so the unattended surface cannot drift from
+  the one you type. Reporting only: the daemon still dispatches nothing, and an
+  `auto` is a statement about policy rather than a thing that happened. A
+  finding with no `admission` at all is one no proposal stands behind, or a
+  direct `inspectSession`/`inspectFactory` call that passed no policy — absent
+  reads as *nobody asked*, never as *anything may run*, because the one
+  direction a missing policy must not quietly move a finding is towards `auto`.
+  `admission` is deliberately outside the finding identity, so editing
+  `scheduler.yml` cannot restart a six-day-old finding's clock.
+- The daemon now knows **how long** each finding has been standing. Every
+  finding carries `firstSeen` and `isNew`, and a tick reports `newAttention`
+  beside `attention`: the number worth waking someone for, as against the
+  number worth looking at. Until now the watcher recomputed everything from
+  the log each tick and overwrote the last report, so a break thirty seconds
+  old and one six days old read identically — the very distinction
+  `FindingSeverity` draws one level up, missing at the level an operator
+  actually triages on. Two ticks agree a finding is the same one when `kind`,
+  `sessionId` and `subject` match; `detail` is excluded because it carries the
+  moving parts, and including it would restart the clock on the
+  longest-standing problems most often. The memory is one small, disposable
+  `state/daemon/findings.json` — missing or corrupt reads as empty rather than
+  failing a tick, because a watchdog that dies over its own scratch file is
+  silent exactly when something is wrong.
+
 - A `factory-width` daemon finding — the watcher now asks the question the
   repo rests on. `smith epic width` can answer it, but only when somebody
   types it, and a fact nobody is scheduled to look at is a fact the factory

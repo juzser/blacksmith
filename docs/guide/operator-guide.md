@@ -2989,10 +2989,17 @@ outlives your terminal — and its entire write surface is `state/daemon/` and
 log it only ever reads. It cannot merge, cannot touch a worktree, and cannot
 spend a token.
 
+Findings a scheduler proposal stands behind also carry the `admission` that
+`smith scheduler admit` renders, and the report counts them as `autoAdmitted`
+and `operatorHeld`. That is the split a morning triage actually turns on: how
+much of the list a `/bs report` wave drains on its own, and how much of it is
+yours whatever you do. `auto` remains a statement about policy — the daemon
+still dispatches nothing, and a person still starts the wave.
+
 Because it re-runs the same folds rather than reimplementing them, it and
 those commands cannot disagree. The full operator story — every flag, the
-finding kinds, launchd/systemd/cron units, the health check, what to back up —
-is [`../runbooks/ops.md`](../runbooks/ops.md).
+finding kinds, the admission codes, launchd/systemd/cron units, the health
+check, what to back up — is [`../runbooks/ops.md`](../runbooks/ops.md).
 
 ## Limitations today
 
@@ -3040,7 +3047,9 @@ is [`../runbooks/ops.md`](../runbooks/ops.md).
 - **`smith scheduler admit` says who may say yes, and still says only
   that.** It re-reads the same proposals and classifies each `auto` or
   `operator` against `scheduler.yml`'s `autonomy:` block, appending no
-  event and starting no agent. An `auto` classification removes the
+  event and starting no agent. `smith daemon` reports the same verdict per
+  finding (§11), which is reporting and not a second answer: both call
+  `autonomy.ts`, so the unattended surface cannot drift from the one you type. An `auto` classification removes the
   operator's *tick*, not the gates: the work still goes through `/bs run`'s
   ordinary wave — worktrees, tests, reviewer — and **the PR is still merged
   by a person**, which is the backstop that makes widening the whitelist

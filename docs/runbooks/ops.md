@@ -94,10 +94,29 @@ Flags worth knowing:
       "severity": "attention",
       "sessionId": "dogfood-envkit-1",
       "subject": "envkit-config-loader",
-      "detail": "alarm: 412,000 tokens measured across 4 of 6 task(s), 486,000 projected, against a 400,000 alarm and a 500,000 cap. Measured spend alone has reached the alarm — re-plan the remaining work to fit, or ask the operator to extend. Unrecorded spend can only add to this."
+      "detail": "alarm: 412,000 tokens measured across 4 of 6 task(s), 486,000 projected, against a 400,000 alarm and a 500,000 cap. Measured spend alone has reached the alarm — re-plan the remaining work to fit, or ask the operator to extend. Unrecorded spend can only add to this.",
+      "firstSeen": "2026-08-25T14:00:00.000Z",
+      "isNew": false
+    },
+    {
+      "kind": "recheck",
+      "severity": "info",
+      "sessionId": "dogfood-envkit-1",
+      "subject": "envkit-config-loader/task-3",
+      "detail": "Recheck due (merge-threshold): 6 later overlapping merge(s), 3 day(s) elapsed, confidence 0.9.",
+      "admission": {
+        "decision": "auto",
+        "code": "admitted",
+        "reason": "Every reason (merge-threshold) is whitelisted."
+      },
+      "firstSeen": "2026-08-27T09:00:00.000Z",
+      "isNew": true
     }
   ],
   "attention": 1,
+  "newAttention": 0,
+  "autoAdmitted": 1,
+  "operatorHeld": 0,
   "projected": 1
 }
 ```
@@ -124,6 +143,31 @@ Finding kinds, and where each one comes from:
 The `info` / `attention` split is the whole point of the `attention` count:
 `attention > 0` means something is wrong **now**, and it stops meaning that the
 moment a routine 30-day cadence is filed under the same word.
+
+### How long a finding has been standing
+
+Every finding also carries `firstSeen` and `isNew`, and the report carries
+`newAttention` beside `attention`. The distinction is the one you triage on: a
+daemon ticking every five minutes reports the same standing alarm 288 times a
+day, so `attention` is the number worth **looking at** and `newAttention` the
+number worth **waking someone for**. An alert rule wants `newAttention > 0`; a
+morning review wants `attention` and the oldest `firstSeen`.
+
+Two findings count as the same finding across ticks when their `kind`,
+`sessionId` and `subject` agree. `detail` is deliberately excluded — it carries
+the moving parts, and a `recheck` whose "N day(s) elapsed" climbs daily would
+otherwise report itself as new every day it stood. `severity` is excluded too:
+a finding that changes severity has not changed what it is about.
+
+Two consequences worth knowing before you build an alert on this:
+
+- `unattributed-spend` and `maintenance` put a **count in their subject**
+  ("4 dispatch(es)", "3 package(s)"), so a growing count reads as a new
+  finding. That is intended — the count moved because something new went
+  unattributed or another package fell behind, and that happened *now*.
+- A finding that **cleared and came back is new again**. Its clock is not
+  restored from before the fix, because "broken since March" is false about a
+  factory that was fixed in April and broke again this morning.
 
 `spec-change` is the one kind whose severity the *worker* chose: `blocking`
 means the task cannot go further without the amendment, so an unanswered
@@ -154,15 +198,68 @@ SQLite file the daemon cannot write, becomes a finding and the tick carries
 on — a watchdog that dies on the first corrupt log is silent exactly when
 something is wrong.
 
+### Whose queue a finding is in
+
+Findings that a scheduler proposal stands behind — `recheck`, `maintenance`,
+`growth-review` — also carry an `admission`, and the report carries
+`autoAdmitted` and `operatorHeld` beside `attention`. This is the same verdict
+`smith scheduler admit --session <id>` renders (operator guide, *Limitations
+today*; step 2 of the `/bs report` playbook), computed against the same two
+files and reported per finding instead of per session:
+
+- `scheduler.yml` `autonomy:` — what may run unattended at all.
+- `crosscheck.yml` `plan_quorum.security_keywords` — which claimed paths make a
+  change a security surface.
+
+An `admission` has three fields: `decision` (`auto` or `operator`), `code`, and
+a `reason` written to be argued with. The codes are `autonomy.ts`'s, and every
+one of them can only **deny**:
+
+| `code` | Means |
+| --- | --- |
+| `admitted` | Nothing denied it. |
+| `autonomy-disabled` | `autonomy.enabled` is `false`. Nothing else was even read. |
+| `growth-never-auto` | A growth review proposes *scope*, which is the operator's regardless of the whitelist. |
+| `kind-not-whitelisted` | The proposal kind is not in `auto_dispatch_kinds`. |
+| `security-surface` | The task claims a path matching a security keyword. The one denial no edit to `scheduler.yml` can lift. |
+| `reason-not-whitelisted` | A recheck fired for a reason outside `auto_dispatch_recheck_reasons`. |
+| `below-confidence-floor` | The proposal's confidence is under `confidence_floor`. |
+
+Read the two counts as the split you actually triage on: `autoAdmitted` is how
+much of the list drains itself once you start a `/bs report` wave, and
+`operatorHeld` is how much of it is yours no matter how long you wait. A
+morning where `operatorHeld` is 0 is a morning you can skip.
+
+Three things `auto` does **not** mean:
+
+- **Not "it ran."** The daemon dispatches nothing; §1 is unchanged by this. An
+  `auto` is a statement about policy, and a person still has to start the wave.
+- **Not "it is safe."** It means no rule in `autonomy.ts` denied it. The rules
+  can only deny; none of them ever approves anything on the merits.
+- **Not the default.** A finding with **no** `admission` key at all is one no
+  proposal stands behind (a blown budget is a condition, not queued work), or a
+  call into `inspectSession` / `inspectFactory` that passed no policy. Absent
+  reads as *nobody asked* — never as *anything may run*. If you build an alert
+  on this, treat a missing `admission` as neither half of the split, which is
+  exactly what `autoAdmitted + operatorHeld < findings.length` is telling you.
+
+Editing `scheduler.yml` does **not** restart a finding's clock: `admission` is
+not part of the identity above, so a six-day-old recheck that flips from
+`operator` to `auto` keeps its `firstSeen`. And the standing rule from the
+`/bs report` playbook holds here too — widening `auto_dispatch_kinds`,
+`auto_dispatch_recheck_reasons` or `confidence_floor` to clear one denial is a
+decision about standing policy, not a way past one finding.
+
 ## 4. Files the daemon owns
 
-All three live in `--dir` (default `state/daemon/`, git-ignored with the rest
+All four live in `--dir` (default `state/daemon/`, git-ignored with the rest
 of `state/`):
 
 | File | Written by | Lifetime |
 | --- | --- | --- |
 | `daemon.pid` | `run`, at startup | Removed by the daemon's own exit path, or by `stop`. |
 | `status.json` | `run`, after every tick | Overwritten each tick; survives the daemon. |
+| `findings.json` | `run`, after every tick | Overwritten each tick; survives the daemon. |
 | `daemon.log` | `start` only | Appended forever — see the rotation note below. |
 
 `daemon.pid` is a JSON document (`{pid, startedAt, intervalSeconds}`), taken
@@ -173,6 +270,15 @@ human to delete a file before the factory can watch itself again.
 
 `status.json` is written tmp-then-rename, so a reader polling it never sees
 half a document.
+
+`findings.json` is the daemon's only memory: finding identity to the timestamp
+it was first seen, and nothing else. It is what makes `firstSeen` possible at
+all, because the event log records what *happened* and not what the watcher
+*noticed*, so this one fact cannot be recomputed from scratch the way every
+other fact in this factory can. It is also deliberately disposable — deleting
+it costs one tick in which every standing finding reads as new, and nothing
+else. A missing or corrupt file is read as an empty memory rather than failing
+the tick, for the same reason `unreadable-log` is a finding and not a crash.
 
 `daemon.log` is only produced by `smith daemon start`, and **nothing rotates
 it**. Under launchd or systemd, let the service manager own the output stream
