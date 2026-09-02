@@ -1393,6 +1393,28 @@ async function main(): Promise<number> {
     return result.wave.length > 0 || result.remaining === 0 ? 0 : 1;
   }
 
+  if (namespace === 'wave' && action === 'audit') {
+    // Dynamic for P9-2 (test/cliBoot.test.ts): the module reaches
+    // agents-registry.ts, and nothing that only `wave audit` needs should be
+    // on the path every `smith --help` walks.
+    const { auditWaveConcurrency, summariseWaveConcurrency } = await import('./waveConcurrency.js');
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    // Lineage-wide, for the reason `wave next` and the budget check already
+    // are (D-119): an epic's waves are not confined to the session that
+    // happens to ask, and a wave admitted in session 1 whose agents ran in
+    // session 2 would read as `unobserved` -- the factory reported broken on
+    // nothing but where the operator stood.
+    const summary = summariseWaveConcurrency(
+      auditWaveConcurrency(await readLineageEvents(sessionId, eventOpts), {
+        epicId: typeof flags.epic === 'string' ? flags.epic : undefined,
+      }),
+    );
+    printJson(summary);
+    return summary.exitCode;
+  }
+
   if (namespace === 'new') {
     // `smith new <project> [--ui]` — action doubles as the positional
     // project name here (splitNamespaceAction), never a subcommand word.

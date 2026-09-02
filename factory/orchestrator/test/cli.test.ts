@@ -3432,6 +3432,113 @@ describe('cli.ts (built binary)', () => {
       expect(admitted[0]?.payload.task_ids).toEqual(['epic-1/task-1', 'epic-1/task-2']);
     });
 
+    // The other half of the same claim. `wave check` says two tasks *may* run
+    // at once; nothing until now said whether they *did*. A dispatcher that
+    // admits a wave of two and then runs them one after the other reports the
+    // same green as one that ran them together, and the log already held the
+    // difference — this reads it back. The events go through the CLI rather
+    // than a fixture so the producer's payload and the reader's expectations
+    // are checked against each other.
+    it('wave audit: separates a wave that ran wide from one that ran one at a time', async () => {
+      async function ran(order: string[]): Promise<{ sessionId: string; eventsDir: string }> {
+        const { sessionId, eventsDir, planPath } = await session();
+        const admit = runCli([
+          'wave',
+          'check',
+          planPath,
+          'task-1',
+          'task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(admit.status).toBe(0);
+
+        for (const step of order) {
+          const [kind, task] = step.split(' ');
+          const appended = runCli([
+            'event',
+            'append',
+            JSON.stringify({
+              session_id: sessionId,
+              actor: 'system',
+              plan_version: 1,
+              causal_parent: `${sessionId}#0`,
+              task_id: `epic-1/${task}`,
+              ...(kind === 'dispatch'
+                ? {
+                    event_type: 'dispatch_decision',
+                    payload: {
+                      agent_role: 'coder',
+                      provider: 'claude',
+                      model_tier: 'mid',
+                      model: 'claude-sonnet-5',
+                    },
+                  }
+                : {
+                    event_type: 'task-result-recorded',
+                    payload: { agent: 'coder' },
+                  }),
+            }),
+            '--state-dir',
+            eventsDir,
+          ]);
+          expect(appended.status).toBe(0);
+        }
+        return { sessionId, eventsDir };
+      }
+
+      const audit = (sessionId: string, eventsDir: string, ...rest: string[]) =>
+        runCli(['wave', 'audit', '--session', sessionId, '--state-dir', eventsDir, ...rest]);
+
+      // Admitted, and not one dispatch under it. "Ran narrow" and "cannot
+      // tell" are different facts, so they get different exit codes.
+      const blind = await ran([]);
+      const nothing = audit(blind.sessionId, blind.eventsDir);
+      expect(nothing.status).toBe(2);
+      const nothingSummary = JSON.parse(nothing.stdout);
+      expect(nothingSummary.unobserved).toEqual(['epic-1']);
+      expect(nothingSummary.serialized).toEqual([]);
+      expect(nothingSummary.hint).toContain('dispatch_decision');
+
+      // One task dispatched, finished, and only then the next.
+      const serial = await ran([
+        'dispatch task-1',
+        'result task-1',
+        'dispatch task-2',
+        'result task-2',
+      ]);
+      const serialised = audit(serial.sessionId, serial.eventsDir);
+      expect(serialised.status).toBe(1);
+      const serialSummary = JSON.parse(serialised.stdout);
+      expect(serialSummary.serialized).toEqual(['epic-1']);
+      expect(serialSummary.widest).toEqual({ declared: 2, observed: 1 });
+      expect(serialSummary.waves[0].verdict).toBe('serialized');
+      expect(serialSummary.waves[0].declared).toEqual(['epic-1/task-1', 'epic-1/task-2']);
+
+      // Both in flight before either finished: the shape the factory is for.
+      const wide = await ran([
+        'dispatch task-1',
+        'dispatch task-2',
+        'result task-1',
+        'result task-2',
+      ]);
+      const parallel = audit(wide.sessionId, wide.eventsDir);
+      expect(parallel.status).toBe(0);
+      const wideSummary = JSON.parse(parallel.stdout);
+      expect(wideSummary.serialized).toEqual([]);
+      expect(wideSummary.waves[0].verdict).toBe('parallel');
+      expect(wideSummary.widest).toEqual({ declared: 2, observed: 2 });
+
+      // --epic narrows to one epic's waves; an epic with none is not a failure.
+      const narrowed = audit(wide.sessionId, wide.eventsDir, '--epic', 'epic-9');
+      expect(narrowed.status).toBe(0);
+      expect(JSON.parse(narrowed.stdout).waves).toEqual([]);
+    });
+
     // The bug the old filter hid: `taskIds.includes(t.task_id)` matched
     // nothing when the ids were spelled differently, validateWave([]) said
     // "valid", and an empty wave sailed through as if it had been checked.

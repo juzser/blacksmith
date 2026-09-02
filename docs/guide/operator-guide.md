@@ -251,6 +251,77 @@ Exit 1 means work remains and none of it can start: a stall worth reporting,
 distinguished from the epic simply being finished, which is an empty `wave`
 with `remaining: 0`.
 
+### `smith wave audit` — did the wave that was admitted actually run wide?
+
+`wave next` proposes a wave and `wave check` admits one. Both are statements
+about the future, and both are written before a single agent starts. Nothing
+read them back. A dispatcher that admits three tasks and then runs them one
+after another produces exactly the same log line as one that ran all three at
+once — `wave-admitted` records the width that was *permitted*, never the width
+that happened — so the factory's central claim, that work is executed by many
+agents in parallel, was the one claim it could not check on itself.
+
+It can now, because the evidence was already there. `dispatch_decision` says
+when an agent went live and its terminal event says when it stopped; folding
+that pair per task gives the interval each task was actually running, and the
+most intervals overlapping at any instant is the width the wave really had.
+
+```bash
+smith wave audit --session <session-id> [--epic epic-1] [--state-dir <dir>]
+```
+
+```json
+{"waves":[{"eventId":"s1#1","admittedAt":"2026-09-02T09:49:50.925Z","epicId":"epic-1",
+  "declared":["epic-1/task-1","epic-1/task-2","epic-1/task-3"],
+  "observed":[
+    {"taskId":"epic-1/task-1","startedAt":"...:51.320Z","endedAt":"...:52.107Z","roles":["coder"]},
+    {"taskId":"epic-1/task-2","startedAt":"...:51.711Z","endedAt":"...:52.498Z","roles":["coder"]}],
+  "unobserved":["epic-1/task-3"],"peak":2,"verdict":"partial"}],
+ "serialized":[],"partial":["epic-1"],"unobserved":[],
+ "widest":{"declared":3,"observed":2},"hint":"","exitCode":0}
+```
+
+Each wave gets one of five verdicts. `parallel` is peak concurrency at least
+as wide as the wave was declared. `partial` is narrower than declared but more
+than one at a time. `serialized` is work that was recorded and never once
+overlapped. `single` is a wave of one, which cannot be either. `unobserved` is
+a wave with no dispatch under any of its tasks at all.
+
+The last two distinctions are the point of the command, so it is worth being
+plain about them.
+
+**`serialized` and `unobserved` are different facts and get different exit
+codes.** Exit 1 says the dispatcher ran your wave one task at a time — that is
+a factory not doing its job. Exit 2 says the wave was admitted and the log
+shows no work for it, which is either a dispatcher that never started or
+agents that ran outside the lineage being read; the two readings are a
+different investigation and the command names both in `hint` rather than
+guessing. Scoring "cannot tell" as "ran narrow" would have manufactured
+failures out of a state dir pointed at the wrong place.
+
+**`partial` does not fail.** Three admitted and two in flight is the factory
+working — a dependency landed late, an agent finished early. An exit code that
+cried about that would be routed to `/dev/null` inside a week and would take
+the `serialized` signal with it.
+
+Two smaller decisions that change what the numbers mean.
+
+A task that finishes at the exact instant the next one starts counts as a
+**handoff, not as concurrency**. Without that rule a strictly serial
+dispatcher would score `parallel` on nothing but the clock's granularity,
+which is precisely the lie this command exists to catch.
+
+The audit reads the **whole lineage**, not the session that happens to ask, for
+the same reason `wave next` and the budget check do (D-119). An epic's waves
+are not confined to one session, and a wave admitted in session 1 whose agents
+ran in session 2 would otherwise come back `unobserved` — the factory reported
+broken on nothing but where the operator was standing.
+
+An agent still running has no terminal event, and its task is treated as open
+rather than as instantaneous: a wave audited mid-run reads as wide as it
+currently is, not as narrow as its finished work. The command writes nothing,
+so it is safe to ask at any moment and safe to ask twice.
+
 ### The blind spot a claim has by construction (P9-3)
 
 `wave check` also asks a second question, and it is not about globs. Two
