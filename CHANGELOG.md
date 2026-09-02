@@ -23,6 +23,22 @@ than appearing in it.
 
 ### Added
 
+- `enabled: auto` on an external provider in `crosscheck.yml`, resolved against
+  that provider's precondition on the box reading the file: a `cli` provider is
+  on if its `command` is runnable, an `api` provider is on if its `api_key_env`
+  is set. `enabled` is the one field in that file that describes a *machine*,
+  and the file is checked in, so `enabled: true` is a claim about every clone —
+  which is how CI, a box with no `codex` binary, correctly started failing
+  `smith judge preflight` the day codex was promoted. `auto` lets one commit be
+  right on both boxes without either editing the file. It reads installation,
+  not authentication: `codex` on `PATH` does not mean `codex login` was run, so
+  a box with the binary and no session still spends the call and records the
+  failure. A declared `enabled: true` over a missing binary remains an unmet
+  precondition — `auto` is an escape hatch, not an amnesty — and `auto` is
+  refused on `kind: native`, which has nothing to probe. Preflight now
+  distinguishes the two in words: "enabled: auto, and codex is not on PATH
+  here" rather than "disabled in the policy", which would name a decision
+  nobody made.
 - `crosscheck.yml` `quorum_rule.accept_non_gating_actives`, and a `notes` list
   on `smith judge preflight` for the costs it covers. One external judge
   promoted to `active` against `min_providers: 2` cannot gate anything — the

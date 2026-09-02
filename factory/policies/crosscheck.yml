@@ -56,13 +56,23 @@ providers:
     # caught, so nothing gates on it, but it is latency and noise.
     # `smith judge preflight` checks the first half locally; only a real call
     # can check the second.
+    # `auto`, not `true`. This is the one field in the file that describes a
+    # MACHINE, and the file is checked in, so `true` here would be a claim
+    # about every clone: the day this was written `true`, CI — which has no
+    # `codex` binary — started failing `judge preflight`'s soundness check,
+    # correctly, for a line that was true where it was typed.
+    #
+    # `auto` resolves against the precondition above, on the box reading the
+    # file: `codex` on PATH means enabled, no `codex` means silently off, and
+    # neither box needs to edit this line. What it cannot know is the second
+    # half — whether `codex login` was run — so a box with the binary and no
+    # session still spends a call per trigger and records the failure.
+    #
     # Turned on for THIS box, 2026-09-02, by the operator who owns it: `codex`
-    # resolves on PATH and `codex login` is done, both checked by
-    # `smith judge preflight` and by a real `codex exec` call before the flip.
-    # This is the one field in the file that describes a machine, so a clone on
-    # a box without codex flips it back — that is the rollback, and it is a
-    # one-line edit either way.
-    enabled: true
+    # resolves on PATH and `codex login` is done, both checked by `smith judge
+    # preflight` and by a real `codex exec` call. Rollback for one box is
+    # `enabled: false` here, which `auto` never overrides.
+    enabled: auto
     # `active`, not `shadow`: the operator's call (docs/runbooks/providers.md
     # §3 offers shadow-then-calibrate and this box declined it).
     #
