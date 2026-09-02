@@ -135,6 +135,16 @@ export const COMMANDS: readonly CommandDoc[] = [
       'the checkout the symbol graph is read from.',
   },
   {
+    command: 'wave schedule',
+    positionals: '<plan.json>',
+    flags: `[--repo <dir>] ${EVENTS_DIR}`,
+    summary:
+      'Replay the wave loop against a plan to exhaustion and report how many rounds it needs, ' +
+      'the widest round it ever gets, and which tasks were held back by claim geometry rather ' +
+      'than by a dependency. Reads and simulates, never writes. Exit 1 when the plan stalls, ' +
+      '2 when it runs but loses width to something a re-slice could fix.',
+  },
+  {
     command: 'wave audit',
     positionals: '',
     flags: '--session <id> [--epic <id>] [--state-dir <dir>]',

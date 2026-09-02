@@ -322,6 +322,84 @@ rather than as instantaneous: a wave audited mid-run reads as wide as it
 currently is, not as narrow as its finished work. The command writes nothing,
 so it is safe to ask at any moment and safe to ask twice.
 
+### `smith wave schedule` — how wide can this plan *ever* run?
+
+Three commands now bracket parallelism and all three take the plan as given.
+`wave check` says these tasks may run together. `wave next` says these are the
+ones that can start now. `wave audit` says here is what actually ran. None of
+them can answer the question that comes first: is this plan capable of running
+wide at all?
+
+It is not a hypothetical. A plan whose tasks all claim overlapping globs has a
+ceiling of one no matter how many agents are free, and every check downstream
+signs off on it — each wave of one is admitted, each runs faithful to its
+admission, and the epic serializes with nothing anywhere reporting a problem.
+The cost is decided at plan time and every command that could have named it
+runs too late to matter.
+
+So this one replays the dispatcher against the plan. It calls the same
+`computeNextWave` the real wave loop calls, marks the returned wave complete,
+and calls it again until nothing more can start.
+
+```bash
+smith wave schedule factory/specs/active/epic-1/plan-v1.json \
+  --session <session-id> --repo <project-dir>
+```
+
+```json
+{"epicId":"epic-1",
+ "rounds":[
+   {"round":1,"tasks":["task-1","task-4"],
+    "avoidable":[{"taskId":"task-2","reason":"claim-overlap","blockedBy":["task-1"],
+                  "detail":"Claims overlap task-1 (src/db/** vs src/db/schema.ts)."}]},
+   {"round":2,"tasks":["task-2"],"avoidable":[]},
+   {"round":3,"tasks":["task-3"],"avoidable":[]}],
+ "depth":3,"widest":2,"scheduled":4,"stalled":[],"occupied":[],
+ "constraints":[{"reason":"claim-overlap","tasks":["task-2"],"blockedBy":["task-1"],
+                 "detail":"Claims overlap task-1 (src/db/** vs src/db/schema.ts)."}],
+ "hint":"This plan runs in 3 rounds, and some of that depth is claim geometry…",
+ "exitCode":2}
+```
+
+`depth` is how many sequential waves the plan needs; `widest` is the most
+tasks any one round starts, which is the parallelism ceiling — the number of
+agents beyond which this plan cannot use another one. Because both come out of
+the containment code itself rather than a second model of it, the ceiling
+reported here is the ceiling the dispatcher will hit.
+
+**The one distinction that makes the output actionable.** A task deferred
+`dependency-pending` is waiting on work it genuinely needs. That is the shape
+of the problem, not a defect: a chain of five real dependencies takes five
+rounds and no re-slicing changes it, so a plan serialized purely by its own
+declared edges exits `0` with an empty `constraints`. A task deferred for any
+other reason had its dependencies satisfied, was ready to run that round, and
+was held back only by how the planner drew the claims. Those are the ones
+collected into `constraints`, and only those.
+
+Exit `2` means the plan runs but loses width to something a re-slice could
+fix. Exit `1` outranks it and means the plan **stalls** — `stalled` names
+candidate tasks no round could ever start, which is a plan that cannot be
+finished as written.
+
+What it deliberately does **not** do is claim a counterfactual. It never says
+"re-slice these two and the plan runs in three rounds instead of five",
+because knowing that would mean inventing the claim geometry the planner would
+have written instead, and the dependency graph may simply bind next. It names
+which tasks were held back, by whom, and in which round; whether that is worth
+re-planning is yours to decide, with the numbers to decide on.
+
+Two notes on reading it mid-run. `occupied` lists non-terminal tasks that are
+not candidates — mid-flight, or waiting on a person. The simulation can
+complete a task but it cannot un-block one, so an occupied task holds its
+claims in every round, and a candidate it overlaps will show up in `stalled`
+with that task named in `blockedBy`. And the honest reading of the ceiling is
+on a plan whose tasks have not been dispatched yet; asked halfway through a
+run, the answer mixes in where the run currently stands.
+
+Like `wave next`, it writes nothing — and here there is a second reason. Every
+round after the first is a simulation, its tasks completed by nobody. A log
+that recorded them would be claiming work that has not happened.
+
 ### The blind spot a claim has by construction (P9-3)
 
 `wave check` also asks a second question, and it is not about globs. Two

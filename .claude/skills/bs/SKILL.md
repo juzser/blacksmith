@@ -545,6 +545,29 @@ there means "not looked at", not "looked at and clean".
    v(n+1) so a re-plan is not a fresh choice. Omit the field to take the
    policy default; a value that is not `small`/`medium`/`huge` fails
    validation rather than degrading to it.
+
+   Then read the plan's parallelism ceiling before anyone is dispatched
+   against it:
+
+   ```bash
+   smith wave schedule factory/specs/active/<epic>/plan-v1.json \
+     --session <session-id> --repo <project-dir>
+   ```
+
+   `valid: true` says the plan is well-formed; this says whether it can ever
+   run wide. It replays the wave loop to exhaustion and reports `depth` (how
+   many sequential rounds) and `widest` (the most tasks any round starts —
+   the ceiling beyond which more agents buy nothing). Exit 1 means the plan
+   **stalls** and cannot be finished as written: fix it here, not by watching
+   `/bs run` hang. Exit 2 means it runs but loses width to `constraints` —
+   tasks whose dependencies were satisfied and were held back only by how you
+   drew the claims. That is a plan-time cost and this is the last step that
+   can pay it cheaply; a `widest: 1` plan serializes the whole epic while
+   every gate downstream reports a healthy wave of one. Deferrals for
+   `dependency-pending` never appear there, because a chain of real
+   dependencies is the shape of the work and not a defect. Exit 2 is
+   information, not a stop — decide whether to re-slice, and say which you
+   chose when you present the plan.
 7. Log the sign-off itself as a decision checkpoint (this is exactly what
    `smith dream`'s "plan sign-off" extraction looks for, `lessons.ts`):
    `smith event append '{"session_id":"...","actor":"operator",
