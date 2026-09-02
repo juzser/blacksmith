@@ -117,6 +117,7 @@ Finding kinds, and where each one comes from:
 | `spec-change` | `attention` when the worker called it `blocking`, `info` otherwise | A worker proposed amending an acceptance criterion and nobody has answered. `detail` names the criterion, the assumption and both answering commands. |
 | `maintenance` | `info` | Dependencies `pnpm outdated` reports behind, with the scheduler's confidence. Needs `--project`; repo-scoped. |
 | `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. |
+| `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
 | `unreadable-log` | `attention` | A session log could not be read. |
 | `projection-failed` | `attention` | A session's read-model refresh threw. |
 
@@ -130,6 +131,23 @@ blocking proposal is a stalled task rather than a queue item. The finding says
 only that a decision is outstanding, which stays true whichever way it is
 answered; whether the proposal's diff has since been overtaken by a later plan
 version is a second question, and `smith plan proposals` is where it is asked.
+
+`factory-width` is the one kind that deliberately reads **only the newest
+close**, and the reason is the severity rule above. Closes are immutable, so an
+epic that ran narrow in March is narrow forever; a finding folded over all of
+history would therefore raise the same `attention` on every tick for the life
+of the repo, over something nobody can go back and fix. An attention count that
+can never return to zero is worse than no count — it trains you to stop reading
+it. The newest close is a claim about *now*: it clears itself the moment a wide
+epic closes. The history is not lost, it is one `smith epic width` away (§7f of
+the operator guide), which folds every close and is the right place to ask
+whether the factory has been narrow for a month.
+
+Its `info` form is the opposite state of knowledge, not a milder version of the
+same one: closes exist and none of them recorded how wide it ran, so the factory
+cannot say whether it builds in parallel. That is work to schedule — close a
+current epic, or read a live log back with `smith wave audit` — and never an
+alarm, because nothing here is known to be wrong.
 
 The last two kinds are why a tick never aborts. One corrupt line, or one
 SQLite file the daemon cannot write, becomes a finding and the tick carries
