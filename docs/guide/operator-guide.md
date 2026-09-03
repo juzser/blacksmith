@@ -1469,6 +1469,31 @@ the whole chain root-first and then takes the last `n`. The timeline
 projection follows the same edge: a causal chain that runs back through the
 split renders as one path, not two disconnected stubs.
 
+**`--lineage` on the raw log has a twin on the projection.** Every `smith
+stats` page takes `--session`, and `--session` alone is a question about the
+window rather than about the epic: after a split, `stats kanban --epic epic-7
+--session epic-7-session-2` returns the tasks session 2 recorded and says
+nothing at all about the ones session 1 added to the same epic. Half an epic,
+reported as a whole one. Add `--lineage` and every page is scoped to the whole
+chain instead.
+
+```bash
+# Half the epic — whatever the second window happened to record.
+smith stats kanban --epic epic-7 --session epic-7-session-2
+
+# The epic. --lineage widens every stats page the same way.
+smith stats kanban --epic epic-7 --session epic-7-session-2 --lineage
+```
+
+It resolves the chain off the projection, so it needs a `--db` and nothing
+else — no access to the log directory, which is why the dashboard can draw the
+same scope. It walks ancestors only, exactly as `smith event lineage` does: a
+session's lineage is what it continues, not what later continued it. It stops
+at the first ancestor the projection has not folded yet, so a partial `db
+rebuild` narrows the answer rather than failing it. And it needs a `--session`
+to widen — on its own it exits 1 with `cli.missing-flag` rather than quietly
+answering about every session at once.
+
 Two errors are worth recognising on sight:
 
 | Error code | What you actually did |

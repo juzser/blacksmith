@@ -4,14 +4,15 @@
 // omitted, a query spans every projected session (a single Blacksmith
 // instance is one continuously-running factory, so "no session filter"
 // is the normal case; a session filter is for debugging one run).
-import { and, eq, gte, inArray, lte } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
+import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
   foldAgents,
   liveAgents as foldLiveAgents,
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
-import { compareLogOrder, isLaterEvent } from '../events.js';
+import { compareLogOrder, isLaterEvent, ROOT_EVENT_TYPE } from '../events.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
@@ -40,6 +41,25 @@ export const DEFAULT_PROJECT = 'black-smith';
 
 export interface Scope {
   sessionId?: string;
+  /**
+   * D-263. The sessions this read covers, root-first, when the answer is a
+   * whole lineage rather than one session: `projectedLineage()` resolves it
+   * and every session narrowing below widens from `=` to `IN (...)` when it
+   * is set. `sessionId` stays set alongside it -- it is the session that was
+   * *asked about*, which is what a caller reporting its own scope needs, and
+   * the lineage always contains it.
+   *
+   * This exists because P9-7 made an epic splittable across sessions and
+   * SKILL.md then recommended splitting one: an epic that outlasts a window
+   * continues in a second session whose root chains to the first. The raw-log
+   * readers followed that edge from the day it shipped (`smith event lineage`,
+   * `smith event tail --lineage`), but every projected read still narrowed on
+   * one session id, so asking the continuation session about its own epic
+   * answered with the part of it that happened to fall inside that window and
+   * said nothing about the rest. Half an epic reported as a whole one is the
+   * failure mode this closes.
+   */
+  sessionIds?: readonly string[];
   /**
    * Phase 6b — a plain-string project identifier (architecture §8 note: NOT
    * a taxonomy.yml vocabulary value). Omitted => "global mode": spans every
@@ -74,6 +94,97 @@ export interface Scope {
  */
 function projectOf(value: string | null): string {
   return value ?? DEFAULT_PROJECT;
+}
+
+/**
+ * The session narrowing for one `session_id` column: `IN (lineage)` when the
+ * scope carries one, `= sessionId` when it carries a single session, and
+ * `undefined` -- meaning no narrowing at all -- when it carries neither.
+ *
+ * Every session-scoped read in this file goes through here rather than
+ * writing its own `eq()`, so widening the scope is one change instead of
+ * twenty, and a reader added later cannot quietly opt out of the lineage by
+ * forgetting it exists.
+ */
+function scopedToSessions(column: SQLiteColumn, scope: Scope): SQL | undefined {
+  if (scope.sessionIds !== undefined) {
+    if (scope.sessionIds.length === 0) {
+      // `inArray(col, [])` is a clause with no rows to compare against, and
+      // what a driver makes of it -- match nothing, match everything, refuse
+      // to compile -- is not something this file should be relying on either
+      // way. Neither reading answers "scope this to no sessions", and
+      // `projectedLineage` cannot produce an empty array, so an empty one is
+      // a caller bug and gets told so rather than an arbitrary row set.
+      throw new RangeError(
+        'Scope.sessionIds was empty: a lineage always contains at least the session it was resolved from. Pass sessionId for a single session, or omit both to span every session.',
+      );
+    }
+    return inArray(column, [...scope.sessionIds]);
+  }
+  if (scope.sessionId !== undefined) return eq(column, scope.sessionId);
+  return undefined;
+}
+
+/**
+ * The lineage of `sessionId`, root-first and always containing `sessionId`
+ * itself -- the projection's answer to the question `sessionLineage()` in
+ * events.ts answers from the raw logs.
+ *
+ * It is resolved here, and not by calling that one, because everything this
+ * file serves is a pure reader over `state/smith.db`: `smith stats` opens the
+ * db and nothing else, and the UI server has no access to the log directory
+ * at all. A lineage that could only be read off the filesystem would be a
+ * lineage the dashboard could never draw.
+ *
+ * Ancestors only, exactly as `sessionLineage()` and `smith event tail
+ * --lineage` define it: a session's lineage is what it continues, not what
+ * later continued it. The walk is over `session-start` rows, because that is
+ * the only event type allowed a cross-session `causal_parent`
+ * (`events.cross-session-parent-not-root`), and it takes the FIRST root of
+ * each log for the reason startSession()'s comment gives -- a log has one
+ * beginning, and a second `session-start` is a line no reader looks at.
+ */
+export function projectedLineage(db: SmithDb, sessionId: string): string[] {
+  const chain = [sessionId];
+  const seen = new Set([sessionId]);
+  let current = sessionId;
+
+  for (;;) {
+    const roots = db
+      .select({
+        eventId: eventsRaw.eventId,
+        ts: eventsRaw.ts,
+        causalParent: eventsRaw.causalParent,
+      })
+      .from(eventsRaw)
+      .where(and(eq(eventsRaw.sessionId, current), eq(eventsRaw.eventType, ROOT_EVENT_TYPE)))
+      .all();
+    // inLogOrder, not `limit 1`: rows come back in whatever order the table
+    // holds them, and "the first root" has to mean first in the log.
+    const root = inLogOrder(roots)[0];
+    const parentId = root?.causalParent ?? null;
+    if (parentId === null) return chain;
+
+    const parent = db
+      .select({ sessionId: eventsRaw.sessionId })
+      .from(eventsRaw)
+      .where(eq(eventsRaw.eventId, parentId))
+      .all()[0];
+    // A parent the projection has not folded is where the walk stops, not
+    // where it throws: `smith stats` runs against whatever has been projected
+    // so far, and a partial rebuild is a normal state, not a corrupt one. The
+    // scope is then the part of the lineage that exists, which is the most
+    // this reader can honestly offer.
+    if (parent === undefined) return chain;
+    if (seen.has(parent.sessionId)) {
+      throw new RangeError(
+        `Session lineage for "${sessionId}" is a cycle: "${parent.sessionId}" appears twice. A session log's root may name a parent in another log, and the result has to stay a tree.`,
+      );
+    }
+    seen.add(parent.sessionId);
+    chain.unshift(parent.sessionId);
+    current = parent.sessionId;
+  }
 }
 
 /** Filters an already-fetched row array to `scope.project`; a no-op in global mode (project omitted). */
@@ -282,8 +393,9 @@ const NON_TERMINAL_TASK_STATUSES = [
 
 /** Every `tasks` row for `scope`, session-filtered in SQL and project-filtered in JS. */
 function allTasksForScope(db: SmithDb, scope: Scope): (typeof tasks.$inferSelect)[] {
-  const rows = scope.sessionId
-    ? db.select().from(tasks).where(eq(tasks.sessionId, scope.sessionId)).all()
+  const sessionCond = scopedToSessions(tasks.sessionId, scope);
+  const rows = sessionCond
+    ? db.select().from(tasks).where(sessionCond).all()
     : db.select().from(tasks).all();
   return filterByProject(rows, scope);
 }
@@ -335,16 +447,12 @@ interface TaskResultRow {
 
 function taskResultRows(db: SmithDb, scope: Scope): TaskResultRow[] {
   const cols = { payload: eventsRaw.payload, envelopeTaskId: eventsRaw.taskId };
-  const rows = scope.sessionId
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const rows = sessionCond
     ? db
         .select(cols)
         .from(eventsRaw)
-        .where(
-          and(
-            eq(eventsRaw.eventType, 'task-result-recorded'),
-            eq(eventsRaw.sessionId, scope.sessionId),
-          ),
-        )
+        .where(and(eq(eventsRaw.eventType, 'task-result-recorded'), sessionCond))
         .all()
     : db.select(cols).from(eventsRaw).where(eq(eventsRaw.eventType, 'task-result-recorded')).all();
   return rows.map((r) => ({
@@ -516,9 +624,10 @@ function milestoneProgressRows(
 
   const taskRows = allTasksForScope(db, scope);
   const { budgetByEpic, spentByEpic } = epicTokenMaps(db, scope, taskRows);
+  const edgeSessionCond = scopedToSessions(edges.sessionId, scope);
   const edgeRows = opts.includeTaskRefs
-    ? scope.sessionId
-      ? db.select().from(edges).where(eq(edges.sessionId, scope.sessionId)).all()
+    ? edgeSessionCond
+      ? db.select().from(edges).where(edgeSessionCond).all()
       : db.select().from(edges).all()
     : [];
 
@@ -582,8 +691,9 @@ export interface RecentDispatch {
 const RECENT_DISPATCHES_LIMIT = 10;
 
 function allFindingsForScope(db: SmithDb, scope: Scope): (typeof findings.$inferSelect)[] {
-  const rows = scope.sessionId
-    ? db.select().from(findings).where(eq(findings.sessionId, scope.sessionId)).all()
+  const sessionCond = scopedToSessions(findings.sessionId, scope);
+  const rows = sessionCond
+    ? db.select().from(findings).where(sessionCond).all()
     : db.select().from(findings).all();
   return filterByProject(rows, scope);
 }
@@ -592,11 +702,12 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
   // agents has no project column of its own (schema.ts) — scope it by
   // membership in this scope's own task set (agents.taskId -> tasks.project),
   // the same "derive via the owning task" approach projectFindings() uses.
-  const liveRows = scope.sessionId
+  const sessionCond = scopedToSessions(agents.sessionId, scope);
+  const liveRows = sessionCond
     ? db
         .select()
         .from(agents)
-        .where(and(eq(agents.status, 'live'), eq(agents.sessionId, scope.sessionId)))
+        .where(and(eq(agents.status, 'live'), sessionCond))
         .all()
     : db.select().from(agents).where(eq(agents.status, 'live')).all();
   if (scope.project === undefined) return liveRows;
@@ -631,8 +742,9 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
  * dashboard's 5s poll rather than shuffling between renders.
  */
 export function runningSessions(db: SmithDb, scope: Scope = {}): RunningSession[] {
-  const rows = scope.sessionId
-    ? db.select().from(sessions).where(eq(sessions.sessionId, scope.sessionId)).all()
+  const sessionCond = scopedToSessions(sessions.sessionId, scope);
+  const rows = sessionCond
+    ? db.select().from(sessions).where(sessionCond).all()
     : db.select().from(sessions).all();
 
   const liveBySession = new Map<string, number>();
@@ -660,9 +772,8 @@ export function runningSessions(db: SmithDb, scope: Scope = {}): RunningSession[
       eventId: eventsRaw.eventId,
     })
     .from(eventsRaw);
-  for (const e of scope.sessionId
-    ? eventQuery.where(eq(eventsRaw.sessionId, scope.sessionId)).all()
-    : eventQuery.all()) {
+  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  for (const e of eventSessionCond ? eventQuery.where(eventSessionCond).all() : eventQuery.all()) {
     const seen = lastEvent.get(e.sessionId);
     if (seen === undefined || isLaterEvent(e, seen)) lastEvent.set(e.sessionId, e);
   }
@@ -714,8 +825,9 @@ function groupLiveAgents(rows: (typeof agents.$inferSelect)[]): LiveAgentGroup[]
  * different things depending on which card you're looking at.
  */
 function closedEpicsForScope(db: SmithDb, scope: Scope): ClosedEpic[] {
-  const rows = scope.sessionId
-    ? db.select().from(epics).where(eq(epics.sessionId, scope.sessionId)).all()
+  const sessionCond = scopedToSessions(epics.sessionId, scope);
+  const rows = sessionCond
+    ? db.select().from(epics).where(sessionCond).all()
     : db.select().from(epics).all();
   return filterByProject(rows, scope)
     .map((e) => ({
@@ -807,7 +919,8 @@ const SNAPSHOT_EVENT_TYPES = REGISTRY_EVENT_TYPES as readonly string[];
  */
 function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
   const conds = [lte(eventsRaw.ts, cutoffIso), inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES)];
-  if (scope.sessionId) conds.push(eq(eventsRaw.sessionId, scope.sessionId));
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  if (sessionCond) conds.push(sessionCond);
   const rows = inLogOrder(
     db
       .select()
@@ -859,7 +972,8 @@ function tokensSpentAt(
   epicByTask: Map<string, string>,
 ): number {
   const conds = [eq(eventsRaw.eventType, 'task-result-recorded'), lte(eventsRaw.ts, cutoffIso)];
-  if (scope.sessionId) conds.push(eq(eventsRaw.sessionId, scope.sessionId));
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  if (sessionCond) conds.push(sessionCond);
   const rows = db
     .select()
     .from(eventsRaw)
@@ -900,7 +1014,8 @@ function tokensBudgetedAt(
   epicByTask: Map<string, string>,
 ): number {
   const conds = [eq(eventsRaw.eventType, 'task-added'), lte(eventsRaw.ts, cutoffIso)];
-  if (scope.sessionId) conds.push(eq(eventsRaw.sessionId, scope.sessionId));
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  if (sessionCond) conds.push(sessionCond);
   const rows = inLogOrder(
     db
       .select()
@@ -957,8 +1072,9 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   );
   const pendingWaivers = pendingWaiverFindings.filter((f) => f.waiverId === null).length;
 
-  const dispatchRows = scope.sessionId
-    ? db.select().from(dispatches).where(eq(dispatches.sessionId, scope.sessionId)).all()
+  const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);
+  const dispatchRows = dispatchSessionCond
+    ? db.select().from(dispatches).where(dispatchSessionCond).all()
     : db.select().from(dispatches).all();
   const scopedDispatches = filterByProject(dispatchRows, scope);
   // Newest first, then the top ten — so the tie has to be broken before the
@@ -982,8 +1098,9 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   let projects: ProjectOverviewSummary[] | undefined;
   if (scope.project === undefined) {
-    const allTaskRowsUnfiltered = scope.sessionId
-      ? db.select().from(tasks).where(eq(tasks.sessionId, scope.sessionId)).all()
+    const taskSessionCond = scopedToSessions(tasks.sessionId, scope);
+    const allTaskRowsUnfiltered = taskSessionCond
+      ? db.select().from(tasks).where(taskSessionCond).all()
       : db.select().from(tasks).all();
     // Milestones too, not just tasks: roadmap.md's `- project:` bullet
     // declares a project before any of its work is planned, and
@@ -1328,7 +1445,8 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
 
   const eventTypes = filter.eventTypes ?? timelineEventTypes();
   const conditions = [inArray(eventsRaw.eventType, eventTypes)];
-  if (filter.sessionId) conditions.push(eq(eventsRaw.sessionId, filter.sessionId));
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, filter);
+  if (sessionCond) conditions.push(sessionCond);
   if (filter.taskId) conditions.push(eq(eventsRaw.taskId, filter.taskId));
 
   const rows = inLogOrder(
@@ -1413,8 +1531,7 @@ function worstSeverity(severities: string[]): string | null {
  */
 export function kanban(db: SmithDb, epicId?: string, scope: Scope = {}): KanbanColumn[] {
   const epicCond = epicId !== undefined ? eq(tasks.epicId, epicId) : undefined;
-  const sessionCond =
-    scope.sessionId !== undefined ? eq(tasks.sessionId, scope.sessionId) : undefined;
+  const sessionCond = scopedToSessions(tasks.sessionId, scope);
   const taskConds = [epicCond, sessionCond].filter((c) => c !== undefined);
   const taskRows = filterByProject(
     taskConds.length > 0
@@ -1449,8 +1566,9 @@ export function kanban(db: SmithDb, epicId?: string, scope: Scope = {}): KanbanC
   // directive 2, Phase 6b round 3: Kanban's "subagent + model" chip. Same
   // minimal-widening pattern as the earlier agentRole/title/milestoneId
   // additions in this function, disclosed the same way.
-  const dispatchRows = scope.sessionId
-    ? db.select().from(dispatches).where(eq(dispatches.sessionId, scope.sessionId)).all()
+  const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);
+  const dispatchRows = dispatchSessionCond
+    ? db.select().from(dispatches).where(dispatchSessionCond).all()
     : db.select().from(dispatches).all();
   const latestAgentRoleByTask = new Map<
     string,
@@ -1608,8 +1726,9 @@ export const LESSON_BUCKET_FOR_STATUS: Record<string, 'pending' | 'approved' | '
 };
 
 export function lessonsPage(db: SmithDb, scope: Scope = {}): LessonsResult {
-  const rows = scope.sessionId
-    ? db.select().from(lessons).where(eq(lessons.sessionId, scope.sessionId)).all()
+  const sessionCond = scopedToSessions(lessons.sessionId, scope);
+  const rows = sessionCond
+    ? db.select().from(lessons).where(sessionCond).all()
     : db.select().from(lessons).all();
 
   const result: LessonsResult = { pending: [], approved: [], closed: [] };
@@ -1651,8 +1770,9 @@ export interface ErrorsResult {
 }
 
 export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
-  const allRows = scope.sessionId
-    ? db.select().from(errors).where(eq(errors.sessionId, scope.sessionId)).all()
+  const sessionCond = scopedToSessions(errors.sessionId, scope);
+  const allRows = sessionCond
+    ? db.select().from(errors).where(sessionCond).all()
     : db.select().from(errors).all();
   const rows = filterByProject(allRows, scope);
 
@@ -1767,16 +1887,12 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([day, completed]) => ({ day, completed }));
 
-  const resultRows = scope.sessionId
+  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const resultRows = eventSessionCond
     ? db
         .select({ taskId: eventsRaw.taskId, payload: eventsRaw.payload })
         .from(eventsRaw)
-        .where(
-          and(
-            eq(eventsRaw.eventType, 'task-result-recorded'),
-            eq(eventsRaw.sessionId, scope.sessionId),
-          ),
-        )
+        .where(and(eq(eventsRaw.eventType, 'task-result-recorded'), eventSessionCond))
         .all()
     : db
         .select({ taskId: eventsRaw.taskId, payload: eventsRaw.payload })
@@ -1808,16 +1924,11 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
     };
   });
 
-  const decisionRows = scope.sessionId
+  const decisionRows = eventSessionCond
     ? db
         .select({ ts: eventsRaw.ts, taskId: eventsRaw.taskId, payload: eventsRaw.payload })
         .from(eventsRaw)
-        .where(
-          and(
-            eq(eventsRaw.eventType, 'severity-decisions'),
-            eq(eventsRaw.sessionId, scope.sessionId),
-          ),
-        )
+        .where(and(eq(eventsRaw.eventType, 'severity-decisions'), eventSessionCond))
         .all()
     : db
         .select({ ts: eventsRaw.ts, taskId: eventsRaw.taskId, payload: eventsRaw.payload })
@@ -1978,8 +2089,9 @@ export function flowGraph(db: SmithDb, filter: FlowFilter = {}): FlowGraph {
 
   const taskIds = new Set(taskRows.map((t) => t.taskId));
 
-  const edgeRows = filter.sessionId
-    ? db.select().from(edges).where(eq(edges.sessionId, filter.sessionId)).all()
+  const edgeSessionCond = scopedToSessions(edges.sessionId, filter);
+  const edgeRows = edgeSessionCond
+    ? db.select().from(edges).where(edgeSessionCond).all()
     : db.select().from(edges).all();
   const scopedEdges = edgeRows.filter((e) => taskIds.has(e.taskId) && taskIds.has(e.dependsOn));
 
@@ -2097,7 +2209,8 @@ export function providerAgreement(
   opts: { since?: string } = {},
 ): ProviderAgreementStat[] {
   const conds = [eq(eventsRaw.eventType, 'judge-verdict')];
-  if (scope.sessionId) conds.push(eq(eventsRaw.sessionId, scope.sessionId));
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  if (sessionCond) conds.push(sessionCond);
   if (opts.since) conds.push(gte(eventsRaw.ts, opts.since));
 
   const rows = db
@@ -2255,19 +2368,22 @@ export function pulse(db: SmithDb, scope: Scope = {}): PulseResult {
     project: eventsRaw.project,
     eventId: eventsRaw.eventId,
   };
-  const allEvents = scope.sessionId
-    ? db.select(eventCols).from(eventsRaw).where(eq(eventsRaw.sessionId, scope.sessionId)).all()
+  const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const allEvents = eventSessionCond
+    ? db.select(eventCols).from(eventsRaw).where(eventSessionCond).all()
     : db.select(eventCols).from(eventsRaw).all();
   const events = filterByProject(allEvents, scope);
 
   const errorCols = { project: errors.project };
-  const allErrors = scope.sessionId
-    ? db.select(errorCols).from(errors).where(eq(errors.sessionId, scope.sessionId)).all()
+  const errorSessionCond = scopedToSessions(errors.sessionId, scope);
+  const allErrors = errorSessionCond
+    ? db.select(errorCols).from(errors).where(errorSessionCond).all()
     : db.select(errorCols).from(errors).all();
 
   const lessonCols = { lessonStatus: lessons.lessonStatus };
-  const lessonRows = scope.sessionId
-    ? db.select(lessonCols).from(lessons).where(eq(lessons.sessionId, scope.sessionId)).all()
+  const lessonSessionCond = scopedToSessions(lessons.sessionId, scope);
+  const lessonRows = lessonSessionCond
+    ? db.select(lessonCols).from(lessons).where(lessonSessionCond).all()
     : db.select(lessonCols).from(lessons).all();
 
   // Max over `ts`, not "the last row": rows land in the order the projector
