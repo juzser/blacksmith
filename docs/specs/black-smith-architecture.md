@@ -81,8 +81,12 @@ black-smith/
 │   │                              #   non-Claude-Code-native shared instructions
 │   └── settings/                 # MCP servers, model presets, permissions
 ├── .claude/
-│   └── skills/bs/SKILL.md        # the /bs operator console (Phase 7) — Claude
-│                                  #   Code's own skill-discovery convention
+│   └── skills/bs/
+│       ├── SKILL.md              # the /bs operator console (Phase 7) — Claude
+│       │                          #   Code's own skill-discovery convention;
+│       │                          #   epic tier: plan, admit a wave, close
+│       └── wave.md               # wave tier: /bs run steps 2-10, one wave,
+│                                  #   thrown away when it lands (D13 step 2)
 ├── factory/
 │   ├── orchestrator/             # loop runner (dispatch, gates, merge queue)
 │   │   └── providers/            # judge-tier adapters: claude, codex, deepseek (§6)

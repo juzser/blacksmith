@@ -23,6 +23,30 @@ than appearing in it.
 
 ### Added
 
+- **`/bs run` is two playbooks, so an epic stops carrying every wave's turns.**
+  `.claude/skills/bs/SKILL.md` is now the epic tier — it plans, admits one wave
+  (step 1) and closes the epic (steps 11-17) — and the new
+  `.claude/skills/bs/wave.md` is the wave tier, carrying steps 2-10, worktrees
+  through merge queue, and written to be thrown away when the wave lands. A
+  wave opens a log of its own with `smith session start <wave-id> --continues
+  <epic-session>#<n>` when it is too large for the epic's window, and runs
+  inline in the epic session when it is not; both shapes are correct because
+  `--continues` is what keeps the epic's own reads able to see the work. That
+  is D13 step 2 — "each tier owns the log for what it dispatches" — and it is
+  only safe because D-266 taught lineage to walk down as well as up. The
+  concurrency and event-id rule moved with it, out of the epic tier's step 1
+  and into the shared **Dispatch contract**, because the fan-out it describes
+  now happens one tier below: a rule scoped narrower than the thing it guards
+  is D-119's shape, and D-119 is how a `hold` with eleven open findings became
+  a `go` with none. `factory/orchestrator/test/waveTier.test.ts` drives the
+  built binary over the exact topology and pairs every claim with the control a
+  session-scoped read would fail: `wave audit`, `budget alarm`, `tester check`
+  and `judge outstanding` answer about a wave session's dispatches from the
+  epic session that admitted them, and about nothing from a *sibling* wave.
+  `effort.test.ts`'s knob guard widened with the split — it reads every `*.md`
+  under `.claude/skills/bs/` rather than two sections of one file, because five
+  of the eight effort knobs are spent in the tier that moved.
+
 - **A roadmap that shows what the factory built, not how it was built.** A
   milestone now carries a `kind` — `product`, `dogfood` or `factory` — parsed
   from an optional `- kind:` bullet in `factory/specs/roadmap.md` and stored on

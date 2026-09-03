@@ -18,7 +18,7 @@ is your console:
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
 | `/bs mcp <project>` | Layer the MCP surface on, at its own milestone |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner |
-| `/bs run <epic>` | Admit a wave and drive it through the loop |
+| `/bs run <epic>` | Admit a wave and drive it through the loop (steps 2-10 live in the sibling playbook [`wave.md`](../../.claude/skills/bs/wave.md)) |
 | `/bs status` | Live agent count, budget burn, epic phase |
 | `/bs ui` | Serve the local dashboard |
 | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic |

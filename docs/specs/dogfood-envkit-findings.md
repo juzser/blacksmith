@@ -461,9 +461,10 @@ Until (1) lands: flat topology, and return discipline
 concurrency cap — a cap pays the same total context cost spread over N batches
 and buys latency with it.
 
-**Status: step 1 fixed, 2026-08-08, branch `smith/phase-9/p9-7-cross-session`;
-steps 2-3 open** — the cross-session edge shipped, arriving as `causal_parent`
-itself rather than as the separate `parent_event` key sketched above: a
+**Status: steps 1-2 fixed (step 1 on 2026-08-08, branch
+`smith/phase-9/p9-7-cross-session`; step 2 on 2026-09-03); step 3 open** —
+the cross-session edge shipped, arriving as `causal_parent` itself rather
+than as the separate `parent_event` key sketched above: a
 `session-start` may name a parent in another session's log, any other event
 type naming one is `events.cross-session-parent-not-root`, and the read side
 grew `sessionLineage` behind `smith event lineage <session-id>` and `smith
@@ -475,12 +476,29 @@ landed with D-266 (2026-09-03): lineage now walks down as well as up, so an
 epic session that dispatches wave sessions can read what they did. Before
 that, every gate standing at the epic end saw a lineage of one, and a tier
 split would have shipped a factory whose closes were blind by construction.
-Step 2 itself has not started — `.claude/skills/bs/` still holds a single
-epic-level SKILL.md and no disposable wave-level playbook — so the tier
-split this finding is really about is still ahead, and step 3 waits behind
-it. Splitting an epic across
-*operator* sessions works today and SKILL.md documents it; splitting it across
-*dispatched* ones does not.
+Step 2 then landed on top of it. `.claude/skills/bs/` now holds two
+playbooks: `SKILL.md` is the epic tier — it plans, admits one wave (step 1)
+and closes the epic (steps 11-17) — and
+[`wave.md`](../../.claude/skills/bs/wave.md) is the wave tier, carrying steps
+2-10, worktrees through merge queue, written to be thrown away when the wave
+lands. A wave opens a log of its own with `smith session start <wave-id>
+--continues <epic-session>#<n>` when it is too large for the epic's window,
+and runs inline in the epic session when it is not. Both shapes are correct,
+and `--continues` is the whole of why: it is what keeps the epic's own reads
+able to see the wave's work.
+
+`factory/orchestrator/test/waveTier.test.ts` drives the built binary over
+that exact topology, and pairs every claim with the sibling-scoped control a
+session-scoped read would fail: `wave audit`, `budget alarm`, `tester check`
+and `judge outstanding` each answer about a wave session's dispatches when
+asked from the epic session that admitted them, and each answers about
+nothing when asked from a *sibling* wave. That pairing is the D-119 shape
+this finding could most easily have shipped — a split log read one session
+at a time turns a hold into a green.
+
+Step 3 is now the only open half. Splitting an epic across *operator*
+sessions works today and both playbooks document it; splitting it across
+*dispatched* ones still needs the scoped `Agent(...)` grant step 3 is.
 
 ---
 
