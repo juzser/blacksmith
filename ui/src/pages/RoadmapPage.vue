@@ -55,7 +55,12 @@ import { useProjectContext } from '../composables/useProjectContext.js';
 import { fetchRoadmap, type MilestoneProgress } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { formatRelative, summarize } from '../lib/format.js';
-import { roadmapFlowEdges, roadmapFlowNodes, roadmapLanes } from '../lib/roadmapFlow.js';
+import {
+  partitionByKind,
+  roadmapFlowEdges,
+  roadmapFlowNodes,
+  roadmapLanes,
+} from '../lib/roadmapFlow.js';
 import { milestoneStatusTone } from '../lib/taxonomy.js';
 
 const router = useRouter();
@@ -69,6 +74,14 @@ const milestones = ref<MilestoneProgress[] | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
 const search = ref('');
+/**
+ * Operator directive (Phase 10): the page answers "what has this factory
+ * built", so it opens on the projects the factory built FOR someone and
+ * leaves its own ten phases and the dogfood project's four milestones
+ * behind the toggle. Not persisted -- the default is the directive, and a
+ * remembered preference would quietly make it something else.
+ */
+const showInternal = ref(false);
 
 async function load() {
   error.value = null;
@@ -88,11 +101,14 @@ const filtered = computed(() =>
   (milestones.value ?? []).filter((m) => m.name.toLowerCase().includes(search.value.toLowerCase())),
 );
 
+const partition = computed(() => partitionByKind(filtered.value, showInternal.value));
+const shown = computed(() => partition.value.shown);
+
 // Operator directive 4 (Phase 6b round 3): group by project — but only when
 // NOT already scoped to one project (project.value set, e.g.
 // /p/:project/roadmap) and the filtered set actually spans more than one.
 // Same rule as the old SectionHeading grouping, now expressed as lanes.
-const lanes = computed(() => roadmapLanes(filtered.value, project.value));
+const lanes = computed(() => roadmapLanes(shown.value, project.value));
 const flowNodes = computed(() => roadmapFlowNodes(lanes.value));
 const flowEdges = computed(() =>
   roadmapFlowEdges(lanes.value).map((e) => ({
@@ -119,8 +135,20 @@ function goToTask(taskId: string) {
   <div class="app-page app-page--full-bleed">
     <PageHeader title="Roadmap" />
 
-    <Toolbar :count="`${filtered.length} milestones`">
+    <Toolbar :count="`${shown.length} milestones`">
       <input v-model="search" type="search" class="raw-input" aria-label="Search milestone name" placeholder="Search name…" style="height: var(--ds-control-height); border: 1px solid var(--ds-border); border-radius: var(--ds-radius-control); padding: 0 var(--ds-space-2); background: var(--ds-surface); color: var(--ds-text)" />
+      <!-- The filter says out loud what it is holding back. A page that
+           silently dropped fourteen of fourteen rows would look broken
+           rather than filtered (D-119). -->
+      <Button
+        v-if="partition.hiddenCount > 0 || showInternal"
+        variant="outline"
+        size="sm"
+        :aria-pressed="showInternal"
+        @click="showInternal = !showInternal"
+      >
+        {{ showInternal ? 'Hide the factory’s own roadmap' : `Show the factory’s own roadmap (${partition.hiddenCount})` }}
+      </Button>
     </Toolbar>
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
@@ -129,7 +157,14 @@ function goToTask(taskId: string) {
       <Skeleton height="560" />
     </template>
 
-    <EmptyState v-else-if="canClaimEmpty(milestones !== null, filtered.length)" icon="map">No milestones match these filters.</EmptyState>
+    <!-- Two different emptinesses, and they must not read alike. Nothing
+         built yet is the expected state of a fresh clone and says what to do
+         about it; nothing MATCHING is a filter the operator can widen. -->
+    <EmptyState v-else-if="canClaimEmpty(milestones !== null, shown.length) && partition.hiddenCount > 0 && search === ''" icon="map">
+      This factory has not built a project yet. The {{ partition.hiddenCount }} milestone{{ partition.hiddenCount === 1 ? '' : 's' }} it does hold belong to itself and to {{ partition.hiddenProjects.join(', ') }}. Run <code>/bs new</code> to start one.
+    </EmptyState>
+
+    <EmptyState v-else-if="canClaimEmpty(milestones !== null, shown.length)" icon="map">No milestones match these filters.</EmptyState>
 
     <template v-else>
       <div class="roadmap-canvas">
@@ -223,7 +258,7 @@ function goToTask(taskId: string) {
            for its ORDER; the nodes themselves are readable, the sequence is
            not). Same pattern as FlowPage's task-DAG table. -->
       <table class="sr-only">
-        <caption>Roadmap: {{ filtered.length }} milestones in sequence order</caption>
+        <caption>Roadmap: {{ shown.length }} milestones in sequence order</caption>
         <thead>
           <tr>
             <th scope="col">Milestone</th>
@@ -234,7 +269,7 @@ function goToTask(taskId: string) {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="m in filtered" :key="`${m.project}::${m.milestoneId}`">
+          <tr v-for="m in shown" :key="`${m.project}::${m.milestoneId}`">
             <td>{{ m.name }}</td>
             <td>{{ m.project }}</td>
             <td>{{ m.status }}</td>

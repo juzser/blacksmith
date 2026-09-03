@@ -42,6 +42,7 @@ describe('roadmap.ts parseRoadmap()', () => {
         goal: 'Stand up the scaffold.',
         epicIds: [],
         project: 'black-smith',
+        kind: 'factory',
       },
       {
         milestoneId: 'phase-2',
@@ -51,6 +52,7 @@ describe('roadmap.ts parseRoadmap()', () => {
         goal: null,
         epicIds: ['epic-1', 'epic-2'],
         project: 'black-smith',
+        kind: 'factory',
       },
     ]);
   });
@@ -189,6 +191,193 @@ Some intro prose that is not a milestone block.
 `;
     expect(() => parseRoadmap(md)).toThrow(RoadmapError);
     expect(() => parseRoadmap(md)).toThrow(/epic-a epic-b/);
+  });
+});
+
+/**
+ * `- kind:` says what a project IS to this factory, so the Roadmap page can
+ * answer "what has this factory built" without the reader wading past ten of
+ * the factory's own phases and four dogfood milestones. The rules under test
+ * are all consequences of it describing a PROJECT while being written on a
+ * MILESTONE: one bullet settles every milestone naming that project, the
+ * answer cannot depend on which milestone carries it, and a writer that
+ * appends an undeclared milestone to a declared project must not change it.
+ */
+describe('roadmap.ts parseRoadmap() milestone kind', () => {
+  it('derives kind "factory" for the factory\'s own project when no bullet declares one', () => {
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+`;
+    expect(parseRoadmap(md)[0]?.kind).toBe('factory');
+  });
+
+  /**
+   * The default that lets scaffold.ts's registerProjectInRoadmap() stay as it
+   * is: a project registered by `smith new` writes no kind bullet and still
+   * reads as a product, which is the only thing it can be.
+   */
+  it('derives kind "product" for any other project when no bullet declares one', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: planned
+- project: envkit
+`;
+    expect(parseRoadmap(md)[0]?.kind).toBe('product');
+  });
+
+  it('reads an explicit "- kind:" bullet', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: planned
+- project: envkit
+- kind: dogfood
+`;
+    expect(parseRoadmap(md)[0]?.kind).toBe('dogfood');
+  });
+
+  it('reads an empty "- kind:" value as absent, the way "- project:" reads one', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: planned
+- project: envkit
+- kind:
+`;
+    expect(parseRoadmap(md)[0]?.kind).toBe('product');
+  });
+
+  /**
+   * The rule mcp.ts's registerMcpMilestone() depends on. It appends a
+   * milestone to an EXISTING project and writes no kind bullet; if kind
+   * resolved per-milestone that appended row would read `product` while its
+   * siblings read `dogfood`, and the project would appear on the Roadmap page
+   * for one row and vanish for the rest.
+   */
+  it('settles kind project-wide from a single bullet, whichever milestone carries it', () => {
+    const declaredFirst = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- kind: dogfood
+
+## envkit — mcp surface
+- id: envkit-mcp
+- status: planned
+- project: envkit
+`;
+    const declaredLast = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+
+## envkit — mcp surface
+- id: envkit-mcp
+- status: planned
+- project: envkit
+- kind: dogfood
+`;
+    for (const md of [declaredFirst, declaredLast]) {
+      expect(parseRoadmap(md).map((m) => m.kind)).toEqual(['dogfood', 'dogfood']);
+    }
+  });
+
+  it('settles each project independently', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- kind: dogfood
+
+## acme — bootstrap
+- id: acme-bootstrap
+- status: planned
+- project: acme
+
+## Phase 1 — Bootstrap
+- id: phase-1
+- status: completed
+`;
+    expect(parseRoadmap(md).map((m) => m.kind)).toEqual(['dogfood', 'product', 'factory']);
+  });
+
+  it('throws roadmap.invalid-kind when the value is outside the closed set', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: planned
+- project: envkit
+- kind: demo
+`;
+    let caught: unknown;
+    try {
+      parseRoadmap(md);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RoadmapError);
+    expect((caught as RoadmapError).code).toBe('roadmap.invalid-kind');
+    expect((caught as RoadmapError).message).toContain('demo');
+  });
+
+  /**
+   * Which project is this clone is settled by FACTORY_PROJECT and REPO_ROOT
+   * (projects.ts). A bullet able to contradict that would be a second source
+   * of truth for the one question the factory must never get wrong about
+   * itself, so the refusal is the answer, not a silent override.
+   */
+  it('throws roadmap.factory-kind-fixed when a factory milestone declares another kind', () => {
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+- kind: product
+`;
+    let caught: unknown;
+    try {
+      parseRoadmap(md);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RoadmapError);
+    expect((caught as RoadmapError).code).toBe('roadmap.factory-kind-fixed');
+  });
+
+  it('accepts a redundant "- kind: factory" on the factory\'s own milestones', () => {
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+- kind: factory
+`;
+    expect(parseRoadmap(md)[0]?.kind).toBe('factory');
+  });
+
+  /**
+   * Two different kinds for one project has no reading more likely than a
+   * typo, so it is a refusal rather than a precedence rule -- and the message
+   * names both milestones, because "which bullet is wrong" is the only
+   * question the operator then has.
+   */
+  it('throws roadmap.conflicting-kind when two milestones disagree about one project', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- kind: dogfood
+
+## envkit — mcp surface
+- id: envkit-mcp
+- status: planned
+- project: envkit
+- kind: product
+`;
+    let caught: unknown;
+    try {
+      parseRoadmap(md);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RoadmapError);
+    expect((caught as RoadmapError).code).toBe('roadmap.conflicting-kind');
+    expect((caught as RoadmapError).message).toContain('envkit-bootstrap');
+    expect((caught as RoadmapError).message).toContain('envkit-mcp');
   });
 });
 

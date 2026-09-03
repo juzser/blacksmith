@@ -55,6 +55,7 @@ import {
   type SessionActivity,
 } from '../lib/liveness.js';
 import {
+  AGENT_VISIBLE_CAP,
   bandsPerRowFor,
   SESSION_BAND_CAP,
   sessionGroups,
@@ -184,8 +185,35 @@ watch(canvasEl, (el) => {
 });
 onBeforeUnmount(() => canvasObserver?.disconnect());
 
+/**
+ * Which bands the operator has opened past AGENT_VISIBLE_CAP. Interaction
+ * state, not geometry -- it is threaded INTO the pure layout functions, never
+ * computed inside them, the same split every other number on this canvas keeps.
+ *
+ * Replaced rather than mutated: a Set mutated in place is the same object, and
+ * a `ref` holding the same object does not notify.
+ */
+const expandedSessions = ref<ReadonlySet<string>>(new Set());
+function toggleExpanded(sessionId: string) {
+  const next = new Set(expandedSessions.value);
+  if (!next.delete(sessionId)) next.add(sessionId);
+  expandedSessions.value = next;
+}
+// A poll can retire a session out of `visibleBands()`; its id would otherwise
+// sit in the set forever and re-open the band if the run came back.
+watch(groups, (gs) => {
+  const alive = new Set(gs.map((g) => g.session.sessionId));
+  if ([...expandedSessions.value].every((id) => alive.has(id))) return;
+  expandedSessions.value = new Set([...expandedSessions.value].filter((id) => alive.has(id)));
+});
+
 const bandsPerRow = computed(() =>
-  bandsPerRowFor(groups.value, canvasSize.value.width, canvasSize.value.height),
+  bandsPerRowFor(
+    groups.value,
+    canvasSize.value.width,
+    canvasSize.value.height,
+    expandedSessions.value,
+  ),
 );
 // Only fires when the column count actually flips, because a computed that
 // returns the same number does not propagate — so this re-fits when a resize or
@@ -199,8 +227,17 @@ watch(bandsPerRow, () => {
   });
 });
 
+// Expanding a band changes the row extents exactly as a column-count flip does,
+// so it needs the same re-fit -- otherwise the newly revealed agents are drawn
+// below the viewport the operator is looking at.
+watch(expandedSessions, () => {
+  nextTick(() => {
+    if (storeNodes.value.length > 0) fitView();
+  });
+});
+
 const flowNodes = computed(() =>
-  sessionsFlowNodes(groups.value, graphNow.value, bandsPerRow.value),
+  sessionsFlowNodes(groups.value, graphNow.value, bandsPerRow.value, expandedSessions.value),
 );
 const flowEdges = computed(() =>
   sessionsFlowEdges(groups.value, graphNow.value).map((e) => ({
@@ -312,7 +349,10 @@ function goToTask(taskId: string | null) {
           <template #node-session="{ data: node }">
             <article
               class="session-node"
-              :class="{ 'session-node--active': node.activity === 'active' }"
+              :class="{
+                'session-node--active': node.activity === 'active',
+                'session-node--expandable': node.agentCount > AGENT_VISIBLE_CAP,
+              }"
             >
               <div class="session-node__head">
                 <span
@@ -341,6 +381,33 @@ function goToTask(taskId: string | null) {
               <div v-if="node.session.projects.length > 0" class="session-node__projects">
                 <IdentityChip v-for="p in node.session.projects" :key="p" :id="p" />
               </div>
+              <!-- The disclosure lives on the session card, not at the foot of
+                   the agent stack: the stack is the thing being truncated, and
+                   a control below it would be the first thing off-canvas. It
+                   is what `session-node--expandable` above buys the height
+                   for; the same condition gates both, so the card never grows
+                   for a button that is not there. The aria-label carries the
+                   session id because a canvas of eight bands is otherwise
+                   eight identically-labelled buttons. -->
+              <Button
+                v-if="node.agentCount > AGENT_VISIBLE_CAP"
+                class="session-node__more"
+                variant="outline"
+                size="sm"
+                :aria-expanded="expandedSessions.has(node.session.sessionId)"
+                :aria-label="
+                  expandedSessions.has(node.session.sessionId)
+                    ? `Show only the ${AGENT_VISIBLE_CAP} longest-running of ${node.agentCount} agents for session ${node.session.sessionId}`
+                    : `Show all ${node.agentCount} agents for session ${node.session.sessionId}`
+                "
+                @click="toggleExpanded(node.session.sessionId)"
+              >
+                {{
+                  expandedSessions.has(node.session.sessionId)
+                    ? `Show top ${AGENT_VISIBLE_CAP}`
+                    : `Show all ${node.agentCount}`
+                }}
+              </Button>
             </article>
           </template>
 

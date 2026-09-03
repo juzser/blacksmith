@@ -40,6 +40,40 @@ export const MILESTONE_STATUSES: readonly MilestoneStatus[] = [
   'completed',
 ];
 
+/**
+ * What a milestone's project IS to this factory.
+ *
+ * `- project:` says which project a milestone belongs to; it does not say
+ * whether that project is one the factory shipped for an operator, one it
+ * built to test itself, or the factory's own build-out. The Roadmap page
+ * needs that distinction -- an operator asking "what has this factory built"
+ * should not have to read past ten of the factory's own phases and four
+ * dogfood milestones to find it -- and nothing in the data carried it.
+ *
+ * `factory` is derived, not declared: it is whatever `- project:` resolves to
+ * FACTORY_PROJECT. `product` is the default for everything else, so a project
+ * registered by `smith new` before this bullet existed still reads as what it
+ * is. `dogfood` is the only value an operator has to write by hand, because
+ * a project built to exercise the factory is indistinguishable, in the data,
+ * from one built for its own sake -- the difference is intent.
+ */
+export type MilestoneKind = 'factory' | 'dogfood' | 'product';
+
+export const MILESTONE_KINDS: readonly MilestoneKind[] = ['factory', 'dogfood', 'product'];
+
+/**
+ * The kind a project carries when no milestone of its own declares one.
+ *
+ * `product` for everything that is not this clone, so a project registered by
+ * `smith new` needs no bullet at all -- and so neither scaffold.ts's
+ * registerProjectInRoadmap() nor mcp.ts's registerMcpMilestone() has to learn
+ * to write one. Marking a project `dogfood` stays a hand edit, because it is
+ * a statement about why the project exists that no writer can infer.
+ */
+export function defaultKindFor(project: string): MilestoneKind {
+  return project === FACTORY_PROJECT ? 'factory' : 'product';
+}
+
 export interface MilestoneDef {
   milestoneId: string;
   name: string;
@@ -54,6 +88,13 @@ export interface MilestoneDef {
    * bullet is absent, so every pre-6b roadmap.md still parses unchanged.
    */
   project: string;
+  /**
+   * Phase 10: `factory` | `dogfood` | `product` -- see MilestoneKind. Derived
+   * from `- project:` when the `- kind:` bullet is absent, so every roadmap.md
+   * written before the bullet existed still parses, and still parses to the
+   * same answer it would have given.
+   */
+  kind: MilestoneKind;
 }
 
 function bulletValue(line: string, key: string): string | null {
@@ -126,9 +167,61 @@ function isMilestoneStatus(value: string): value is MilestoneStatus {
   return (MILESTONE_STATUSES as readonly string[]).includes(value);
 }
 
+function isMilestoneKind(value: string): value is MilestoneKind {
+  return (MILESTONE_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Settle every milestone's kind project-wide, and independently of the order
+ * the milestones happen to sit in.
+ *
+ * `kind` describes a project but is written on a milestone, so one bullet has
+ * to settle every milestone that names that project. Resolving per-milestone
+ * instead would mean `smith mcp init` appending an undeclared milestone to a
+ * dogfood project silently made that one milestone a product -- the project
+ * would then show on the Roadmap page for one row and vanish for the rest,
+ * which reads as missing data rather than as the drift it is.
+ *
+ * Two passes rather than one because the answer must not depend on which
+ * milestone the operator wrote the bullet on: the bullets inside a block are
+ * already order-independent, and the blocks should be too. An explicit
+ * disagreement is a refusal, not a precedence rule -- there is no reading of
+ * two different kinds for one project that is more likely than a typo.
+ */
+function resolveKinds(milestones: MilestoneDef[], explicit: (MilestoneKind | null)[]): void {
+  const declared = new Map<string, { kind: MilestoneKind; by: string }>();
+  for (let i = 0; i < milestones.length; i += 1) {
+    const m = milestones[i] as MilestoneDef;
+    const kind = explicit[i] ?? null;
+    if (kind === null) continue;
+    const first = declared.get(m.project);
+    if (first === undefined) {
+      declared.set(m.project, { kind, by: m.milestoneId });
+      continue;
+    }
+    if (first.kind !== kind) {
+      throw new RoadmapError(
+        'roadmap.conflicting-kind',
+        `Project "${m.project}" is kind "${first.kind}" on milestone "${first.by}" but "${kind}" on "${m.milestoneId}" — every milestone naming one project must agree.`,
+        {
+          project: m.project,
+          id: m.milestoneId,
+          kind,
+          conflictsWith: first.by,
+          conflictsWithKind: first.kind,
+        },
+      );
+    }
+  }
+  for (const m of milestones) {
+    m.kind = declared.get(m.project)?.kind ?? defaultKindFor(m.project);
+  }
+}
+
 /** Parse the full roadmap.md text into milestone rows, in file order. */
 export function parseRoadmap(markdown: string): MilestoneDef[] {
   const milestones: MilestoneDef[] = [];
+  const explicitKinds: (MilestoneKind | null)[] = [];
   const seenIds = new Set<string>();
   const sections = markdown.split(/\n(?=## )/);
   let sequence = 0;
@@ -146,6 +239,7 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
     let goal: string | null = null;
     let epicsRaw: string | null = null;
     let project: string = FACTORY_PROJECT;
+    let kindRaw: string | null = null;
 
     for (const rawLine of lines.slice(1)) {
       const line = rawLine.trim();
@@ -172,6 +266,14 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
       const projectVal = bulletValue(line, 'project');
       if (projectVal !== null && projectVal !== '') {
         project = projectVal;
+        continue;
+      }
+      // An empty `- kind:` is absent, not invalid -- the same reading
+      // `- project:` gives it, so a half-written bullet falls back to the
+      // derived answer rather than taking the whole roadmap away.
+      const kindVal = bulletValue(line, 'kind');
+      if (kindVal !== null && kindVal !== '') {
+        kindRaw = kindVal;
       }
     }
 
@@ -203,15 +305,51 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
       );
     }
 
+    let kind: MilestoneKind | null = null;
+    if (kindRaw !== null) {
+      if (!isMilestoneKind(kindRaw)) {
+        throw new RoadmapError(
+          'roadmap.invalid-kind',
+          `Milestone "${id}" has kind "${kindRaw}" — expected one of ${MILESTONE_KINDS.join(', ')}.`,
+          { id, kind: kindRaw },
+        );
+      }
+      // The factory's own kind is structural, not declarative: which project
+      // is this clone is settled by FACTORY_PROJECT and REPO_ROOT (see
+      // projects.ts), and a roadmap bullet able to contradict that would be a
+      // second source of truth for the one question the factory must never
+      // get wrong about itself.
+      if (project === FACTORY_PROJECT && kindRaw !== 'factory') {
+        throw new RoadmapError(
+          'roadmap.factory-kind-fixed',
+          `Milestone "${id}" declares kind "${kindRaw}" on project "${FACTORY_PROJECT}" — the factory's own milestones are always kind "factory". Drop the bullet, or name a different project.`,
+          { id, kind: kindRaw, project },
+        );
+      }
+      kind = kindRaw;
+    }
+    explicitKinds.push(kind);
+
     // Read after the id is known and validated, so the refusal names the
     // milestone the way invalid-status does -- the bullets are
     // order-independent, and `- epics:` may well come first in the block.
     const epicIds = parseEpicIds(id, epicsRaw);
 
     sequence += 1;
-    milestones.push({ milestoneId: id, name: heading, status, sequence, goal, epicIds, project });
+    milestones.push({
+      milestoneId: id,
+      name: heading,
+      status,
+      sequence,
+      goal,
+      epicIds,
+      project,
+      // Provisional -- resolveKinds() below settles it project-wide.
+      kind: defaultKindFor(project),
+    });
   }
 
+  resolveKinds(milestones, explicitKinds);
   return milestones;
 }
 

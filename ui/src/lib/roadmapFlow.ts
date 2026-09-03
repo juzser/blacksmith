@@ -58,6 +58,58 @@ function bySequence(a: MilestoneProgress, b: MilestoneProgress): number {
 }
 
 /**
+ * The one kind the Roadmap page shows by default.
+ *
+ * Operator directive (Phase 10): "không hiện roadmap của dogfood và chính
+ * blacksmith. Chỉ hiển thị các project new với blacksmith." The page's
+ * question is "what has this factory built for me", and the factory's own
+ * ten phases plus the four milestones of a project built to exercise it are
+ * not answers to it -- they are the machinery, and they were burying the
+ * answer under fourteen rows of it.
+ */
+export const DEFAULT_ROADMAP_KIND = 'product';
+
+export interface RoadmapKindPartition {
+  /** What the diagram draws. */
+  shown: MilestoneProgress[];
+  /** Milestones the kind filter is holding back, whatever their project. */
+  hiddenCount: number;
+  /** The projects those milestones belong to, unique and sorted, for the toggle's label. */
+  hiddenProjects: string[];
+}
+
+/**
+ * Split milestones into what the page shows and what its kind filter holds
+ * back -- and always report what was held back, never just drop it.
+ *
+ * Hiding is reversible and it is counted. A filter that silently removed
+ * fourteen of fourteen rows would be indistinguishable, on screen, from an
+ * orchestrator that had lost the roadmap file; `hiddenCount` is what lets the
+ * page say "nothing built yet, and here is the machinery you are not seeing"
+ * rather than showing a bare empty state that reads as breakage (the D-119
+ * rule: a filter that narrows what a reader sees has to say so in its own
+ * output).
+ *
+ * `showInternal` is the operator's escape hatch, not a preference the page
+ * remembers: the default is the directive, and the toggle exists because the
+ * factory still has to be able to look at itself.
+ */
+export function partitionByKind(
+  milestones: MilestoneProgress[],
+  showInternal: boolean,
+): RoadmapKindPartition {
+  const shown = showInternal
+    ? milestones
+    : milestones.filter((m) => m.kind === DEFAULT_ROADMAP_KIND);
+  const hidden = milestones.filter((m) => m.kind !== DEFAULT_ROADMAP_KIND);
+  return {
+    shown,
+    hiddenCount: showInternal ? 0 : hidden.length,
+    hiddenProjects: [...new Set(hidden.map((m) => m.project))].sort(),
+  };
+}
+
+/**
  * Group milestones into the rows of the diagram. Mirrors RoadmapPage's old
  * `groupedMilestones`: one unlabelled lane when the view is already scoped to
  * a project or only one project is present, otherwise one lane per project in

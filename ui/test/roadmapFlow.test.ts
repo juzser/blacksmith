@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { MilestoneProgress } from '../src/lib/api.js';
 import {
+  DEFAULT_ROADMAP_KIND,
   LANE_HEIGHT,
   MILESTONE_STEP_X,
+  partitionByKind,
   roadmapFlowEdges,
   roadmapFlowNodes,
   roadmapLanes,
@@ -21,9 +23,57 @@ function m(over: Partial<MilestoneProgress> & { milestoneId: string }): Mileston
     tokensSpent: 0,
     tokensBudget: null,
     project: 'black-smith',
+    kind: 'factory',
     ...over,
   };
 }
+
+describe('lib/roadmapFlow.ts partitionByKind()', () => {
+  const all = [
+    m({ milestoneId: 'phase-1' }),
+    m({ milestoneId: 'phase-2' }),
+    m({ milestoneId: 'envkit-1', project: 'envkit', kind: 'dogfood' }),
+    m({ milestoneId: 'acme-1', project: 'acme', kind: 'product' }),
+  ];
+
+  it('shows only product milestones by default', () => {
+    expect(partitionByKind(all, false).shown.map((x) => x.milestoneId)).toEqual(['acme-1']);
+  });
+
+  it('shows everything when the operator asks for the machinery', () => {
+    expect(partitionByKind(all, true).shown).toHaveLength(4);
+  });
+
+  /**
+   * The D-119 rule applied to a filter: hiding is only honest when the page
+   * can say how much it hid. A bare empty diagram is indistinguishable from a
+   * roadmap the orchestrator failed to read.
+   */
+  it('counts what it held back and names the projects it came from', () => {
+    const part = partitionByKind(all, false);
+    expect(part.hiddenCount).toBe(3);
+    expect(part.hiddenProjects).toEqual(['black-smith', 'envkit']);
+  });
+
+  it('holds nothing back once internal milestones are shown', () => {
+    expect(partitionByKind(all, true).hiddenCount).toBe(0);
+  });
+
+  /**
+   * A project registered by `smith new` before the kind bullet existed parses
+   * to `product` (roadmap.ts's defaultKindFor), so the page's default must be
+   * exactly that value and nothing narrower.
+   */
+  it('treats "product" as the shown kind', () => {
+    expect(DEFAULT_ROADMAP_KIND).toBe('product');
+  });
+
+  it('holds back a milestone whose kind the client does not recognise', () => {
+    const part = partitionByKind([m({ milestoneId: 'x', project: 'p', kind: 'future' })], false);
+    expect(part.shown).toEqual([]);
+    expect(part.hiddenCount).toBe(1);
+  });
+});
 
 describe('lib/roadmapFlow.ts roadmapLanes()', () => {
   it('puts one project into a single unlabelled lane, ordered by sequence', () => {

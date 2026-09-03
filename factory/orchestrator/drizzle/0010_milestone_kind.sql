@@ -1,0 +1,1 @@
+ALTER TABLE `milestones` ADD `kind` text DEFAULT 'factory' NOT NULL;

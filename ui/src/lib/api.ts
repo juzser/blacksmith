@@ -101,6 +101,8 @@ export interface MilestoneProgress {
   tokensSpent: number;
   tokensBudget: number | null;
   project: string;
+  /** 'factory' | 'dogfood' | 'product' — roadmap.ts's MilestoneKind. */
+  kind: string;
   recentDone?: MilestoneTaskRef[];
   nextUp?: MilestoneTaskRef[];
 }

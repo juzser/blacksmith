@@ -56,6 +56,62 @@ export function foldIntoColumns<T extends KanbanTaskLike>(
   return [...buckets.entries()].map(([name, tasksInColumn]) => ({ name, tasks: tasksInColumn }));
 }
 
+/**
+ * How many tasks a column draws before it stops and offers the rest.
+ *
+ * Operator directive (Phase 10): "limit mỗi cột max 10 tasks, sau đó có thể
+ * view more. Tránh phải scroll rất dài." A column is an unbounded list of
+ * cards inside a page that already scrolls, so a Completed column holding two
+ * hundred merged tasks pushed every other column's contents off the screen --
+ * the board stopped being a board and became one very long list with four
+ * short ones beside it.
+ */
+export const KANBAN_PAGE_SIZE = 10;
+
+export interface CappedColumn<T> {
+  /** The slice the column draws. */
+  visible: T[];
+  /** How many it is not drawing. Zero means the column is showing everything. */
+  hidden: number;
+  /** How many the next reveal would add -- the number a "view more" control names. */
+  nextStep: number;
+}
+
+/**
+ * Take the slice of a column the board draws, and say how much it left.
+ *
+ * `revealedPages` is the count of EXTRA pages the reader has asked for, so 0
+ * is the first render and the cap is one page. Reveal is additive rather than
+ * all-or-nothing: a column of two hundred has no useful state between "ten"
+ * and "two hundred", and jumping straight to the second reproduces the scroll
+ * the directive is about.
+ *
+ * `hidden` is always the truth about the remainder, whatever the caller then
+ * paints -- a cap that did not report its own remainder would be a column
+ * that quietly disagrees with the count in its own header (D-242's rule for
+ * visibleTaskCount(), applied one level down).
+ *
+ * A `pageSize` below 1 is read as "no cap" rather than as an error: the only
+ * way to reach it is a caller passing a computed size, and a board that drew
+ * zero cards would be a worse answer to that mistake than a board that drew
+ * all of them.
+ */
+export function capColumn<T>(
+  tasks: readonly T[],
+  revealedPages = 0,
+  pageSize: number = KANBAN_PAGE_SIZE,
+): CappedColumn<T> {
+  if (pageSize < 1) return { visible: [...tasks], hidden: 0, nextStep: 0 };
+  const pages = Math.max(0, Math.floor(revealedPages)) + 1;
+  const limit = pages * pageSize;
+  const hidden = Math.max(0, tasks.length - limit);
+  return {
+    visible: tasks.slice(0, limit),
+    hidden,
+    nextStep: Math.min(pageSize, hidden),
+  };
+}
+
 function titleCase(status: string): string {
   return status
     .split('-')

@@ -71,6 +71,13 @@
       "when": 1787382509200,
       "tag": "0009_agents_epic_id",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788429177107,
+      "tag": "0010_milestone_kind",
+      "breakpoints": true
     }
   ]
 }

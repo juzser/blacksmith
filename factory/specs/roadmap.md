@@ -11,7 +11,19 @@ Each milestone is a `## <name>` heading followed by bullet fields:
 `id` (required, stable), `status` (required — `planned` | `in-progress` |
 `completed`), `goal` (optional, one sentence), `epics` (optional, `[]` when
 no epic has been mapped to this phase yet — the join yields zero tasks
-until an epic is tagged here).
+until an epic is tagged here), `project` (optional, defaults to
+`black-smith` — this clone), and `kind` (optional — `factory` | `dogfood` |
+`product`).
+
+`kind` describes the *project*, not the milestone, so one bullet anywhere in
+a project's milestones settles all of them; a second copy would only be a
+copy that drifts. It defaults to `factory` for `black-smith` and `product`
+for everything else, which is why a project registered by `smith new` needs
+no bullet at all. `dogfood` is the one value that must be written by hand:
+a project built to exercise the factory looks, in the data, exactly like a
+project built for its own sake — the difference is intent. The Roadmap page
+shows `product` by default and hides the other two, so an operator asking
+"what has this factory built" is not reading past the factory's own phases.
 
 ## Phase 1 — Interview + standards
 - id: phase-1
@@ -77,6 +89,7 @@ until an epic is tagged here).
 - id: envkit-bootstrap
 - status: completed
 - project: envkit
+- kind: dogfood
 - epics: []
 - goal: Scaffold landed in workspaces/envkit from docs/standards/stack.md; the first epic is planned and moved to its own milestone below.
 
