@@ -968,6 +968,29 @@ than appearing in it.
 
 ### Changed
 
+- **The standing rule against nesting now cites a reason that is still
+  true.** `docs/standards/agent-constraints.md` justified flat topology with
+  a blocker that P9-7 removed on 2026-08-08: it said `causal_parent` is
+  validated only within one session's log and that `EventInput` has no
+  parent-session field, and it filed two-tier sessions under "waits on phase
+  9". A `session-start` has been able to name a parent in another session's
+  log for three weeks. The bullet above it — **No role template is granted
+  `Agent`** — pointed at that paragraph for its justification, so a standing
+  decision was resting on a reason that had expired, which is worse than an
+  undocumented decision: an agent that reads it and checks reaches a
+  different conclusion than the repo intends. The constraint itself is
+  unchanged and still correct (no template in `.claude/agents/` grants
+  `Agent`); what it now says is why it is still true, which is that a
+  dispatched agent is not a session and so cannot own the log for what it
+  dispatches. `dogfood-envkit-findings.md` D13 gets the `**Status:**` line it
+  never had: step 1 fixed by P9-7 and by `smith session start` in the same
+  breath, steps 2-3 open, and `.claude/skills/bs/` still holding one
+  epic-level playbook and no disposable wave-level one — which is the tier
+  split that finding is actually about. `agent-interviews.md` M-5 repeats the
+  expired reason but is a dated record of what was decided on 2026-08-05, so
+  it takes a dated addendum instead of a rewrite: the answer is unchanged,
+  the reason under it is replaced, and the record of having chosen it stays
+  intact.
 - **The maintenance pass now watches every repo the factory is responsible
   for, and each finding says which one.** ⚠️ **Behaviour change to finding
   identity:** the `maintenance` subject is now `"<repo>: N package(s)"` rather

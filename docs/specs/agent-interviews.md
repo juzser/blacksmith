@@ -239,6 +239,18 @@ mid-flight, and nesting hides that failure.
 > playbook and a disposable wave-level one. A wave session then owns its own
 > log for the workers it dispatches, and the invariant holds at both tiers.
 > No role template gains `Agent` before that lands.
+>
+> **Addendum 2026-09-03 — the event-log half of that target shipped.** P9-7
+> landed the cross-session edge on 2026-08-08, as `causal_parent` on a
+> `session-start` rather than as the separate `parent_event` key named above;
+> `smith session start <session-id> --continues <event-id>` writes it. The
+> blocker this answer rested on is gone, and M-6's closing line rests on the
+> same gap. (a) still stands, now on the invariant rather than on the gap:
+> `/bs` has not been split into an epic-level playbook and a wave-level one,
+> so there is no tier for a subordinate session to be, and an agent that is
+> not a session cannot own the log for what it dispatches. No role template
+> gains `Agent` before that split lands — `dogfood-envkit-findings.md` D13
+> steps 2-3.
 
 **M-6. Return discipline.** With concurrency uncapped, a wave of hundreds
 of workers returning prose would drown the operator context before the
