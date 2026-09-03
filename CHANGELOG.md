@@ -23,6 +23,17 @@ than appearing in it.
 
 ### Added
 
+- **`smith event lineage` says who continued you** (D-266). The verb now
+  prints `continued_by` beside `lineage`, and `lineage` is the full scope a
+  lineage-wide fold reads — `[...ancestry, ...continued_by]` — so the display
+  verb and the deciding verbs draw the same picture. `depth` stays the length
+  of the ancestry alone: it has always meant "how many windows back does this
+  go", and a fan-out is width, not depth. `sessionTree()` is the underlying
+  read for callers that need the two halves apart, and
+  `events.unreadable-session-log` is the new code for a log whose first line
+  cannot be parsed — the one case where lineage refuses to answer rather than
+  answering short.
+
 - **A guard that the documented error codes are the raised ones** (D-265).
   `docErrorCodes.test.ts` is `docCommands.test.ts` one level down: that file
   holds the documented verbs to the shipped verbs, this one holds the
@@ -1385,6 +1396,37 @@ than appearing in it.
   error, the approval-time `novelty` block, or the dashboard's notice.
 
 ### Fixed
+
+- **A lineage that only walked upward could not see the wave it dispatched
+  (D-266).** P9-7 shipped lineage for a chain — a session that runs out of
+  window and continues in a fresh one — and read from the new session the
+  upward walk finds the whole epic. A parallel round is the same one event
+  used sideways: an epic session dispatches wave sessions, each opened with
+  `--continues <epic>#<idx>`. But the reads that decide anything about a round
+  stand at the *parent* end — `epic close`, `wave audit`, `findings list`,
+  `stats overview`, `dispatch check` — and from there the walk answered with a
+  lineage of one. A wave raised a finding, the epic session listed findings
+  and printed none, the epic closed clean. Which is D-119's failure mode
+  reached from the other direction: a gate reading a narrower scope than the
+  thing it guards is off for everything outside that scope, and nothing in its
+  output says so. Lineage is now a tree: ancestors, self, then everything that
+  continues self, breadth-first with ids sorted at each level. Downward from
+  the session asked about and not from the root, so a wave folds in its own
+  continuations and never its siblings — two waves running at once are two
+  scopes, and a gate that could read its sibling's events would be gating on
+  work it does not own. Finding the continuations asks every log in the state
+  directory what it continues, the read `daemon.ts`'s `runTick` already pays
+  for, paid down to an ~8KB probe of each log's first line with a full read as
+  the fallback when the probe cannot answer — including when the first line is
+  not the root, because `appendEvent` deliberately lets the root sit anywhere
+  and the upward walk finds it with `.find()`. A log whose first line is not
+  JSON throws `events.unreadable-session-log` rather than being skipped:
+  dropping a child quietly would reintroduce exactly the blindness this
+  closes. `projectedLineage` moved in the same step or the dashboard and the
+  CLI would scope an epic differently again — the split D-264 exists to close.
+  One deliberate change for readers that were already correct: a chain read
+  from its *oldest* end now answers with the whole chain instead of with
+  itself, which is what D-263 was already arguing for.
 
 - **The dashboard drew the window, the CLI drew the epic (D-264).** D-263
   taught every projected read to take a lineage and gave `smith stats` the

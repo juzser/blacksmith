@@ -96,6 +96,90 @@ chose: `flag` (a `--effort` that beats the plan file), `plan`, or `default`
 (nobody chose, and `defaultTier` applies). `--policy` and `--crosscheck` point
 at alternate policy files for a what-if.
 
+## 0b. `smith new` — the project the factory builds in
+
+The factory does not build inside itself. Everything from §1 on assumes a
+**target project** that already exists somewhere else on disk, with its own git
+history and its own gates. This is the one-time step that creates it.
+
+Your stack answers come first, because `smith new` reads them rather than
+asking:
+
+```bash
+smith stack show    # what factory/policies/stack.yml currently answers
+smith stack check   # which of those answers the shipped templates honour
+```
+
+```json
+{"ok":true,"answers":[
+  {"field":"language","value":"typescript","support":"honoured",
+   "note":"The base template scaffolds TypeScript."},
+  {"field":"database","value":"none","support":"recorded",
+   "note":"Nothing in factory/scaffold reads this. Read by the planner and coder, when a task needs storage."}]}
+```
+
+`support` is the field to read, and `recorded` is the value worth reading
+twice. Those answers reach the agents — the planner and the coder are told
+what you build with — but nothing in `factory/scaffold/` implements them, so
+the scaffold will not contain them. A `refused` answer is different: it makes
+`smith new` exit **1 before creating anything**, and `ok` goes false. That is
+the whole point — `frontend: react` does not get you the Vue frontend the
+templates do ship.
+
+```bash
+smith new my-app --target-dir ~/code/my-app     # --ui adds the frontend
+```
+
+```json
+{"targetDir":"/Users/you/code/my-app","filesWritten":["package.json","..."],
+ "branch":"setup","toolchain":{"status":"verified","steps":[...]},
+ "commitIdentity":"machine",
+ "commands":{
+   "ghRepoCreate":"gh repo create my-app --private --source=/Users/you/code/my-app --remote=origin --push=false",
+   "push":"git -C /Users/you/code/my-app push -u origin setup"}}
+```
+
+One call copies `factory/scaffold/` (TypeScript strict, Biome, Vitest, a CI
+workflow), layers the frontend if `--ui`, vendors a design system if
+`stack.yml` names a source for one, then runs `pnpm install`, `lint`,
+`typecheck`, `test:coverage` and `build` — `ci.yml`'s order, so the lockfile
+lands in the first commit and no epic ever needs a serial `task-0-toolchain`
+(P9-19). It commits the result on a `setup` branch and appends a bootstrap
+milestone to `factory/specs/roadmap.md`.
+
+Read `toolchain.status`:
+
+| Status | What it means |
+|---|---|
+| `verified` | Every gate passed. Plan the first epic against it |
+| `failed` | `failedStep` names the gate; that step's `output` is the tail and its `command` is the exact line to re-run. Exit **1**, tree left in place to fix |
+| `skipped` | `--skip-toolchain` was passed. `reason` says so. Nothing was proven — do not report a green |
+
+`commitIdentity` is the other field worth a glance: it says whose name went on
+the first commit — the machine's git identity, or the placeholder this repo
+had to invent because the machine had none configured.
+
+Without `--target-dir` the project lands beside this clone, in
+`<repo-parent>/<project>`. That is a default, not a requirement: `projectDir`
+is read as a path everywhere downstream, and because worktrees are siblings of
+the project (§3) a clone anywhere on disk works.
+
+**The last two commands are yours.** `commands.ghRepoCreate` and
+`commands.push` are printed and not run. Creating a remote and pushing a
+brand-new repository is an operator action — `guardrails.md` forbids an agent
+session from doing either, and `/bs new` prints them for you to run rather
+than running them.
+
+The MCP surface is **not** part of this step. `smith mcp init <project>` layers
+it on later, at the mandatory `<project> — mcp surface` milestone, once the
+tools worth exposing are known; running it on day one would produce a manifest
+declaring nothing, which is the rubber stamp the standard exists to prevent
+(`docs/standards/mcp.md`).
+
+What ships out of the factory carries no trace of it: no dependency on this
+repo, no Blacksmith-shaped config, no docs about the loop that built it — one
+`Built by Blacksmith` line in the project's README, and that is all.
+
 ## 1. Plan JSON → `smith plan validate`
 
 A plan file is one **immutable plan version** for an epic: `epic_id`,
@@ -1455,9 +1539,12 @@ smith event tail epic-7-session-1 --n 1
 # session root — every event after this one chains inside its own session.
 smith session start epic-7-session-2 --continues 'epic-7-session-1#412'
 
-# Read the chain, root first. Depth 1 means "this session started fresh".
+# Read the tree. `lineage` is every session a lineage-wide fold reads;
+# `continued_by` is the half below you; `depth` counts the ancestry alone,
+# so depth 1 still means "this session started fresh".
 smith event lineage epic-7-session-2
-# {"session":"epic-7-session-2","lineage":["epic-7-session-1","epic-7-session-2"],"depth":2,"root":"epic-7-session-1"}
+# {"session":"epic-7-session-2","lineage":[...],"depth":2,
+#  "root":"epic-7-session-1","continued_by":[]}
 
 # Tail the EPIC, not the session that happens to be running.
 smith event tail epic-7-session-2 --lineage --n 40
@@ -1468,6 +1555,30 @@ is the newest slice of the epic and nothing before it — `--lineage` folds
 the whole chain root-first and then takes the last `n`. The timeline
 projection follows the same edge: a causal chain that runs back through the
 split renders as one path, not two disconnected stubs.
+
+**The same edge carries a fan-out, and it is read from the other end.** A
+parallel round is one epic session dispatching several wave sessions, each
+opened with `--continues <epic>#<idx>` — the same one event as a split, used
+sideways. So `--lineage` reads *down* as well as up: from the epic session it
+folds in every wave that continues it, and every wave those waves opened in
+turn, which is what makes `epic close`, `findings list` and `stats overview`
+answer about the round rather than about the empty log the dispatcher kept.
+
+From inside a wave it does not widen to the siblings. A wave sees its own
+ancestry and its own continuations and nothing else, because two waves running
+at once are two scopes, and a gate that could read its sibling's events would
+be gating on work it does not own.
+
+```bash
+# From the epic: the round. `continued_by` names the waves.
+smith event lineage epic-7-session-1
+# {"lineage":["epic-7-session-1","wave-a","wave-b"],"depth":1,
+#  "continued_by":["wave-a","wave-b"]}
+
+# From a wave: its own ancestry, not its sibling's.
+smith event lineage wave-a
+# {"lineage":["epic-7-session-1","wave-a"],"depth":2,"continued_by":[]}
+```
 
 **`--lineage` on the raw log has a twin on the projection.** Every `smith
 stats` page takes `--session`, and `--session` alone is a question about the
@@ -1487,12 +1598,12 @@ smith stats kanban --epic epic-7 --session epic-7-session-2 --lineage
 
 It resolves the chain off the projection, so it needs a `--db` and nothing
 else — no access to the log directory, which is why the dashboard can draw the
-same scope. It walks ancestors only, exactly as `smith event lineage` does: a
-session's lineage is what it continues, not what later continued it. It stops
-at the first ancestor the projection has not folded yet, so a partial `db
-rebuild` narrows the answer rather than failing it. And it needs a `--session`
-to widen — on its own it exits 1 with `cli.missing-flag` rather than quietly
-answering about every session at once.
+same scope. It walks the same tree `smith event lineage` does: what this
+session continues, plus everything that continued it. It stops at the first
+ancestor the projection has not folded yet, so a partial `db rebuild` narrows
+the answer rather than failing it. And it needs a `--session` to widen — on
+its own it exits 1 with `cli.missing-flag` rather than quietly answering about
+every session at once.
 
 The UI server's read routes take the same pair. `?session=<id>` alone is the
 window; `?session=<id>&lineage=true` is the epic, resolved through the same

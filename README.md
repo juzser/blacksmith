@@ -187,6 +187,47 @@ troubleshooting, and the known platform gaps stated rather than papered over.
 
 ## Using it
 
+### Starting a new project
+
+Blacksmith never builds inside itself. It builds a **separate project**, in
+its own directory, with its own git history — and what comes out is not a
+Blacksmith dependency. No config pointing back here, no docs about the
+factory; one `Built by Blacksmith` line in its README is the whole trace.
+
+Open a Claude Code session in this clone and say **`/bs new my-app`**. If you
+would rather drive it yourself, it is three commands:
+
+```bash
+$EDITOR factory/policies/stack.yml   # your stack answers: language, frontend,
+                                     # database, deploy target. `none` is fine.
+smith stack check                    # which answers the templates honour,
+                                     # which they only record, which they refuse
+smith new my-app --target-dir ~/code/my-app     # add --ui for a frontend
+```
+
+The last call scaffolds (TS strict, Biome, Vitest, CI), installs, runs the
+project's own gates, commits it on a `setup` branch, and registers a bootstrap
+milestone. Read `toolchain` in the JSON it prints: `verified` means you may
+plan against it. An answer the templates cannot build stops it **before
+anything is created** rather than handing you something else.
+
+Creating the remote and the first push are printed, not run — that is an
+operator action, and no agent session here will do it for you:
+
+```bash
+gh repo create my-app --private --source ~/code/my-app
+git -C ~/code/my-app push -u origin setup
+```
+
+Then `/bs plan <goal>` against it, and you are in the loop below. The MCP
+surface comes later, at its own milestone (`/bs mcp my-app`), once there are
+tools worth declaring.
+
+→ **[Step 0 of the operator loop](docs/guide/operator-loop.md)** has the same
+ground with the failure modes spelled out.
+
+### The loop
+
 Day to day, from a Claude Code session opened in this repo:
 
 | Command | What it does |
