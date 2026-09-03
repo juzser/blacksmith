@@ -43,6 +43,7 @@ import {
 } from './events.js';
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
+import { type ProjectRef, unwatchedProjects } from './projects.js';
 import {
   computeProposals,
   loadSchedulerPolicy,
@@ -76,6 +77,7 @@ export type FindingKind =
   | 'maintenance'
   | 'growth-review'
   | 'factory-width'
+  | 'unwatched-project'
   | 'unreadable-log'
   | 'projection-failed';
 
@@ -185,6 +187,17 @@ export interface InspectOptions {
   projectDirs?: readonly string[];
   /** Test seam, threaded straight through to `computeProposals`. */
   readOutdated?: (projectDir: string) => OutdatedPackage[] | null;
+  /**
+   * Every repo this factory is answerable for -- itself and the projects it
+   * built -- so `projectDirs` can be judged against something rather than
+   * taken on trust. `projects.ts`'s `factoryProjects` is the real one.
+   *
+   * Omitted -> no `unwatched-project` finding at all. This fold reads policy
+   * files and the repos it was handed; it does not go looking for a roadmap
+   * nobody asked it to read, and a unit test that got one would answer
+   * differently on every machine.
+   */
+  readProjects?: () => readonly ProjectRef[];
   /**
    * Who may say yes. Omitted -> findings carry no `admission` at all; see the
    * field's note on why absent must not read as `auto`.
@@ -404,7 +417,52 @@ export function inspectFactory(
     }
   }
 
+  // The other half of the sentence this repo is built to answer: it maintains
+  // itself AND the projects it built. `--project` has been able to name every
+  // repo since the maintenance pass went plural, and nothing noticed an
+  // operator who named fewer than all of them -- so a project could drop out
+  // of maintenance by being forgotten, which is the same silence, one level
+  // down, that repeating the flag was meant to end.
+  //
+  // Clearable in one flag, which is the test the factory-width note above sets
+  // for any new attention. The register deliberately omits a project it cannot
+  // find on disk, so nothing here can raise an alarm that has no action.
+  for (const ref of unwatchedRepos(opts)) {
+    findings.push({
+      kind: 'unwatched-project',
+      severity: 'attention',
+      sessionId: null,
+      // The resolved directory, for the same two reasons `maintenance` leads
+      // with it: sessionId is null so the subject is the only field that can
+      // tell two repos apart, and it is the exact string that clears this.
+      subject: ref.dir,
+      detail:
+        `${ref.self ? 'This clone' : `\`${ref.name}\`, built by this factory`} is not in ` +
+        'this pass, so nothing is reading its lockfile and no maintenance ' +
+        `proposal can ever name it. Add \`--project ${ref.dir}\` to \`smith daemon ` +
+        'run|start` (and to `smith scheduler run|admit`). `smith projects list` ' +
+        'prints the whole flag line.',
+    });
+  }
+
   return findings;
+}
+
+/**
+ * The repos the register knows and this pass was not pointed at.
+ *
+ * Wrapped in a catch because the register reads an operator-edited file and
+ * this is a watcher: D-21 -- a gate that only reports a fact must never crash
+ * over that fact. `factoryProjects` already refuses to throw; this makes an
+ * injected reader that does cost nothing but its own finding.
+ */
+function unwatchedRepos(opts: InspectOptions): readonly ProjectRef[] {
+  if (opts.readProjects === undefined) return [];
+  try {
+    return unwatchedProjects(opts.readProjects(), opts.projectDirs ?? []);
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -547,6 +605,7 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
     ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
     ...(opts.readOutdated === undefined ? {} : { readOutdated: opts.readOutdated }),
+    ...(opts.readProjects === undefined ? {} : { readProjects: opts.readProjects }),
   };
 
   const projectDb = opts.projectDb ?? true;
@@ -881,6 +940,7 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<TickReport[]> {
     ...(opts.schedulerPolicy === undefined ? {} : { schedulerPolicy: opts.schedulerPolicy }),
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
     ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
+    ...(opts.readProjects === undefined ? {} : { readProjects: opts.readProjects }),
     ...(opts.stateDir === undefined ? {} : { stateDir: opts.stateDir }),
     ...(opts.projectDb === undefined ? {} : { projectDb: opts.projectDb }),
     ...(opts.dbPath === undefined ? {} : { dbPath: opts.dbPath }),

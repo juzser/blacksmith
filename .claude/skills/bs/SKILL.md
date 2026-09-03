@@ -1140,13 +1140,18 @@ The scribe-template digest playbook (agent-constraints.md "scribe (digest
 duties, v3.2)"), plus running the scheduler first — a report that omits
 pending proposals lets them sit invisible instead of surfacing them.
 
-1. **Run the scheduler first.** `smith scheduler run [--dry] --session
-   <id> [--project <dir>...]` — a deterministic pass over the
-   event log, it never dispatches an agent itself
-   (`factory/policies/scheduler.yml`, architecture §12). Repeat
-   `--project` once per repo the factory is responsible for — its own
-   clone and every project it built — because the maintenance pass reads
-   one lockfile per flag and reports one proposal per repo. Read its
+1. **Ask what the factory is answerable for, then run the scheduler.**
+   `smith projects list` reads the roadmap's `- project:` bullets — the
+   register `smith new` writes to — and prints this clone plus every
+   project it built that has a checkout, ending in the `--project` line to
+   pass on. Do not assemble that list from memory: the maintenance pass
+   reads one lockfile per flag and reports one proposal per repo, so a repo
+   left off the line is not reported as missing, it is simply never
+   mentioned. (The daemon raises `unwatched-project` for exactly this; this
+   step is the same question asked by hand.) Then run `smith scheduler run
+   [--dry] --session <id> [--project <dir>...]` with those flags — a
+   deterministic pass over the event log, it never dispatches an agent
+   itself (`factory/policies/scheduler.yml`, architecture §12). Read its
    `proposals` and route each kind before writing the digest:
    - `recheck-proposed` → don't act on it silently; tick it into the next
      `/bs plan` sign-off as an `origin: recheck` task, same spec/sign-off
@@ -1167,7 +1172,8 @@ pending proposals lets them sit invisible instead of surfacing them.
      and proposes new epics — the operator's tick is required regardless
      of confidence, same as any other plan sign-off.
 2. **Ask who may say yes.** `smith scheduler admit --session <id>
-   [--project <dir>...]` re-reads the same proposals and classifies
+   [--project <dir>...]`, with the same flag line step 1 printed, re-reads
+   the same proposals and classifies
    each one `auto` or `operator` against `scheduler.yml`'s `autonomy:`
    block (`src/autonomy.ts`). It enacts nothing — the split is printed so
    it can be read and argued with before anything moves.

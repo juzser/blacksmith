@@ -206,6 +206,14 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'SIGTERM the daemon the lock names and clear the lock, live or already dead.',
   },
   {
+    command: 'projects list',
+    positionals: '',
+    flags: '[--roadmap <file>] [--json]',
+    summary:
+      'List every repo this factory maintains -- itself and what it built -- with the ' +
+      '--project flags that watch them.',
+  },
+  {
     command: 'scheduler run',
     positionals: '',
     flags: `[--dry] [--now <iso>] [--project <dir>...] ${EVENTS_DIR}`,

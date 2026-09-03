@@ -15,6 +15,23 @@ import { ROADMAP_PATH } from './paths.js';
 
 export class RoadmapError extends SmithError {}
 
+/**
+ * The `- project:` value that means "this clone", not a project this factory
+ * built. It is the default a milestone written before Phase 6b carries, so
+ * every roadmap.md that predates the bullet still parses as the factory's own.
+ *
+ * Exported because a factory that maintains the projects it built has to be
+ * able to tell them from itself, and by name is the only handle the roadmap
+ * gives. Reading it as a directory is the one thing nothing may do: this
+ * clone's parent holds a `black-smith` sibling that is a DIFFERENT repository,
+ * so the factory's own checkout is `REPO_ROOT` and never a name lookup.
+ *
+ * Deliberately not imported from `db/queries.ts`'s `DEFAULT_PROJECT`, which
+ * says the same word: that module reaches drizzle, and `test/cliBoot.test.ts`
+ * pins that the CLI's module graph never does.
+ */
+export const FACTORY_PROJECT = 'black-smith';
+
 export type MilestoneStatus = 'planned' | 'in-progress' | 'completed';
 
 export const MILESTONE_STATUSES: readonly MilestoneStatus[] = [
@@ -128,7 +145,7 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
     let status: string | null = null;
     let goal: string | null = null;
     let epicsRaw: string | null = null;
-    let project = 'black-smith';
+    let project: string = FACTORY_PROJECT;
 
     for (const rawLine of lines.slice(1)) {
       const line = rawLine.trim();
