@@ -333,8 +333,13 @@ describe('what one tick notices', () => {
 describe('what the factory-wide pass notices', () => {
   const OPTS = { now: NOW, schedulerPolicy: SCHEDULER };
 
+  // A log with records in it and no growth review among them. Deliberately not
+  // an empty log: "never recorded" is a fact about a factory that has done
+  // something, while an empty log means nothing has ever happened here, and a
+  // cadence reminder about work that has never started is noise a fresh clone
+  // does not need.
   it('asks for a growth review the log has never recorded', () => {
-    const findings = inspectFactory([], OPTS);
+    const findings = inspectFactory([stored('sess-1', 'session-start', {})], OPTS);
     const growth = findings.filter((f) => f.kind === 'growth-review');
     expect(growth).toHaveLength(1);
     // Work to schedule, not a fault to fix — an operator who sees `attention`
@@ -343,6 +348,13 @@ describe('what the factory-wide pass notices', () => {
     // A cadence belongs to the repo, not to whichever session happened to be
     // open; attributing it to one would report it once per session.
     expect(growth[0]?.sessionId).toBeNull();
+  });
+
+  // The other side of the same rule, and the reason the daemon no longer has to
+  // suppress this whole pass to get it: a cadence is a claim about elapsed time
+  // and an empty log gives it nothing to elapse from.
+  it('asks for none at all when the log is empty', () => {
+    expect(inspectFactory([], OPTS).filter((f) => f.kind === 'growth-review')).toEqual([]);
   });
 
   it('stays quiet while the last growth review is still inside the cadence', () => {
@@ -1084,7 +1096,11 @@ describe('who has to say yes to a finding', () => {
   });
 
   it('holds a growth review even when the kind is whitelisted', () => {
-    const growth = inspectFactory([], { now: NOW, schedulerPolicy: SCHEDULER, admission: OPEN });
+    const growth = inspectFactory([stored('sess-1', 'session-start', {})], {
+      now: NOW,
+      schedulerPolicy: SCHEDULER,
+      admission: OPEN,
+    });
     const finding = growth.find((f) => f.kind === 'growth-review');
     expect(finding?.admission?.decision).toBe('operator');
     expect(finding?.admission?.code).toBe('growth-never-auto');
@@ -1473,5 +1489,62 @@ describe('a tick carries the register down to the fold', () => {
       projectDirs: ['/repo/envkit'],
     });
     expect(watched?.findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The bug this closes, found by pointing the shipped daemon at this clone: the
+// whole factory-wide pass was gated on there being a session in the log, so a
+// factory that had not yet been used read no lockfile and named no unwatched
+// repo. Nothing about `pnpm outdated` needs a session to have happened -- a
+// dependency falls behind on the registry's clock, not on ours -- and the
+// window where that gate bit is exactly the window it must not: a fresh clone,
+// and a child project scaffolded an hour ago.
+// ---------------------------------------------------------------------------
+describe('a factory that has built nothing still has repos to tend', () => {
+  let stateDir: string;
+  let dir: string;
+
+  // No session file anywhere. This is what `state/events` looks like on a
+  // clone nobody has run a task in yet.
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'smith-fresh-'));
+    stateDir = path.join(dir, 'events');
+    mkdirSync(stateDir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const OPTS = {
+    now: NOW,
+    budgetPolicy: BUDGET,
+    schedulerPolicy: SCHEDULER,
+    projectDb: false,
+    readOutdated: (): OutdatedPackage[] => [
+      { name: 'lodash', current: '4.17.20', wanted: '4.17.21', latest: '4.17.21' },
+    ],
+    readProjects: () => [{ name: 'envkit', dir: '/repo/envkit', self: false }],
+  };
+
+  it('reads the lockfiles even with no session in the log', async () => {
+    const report = await runTick({ ...OPTS, stateDir, projectDirs: ['/repo/self'] });
+    expect(report.sessions).toEqual([]);
+    expect(report.findings.filter((f) => f.kind === 'maintenance')).toHaveLength(1);
+  });
+
+  it('names a repo nothing is watching even with no session in the log', async () => {
+    const report = await runTick({ ...OPTS, stateDir });
+    const unwatched = report.findings.filter((f) => f.kind === 'unwatched-project');
+    expect(unwatched).toHaveLength(1);
+    expect(unwatched[0]?.subject).toBe('/repo/envkit');
+  });
+
+  // The half of the old gate that was right, kept: a cadence reminder about
+  // work that has never started is noise a fresh clone does not need.
+  it('still asks for no growth review on a factory with no history', async () => {
+    const report = await runTick({ ...OPTS, stateDir });
+    expect(report.findings.filter((f) => f.kind === 'growth-review')).toEqual([]);
   });
 });

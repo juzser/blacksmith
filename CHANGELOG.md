@@ -1321,6 +1321,23 @@ than appearing in it.
 
 ### Fixed
 
+- **A factory that had built nothing tended nothing.** The daemon's
+  factory-wide pass — maintenance, `unwatched-project`, `growth-review`,
+  `factory-width` — was skipped entirely on a tick that found no session in
+  the event log. The gate was written for one of those four: a cadence
+  reminder about work that has never started is noise, so a clone nobody has
+  run a task in should not be told a growth review is due. But it took the
+  other three with it, and two of them read the disk rather than the log.
+  `pnpm outdated` answers on the registry's clock and a repo goes unwatched the
+  moment it is scaffolded, so the window where the gate bit was exactly the
+  window it must not: a fresh install, and a child project an hour old — where
+  a missing `--project` flag and a stale lockfile are most likely and least
+  likely to have been noticed. Pointing the shipped daemon at this clone found
+  it: an empty `state/events/` produced a tick with zero findings and no
+  reading of any lockfile. The cadence gate now sits on the growth-review
+  branch alone, where it is a statement about elapsed history rather than a
+  statement about the whole pass, and an idle daemon on an idle clone still
+  reports an empty tick.
 - **The parallel gate that could only ever admit one task.** `wave check`
   refuses a wave whose tasks share a `serialize_always_globs` hotspot, and it
   decided that by asking whether two globs *could* both match some hypothetical
