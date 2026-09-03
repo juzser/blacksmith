@@ -1545,6 +1545,9 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
   });
 
   afterEach(async () => {
+    // Unconditional: harmless when no test faked the clock, and the one that
+    // does must not leak a frozen Date into the next test's appends.
+    vi.useRealTimers();
     await rm(stateDir, { recursive: true, force: true });
   });
 
@@ -1694,6 +1697,31 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     return events.filter((e) => e.record.event_type === EPIC_CLOSED_EVENT_TYPE);
   }
 
+  /**
+   * D-262. appendEvent() stamps `ts` off the wall clock, and a whole wave
+   * written in-process lands inside one millisecond. The width verdict is interval
+   * arithmetic over those stamps, so which side of a millisecond boundary each
+   * append fell on decided the assertion: let the clock tick between the two
+   * dispatches and then let task-1's terminal share the millisecond task-2's
+   * dispatch landed in, and the two runs meet end-to-start. peakOverlap reads
+   * that as a handoff rather than an overlap -- deliberately, and
+   * waveConcurrency.test.ts pins the rule -- so a wave that ran two wide closed
+   * `serialized`. Faking Date, and only Date, puts the intervals where the
+   * fixture means them; db/milestones.test.ts steps the clock for the same
+   * reason, and the log lock's setTimeout stays real either way.
+   */
+  function steppedClock() {
+    let now = Date.now();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(now));
+    return {
+      step() {
+        now += 60_000;
+        vi.setSystemTime(new Date(now));
+      },
+    };
+  }
+
   /** A ready epic closes on the machine's own say-so — no human in the loop. */
   it('records an epic-closed event carrying the verdict and the summary it was computed from', async () => {
     await addTask('epic-1/task-1', 'completed');
@@ -1785,8 +1813,14 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
   // the shape of this one key — so a fixture standing in for the close here
   // would let the two drift apart and both keep passing.
   it('writes a width that summariseEpicWidth can read back off the close alone', async () => {
+    // Both dispatches at one instant and each terminal a minute after them:
+    // two runs that overlap by a minute rather than by whatever the runner had
+    // left of a millisecond.
+    const clock = steppedClock();
     await addWave(['epic-1/task-1', 'epic-1/task-2']);
+    clock.step();
     await addTask('epic-1/task-1', 'completed');
+    clock.step();
     await addTask('epic-1/task-2', 'completed');
     await addIntegrationCheck();
     await addSpecReview();

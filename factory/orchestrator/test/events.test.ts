@@ -13,6 +13,8 @@ import {
   parseEventId,
   readEvents,
   requireSession,
+  sessionLineage,
+  startSession,
   tailEvents,
 } from '../src/events.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
@@ -1578,6 +1580,107 @@ describe('events.ts', () => {
       await expect(
         addTask('sess-25', { epic_id: 'epic-1', objective: 'do the thing' }),
       ).resolves.toBeDefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Opening a session was the one write with no verb. `appendEvent` is the open
+  // write side on purpose (D-163) -- it must accept a type it has never heard
+  // of rather than lose the record -- and that openness extends to the root:
+  // a second `session-start`, `causal_parent: null`, into a log that already
+  // has one is accepted, receipted `#1`, and exits 0. Nothing downstream reads
+  // it. `sessionLineage` takes the FIRST root and the tree-of-sessions reading
+  // in §7 assumes there is only one, so the second root is not a second
+  // beginning -- it is a line nobody will ever look at, written by an operator
+  // who thought they were starting fresh.
+  //
+  // The fix is a verb, not a rule inside the writer: a command whose whole job
+  // is the root can be closed where `appendEvent` has to stay open.
+  // ---------------------------------------------------------------------------
+  describe('startSession: a session has one beginning', () => {
+    it('opens a log that does not exist yet and hands back the id everything chains off', async () => {
+      const { event_id, record } = await startSession('sess-open-1', { stateDir });
+
+      expect(event_id).toBe('sess-open-1#0');
+      expect(record.event_type).toBe('session-start');
+      expect(record.causal_parent).toBeNull();
+      expect(record.plan_version).toBe(1);
+      // The operator is who starts a session by hand; an agent that starts one
+      // says so, and the log keeps the difference.
+      expect(record.actor).toBe('operator');
+    });
+
+    it('stamps the actor it was given', async () => {
+      const { record } = await startSession('sess-open-2', { stateDir, actor: 'operator-skill' });
+      expect(record.actor).toBe('operator-skill');
+    });
+
+    // Reads the log, not its own bookkeeping: the session this refuses was
+    // opened the old way, by hand, which is the case that actually happens.
+    it('refuses a session whose log already holds an event', async () => {
+      await appendEvent(
+        {
+          session_id: 'sess-open-3',
+          actor: 'operator',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+
+      await expect(startSession('sess-open-3', { stateDir })).rejects.toMatchObject({
+        code: 'events.session-already-started',
+      });
+
+      // Refused before the write, not after it: an append-only log cannot take
+      // one back, so the guard is worth nothing unless it runs first.
+      expect(await readEvents('sess-open-3', { stateDir })).toHaveLength(1);
+    });
+
+    // The error has one job beyond refusing: say what to do instead. An
+    // operator who reaches for `session start` on a live session wants the
+    // anchor its next command needs, and the message names the event that is
+    // already there.
+    it('names the event the caller should have chained off', async () => {
+      await startSession('sess-open-4', { stateDir });
+      await expect(startSession('sess-open-4', { stateDir })).rejects.toThrow(/sess-open-4#0/);
+    });
+
+    // P9-7's continuation, which is the other legal shape of a root and was
+    // three lines of hand-written JSON in the guide. The cross-session rules
+    // are the writer's, unchanged -- this verb only fills the field.
+    it('continues another session, and the lineage reads root first', async () => {
+      await startSession('sess-open-5a', { stateDir });
+
+      const { record } = await startSession('sess-open-5b', {
+        stateDir,
+        continues: 'sess-open-5a#0',
+      });
+
+      expect(record.causal_parent).toBe('sess-open-5a#0');
+      expect(await sessionLineage('sess-open-5b', { stateDir })).toEqual([
+        'sess-open-5a',
+        'sess-open-5b',
+      ]);
+    });
+
+    it('refuses to continue an event that is not there', async () => {
+      await expect(
+        startSession('sess-open-6', { stateDir, continues: 'sess-open-nowhere#0' }),
+      ).rejects.toMatchObject({ code: 'events.unknown-causal-session' });
+
+      // Nothing half-written: the session it refused to open has no log.
+      expect(existsSync(path.join(stateDir, 'sess-open-6.jsonl'))).toBe(false);
+    });
+
+    // D-197 is the writer's rule and this verb inherits it rather than
+    // restating it -- a session id is a file name before it is anything else.
+    it('refuses a session id that is not a file name', async () => {
+      await expect(startSession('../escape', { stateDir })).rejects.toMatchObject({
+        code: 'events.malformed-session-id',
+      });
     });
   });
 });

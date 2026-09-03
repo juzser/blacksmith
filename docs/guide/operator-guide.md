@@ -1319,12 +1319,11 @@ smith gate run epic-1/task-1 \
 - `--session`/`--plan-version`/`--causal-parent` are required on every
   gate/findings/waivers command — they're the event-log envelope
   (`session_id`, `plan_version`, `causal_parent`). `--causal-parent` must
-  reference a real prior event in that session's log (seed one with `smith
-  event append '{"session_id":"...","actor":"operator","event_type":
-  "session-start","plan_version":1,"causal_parent":null,"payload":{}}'` if
-  you're starting a session from scratch — `session-start` is the only
-  event type allowed a `null` causal_parent, and the only one allowed to
-  name a parent in a *different* session; see §5a).
+  reference a real prior event in that session's log, so a session from
+  scratch starts with `smith session start <session-id>`, which writes the
+  root and prints the event id the next command hangs off. `session-start`
+  is the only event type allowed a `null` causal_parent, and the only one
+  allowed to name a parent in a *different* session (see §5a and §5b).
 
 **Putting your own words in the log.** `smith prompt record <file|-> --session
 <id> --causal-parent <event-id>` appends a `user_prompt` holding what you
@@ -1454,9 +1453,7 @@ smith event tail epic-7-session-1 --n 1
 
 # Open the continuation. Cross-session parents are allowed ONLY here, on the
 # session root — every event after this one chains inside its own session.
-smith event append '{"session_id":"epic-7-session-2","actor":"operator",
-  "event_type":"session-start","plan_version":1,
-  "causal_parent":"epic-7-session-1#412","payload":{}}'
+smith session start epic-7-session-2 --continues 'epic-7-session-1#412'
 
 # Read the chain, root first. Depth 1 means "this session started fresh".
 smith event lineage epic-7-session-2
@@ -1478,6 +1475,7 @@ Two errors are worth recognising on sight:
 |---|---|
 | `events.cross-session-parent-not-root` | Pointed a mid-session event at another session. Only `session-start` may cross; re-anchor the chain locally. |
 | `events.unknown-causal-session` | Named a session with no log at all — nearly always a typo'd session id, since the message prints the path it looked for. |
+| `events.session-already-started` | Ran `smith session start` on a session that already has a log. A log has one root; the message names the last event in it, which is the `--causal-parent` you wanted. |
 
 **Read `on_timeline` on every append receipt.** `event_type` is a free string
 here on purpose: a closed list at write time would reject an event nobody had
@@ -1495,6 +1493,13 @@ warning: event_type "plan-approved" is not read by the operator timeline. sess-1
 written and durable, but timeline() filters it out under every filter. …
 {"event_id":"sess-1#1","record":{...},"on_timeline":false}
 ```
+
+The same receipt covers the other thing this side cannot refuse: a
+`session-start` appended into a log that already has a root. `causal_parent:
+null` is precisely what the rule permits, so the write is valid and durable —
+but `event lineage` and the timeline both take the *first* root, so nothing
+will ever read the second one. stderr says so and points at `smith session
+start`, which is the side that can refuse.
 
 Exit stays 0 — the write succeeded, and refusing it is exactly what the open
 write side exists to prevent. The record is in the log, `event tail` and

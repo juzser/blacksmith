@@ -23,6 +23,26 @@ than appearing in it.
 
 ### Added
 
+- **Opening a session is a command.** `smith session start <session-id>` writes
+  the one `session-start` a log is allowed and prints the event id every write
+  command needs as `--causal-parent`; `--continues <event-id>` opens it as the
+  continuation of another session (P9-7's cross-session edge). This was the one
+  write with no verb: every other command takes an envelope pointing at a prior
+  event, and the first event could only be produced by hand-writing its JSON
+  through `smith event append` — which the operator guide, `SKILL.md` and the
+  agent constraints each spelled out, on one line, quoted for a shell. The
+  verb exists rather than a rule inside the writer because `appendEvent` has to
+  stay open (D-163): a second `session-start` with a null `causal_parent` into a
+  log that already has a root satisfies every check the writer has, is receipted
+  as a success, and is then read by nothing — `event lineage` and the timeline
+  both take the *first* root. So the second root was not a second beginning; it
+  was a line nobody would ever look at, written by someone who had been told
+  they were starting fresh. A command whose only job is the root can refuse,
+  and does, naming the last event in the log so the caller gets the anchor they
+  actually wanted. `event append` keeps writing it and now warns on stderr,
+  exit 0, in the same shape as its `on_timeline` and payload-`task_id`
+  receipts.
+
 - The factory can now answer **which repos it is answerable for**, and the
   watcher notices when the answer and the flags disagree. `smith projects list`
   reads the `- project:` bullets `smith new` writes into
@@ -1321,6 +1341,24 @@ than appearing in it.
 
 ### Fixed
 
+- **A wave that ran two wide closed `serialized` on a slow enough runner
+  (D-262).** The gate failed on `main` (run 33654242531) and again on a branch
+  that had not touched any of this, both times on the same assertion in
+  `epic.test.ts`, and passed every time locally. `appendEvent` stamps `ts` off
+  the wall clock, and that fixture writes a whole epic — an admission, two
+  dispatches, two terminals, three checks and the close — inside a single
+  millisecond, while the width verdict is interval arithmetic over those
+  stamps. So the assertion was settled by which side of a millisecond boundary
+  each append happened to fall on: let the clock tick between the two
+  dispatches and then let task-1's terminal share the millisecond task-2's
+  dispatch landed in, and the two runs meet exactly end-to-start — which
+  `peakOverlap` reads as a handoff rather than an overlap. That rule is
+  deliberate and `waveConcurrency.test.ts` pins it, so nothing in
+  `waveConcurrency.ts` changed. The fixture now fakes `Date` and steps it by a
+  minute between dispatch and terminal, the way `db/milestones.test.ts`
+  already does for the same reason. At the granularity a real run writes at
+  the defect was never reachable — it was the test's clock throughout, which
+  is why it read as an unrelated red gate on somebody else's pull request.
 - **A daemon on a fresh clone left the dashboard empty.** `milestones` is the
   one projected table that is not folded out of the event log — it is a full
   replacement of `factory/specs/roadmap.md`, and `projector.ts` calls it "not
