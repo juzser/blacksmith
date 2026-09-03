@@ -30,7 +30,7 @@ import { checkBudgetAlarm } from './budgetAlarm.js';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
 import type { DbOpts } from './db/projector.js';
-import { apply, foldTasks } from './db/projector.js';
+import { apply, foldTasks, rebuild } from './db/projector.js';
 import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
 import { SmithError } from './errors.js';
 import {
@@ -620,6 +620,18 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
   const dbOpts: DbOpts = { stateDir, ...opts.dbOpts };
   let projected = 0;
 
+  // Carries no session when there was none to blame. Clearable either way: the
+  // next tick that can open the file drops it.
+  const projectionFailed = (sessionId: string | null, err: unknown): DaemonFinding => ({
+    kind: 'projection-failed',
+    severity: 'attention',
+    sessionId,
+    subject: dbPath,
+    detail:
+      `The read-model refresh failed: ${errorMessage(err)}. The event log is unaffected — ` +
+      'it is the UI and `smith status` that are now stale.',
+  });
+
   for (const leaf of leaves) {
     findings.push(...inspectSession(leaf, mergeSessionLogs(lineageOf(leaf)), inspectOpts));
     if (!projectDb) continue;
@@ -627,15 +639,27 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
       await apply(dbPath, leaf, dbOpts);
       projected += 1;
     } catch (err) {
-      findings.push({
-        kind: 'projection-failed',
-        severity: 'attention',
-        sessionId: leaf,
-        subject: dbPath,
-        detail:
-          `The read-model refresh failed: ${errorMessage(err)}. The event log is unaffected — ` +
-          'it is the UI and `smith status` that are now stale.',
-      });
+      findings.push(projectionFailed(leaf, err));
+    }
+  }
+
+  // The read-model is not made of sessions alone. `milestones` is a full
+  // replacement of roadmap.md on every projector call -- projector.ts calls it
+  // "not session-scoped" in as many words -- and `apply()` inside the loop
+  // above was the only thing a running daemon ever called. So a tick that
+  // folded no session refreshed nothing, and on a fresh clone that meant no
+  // database file at all: the operator writes a roadmap, starts the watcher,
+  // opens the UI, and the Roadmap view and the project switcher are both
+  // empty until somebody happens to run `smith db rebuild` by hand. Rebuilding
+  // is the honest answer to "no session to fold" and not merely the
+  // convenient one: with an empty log it clears nothing and projects the
+  // roadmap, which is exactly what that hand-run command does. It stays cheap
+  // because it is unreachable the moment one session exists.
+  if (projectDb && leaves.length === 0) {
+    try {
+      await rebuild(dbPath, 'all', dbOpts);
+    } catch (err) {
+      findings.push(projectionFailed(null, err));
     }
   }
 

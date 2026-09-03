@@ -158,7 +158,7 @@ Finding kinds, and where each one comes from:
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
 | `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
 | `unreadable-log` | `attention` | A session log could not be read. |
-| `projection-failed` | `attention` | A session's read-model refresh threw. |
+| `projection-failed` | `attention` | A read-model refresh threw. `sessionId` names the lineage being folded, or is `null` when the tick had no session to fold and was refreshing the roadmap alone. |
 
 The `info` / `attention` split is the whole point of the `attention` count:
 `attention > 0` means something is wrong **now**, and it stops meaning that the
@@ -254,6 +254,16 @@ The last two kinds are why a tick never aborts. One corrupt line, or one
 SQLite file the daemon cannot write, becomes a finding and the tick carries
 on — a watchdog that dies on the first corrupt log is silent exactly when
 something is wrong.
+
+The read-model obeys the same rule, for the same reason. Most of `state/smith.db`
+is folded out of the event log, but `milestones` is not: it is a full
+replacement of `factory/specs/roadmap.md`, and a roadmap is a *declaration*,
+legible the day the repo is cloned. A tick with no session to fold therefore
+still refreshes it — otherwise an operator could write a roadmap, start the
+watcher, open the dashboard, and find the Roadmap view and the project switcher
+both empty until they happened to run `smith db rebuild` by hand. The refresh
+is a rebuild, which with an empty log clears nothing and projects the roadmap,
+and it stops being reachable the moment one session exists.
 
 ### Whose queue a finding is in
 
@@ -537,8 +547,10 @@ current status rather than assuming from this file's title.
 
 What the daemon does give the dashboard today is a read-model that stays fresh
 without an operator session: each tick reprojects every inspected lineage into
-`state/smith.db`, which is the file `ui/server` reads. Start the UI whenever
-you want to look; the data is already current.
+`state/smith.db`, which is the file `ui/server` reads — and a tick that finds
+no lineage at all still projects `roadmap.md`, so the dashboard is worth
+opening on a clone nothing has run in yet. Start the UI whenever you want to
+look; the data is already current.
 
 ## 9. Backing up state
 
