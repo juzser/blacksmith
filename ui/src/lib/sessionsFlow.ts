@@ -96,6 +96,23 @@ export const FIT_MAX_ZOOM = 2;
  */
 export const SESSION_BAND_CAP = 8;
 
+/**
+ * How many agents a band draws before it stops and offers the rest.
+ *
+ * Operator directive (Phase 10): "Phần session cần tổ chức lại để dễ nhìn hơn
+ * khi có nhiều subagent được dispatch." A band was as tall as its agent stack
+ * with nothing above it, and `sessionsFlowNodes()` gives a row the height of its
+ * tallest band -- so one session that dispatched twenty subagents made a 1720px
+ * row, dragged its two row-mates down into all that blank space, and shrank the
+ * fit zoom until every card on the canvas was unreadable. The band that caused
+ * it was the only one you could have read; the cost landed on the others.
+ *
+ * Six because `6 * AGENT_STEP_Y + BAND_GAP_Y = 544` is inside the 640px canvas:
+ * the busiest collapsed band still fits without the page scrolling at zoom 1,
+ * which is the property that stops one busy run from taxing the rest.
+ */
+export const AGENT_VISIBLE_CAP = 6;
+
 export interface SessionGroup {
   session: RunningSession;
   /** Live agents dispatched by this session, longest-running first. */
@@ -184,11 +201,97 @@ export function visibleBands(
 }
 
 /**
- * Height a band needs: one row per agent, one row even with no agents, and
- * never less than the session card that sits beside the stack.
+ * The agents one band actually draws, and how many it is leaving out — the same
+ * shown/hidden contract as `visibleBands()`, applied inside a band instead of
+ * across them.
+ *
+ * The order is `byRuntimeDesc`'s, untouched: longest-running first is already
+ * "most likely to be stalled first", so the six an operator is shown are the six
+ * worth looking at. Truncating a sort is a decision about what to show; re-
+ * sorting to truncate would be a decision about what matters, and this page has
+ * already made that one.
+ *
+ * `expanded` is the operator's explicit choice, so it lifts the cap entirely
+ * rather than raising it a page at a time: a band is drawn on a canvas that
+ * pans, not in a column that scrolls, and "twelve of twenty" would leave them
+ * clicking through a graph that re-fits at every step.
  */
-function bandHeight(group: SessionGroup): number {
-  return Math.max(SESSION_NODE_H, Math.max(1, group.agents.length) * AGENT_STEP_Y + BAND_GAP_Y);
+export function visibleAgents(
+  group: SessionGroup,
+  expanded: boolean,
+  cap: number = AGENT_VISIBLE_CAP,
+): { shown: LiveAgentEntry[]; hidden: number } {
+  if (expanded) return { shown: group.agents, hidden: 0 };
+  return {
+    shown: group.agents.slice(0, cap),
+    hidden: Math.max(0, group.agents.length - cap),
+  };
+}
+
+/**
+ * Height a band needs: one row per DRAWN agent, one row even with no agents,
+ * and never less than the session card that sits beside the stack.
+ *
+ * It measures what is drawn, not what exists, because this number is what
+ * `bandsPerRowFor()` scores: charging a collapsed band for fourteen agents it
+ * does not render would pick a column count for a graph the page never draws.
+ */
+function bandHeight(group: SessionGroup, expanded = false): number {
+  const drawn = visibleAgents(group, expanded).shown.length;
+  return Math.max(SESSION_NODE_H, Math.max(1, drawn) * AGENT_STEP_Y + BAND_GAP_Y);
+}
+
+/**
+ * A band whose expansion has made it taller than any collapsed band can be.
+ *
+ * Collapsed, every band lands in [136, 544] — a bounded spread that ordinary
+ * tiling handles. Expanded past the cap, a band is unbounded again, which is the
+ * exact condition that made a row's tallest member a tax on its neighbours. So
+ * the answer is not to shrink it (the operator asked to see it) but to stop it
+ * sharing a row.
+ *
+ * Note it is FALSE for a collapsed band however many agents it has, and false
+ * for an expanded band at or under the cap — expanding such a band reveals
+ * nothing, so it must not move anything either.
+ */
+function isTallBand(group: SessionGroup, expanded: boolean): boolean {
+  return expanded && group.agents.length > AGENT_VISIBLE_CAP;
+}
+
+/**
+ * Where the row breaks fall — the one thing this changes about row-major
+ * placement, and it never changes the order.
+ *
+ * A tall band closes whatever row is open, takes a row to itself, and the next
+ * band starts a fresh one. Every other band tiles `bandsPerRow` across exactly
+ * as before, so with nothing expanded this is `groups.slice(start, start+cols)`
+ * chunking and produces byte-identical output to the code it replaced.
+ */
+function layoutRows(
+  groups: SessionGroup[],
+  bandsPerRow: number,
+  expandedSessionIds: ReadonlySet<string>,
+): SessionGroup[][] {
+  const cols = Math.max(1, bandsPerRow);
+  const rows: SessionGroup[][] = [];
+  let current: SessionGroup[] = [];
+  for (const group of groups) {
+    if (isTallBand(group, expandedSessionIds.has(group.session.sessionId))) {
+      if (current.length > 0) {
+        rows.push(current);
+        current = [];
+      }
+      rows.push([group]);
+      continue;
+    }
+    current.push(group);
+    if (current.length === cols) {
+      rows.push(current);
+      current = [];
+    }
+  }
+  if (current.length > 0) rows.push(current);
+  return rows;
 }
 
 /**
@@ -209,14 +312,16 @@ function bandHeight(group: SessionGroup): number {
 export function bandGridExtent(
   groups: SessionGroup[],
   bandsPerRow: number,
+  expandedSessionIds: ReadonlySet<string> = new Set(),
 ): { width: number; height: number } {
   if (groups.length === 0) return { width: 0, height: 0 };
   const cols = Math.max(1, Math.min(bandsPerRow, groups.length));
   let height = 0;
   let lastColumnHasAgents = false;
-  for (let start = 0; start < groups.length; start += cols) {
-    const row = groups.slice(start, start + cols);
-    height += Math.max(...row.map(bandHeight));
+  for (const row of layoutRows(groups, cols, expandedSessionIds)) {
+    height += Math.max(
+      ...row.map((g) => bandHeight(g, expandedSessionIds.has(g.session.sessionId))),
+    );
     // The last column of THIS row is the grid's last column only on full rows;
     // a short final row leaves the rightmost column to the rows above it.
     const last = row[cols - 1];
@@ -257,12 +362,13 @@ export function bandsPerRowFor(
   groups: SessionGroup[],
   canvasWidth: number,
   canvasHeight: number,
+  expandedSessionIds: ReadonlySet<string> = new Set(),
 ): number {
   if (groups.length === 0 || canvasWidth <= 0 || canvasHeight <= 0) return 1;
   let best = 1;
   let bestZoom = -1;
   for (let cols = 1; cols <= Math.min(MAX_BANDS_PER_ROW, groups.length); cols++) {
-    const { width, height } = bandGridExtent(groups, cols);
+    const { width, height } = bandGridExtent(groups, cols, expandedSessionIds);
     const zoom = Math.min(FIT_MAX_ZOOM, canvasWidth / width, canvasHeight / height);
     // Strictly greater, so an equal fit leaves `best` at the earlier — fewer —
     // column count rather than drifting wider for no gain.
@@ -275,7 +381,9 @@ export function bandsPerRowFor(
 }
 
 /**
- * Bands are laid out row-major, `bandsPerRow` across; a band's agents are NOT.
+ * Bands are laid out row-major, `bandsPerRow` across — with one exception, the
+ * expanded band, which takes a row to itself (see `layoutRows`) — and a band's
+ * agents are NOT.
  *
  * That asymmetry is a decision rather than an oversight. Every agent is drawn
  * as a straight edge out of its session's right handle, which sits inside the
@@ -291,13 +399,17 @@ export function sessionsFlowNodes(
   // how wide the box is passes `bandsPerRowFor()`, and a caller that does not
   // gets the layout that cannot be drawn wider than it fits.
   bandsPerRow = 1,
+  // Which bands the operator has opened. Passed in rather than derived: this is
+  // interaction state the page owns, and a layout function that remembered it
+  // would be two sources of truth for one answer.
+  expandedSessionIds: ReadonlySet<string> = new Set(),
 ): SessionsFlowNode[] {
   const nodes: SessionsFlowNode[] = [];
   let rowTop = 0;
-  for (let start = 0; start < groups.length; start += bandsPerRow) {
-    const row = groups.slice(start, start + bandsPerRow);
+  for (const row of layoutRows(groups, bandsPerRow, expandedSessionIds)) {
     row.forEach((group, col) => {
       const bandLeft = col * BAND_COLUMN_STEP_X;
+      const expanded = expandedSessionIds.has(group.session.sessionId);
       nodes.push({
         id: sessionNodeId(group.session.sessionId),
         type: 'session',
@@ -312,7 +424,7 @@ export function sessionsFlowNodes(
         sourcePosition: 'right',
         targetPosition: 'left',
       });
-      group.agents.forEach((agent, idx) => {
+      visibleAgents(group, expanded).shown.forEach((agent, idx) => {
         nodes.push({
           id: agentNodeId(agent.id),
           type: 'agent',
@@ -325,7 +437,9 @@ export function sessionsFlowNodes(
     });
     // The tallest band in the row, not the last one placed: a short band beside
     // a four-agent one must not let the next row start under those agents.
-    rowTop += Math.max(...row.map(bandHeight));
+    rowTop += Math.max(
+      ...row.map((g) => bandHeight(g, expandedSessionIds.has(g.session.sessionId))),
+    );
   }
   return nodes;
 }

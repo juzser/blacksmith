@@ -381,6 +381,13 @@ export interface MilestoneProgress {
   /** Phase 6b — the milestone's own project (roadmap.md's `- project:` bullet, defaults 'black-smith'). */
   project: string;
   /**
+   * Phase 10 — `factory` | `dogfood` | `product` (roadmap.ts's MilestoneKind),
+   * resolved project-wide at parse time. Carried on the row rather than
+   * derived in the client, so the Roadmap page can show what the factory has
+   * built without also re-deriving which project is the factory.
+   */
+  kind: string;
+  /**
    * Phase 6b, operator directive 4 (mini-timeline): up to 3 most-recently-
    * completed tasks and up to 3 next-up tasks for this milestone, in plan/
    * dependency order. `null` when milestoneProgressRows() didn't compute it
@@ -749,6 +756,7 @@ function milestoneProgressRows(
       tokensSpent,
       tokensBudget: hasBudget ? tokensBudget : null,
       project: m.project,
+      kind: m.kind,
       ...(refs ? { recentDone: refs.recentDone, nextUp: refs.nextUp } : {}),
     };
   });

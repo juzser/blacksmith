@@ -23,6 +23,46 @@ than appearing in it.
 
 ### Added
 
+- **A roadmap that shows what the factory built, not how it was built.** A
+  milestone now carries a `kind` — `product`, `dogfood` or `factory` — parsed
+  from an optional `- kind:` bullet in `factory/specs/roadmap.md` and stored on
+  the `milestones` row (migration `0010_milestone_kind`). Blacksmith's own
+  phases are `factory` and the epic that builds a project to prove the factory
+  works is `dogfood`; everything else is `product`. The Roadmap page draws
+  `product` only, because the operator asking "where is my project" is not
+  asking about the machine that is building it, and states the hidden count and
+  the projects it belongs to rather than pretending the rows do not exist — a
+  toggle brings them back. Three typed refusals guard the parse:
+  `roadmap.invalid-kind` for a kind that is not one of the three,
+  `roadmap.factory-kind-fixed` for an attempt to relabel Blacksmith's own
+  phases, and `roadmap.conflicting-kind` for a project whose milestones
+  disagree with each other, because a project is one kind of thing or the file
+  is wrong.
+
+- **Every board caps what it draws, and says what it capped.** Three canvases
+  grew past the point where scrolling was a substitute for structure, and each
+  is now bounded by a tested pure function rather than by the operator's
+  patience:
+
+  - Kanban columns draw ten tasks and a "view more" (`lib/kanban.ts`
+    `capColumn`). The column header and the sub-status breakdown still count
+    the WHOLE column, so the number in the header can never disagree with what
+    the board is holding back (D-242).
+  - A session band draws six agents and a disclosure for the rest
+    (`lib/sessionsFlow.ts` `visibleAgents`), and a band that has more is
+    allowed to grow taller than one that does not, so a wave of twelve
+    subagents is one readable node instead of a clipped list.
+  - A Flow wave wider than six tasks wraps into sub-columns instead of drawing
+    one unbounded vertical stripe (`lib/flowLayout.ts` `wrapWaveColumn`),
+    finished work folds behind a per-wave disclosure with the wave header still
+    counting the whole wave, tasks are ordered by where their predecessors sit
+    in the column to the left, and the node thins out at low zoom without the
+    box ever changing size — the geometry the overlap check asserts holds at
+    every tier. The page also gained the Toolbar every other scoped page has:
+    it names the project, epic and plan version it is drawing, which the
+    project switcher in the topbar had been setting silently, and an edge-type
+    legend that doubles as a filter.
+
 - **`smith event lineage` says who continued you** (D-266). The verb now
   prints `continued_by` beside `lineage`, and `lineage` is the full scope a
   lineage-wide fold reads — `[...ancestry, ...continued_by]` — so the display

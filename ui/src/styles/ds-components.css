@@ -1467,6 +1467,17 @@ a.live-agent-entry:focus-visible {
   flex-direction: column;
   gap: var(--ds-space-2-5);
 }
+/* The column's own footer, not a card: full-width so it reads as the end of
+   the list rather than as an eleventh item, and pushed to the bottom of the
+   well (margin-top:auto) so every column's control sits on one line however
+   many cards sit above it. */
+.kanban-col__more {
+  width: 100%;
+  margin-top: auto;
+  justify-content: center;
+  font-size: var(--ds-text-xs);
+  font-variant-numeric: tabular-nums;
+}
 .kanban-card {
   display: flex;
   flex-direction: column;
@@ -2123,6 +2134,48 @@ a.live-agent-entry:focus-visible {
   font-size: var(--ds-text-xs);
   color: var(--ds-text-subtlest);
 }
+/* Round 12. The header is pointer-events: none so it can never intercept a
+   pan started over a wave column; the disclosure inside it is a real control
+   and takes its own pointer events back. Nothing else in the header does. */
+.flow-wave-label__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-0-5);
+}
+.flow-wave-label__more {
+  pointer-events: auto;
+  align-self: flex-start;
+}
+/* Zoom tiers (lib/flowLayout.ts zoomTier(), covered by flowLayout.test.ts).
+   The BOX never changes -- 232x132 is what the layout reserved and what the
+   overlap check asserts -- only what is painted inside it. At `compact` the
+   objective drops to one line; at `mini` the node is an id and nothing else,
+   which is the zoom where an operator is reading the SHAPE of a forty-node
+   plan, not its text. */
+.flow-canvas--compact .flow-node__title {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+.flow-canvas--mini .flow-node__title,
+.flow-canvas--mini .flow-node__tags,
+.flow-canvas--mini .flow-node__live,
+.flow-canvas--mini .flow-wave-label__more {
+  display: none;
+}
+.flow-canvas--mini .flow-node__id {
+  font-size: var(--ds-text-sm);
+}
+/* The Toolbar's scope line: the one place the page names the project it is
+   drawing (the switcher that sets it lives in the topbar, two regions away). */
+.flow-scope {
+  font-size: var(--ds-text-xs);
+  color: var(--ds-text-subtle);
+}
+.flow-toolbar__field {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-1-5);
+}
 
 /* Sessions canvas (operator directive: "Làm kiểu T1", after reading nodeterm).
    The dot classes are NOT redefined here — .running-session__dot* and
@@ -2179,6 +2232,28 @@ a.live-agent-entry:focus-visible {
   font-size: var(--ds-text-xs);
   text-align: left;
 }
+/* The one card allowed past SESSION_NODE_H, and it costs the layout nothing.
+   The modifier is set only where the disclosure control is — a band holding
+   more than AGENT_VISIBLE_CAP agents — and such a band is already
+   6 * AGENT_STEP_Y + BAND_GAP_Y = 544px tall, so the extra room is spent
+   inside height the agent stack had claimed anyway. Every other session card
+   keeps the 136px floor, so a band that dispatched nothing is unchanged.
+   Still a declared cap rather than no cap: the reasoning in the block comment
+   above (rem content against px geometry) does not stop applying just because
+   the number moved. What changes is WHICH line gets clipped at a 20px root —
+   a project chip, whose full list is in the title attribute, instead of a
+   control the operator has to be able to click. */
+.session-node--expandable {
+  max-height: 240px;
+}
+/* The card's own footer, not a fifth line of text: full width, and pinned
+   against a flex column that would otherwise shrink it to fit the cap. */
+.session-node__more {
+  width: 100%;
+  flex-shrink: 0;
+  justify-content: center;
+}
+
 /* Border only, deliberately — no ring, unlike .roadmap-node--live. Roadmap had
    no other motion channel, so round 8's directive put the pulse on the node
    itself. Here an active run already animates in two places: its dot, and the

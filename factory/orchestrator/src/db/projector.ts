@@ -207,6 +207,7 @@ function projectMilestones(handle: DbHandle, opts: DbOpts): void {
           goal: m.goal,
           epicIds: JSON.stringify(m.epicIds),
           project: m.project,
+          kind: m.kind,
         })
         .run();
     }

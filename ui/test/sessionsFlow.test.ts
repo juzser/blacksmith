@@ -3,6 +3,7 @@ import type { LiveAgentEntry, OverviewResult, RunningSession } from '../src/lib/
 import {
   AGENT_COLUMN_X,
   AGENT_STEP_Y,
+  AGENT_VISIBLE_CAP,
   BAND_COLUMN_STEP_X,
   BAND_GAP_Y,
   BAND_WIDTH,
@@ -15,9 +16,11 @@ import {
   SESSION_NODE_W,
   type SessionsFlowNode,
   sessionGroups,
+  sessionNodeId,
   sessionsFlowEdges,
   sessionsFlowNodes,
   unattachedAgents,
+  visibleAgents,
   visibleBands,
 } from '../src/lib/sessionsFlow.js';
 import { nth } from './helpers.js';
@@ -562,5 +565,214 @@ describe('lib/sessionsFlow.ts sessionsFlowEdges()', () => {
       .map((e) => e.target);
 
     expect(animated).toEqual(['agent::moving']);
+  });
+});
+
+/**
+ * `n` bands where band `busyIndex` carries `busyAgents` agents and every other
+ * band carries one -- the shape the cap exists for. Recency order is `s0` first,
+ * so the index is also the position in `sessionGroups()`'s output.
+ */
+function unevenBands(n: number, busyIndex: number, busyAgents: number) {
+  const entries: LiveAgentEntry[] = [];
+  for (let i = 0; i < n; i++) {
+    const count = i === busyIndex ? busyAgents : 1;
+    for (let k = 0; k < count; k++) {
+      entries.push(
+        agent({
+          id: `a${i}-${k}`,
+          sessionId: `s${i}`,
+          // byRuntimeDesc reads dispatchedAt, so stagger it: k=0 is the
+          // oldest and must stay first through the cap.
+          dispatchedAt: `2026-08-13T09:${String(k).padStart(2, '0')}:00.000Z`,
+        }),
+      );
+    }
+  }
+  return sessionGroups(
+    overview({
+      runningSessions: Array.from({ length: n }, (_, i) =>
+        session({
+          sessionId: `s${i}`,
+          lastEventAt: `2026-08-13T11:${String(59 - i).padStart(2, '0')}:00.000Z`,
+        }),
+      ),
+      liveAgentEntries: entries,
+    }),
+  );
+}
+
+/**
+ * Operator directive (Phase 10): "Phần session cần tổ chức lại để dễ nhìn hơn
+ * khi có nhiều subagent được dispatch." A band's height was unbounded in agent
+ * count while `sessionsFlowNodes()` takes the tallest band in a row as the row's
+ * height -- so one session that dispatched twenty subagents dragged its
+ * row-mates down with it and collapsed the fit zoom for every band on the
+ * canvas. These tests pin the two halves of the fix: the stack is capped, and an
+ * expanded stack is routed out of the shared row rather than allowed to inflate
+ * it.
+ */
+describe('lib/sessionsFlow.ts visibleAgents()', () => {
+  const band = (count: number) => nth(unevenBands(1, 0, count), 0);
+
+  it('caps a collapsed stack and says how many it left', () => {
+    const { shown, hidden } = visibleAgents(band(10), false);
+    expect(shown).toHaveLength(AGENT_VISIBLE_CAP);
+    expect(hidden).toBe(10 - AGENT_VISIBLE_CAP);
+  });
+
+  it('draws every agent once the operator expands the band', () => {
+    const { shown, hidden } = visibleAgents(band(10), true);
+    expect(shown).toHaveLength(10);
+    expect(hidden).toBe(0);
+  });
+
+  it('leaves a stack at or under the cap alone, expanded or not', () => {
+    for (const expanded of [false, true]) {
+      expect(visibleAgents(band(AGENT_VISIBLE_CAP), expanded)).toEqual({
+        shown: nth(unevenBands(1, 0, AGENT_VISIBLE_CAP), 0).agents,
+        hidden: 0,
+      });
+    }
+  });
+
+  it('reports nothing hidden for a band that dispatched nothing', () => {
+    const idle = nth(agentlessBands(1), 0);
+    expect(visibleAgents(idle, false)).toEqual({ shown: [], hidden: 0 });
+  });
+
+  it('keeps byRuntimeDesc order -- the cap is the head of the stack, not a sample', () => {
+    const { shown } = visibleAgents(band(10), false);
+    // byRuntimeDesc is longest-running first, and unevenBands staggers startedAt
+    // ascending by k, so the oldest agent is a0-0.
+    expect(shown.map((a) => a.id)).toEqual(['a0-0', 'a0-1', 'a0-2', 'a0-3', 'a0-4', 'a0-5']);
+  });
+});
+
+describe('lib/sessionsFlow.ts sessionsFlowNodes() agent cap', () => {
+  it('draws at most AGENT_VISIBLE_CAP agent nodes for a collapsed band', () => {
+    const nodes = sessionsFlowNodes(unevenBands(1, 0, 10), NOW);
+    expect(nodes.filter((n) => n.type === 'agent')).toHaveLength(AGENT_VISIBLE_CAP);
+  });
+
+  it('draws every agent node once the band is expanded', () => {
+    const nodes = sessionsFlowNodes(unevenBands(1, 0, 10), NOW, 1, new Set(['s0']));
+    expect(nodes.filter((n) => n.type === 'agent')).toHaveLength(10);
+  });
+
+  it('still reports the whole agent count on the session node, capped or not', () => {
+    // The card counts the run's agents. The cap changes how many are drawn,
+    // never how many there are (D-242).
+    const nodes = sessionsFlowNodes(unevenBands(1, 0, 10), NOW);
+    const card = nodeById(nodes, sessionNodeId('s0'));
+    expect(card.data.kind === 'session' && card.data.agentCount).toBe(10);
+  });
+
+  it('places an expanded busy band alone in its row', () => {
+    // Four bands, three across: without the isolate rule s0 would share row 0
+    // with s1 and s2 and drag both down to 10*84+40 = 880px.
+    const groups = unevenBands(4, 0, 10);
+    const nodes = sessionsFlowNodes(groups, NOW, 3, new Set(['s0']));
+    expect(nodeById(nodes, sessionNodeId('s0')).position).toEqual({ x: 0, y: 0 });
+    // s1..s3 tile normally in the row below, starting under the tall band.
+    const rowTop = 10 * AGENT_STEP_Y + BAND_GAP_Y;
+    expect(nodeById(nodes, sessionNodeId('s1')).position).toEqual({ x: 0, y: rowTop });
+    expect(nodeById(nodes, sessionNodeId('s2')).position).toEqual({
+      x: BAND_COLUMN_STEP_X,
+      y: rowTop,
+    });
+    expect(nodeById(nodes, sessionNodeId('s3')).position).toEqual({
+      x: 2 * BAND_COLUMN_STEP_X,
+      y: rowTop,
+    });
+  });
+
+  it('closes the row already in progress before isolating a tall band', () => {
+    // s2 is the busy one, so s0 and s1 have already filled two of three slots
+    // in row 0. The tall band must not join them, and must not reorder them.
+    const nodes = sessionsFlowNodes(unevenBands(4, 2, 10), NOW, 3, new Set(['s2']));
+    expect(nodeById(nodes, sessionNodeId('s0')).position).toEqual({ x: 0, y: 0 });
+    expect(nodeById(nodes, sessionNodeId('s1')).position).toEqual({
+      x: BAND_COLUMN_STEP_X,
+      y: 0,
+    });
+    const secondRow = SESSION_NODE_H;
+    expect(nodeById(nodes, sessionNodeId('s2')).position).toEqual({ x: 0, y: secondRow });
+    expect(nodeById(nodes, sessionNodeId('s3')).position).toEqual({
+      x: 0,
+      y: secondRow + 10 * AGENT_STEP_Y + BAND_GAP_Y,
+    });
+  });
+
+  it('does not isolate a busy band that is merely collapsed', () => {
+    // Collapsed, a ten-agent band is exactly as tall as any other capped band,
+    // so it has no claim on a row of its own -- this is the default state, and
+    // it must tile exactly as it did before the cap existed.
+    const nodes = sessionsFlowNodes(unevenBands(3, 0, 10), NOW, 3);
+    expect(nodeById(nodes, sessionNodeId('s1')).position).toEqual({
+      x: BAND_COLUMN_STEP_X,
+      y: 0,
+    });
+  });
+
+  it('does not isolate an expanded band that is under the cap', () => {
+    // Expanding a band with three agents reveals nothing, so it changes no
+    // geometry either. An expansion state that moved a band without changing
+    // what it draws would be a layout that jumps for no visible reason.
+    const groups = unevenBands(3, 0, 3);
+    expect(sessionsFlowNodes(groups, NOW, 3, new Set(['s0']))).toEqual(
+      sessionsFlowNodes(groups, NOW, 3),
+    );
+  });
+});
+
+describe('lib/sessionsFlow.ts bandGridExtent() with expansion', () => {
+  it('measures the isolated row, not the tiled one it would have been', () => {
+    const groups = unevenBands(4, 0, 10);
+    const tall = 10 * AGENT_STEP_Y + BAND_GAP_Y;
+    expect(bandGridExtent(groups, 3, new Set(['s0']))).toEqual({
+      width: 2 * BAND_COLUMN_STEP_X + BAND_WIDTH,
+      height: tall + SESSION_NODE_H,
+    });
+  });
+
+  it('measures a collapsed busy band at the capped height, not the raw one', () => {
+    // Six agents fit; the seventh through the twentieth are not drawn and so
+    // must not be charged for.
+    expect(bandGridExtent(unevenBands(1, 0, 20), 1)).toEqual({
+      width: BAND_WIDTH,
+      height: AGENT_VISIBLE_CAP * AGENT_STEP_Y + BAND_GAP_Y,
+    });
+  });
+
+  it('agrees with what sessionsFlowNodes() actually draws', () => {
+    // The extent is what bandsPerRowFor() scores; if it disagreed with the
+    // nodes, the page would pick a column count for a graph it never draws.
+    const groups = unevenBands(5, 1, 12);
+    const expanded = new Set(['s1']);
+    const nodes = sessionsFlowNodes(groups, NOW, 2, expanded);
+    const bottom = Math.max(...nodes.map((n) => n.position.y));
+    expect(bandGridExtent(groups, 2, expanded).height).toBeGreaterThan(bottom);
+  });
+});
+
+describe('lib/sessionsFlow.ts bandsPerRowFor() with expansion', () => {
+  it('scores the extents the expanded layout will actually occupy', () => {
+    const groups = unevenBands(4, 0, 10);
+    // Same canvas, same bands, one expanded: the answer is allowed to differ,
+    // but it must come from bandGridExtent under the SAME expansion set.
+    const cols = bandsPerRowFor(groups, 990, 640, new Set(['s0']));
+    const { width, height } = bandGridExtent(groups, cols, new Set(['s0']));
+    for (let other = 1; other <= MAX_BANDS_PER_ROW; other++) {
+      const alt = bandGridExtent(groups, other, new Set(['s0']));
+      expect(Math.min(FIT_MAX_ZOOM, 990 / width, 640 / height)).toBeGreaterThanOrEqual(
+        Math.min(FIT_MAX_ZOOM, 990 / alt.width, 640 / alt.height) - 1e-9,
+      );
+    }
+  });
+
+  it('reads an omitted expansion set as nothing expanded', () => {
+    const groups = unevenBands(6, 0, 10);
+    expect(bandsPerRowFor(groups, 990, 640)).toBe(bandsPerRowFor(groups, 990, 640, new Set()));
   });
 });

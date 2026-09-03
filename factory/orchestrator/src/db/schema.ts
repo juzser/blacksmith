@@ -344,6 +344,12 @@ export const milestones = sqliteTable(
     // hand-authored declaration, not an event replay — there is no "old row"
     // to migrate.
     project: text('project').notNull().default('black-smith'),
+    // Phase 10 -- 'factory' | 'dogfood' | 'product' (roadmap.ts's
+    // MilestoneKind). Defaults to 'factory' here for the same reason project
+    // defaults to 'black-smith': the column default has to agree with what
+    // roadmap.ts resolves for a milestone that declares neither bullet, and
+    // for those two that answer is the factory's own.
+    kind: text('kind').notNull().default('factory'),
   },
   (t) => [index('milestones_project_idx').on(t.project)],
 );
