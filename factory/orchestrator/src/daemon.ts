@@ -353,7 +353,14 @@ export function inspectFactory(
           `${proposal.autoSchedulable ? 'auto-schedulable' : 'needs an operator'}).`,
         ...(admission === undefined ? {} : { admission }),
       });
-    } else if (proposal.kind === 'growth-review-due') {
+    } else if (proposal.kind === 'growth-review-due' && events.length > 0) {
+      // A cadence needs a log to be a cadence about. `proposeGrowthReview`
+      // fires immediately on `lastReviewAt === null`, which is right for a
+      // factory that has been working and never reviewed itself and wrong for
+      // one that has never done anything at all -- and the second is what an
+      // empty log means. The gate belongs on this branch alone: the pass also
+      // reads lockfiles and the project register, and neither of those waits
+      // on a session to have happened.
       findings.push({
         kind: 'growth-review',
         severity: 'info',
@@ -632,13 +639,16 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     }
   }
 
-  // The factory-wide pass only means anything once there is a factory to
-  // review; an empty state dir must produce an empty tick, not a cadence
-  // reminder about work that has never started.
-  if (leaves.length > 0) {
-    const all = [...logs.entries()].map(([sessionId, events]) => ({ sessionId, events }));
-    findings.push(...inspectFactory(mergeSessionLogs(all), inspectOpts));
-  }
+  // Always, including on a clone whose event log is empty. This used to be
+  // gated on there being a session to fold, which suppressed the right half
+  // for the wrong reason: growth-review is the only finding here that is a
+  // claim about elapsed history, and `inspectFactory` now gates that branch
+  // itself. Maintenance reads lockfiles and `unwatched-project` reads the
+  // register; a dependency falls behind on the registry's clock and a repo
+  // goes unwatched the moment it is scaffolded, so a factory that has built
+  // nothing still has repos to tend.
+  const all = [...logs.entries()].map(([sessionId, events]) => ({ sessionId, events }));
+  findings.push(...inspectFactory(mergeSessionLogs(all), inspectOpts));
 
   const aged = ageFindings(opts.memory ?? {}, findings, now);
   return {

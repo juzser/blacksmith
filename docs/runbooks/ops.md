@@ -154,7 +154,7 @@ Finding kinds, and where each one comes from:
 | `recheck` | `info` | Completed work `scheduler.yml`'s recheck policy says is due another look. |
 | `spec-change` | `attention` when the worker called it `blocking`, `info` otherwise | A worker proposed amending an acceptance criterion and nobody has answered. `detail` names the criterion, the assumption and both answering commands. |
 | `maintenance` | `info` | Dependencies `pnpm outdated` reports behind in one repo, with the scheduler's confidence. Needs `--project`; one finding per `--project`, and the subject names the repo. |
-| `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. |
+| `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. The one kind that needs a log with records in it — see the note on a factory that has built nothing. |
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
 | `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
 | `unreadable-log` | `attention` | A session log could not be read. |
@@ -232,6 +232,23 @@ same blind spot pointing the other way. It is also the one entry that is never
 resolved by name: this checkout is known, while the roadmap's project *name* is
 a directory name that may well match some unrelated repo sitting beside this
 one.
+
+### A factory that has built nothing still has repos to tend
+
+The factory-wide half of a tick runs on every tick, including the first one on
+a clone whose `state/events/` is empty. That matters more than it sounds: a
+fresh install and a project scaffolded an hour ago are exactly the states where
+nothing has been logged yet, and they are also exactly the states where a
+dependency is most likely behind and a `--project` flag most likely missing.
+Lockfiles fall behind on the registry's clock, not on yours, and a repo goes
+unwatched the moment it is scaffolded — neither fact waits for a session to
+have happened.
+
+`growth-review` is the one kind that does wait, and for a reason that does not
+generalise: it is a claim about *elapsed* history. A cadence needs a log to be
+a cadence about, so an empty log reports no review due — a reminder to review
+work that has never started is noise a new operator does not need. It begins
+asking as soon as the log has anything in it and no growth review among it.
 
 The last two kinds are why a tick never aborts. One corrupt line, or one
 SQLite file the daemon cannot write, becomes a finding and the tick carries
