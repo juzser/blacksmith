@@ -12,7 +12,7 @@ import {
   liveAgents as foldLiveAgents,
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
-import { compareLogOrder, isLaterEvent, ROOT_EVENT_TYPE } from '../events.js';
+import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
@@ -136,15 +136,27 @@ function scopedToSessions(column: SQLiteColumn, scope: Scope): SQL | undefined {
  * at all. A lineage that could only be read off the filesystem would be a
  * lineage the dashboard could never draw.
  *
- * Ancestors only, exactly as `sessionLineage()` and `smith event tail
- * --lineage` define it: a session's lineage is what it continues, not what
- * later continued it. The walk is over `session-start` rows, because that is
- * the only event type allowed a cross-session `causal_parent`
+ * Ancestors, self, then continuations -- exactly as `sessionLineage()` and
+ * `smith event tail --lineage` define it, because D-264's whole point was that
+ * the dashboard and the CLI must not scope an epic differently. D-266 added
+ * the downward half on both sides at once: an epic session that dispatches a
+ * session per wave is read from the epic end, and a walk that only went up saw
+ * none of the work. Continuations of `sessionId` and not of the root, for the
+ * reason walkLineage() gives -- a wave folds in its ancestry and its own
+ * continuations, never its siblings.
+ *
+ * The walk is over `session-start` rows, because that is the only event type
+ * allowed a cross-session `causal_parent`
  * (`events.cross-session-parent-not-root`), and it takes the FIRST root of
  * each log for the reason startSession()'s comment gives -- a log has one
  * beginning, and a second `session-start` is a line no reader looks at.
  */
 export function projectedLineage(db: SmithDb, sessionId: string): string[] {
+  return [...projectedAncestry(db, sessionId), ...projectedContinuations(db, sessionId)];
+}
+
+/** The chain `sessionId` continues, root first, ending with `sessionId`. */
+function projectedAncestry(db: SmithDb, sessionId: string): string[] {
   const chain = [sessionId];
   const seen = new Set([sessionId]);
   let current = sessionId;
@@ -185,6 +197,76 @@ export function projectedLineage(db: SmithDb, sessionId: string): string[] {
     chain.unshift(parent.sessionId);
     current = parent.sessionId;
   }
+}
+
+/**
+ * The sessions that continue `sessionId`, breadth-first, ids sorted at each
+ * level -- the projection's copy of walkLineage()'s downward half.
+ *
+ * Every root row in the projection is fetched once and indexed by the session
+ * its `causal_parent` names, rather than issuing a query per frontier session:
+ * there is one root per log, so the set is small, and the alternative is a
+ * query per level per session.
+ *
+ * The parent session is read off the event id rather than by joining back to
+ * the parent row, and the asymmetry with the upward walk is deliberate. Up
+ * there, an unresolvable parent is where the walk stops, because a partial
+ * rebuild is a normal state and the ancestors are what the reader was
+ * promised. Down here the CHILD is the row that was projected, so it belongs
+ * in the scope whether or not its parent's log has been folded yet -- and
+ * dropping it would be the very blindness this walk exists to remove.
+ */
+function projectedContinuations(db: SmithDb, sessionId: string): string[] {
+  const roots = db
+    .select({
+      eventId: eventsRaw.eventId,
+      sessionId: eventsRaw.sessionId,
+      ts: eventsRaw.ts,
+      causalParent: eventsRaw.causalParent,
+    })
+    .from(eventsRaw)
+    .where(eq(eventsRaw.eventType, ROOT_EVENT_TYPE))
+    .all();
+
+  const childrenOf = new Map<string, string[]>();
+  const firstRootSeen = new Set<string>();
+  for (const root of inLogOrder(roots)) {
+    // One entry edge per log: the first root wins, later ones are lines no
+    // reader looks at.
+    if (firstRootSeen.has(root.sessionId)) continue;
+    firstRootSeen.add(root.sessionId);
+    if (root.causalParent === null) continue;
+    let parentSession: string;
+    try {
+      parentSession = parseEventId(root.causalParent).sessionId;
+    } catch {
+      // A malformed parent id is not an edge. The raw-log reader throws on
+      // this; here the row is already projected and the projection is a
+      // derived artefact, so the honest answer is that this session continues
+      // nothing that can be named.
+      continue;
+    }
+    if (parentSession === root.sessionId) continue;
+    const siblings = childrenOf.get(parentSession);
+    if (siblings === undefined) childrenOf.set(parentSession, [root.sessionId]);
+    else siblings.push(root.sessionId);
+  }
+  for (const siblings of childrenOf.values()) siblings.sort();
+
+  const out: string[] = [];
+  const seen = new Set([sessionId]);
+  let frontier = childrenOf.get(sessionId) ?? [];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const child of frontier) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      out.push(child);
+      next.push(...(childrenOf.get(child) ?? []));
+    }
+    frontier = next;
+  }
+  return out;
 }
 
 /** Filters an already-fetched row array to `scope.project`; a no-op in global mode (project omitted). */

@@ -305,7 +305,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'event lineage',
     positionals: '<session-id>',
     flags: '[--state-dir <dir>]',
-    summary: 'Print the causal chain of a session: what each record was written in answer to.',
+    summary: "Print every session in this one's lineage: what it continues, and what continued it.",
   },
   {
     command: 'prompt wrap',

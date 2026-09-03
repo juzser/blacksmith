@@ -13360,3 +13360,99 @@ was reported as `docs/runbooks/ops.md:569 cli.missing-flags`, and the floor
 test refuses a scan that resolves fewer than 200 codes or fewer than 30 claims.
 
 **Related:** [[D-259]], [[D-191]], [[D-142]].
+
+## D-266 — a lineage that only walks upward cannot see the wave it dispatched
+
+**Severity:** S1 (stop the line) for axis 2. Every lineage-wide fold — `epic
+close`, `wave audit`, `findings list`, `stats overview`, `dispatch check`, and
+the ~35 other deciding reads D-119 moved onto `readLineageEvents` — answered
+confidently about a scope that contained none of the parallel work, whenever
+the question was asked from the session that dispatched it.
+
+**Where:** `walkLineage` in `factory/orchestrator/src/events.ts`, and its
+projection-side twin `projectedLineage` in
+`factory/orchestrator/src/db/queries.ts`.
+
+**How it opened.** P9-7 shipped lineage for one shape: a session that runs out
+of window and continues in a fresh one. Read from the new session, the walk
+climbs `session-start`'s `causal_parent` until it reaches a root, and the
+whole epic is in scope. D-263 hardened that shape and D-264 taught the
+dashboard to draw the same one. All three are about a chain, and a chain read
+from its newest end is the only end anybody was reading from.
+
+Axis 2 is not a chain. An epic session dispatches wave sessions in parallel,
+each opened with `--continues <epic>#<idx>`, and the epic session is where the
+epic is *closed* — where `epic close` runs, where the operator asks `findings
+list`, where the daemon's `dispatch check` decides whether the round is done.
+Every one of those reads stands at the parent end. Walking upward from there
+answers with a lineage of one:
+
+```
+event lineage wave-1  → {"lineage":["epic-e","wave-1"],"depth":2}
+event lineage epic-e  → {"lineage":["epic-e"],"depth":1}
+event tail wave-1 --lineage → 3 events
+event tail epic-e --lineage → 1 event
+```
+
+Which is D-119's failure mode reached from the other direction: a gate reading
+a narrower scope than the thing it guards is off for everything outside that
+scope, and nothing in its output says so. A wave raises a finding; the epic
+session lists findings and prints none; the epic closes clean.
+
+**The fix.** Lineage is a tree, not a chain. `sessionTree(sessionId)` returns
+`{ sessions, ancestry, continuations }` where `sessions` is
+`[...ancestry, ...continuations]` — ancestors, self, then everything that
+continues self, breadth-first with ids sorted at each level.
+
+Downward from `sessionId` and not from the root, on purpose. A wave folds in
+its own ancestry and its own continuations, never its siblings: two waves
+running in parallel are two scopes, and a wave that could read its sibling's
+events could gate on work it does not own.
+
+Finding the continuations means asking every log in the state directory what
+it continues, which is a read of every log — the price `daemon.ts`'s `runTick`
+already pays for the same question. It is paid down to an ~8KB `open`/`read`
+probe of each log's first line, with a full read as the fallback in two cases:
+a first line longer than the probe, and a first line that is not the root.
+That second fallback exists because D-163 leaves `appendEvent` open — the root
+may sit anywhere in a log written by hand — and the upward walk finds it with
+`.find()`. A probe that only ever read line 0 would make the two directions
+disagree about the same log, which is a worse bug than the one being fixed.
+
+A log whose first line is not JSON throws `events.unreadable-session-log`
+rather than being skipped. Skipping it would silently drop a child and
+reintroduce exactly the blindness this closes: "cannot tell" must not be
+reported as "continues nothing". Only `ENOENT` is answered quietly, because a
+session with no log is P9-28's answered case.
+
+Cycles keep the asymmetry they need. Upward, a revisit still throws
+`events.session-lineage-cycle` — the caller is standing inside the cycle.
+Downward, a revisit is skipped, because throwing there would take out every
+reader of an unrelated lineage that merely shares a state directory with one
+hand-edited log.
+
+`projectedLineage` had to move in the same step, or the dashboard and the CLI
+would scope an epic differently again — the split D-264 exists to close. It is
+now `projectedAncestry` plus `projectedContinuations`, and the two directions
+handle an unresolvable parent differently on purpose: upward it stops the walk
+(a partial rebuild is normal), downward the *child* is the projected row, so
+it is in scope whether or not its parent has been projected yet.
+
+**What changed for a reader that was already correct.** A chain read from its
+newest end answers exactly as before. A chain read from its *oldest* end now
+answers with the whole chain rather than with itself — a deliberate change,
+and the one D-263 was already arguing for: the scope is the epic, not the
+window, and the operator has no way to know which end they are standing on
+until they have already read the wrong one.
+
+`event lineage` prints the full fold scope as `lineage` and the new
+`continued_by` beside it. `depth` stays the length of the ancestry alone: it
+has always meant "how many windows back does this go", and a fan-out is width.
+
+**Status: fixed, 2026-09-03, branch `feat/a-lineage-is-a-tree`** — eleven
+tests in `factory/orchestrator/test/crossSession.test.ts`, three in
+`test/db/lineageScope.test.ts`, one in `test/cli.test.ts`, plus two D-263
+assertions updated to the new oldest-end semantics with the reason recorded
+in place.
+
+**Related:** [[D-119]], [[D-263]], [[D-264]], [[D-163]].

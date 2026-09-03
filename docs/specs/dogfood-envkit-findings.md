@@ -470,10 +470,15 @@ grew `sessionLineage` behind `smith event lineage <session-id>` and `smith
 event tail <session-id> --lineage`. `smith session start <session-id>
 [--continues <event-id>]` is the verb that writes the root (2026-09-03, PR
 #66); before it the only way to open a log was to hand-append the root, which
-is why the edge sat unused for a month. Step 2 has not started —
-`.claude/skills/bs/` still holds a single epic-level SKILL.md and no
-disposable wave-level playbook — so the tier split this finding is really
-about is still ahead, and step 3 waits behind it. Splitting an epic across
+is why the edge sat unused for a month. Step 2's read-side prerequisite
+landed with D-266 (2026-09-03): lineage now walks down as well as up, so an
+epic session that dispatches wave sessions can read what they did. Before
+that, every gate standing at the epic end saw a lineage of one, and a tier
+split would have shipped a factory whose closes were blind by construction.
+Step 2 itself has not started — `.claude/skills/bs/` still holds a single
+epic-level SKILL.md and no disposable wave-level playbook — so the tier
+split this finding is really about is still ahead, and step 3 waits behind
+it. Splitting an epic across
 *operator* sessions works today and SKILL.md documents it; splitting it across
 *dispatched* ones does not.
 

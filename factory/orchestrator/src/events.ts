@@ -899,35 +899,205 @@ export function requireSession(sessionId: string, opts: EventOpts = {}): void {
 }
 
 /**
- * The chain of sessions this one continues, root first, ending with itself.
+ * A session's ancestry and its continuations, resolved in one walk.
  *
- * P9-7's read side. A session's entry edge is the `causal_parent` of its
- * `session-start` event; when that names another session, this walk follows it
- * back. A session with no cross-session parent answers `[sessionId]` — a
- * lineage of one, not an empty list, because the session is always part of its
- * own lineage.
+ * The two halves are kept apart because they answer different questions and
+ * `smith event lineage` prints both. `ancestry` is the chain this session
+ * continues, root first, ending with the session itself — the P9-7 answer,
+ * unchanged. `continuations` is what later continued it.
  */
-export async function sessionLineage(sessionId: string, opts: EventOpts = {}): Promise<string[]> {
-  // `require` — a caller naming a session by hand gets told when the name is
-  // wrong. readLineageEvents does not, and its comment says why.
-  return (await walkLineage(sessionId, opts, true)).map((s) => s.sessionId);
+export interface SessionTree {
+  /** Every session a lineage-wide fold reads: `[...ancestry, ...continuations]`. */
+  sessions: string[];
+  /** The chain this session continues, root first, ending with itself. */
+  ancestry: string[];
+  /** The sessions that continue this one, breadth-first, ids sorted at each level. */
+  continuations: string[];
 }
 
 /**
- * One walk back up the causal_parent chain, root first, carrying each
- * session's log with it.
+ * The chain of sessions this one continues, plus the sessions that continue
+ * it, as separate lists.
+ *
+ * D-266's read side, and the shape `smith event lineage` prints from. Callers
+ * that only want the union take `sessionLineage`.
+ */
+export async function sessionTree(sessionId: string, opts: EventOpts = {}): Promise<SessionTree> {
+  // `require` — a caller naming a session by hand gets told when the name is
+  // wrong. readLineageEvents does not, and its comment says why.
+  const { ancestors, continuations } = await walkLineage(sessionId, opts, true);
+  const ancestry = ancestors.map((s) => s.sessionId);
+  const continued = continuations.map((s) => s.sessionId);
+  return { sessions: [...ancestry, ...continued], ancestry, continuations: continued };
+}
+
+/**
+ * Every session in this one's lineage: what it continues, itself, and what
+ * continued it.
+ *
+ * P9-7 shipped the upward half. A session's entry edge is the `causal_parent`
+ * of its `session-start` event; when that names another session, the walk
+ * follows it back. A session with no cross-session parent and nothing
+ * continuing it answers `[sessionId]` — a lineage of one, not an empty list,
+ * because the session is always part of its own lineage.
+ *
+ * D-266 added the downward half. `--continues` was built for a chain: an epic
+ * that outlives one operator window, continued in a fresh session and read
+ * from the newest end. The tier split the factory needs is not a chain but a
+ * fan-out — an epic session dispatching a disposable session per wave, each of
+ * which continues it — and every verb that decides something about an epic
+ * (`epic close`, `wave audit`, `findings list`, `stats overview`) is run from
+ * the epic end. Walking up only, that end saw a lineage of one and said so in
+ * exactly the words it uses for an epic that never fanned out at all. Which is
+ * D-119's failure mode, arrived at from the other direction.
+ */
+export async function sessionLineage(sessionId: string, opts: EventOpts = {}): Promise<string[]> {
+  return (await sessionTree(sessionId, opts)).sessions;
+}
+
+/** The `causal_parent` of a log's `session-start`, however far into the log it sits.
+ *
+ * The FIRST such event, for the reason `startSession`'s comment gives: a log
+ * has one beginning, and a second `session-start` is a line no reader looks at.
+ */
+function entryEdge(events: readonly StoredEvent[]): string | null {
+  return events.find((e) => e.record.event_type === ROOT_EVENT_TYPE)?.record.causal_parent ?? null;
+}
+
+/**
+ * How much of a log to read when all that is wanted is its entry edge.
+ *
+ * One `session-start` record is a few hundred bytes; 8KB is slack enough that
+ * the full-read fallback below is for malformed logs rather than for ordinary
+ * large ones.
+ */
+const ENTRY_EDGE_PROBE_BYTES = 8192;
+
+/**
+ * The entry edge of one log, without reading the whole log.
+ *
+ * The downward walk asks this of every log in the state directory, and every
+ * log's answer lives on its first line — so this reads the head of the file
+ * and stops. `undefined` means the log is gone (a delete racing the readdir
+ * that produced the id), which is the one absence that is not an answer about
+ * lineage.
+ *
+ * The full-read fallback is not defensive padding. `startSession` enforces
+ * "the root is line 0", but `appendEvent` deliberately does not (D-163), so a
+ * log written event-by-event may carry its root anywhere and the upward walk
+ * finds it with a scan. A probe that only ever read line 0 would make the two
+ * directions disagree, and a session reachable upward but not downward is the
+ * exact asymmetry this walk exists to remove.
+ *
+ * A first line that is not JSON throws rather than being skipped. Skipping it
+ * would drop that session out of its parent's lineage silently, and a fold
+ * that cannot tell "no session continues you" from "I could not read whether
+ * one does" is the thing D-119 is about. Loud, naming the file, is the answer.
+ */
+async function readEntryEdge(
+  sessionId: string,
+  opts: EventOpts,
+): Promise<string | null | undefined> {
+  const filePath = logPath(sessionId, opts);
+  let head: string;
+  let bytesRead: number;
+  try {
+    const handle = await open(filePath, 'r');
+    try {
+      const buf = Buffer.alloc(ENTRY_EDGE_PROBE_BYTES);
+      ({ bytesRead } = await handle.read(buf, 0, ENTRY_EDGE_PROBE_BYTES, 0));
+      head = buf.subarray(0, bytesRead).toString('utf8');
+    } finally {
+      await handle.close();
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+
+  const newline = head.indexOf('\n');
+  // No newline inside the probe means the first line is longer than the probe.
+  // The cheap read cannot answer, so pay for the whole one.
+  if (newline === -1 && bytesRead === ENTRY_EDGE_PROBE_BYTES) {
+    return entryEdge(await readEventsAtPath(filePath, sessionId));
+  }
+
+  const firstLine = (newline === -1 ? head : head.slice(0, newline)).trim();
+  // An empty log continues nothing, exactly as `readEvents` reports it.
+  if (firstLine.length === 0) return null;
+
+  let record: EventRecord;
+  try {
+    record = JSON.parse(firstLine) as EventRecord;
+  } catch (err) {
+    throw new EventError(
+      'events.unreadable-session-log',
+      `The first line of ${filePath} is not JSON, so whether session "${sessionId}" continues another cannot be read: ${errorText(err)}. Every lineage read scans every log in the state directory, so one unparseable log stops all of them — deliberately, because "cannot tell" must not be reported as "continues nothing".`,
+      { session_id: sessionId, path: filePath },
+    );
+  }
+
+  if (record.event_type === ROOT_EVENT_TYPE) return record.causal_parent ?? null;
+  return entryEdge(await readEventsAtPath(filePath, sessionId));
+}
+
+/** Whatever a thrown value has to say for itself, without assuming it is an Error. */
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Every session in the state directory that continues another, keyed by the
+ * session it continues.
+ *
+ * Built by probe rather than by full read: the alternative is reading every
+ * log on every lineage fold, and `runTick` — the one place that already does
+ * that — pays for it because it needs the events, not just the edges. Children
+ * come out id-sorted for free, since `listSessionIds` sorts.
+ *
+ * The cost is one readdir plus one bounded read per log, per lineage fold. It
+ * is accepted rather than cached because a cache would have to be invalidated
+ * by a writer this module deliberately lets run concurrently in other
+ * processes, and a lineage index that is stale is a lineage index that is
+ * blind — which is the whole finding.
+ */
+async function continuationIndex(opts: EventOpts): Promise<Map<string, string[]>> {
+  const index = new Map<string, string[]>();
+  for (const sessionId of listSessionIds(opts.stateDir ?? STATE_EVENTS_DIR)) {
+    const edge = await readEntryEdge(sessionId, opts);
+    if (edge === undefined || edge === null) continue;
+    const parent = parseEventId(edge).sessionId;
+    // A root naming its own log is not a continuation; the upward walk stops
+    // on the same condition.
+    if (parent === sessionId) continue;
+    const siblings = index.get(parent);
+    if (siblings === undefined) index.set(parent, [sessionId]);
+    else siblings.push(sessionId);
+  }
+  return index;
+}
+
+/**
+ * One walk up the causal_parent chain and one walk back down it, carrying each
+ * session's log along.
  *
  * Both readers need the same walk and the same cycle guard, and the walk has
  * to read every ancestor's log anyway to find its parent — so the events come
  * back with the ids rather than being read a second time by whoever wanted
  * them.
+ *
+ * Downward from `sessionId` and not from the root, on purpose: a wave session
+ * folds in its own ancestry and its own continuations, never its siblings.
+ * Folding in siblings would re-couple exactly what dispatching a session per
+ * wave decouples, and would make a disposable session's scope grow with every
+ * other wave the epic ever ran.
  */
 async function walkLineage(
   sessionId: string,
   opts: EventOpts,
   require: boolean,
-): Promise<{ sessionId: string; events: StoredEvent[] }[]> {
-  const lineage: { sessionId: string; events: StoredEvent[] }[] = [];
+): Promise<{ ancestors: SessionLog[]; continuations: SessionLog[] }> {
+  const ancestors: SessionLog[] = [];
   const seen = new Set<string>();
   let current: string | null = sessionId;
 
@@ -943,15 +1113,34 @@ async function walkLineage(
     if (require) requireSession(current, opts);
 
     const events = await readEvents(current, opts);
-    lineage.unshift({ sessionId: current, events });
+    ancestors.unshift({ sessionId: current, events });
 
-    const root = events.find((e) => e.record.event_type === ROOT_EVENT_TYPE);
-    const parent = root?.record.causal_parent ?? null;
+    const parent = entryEdge(events);
     const parentSession = parent === null ? null : parseEventId(parent).sessionId;
     current = parentSession === current ? null : parentSession;
   }
 
-  return lineage;
+  const index = await continuationIndex(opts);
+  const continuations: SessionLog[] = [];
+  // Breadth-first: a wave's own continuation sorts after every wave of the
+  // round it belongs to, which is the order they were dispatched in.
+  let frontier = index.get(sessionId) ?? [];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const child of frontier) {
+      // A revisit here is a hand-edited cycle, and the upward walk from the
+      // session inside it already throws. Down here it is enough to visit once
+      // — throwing would take out every reader of an unrelated lineage that
+      // merely shares a state directory with the edited log.
+      if (seen.has(child)) continue;
+      seen.add(child);
+      continuations.push({ sessionId: child, events: await readEvents(child, opts) });
+      next.push(...(index.get(child) ?? []));
+    }
+    frontier = next;
+  }
+
+  return { ancestors, continuations };
 }
 
 /**
@@ -988,7 +1177,8 @@ export async function readLineageEvents(
   sessionId: string,
   opts: EventOpts = {},
 ): Promise<StoredEvent[]> {
-  return mergeSessionLogs(await walkLineage(sessionId, opts, false));
+  const { ancestors, continuations } = await walkLineage(sessionId, opts, false);
+  return mergeSessionLogs([...ancestors, ...continuations]);
 }
 
 /**
