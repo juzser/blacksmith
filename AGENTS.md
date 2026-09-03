@@ -23,7 +23,8 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Agent templates | `.claude/agents/` |
 | Approved lessons (injected into agents) | `factory/policies/lessons.md` |
 | Loop runner + worktree engine (taxonomy/schemas/events/plan/claims/worktree/queue/cli, TS strict + Vitest) | `factory/orchestrator/` |
-| Operator console (`/bs new\|plan\|run\|status\|ui\|waivers\|lessons\|report`) | `.claude/skills/bs/SKILL.md` |
+| Operator console (`/bs new\|plan\|run\|status\|ui\|waivers\|lessons\|report`) — epic tier | `.claude/skills/bs/SKILL.md` |
+| `/bs run` steps 2-10, one wave, thrown away when it lands | `.claude/skills/bs/wave.md` |
 | New-project scaffolder (`smith new`) | `factory/scaffold/`, `factory/orchestrator/src/scaffold.ts` |
 | Recheck/maintenance/growth scheduler (`smith scheduler run`) | `factory/orchestrator/src/scheduler.ts`, `factory/policies/scheduler.yml` |
 | Lessons pipeline (novelty gate, compile, `smith dream`) | `factory/orchestrator/src/lessons.ts` |

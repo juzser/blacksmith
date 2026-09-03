@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { PlanQuorumPolicy } from '../src/crosscheck.js';
@@ -264,11 +264,28 @@ describe('resolveEffort', () => {
 // ---------------------------------------------------------------------------
 
 describe('the playbooks actually ask for the tier', () => {
-  const skill = readFileSync(path.join(REPO_ROOT, '.claude/skills/bs/SKILL.md'), 'utf8');
+  const SKILLS_DIR = path.join(REPO_ROOT, '.claude/skills/bs');
+  const skill = readFileSync(path.join(SKILLS_DIR, 'SKILL.md'), 'utf8');
   const section = (heading: string): string =>
     skill.slice(skill.indexOf(heading), skill.indexOf('\n## ', skill.indexOf(heading) + 1));
   const plan = section('## `/bs plan');
   const run = section('## `/bs run');
+
+  /**
+   * Every playbook in the skill directory, read by shape rather than by a list
+   * of today's filenames. The knob scan below used to read two sections of one
+   * file; D13 split the run loop across two files and five of the knobs moved
+   * with it, which is D-119's shape exactly -- a guard that reads a narrower
+   * scope than the thing it guards goes quiet outside that scope, and the
+   * quiet reads as a pass. Widening it here is strictly stronger: a knob may
+   * be spent in whichever playbook actually spends it, and a knob spent in
+   * none of them still fails.
+   */
+  const playbooks = readdirSync(SKILLS_DIR)
+    .filter((name) => name.endsWith('.md'))
+    .sort()
+    .map((name) => readFileSync(path.join(SKILLS_DIR, name), 'utf8'))
+    .join('\n');
 
   it('makes `/bs plan` choose a tier, and `/bs run` read the one it chose', () => {
     expect(plan).not.toBe('');
@@ -287,7 +304,7 @@ describe('the playbooks actually ask for the tier', () => {
   it('spends every knob the profile returns, by name, somewhere in the flow', () => {
     // A knob nobody reads is a policy file lying about what it controls.
     const profile = loadEffortPolicy().tiers.small;
-    const named = plan + run;
+    const named = playbooks;
     for (const knob of Object.keys(profile).filter((key) => key !== 'summary')) {
       // Word-boundary, not substring: `profile.graderRoundsZZ` contains
       // `profile.graderRounds`, and a renamed knob is exactly the drift this
@@ -296,6 +313,16 @@ describe('the playbooks actually ask for the tier', () => {
         new RegExp(`profile\\.${knob}\\b`),
       );
     }
+  });
+
+  it('reads the whole skill, not the one file the knobs used to live in', () => {
+    // The widened scan above is worth nothing if the walk finds a single file:
+    // it would pass exactly as the old two-section scan did, and say nothing
+    // about the tier the split moved the knobs into.
+    const files = readdirSync(SKILLS_DIR).filter((name) => name.endsWith('.md'));
+    expect(files).toContain('SKILL.md');
+    expect(files.length).toBeGreaterThan(1);
+    expect(playbooks.length).toBeGreaterThan(skill.length);
   });
 
   it('promises the operator guide documents the verb it tells them to run', () => {

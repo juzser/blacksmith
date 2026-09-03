@@ -37,3 +37,9 @@ that matter most:
 console (`/bs new|plan|run|status|ui|waivers|lessons|report`). Its playbooks
 own the dispatch contract, the event-log envelope, and the lessons splice —
 use them rather than improvising a dispatch.
+
+`/bs run` is two files, because an epic outlives its waves. `SKILL.md` is the
+epic tier: it plans, admits one wave, and closes the epic.
+[`wave.md`](.claude/skills/bs/wave.md) is the wave tier — steps 2-10,
+worktrees through merge queue — and is read from inside a run, never invoked
+on its own.

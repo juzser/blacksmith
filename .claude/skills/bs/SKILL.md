@@ -1,6 +1,6 @@
 ---
 name: bs
-description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. Use this whenever the operator wants to interact with Blacksmith itself, from a Claude Code session inside this repo.
+description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. `/bs run` steps 2-10, one wave, live in the sibling playbook `wave.md`. Use this whenever the operator wants to interact with Blacksmith itself, from a Claude Code session inside this repo.
 ---
 
 # /bs — Blacksmith operator console
@@ -390,6 +390,16 @@ separate `tester` dispatch behind it is a **violation** there, where an absent
 critic is `not-applicable` here: for a tester, absence is the finding. Same
 fail-closed contract, and the two are not substitutes.
 
+Concurrency and the event log: `smith` reads (`wave next`, `status`,
+`budget alarm`) are free to run at any time. Writes to one session log are
+serialized by the log itself across processes, so a burst of parallel
+`smith` write-commands is safe — but each one's `event_id` comes back in
+its own output, and **that is the only place to read it from**. Never
+compute the next id by adding one: under fan-out the events between yours
+belong to sibling tasks, and a `--causal-parent` you guessed will name a
+real event that is not the parent, which validates and quietly mis-shapes
+the lineage.
+
 | Subcommand | Purpose |
 |---|---|
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack answers |
@@ -401,6 +411,10 @@ fail-closed contract, and the two are not substitutes.
 | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic |
 | `/bs lessons` | Review pending lesson candidates |
 | `/bs report` | Render/send the scribe's progress digest |
+
+One file below is not a subcommand: [`wave.md`](wave.md) holds steps 2-10
+of `/bs run`, the half that drives a single wave. It is read from inside a
+run, never invoked on its own.
 
 ## `/bs new <project> [--ui]`
 
@@ -593,13 +607,21 @@ there means "not looked at", not "looked at and clean".
 The loop playbook (architecture §3, §5, §11): one wave at a time, and every
 task in the wave at once.
 
+**Two tiers, two logs.** This file is the epic tier. It admits a wave (step
+1), hands it to [`wave.md`](wave.md) — the wave playbook, steps 2-10 — and
+picks the loop back up at step 11 once the wave has landed. That is D13's
+fix: each tier owns the log for what it dispatches, so an epic session stops
+carrying every wave's turns in a window it needs to reach the end of the
+epic. "Hand the wave over" below says how, and says the one thing that makes
+it safe.
+
 Ask the epic's effort tier once, at the top of the run, and keep the answer
 for the whole epic — `smith effort show --plan
-factory/specs/active/<epic>/plan-vN.json`. Steps 3, 6, 7 and 13 each name the
-`profile` field that scales them; nothing else in this playbook moves. Read
-`effective`, not `requested`: a plan whose live tasks fire a security trigger
-is floored, and running it at the tier the file asked for would be running it
-below the floor.
+factory/specs/active/<epic>/plan-vN.json`. Step 13 here, and steps 3, 6 and 7
+of the wave playbook, each name the `profile` field that scales them; nothing
+else in either file moves. Read `effective`, not `requested`: a plan whose
+live tasks fire a security trigger is floored, and running it at the tier the
+file asked for would be running it below the floor.
 
 1. Ask the graph how wide this wave can be, then ask the gate whether it may
    be that wide. Two commands, two different questions — do not skip to the
@@ -650,209 +672,46 @@ below the floor.
      whose whole claim is parallel execution, running its plan one task at a
      time and passing every gate while it does.
 
-   **Then run the whole wave at once.** The wave is the unit of work, not
-   the task. Three rules follow, and they are the difference between a
-   factory and a queue with extra steps:
+### Steps 2-10 — hand the wave over
 
-   - **One message, many dispatches.** When steps 3–7 reach a phase, issue
-     that phase for *every* task in the wave as parallel tool calls in a
-     single message. Five coders in one message is five agents working; five
-     messages of one coder is five agents waiting. The worktrees are
-     disjoint by construction — that is what `wave check` just certified —
-     so there is nothing for them to collide over.
-   - **No lockstep barrier.** Each task walks 3 → 7 at its own pace. Do not
-     hold a finished coder until its neighbours finish theirs; dispatch its
-     tester the moment it returns. Waiting for the slowest task at every
-     phase boundary costs the wave the difference between its longest task
-     and the sum of its phases, which is most of what parallelism buys.
-   - **A blocked task blocks itself.** Gate outcome `blocked` bounces to
-     *that* task's coder (step 9) while its neighbours carry on. One task
-     escalating to the operator does not stop the other four; report it and
-     keep the wave moving.
+The admitted wave now goes to [`wave.md`](wave.md), the wave playbook:
+worktrees, pre-code, coder, tester, grader, the gate pipeline, bounces, and
+the merge queue. Read that file and work it — inline in this session when the
+wave is small enough for this window, or in a session of its own when it is
+not:
 
-   The single place the wave rejoins is step 10's merge queue, which is
-   serial on purpose — `smith queue run` rebases one task at a time onto
-   `smith/<epic>/integration` and runs the cumulative tests between. Merging
-   is the one thing that cannot be done in parallel, and it is already the
-   one thing this playbook never asks you to.
+```bash
+smith session start <wave-id> --continues <session-id>#<n>
+```
 
-   **Then check that it did.** Once the wave's tasks reach a terminal
-   state, `smith wave audit --session <id> --epic <epic>` reads the log
-   back and reports the width the wave actually ran at, not the width it
-   was admitted at. Exit `1` is a wave whose tasks never once overlapped —
-   the three rules above were not followed, and the log will say so long
-   after this session has forgotten. Exit `2` means the wave was admitted
-   and no dispatch was recorded under it, which is usually the wrong
-   `--state-dir` rather than a stalled run. Ask before reporting the wave
-   done; a green gate on serialized work is exactly the outcome the
-   playbook above is written to prevent.
+`<n>` is the index of the event that admitted this wave. Hand over the
+project directory, the epic id, the live plan path, the admitted task ids,
+the effort `profile` resolved above, and the session id and event id the
+wave writes from. Take back each task's terminal state, the merge-queue
+outcome, the findings raised, any escalation, and the wave session's last
+event id if it opened one — chain the next command off that.
 
-   Concurrency and the event log: `smith` reads (`wave next`, `status`,
-   `budget alarm`) are free to run at any time. Writes to one session log are
-   serialized by the log itself across processes, so a burst of parallel
-   `smith` write-commands is safe — but each one's `event_id` comes back in
-   its own output, and **that is the only place to read it from**. Never
-   compute the next id by adding one: under fan-out the events between yours
-   belong to sibling tasks, and a `--causal-parent` you guessed will name a
-   real event that is not the parent, which validates and quietly mis-shapes
-   the lineage.
-2. Per admitted task, and for all of them together: `smith worktree create
-   <project-dir> <epic> <task-id>`.
-3. Pre-code, if the task needs it: dispatch `researcher` for an unknown, or
-   `uiux` (`.claude/agents/uiux.md`) for any UI-affecting acceptance
-   criterion — before the coder starts, not after.
-   - `profile.preCodeResearch` gates the researcher: `when-needed` is the
-     line above, `never` (`small`) means the coder reading the repo *is* the
-     brief. An epic that genuinely cannot start without a research brief is
-     not a `small` epic — raise the tier rather than dispatching anyway.
-   - `profile.preCodeUiux` gates the uiux spec, and is `when-ui-criterion` at
-     every tier: no tier ships a UI change without a spec to review it
-     against. It is listed as a knob so the answer is asked for rather than
-     assumed, not because a tier can turn it off.
-   - A returned brief goes through `smith research check --brief <path>`
-     before it is attached to a task spec ("Fetched and quoted text goes into
-     a prompt fenced" above). Exit 1 sends it back; on exit 0, carry
-     `recommendation.provenance` into the coder's prompt so the task knows
-     whether its research rests on this repo or on a fetched page. Any raw
-     fetched text you quote alongside it is wrapped with `smith prompt wrap`.
-4. Dispatch **`coder`** (`.claude/agents/coder.md`) in that worktree.
-   Token/diff caps (`budgets.yml`: 150k tokens, 400 diff lines) and YAGNI
-   are the coder's own constraints — don't restate them here, the template
-   does.
-5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
-   coverage and epic-level e2e/screenshots.
-   - Then the **uiux visual pass**, but only when all three hold: the task
-     is UI-affecting, the tester actually returned screenshot artifacts, and
-     step 3 wrote a uiux spec for this task (agent-interviews.md N-6). Miss
-     any one and skip it — say so; a "visual pass" over screenshots that do
-     not exist is worse than no pass. Dispatch it with the spec path and the
-     image paths and **nothing else**: no diff, no components, no test code.
-     The pass is a judgment about the rendered screen, and a uiux session
-     that reads the diff ends up reviewing intent, which the reviewer
-     already covers.
-6. Dispatch **`grader`** (`.claude/agents/grader.md`) — bounded rubric
-   loop, `profile.graderRounds` rounds (2 at `huge`, 1 below; never more
-   than 2, agent-constraints.md "grader (v3)"), before any gate
-   runs; it never decides pass/fail itself. At one round the grader scores
-   once and a failed criterion is the coder's bounce, not a re-grade. Its result file is an **input to
-   step 7**, not a note to the operator: pass it as `--grader` or the rubric
-   gates nothing (D-34).
-7. Run the gate pipeline:
-   `smith gate run <task-id> --worktree <dir> --checks checks.json --result
-   result.json --grader state/results/<task-id>.grader-r<round>.json
-   --findings findings.json --session ... --plan-version N
-   --causal-parent ...` (schema check → grader verdict → tests → coverage
-   evidence → findings intake → severity decision,
-   `docs/guide/operator-guide.md` §5).
-   - `--grader` takes step 6's file, latest round. A criterion that came back
-     `fail` or `partial` blocks before any check command runs — the outcome is
-     `blocked` with `reason: "grader-fail"`, and the payload's
-     `failed_criteria` is what you hand back to the coder.
-   - Name a check `coverage` and the gate reads
-     `coverage/coverage-summary.json` instead of scraping the text table,
-     which hides every file at 100% — including the file the task exists to
-     add (D-40). `blocked` with `reason: "coverage-evidence"` means the run
-     produced no per-file number for a file this task's claims name; fix the
-     reporter or the include glob, not the code. Ask the same question
-     outside a gate run with `smith coverage check <worktree-dir> --plan
-     <plan.json> --task <task-id>` (§5c).
-   - Findings come from dispatching **`reviewer`**
-     (`.claude/agents/reviewer.md`, fresh context, read-only) then
-     **`verifier`** (`.claude/agents/verifier.md`, adversarial refute
-     mandate) — never skip the adversarial stage on an S1/S2 finding
-     (`crosscheck.yml` `asymmetric_roles`). Which findings that covers is
-     `profile.verifierSeverities`, plus a
-     `profile.verifierS3SpotCheckRatio` sample of S3-minor: `[S1, S2]` + 0.2
-     at `huge`, `[S1, S2]` + 0 at `medium`, `[S1]` + 0 at `small`. The S3
-     sample is a calibration measurement on the reviewer, so it is the first
-     thing a cheaper tier drops; `S1-stop-the-line` is in every tier's list
-     and no tier may remove it. A finding outside the tier's list still goes
-     to the coder — it is verified by the coder's fix, not waived.
-   - Dispatch **`security-reviewer`** only when its conditional triggers
-     fire — never per-task by default. Ask, do not recall:
-     `smith security triggers --task <spec.json>` and dispatch iff
-     `dispatchSecurityReviewer` is true ("Dispatching the security-reviewer"
-     above).
-   - Every judge dispatched in steps 5–7 — uiux visual pass, grader,
-     reviewer, verifier, security-reviewer — is bracketed by
-     `smith worktree fingerprint` / `smith worktree verify`
-     ("Fingerprint the worktree around every judge" above). Exit 1 discards
-     that judge's result; it does not become a finding against the coder.
-   - Each of those is also bracketed by `smith judge dispatch` /
-     `smith judge report` ("Declare each judge's artifact before you dispatch
-     it" above). `smith judge outstanding --task <task-id>` exits 1 while any
-     judge still owes its file — re-poke it and report before running the
-     gate, because the gate now refuses to score with a non-empty outstanding
-     set (`reason: judges-outstanding`) rather than reading a silent judge as
-     zero findings.
-   - The gate scores tests it did not write, so once it has run, make the log
-     say who did: `smith tester check <session-id> --task <task-id>`
-     (`crosscheck.yml` `role_isolation`, operator-guide §2d). Exit 1 means no
-     `tester` dispatch precedes this task's `testgate-result`, the coder and
-     tester dispatches share one `agent_id`, or the answer is unknowable. A
-     coder that writes and runs its own tests grades itself and every gate
-     downstream still goes green — step 5 is what prevents that, and this is
-     the log checking that step 5 happened.
-8. Every dispatch in steps 3–7 carries the compiled lessons block for that
-   role (`smith lessons for-dispatch <role> --plan … --task …`), every
-   worktree dispatch also carries the open-findings block for that task
-   (`smith findings for-dispatch --plan … --task …`) — both under "Dispatch
-   contract" above — and each is a `dispatch_decision` event with a `causal_parent`
-   chaining back to the prompt/decision that caused it (architecture §7) —
-   this is the timeline, not optional bookkeeping.
-9. Gate outcome `blocked` → bounce to the coder on the **same branch**.
-   After 2 failed rounds on the same task, escalate model tier
-   automatically (sonnet → opus, logged — `budgets.yml`
-   `escalation_ladder`); after 3, escalate to the operator. Never skip a
-   rung, never loop past one. Count the rounds from this task's
-   `dispatch_decision` events, not from the agent's own account of itself
-   — see "Round counting and escalation" above. Then have the log check
-   you: `smith escalation check <session-id> --task <task-id>`, which
-   exits 1 if the rung you just climbed is not evidenced.
-10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting,
-    ask what the diff did to everyone outside the claims:
-    `smith claims impact <worktree-dir> <spec.json>`. Exit 1 means a
-    `proven` break — this task removed an export a file outside its claims
-    still imports — and that is a bounce to the coder, not a merge. A
-    `possible` / `signature-changed` entry exits 0 and is a note: the
-    scanner reads text, not types (operator-guide §2). Then admit into the
-    merge queue: `smith queue run <epic> --project <project-dir>
-    --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
-    `rebase-conflict` outcome, dispatch **`merger`**
-    (`.claude/agents/merger.md`) with both diffs + specs, and note three
-    things the queue's own behaviour forces (agent-interviews.md N-12):
-    - **Into the failing task's existing worktree** — a fresh one would not
-      reproduce the conflict. The result gives you only `taskId` and
-      `conflictingFiles`, so the path is the `worktreeDir` you wrote for
-      that task in `tasks.json`; carry it into the prompt yourself.
-    - **Claims = the queue's `conflictingFiles`**, verbatim. Anything else
-      the merger touches is a claim violation like any other.
-    - The queue already ran `git rebase --abort` (`queue.ts`), so the
-      merger arrives at a clean tree and **replays** the rebase rather than
-      resuming it — and it **never lands the merge**. When it returns
-      `resolution: "mechanical"`, re-run `smith queue run`; the queue stays
-      the single place a merge can happen.
+Splitting the tier does not split the log. Every read in this playbook folds
+the lineage, so a dispatch a wave session recorded is one this session can
+still audit; that is what `--continues` buys, and it is why the split is safe
+to make (D13, D-266). What it does not buy is a shortcut. A wave session
+opened without `--continues` writes into a log nothing here reads, and the
+verbs below then report a wave that appears never to have run rather than
+failing — which is the same silence, arriving as a green.
 
-    `resolution: "escalated"` — low confidence, or both sides changed the
-    same logic — goes to the operator with the side-by-side. Never
-    auto-resolve a semantic conflict silently (`worktree.yml`
-    `conflict_resolution_ladder`).
+**Then check that it did.** Once the wave's tasks reach a terminal state,
+`smith wave audit --session <id> --epic <epic>` reads the log back and
+reports the width the wave actually ran at, not the width it was admitted
+at. Ask it with *this* session: it folds the lineage, so it sees the
+dispatches a wave session made under the admission this one wrote. Exit `1`
+is a wave whose tasks never once overlapped — the wave playbook's three
+rules were not followed, and the log will say so long after this session has
+forgotten. Exit `2` means the wave was admitted and no dispatch was recorded
+under it, which is the wrong `--state-dir`, or a wave session opened without
+`--continues`, rather than a stalled run. Ask before reporting the wave
+done; a green gate on serialized work is exactly the outcome the two
+playbooks are written to prevent.
 
-    Once the wave is merged, check the epic's spend — `smith budget alarm
-    <session-id> [--epic <epic>]`. Exit 1 means either the epic crossed
-    `alarm_ratio` (re-plan the remaining work to fit, or ask the operator —
-    extension is always an operator question) **or** the log is too holey to
-    rule a crossing out. Read the two numbers as what they are:
-    `measuredTokens` is a floor, never the bill (judges return findings, not
-    Results, so their tokens are in no event), and `projectedTokens` prices
-    every unmeasured dispatch at its `budgets.yml` cap. `unverifiable` with
-    `rolesWithoutCap` non-empty is a policy gap, not a spend problem: that
-    role has no cap to price it with. `unverifiable` with `tasksOverPrice`
-    non-empty means this epic has already been measured spending more on one
-    task than the projection charges an unmeasured dispatch, so its caps are
-    bounding nothing here (D-188) — the fix is to record the missing spend,
-    never to raise the cap until the number fits. Do not report an epic as
-    under budget on the strength of `measuredTokens` alone.
 11. Repeat until every task in the live plan version is
     `completed`/`superseded`/`waived`. Dispatch the **`planner`** again for
     the epic verdict against acceptance criteria — gaps found → a NEW
