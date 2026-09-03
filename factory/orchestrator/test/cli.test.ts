@@ -1177,6 +1177,127 @@ describe('cli.ts (built binary)', () => {
     expect(payloadOnly.stderr).toContain('task_id');
   });
 
+  // ---------------------------------------------------------------------------
+  // The first hop had no verb. Every write command needs `--session` and
+  // `--causal-parent`, and the event those two point at could only be produced
+  // by hand-writing the root envelope through `event append` — which is what
+  // the operator guide, SKILL.md and agent-constraints.md all told you to do,
+  // in JSON, on one line, quoted for a shell. `smith session start` is that
+  // envelope as a command, and unlike the writer underneath it, it is allowed
+  // to refuse.
+  // ---------------------------------------------------------------------------
+  describe('session start: opening a log is a command (D-261)', () => {
+    it('writes the root nothing else could write, and prints the id everything chains off', () => {
+      const sessionId = `cli-session-start-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'session-start-events');
+
+      const started = runCli(['session', 'start', sessionId, '--state-dir', eventsDir]);
+      expect(started.status).toBe(0);
+      const receipt = JSON.parse(started.stdout);
+      expect(receipt.event_id).toBe(`${sessionId}#0`);
+      expect(receipt.record.event_type).toBe('session-start');
+      expect(receipt.record.causal_parent).toBeNull();
+      expect(receipt.record.actor).toBe('operator');
+
+      // The id it printed is a usable `--causal-parent`, which is the only
+      // reason the receipt exists.
+      const recorded = runCli(
+        [
+          'prompt',
+          'record',
+          '-',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          receipt.event_id,
+          '--state-dir',
+          eventsDir,
+        ],
+        undefined,
+        'the first thing the operator said',
+      );
+      expect(recorded.status).toBe(0);
+      expect(JSON.parse(recorded.stdout).record.causal_parent).toBe(receipt.event_id);
+    });
+
+    it('refuses a session that is already open, and names the anchor instead', () => {
+      const sessionId = `cli-session-twice-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'session-twice-events');
+
+      expect(runCli(['session', 'start', sessionId, '--state-dir', eventsDir]).status).toBe(0);
+
+      const again = runCli(['session', 'start', sessionId, '--state-dir', eventsDir]);
+      expect(again.status).toBe(1);
+      const error = JSON.parse(again.stdout).error;
+      expect(error.code).toBe('events.session-already-started');
+      expect(error.message).toContain(`${sessionId}#0`);
+
+      // Refused, not appended: the log still holds the one root.
+      const tail = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
+      expect(JSON.parse(tail.stdout)).toHaveLength(1);
+    });
+
+    it('continues another session in one flag (§5b)', () => {
+      const first = `cli-session-a-${Date.now()}`;
+      const second = `cli-session-b-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'session-continue-events');
+
+      expect(runCli(['session', 'start', first, '--state-dir', eventsDir]).status).toBe(0);
+      const continued = runCli([
+        'session',
+        'start',
+        second,
+        '--continues',
+        `${first}#0`,
+        '--actor',
+        'operator-skill',
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(continued.status).toBe(0);
+      expect(JSON.parse(continued.stdout).record.causal_parent).toBe(`${first}#0`);
+      expect(JSON.parse(continued.stdout).record.actor).toBe('operator-skill');
+
+      const lineage = runCli(['event', 'lineage', second, '--state-dir', eventsDir]);
+      expect(JSON.parse(lineage.stdout).lineage).toEqual([first, second]);
+    });
+
+    // The other half of the same defect, on the side that has to stay open.
+    // `event append` cannot refuse a second root — refusing a record is what
+    // its openness exists to prevent — so it says so, in the same shape as
+    // D-163's and D-245's receipts, and still exits 0.
+    it('event append: warns when a session-start is not the first event in its log', () => {
+      const sessionId = `cli-second-root-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'second-root-events');
+      const root = () =>
+        runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'operator',
+            event_type: 'session-start',
+            plan_version: 1,
+            causal_parent: null,
+            payload: {},
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+
+      const first = root();
+      expect(first.status).toBe(0);
+      expect(first.stderr).toBe('');
+
+      const second = root();
+      // The write succeeded and is durable. This is a receipt, not a rejection.
+      expect(second.status).toBe(0);
+      expect(JSON.parse(second.stdout).event_id).toBe(`${sessionId}#1`);
+      expect(second.stderr).toContain('session-start');
+      expect(second.stderr).toContain('smith session start');
+    });
+  });
+
   // D-131/D-132, driven through the binary because that is where they were
   // found: the unit tests in args.test.ts prove the parser, and these prove
   // the parser is the one the CLI actually runs.

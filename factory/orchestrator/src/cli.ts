@@ -58,6 +58,7 @@ import {
   requireSession,
   type StoredEvent,
   sessionLineage,
+  startSession,
   tailEvents,
 } from './events.js';
 import { findingsForDispatch } from './findingContext.js';
@@ -1985,6 +1986,21 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  if (namespace === 'session' && action === 'start') {
+    const [sessionId] = requirePositionals(positional, usageFor('session start')) as [string];
+    // Every other write verb takes `--session` and `--causal-parent` and can
+    // therefore assume a log. This is the one that cannot, so it is the one
+    // command in the CLI whose whole argument list is what it is about.
+    printJson(
+      await startSession(sessionId, {
+        ...eventOptsFromFlags(flags),
+        ...(flags.actor === undefined ? {} : { actor: flags.actor }),
+        ...(flags.continues === undefined ? {} : { continues: flags.continues }),
+      }),
+    );
+    return 0;
+  }
+
   if (namespace === 'event' && action === 'append') {
     const [json] = requirePositionals(positional, usageFor('event append')) as [string];
     const input = JSON.parse(json);
@@ -2034,6 +2050,28 @@ async function main(): Promise<number> {
           `task_id is empty. ${result.event_id} is written and durable, and the folds read both ` +
           'levels, but only the top-level field is indexed. Put task_id beside session_id, at the ' +
           'top level of the JSON.\n',
+      );
+    }
+    // D-261. The third of these receipts, for the field the two above do not
+    // cover: a log has one root, and this command is structurally unable to be
+    // what enforces that. `causal_parent: null` on a `session-start` is exactly
+    // what the writer's rule permits, so a second one into a log that already
+    // has a root passes every check and comes back as a success -- and no
+    // reader ever looks at it. `sessionLineage` takes the FIRST root, and the
+    // tree-of-sessions reading the cross-session edge rests on assumes one
+    // entry point per session. Exit stays 0 for the same reason it does above:
+    // the record is valid and durable, and refusing it is not this side's job.
+    // `smith session start` is the side that can refuse.
+    if (
+      result.record.event_type === 'session-start' &&
+      result.event_id !== `${result.record.session_id}#0`
+    ) {
+      process.stderr.write(
+        `warning: this session-start is ${result.event_id}, not ${result.record.session_id}#0 — ` +
+          `session "${result.record.session_id}" was already open. The record is written and ` +
+          'durable, but a log has one root and readers take the first, so nothing will read this ' +
+          'one. Use `smith session start`, which refuses instead of receipting, and chain off the ' +
+          'event that is already there.\n',
       );
     }
     printJson({ ...result, on_timeline: onTimeline });

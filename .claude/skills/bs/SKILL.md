@@ -30,12 +30,13 @@ once, at the top of a run, and carry that one answer through every command
 below — `<project-dir>` here means that answer, never a fixed path.
 
 Every write command needs an event-log envelope: `--session <id>
---plan-version <n> --causal-parent <event-id> [--actor operator]`. Seed a
-session with `smith event append '{"session_id":"...","actor":"operator",
-"event_type":"session-start","plan_version":1,"causal_parent":null,
-"payload":{}}'` if one isn't already running (`session-start` is the only
-event type allowed a null `causal_parent` — `docs/guide/operator-guide.md`
-§5).
+--plan-version <n> --causal-parent <event-id> [--actor operator]`. Open a
+session with `smith session start <session-id>` if one isn't already
+running — it writes the root and prints the event id everything else hangs
+off as `--causal-parent`. Run it once: it refuses a session that already
+has a log, and names the last event in it so you have the anchor either way
+(`docs/guide/operator-guide.md` §5). To continue an epic in a new session,
+`smith session start <new-id> --continues <old-session>#<index>` (§5b).
 
 **Record the operator's turn before you act on it**: `smith prompt record -
 --session <id> --causal-parent <event-id>` (heredoc the words in, or pass a
@@ -129,16 +130,18 @@ fix for orchestrator context is splitting the epic across sessions, not
 throttling the wave.
 
 **Splitting an epic across sessions** (P9-7). A new session's `session-start`
-may name an event in the previous session as its `causal_parent` —
-`{"session_id":"<new>","event_type":"session-start","causal_parent":"<old>#<n>",...}` —
-and that is the only place a cross-session edge is allowed: everything after
-the root chains locally, so each session has exactly one entry edge and the
-log stays a tree of sessions rather than a graph. `smith event lineage
-<session-id>` prints the chain root-first, and `smith event tail <session-id>
---lineage` tails the whole epic instead of the session that happens to be
-running. A cross-session parent on a non-root event is
-`events.cross-session-parent-not-root`; a parent naming a session with no log
-is `events.unknown-causal-session` (usually a typo'd session id).
+may name an event in the previous session as its `causal_parent` — `smith
+session start <new-id> --continues <old-id>#<n>` — and that is the only place
+a cross-session edge is allowed: everything after the root chains locally, so
+each session has exactly one entry edge and the log stays a tree of sessions
+rather than a graph. `smith event lineage <session-id>` prints the chain
+root-first, and `smith event tail <session-id> --lineage` tails the whole epic
+instead of the session that happens to be running. A cross-session parent on
+a non-root event is `events.cross-session-parent-not-root`; a parent naming a
+session with no log is `events.unknown-causal-session` (usually a typo'd
+session id); `smith session start` on a session that already has one is
+`events.session-already-started`, and the message names the event you should
+have chained off.
 
 **The envelope is yours, not the agent's** (agent-interviews.md N-1, N-2). A
 worker's result file carries only `run_status`, `structured_output` and

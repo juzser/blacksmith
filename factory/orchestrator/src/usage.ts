@@ -276,6 +276,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Log a merge that landed outside the queue, after verifying it landed.',
   },
   {
+    command: 'session start',
+    positionals: '<session-id>',
+    flags: '[--continues <event-id>] [--actor <name>] [--state-dir <dir>]',
+    summary:
+      'Open a session log with the one root event it is allowed. Exit 1 if the session is already open.',
+  },
+  {
     command: 'event append',
     positionals: '<json>',
     flags: '[--state-dir <dir>]',

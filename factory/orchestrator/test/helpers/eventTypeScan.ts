@@ -57,9 +57,9 @@ export interface FreeEventType {
 export const FREE_EVENT_TYPES: FreeEventType[] = [
   {
     eventType: 'session-start',
-    writtenBy: 'cli',
+    writtenBy: 'src',
     reason:
-      'The root event of every log, and the only one allowed a null causal_parent or a parent in another session (README, /bs skill). Written by the operator opening a session, not by the orchestrator: events.ts holds ROOT_EVENT_TYPE only to recognise it on read.',
+      "The root event of every log, and the only one allowed a null causal_parent or a parent in another session (README, /bs skill). It was 'cli' until D-261, when opening a session became a verb: `smith session start` calls startSession() in events.ts, which writes the root and is the one caller allowed to, because it is the one that can first read the log and refuse a second root. `event append` can still write the type -- that side has to stay open -- so this label says where the write belongs, not where it is possible.",
   },
   {
     eventType: 'user_prompt',

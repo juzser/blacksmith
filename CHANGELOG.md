@@ -23,6 +23,26 @@ than appearing in it.
 
 ### Added
 
+- **Opening a session is a command.** `smith session start <session-id>` writes
+  the one `session-start` a log is allowed and prints the event id every write
+  command needs as `--causal-parent`; `--continues <event-id>` opens it as the
+  continuation of another session (P9-7's cross-session edge). This was the one
+  write with no verb: every other command takes an envelope pointing at a prior
+  event, and the first event could only be produced by hand-writing its JSON
+  through `smith event append` — which the operator guide, `SKILL.md` and the
+  agent constraints each spelled out, on one line, quoted for a shell. The
+  verb exists rather than a rule inside the writer because `appendEvent` has to
+  stay open (D-163): a second `session-start` with a null `causal_parent` into a
+  log that already has a root satisfies every check the writer has, is receipted
+  as a success, and is then read by nothing — `event lineage` and the timeline
+  both take the *first* root. So the second root was not a second beginning; it
+  was a line nobody would ever look at, written by someone who had been told
+  they were starting fresh. A command whose only job is the root can refuse,
+  and does, naming the last event in the log so the caller gets the anchor they
+  actually wanted. `event append` keeps writing it and now warns on stderr,
+  exit 0, in the same shape as its `on_timeline` and payload-`task_id`
+  receipts.
+
 - The factory can now answer **which repos it is answerable for**, and the
   watcher notices when the answer and the flags disagree. `smith projects list`
   reads the `- project:` bullets `smith new` writes into

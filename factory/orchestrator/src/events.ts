@@ -769,6 +769,80 @@ export async function appendEvent(input: EventInput, opts: EventOpts = {}): Prom
   );
 }
 
+export interface StartSessionOptions extends EventOpts {
+  /**
+   * Who is opening the session. Defaults to `operator`, which is who opens one
+   * by hand; an agent that opens one says so, and the log keeps the difference.
+   */
+  actor?: string;
+  /**
+   * P9-7's cross-session edge: an event in ANOTHER session's log that this
+   * session continues. The rules about it are `validateCausalParent`'s and are
+   * not restated here -- this only fills the field.
+   */
+  continues?: string;
+}
+
+/**
+ * Open a session: write the one `session-start` its log is allowed to hold.
+ *
+ * This exists because `appendEvent` cannot be the thing that enforces "one
+ * root per log", and should not become it. That writer is open on purpose
+ * (D-163): `event_type` is a free string so a type nobody has declared yet is
+ * still recorded rather than lost, and the same openness reaches the root --
+ * a second `session-start` with a null `causal_parent`, into a log that
+ * already has one, satisfies every rule the writer has and is receipted as
+ * `#1` with exit 0.
+ *
+ * Nothing downstream reads that second line. `sessionLineage` takes the FIRST
+ * root, and the tree-of-sessions reading the whole cross-session edge is built
+ * on assumes there is exactly one entry point per session. So the second root
+ * is not a second beginning; it is a line no reader will ever look at, written
+ * by someone who believed they were starting fresh and was told they had.
+ *
+ * A dedicated verb can be closed where the writer has to stay open, and that
+ * is the whole design: the rule lives in the command whose only job is the
+ * root, so `appendEvent` keeps the property that makes it safe to hand an
+ * unknown record to.
+ *
+ * The emptiness check runs inside the same lock as the append, for the reason
+ * `withLogLock` gives above: checking outside it would read a length another
+ * process is in the middle of changing, and a guard that passes because it
+ * looked a moment too early is worse than no guard, since it reports success.
+ */
+export async function startSession(
+  sessionId: string,
+  opts: StartSessionOptions = {},
+): Promise<StoredEvent> {
+  const filePath = logPath(sessionId, opts);
+  const input: EventInput = {
+    session_id: sessionId,
+    actor: opts.actor ?? 'operator',
+    event_type: ROOT_EVENT_TYPE,
+    plan_version: 1,
+    causal_parent: opts.continues ?? null,
+    payload: {},
+  };
+
+  return enqueue(filePath, () =>
+    withLogLock(filePath, async () => {
+      const existing = await readEventsAtPath(filePath, sessionId);
+      const last = existing[existing.length - 1];
+      if (last !== undefined) {
+        // Names the anchor rather than only the refusal. Someone who reaches
+        // for this verb on a live session wants the event id their next
+        // command needs as `--causal-parent`, and it is right here.
+        throw new EventError(
+          'events.session-already-started',
+          `Session "${sessionId}" is already open — its log holds ${existing.length} event(s), the last being "${last.event_id}". A session log has one root, so there is nothing here to start. Chain your next command off "${last.event_id}", or pick a session id nothing has used.`,
+          { session_id: sessionId, event_id: last.event_id, events: existing.length },
+        );
+      }
+      return appendEventLocked(input, opts, filePath);
+    }),
+  );
+}
+
 /** Convenience wrapper for edge-recorded events (edge_type + edge_provenance required). */
 export async function appendEdge(
   input: Omit<EventInput, 'edge' | 'event_type'> & { event_type?: string },
