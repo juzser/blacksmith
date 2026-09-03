@@ -178,13 +178,24 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
   dispatches, one log, one unbroken causal chain. Scoped grants like
   `Agent(tester, grader)` are a real capability and are deliberately not
   used yet — see below for why.
-- **Blocker on nesting** (`factory/orchestrator/src/events.ts`):
-  `causal_parent` is validated only within a single session's log,
-  `session-start` is the only event allowed `causal_parent: null`, and
-  `EventInput` has no parent-session field. A second session therefore
-  cannot record that session A's decision at event X spawned it — the chain
-  breaks silently at the session boundary. Two-tier sessions wait on an
-  optional `parent_event: "<session-id>#<index>"` (phase 9).
+- **Nesting is no longer blocked by the event log** (P9-7, 2026-08-08). A
+  `session-start` may name a `causal_parent` in *another* session's log, so
+  "session A's decision at event X spawned this one" is expressible and reads
+  back — `smith event lineage <session-id>` prints the chain root-first and
+  `smith event tail <session-id> --lineage` tails the epic rather than the
+  newest session. A cross-session parent on any other event type is still
+  `events.cross-session-parent-not-root`, so each session keeps exactly one
+  entry edge and the log stays a tree of sessions rather than a graph.
+- **What blocks nesting now is that a dispatched agent is not a session.**
+  The first rule above binds a log to the node that dispatches; a role
+  template granted `Agent` would dispatch without owning one. The tier that
+  would fix that does not exist yet — `.claude/skills/bs/` holds one
+  epic-level playbook and no disposable wave-level one — so the shipped
+  answer to "an epic outlasts your window" is splitting the epic across
+  operator sessions, each a real session whose root chains to the last
+  (SKILL.md, "Splitting an epic across sessions"), not nesting dispatch
+  under a template. `docs/specs/dogfood-envkit-findings.md` D13 tracks the
+  steps that remain.
 - **Return discipline is mandatory under uncapped fan-out.** Every worker
   writes its full result to `state/results/<task-id>.json` and returns only
   `{status, severity_counts, artifact_path}`. The dispatcher reads the file

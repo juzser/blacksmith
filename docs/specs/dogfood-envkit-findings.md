@@ -461,6 +461,22 @@ Until (1) lands: flat topology, and return discipline
 concurrency cap — a cap pays the same total context cost spread over N batches
 and buys latency with it.
 
+**Status: step 1 fixed, 2026-08-08, branch `smith/phase-9/p9-7-cross-session`;
+steps 2-3 open** — the cross-session edge shipped, arriving as `causal_parent`
+itself rather than as the separate `parent_event` key sketched above: a
+`session-start` may name a parent in another session's log, any other event
+type naming one is `events.cross-session-parent-not-root`, and the read side
+grew `sessionLineage` behind `smith event lineage <session-id>` and `smith
+event tail <session-id> --lineage`. `smith session start <session-id>
+[--continues <event-id>]` is the verb that writes the root (2026-09-03, PR
+#66); before it the only way to open a log was to hand-append the root, which
+is why the edge sat unused for a month. Step 2 has not started —
+`.claude/skills/bs/` still holds a single epic-level SKILL.md and no
+disposable wave-level playbook — so the tier split this finding is really
+about is still ahead, and step 3 waits behind it. Splitting an epic across
+*operator* sessions works today and SKILL.md documents it; splitting it across
+*dispatched* ones does not.
+
 ---
 
 ## Environment note
