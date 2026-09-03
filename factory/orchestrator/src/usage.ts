@@ -49,8 +49,14 @@ export interface CommandDoc {
 const EVENTS = '--session <id> --causal-parent <event-id> [--plan-version <n>] [--actor <name>]';
 /** …plus the state-dir override, on the commands whose module accepts EventOpts. */
 const EVENTS_DIR = `${EVENTS} [--state-dir <dir>]`;
-/** Every `stats` page reads the same projection. */
-const STATS = '[--db <file>] [--session <id>]';
+/**
+ * Every `stats` page reads the same projection. `--lineage` widens `--session`
+ * from one session to the chain it continues (D-263): an epic that outlasts a
+ * window carries on in a session whose root names the first, and without this
+ * every page answered with the part of that epic which fell inside the window
+ * asked about.
+ */
+const STATS = '[--db <file>] [--session <id>] [--lineage]';
 
 export const COMMANDS: readonly CommandDoc[] = [
   {

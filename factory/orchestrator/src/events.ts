@@ -58,7 +58,13 @@ export interface EventOpts {
 
 // Root events (session_id's first event) are the only ones allowed a null
 // causal_parent (architecture §7).
-const ROOT_EVENT_TYPE = 'session-start';
+/**
+ * The one event type a log may open with, and the only one allowed to name a
+ * `causal_parent` in another session's log. Exported since D-263 because
+ * db/queries.ts walks the same edge off the projection and a second copy of
+ * the literal is a second thing to keep in step.
+ */
+export const ROOT_EVENT_TYPE = 'session-start';
 
 export interface ParsedEventId {
   sessionId: string;

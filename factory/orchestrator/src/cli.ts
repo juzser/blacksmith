@@ -3568,6 +3568,7 @@ async function main(): Promise<number> {
       lessonsPage,
       overview,
       providerAgreement,
+      projectedLineage,
       roadmapPage,
       taskDetail,
       timeline,
@@ -3575,7 +3576,16 @@ async function main(): Promise<number> {
     const dbPath = flags.db ?? STATE_DB_PATH;
     const handle = openDb(dbPath);
     try {
-      const scope = flags.session ? { sessionId: flags.session } : {};
+      const scope: { sessionId?: string; sessionIds?: readonly string[] } = flags.session
+        ? { sessionId: flags.session }
+        : {};
+      if (flags.lineage) {
+        // --lineage widens the scope from the session asked about to the whole
+        // chain it continues, resolved off the projection so `stats` still needs
+        // nothing but a db. It has nothing to widen without --session, and
+        // saying so beats silently reporting every session as "the lineage".
+        scope.sessionIds = projectedLineage(handle.db, requireFlag(flags, 'session'));
+      }
       if (action === 'overview') {
         printJson(overview(handle.db, scope));
         return 0;

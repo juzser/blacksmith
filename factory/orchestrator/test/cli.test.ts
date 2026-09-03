@@ -1298,6 +1298,109 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // D-263. `session start --continues` made an epic able to outlast the window
+  // that opened it, and the operator console then recommended splitting one
+  // that way. Every `stats` page still narrowed on a single session id, so the
+  // continuation session asking about its own epic was answered with the part
+  // of it that happened to fall inside that window -- and told nothing about
+  // the rest. `--lineage` is the scope that follows the epic instead.
+  // ---------------------------------------------------------------------------
+  describe('stats --lineage: an epic outlives the session that opened it (D-263)', () => {
+    const taskEvent = (session: string, taskId: string): string =>
+      JSON.stringify({
+        session_id: session,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: taskId,
+        plan_version: 1,
+        causal_parent: `${session}#0`,
+        payload: {
+          epic_id: 'epic-lin',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          plan_version: 1,
+          objective: `Do ${taskId}.`,
+          claims: [`src/${taskId.replace('/', '-')}.ts`],
+          budget_tokens: 1000,
+        },
+      });
+
+    it('reads the whole epic where --session alone reads one window of it', () => {
+      const stamp = Date.now();
+      const first = `cli-lineage-a-${stamp}`;
+      const second = `cli-lineage-b-${stamp}`;
+      const eventsDir = path.join(scratchDir, 'lineage-events');
+      const dbPath = path.join(scratchDir, `lineage-${stamp}.db`);
+
+      expect(runCli(['session', 'start', first, '--state-dir', eventsDir]).status).toBe(0);
+      expect(
+        runCli(['event', 'append', taskEvent(first, 'epic-lin/task-1'), '--state-dir', eventsDir])
+          .status,
+      ).toBe(0);
+      expect(
+        runCli(['session', 'start', second, '--continues', `${first}#0`, '--state-dir', eventsDir])
+          .status,
+      ).toBe(0);
+      expect(
+        runCli(['event', 'append', taskEvent(second, 'epic-lin/task-2'), '--state-dir', eventsDir])
+          .status,
+      ).toBe(0);
+
+      expect(runCli(['db', 'rebuild', '--db', dbPath, '--state-dir', eventsDir]).status).toBe(0);
+
+      const taskIdsOf = (stdout: string): string[] =>
+        (JSON.parse(stdout) as { tasks: { taskId: string }[] }[])
+          .flatMap((column) => column.tasks)
+          .map((t) => t.taskId)
+          .sort();
+
+      const narrow = runCli([
+        'stats',
+        'kanban',
+        '--db',
+        dbPath,
+        '--epic',
+        'epic-lin',
+        '--session',
+        second,
+      ]);
+      expect(narrow.status).toBe(0);
+      expect(taskIdsOf(narrow.stdout)).toEqual(['epic-lin/task-2']);
+
+      const wide = runCli([
+        'stats',
+        'kanban',
+        '--db',
+        dbPath,
+        '--epic',
+        'epic-lin',
+        '--session',
+        second,
+        '--lineage',
+      ]);
+      expect(wide.status).toBe(0);
+      expect(taskIdsOf(wide.stdout)).toEqual(['epic-lin/task-1', 'epic-lin/task-2']);
+    });
+
+    it('refuses --lineage with no session to widen', () => {
+      const stamp = Date.now();
+      const eventsDir = path.join(scratchDir, 'lineage-alone-events');
+      const dbPath = path.join(scratchDir, `lineage-alone-${stamp}.db`);
+      expect(
+        runCli(['session', 'start', `cli-lineage-c-${stamp}`, '--state-dir', eventsDir]).status,
+      ).toBe(0);
+      expect(runCli(['db', 'rebuild', '--db', dbPath, '--state-dir', eventsDir]).status).toBe(0);
+
+      // Not a silent no-op: without --session there is nothing to widen, and
+      // answering with every session at once would be a different question.
+      const orphan = runCli(['stats', 'overview', '--db', dbPath, '--lineage']);
+      expect(orphan.status).toBe(1);
+      expect(JSON.parse(orphan.stdout).error.code).toBe('cli.missing-flag');
+    });
+  });
+
   // D-131/D-132, driven through the binary because that is where they were
   // found: the unit tests in args.test.ts prove the parser, and these prove
   // the parser is the one the CLI actually runs.

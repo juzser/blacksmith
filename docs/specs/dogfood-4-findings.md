@@ -13133,3 +13133,85 @@ surface, and a test that spot-checks a few paths stays green while it
 happens.
 
 **Related:** [[D-191]].
+
+---
+
+## D-263 — half an epic, reported as a whole one
+
+**Severity:** S2 (major) — every projected read answers a narrower question
+than the one asked, and answers it without saying so. There is no error, no
+empty result, no warning: `stats kanban --epic epic-7 --session
+epic-7-session-2` prints a kanban board of one epic, correctly shaped, missing
+the tasks the previous session added to it. An operator reading a board and
+counting three cards has no way to know there are five.
+
+**Where:** `factory/orchestrator/src/db/queries.ts` — roughly twenty
+narrowings, one per reader, each written `eq(<table>.sessionId,
+scope.sessionId)`; and `factory/orchestrator/src/cli.ts:3578`, where the
+`stats` branch built the only scope any of them ever receive.
+
+**How it opened.** P9-7 (2026-08-08) made a session log able to name a parent
+in another log: `validateCausalParent` allows a cross-session
+`causal_parent` on `session-start` and nowhere else. That shipped with its
+raw-log readers — `smith event lineage` walks the chain, `smith event tail
+--lineage` folds it root-first — and §5b of the operator guide was written
+around them. Then D-261 gave the edge a verb (`smith session start
+--continues`), and `.claude/skills/bs/SKILL.md` began *recommending* the split:
+an epic outlasts the orchestrator's context window, so finish it in a second
+session that continues the first rather than shrinking the epic.
+
+So the factory's own playbook now tells every long epic to become exactly the
+shape the projection cannot read. Reproduced against a live db: a continuation
+session asking about its own epic got one of that epic's two tasks.
+
+**Why it was invisible.** Every ingredient is individually correct. The
+projector folds every session's events into one db, so the rows are all
+there. `scope.sessionId` narrows a read to one session, which is the right
+answer to "what happened in this session". `--session` is optional, and
+omitting it spans everything. What has no expression anywhere in the file is
+the third question, the one the split created: *this epic*, which is neither
+one session nor all of them.
+
+**The fix.** `Scope` grows `sessionIds?: readonly string[]` beside
+`sessionId`, and a single helper — `scopedToSessions(column, scope)` — is
+the one place `=` widens to `IN (...)`. Every session narrowing in the file goes
+through it, which is the point: twenty hand-written `eq()`s are twenty chances
+for the next reader to be added without the lineage, and one helper is one.
+`sessionId` stays set alongside `sessionIds` because it is the session that was
+*asked about*, and the lineage always contains it.
+
+`projectedLineage(db, sessionId)` resolves the chain **off the projection**,
+not by calling `sessionLineage()` in events.ts. That is not duplication for its
+own sake: everything queries.ts serves is a pure reader over `state/smith.db`.
+`smith stats` opens a db and nothing else, and the UI server has no access to
+the log directory at all, so a lineage that could only be read off the
+filesystem would be a lineage the dashboard could never draw. The two walks are
+held to one definition instead — ancestors only, root-first, first root of each
+log — and the literal they share, `ROOT_EVENT_TYPE`, is now exported rather
+than copied.
+
+Two edges are decided rather than left to the driver. An unprojected ancestor
+**stops** the walk: `db rebuild` is incremental, a partial projection is a
+normal state and not a corrupt one, and the honest answer is the part of the
+lineage that exists. An empty `sessionIds` **throws** `RangeError`, because
+`inArray(col, [])` matches nothing on one driver and everything on another,
+neither is an answer to "scope this to no sessions", and the resolver cannot
+produce one — so an empty array is a caller bug and is told so rather than
+silently served an arbitrary row set.
+
+On the CLI it is `--lineage`, added to the shared `STATS` flag string, so all
+nine `stats` pages take it in one edit. It refuses to run without `--session`:
+there is nothing to widen, and answering about every session at once would be a
+different question than the operator asked.
+
+**What this does not cover.** The UI's HTTP surface still takes a single
+`session` query parameter. The seam it would use now exists — the server builds
+a `Scope` like everything else — but wiring the parameter, the dashboard
+control, and the e2e coverage is a separate change and is deliberately not in
+this one.
+
+**Status: fixed, 2026-09-03, branch `feat/a-lineage-is-one-epic`** — six
+projection-level tests in `test/db/lineageScope.test.ts` and two CLI-level
+tests driving the built binary in `test/cli.test.ts`.
+
+**Related:** [[D-261]].

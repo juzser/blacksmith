@@ -1364,6 +1364,27 @@ than appearing in it.
 
 ### Fixed
 
+- **Half an epic, reported as a whole one (D-263).** P9-7 made an epic able to
+  outlast the session that opened it — `causal_parent` may name another
+  session's log when the event is the `session-start` — D-261 gave that edge a
+  verb, and `SKILL.md` then recommended taking it whenever a context window
+  runs out mid-epic. Every read in `db/queries.ts` still narrowed on a single
+  session id with exact equality, so the continuation session asking about its
+  own epic was answered with the part of it that fell inside that window, and
+  told nothing about the rest. Not an error and not an empty page: a shorter
+  kanban, a thinner timeline, an analytics number computed over a fraction of
+  the runs — all of it looking exactly like a correct answer to a different
+  question. `Scope` now takes `sessionIds` beside `sessionId`, one helper
+  `scopedToSessions` is the single place equality widens to `inArray` so no
+  later reader can opt out by forgetting one call site, and `projectedLineage`
+  resolves the chain off `events_raw` rather than the log directory, because
+  `smith stats` opens nothing but a database and the UI server has no
+  filesystem to read. `smith stats <page> --session <id> --lineage` is the
+  operator-facing half, on all nine pages at once; it walks ancestors only,
+  exactly as `smith event lineage` does, stops at the first ancestor the
+  projection has not folded so a partial `db rebuild` narrows the answer
+  instead of failing it, and refuses to run without a `--session` rather than
+  quietly reporting every session as one lineage.
 - **A wave that ran two wide closed `serialized` on a slow enough runner
   (D-262).** The gate failed on `main` (run 33654242531) and again on a branch
   that had not touched any of this, both times on the same assertion in
