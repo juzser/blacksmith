@@ -23,10 +23,11 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { eq } from 'drizzle-orm';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
-import type { AnalyticsResult } from '../../../factory/orchestrator/dist/db/queries.js';
+import type { AnalyticsResult, Scope } from '../../../factory/orchestrator/dist/db/queries.js';
 import {
   analytics,
   errorsPage,
@@ -34,6 +35,7 @@ import {
   kanban,
   lessonsPage,
   overview,
+  projectedLineage,
   pulse,
   roadmapPage,
   taskDetail,
@@ -393,6 +395,44 @@ export function createApp(opts: AppOpts): AppHandle {
   // noveltyOptsFromFlags() is — a missing policy is an error, not a default.
   const lessonsPolicy = (opts.schedulerPolicy ?? loadSchedulerPolicy()).lessons;
 
+  /**
+   * The session half of every read route's scope, in one place (D-263).
+   *
+   * `?session` narrows to one session. `?lineage=true` widens that to the
+   * chain it continues, resolved off the projection by the same
+   * `projectedLineage()` the CLI's `--lineage` calls -- so the dashboard and
+   * `smith stats` draw the same scope from the same rows, and the server
+   * still needs nothing but a database to do it.
+   *
+   * Two refusals, both 400, both for the same reason. `?lineage` with no
+   * `?session` has nothing to widen, and reading it as "every session at
+   * once" would be D-263's failure in the other direction. And a `lineage`
+   * value that is neither `true` nor `false` is refused rather than ignored:
+   * falling through on `lineage=1` hands back the window, which is precisely
+   * the answer the caller asked not to get. A narrowing flag
+   * (`decisionsOnly`) can afford to be lenient about its spelling; a widening
+   * one cannot.
+   */
+  function sessionScope(c: Context): Pick<Scope, 'sessionId' | 'sessionIds'> {
+    const sessionId = c.req.query('session');
+    const lineage = c.req.query('lineage');
+    if (lineage !== undefined && lineage !== 'true' && lineage !== 'false') {
+      throw new BadRequestError(
+        'scope.bad-request',
+        `Query parameter "lineage" must be "true" or "false", not "${lineage}".`,
+        { lineage },
+      );
+    }
+    if (lineage !== 'true') return sessionId ? { sessionId } : {};
+    if (!sessionId) {
+      throw new BadRequestError(
+        'scope.bad-request',
+        'Query parameter "lineage" needs a "session" to widen: a lineage is resolved from a session, and every session at once is not one.',
+      );
+    }
+    return { sessionId, sessionIds: projectedLineage(handle.db, sessionId) };
+  }
+
   const app = new Hono();
 
   app.onError((err, c) => {
@@ -414,15 +454,11 @@ export function createApp(opts: AppOpts): AppHandle {
 
   // --- Reads: one route per §10 page query -----------------------------
   app.get('/api/overview', (c) => {
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
-    return c.json(
-      overview(handle.db, { ...(sessionId ? { sessionId } : {}), ...(project ? { project } : {}) }),
-    );
+    return c.json(overview(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
   app.get('/api/timeline', (c) => {
-    const sessionId = c.req.query('session');
     const taskId = c.req.query('task');
     const epicId = c.req.query('epic');
     const project = c.req.query('project');
@@ -431,7 +467,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const decisionsOnly = c.req.query('decisionsOnly');
     return c.json(
       timeline(handle.db, {
-        ...(sessionId ? { sessionId } : {}),
+        ...sessionScope(c),
         ...(taskId ? { taskId } : {}),
         ...(epicId ? { epicId } : {}),
         ...(project ? { project } : {}),
@@ -444,14 +480,8 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.get('/api/kanban', (c) => {
     const epic = c.req.query('epic');
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
-    return c.json(
-      kanban(handle.db, epic, {
-        ...(sessionId ? { sessionId } : {}),
-        ...(project ? { project } : {}),
-      }),
-    );
+    return c.json(kanban(handle.db, epic, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
   // The app shell's own poll — "is the factory still moving, and what has
@@ -459,16 +489,12 @@ export function createApp(opts: AppOpts): AppHandle {
   // other read, so the frame's liveness reading and the page's data are folded
   // from the same event log at the same moment.
   app.get('/api/pulse', (c) => {
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
-    return c.json(
-      pulse(handle.db, { ...(sessionId ? { sessionId } : {}), ...(project ? { project } : {}) }),
-    );
+    return c.json(pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
   app.get('/api/projects', (c) => {
-    const sessionId = c.req.query('session');
-    const result = overview(handle.db, sessionId ? { sessionId } : {});
+    const result = overview(handle.db, sessionScope(c));
     return c.json(result.projects ?? []);
   });
 
@@ -479,40 +505,29 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(detail);
   });
 
-  app.get('/api/lessons', (c) => {
-    const sessionId = c.req.query('session');
-    return c.json(lessonsPage(handle.db, sessionId ? { sessionId } : {}));
-  });
+  app.get('/api/lessons', (c) => c.json(lessonsPage(handle.db, sessionScope(c))));
 
   app.get('/api/errors', (c) => {
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
-    return c.json(
-      errorsPage(handle.db, {
-        ...(sessionId ? { sessionId } : {}),
-        ...(project ? { project } : {}),
-      }),
-    );
+    return c.json(errorsPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
   app.get('/api/analytics', (c) => {
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
     const result: AnalyticsResult = analytics(handle.db, {
-      ...(sessionId ? { sessionId } : {}),
+      ...sessionScope(c),
       ...(project ? { project } : {}),
     });
     return c.json(result);
   });
 
   app.get('/api/flow', (c) => {
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
     const epic = c.req.query('epic');
     const planVersion = parsePlanVersion(c.req.query('planVersion'));
     return c.json(
       flowGraph(handle.db, {
-        ...(sessionId ? { sessionId } : {}),
+        ...sessionScope(c),
         ...(project ? { project } : {}),
         ...(epic ? { epicId: epic } : {}),
         ...(planVersion !== undefined ? { planVersion } : {}),
@@ -521,14 +536,8 @@ export function createApp(opts: AppOpts): AppHandle {
   });
 
   app.get('/api/roadmap', (c) => {
-    const sessionId = c.req.query('session');
     const project = c.req.query('project');
-    return c.json(
-      roadmapPage(handle.db, {
-        ...(sessionId ? { sessionId } : {}),
-        ...(project ? { project } : {}),
-      }),
-    );
+    return c.json(roadmapPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
   // --- Writes: waiver apply-batch + lesson approve/edit/reject only ----

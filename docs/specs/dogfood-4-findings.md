@@ -13208,10 +13208,63 @@ different question than the operator asked.
 `session` query parameter. The seam it would use now exists — the server builds
 a `Scope` like everything else — but wiring the parameter, the dashboard
 control, and the e2e coverage is a separate change and is deliberately not in
-this one.
+this one. [[D-264]] is the first half of it.
 
 **Status: fixed, 2026-09-03, branch `feat/a-lineage-is-one-epic`** — six
 projection-level tests in `test/db/lineageScope.test.ts` and two CLI-level
 tests driving the built binary in `test/cli.test.ts`.
 
 **Related:** [[D-261]].
+
+## D-264 — the dashboard drew the window, the CLI drew the epic
+
+**Severity:** S3 (minor) — D-263's silence, still standing on the one surface
+D-263 deliberately left alone. Minor because the shipped dashboard cannot
+reach it: every Vue page scopes by project and passes `undefined` for the
+session, so there is no picker to hand a continuation session to. It is a
+finding at all because the HTTP API is the surface anything outside this repo
+reads a projection through, and a caller passing `?session` by hand was
+answered with the window — exactly as `smith stats --session` was before D-263.
+
+**Where:** `ui/server/src/app.ts` — ten read routes (`overview`, `timeline`,
+`kanban`, `pulse`, `projects`, `lessons`, `errors`, `analytics`, `flow`,
+`roadmap`), each opening `const sessionId = c.req.query('session')` and
+spreading `...(sessionId ? { sessionId } : {})` into the scope it built.
+
+**How it opened.** D-263 fixed the projection and the CLI together and wrote
+down what it had not fixed: the UI's HTTP surface, the dashboard control, and
+the e2e coverage, named as a separate change rather than left implied. This is
+the first half of that change.
+
+**The fix.** One `sessionScope(c)` helper builds the session half of every
+route's scope, and all ten routes spread it — the same reason
+`scopedToSessions` is one helper a layer down: a route written later cannot
+opt out of the widening by forgetting to call something. `?lineage=true`
+resolves the chain with the same `projectedLineage()` the CLI's `--lineage`
+calls, off `events_raw`, so the dashboard and `smith stats` draw the same scope
+from the same rows, and the server still needs nothing but a database to do it.
+
+Two refusals, both `400 scope.bad-request`. `?lineage` with no `?session` has
+nothing to widen, and reading it as "every session at once" would be D-263's
+failure in the other direction — the CLI refuses the same combination for the
+same reason. And a `lineage` value that is neither `true` nor `false` is
+refused rather than ignored, which is the opposite of how `decisionsOnly` is
+read a few lines above it. The asymmetry is deliberate: ignoring a narrowing
+flag returns *more* rows than were asked for, and the caller can see them;
+ignoring a widening one returns *fewer*, which is precisely the answer the
+caller spelled `lineage=1` to avoid. A flag whose failure mode is silence gets
+no leniency about spelling.
+
+**What this does not cover.** `ui/src/lib/api.ts` is untouched. The dashboard
+scopes by project on every page and never sends a session, so a `lineage`
+client parameter would have no caller today: a session picker in the UI is a
+feature in its own right, not a line in this one, and shipping the parameter
+first would be building a road to a door that does not exist yet.
+
+**Status: fixed, 2026-09-03, branch `feat/the-dashboard-draws-the-same-scope`**
+— five route-level tests in `ui/server/test/app.test.ts` that seed a real
+continuation session through `appendEvent` + `rebuild`, then assert that
+`?session` alone reads one window of the epic while `?session&lineage=true`
+reads all of it, on kanban, timeline and flow alike.
+
+**Related:** [[D-263]], [[D-261]].

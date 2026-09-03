@@ -1364,6 +1364,26 @@ than appearing in it.
 
 ### Fixed
 
+- **The dashboard drew the window, the CLI drew the epic (D-264).** D-263
+  taught every projected read to take a lineage and gave `smith stats` the
+  `--lineage` to ask for one, and said in the same breath what it had not
+  done: the UI's HTTP surface still took a single `?session`. So the two ways
+  of reading one projection disagreed — the CLI could see a whole epic, an API
+  caller standing in a continuation session got the window and no sign that
+  anything was missing. All ten read routes now build their session scope
+  through one `sessionScope()` helper, the same shape as `scopedToSessions` a
+  layer down and for the same reason: a route added later cannot opt out of
+  the widening by forgetting a call. `?lineage=true` resolves the chain with
+  the very `projectedLineage()` the CLI calls, off `events_raw`, so both
+  surfaces draw the same scope from the same rows. `?lineage` without a
+  `?session` is refused with 400 rather than read as every session at once —
+  D-263's failure in the other direction — and a `lineage` that is neither
+  `true` nor `false` is refused rather than ignored, because ignoring a
+  widening flag hands back exactly the narrow answer the caller spelled it to
+  avoid. The Vue client is deliberately unchanged: it scopes by project and
+  never sends a session, so the parameter waits for a session picker rather
+  than the picker waiting for it.
+
 - **Half an epic, reported as a whole one (D-263).** P9-7 made an epic able to
   outlast the session that opened it — `causal_parent` may name another
   session's log when the event is the `session-start` — D-261 gave that edge a

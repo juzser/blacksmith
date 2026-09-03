@@ -1494,6 +1494,18 @@ rebuild` narrows the answer rather than failing it. And it needs a `--session`
 to widen — on its own it exits 1 with `cli.missing-flag` rather than quietly
 answering about every session at once.
 
+The UI server's read routes take the same pair. `?session=<id>` alone is the
+window; `?session=<id>&lineage=true` is the epic, resolved through the same
+code path, on all ten routes at once — `/api/overview`, `/api/timeline`,
+`/api/kanban`, `/api/pulse`, `/api/projects`, `/api/lessons`, `/api/errors`,
+`/api/analytics`, `/api/flow`, `/api/roadmap`. Both refusals travel with it,
+as `400 scope.bad-request`: a `lineage` with no `session` has nothing to
+widen, and a `lineage` spelled anything but `true` or `false` is rejected
+rather than ignored, because ignoring it would hand back precisely the narrow
+answer the caller asked not to get. The shipped dashboard scopes by project
+and never sends a session, so this is an affordance for whatever else reads
+the API.
+
 Two errors are worth recognising on sight:
 
 | Error code | What you actually did |
