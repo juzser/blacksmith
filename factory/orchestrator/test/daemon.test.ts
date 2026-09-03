@@ -23,6 +23,8 @@ import {
   writeFindingMemory,
   writeStatus,
 } from '../src/daemon.js';
+import { openDb } from '../src/db/projector.js';
+import { roadmapPage } from '../src/db/queries.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
 import type { OutdatedPackage, SchedulerPolicy } from '../src/scheduler.js';
@@ -1546,5 +1548,107 @@ describe('a factory that has built nothing still has repos to tend', () => {
   it('still asks for no growth review on a factory with no history', async () => {
     const report = await runTick({ ...OPTS, stateDir });
     expect(report.findings.filter((f) => f.kind === 'growth-review')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same gate one layer down, in the read-model. `milestones` is the one
+// projected table that is not a fold of the event log at all -- it is a full
+// replacement of roadmap.md, and projector.ts says so in as many words -- and
+// the only thing that refreshes it is `apply()`, which a tick called once per
+// session. A clone with no session in the log therefore got no read-model at
+// all: not an empty Roadmap view, an unopened database file. `smith db
+// rebuild` filled it by hand and the daemon never did, which is the wrong way
+// round for the one process whose whole justification is that nobody is
+// watching.
+// ---------------------------------------------------------------------------
+describe('the read-model of a factory with no sessions', () => {
+  let dir: string;
+  let stateDir: string;
+  let dbPath: string;
+  let roadmapPath: string;
+
+  // A roadmap is a declaration, not a record of work: this one is legible the
+  // day the repo is cloned and nothing has run in it.
+  const ROADMAP = [
+    '# Roadmap',
+    '',
+    '## Phase A — Declared, not started',
+    '- id: phase-a',
+    '- status: planned',
+    '- epics: []',
+    '',
+  ].join('\n');
+
+  beforeEach(async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'smith-fresh-db-'));
+    stateDir = path.join(dir, 'events');
+    mkdirSync(stateDir, { recursive: true });
+    dbPath = path.join(dir, 'smith.db');
+    roadmapPath = path.join(dir, 'roadmap.md');
+    writeFileSync(roadmapPath, ROADMAP, 'utf8');
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Both readers stubbed empty: this block is about the projection, and a
+  // fixture that also read the operator's real project register would answer
+  // a different question every time somebody scaffolded a repo.
+  const tick = (overrides: Partial<Parameters<typeof runTick>[0]> = {}) =>
+    runTick({
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+      stateDir,
+      projectDb: true,
+      dbPath,
+      dbOpts: { roadmapPath },
+      readOutdated: () => [],
+      readProjects: () => [],
+      ...overrides,
+    });
+
+  it('projects the roadmap with no session to hang it off', async () => {
+    const report = await tick();
+    expect(report.sessions).toEqual([]);
+
+    const handle = openDb(dbPath);
+    try {
+      expect(roadmapPage(handle.db).map((m) => m.milestoneId)).toEqual(['phase-a']);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  // `projected` counts sessions folded, and none were. Refreshing a table that
+  // was never session-scoped is not a session projection, and a number that
+  // said otherwise would be one an operator could not reconcile with the
+  // `sessions` list printed beside it.
+  it('still reports no sessions projected', async () => {
+    expect((await tick()).projected).toBe(0);
+  });
+
+  // Same promise as the per-session path: the read-model failing is a finding,
+  // not a crash. It carries no session because there is no session to blame --
+  // and it clears on the next tick that can open the file, so the attention
+  // count it raises can come back down.
+  it('reports a projection failure it cannot pin on any session', async () => {
+    mkdirSync(dbPath, { recursive: true });
+
+    const report = await tick();
+
+    const failed = report.findings.filter((f) => f.kind === 'projection-failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.severity).toBe('attention');
+    expect(failed[0]?.sessionId).toBeNull();
+    expect(failed[0]?.subject).toBe(dbPath);
+    expect(report.attention).toBe(1);
+  });
+
+  it('leaves the database alone when the projection is switched off', async () => {
+    await tick({ projectDb: false });
+    expect(existsSync(dbPath)).toBe(false);
   });
 });

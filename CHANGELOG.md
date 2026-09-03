@@ -1321,6 +1321,25 @@ than appearing in it.
 
 ### Fixed
 
+- **A daemon on a fresh clone left the dashboard empty.** `milestones` is the
+  one projected table that is not folded out of the event log — it is a full
+  replacement of `factory/specs/roadmap.md`, and `projector.ts` calls it "not
+  session-scoped" in as many words. But the only thing a running daemon ever
+  called to refresh it was `apply()`, once per session, inside the tick's loop
+  over lineages. A clone with nothing in `state/events/` therefore got no
+  read-model at all: not an empty Roadmap view, an unopened SQLite file. An
+  operator could write a roadmap, start the watcher, open the dashboard, and
+  find the Roadmap view and the project switcher blank until they happened to
+  run `smith db rebuild` by hand — and the daemon never would, which is the
+  wrong way round for the one process whose whole justification is that nobody
+  is watching. A tick that folds no session now rebuilds instead, which on an
+  empty log clears nothing and projects the roadmap; it stops being reachable
+  the moment one session exists. `projected` still counts sessions folded and
+  so still reads `0`, and a rebuild that throws raises the same clearable
+  `projection-failed` finding as the per-session path, carrying `sessionId:
+  null` because there is no session to blame. Found the same way as the entry
+  below, one layer down: `smith stats roadmap` against this clone answered
+  `[]` while `roadmap.md` declared 14 milestones across 2 projects.
 - **A factory that had built nothing tended nothing.** The daemon's
   factory-wide pass — maintenance, `unwatched-project`, `growth-review`,
   `factory-width` — was skipped entirely on a tick that found no session in
