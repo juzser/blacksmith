@@ -23,6 +23,28 @@ than appearing in it.
 
 ### Added
 
+- **A guard that the documented error codes are the raised ones** (D-265).
+  `docErrorCodes.test.ts` is `docCommands.test.ts` one level down: that file
+  holds the documented verbs to the shipped verbs, this one holds the
+  documented *failures* to the shipped ones. An error code is a string literal
+  in a constructor's first argument, referenced by nothing the compiler checks
+  and named by hand in the guide's "Error code | What you actually did" tables
+  — so a rename leaves every table reading true and answering wrong, and the
+  operator who greps for the code the CLI just printed concludes the failure is
+  undocumented rather than renamed. `test/helpers/errorCodeScan.ts` reads the
+  vocabulary out of `factory/orchestrator/src` and `ui/server/src` in three
+  textual shapes (`new <subclass>('<code>'`, a `super('<code>'` for the one
+  subclass that builds its own, a `code:` field for the codes held in
+  `lessons.ts`'s table) — 231 codes, 48 namespaces — and reports rather than
+  drops any construction whose code it cannot read, so the scan cannot go
+  blind in silence. The prose side gates on three things: dotted and
+  code-shaped, a first segment something raises, and a last segment that is not
+  a file extension, which is what keeps `lessons.ts` and `severity.yml` out of a
+  guard whose namespaces are named after the modules that raise them. One
+  genuine collision, `task.judges`, is excused by name with its reason and both
+  halves of the excuse are checked. The instruction surface both guards read
+  moved to `test/helpers/instructionSurface.ts` rather than being copied.
+
 - **Opening a session is a command.** `smith session start <session-id>` writes
   the one `session-start` a log is allowed and prints the event id every write
   command needs as `--causal-parent`; `--continues <event-id>` opens it as the

@@ -13268,3 +13268,95 @@ continuation session through `appendEvent` + `rebuild`, then assert that
 reads all of it, on kanban, timeline and flow alike.
 
 **Related:** [[D-263]], [[D-261]].
+
+## D-265 — a code in the docs is not a code in the source
+
+**Severity:** S3 (minor) — nothing is broken today. The guard goes green on
+`main` at the moment it lands, which is the point: it is a lint against a
+rename that has not happened yet, on a surface where the rename is free and
+the drift is invisible. Minor because the cost lands on a person rather than
+an agent, and later rather than immediately.
+
+**Where:** every governing document that names a failure by its code —
+`docs/guide/operator-guide.md` (21 mentions), `.claude/skills/bs/SKILL.md`
+(14), `docs/runbooks/providers.md` and `ops.md`, the reviewer, spec-reviewer
+and security-reviewer role files, `docs/standards/agent-constraints.md` and
+`mcp.md`, `docs/specs/black-smith-architecture.md`. Ten live files, 57
+mentions, 39 distinct codes.
+
+**How it opened.** D-191 said a verb in code that no document names reaches no
+agent. D-259 found the converse — a document naming a verb the CLI does not
+ship — and `docCommands.test.ts` now guards it. The same asymmetry exists one
+level down, on the strings those failures are *identified* by, and nothing
+guarded it.
+
+An error code is a string literal in a constructor's first argument. Nothing
+the compiler checks references it, and the guide's "Error code | What you
+actually did" tables reference it by hand. Rename `cli.missing-flag` and every
+table naming it keeps reading true while answering wrong: the operator greps
+the guide for the code the CLI just printed, finds nothing, and concludes the
+failure is undocumented rather than renamed. That is quieter than D-259's
+failure — a verb that does not exist fails immediately, in an agent's hands; a
+code that does not exist fails only later, in a person's, while they are
+already debugging something else.
+
+**The fix.** `test/helpers/errorCodeScan.ts` reads the vocabulary out of the
+sources, and `docErrorCodes.test.ts` holds the prose to it.
+
+Reading the vocabulary is three shapes, textual for the reason
+`eventTypeScan.ts` gives (the `typescript` package here is 7.0.2, whose JS
+entry exposes no compiler API): `new <subclass>('<code>'`, which is 226 of
+them; `super('<code>'` in a file declaring a subclass, for `GitCommandError`,
+which overrides the constructor and builds its own; and a `code: '<code>'`
+field, for `lessons.ts`'s `SELECTOR_RULES`, which holds codes in a table and
+raises them as `rule.code`. 231 codes across 48 namespaces. The alternation is
+built from the `extends SmithError` declarations rather than from
+`/[A-Z]\w*Error/`, which also matches `new RangeError(...)` and admits its
+first argument — a whole English sentence — as a code.
+
+What the scanner cannot read, it reports. A `new FooError(` whose first
+argument is not a literal becomes an *opaque site*, and the guard pins the set
+of them to the two that exist, by class. A scanner that quietly stops seeing
+raise sites passes every check built on it forever; this one has to be argued
+with instead.
+
+Reading the prose is three gates, narrowest first. A token must be dotted and
+code-shaped — an undotted code (`unsupported-runtime`) is indistinguishable
+from an ordinary hyphenated word, and guarding it would report English. Its
+first segment must be a namespace something raises, or the guard grows into
+every dotted string in the repo. And its last segment must not be a file
+extension, because most namespaces are named after the module that raises
+them: `lessons.ts`, `severity.yml` and `daemon.log` all read as
+`<namespace>.<x>`, 29 of them today, enough noise to make the guard worth
+ignoring.
+
+That leaves exactly one genuine collision, `task.judges` — a key path in
+`budgets.yml`, sharing a namespace with `task.unknown` — and it is excused by
+name with the reason written down, the bargain `FREE_EVENT_TYPES` already
+strikes. Both halves of the excuse are checked: an entry no live document
+writes any more fails, and so does one the sources have started raising.
+
+The instruction surface itself moved to `test/helpers/instructionSurface.ts`
+rather than being copied. Two answers to "which documents govern an agent" is
+one answer too many the day one of them gains a `SKIP_DIRS` entry the other
+does not, and both guards are only worth anything if they read the same
+surface the dispatcher does.
+
+**What this does not cover.** Three things, all deliberate. A code raised
+nowhere and documented nowhere is invisible to both halves — this is the
+converse guard, not a coverage report, and an unused code costs nobody
+anything. Single-segment codes (`unsupported-runtime`) are unguarded, for the
+reason above. And the codes are checked for existence, not for meaning: a
+table that pairs a real code with the wrong explanation still reads clean, and
+no scanner is going to catch that.
+
+**Status: fixed, 2026-09-03, branch
+`feat/a-code-in-the-docs-is-a-code-in-the-source`** — twelve tests in
+`factory/orchestrator/test/docErrorCodes.test.ts`, of which four pin the
+scanner against fixtures rather than the repo, four pin the prose predicate,
+and the rest hold the surface. The guard was proven to bite before it was
+proven to pass: a stale `cli.missing-flags` planted in `docs/runbooks/ops.md`
+was reported as `docs/runbooks/ops.md:569 cli.missing-flags`, and the floor
+test refuses a scan that resolves fewer than 200 codes or fewer than 30 claims.
+
+**Related:** [[D-259]], [[D-191]], [[D-142]].
