@@ -1341,6 +1341,24 @@ than appearing in it.
 
 ### Fixed
 
+- **A wave that ran two wide closed `serialized` on a slow enough runner
+  (D-262).** The gate failed on `main` (run 33654242531) and again on a branch
+  that had not touched any of this, both times on the same assertion in
+  `epic.test.ts`, and passed every time locally. `appendEvent` stamps `ts` off
+  the wall clock, and that fixture writes a whole epic — an admission, two
+  dispatches, two terminals, three checks and the close — inside a single
+  millisecond, while the width verdict is interval arithmetic over those
+  stamps. So the assertion was settled by which side of a millisecond boundary
+  each append happened to fall on: let the clock tick between the two
+  dispatches and then let task-1's terminal share the millisecond task-2's
+  dispatch landed in, and the two runs meet exactly end-to-start — which
+  `peakOverlap` reads as a handoff rather than an overlap. That rule is
+  deliberate and `waveConcurrency.test.ts` pins it, so nothing in
+  `waveConcurrency.ts` changed. The fixture now fakes `Date` and steps it by a
+  minute between dispatch and terminal, the way `db/milestones.test.ts`
+  already does for the same reason. At the granularity a real run writes at
+  the defect was never reachable — it was the test's clock throughout, which
+  is why it read as an unrelated red gate on somebody else's pull request.
 - **A daemon on a fresh clone left the dashboard empty.** `milestones` is the
   one projected table that is not folded out of the event log — it is a full
   replacement of `factory/specs/roadmap.md`, and `projector.ts` calls it "not
