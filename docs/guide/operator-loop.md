@@ -1,7 +1,8 @@
 # The operator loop
 
 What you actually do, in the order you meet it. Six steps, two of which need
-you; the rest is the factory's job.
+you; the rest is the factory's job. Step 0 comes before all of them and
+happens once per project.
 
 This is the bridge between the README's summary and
 [`operator-guide.md`](operator-guide.md), which walks the same ground with
@@ -15,6 +16,7 @@ is your console:
 | Command | What it does |
 |---|---|
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
+| `/bs mcp <project>` | Layer the MCP surface on, at its own milestone |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner |
 | `/bs run <epic>` | Admit a wave and drive it through the loop |
 | `/bs status` | Live agent count, budget burn, epic phase |
@@ -29,6 +31,57 @@ while the session is closed. `smith daemon` runs in the background and will
 tell you what the factory needs while you are away, but it watches and never
 dispatches — see [Limitations today](operator-guide.md#limitations-today) and
 [the ops runbook](../runbooks/ops.md).
+
+## 0. Have something to build in — `/bs new <project>`
+
+One-time, and only for a project that does not exist yet. The loop below
+starts at step 1 for every epic after this one.
+
+Blacksmith does not build inside itself. It builds a **separate project**, in
+its own directory, with its own git history, and that project must exist
+before there is anything to plan an epic against.
+
+```bash
+# 1. Say what you build with. Answers, not code -- language, frontend,
+#    design system, database, deploy target. `none` wherever you have no
+#    opinion yet; the defaults assume least.
+$EDITOR factory/policies/stack.yml
+smith stack check          # which answers the templates honour,
+                           # which are only recorded, which make `new` refuse
+
+# 2. Scaffold. Lands in <repo-parent>/<project> unless you say otherwise.
+smith new my-app --target-dir ~/code/my-app        # add --ui for a frontend
+```
+
+That one call copies the scaffold (TS strict, Biome, Vitest, CI), installs,
+runs the project's own gates in `ci.yml`'s order, commits it on a `setup`
+branch, and registers a bootstrap milestone in `factory/specs/roadmap.md`.
+Read `toolchain` in the JSON it prints: `verified` means every gate passed and
+you may plan against it; `failed` names the gate and the exact command to
+re-run by hand; `skipped` means `--skip-toolchain` was passed and nothing was
+proven.
+
+It refuses rather than improvises. An answer the shipped templates cannot
+build — `frontend: react` today — stops it **before anything is created**,
+instead of quietly handing you the frontend they do ship.
+
+The last two commands are yours. `smith new` prints `commands.ghRepoCreate`
+and `commands.push` and does not run them: creating a remote and pushing a
+brand-new repo is an operator action, and no agent session here will do it for
+you.
+
+```bash
+gh repo create my-app --private --source ~/code/my-app
+git -C ~/code/my-app push -u origin setup
+```
+
+Then step 1, with `--project my-app` on the epic. The MCP surface comes later,
+at its own milestone — `/bs mcp <project>` — once there are tools worth
+exposing; running it on day one would declare nothing.
+
+Nothing in the built project points back here. No dependency, no
+Blacksmith-shaped config, no docs about the factory — one `Built by
+Blacksmith` line in its README and that is the whole trace.
 
 ## 1. Say what you want — `/bs plan <goal>`
 

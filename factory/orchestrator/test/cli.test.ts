@@ -8452,6 +8452,33 @@ describe('cli.ts (built binary)', () => {
       expect(parsed.lineage).toEqual(['lin-a', 'lin-b']);
       expect(parsed.root).toBe('lin-a');
       expect(parsed.depth).toBe(2);
+      expect(parsed.continued_by).toEqual([]);
+    });
+
+    it('names the waves that continue an epic, read from the epic itself (D-266)', () => {
+      const r0 = append('fan-root', 'session-start', null);
+      append('fan-w2', 'session-start', r0);
+      append('fan-w1', 'session-start', r0);
+
+      const { stdout, status } = runCli([
+        'event',
+        'lineage',
+        'fan-root',
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.lineage).toEqual(['fan-root', 'fan-w1', 'fan-w2']);
+      expect(parsed.continued_by).toEqual(['fan-w1', 'fan-w2']);
+      // A fan-out is width, not depth: the epic is still one window deep.
+      expect(parsed.depth).toBe(1);
+      expect(parsed.root).toBe('fan-root');
+
+      // And from inside a wave, the siblings are somebody else's scope.
+      const wave = runCli(['event', 'lineage', 'fan-w1', '--state-dir', eventsDir()]);
+      expect(wave.status).toBe(0);
+      expect(JSON.parse(wave.stdout).lineage).toEqual(['fan-root', 'fan-w1']);
     });
 
     it('tail --lineage reads the whole epic, plain tail reads one session', () => {

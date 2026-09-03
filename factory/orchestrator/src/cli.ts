@@ -57,7 +57,7 @@ import {
   readLineageEvents,
   requireSession,
   type StoredEvent,
-  sessionLineage,
+  sessionTree,
   startSession,
   tailEvents,
 } from './events.js';
@@ -2105,8 +2105,21 @@ async function main(): Promise<number> {
 
   if (namespace === 'event' && action === 'lineage') {
     const [sessionId] = requirePositionals(positional, usageFor('event lineage')) as [string];
-    const lineage = await sessionLineage(sessionId, eventOptsFromFlags(flags));
-    printJson({ session: sessionId, lineage, depth: lineage.length, root: lineage[0] });
+    const tree = await sessionTree(sessionId, eventOptsFromFlags(flags));
+    // D-266. `lineage` is every session a lineage-wide fold reads, because a
+    // display verb that draws a narrower scope than the gates decide on is the
+    // reason the operator trusts the wrong picture. `depth` stays the length of
+    // the ancestry alone -- it has always meant "how many windows back does
+    // this go", and a fan-out is not depth. `continued_by` is the half that is
+    // new, and printing it as its own field is what makes the two readable
+    // apart: lineage === [...ancestry, ...continued_by].
+    printJson({
+      session: sessionId,
+      lineage: tree.sessions,
+      depth: tree.ancestry.length,
+      root: tree.ancestry[0],
+      continued_by: tree.continuations,
+    });
     return 0;
   }
 
