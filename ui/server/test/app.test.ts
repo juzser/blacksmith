@@ -726,6 +726,141 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  // ---------------------------------------------------------------------------
+  // D-263, at the door. `smith stats --lineage` widens a projected read from
+  // one session to the chain it continues; every read route here still took a
+  // single `session` and nothing else, so an API caller standing in a
+  // continuation session was answered with the window rather than the epic --
+  // the same half-an-epic the CLI stopped reporting.
+  // ---------------------------------------------------------------------------
+  describe('?lineage widens a read from the window to the epic (D-263)', () => {
+    const CONTINUATION = 'sess-continuation';
+    const TASK_5 = `${EPIC_ID}/task-5`;
+
+    /** A second session that continues the fixture's, carrying one more task
+     * on the SAME epic -- the shape SKILL.md recommends when an epic outlasts
+     * the window that opened it. */
+    async function seedContinuation(): Promise<void> {
+      const root = await appendEvent(
+        {
+          session_id: CONTINUATION,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: `${SESSION_ID}#0`,
+          payload: {},
+        },
+        { stateDir },
+      );
+      await appendEvent(
+        {
+          session_id: CONTINUATION,
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: TASK_5,
+          plan_version: 1,
+          causal_parent: root.event_id,
+          payload: {
+            epic_id: EPIC_ID,
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Finish what the first window started.',
+            claims: ['src/task-5.ts'],
+            budget_tokens: 1000,
+          },
+        },
+        { stateDir },
+      );
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+    }
+
+    async function kanbanTasks(query: string): Promise<string[]> {
+      const handle = app();
+      try {
+        const res = await handle.app.request(`/api/kanban?epic=${EPIC_ID}&${query}`);
+        expect(res.status).toBe(200);
+        const body = await json<Array<{ tasks: Array<{ taskId: string }> }>>(res);
+        return body
+          .flatMap((c) => c.tasks)
+          .map((t) => t.taskId)
+          .sort();
+      } finally {
+        closeApp(handle);
+      }
+    }
+
+    it('reads the whole epic where ?session alone reads one window of it', async () => {
+      await seedContinuation();
+
+      const window = await kanbanTasks(`session=${CONTINUATION}`);
+      expect(window).toEqual([TASK_5]);
+
+      const epic = await kanbanTasks(`session=${CONTINUATION}&lineage=true`);
+      expect(epic).toContain(TASK_5);
+      expect(epic).toContain(TASK_1);
+      expect(epic.length).toBeGreaterThan(window.length);
+    });
+
+    it('widens the timeline and the flow graph the same way', async () => {
+      await seedContinuation();
+      const handle = app();
+      try {
+        const tasksOf = async (query: string): Promise<Set<string>> => {
+          const res = await handle.app.request(`/api/timeline?${query}`);
+          expect(res.status).toBe(200);
+          const body = await json<Array<{ taskId: string | null }>>(res);
+          return new Set(body.map((e) => e.taskId).filter((id): id is string => id !== null));
+        };
+        expect(await tasksOf(`session=${CONTINUATION}`)).toEqual(new Set([TASK_5]));
+        expect(await tasksOf(`session=${CONTINUATION}&lineage=true`)).toContain(TASK_1);
+
+        const nodes = async (query: string): Promise<number> => {
+          const res = await handle.app.request(`/api/flow?epic=${EPIC_ID}&${query}`);
+          expect(res.status).toBe(200);
+          return (await json<{ nodes: unknown[] }>(res)).nodes.length;
+        };
+        expect(await nodes(`session=${CONTINUATION}&lineage=true`)).toBeGreaterThan(
+          await nodes(`session=${CONTINUATION}`),
+        );
+      } finally {
+        closeApp(handle);
+      }
+    });
+
+    it('refuses ?lineage with no session to widen', async () => {
+      const handle = app();
+      try {
+        const res = await handle.app.request('/api/overview?lineage=true');
+        expect(res.status).toBe(400);
+        const body = await json<{ error: { code: string } }>(res);
+        expect(body.error.code).toBe('scope.bad-request');
+      } finally {
+        closeApp(handle);
+      }
+    });
+
+    it('refuses a lineage value it cannot read rather than answering narrowly', async () => {
+      // Silently ignoring `lineage=1` would hand back the window -- the exact
+      // answer the caller asked not to get. A widening flag has to fail loud
+      // where a narrowing one (`decisionsOnly`) can afford to fall through.
+      const handle = app();
+      try {
+        const res = await handle.app.request(`/api/kanban?session=${SESSION_ID}&lineage=1`);
+        expect(res.status).toBe(400);
+        expect((await json<{ error: { code: string } }>(res)).error.code).toBe('scope.bad-request');
+      } finally {
+        closeApp(handle);
+      }
+    });
+
+    it('reads lineage=false as the absent flag', async () => {
+      await seedContinuation();
+      expect(await kanbanTasks(`session=${CONTINUATION}&lineage=false`)).toEqual([TASK_5]);
+    });
+  });
+
   describe('static-serve (uiDistDir)', () => {
     let distDir: string;
 
