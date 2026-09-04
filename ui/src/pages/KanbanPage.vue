@@ -22,6 +22,7 @@ import KanbanBoard from '../components/KanbanBoard.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import { fetchKanban, fetchOverview, type KanbanColumn, selectableEpics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
@@ -32,6 +33,7 @@ const route = useRoute();
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Kanban' }]);
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 
 const epics = ref<string[]>([]);
 const selectedEpic = ref<string>(ALL_EPICS);
@@ -50,7 +52,7 @@ const epicsFailed = ref(false);
 
 async function loadEpics() {
   try {
-    const overview = await fetchOverview(undefined, project.value);
+    const overview = await fetchOverview(sessionScope.value, project.value);
     epics.value = selectableEpics(overview);
     epicsFailed.value = false;
   } catch {
@@ -64,7 +66,11 @@ async function loadBoard() {
   // an outage every one of those attempts wiped the banner for the length of
   // its own flight, leaving the bare empty state in its place (D-226).
   try {
-    columns.value = await fetchKanban(selectedEpic.value || undefined, undefined, project.value);
+    columns.value = await fetchKanban(
+      selectedEpic.value || undefined,
+      sessionScope.value,
+      project.value,
+    );
     error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -96,7 +102,7 @@ watch(selectedEpic, loadBoard);
 // project's epics. Here the 15s poll re-ran `load()` and healed it eventually
 // — the operator just had up to fifteen seconds of a control offering epics
 // that belong to a project they are no longer looking at (D-228).
-watch(project, async () => {
+watch([project, sessionKey], async () => {
   await loadEpics();
   selectedEpic.value = retainedEpic(selectedEpic.value, epics.value);
   await loadBoard();

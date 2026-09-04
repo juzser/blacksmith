@@ -23,6 +23,27 @@ than appearing in it.
 
 ### Added
 
+- **The dashboard can be asked about one run, and about that run's lineage.**
+  D-263/D-264 taught the server to read `?session` and `?lineage` on every read
+  route and then deliberately stopped there, because "a session picker in the
+  UI is a feature in its own right". This is that feature. Every page that
+  consumes the scope — Overview, Sessions, Timeline, Kanban, Flow, Errors,
+  Analytics — carries a session picker in the topbar beside the project
+  switcher, and picking a run adds a width control: **This session** or **With
+  its lineage**. The choice rides in the route query, so a scoped view survives
+  a reload and can be pasted to somebody else, and clearing the run clears the
+  widening with it — `lineage` with no `session` is the pair the server
+  refuses, and `SessionScope` makes it unrepresentable rather than unsent. It
+  matters most on Sessions, the page the operator asked to be able to read when
+  a screenful of dispatched wave-runners is on it: since D13 an epic spans three
+  sessions, so "what did this epic do" is a question about a lineage and the
+  dashboard had no way to ask it about anything narrower than the whole state
+  dir. The rules live in `ui/src/lib/sessionScope.ts` under 46 unit tests, not
+  in the `.vue` files that neither tsc nor biome checks here, and the topbar
+  picker is fed by a new thin `/api/sessions` route rather than by a second
+  shell-level caller of `/api/overview` — the two pages that poll that endpoint
+  every 5s are also the two whose outage guards fail it deliberately.
+
 - **An agent may now dispatch agents, and `factory/policies/delegation.yml`
   says which one.** D13 closed on "the orchestrator cannot be split"; this is
   the third and last step of splitting it. `.claude/agents/wave-runner.md` is

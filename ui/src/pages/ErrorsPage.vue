@@ -19,6 +19,7 @@ import Skeleton from '../components/ds/Skeleton.vue';
 import Table from '../components/ds/Table.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import { type ErrorsResult, fetchErrors } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { errorGroupIcon, severityTone } from '../lib/taxonomy.js';
@@ -26,6 +27,7 @@ import { errorGroupIcon, severityTone } from '../lib/taxonomy.js';
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Errors' }]);
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 
 const data = ref<ErrorsResult | null>(null);
 const error = ref<string | null>(null);
@@ -42,7 +44,7 @@ async function load() {
   // gets its skeleton, because there the page really is empty (D-243).
   loading.value = data.value === null;
   try {
-    data.value = await fetchErrors(undefined, project.value);
+    data.value = await fetchErrors(sessionScope.value, project.value);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -50,7 +52,7 @@ async function load() {
   }
 }
 onMounted(load);
-watch(project, load);
+watch([project, sessionKey], load);
 
 /** The fetch's own verdict. `!loading` is not it: loading goes false on failure too. */
 const loaded = computed(() => data.value !== null);

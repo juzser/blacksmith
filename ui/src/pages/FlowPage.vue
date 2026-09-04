@@ -75,6 +75,7 @@ import Skeleton from '../components/ds/Skeleton.vue';
 import Toolbar from '../components/ds/Toolbar.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import { type FlowGraph, fetchFlow, fetchOverview, selectableEpics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
@@ -93,6 +94,7 @@ const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Flow' }]);
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 
 const graph = ref<FlowGraph | null>(null);
 const error = ref<string | null>(null);
@@ -122,7 +124,7 @@ const epicsFailed = ref(false);
 
 async function loadEpics() {
   try {
-    const ov = await fetchOverview(undefined, project.value);
+    const ov = await fetchOverview(sessionScope.value, project.value);
     epics.value = selectableEpics(ov);
     epicsFailed.value = false;
   } catch {
@@ -135,6 +137,7 @@ async function load() {
   loading.value = true;
   try {
     graph.value = await fetchFlow({
+      session: sessionScope.value,
       project: project.value,
       epic: selectedEpic.value || undefined,
       planVersion: planVersion.value ?? undefined,
@@ -160,7 +163,7 @@ watch([selectedEpic, planVersion], load);
 // project folded into the watcher above, the picker stayed frozen on the
 // previous project's epics for good, and the new project's epics could not be
 // selected at all without a manual reload (D-228).
-watch(project, async () => {
+watch([project, sessionKey], async () => {
   await loadEpics();
   selectedEpic.value = retainedEpic(selectedEpic.value, epics.value);
   await load();

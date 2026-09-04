@@ -15,6 +15,7 @@ import StatCard from '../components/ds/StatCard.vue';
 import TwoColumn from '../components/ds/TwoColumn.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import {
   costPerTask,
   costPerTaskBy,
@@ -30,6 +31,7 @@ import { canClaimEmpty } from '../lib/emptyClaim.js';
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Analytics' }]);
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 
 const data = ref<AnalyticsResult | null>(null);
 const error = ref<string | null>(null);
@@ -45,7 +47,7 @@ async function load() {
   // gets its skeleton, because there the page really is empty (D-243).
   loading.value = data.value === null;
   try {
-    data.value = await fetchAnalytics(undefined, project.value);
+    data.value = await fetchAnalytics(sessionScope.value, project.value);
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -53,7 +55,7 @@ async function load() {
   }
 }
 onMounted(load);
-watch(project, load);
+watch([project, sessionKey], load);
 
 const throughputTotal = computed(() =>
   (data.value?.throughput ?? []).reduce((s, d) => s + d.completed, 0),
