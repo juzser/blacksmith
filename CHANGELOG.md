@@ -1115,6 +1115,17 @@ than appearing in it.
 
 ### Changed
 
+- **Phase 10, wave 1: this clone joins its own maintenance pass by default,
+  and a struck roadmap milestone keeps its evidence.** `daemon run`,
+  `scheduler run` and `scheduler admit` now watch this checkout unless an
+  operator opts out with `--no-self`; the reconciliation with the two rules
+  that default had to hold — this clone is always `REPO_ROOT`, never a name
+  lookup, and an `unwatched-project` finding for it must be able to clear —
+  is recorded in D-272. The four `envkit` milestones `factory/specs/roadmap.md`
+  could no longer reach were struck rather than left to point at a checkout
+  this clone's tooling cannot open, their evidence preserved in D-271 rather
+  than left to git history alone.
+
 - **The standing rule against nesting now cites a reason that is still
   true.** `docs/standards/agent-constraints.md` justified flat topology with
   a blocker that P9-7 removed on 2026-08-08: it said `causal_parent` is

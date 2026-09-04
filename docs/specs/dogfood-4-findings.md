@@ -13893,3 +13893,101 @@ unchanged before and after — the `- epics: [phase-10]` edit landed on its
 own line, the goal line untouched by a single byte.
 
 **Related:** [[D-269]].
+
+## D-272 — self is the one entry a `--project` flag has nothing to add
+
+**Severity:** S3-minor.
+
+**Where:** `factory/orchestrator/src/projects.ts:14-20,56-58,100-114` and
+`docs/runbooks/ops.md:213-214` (restated at
+`factory/orchestrator/src/daemon.ts:388-390`), against
+`factory/orchestrator/src/cli.ts:1656-1671` (`daemon run`) and its two
+siblings at `cli.ts:1548-1556` (`scheduler run`) and `cli.ts:1609-1616`
+(`scheduler admit`).
+
+**How it opened.** Before task-1, `--project` was the only way any
+maintenance pass — `daemon run`, `scheduler run`, `scheduler admit` —
+learned a repo existed, and this clone was never one of the repos an
+operator typed. `factoryProjects()` already listed this clone first in its
+own register (`projects.ts:60-62`); nothing downstream read that entry
+unless `--project` named it too, so `unwatched-project` never fired for the
+one repo every other finding in the file is about. The gap had a name
+nobody could see: `state/daemon/status.json` at 2026-09-03T02:16:47.709Z
+recorded exactly one finding, `unwatched-project` with this clone's own
+checkout as `subject`, raised because that tick was never handed
+`--project /path/to/this/clone`.
+
+**The fix.** `resolveProjectDirs` (`projects.ts:107-114`) now joins this
+clone's `REPO_ROOT` into every project list by default; `daemon run`,
+`scheduler run` and `scheduler admit` all call it the same way, so the
+three call sites cannot drift into three answers for "does self count".
+`--no-self` is the one way to say no, and it has to do two things
+together: drop `REPO_ROOT` from `resolveProjectDirs`'s output and filter
+the `self: true` entry out of `factoryProjects()`'s own register before
+the daemon folds it. Leaving self in the register while pulling it from
+the watched list would still raise `unwatched-project` for it — exactly
+the alarm `--no-self` exists to silence (`cli.ts:1662-1667`).
+
+Two rules already in the file governed how this had to be built, not
+whether:
+
+- `projects.ts:14-20`'s header rule — this clone's entry is always
+  `REPO_ROOT`, resolved directly, never a name lookup of `FACTORY_PROJECT`
+  under `PROJECTS_DIR`, because `PROJECTS_DIR` is this clone's parent
+  directory and on this box that parent also holds `black-smith`, a
+  different repo with a different remote. A name lookup would read the
+  wrong repo while reporting that it read its own. `factoryProjects()`
+  honors this at `projects.ts:62`: the self entry is built once, straight
+  from `REPO_ROOT`, before the roadmap is even read.
+- `ops.md:213-214`'s rule — "An attention count that can never return to
+  zero is worse than no count — it trains you to stop reading it,"
+  restated at the call site in `daemon.ts:388-390`. `--no-self` has to
+  clear the finding it creates, in one flag, the same test `factory-width`
+  already sets for itself: `daemon.ts`'s register deliberately omits any
+  project it cannot find on disk, for the identical reason — nothing here
+  may raise an alarm with no action.
+
+Self is the one entry where `--project` would carry no information the
+process lacks. Every other repo in `factoryProjects()`'s register is found
+by searching `PROJECTS_DIR` and `WORKSPACES_DIR` for a name the roadmap
+declared, and that search can fail — a checkout can be missing, moved, or
+never cloned. This clone's own location is never in question: the running
+process already knows where it is, which is what `projects.ts:56-58` means
+by calling self "the one entry that needs no roadmap and no search to be
+certain of." A `--project` flag for self would only ask the process to
+confirm a fact it cannot fail to have.
+
+**Measured, 2026-09-04.** Before: the single `unwatched-project` finding
+above. After, on this branch: `node factory/orchestrator/dist/cli.js
+daemon run --once --dir <scratch>`, a fresh directory outside `state/` so
+the live daemon lock and status are untouched —
+
+```
+{"ticks":1,"dir":"<scratch>","last":{"at":"2026-09-04T14:22:35.139Z",
+"sessions":[],"findings":[{"kind":"maintenance","severity":"info",
+"subject":"<this checkout>: 5 package(s)","detail":"...(confidence 0.5,
+needs an operator).","admission":{"decision":"operator","code":
+"below-confidence-floor", ...}}],"attention":0,"newAttention":0,
+"autoAdmitted":0,"operatorHeld":1,"projected":0}}
+```
+
+No `unwatched-project` finding; `attention: 0`. The one finding raised is
+unrelated — a `maintenance` advisory about five package upgrades, `info`
+severity, sorted into `operatorHeld` because its confidence sits below
+`autonomy.confidence_floor`. One correction to the orchestrator's own
+before-dispatch note: the scratch directory belongs on `--dir`, not
+`--state-dir`. `--state-dir` overrides only the events-log directory read
+by `eventOptsFromFlags` (`cli.ts:433-441`); it never touches where a tick
+writes its own status, which stays `--dir`, defaulting to `state/daemon`
+(`cli.ts:1646`, `DEFAULT_DAEMON_DIR`). A tick run with `--state-dir
+<scratch>` alone still writes to the live `state/daemon/status.json`.
+
+No divergence from task-1's mandate: the default and the `--no-self`
+opt-out both match this record's account for all three call sites.
+
+**Status: recorded, 2026-09-04, branch
+`smith/phase-10/task-1-watch-this-clone-by-default`** — verified above
+against this branch's `projects.ts` and `cli.ts`, and against one
+`daemon run --once --dir <scratch>` tick.
+
+**Related:** [[D-269]], [[D-271]].
