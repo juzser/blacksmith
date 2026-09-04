@@ -2039,6 +2039,10 @@ describe('cli.ts (built binary)', () => {
       sessionId,
       '--dry',
       'true',
+      // This clone is in the pass by default; --no-self keeps this test's
+      // scope to the session-event question it actually asks rather than
+      // this checkout's own dependency state.
+      '--no-self',
       '--state-dir',
       eventsDir,
     ]);
@@ -2115,6 +2119,10 @@ describe('cli.ts (built binary)', () => {
       'admit',
       '--session',
       sessionId,
+      // See the --dry test above: keep this clone out so the assertions
+      // below stay about admission classification, not this checkout's
+      // own dependency state.
+      '--no-self',
       '--state-dir',
       eventsDir,
     ]);
@@ -9557,9 +9565,9 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(status).toBe(0);
       const findings = JSON.parse(stdout).last.findings as Array<{ kind: string; subject: string }>;
-      expect(findings.filter((f) => f.kind === 'unwatched-project' && f.subject === REPO_ROOT)).toEqual(
-        [],
-      );
+      expect(
+        findings.filter((f) => f.kind === 'unwatched-project' && f.subject === REPO_ROOT),
+      ).toEqual([]);
     });
 
     // `--no-self` accepted and honoured: excluding this clone still raises no
@@ -9579,9 +9587,9 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(status).toBe(0);
       const findings = JSON.parse(stdout).last.findings as Array<{ kind: string; subject: string }>;
-      expect(findings.filter((f) => f.kind === 'unwatched-project' && f.subject === REPO_ROOT)).toEqual(
-        [],
-      );
+      expect(
+        findings.filter((f) => f.kind === 'unwatched-project' && f.subject === REPO_ROOT),
+      ).toEqual([]);
     });
 
     it('exits 1 from `status` when nobody is watching, last tick and all', () => {
