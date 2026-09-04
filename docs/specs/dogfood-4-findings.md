@@ -13456,3 +13456,110 @@ assertions updated to the new oldest-end semantics with the reason recorded
 in place.
 
 **Related:** [[D-119]], [[D-263]], [[D-264]], [[D-163]].
+
+## D-267 — a lens two documents promise and no agent was told to apply
+
+**Status: fixed 2026-09-04** on `fix/a-lens-nobody-carries`.
+
+**Severity:** S3 (minor). Nothing shipped wrong and no gate went green that
+should have gone red — but the one enforcement YAGNI had was named in two
+policy documents and existed in neither the template that would apply it nor
+the contract that would let it be raised. The S2 argument is real (a whole
+finding category was unreachable for the life of the factory); it stays S3
+because the cost is un-caught over-engineering rather than a wrong answer,
+which is the same reason the category itself defaults to S3.
+
+**Where:** `docs/standards/agent-constraints.md:67` and
+`factory/policies/severity.yml:64` (`over_engineering_note`), both naming
+*"the reviewer's `over-engineering` lens"*, against
+`.claude/agents/reviewer.md`, which carried a `## Behavioral-drift lens (v3)`
+and no over-engineering lens at all. In the whole reviewer template the
+string `over-engineering` occurred exactly once, at line 98 — as one entry in
+the closed category vocabulary.
+
+**How it opened.** The operator pointed at `DietrichGebert/ponytail`, an
+external repo that ships one YAGNI rule text across a dozen agent ecosystems,
+and asked whether anything in it was worth taking. The answer was no: its
+content is already here and better wired, because Blacksmith attaches YAGNI to
+a severity policy, fingerprinted waivers and same-mistake escalation while
+ponytail attaches it to prose. Reading the two side by side is what exposed
+that the wiring ran to a lens that was never written.
+
+Two documents describing enforcement is not enforcement. Policy files do not
+reach an agent — the role template is the only thing a dispatched reviewer
+reads — so `severity.yml` saying a lens enforces YAGNI is a claim about a
+different file, and nothing checked that the file agreed. This is [[D-265]]
+one surface over, and the same asymmetry [[D-191]] and D-259 found on verbs
+and error codes: prose drifts toward describing a thing that was never built.
+
+**The contract made it unraisable anyway.** This is the half that bites
+harder, and it would have survived writing the lens on its own.
+`reviewer.md`'s output contract requires `failure_scenario` as an object with
+all three of `inputs`, `expected`, `actual` — *"Concrete input state → the
+wrong output or crash it produces. Not a sentence, not a worry. A finding
+whose failure scenario you cannot fill in is a finding the verifier will
+refute, so drop it yourself"* — and both
+`factory/specs/schema/finding-evidence.schema.json` and `finding.schema.json`
+hard-require the three fields with `additionalProperties: false`.
+
+Over-engineered code returns the right answer. That is its definition: an
+abstraction with one implementation computes exactly what inlining it would
+compute, so `expected` and `actual` are the same string. The contract
+therefore instructed the reviewer to self-drop every over-engineering finding
+it might have raised, silently, as a matter of following its own rules.
+
+And the escalation written to make the category *matter* is what finished it.
+`severity.yml`'s `same_mistake_escalation` lifts over-engineering S3 -> S2
+once a matching lesson is approved; `.claude/agents/verifier.md` is
+refute-by-default on every `S2-major` and says *"if you cannot make it
+concrete, the verdict is `refuted`"*, with the constraint spelled *"A finding
+survives only with inputs -> wrong output spelled out … regardless of who
+raised it."* At S3 a finding was mostly unverified (20% spot-check) and merely
+self-dropped; escalated to S2 it met the one gate structurally guaranteed to
+refute it. The rule that made repeat over-engineering serious was a trapdoor.
+
+**The fix.** Five parts, four of them prose because the defect is prose.
+
+`.claude/agents/reviewer.md` gains `## Over-engineering lens`, parallel to the
+behavioral-drift one. It carries a closed tag vocabulary — `delete:`,
+`stdlib:`, `native:`, `yagni:`, `shrink:` — each of which must name the
+replacement, which is `severity.yml`'s existing promise of *"S3 with a
+proposed simplification"* made checkable rather than aspirational. This is the
+one thing worth taking from ponytail, and it is taken as a shape, not as text.
+
+The same section states what the evidence object holds for a category whose
+defect is not a wrong output: `inputs` is the acceptance criterion plus the
+named replacement, `expected` is the shape that criterion asks for in call
+sites or lines, `actual` is the shape the diff ships. The schema is untouched
+— the three fields are filled honestly rather than widened, so every consumer
+of a finding keeps reading one shape. The output contract now points at that
+reading as the single exemption to "drop it yourself".
+
+`.claude/agents/coder.md` gains the ladder those tags read against — already
+in this codebase, then the standard library, then the platform you already
+run on, then a dependency the project already has, a new one last and only on
+a criterion or a `spec_change_request`. Without it `stdlib:` and `native:`
+would be review tags for a rule the coder was never given, which is this
+finding's own shape pointed the other way.
+
+`.claude/agents/verifier.md` gains the matching carve-out and, more usefully,
+the grounds on which such a finding *is* refuted: a second real call site, a
+test the replacement breaks, or a spec line requiring the abstraction. A
+finding naming no replacement is still refuted, so the stance survives.
+
+`test/docLenses.test.ts` holds the prose to the templates from now on. It
+parses the attributed form — "the `<role>`'s `<name>` lens" — out of the
+markdown instruction surface *and* `factory/policies/*.yml`, resolves the role
+against the filenames in `.claude/agents/`, and requires a matching `## …
+lens` heading in that template. Yaml is in scope deliberately: `severity.yml`
+is where the claim was load-bearing, and a guard that read only markdown would
+have passed on the line that made the promise. A second assertion floors the
+subject count above zero, so a reword that drops the possessive fails loudly
+instead of leaving the guard reading nothing ([[D-119]]).
+
+Written red first: the guard named both offending surfaces before the lens
+existed and none after — and it reads three attributions today, the third
+being the coder line added above, which it caught only once the article and
+the role were matched case-insensitively.
+
+**Related:** [[D-265]], [[D-191]], [[D-119]].

@@ -45,6 +45,14 @@ the evidence forces `confirmed`.
 - **Concrete failure scenario required.** A finding survives only with
   inputs -> wrong output spelled out. "Could be a problem" dies here,
   regardless of who raised it.
+- **Except `over-engineering`, where the failure is a change, not a crash.**
+  That code returns the right answer; demanding a wrong output of it refutes
+  the whole category on a technicality, which is how a same-mistake escalation
+  to `S2-major` would otherwise land in front of you pre-refuted. Hold it to
+  the reviewer's named replacement instead, and refute on the same three
+  grounds the reviewer was told to check itself against: a second real call
+  site, a test the replacement breaks, or a spec line requiring the
+  abstraction. A finding naming no replacement is still refuted.
 - Mechanical oracles first: if a deterministic check (schema validation,
   type check, test) already settles the question, defer to it — don't
   re-litigate what a machine already decided.
@@ -80,7 +88,9 @@ element has exactly these four keys:
 - `failure_scenario` — an **object** with `inputs`, `expected`, `actual`,
   required when `confirmed`. Sharpen the reviewer's version against the real
   code path rather than copying it; if you cannot make it concrete, the
-  verdict is `refuted`
+  verdict is `refuted`. For `over-engineering` the concrete thing is the
+  replacement -- `actual` is what the diff ships, `expected` is what the
+  criterion asked for, in call sites or lines
 
 **2. Return one line** as your final message — this JSON and nothing else:
 
