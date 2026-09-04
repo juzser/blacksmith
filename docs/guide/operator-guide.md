@@ -837,11 +837,12 @@ is a different one — a coder that writes and runs its own tests grades itself,
 and every gate downstream still goes green over it.
 
 The thing that separates those two cases in the log is not a model, it is a
-**turn**. No role template grants `Agent`, so a `dispatch_decision` is written
-by the orchestrator once per agent it invokes and never by an agent about
-itself; a second dispatch is therefore the only evidence the log can hold that
-a second turn happened at all. `crosscheck.yml`'s `role_isolation.pairs` names
-the pair (one entry: `coder` / `tester`), and this asserts it per test gate:
+**turn**. A `dispatch_decision` is written by the node that dispatched and
+never by an agent about itself, so a second dispatch is the only evidence the
+log can hold that a second turn happened at all. (Who may be such a node is
+`delegation.yml`, asserted by [§2e](#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)
+— run the two together.) `crosscheck.yml`'s `role_isolation.pairs` names the
+pair (one entry: `coder` / `tester`), and this asserts it per test gate:
 
 ```bash
 smith tester check <session-id> [--task <task-id>] [--policy <path>]
@@ -888,6 +889,69 @@ dispatched separately, and did it report, before this task's tests were
 graded?" — not "did that tester write the tests". `role-write-scope` in
 `guardrails.yml` fences where a leased tester may write; the two checks are
 complementary, not substitutes.
+
+## 2e. `smith delegation check` — did the node that dispatched own its log?
+
+The two checks above both read *a second dispatch* as proof of *a second
+turn*. That reading has a premise: whoever writes a `dispatch_decision` owns
+the log it lands in. While no role template held `Agent`, the premise was free
+— only the operator session could dispatch, so it was true by construction.
+
+It is no longer free. `factory/policies/delegation.yml` grants `Agent` to
+`wave-runner`, so an epic can hand a whole wave to a dispatched agent instead
+of spending its own window on it. This command is what keeps the premise true
+under that grant, and it asks two questions that fail apart:
+
+```bash
+smith delegation check <session-id> [--task <task-id>] [--policy <path>] [--crosscheck <path>]
+```
+
+```json
+{"session":"epic-1",
+ "grants":{"grantsExamined":1,"templatesExamined":13,
+  "checks":[{"role":"wave-runner","status":"ok","detail":"wave-runner may dispatch coder, tester, … and must open its own session first; its template holds `Agent` and the grant contradicts no crosscheck.yml pair."}],
+  "ok":true},
+ "log":{"sessionId":"epic-1","taskId":null,"dispatchesExamined":2,"delegatedSessions":1,
+  "checks":[{"role":"wave-runner","sessionId":"wave-1","taskId":"T1","eventId":"epic-1#1","status":"ok","detail":"wave-runner was dispatched at epic-1#1 and opened session wave-1 against it, so the dispatches it writes are its own log's."}],
+  "ok":true},
+ "ok":true}
+```
+
+**`grants` is the topology**, and it reads files, not logs — the same answer
+before a run as after one. It fails a grant whose role is not in the taxonomy,
+a grant naming a target that is not, a template that lists `Agent` with no
+grant behind it, a grant whose role ships no template (D-191, both
+directions), a scoped `Agent(…)` whose scope disagrees with the policy, and
+above all three shapes of self-judging: a role granted **itself**, a worker
+granted its own **auditor** from `role_isolation.pairs`, or a finder granted
+its own **critic** from `asymmetric_roles.pairs`. That last group is the whole
+point. A `coder` granted `Agent(tester)` picks and prompts the agent that
+grades it, and §2d goes green over a coder grading itself — widening one list
+in one file would silently disarm a check in another.
+
+**`log` is the run.** Every grantee dispatch is matched against a
+`session-start` whose `causal_parent` is that dispatch's event id: that is what
+`smith session start <wave-id> --continues <dispatch-event-id>` writes. A
+grantee that dispatched from inside the dispatcher's session, or dispatched a
+role outside its grant, is a `violation`.
+
+| Status | Meaning | Counts as failure |
+|---|---|---|
+| `ok` | Every grant is sound, and every grantee opened its own log before dispatching inside its grant | no |
+| `violation` | A grant hands a role its own judge, a template and the policy disagree, or a grantee dispatched without a log of its own | **yes** |
+| `unverifiable` | A grantee was dispatched and has not opened its session *yet* — it still may, which is exactly why this is not a pass | **yes** |
+| `not-applicable` | No grant exists and no template holds `Agent`, or no dispatch in this lineage involves a granted role | no |
+
+Read lineage-wide (D-119), and here that is the point rather than a nicety:
+the dispatches a wave-runner writes live in the wave's session, so a check
+scoped to the epic's own log would report the delegation it exists to audit as
+never having happened. Either id answers — `delegation check epic-1` walks
+down into the wave, `delegation check wave-1` walks up to the epic.
+
+**What it does not claim.** It does not read the wave's *work*, only its
+bookkeeping: a wave-runner that opened its log correctly and then dispatched
+ten coders at a plan nobody approved passes here. `wave audit` and the gates
+are what grade that.
 
 ## 3. `smith worktree create`
 

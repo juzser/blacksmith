@@ -113,6 +113,14 @@ and runs coder → tester → grader → the gate pipeline (schema check, cumula
 tests, coverage evidence, reviewer, verifier). Whatever passes joins the
 serial merge queue into `smith/<epic>/integration`.
 
+A wide wave may run in a session of its own, or be handed to a `wave-runner`
+agent, so the epic's own window lasts to the end of the epic. You do not have
+to care which — every status read folds the whole lineage, so `/bs status` and
+the dashboard answer about the epic regardless of how many sessions it took.
+What keeps that honest is `smith delegation check <session-id>`: a dispatched
+wave that did not open its own log fails it rather than reporting an empty
+wave ([operator-guide §2e](operator-guide.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)).
+
 Want to look in? `/bs status` gives you live agent count, budget burn and epic
 phase; `/bs ui` serves the [dashboard](dashboard.md) if you would rather watch
 it.

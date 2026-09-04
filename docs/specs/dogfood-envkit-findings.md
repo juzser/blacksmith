@@ -443,8 +443,9 @@ That is blocked in `factory/orchestrator/src/events.ts`:
 So a wave session literally cannot record that it was spawned by the epic
 session's decision at event X. Its log starts as an orphan and the causal chain
 — the thing the event log exists to preserve — breaks silently at every session
-boundary. This is also why no role template is granted `Agent` today: nesting
-dispatch under an agent would break the same chain in the same place.
+boundary. This is also why no role template was granted `Agent` when this was
+written: nesting dispatch under an agent would break the same chain in the
+same place. Step 3 below is exactly the lifting of that.
 
 **Fix (Phase 9), smallest change that works:**
 1. Add an optional `parent_event: "<session-id>#<index>"` to `EventInput`,
@@ -461,8 +462,8 @@ Until (1) lands: flat topology, and return discipline
 concurrency cap — a cap pays the same total context cost spread over N batches
 and buys latency with it.
 
-**Status: steps 1-2 fixed (step 1 on 2026-08-08, branch
-`smith/phase-9/p9-7-cross-session`; step 2 on 2026-09-03); step 3 open** —
+**Status: fixed — all three steps (step 1 on 2026-08-08, branch
+`smith/phase-9/p9-7-cross-session`; steps 2 and 3 on 2026-09-03)** —
 the cross-session edge shipped, arriving as `causal_parent` itself rather
 than as the separate `parent_event` key sketched above: a
 `session-start` may name a parent in another session's log, any other event
@@ -496,9 +497,33 @@ nothing when asked from a *sibling* wave. That pairing is the D-119 shape
 this finding could most easily have shipped — a split log read one session
 at a time turns a hold into a green.
 
-Step 3 is now the only open half. Splitting an epic across *operator*
-sessions works today and both playbooks document it; splitting it across
-*dispatched* ones still needs the scoped `Agent(...)` grant step 3 is.
+Step 3 landed on top of that, as `factory/policies/delegation.yml` plus
+`smith delegation check <session-id>`. The grant itself is one line — role
+`wave-runner`, `Agent(coder, tester, …)` — and everything around it is the
+answer to *why the flat topology was never the rule*. The rule is "the
+dispatching node owns the event log for what it dispatches", and step 2 is
+what let a grantee satisfy it: a dispatched wave-runner runs `smith session
+start <wave-id> --continues <the dispatch's event id>` and *is* a dispatching
+node with a log of its own.
+
+The grant is a policy file rather than frontmatter alone because a capability
+that lives only in a template is a capability nobody audits — and because two
+other checks quietly depend on this one. `smith tester check` and `smith
+dispatch check` both read *a second dispatch* as proof of *a second turn*; a
+`coder` granted `Agent(tester)` picks and prompts the agent that grades it,
+and both go green over a coder grading itself. So `delegation check` refuses
+any grant that lets a role dispatch itself, its auditor from
+`role_isolation.pairs`, or its critic from `asymmetric_roles.pairs`, refuses a
+template and a policy that disagree in either direction (D-191), and reports a
+grantee that has not opened its log *yet* as `unverifiable` rather than `ok`.
+`delegation.test.ts` runs all of it against the shipped taxonomy, crosscheck
+topology and templates, so a widened grant fails CI rather than a later audit.
+
+D13 opened on "the orchestrator cannot be split". It can: an epic session now
+plans, admits a wave, dispatches a `wave-runner` that opens its own log and
+absorbs the wave's returns, and reads back down the lineage to close. The epic
+never accumulates a wave's worth of context, which is the whole thing this
+finding asked for.
 
 ---
 

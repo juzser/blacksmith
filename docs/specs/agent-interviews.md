@@ -251,6 +251,36 @@ mid-flight, and nesting hides that failure.
 > not a session cannot own the log for what it dispatches. No role template
 > gains `Agent` before that split lands — `dogfood-envkit-findings.md` D13
 > steps 2-3.
+>
+> **Addendum 2026-09-03 (second) — the split landed, and (a) is superseded.**
+> D13 step 2 shipped `.claude/skills/bs/wave.md`, the wave-level playbook this
+> answer was waiting for, and step 3 shipped the grant that needed it. The
+> answer is now **(b′)**: a new role, `wave-runner`, holds
+> `Agent(coder, tester, …)` and runs one admitted wave; every other template
+> still holds none. Not (b) as offered — `planner` was the wrong grantee, and
+> the reason is the third rule below.
+>
+> The grant is written in `factory/policies/delegation.yml`, not in the
+> template alone, because a capability that lives only in frontmatter is a
+> capability nobody audits. `smith delegation check <session-id>` asserts four
+> things, and the shipped files are asserted against them in CI:
+>
+> 1. The grantee **opens its own session** against the dispatch that started
+>    it (`--continues <dispatch-event-id>`) before it dispatches anything.
+>    This is the invariant above, made checkable rather than assumed.
+> 2. No role may dispatch **itself**.
+> 3. No worker may dispatch its own **auditor** (`role_isolation.pairs`), and
+>    no finder its own **critic** (`asymmetric_roles.pairs`). This is what
+>    rules out offer (c) permanently: a coder holding `Agent(tester, grader)`
+>    picks and prompts the agents that grade it, and `smith tester check`
+>    would go green over a coder grading itself. It also rules out (b) as
+>    written — a planner that dispatches its own spec-reviewer chooses its own
+>    critic.
+> 4. Template and policy agree, in both directions (D-191).
+>
+> `wave-runner` passes 2-4 by construction: it is nobody's worker and nobody's
+> finder. It is meant to stay the only grant until a second role has an
+> epic-shaped reason to outlive a window.
 
 **M-6. Return discipline.** With concurrency uncapped, a wave of hundreds
 of workers returning prose would drown the operator context before the

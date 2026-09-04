@@ -134,9 +134,10 @@ export interface AsymmetricRoles {
  * tester may legitimately run on the coder's model, and forcing a second
  * vendor onto it would buy nothing. What it may not do is run inside the
  * coder's own turn, and the only evidence of a separate turn the event log
- * can hold is a separate `dispatch_decision` — no role template grants
- * `Agent`, so a dispatch is written by the orchestrator once per agent it
- * invokes, never by an agent about itself.
+ * can hold is a separate `dispatch_decision`, written by the node that
+ * dispatched and never by an agent about itself. delegation.yml decides who
+ * may be such a node, and delegation.ts refuses any grant that would let a
+ * `worker` here dispatch its own `auditor`.
  */
 export interface RoleIsolationPair {
   /** The role whose work is being graded. */

@@ -351,9 +351,11 @@ recheck) come out of the same call.
 the call and `task-result-recorded` (or `error-logged`) *after* it — never
 from inside the agent. An agent that dies mid-flight cannot record its own
 death, so a dispatch logged by the dispatchee is a dispatch that silently
-vanishes in exactly the case worth seeing. This is also why no role template
-grants `Agent`: a node may dispatch only if it owns the event log for what it
-dispatches, and today only this session does.
+vanishes in exactly the case worth seeing. This is also what limits who may
+hold `Agent`: a node may dispatch only if it owns the event log for what it
+dispatches. `factory/policies/delegation.yml` names the exceptions — today one,
+`wave-runner` — and each of them earns it by opening a session of its own
+against your dispatch's event id before it dispatches anything.
 
 **The task id goes on the event, not in the payload.** `smith event append`
 reads `task_id` at the top level of the JSON, beside `session_id`; a copy
@@ -389,6 +391,20 @@ question — not *which model* graded, but *whose turn* did. `crosscheck.yml`'s
 separate `tester` dispatch behind it is a **violation** there, where an absent
 critic is `not-applicable` here: for a tester, absence is the finding. Same
 fail-closed contract, and the two are not substitutes.
+
+Both of those read a second dispatch as proof of a second turn, and that
+reading is only sound while every dispatcher owns its own log. Once a wave runs
+as a dispatched agent, assert that too:
+
+```bash
+smith delegation check <session-id> [--task <task-id>]
+```
+
+It answers two questions in one report, because they fail apart: `grants` is
+the topology — did anyone get `Agent` without a grant, or a grant that hands a
+role its own auditor or critic — and `log` is the run: did each grantee open
+its session before it dispatched. Fail-closed like the other two, and a
+grantee that has not opened its log *yet* is `unverifiable`, not `ok`.
 
 Concurrency and the event log: `smith` reads (`wave next`, `status`,
 `budget alarm`) are free to run at any time. Writes to one session log are
@@ -676,20 +692,26 @@ file asked for would be running it below the floor.
 
 The admitted wave now goes to [`wave.md`](wave.md), the wave playbook:
 worktrees, pre-code, coder, tester, grader, the gate pipeline, bounces, and
-the merge queue. Read that file and work it — inline in this session when the
-wave is small enough for this window, or in a session of its own when it is
-not:
+the merge queue. Three shapes, in order of how much of this window the wave
+would cost:
 
-```bash
-smith session start <wave-id> --continues <session-id>#<n>
-```
+- **Inline**, in this session, when the wave is small enough for this
+  window. Read `wave.md` and work it here.
+- **In a session of its own**, when it is not, but you still want to drive
+  it yourself: `smith session start <wave-id> --continues <session-id>#<n>`,
+  where `<n>` is the index of the event that admitted this wave.
+- **Dispatched**, as the **`wave-runner`** agent, when the wave would eat
+  the window this epic needs to reach its own end. It is the only role
+  `factory/policies/delegation.yml` grants `Agent`, and it earns that by
+  opening its own log first — so hand it the event id of *your dispatch*,
+  not the admission, because that is the edge the audit walks.
 
-`<n>` is the index of the event that admitted this wave. Hand over the
-project directory, the epic id, the live plan path, the admitted task ids,
-the effort `profile` resolved above, and the session id and event id the
-wave writes from. Take back each task's terminal state, the merge-queue
-outcome, the findings raised, any escalation, and the wave session's last
-event id if it opened one — chain the next command off that.
+Whichever shape, hand over the project directory, the epic id, the live plan
+path, the admitted task ids, the effort `profile` resolved above, and the
+session id and event id the wave writes from. Take back each task's terminal
+state, the merge-queue outcome, the findings raised, any escalation, and the
+wave session's last event id if it opened one — chain the next command off
+that.
 
 Splitting the tier does not split the log. Every read in this playbook folds
 the lineage, so a dispatch a wave session recorded is one this session can
@@ -697,7 +719,10 @@ still audit; that is what `--continues` buys, and it is why the split is safe
 to make (D13, D-266). What it does not buy is a shortcut. A wave session
 opened without `--continues` writes into a log nothing here reads, and the
 verbs below then report a wave that appears never to have run rather than
-failing — which is the same silence, arriving as a green.
+failing — which is the same silence, arriving as a green. When you dispatched
+the wave rather than ran it, `smith delegation check <session-id>` is what
+turns that silence into a red: a `wave-runner` that dispatched before opening
+its log, or against the wrong event, is `unverifiable` and exits 1.
 
 **Then check that it did.** Once the wave's tasks reach a terminal state,
 `smith wave audit --session <id> --epic <epic>` reads the log back and
