@@ -1511,6 +1511,25 @@ than appearing in it.
 
 ### Fixed
 
+- **The guides said both cross-provider judges ship off; codex has been live
+  for weeks (D-269).** `crosscheck.yml` reads `codex: enabled: auto, mode:
+  active`, and `docs/runbooks/providers.md` says so. Four sites in
+  `status.md` and `operator-guide.md` still said both externals ship
+  `enabled: false`, "so neither is invoked at all — no call, no
+  `judge-verdict` row, no spend". An operator whose box holds the `codex`
+  binary was told a live tier was inert, and was not told the thing that
+  actually blocks them: one active external cannot reach `min_providers: 2`.
+  All four now state the shipped values and that consequence — funding a
+  second judge or changing the quorum policy is an operator decision, not a
+  default. `docPolicyValues.test.ts` is the fifth guard of the D-259 shape:
+  it hand-parses the policy as text, because `loadCrosscheckPolicy()`
+  resolves `enabled: auto` against the box and a guard whose expected value
+  moves with the runner is not a guard. Its scope is stated where it can be
+  read: attributed value claims in code spans, a markdown citation read as
+  reporting rather than asserting, and — named, not hidden — no reach at all
+  over a claim made in words, which is why `status.md:24`'s "every external
+  ships off" was fixed by hand.
+
 - **The repo asked for one language and nothing read the rule back (D-268).**
   `AGENTS.md` says every artifact here is English. A hundred and ten lines
   across thirty-nine files quoted the operator's directives verbatim in

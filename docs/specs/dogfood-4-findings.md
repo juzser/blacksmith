@@ -13665,3 +13665,63 @@ two tests in `factory/orchestrator/test/repoLanguage.test.ts`, green over 110
 translated lines, with the guard reporting `file:line` for anything new.
 
 **Related:** [[D-267]], [[D-265]], [[D-259]], [[D-119]].
+
+## D-269 — a value quoted in prose is a copy, and copies drift
+
+**Severity:** S2-major
+
+**Where:** `docs/guide/status.md:24`, `docs/guide/status.md:48-49`,
+`docs/guide/operator-guide.md:2052-2058`,
+`docs/guide/operator-guide.md:3303-3312`, against
+`factory/policies/crosscheck.yml:75,91,106-107`.
+
+**How it opened.** Phase 10 preparation asked a plain question — what does
+this repo ship with, today — and got two answers. `crosscheck.yml` has read
+`codex: enabled: auto, mode: active` since the operator asked for it;
+`docs/runbooks/providers.md` was updated in the same breath and says so.
+Four sites in the two guides an operator actually reads first were not, and
+still said both externals ship `enabled: false`, "so neither is invoked at
+all — no call, no `judge-verdict` row, no spend". That is a wrong
+operational fact, not a stale adjective: it tells an operator whose box holds
+the `codex` binary that a tier is inert while it is live, and it hides the
+thing that actually blocks them, which is that one active external cannot
+reach `min_providers: 2`. The guides were also wrong in the reassuring
+direction — a reader who believed them would not go looking for the quorum
+they are one vendor short of.
+
+**The fix.** The four sites now state the shipped values and the consequence:
+codex live where the binary exists, deepseek off because a key is a fact
+about the operator's box, and one active external against a quorum of two, so
+funding a second judge or changing the policy is an operator decision rather
+than a default. `factory/orchestrator/test/docPolicyValues.test.ts` is the
+reader the values never had — the fifth guard of this shape after D-259,
+D-265, D-267 and D-268. It hand-parses `crosscheck.yml` as text rather than
+calling `loadCrosscheckPolicy()`, because the loader resolves `enabled: auto`
+against the box it runs on: codex resolves `true` on a machine holding the
+binary and `false` in CI, and a guard whose expected value moves with the
+runner is not a guard. It reads attributed value claims out of prose —
+`` `codex: enabled: auto, mode: active` `` binds both fields to codex, an
+unattributed `` `mode: shadow` `` binds only to a provider named before it —
+and it flushes at every list-item boundary, because joining bullets carries
+the subject of one line into the claim on the next.
+
+Two limits are named rather than papered over. A sentence citing a markdown
+source with a line number is read as reporting another document's claim, not
+making one, which is what lets a punch list quote the drift it exists to
+name; the cost is that prose can leave the scan by citing a line number, and
+the rule is deliberately *markdown* citation, since a claim about the policy
+cites the policy and `crosscheck.yml` is not markdown. And a claim with no
+value span — `status.md:24`'s "every external ships off" — is invisible to
+it. That sentence was part of the same defect and was fixed by hand. This
+guard holds attributed, file-scoped value claims; a claim spelled out in
+words is still on the reader. Per D-119 it asserts against its own walk
+first: every provider it parsed must declare `enabled`, and the resolved
+claim set must actually contain `codex` and `deepseek`, so a scan that
+silently reaches nothing fails instead of passing.
+
+**Status: fixed, 2026-09-04, branch `fix/a-value-nobody-read-back`** — three
+tests in `docPolicyValues.test.ts`; flipping `status.md` back to
+`enabled: false, mode: shadow` reports both fields at `status.md:48` and the
+suite goes red.
+
+**Related:** [[D-268]], [[D-267]], [[D-265]], [[D-259]], [[D-119]].
