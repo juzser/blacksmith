@@ -1511,6 +1511,32 @@ than appearing in it.
 
 ### Fixed
 
+- **YAGNI was enforced by a lens the reviewer was never given (D-267).**
+  `docs/standards/agent-constraints.md` and `factory/policies/severity.yml`
+  both named "the reviewer's `over-engineering` lens" as the thing enforcing
+  the coder's YAGNI constraint. `.claude/agents/reviewer.md` — the only file a
+  dispatched reviewer actually reads — carried a behavioral-drift lens and no
+  over-engineering lens at all; the category survived as one string in a
+  vocabulary list. Worse, the output contract made it unraisable anyway:
+  `failure_scenario` requires `{inputs, expected, actual}` as "the wrong
+  output or crash it produces", and over-engineered code returns the right
+  answer, so the reviewer was instructed to drop the category itself. The
+  same-mistake rule that escalates it S3 → S2 then handed it to a verifier
+  that refutes by default anything without a wrong output. The lens now
+  exists, with a closed tag vocabulary (`delete:`, `stdlib:`, `native:`,
+  `yagni:`, `shrink:`) that each demand a **named replacement** — the
+  "proposed simplification" the severity policy already promised, made
+  checkable. Its failure scenario is read as a change rather than a crash
+  (criterion + replacement → the shape asked for vs the shape shipped), with
+  no schema widened, and the verifier is given the grounds that refute one: a
+  second real call site, a test the replacement breaks, or a spec line
+  requiring the abstraction. `.claude/agents/coder.md` gains the ladder the
+  `stdlib:`/`native:` tags read against, so they flag a rung skipped rather
+  than a rule never given. `test/docLenses.test.ts` now parses every lens a
+  document attributes to a role — out of the markdown instruction surface and
+  `factory/policies/*.yml` alike — and fails when the role's template does not
+  carry it.
+
 - **A lineage that only walked upward could not see the wave it dispatched
   (D-266).** P9-7 shipped lineage for a chain — a session that runs out of
   window and continues in a fresh one — and read from the new session the

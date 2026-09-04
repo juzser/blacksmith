@@ -86,7 +86,7 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
 | Severity | Blocks merge | Classes |
 |---|---|---|
 | **`S2-major`** (block) | yes | security / data loss · broken core flow · **a11y WCAG AA failure** · **new flaky test** |
-| **`S3-minor`** (waiver) | no — batched question at epic end | visual regression vs the uiux spec · perf regression >20% · everything minor-but-real |
+| **`S3-minor`** (waiver) | no — batched question at epic end | visual regression vs the uiux spec · perf regression >20% · **over-engineering** · everything minor-but-real |
 | **`S4-nit`** | no | style/naming nits the project's linter does not catch |
 
 - `S1-stop-the-line` remains reserved for exactly that (repo corruption,

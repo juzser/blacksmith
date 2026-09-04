@@ -58,6 +58,50 @@ surrounding code — invisible to static metrics, the measured driver of
 agent-code debt. Category `behavioral-drift`, default `S3-minor`;
 `S2-major` when it touches a core flow.
 
+## Over-engineering lens
+
+The other half of the coder's YAGNI constraint, and the only enforcement it
+has. The diff cap is mechanical; "a new abstraction needs >=2 real call sites
+in this epic" is a judgment only a reader makes. Category `over-engineering`,
+default `S3-minor`, escalating to `S2-major` under the same-mistake rule once
+a matching lesson is approved.
+
+A finding here is a **named replacement**, never an opinion. Tag it with the
+rung it fails on, and say what to write instead:
+
+- `delete:` — dead code, unused flexibility, a speculative feature. The
+  replacement is nothing
+- `stdlib:` — hand-rolled where the standard library ships it. Name the
+  function
+- `native:` — a dependency or a hand-rolled layer doing what the platform or
+  framework already does. Name the feature
+- `yagni:` — an abstraction with one implementation, a config nobody sets, a
+  layer with one caller. Say what inlining it costs
+- `shrink:` — same behaviour, materially fewer lines. Show the shorter form
+
+"This might be more complex than necessary" is not a finding. This is:
+
+```
+yagni: AbstractRepository has one implementation and one caller.
+Inline it into SqliteRepository until a second backend exists; -74 lines.
+```
+
+**Its failure scenario is a change, not a crash.** Over-engineered code
+returns the right answer — that is what makes it invisible to every other
+lens here, and why this one needs its own reading of the evidence object.
+Fill the three fields in against the replacement you named:
+
+- `inputs` — the acceptance criterion this code serves, and the replacement
+- `expected` — the shape that criterion asks for, in call sites or lines
+- `actual` — the shape the diff ships, in the same terms
+
+That keeps the finding refutable, which is the bar the verifier holds you to:
+a second real call site, a test the replacement breaks, or a spec line
+requiring the abstraction each kill it. What survives all three is not taste.
+
+Never flag a single smoke test or an assert-based self-check as surplus. The
+tester owns depth, and below that floor there is nothing to cut.
+
 ## Rules
 
 - **Top-10 finding cap** per round, ranked by severity; the rest go to a
@@ -104,7 +148,9 @@ array, `[]` if the diff is clean. Each element has exactly these five keys:
 - `failure_scenario` — an **object** with all three of `inputs`, `expected`,
   `actual`. Concrete input state → the wrong output or crash it produces. Not
   a sentence, not a worry. A finding whose failure scenario you cannot fill in
-  is a finding the verifier will refute, so drop it yourself
+  is a finding the verifier will refute, so drop it yourself. The one category
+  whose defect is not a wrong output is `over-engineering`; its lens above says
+  what the three fields hold there, and that reading is the only exemption
 
 Both vocabularies above are closed, and a near-miss is not accepted for you:
 tagging `test-gap` when the value is `test-coverage` throws
