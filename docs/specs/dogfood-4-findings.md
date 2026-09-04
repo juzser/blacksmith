@@ -14094,3 +14094,383 @@ inventory tests, and one `projects list` run over a fixture roadmap built
 outside the repository.
 
 **Related:** [[D-271]], [[D-272]].
+
+## D-274 — the more accountable dispatch is the one the gate refused
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/judges.ts:46` and `judges.ts:200`, against
+`factory/orchestrator/src/gate.ts:1144,1163`. Fired on
+`state/events/phase-10-2026-09-04.jsonl` events 217, 218, 240, 249 and 258.
+
+**How it opened.** Wave 3 of phase-10 dispatched two coders and no judges, and
+both gates came back `outcome: blocked`, `reason: judges-outstanding`, each
+naming exactly one outstanding turn: role `coder`, round 1. No judge had been
+dispatched for either task, so the turn could only have been opened by the
+coder's own dispatch record — and it was.
+
+`judges.ts:46` sets `JUDGE_DISPATCH_EVENT_TYPE = 'dispatch_decision'`. That is
+the same event type the orchestrator emits before every worker dispatch, because
+the dispatch contract has one event for dispatching anything. `readJudgeTurns`
+therefore opens a judge turn for any `dispatch_decision` whose payload carries
+`agent_role`, `declared_artifact` and `round`; the filter at `judges.ts:200`
+tests those three fields being present and never tests whether the role is a
+judge at all. A census of this epic's log confirms the sharing is total rather
+than incidental: there is no `judge-dispatched` event type anywhere in it, and
+`dispatch_decision` appears 37 times covering every role the epic ran.
+
+What made wave 3 different from waves 1 and 2 was not the code, which never
+changed, but the orchestrator getting stricter. Eight coder dispatches ran this
+epic. Events 19, 20, 21, 27, 157 and 158 — waves 1 and 2 — carried no
+`declared_artifact`. Events 217 and 218 — wave 3 — carried one, because the
+orchestrator had begun applying P9-11's "declare each judge's artifact before
+you dispatch it" to workers as well, on the reasoning that a dispatch which says
+where its result will land is strictly more checkable than one that does not.
+Those two are the only coder dispatches in the epic that opened a turn, and they
+are the two that blocked.
+
+That is the shape worth recording. The more accountable dispatch is the one the
+factory refused, and the reward for volunteering a checkable fact was a gate
+that would not run. A discipline that punishes its own stricter application gets
+un-learned by the next orchestrator to read the log, which is why this is filed
+at S2 rather than as a note.
+
+The block also exposed a second defect at full cost. `testResult` was `null` on
+both verdicts: the judge-outstanding check precedes the test checks, so a
+paperwork block did not merely emit fewer events, it skipped `scripts/check.sh`
+entirely on both tasks. Event 133 had already recorded the early return as an
+event-completeness problem. It is worse than that — a blocked gate buys no
+verification at all, so the price of a malformed input is the whole pass, and
+the second run pays for the first run's checks over again. On this repo that is
+roughly six minutes per task, and the fixed e2e port ([[D-276]]) forbids paying
+the two in parallel.
+
+**What was ruled out, and how.** `artifactIssues` was `[]` on both gates, which
+independently proves the basename repackaging of event 224 was the right remedy
+for [[D-277]] and that it is not implicated here. `commitCheck.certified` was
+true on both, one commit ahead of `smith/phase-10/integration` with a clean
+worktree. `schemaErrors` and `blockingFindings` were both empty. The block had
+exactly one cause.
+
+**The fix.** Not yet applied in code; the remedy owed is one of two, and they
+are not equivalent. Either key the judge-turn table on the role rather than the
+event type — a `dispatch_decision` whose `agent_role` is outside the judge set
+should not open a turn — or, if a worker's declared artifact is genuinely worth
+tracking, track it as its own obligation with its own name, so that "the coder
+has not filed a review" stops being a sentence this system is able to say. The
+second is the better answer if declared artifacts are to stay encouraged for
+workers, which they should be.
+
+**Status: worked around, 2026-09-04, branch `smith/phase-10/integration`** —
+both turns closed through the evidence channel, `gate run --evidence <file
+containing exactly []> --found-by coder`, at events 241 and 250, each followed
+immediately by the full check sequence the blocked run had skipped and a
+`gate-outcome: pass` at 249 and 258. The workaround was checked for honesty
+before it was chosen: both coders' result files carry
+`structured_output.findings: []`, so the empty evidence file states something
+true. `--no-findings` was rejected because the skill reserves that attestation
+for a judge that ran outside the factory, which is not what happened.
+
+**Related:** [[D-276]], [[D-277]].
+
+## D-275 — the verb named `report` is not the one that records the verdict
+
+**Severity:** S3-minor.
+
+**Where:** `factory/orchestrator/src/gate.ts:571-654` (`checkGraderVerdict`) and
+`judges.ts:355-386` (`readJudgeArtifact`), against the `smith judge report`
+command surface.
+
+**How it opened.** Two graders returned clean verdicts on wave 3 and the
+orchestrator went looking for the command that would turn them into
+`grader-verdict` events. The command called `judge report` reads the declared
+artifact and files it as reported; the obvious reading is that reporting a
+grader's verdict is what it is for. It is not, and it cannot be:
+`readJudgeArtifact` demands a bare array — the finding-evidence shape — and
+refuses anything else as `judges.artifact-not-a-list`. A grader's artifact is a
+result envelope with the verdict at `.structured_output`, which is a JSON
+object, so `judge report` would have refused both files by contract.
+
+The channel that actually emits `grader-verdict` is the gate: `gate run
+<task-id> --grader <file>`. Tracing task-4's sequence settles it beyond
+inference — event 201 `judge-reported`, then 202 through 205 the schema,
+artifact, commit and deps checks, then 206 `grader-verdict` sitting between
+`deps-check-result` and `budget-check-result`, then 208 `testgate-result`, 210
+`gate-outcome: pass`. The verdict event is emitted from inside a gate run, in
+gate-check order, by the code at `gate.ts:571-654`. Nothing outside a gate emits
+it.
+
+The two verbs divide the work in a way their names invert. `judge report` closes
+an *obligation* — it answers "did the turn come back", and its unit is the turn.
+`--grader` consumes a *verdict* — it answers "what did the rubric say", and its
+unit is the criteria list. A grader needs both, and only one of them is
+reachable through the command whose name contains the word report.
+
+**The fix.** No code change proposed. The naming is load-bearing elsewhere and
+the behaviour is correct; what was missing was that anyone had written it down.
+Recorded here so the next orchestrator holding a grader artifact does not spend
+a round discovering it, and so the sequence above is quotable: a grader's turn
+is closed by `gate run --evidence <empty> --found-by grader`, and its verdict is
+recorded by `gate run --grader <artifact>`, and both flags belong on the same
+invocation.
+
+**Status: documented, 2026-09-04, branch `smith/phase-10/integration`** —
+verified by reading `checkGraderVerdict` in full and by replaying task-4's event
+sequence at events 201-212 of `state/events/phase-10-2026-09-04.jsonl`.
+
+**Related:** [[D-274]].
+
+## D-276 — a fixed port makes a parallel wave's own verification serial
+
+**Severity:** S2-major.
+
+**Where:** `ui/e2e/global-setup.ts:13` and `ui/playwright.config.ts:33`, reached
+by `scripts/check.sh:439-476`.
+
+**How it opened.** Wave 3 ran two tasks concurrently in two worktrees, which is
+what a wave is for. Both gates then wanted to run `scripts/check.sh`, and
+`check.sh` runs the e2e suite, and the e2e suite binds a port that is a
+module-level constant: `const PORT = 4681;`, read from no environment variable
+and overridable by no flag. `ui/playwright.config.ts:33` hardcodes the same
+number into `baseURL`, carries no `webServer` key, and sets `fullyParallel:
+false` with `workers: 1`.
+
+The collision does not announce itself, because `waitForHealth()` polls
+`/api/health` every 200ms for fifteen seconds and returns on the first `res.ok`.
+It has no way to attribute that response to the process it just spawned. So two
+concurrent runs produce two outcomes that look like different bugs and are in
+fact two phases of one event: the run that loses the race to bind gets
+`EADDRINUSE` and dies, and the run that wins gets a green suite that may have
+been served, in part, by a server the other run started against another
+worktree's build. The run that loses the port is the run that reports the
+failure, which puts the diagnostic on the innocent process.
+
+The practical consequence is a rule with no home in any document until now:
+**never run two `check.sh` invocations concurrently on this box**, which means a
+wave of N tasks verifies in N times six minutes however wide the wave was. The
+factory's parallelism stops at the gate.
+
+**The fix.** Not yet applied. Bind port 0 and read the assigned port back into
+`baseURL`, or honour an env override with the wave handing each worktree a
+distinct port; either way the health check must be pointed at the port that was
+actually bound rather than at a constant. Task-unique scratch paths belong in
+the same change, for the same reason.
+
+**Status: open, recorded 2026-09-04** — mechanism recorded at event 219 and the
+firing at event 222 of `state/events/phase-10-2026-09-04.jsonl`. Worked around
+for the rest of the epic by running every gate strictly sequentially and by
+forbidding both wave-3 graders from re-running the suite, pointing them at the
+gate's own recorded `testResult` instead.
+
+**Related:** [[D-274]].
+
+## D-277 — the one path that is not repo-relative, and its error says missing
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/artifacts.ts:68` (`homeUnder`) and
+`artifacts.ts:130-175` (`checkArtifacts`).
+
+**How it opened.** Every other path a task writes in this factory is
+repo-relative, and an agent that has spent a session writing repo-relative paths
+writes one more into its result's `artifacts` array. `checkArtifacts` resolves
+each declared path against the task's artifact *home*, where `homeUnder(root,
+taskId)` is `path.resolve(artifactsDir, taskId)`. A repo-relative path resolved
+against a home is a path under the home that nothing wrote, so the gate reports
+the artifact as missing — while the file sits, present and correct, at the path
+the agent named.
+
+The declared entry must be a **basename relative to the home**, not a
+repo-relative path. Nothing in the role templates, the skill playbooks or the
+schema says so, and the error message actively points away from it: "missing"
+describes an absent file, and the file is not absent.
+
+Two firings this epic, at events 192 and 224, on two different tasks and two
+different agents, which is what moved it from a nit to S2. The second firing is
+the informative one: it happened *after* the first had been diagnosed, because
+the diagnosis lived in the orchestrator's head and not in the prompt.
+
+**The fix.** Not yet applied. Either accept a repo-relative path by trying it
+against the worktree root when the home-relative resolve misses, or refuse it
+with an error that names the expected form. The second is cheaper and arguably
+better: a path convention that has exactly one exception should say so out loud
+at the moment it is violated. What is not acceptable is the current pair, where
+the convention is undocumented and the error describes a different failure.
+
+There is a companion rule with the same shape and the same silence. The artifact
+home for a **judge** is the main clone, not the worktree — a judge that writes
+into its worktree writes somewhere the gate will not look — while a **worker's**
+home is its own worktree. Both were learned the same way, by a blocked gate, and
+no document states either.
+
+**Status: worked around, 2026-09-04, branch `smith/phase-10/integration`** —
+both wave-3 results repackaged to basenames before the second gate run, after
+which `artifactIssues` was `[]` on both, which is also what ruled the defect out
+as a cause of [[D-274]]'s block.
+
+**Related:** [[D-274]].
+
+## D-278 — a flat judges cap prices the wrong quantity
+
+**Severity:** S3-minor.
+
+**Where:** `factory/policies/budgets.yml`, `task.judges.cap_tokens: 40000`.
+
+**How it opened.** Both wave-3 graders went over the cap while grading two of
+the smallest diffs in the epic. task-6's grader spent 57648 tokens over 16 tool
+uses and 125.6 seconds against a 252-insertion documentation task; task-7's
+spent 41999 over 20 tool uses and 127.8 seconds against a 127-insertion one.
+Both numbers come from the harness meter read at return, not from the agents,
+which cannot read their own meters.
+
+The overruns are not waste. task-6's grader re-derived every number in the
+section it was grading rather than transcribing it: it re-ran `wave audit`, ran
+`grep -c` over `roadmap.md`, rebuilt a scratch database through `db rebuild --db
+<scratch>/rebuild.db`, and read the gate's own `testResult` back for the suite
+counts. task-7's spent its budget on AC7, which asks that every CLI invocation
+quoted in the record actually resolve — and the five doc guards deliberately
+exclude that task's two files, so nothing in the suite would have caught a wrong
+one. The grader resolved all nine against `projects --help` itself.
+
+So the cost was bought by the reading, not by the writing, and the ordering is
+instructive: the grader that read the epic's whole event log to check a
+close-out section cost more than the grader that resolved nine CLI invocations
+against `--help`, and neither number is predictable from the diff that produced
+it. A cap expressed as one flat number for every judge role on every task is
+priced against the wrong variable.
+
+**The fix.** Not applied, and deliberately not applied from inside a running
+wave. The candidate remedy is to price a judge's budget from the surface it must
+read rather than from a constant — the task's claims plus whatever the criteria
+cite — or at minimum to give the grader its own line, since a grader reads a
+rubric while a reviewer reads a diff and those are different quantities.
+Whatever replaces it should keep the property that made this visible at all: the
+check records and does not refuse.
+
+**Measured, 2026-09-04.** task-6 grader 57648 tokens, 1.44x the cap. task-7
+grader 41999, 1.05x. For contrast, the same wave's coders: task-6 103530 against
+a plan cap of 80000, task-7 150913 against 55000.
+
+**Status: recorded, not fixed, 2026-09-04, branch `smith/phase-10/integration`**
+— both meters logged as `error-logged` / `economy.budget-exceeded` at events 261
+and 262 of `state/events/phase-10-2026-09-04.jsonl`. Non-blocking by
+construction: `gate.ts:1376-1378` records budget overruns and never refuses, so
+neither of these did or could block a gate.
+
+**Related:** [[D-279]].
+
+## D-279 — a token meter counts the context, not the task
+
+**Severity:** S3-minor.
+
+**Where:** the harness task-notification meter, against
+`factory/orchestrator/src/gate.ts`'s `--input-tokens` / `--output-tokens`.
+
+**How it opened.** The orchestrator needs a token number per dispatch to stamp
+into the result envelope, and there are two instruments that can supply one: the
+meter the harness reports when a subagent returns, and a reconstruction from the
+subagent's own transcript. They disagreed, and the disagreement had a rule in
+it.
+
+The meter is cumulative *within a continued context* and resets when a resume
+opens a fresh one. So an agent that ran, was cut, and resumed reports its second
+sitting only. Reconstructing from the transcript recovers the rest: per-message
+footprint is `input_tokens + cache_creation_input_tokens +
+cache_read_input_tokens + output_tokens`, a sitting's cost is its peak
+footprint, a new sitting begins where the footprint drops below 60% of the
+running peak, and the total is the sum of the per-sitting peaks. Wave 3 put this
+beyond doubt — task-7's coder ran 139 messages across two sittings peaking at
+106607 and 55175, and the meter reported one of them.
+
+The two instruments therefore answer different questions and both are correct.
+The meter answers "what did this return cost"; the reconstruction answers "what
+did this task cost". Only the second belongs in a budget check.
+
+**The fix.** No code change. Recorded so that the reconstruction method is
+quotable rather than re-derived, and so the divergence stops reading as an
+instrument fault. One constraint travels with it and is not negotiable: the
+extraction is numbers-only. A subagent transcript is never read for content —
+the orchestrator's context is exactly what reading one would destroy.
+
+**Measured, 2026-09-04.** task-7 coder: 139 messages, sittings [106607, 55175].
+task-6 coder: 134 messages, one sitting [103292]. The gate flags carried
+different numbers again — 141941/8972 and 98412/5118 — because the input flag is
+the reconstruction and the meter is not.
+
+**Status: documented, 2026-09-04, branch `smith/phase-10/integration`** — method
+first recorded at event 100, confirmed against two independent instruments
+across waves 2 and 3.
+
+**Related:** [[D-278]].
+
+## D-280 — a gate that keeps only the tail loses the numbers criteria ask for
+
+**Severity:** S3-minor.
+
+**Where:** `factory/orchestrator/src/gate.ts`, `testResult.results[].tail`.
+
+**How it opened.** Wave 3's acceptance criteria asked for suite counts, and the
+gate had run the suite. But `tail` is truncated to roughly 5767 characters —
+about 50 lines — and `scripts/check.sh` runs the e2e suite last, so what
+survives is the e2e portion and nothing else. The unit, server and UI counts are
+printed, then pushed out of the window by the very step that proves them.
+
+The consequence is not a lost log line. It is that a criterion asking a task to
+record what the suite reported cannot be answered from the artifact the gate
+wrote, so the task must re-run the suite to answer it — which on this repo costs
+six minutes and, because of the fixed e2e port ([[D-276]]), cannot be done in
+parallel with anything else.
+
+**The fix.** Not applied. The cheap remedy is to keep a head as well as a tail,
+or to keep the last N lines of each check rather than the last N lines of the
+concatenation. The better one is for `check.sh` to emit a structured summary the
+gate can store whole, since the counts are the part anybody reads and they are a
+few hundred bytes.
+
+**Status: open, recorded 2026-09-04** — observed on every wave-3 gate; the
+workaround was to hand the graders the gate's `testResult` and the
+orchestrator's own measured baselines rather than let them re-run the suite.
+
+**Related:** [[D-276]].
+
+## D-281 — the dispatch prompt is the one artifact with no reviewer
+
+**Severity:** S3-minor.
+
+**Where:** `.claude/skills/bs/SKILL.md`, the dispatch contract.
+
+**How it opened.** Every artifact this factory produces is checked by something.
+A coder's diff meets a grader, a reviewer, a verifier and a test gate. A
+planner's spec meets a spec-reviewer. A researcher's brief meets `research
+check`. A judge's worktree meets `worktree verify`. The one artifact that meets
+nothing is the prompt the orchestrator composes to dispatch all of them.
+
+This epic paid for that three times, and each time the defect was in the prompt
+rather than in the agent. A worker was told to declare its artifact and the
+declaration blocked its gate ([[D-274]]). A declared path was written
+repo-relative when the checker resolves against a home ([[D-277]]). A task whose
+entire job was to measure the factory was nearly dispatched into a worktree
+whose gitignored `state/` holds a database the test suite created, which answers
+every query in a normal voice with another context's numbers — caught before
+dispatch, but caught by the orchestrator re-reading its own prompt, which is not
+a control.
+
+The asymmetry is structural rather than accidental. The dispatch contract
+requires the orchestrator to carry the worktree path, the claims, the token cap
+and the turn budget into the prompt, because the agent can see none of them
+otherwise. Every one of those is a fact that can be wrong, and a wrong one is
+invisible until an agent acts on it.
+
+**The fix.** Not applied. The shape of a remedy is a pre-dispatch assertion
+rather than a review — the facts in a dispatch prompt are checkable without
+judgment. Does the worktree path exist and is it on the branch named. Do the
+claims resolve. Is the declared artifact path in the form its checker will
+resolve. Is the standing point the one this task's measurements need. A `smith
+dispatch check` that ran before the call rather than an auditor that ran after
+it would have caught all three of this epic's instances.
+
+**Status: open, recorded 2026-09-04** — the third instance is recorded at event
+239 of `state/events/phase-10-2026-09-04.jsonl`, the worktree-decoy hazard at
+event 214, and the artifact-declaration firings at 192 and 224.
+
+**Related:** [[D-274]], [[D-277]].

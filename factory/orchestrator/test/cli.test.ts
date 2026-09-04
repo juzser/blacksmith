@@ -1977,7 +1977,7 @@ describe('cli.ts (built binary)', () => {
       expect(printed.status).toBe(0);
       const rows = printed.stdout.split('\n');
       expect(rows.some((r) => /^\* /.test(r))).toBe(true);
-      expect(rows.some((r) => /^  cli-projects-present-xyz\t/.test(r))).toBe(true);
+      expect(rows.some((r) => /^ {2}cli-projects-present-xyz\t/.test(r))).toBe(true);
       expect(rows.some((r) => /^\? cli-projects-missing-xyz\t/.test(r))).toBe(true);
       expect(printed.stdout).toMatch(/--project [^\n]*cli-projects-present-xyz/);
       expect(printed.stdout).not.toMatch(/--project [^\n]*cli-projects-missing-xyz/);
