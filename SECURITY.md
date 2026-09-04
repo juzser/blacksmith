@@ -115,8 +115,16 @@ text* and *things that execute*:
 - All credentials live in environment variables. `.env` is gitignored;
   `.env.example` is the only committed env file and carries variable **names**
   only.
-- Nothing auto-loads `.env` — there is no dotenv dependency. Load it yourself
-  (`node --env-file=.env ...`).
+- The CLI loads `.env` from the repo root at start, into its own process only
+  (`factory/orchestrator/src/dotenv.ts`). It sets names the environment does
+  not already hold and never overrides an exported one, so a runner's real key
+  always beats a developer's file; it returns the names it set and never a
+  value. There is still no dotenv dependency and no file is ever written.
+- The secret scan allowlists exactly one path, `^\.env$`, because that file
+  holds real keys on purpose and `.gitignore` means it can never be committed.
+  The allowlist is anchored — `.env.example` and `.env.local` are still
+  scanned — and `dotenv.test.ts` asks `git check-ignore` whether the reason
+  still holds, so it cannot outlive the ignore that justifies it.
 - `factory/policies/crosscheck.yml` references provider key **env var names**,
   never values.
 - Credential-shaped strings that appear in the test suite are deliberately

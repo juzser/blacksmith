@@ -97,14 +97,30 @@ providers:
     response_format_json_object: true
     api_key_env: DEEPSEEK_API_KEY
     model_tier: mid
-    # PRECONDITION: DEEPSEEK_API_KEY must be set in the dispatching environment.
+    # PRECONDITION: DEEPSEEK_API_KEY must be readable by the dispatching
+    # process -- exported, or in the clone's gitignored `.env`, which the CLI
+    # loads at start without overriding anything already exported (D-270).
     # Without it api-transport.ts throws `Environment variable "DEEPSEEK_API_KEY"
     # is not set` on every quorum trigger; quorum.ts catches it, so the gate
     # holds on the native verdict alone, but each trigger records a provider
     # error. `smith judge preflight` reports the name it looked for and never
     # the value it found, so it is safe to run anywhere.
-    enabled: false     # ships off: the key belongs to a runner, and the repo has never met one
-    mode: shadow       # flip to `active` only after a calibration pass (docs/runbooks/providers.md)
+    #
+    # `auto`, not `true`, for the same reason codex is: this file is checked in
+    # and the key is a fact about one box. A box holding the key gets a second
+    # vendor; a box without one -- CI included -- silently gets none, and
+    # neither has to edit this line.
+    #
+    # Funded for THIS box, 2026-09-04, by the operator who owns the key.
+    enabled: auto
+    # `shadow`, deliberately, and the difference from codex above is the point:
+    # this box declined shadow for codex and chose it here. A shadow provider
+    # is still called and still recorded as a participant -- it forfeits only
+    # gating power -- so what the mode buys is a run of recorded disagreement
+    # to read before a second vendor gets a vote (docs/runbooks/providers.md
+    # §3). Promote by editing this to `active`; that is the calibration pass,
+    # and it is an operator decision, not a default.
+    mode: shadow
 
 quorum_triggers:
   # architecture §6, agent-constraints.md "cross-check (phase 8)" — all four,

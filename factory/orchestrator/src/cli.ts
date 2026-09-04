@@ -45,6 +45,7 @@ import type { TickOptions } from './daemon.js';
 import type { DbOpts } from './db/projector.js';
 import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from './delegation.js';
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
+import { loadDotEnv } from './dotenv.js';
 import { loadEffortPolicy, resolveEffort } from './effort.js';
 import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
@@ -94,7 +95,13 @@ import {
   recordJudgeReport,
 } from './judges.js';
 import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
-import { LESSONS_MD_PATH, REPO_ROOT, SANDBOX_LEASE_DIR, STATE_DB_PATH } from './paths.js';
+import {
+  DOTENV_PATH,
+  LESSONS_MD_PATH,
+  REPO_ROOT,
+  SANDBOX_LEASE_DIR,
+  STATE_DB_PATH,
+} from './paths.js';
 import {
   diffPlans,
   livePlanTasks,
@@ -921,6 +928,14 @@ async function main(): Promise<number> {
     printJson({ error: { code: 'unsupported-runtime', message: runtime.reason } });
     return 1;
   }
+
+  // Before any command resolves a provider. `enabled: auto` is answered by
+  // `apiKeyPresent`, which reads `process.env` -- so a key the operator put
+  // where `docs/runbooks/providers.md` told them to has to arrive here first,
+  // or the policy resolves off and preflight reports a key the operator can
+  // see in the file (D-270). Sets only names the environment does not already
+  // hold, and returns names, never values.
+  loadDotEnv(DOTENV_PATH);
 
   const { namespace, action, rest } = splitNamespaceAction(process.argv.slice(2));
   // Parse against what this command declares, not against "anything starting

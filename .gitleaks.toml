@@ -25,6 +25,20 @@ paths = [
   # committed env file, and a value landing in it is exactly what the gate
   # should catch, so it is deliberately NOT allowlisted:
   #   '''\.env\.example$''',
+  # The clone's own `.env`, and only it. `docs/runbooks/providers.md` tells an
+  # operator to put a provider key here and `factory/orchestrator/src/dotenv.ts`
+  # now reads it, so on any box that followed the runbook this file holds a real
+  # credential. `gitleaks dir` walks the working tree rather than the index, so
+  # it found one and failed the gate for doing exactly what the repo asked
+  # (D-270).
+  #
+  # This is not a hole in the guard. The guard exists to stop a credential
+  # reaching the tree, and `.gitignore:21` means this file cannot get there.
+  # What keeps the two honest is a test: `dotenv.test.ts` asserts `git
+  # check-ignore` still claims `.env`, so this line cannot outlive the ignore
+  # that justifies it. `.env.local` and its siblings are deliberately NOT
+  # here -- the runbook names one file, and a key in any other still fails.
+  '''^\.env$''',
   '''pnpm-lock\.yaml$''',
   '''ui/e2e/__screenshots__/''',
 ]
