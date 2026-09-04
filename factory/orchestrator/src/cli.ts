@@ -1660,11 +1660,15 @@ async function main(): Promise<number> {
     // its arguments.
     const { factoryProjects, resolveProjectDirs } = await import('./projects.js');
     // This clone joins the pass by default (contract clause 1); `--no-self`
-    // is the refusal path.
+    // is the refusal path. It has to drop this clone from BOTH sides of the
+    // fold: leaving it in the register while pulling it from `projectDirs`
+    // would still fold to an `unwatched-project` finding for it, which is
+    // exactly the alarm `--no-self` exists to silence.
+    const self = flags['no-self'] !== 'true';
     const tickOpts: TickOptions = {
       ...eventOptsFromFlags(flags),
-      projectDirs: resolveProjectDirs(repeated.project, { self: flags['no-self'] !== 'true' }),
-      readProjects: () => factoryProjects(),
+      projectDirs: resolveProjectDirs(repeated.project, { self }),
+      readProjects: () => factoryProjects().filter((ref) => self || !ref.self),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
