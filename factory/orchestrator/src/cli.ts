@@ -43,6 +43,7 @@ import {
 } from './crossFinding.js';
 import type { TickOptions } from './daemon.js';
 import type { DbOpts } from './db/projector.js';
+import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from './delegation.js';
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { loadEffortPolicy, resolveEffort } from './effort.js';
 import { SmithError } from './errors.js';
@@ -151,6 +152,7 @@ import {
   readAddedTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
+import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
 import type { CheckCommand } from './testgate.js';
 import { assertSelectableTestCmd } from './testSelect.js';
@@ -2165,6 +2167,36 @@ async function main(): Promise<number> {
     });
     printJson(report);
     return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'delegation' && action === 'check') {
+    // D13 step 3: the other two checks read a dispatch as evidence that a
+    // second turn happened, and that reading only holds while the dispatching
+    // node owns the log it writes into. This verb asserts the condition. It is
+    // two questions in one report because they fail apart: the topology can be
+    // unsound while the run obeyed it, and a sound topology can be disobeyed.
+    // required: 1 -- `<id>` and `<path>` in the usage line are flag values.
+    const [sessionId] = requirePositionals(positional, usageFor('delegation check'), 1) as [string];
+    requireSession(sessionId, eventOptsFromFlags(flags));
+    // Lineage-wide (D-119), and here it is the whole point: a wave-runner's
+    // own session is where its dispatches land, so a check that read only the
+    // epic's session would see the delegation it exists to audit as absent.
+    const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    const policy = loadDelegationPolicy(flags.policy);
+    const crosscheck = loadCrosscheckPolicy(flags.crosscheck);
+    const grants = checkDelegationGrants(policy, {
+      agentRoles: loadTaxonomy().dimensions.agent ?? [],
+      isolationPairs: crosscheck.roleIsolation.pairs,
+      asymmetricPairs: crosscheck.asymmetricRoles.pairs,
+    });
+    const log = checkDelegationLog(events, policy, {
+      sessionId,
+      ...(flags.task ? { taskId: flags.task } : {}),
+    });
+    printJson({ session: sessionId, grants, log, ok: grants.ok && log.ok });
+    // Same fail-closed contract as `dispatch check`: `unverifiable` exits 1,
+    // because a wave-runner that has not opened its log yet is not a pass.
+    return grants.ok && log.ok ? 0 : 1;
   }
 
   if (namespace === 'escalation' && action === 'check') {

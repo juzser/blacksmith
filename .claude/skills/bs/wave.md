@@ -27,22 +27,36 @@ both:
   epic's window can carry it. Nothing changes: the session id you were
   handed is the one you write to.
 - **In a session of its own** when it is not. Open one with `smith session
-  start <wave-id> --continues <epic-session>#<n>`, where `<n>` is the index
-  of the epic event that admitted this wave, and write every dispatch below
+  start <wave-id> --continues <event-id>` and write every dispatch below
   there. The epic session then carries the admission and the result rather
   than every turn in between — which is the point, because an epic outlives
   its waves, and a window spent on this wave's dispatches is a window the
   epic does not have for the wave after next (D13).
 
+Which `<event-id>` depends on how you were started, and the difference is
+not cosmetic — it is the edge an audit walks:
+
+- **The epic ran you** and you opened a wave session yourself: continue from
+  the epic event that admitted this wave.
+- **You were dispatched as a `wave-runner`**: continue from the
+  `dispatch_decision` that dispatched you, the event id handed to you with
+  the wave. `smith delegation check` resolves your session by matching a
+  `session-start`'s `causal_parent` against that dispatch, and it is the
+  only thing that proves the dispatches you are about to write are your
+  own log's rather than an agent talking about itself. Continue from
+  anything else and the check reports you as `unverifiable` — not as a
+  pass — however well the wave ran. Open it **before** your first dispatch,
+  for the same reason: a grant is earned by owning the log first.
+
 Either way, one rule holds: **the log you write is the log the epic reads**,
 and `--continues` is the whole of what makes that true. Every deciding read
 at the epic tier folds the lineage rather than one session — `wave audit`,
 `budget alarm`, `tester check`, `judge outstanding`, `escalation check`,
-`dispatch check` — so a dispatch recorded in a wave session is visible from
-the epic session that admitted it, and is *not* visible from a sibling
-wave's. Open a wave session without `--continues` and none of those verbs
-can see your work: they will not error, they will answer about a wave that
-appears never to have run.
+`dispatch check`, `delegation check` — so a dispatch recorded in a wave
+session is visible from the epic session that admitted it, and is *not*
+visible from a sibling wave's. Open a wave session without `--continues` and
+none of those verbs can see your work: they will not error, they will answer
+about a wave that appears never to have run.
 
 **What you are handed**, and carry through every command below: the project
 directory, the epic id, the live plan path, the admitted task ids, the
