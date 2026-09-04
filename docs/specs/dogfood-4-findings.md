@@ -13991,3 +13991,106 @@ against this branch's `projects.ts` and `cli.ts`, and against one
 `daemon run --once --dir <scratch>` tick.
 
 **Related:** [[D-269]], [[D-271]].
+
+## D-273 — an interval alarm and a question a human just asked get different answers
+
+**Severity:** S3-minor.
+
+**Where:** `factory/orchestrator/src/projects.ts:22-27` (the header rule)
+against `factory/orchestrator/src/cli.ts:1671` (`daemon run`'s
+`readProjects`) and `factory/orchestrator/src/cli.ts:1780-1802` (`projects
+list`).
+
+**How it opened.** D-272's header rule read "A declared project with no
+checkout is reported by nothing here" — true for the whole file, because
+`factoryProjects()` was the only reader either surface had. Task-4 gave the
+file a second reader, `missingProjects()`, and the two callers now disagree
+on purpose: the daemon still calls only `factoryProjects()`, so a
+declaration with no checkout still never reaches an `unwatched-project`
+finding, while `smith projects list` calls both and names what it found.
+A reader who meets that split later, with no record of why, will read it as
+an inconsistency and "fix" it by wiring `missingProjects()` into the daemon
+too — which would put back the exact alarm D-272 argued against clearing by
+restating a known fact, except this time with no way to clear it at all: no
+checkout means no lockfile, and no lockfile means no flag an operator could
+add to make the finding go away. `docs/runbooks/ops.md` states the same
+distinction in its own words: "an alarm nothing can ever clear is worse
+than no alarm," next to "`smith projects list` is a different question,
+asked by a human rather than an interval."
+
+The motivating evidence was concrete, not hypothetical. Before task-2
+struck them, this clone's roadmap carried four `- project: envkit` rows
+with no checkout anywhere under `PROJECTS_DIR` or `WORKSPACES_DIR` (D-271),
+and no surface — not the daemon, not an inventory, because `projects list`
+did not report a miss yet either — ever said so; an operator found it by
+reading the roadmap by hand. That state recurs by construction:
+`registerProjectInRoadmap` (`scaffold.ts:517`, called from `cli.ts:1500`)
+writes a `- project: <name>` bullet for every project `smith new`
+scaffolds, so a checkout that is later moved, renamed or never cloned
+leaves exactly this kind of orphaned declaration behind, silently, again.
+
+**The fix.** Nothing changed in the header rule's daemon half; task-4 added
+a second half rather than replacing the first. `projects.ts:22-27` today:
+
+```
+//   * A declared project with no checkout never enters `factoryProjects()`.
+//     There is no repo to read, so a finding about it would be one an
+//     operator cannot act on and can never clear -- and daemon.ts's
+//     factory-width note says what an alarm that cannot return to zero costs.
+//     `missingProjects()` reports the same fact for a human-invoked inventory
+//     instead: an interval alarm and an operator asking `smith projects list`
+//     a question are answered differently on purpose (docs/runbooks/ops.md).
+```
+
+What it still governs: the daemon finding. `cli.ts:1671` builds `daemon
+run`'s `readProjects` from `factoryProjects()` alone —
+`readProjects: () => factoryProjects().filter((ref) => self || !ref.self)`
+— and never imports `missingProjects`, so `unwatched-project` still cannot
+fire for a checkout that does not exist. `daemon.test.ts:1508`, "raises
+nothing for a declared project with no checkout, same fold, same options,"
+is the regression guard: a fixture roadmap declares `envkit` under neither
+root, `factoryProjects()` over that fixture already drops it, and folding
+that same, real (non-mocked) result through `inspectFactory` raises zero
+`unwatched-project` findings — the same true-before-and-after shape
+`test/projects.test.ts`'s neighbouring "drops a declared project with no
+checkout under any root" test proves at the `factoryProjects()` layer
+itself.
+
+What it does not: the inventory. `cli.ts:1780-1802`'s `projects list`
+handler calls both `factoryProjects(roadmapOpts)` and
+`missingProjects(roadmapOpts)`, prints a resolved entry with `*` (self) or
+a leading space, and prints each missing declaration with `?` and the
+roots searched — kept out of the trailing `--project` line, since there is
+no directory to paste. Verified against a fixture built for this record,
+outside the repository:
+
+```
+$ mkdir -p "$SCRATCH/roots" && cat > "$SCRATCH/roadmap.md" <<'ROADMAP'
+# Roadmap
+
+## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- kind: dogfood
+- epics: []
+- goal: fixture only, for AC3 verification.
+ROADMAP
+$ node factory/orchestrator/dist/cli.js projects list --roadmap "$SCRATCH/roadmap.md"
+* black-smith	<this checkout>
+? envkit	not found under <PROJECTS_DIR>, <WORKSPACES_DIR>
+
+--project <this checkout>
+```
+
+`--json` over the same fixture puts `envkit` in its own `missing` array,
+never inside `projects`, and exits 0 either way — not finding a checkout is
+an answer, not an error.
+
+**Status: recorded, 2026-09-05, branch
+`smith/phase-10/task-7-record-the-inventory-decision`** — verified above
+against this branch's `projects.ts` and `cli.ts`, the cited daemon and
+inventory tests, and one `projects list` run over a fixture roadmap built
+outside the repository.
+
+**Related:** [[D-271]], [[D-272]].
