@@ -9,7 +9,7 @@
 // lines directly beneath it — WITHIN this component, never spanning into
 // the other column, so toggling one group never reflows the other column.
 //
-// Round 7 (operator directive: "để ý đến các mốc thời gian"): every line now
+// Round 7 (operator directive: "mind the timestamps"): every line now
 // carries how long that agent has been running. `dispatchedAt` was already on
 // the entry but only reached the DOM as a native `title` — invisible, and a
 // tooltip is not something an operator scans a column of rows with. The
@@ -17,8 +17,8 @@
 // 40 minutes", so it is rendered as text, on the group row (the longest
 // runtime in the group, visible while collapsed) and on each entry.
 //
-// Round 9 (operator directive: "animation nhỏ cho các indicator ở chip với
-// các agent đang thực sự hoạt động"). Before this round every dot on this
+// Round 9 (operator directive: "a small animation on the chip indicators for
+// the agents that are actually working"). Before this round every dot on this
 // card pulsed unconditionally, which made the animation decoration: an agent
 // wedged since yesterday pulsed exactly like one dispatched a minute ago.
 // The pulse is now spent only on `working` agents — lib/liveness.ts's

@@ -5803,7 +5803,8 @@ describe('cli.ts (built binary)', () => {
         const { proposalId, findingId } = JSON.parse(proposed.stdout);
 
         // No --changes, no --sites, no --rationale. That is the whole of
-        // "duyệt nhanh": everything `plan amend` demands was recorded by the
+        // "approve it fast": everything `plan amend` demands was recorded by
+        // the
         // worker that hit the wall, so approval supplies it rather than
         // asking the operator to reconstruct it.
         const result = runCli([

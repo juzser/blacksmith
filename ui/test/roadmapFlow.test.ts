@@ -181,10 +181,11 @@ describe('lib/roadmapFlow.ts roadmapFlowEdges()', () => {
   });
 
   it('draws straight connectors rather than the default bezier', () => {
-    // Operator directive (round 8): "hiển thị line nối giữa các node thẳng".
-    // A milestone node is content-sized — goal length and mini-timeline row
-    // count differ per milestone — so two nodes in the same lane share a top
-    // edge but rarely a height. Their handles therefore sit at different y,
+    // Operator directive (round 8): "draw the connector lines between nodes
+    // straight". A milestone node is content-sized — goal length and
+    // mini-timeline row count differ per milestone — so two nodes in the same
+    // lane share a top edge but rarely a height. Their handles therefore sit
+    // at different y,
     // and Vue Flow's default bezier renders that offset as a visible S-curve.
     const lanes = roadmapLanes([
       m({ milestoneId: 'p1', sequence: 1 }),

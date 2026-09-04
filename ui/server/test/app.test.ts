@@ -273,7 +273,8 @@ describe('ui/server app.ts', () => {
   }
 
   /**
-   * Operator report: "Chưa thấy kanban update, inprogress chưa thấy task nào."
+   * Operator report: "the kanban still is not updating, and in-progress
+   * shows no tasks at all."
    *
    * createApp() opened one connection and every read route queried it, but
    * nothing on the read path ever re-projected — applyDb() was called only by

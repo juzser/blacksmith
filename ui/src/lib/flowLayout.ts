@@ -1,7 +1,7 @@
 // Pure layout for FlowPage's task DAG (operator directive, Phase 6b round 11:
-// "Flow node cần tách nhau ra và hiển thị rõ ràng hơn"). Split out of the .vue
-// file for the reason roadmapFlow.ts's header already anticipated — "the same
-// split FlowPage's wave layout would have wanted" — so the geometry is unit-
+// "flow nodes need to be spaced apart and shown more clearly"). Split out of
+// the .vue file for the reason roadmapFlow.ts's header already anticipated —
+// "the same split FlowPage's wave layout would have wanted" — so it is unit-
 // tested under ui/vitest.config.ts's node environment instead of resting on a
 // screenshot nobody in this session can take.
 //
@@ -28,7 +28,8 @@
 // together — a node wider than NODE_WIDTH would overlap its neighbour, which
 // is what flowLayout.test.ts's overlap check is there to catch.
 //
-// A later directive — "Flow cũng cần tổ chức lại để dễ nhìn hơn" — arrived
+// A later directive — "Flow needs reorganising too, so it is easier to read"
+// — arrived
 // after the factory started dispatching twenty tasks in one wave, which the
 // geometry above draws as a single 3552px stack: correct, separated, and
 // unreadable without scrolling past everything either side of it. Three

@@ -5,8 +5,9 @@
 // piece (no kanban-by-milestone query exists — see this file's sibling
 // TaskCard.vue comment) — 6a renders one lane for the selected epic.
 //
-// Operator directive (Phase 10): "limit mỗi cột max 10 tasks, sau đó có thể
-// view more. Tránh phải scroll rất dài." The cap and the remainder are
+// Operator directive (Phase 10): "cap each column at ten tasks, with a view
+// more after that -- avoid having to scroll a very long way." The cap and the
+// remainder are
 // lib/kanban.ts's capColumn() so they are unit-tested under the node
 // environment; this file only paints the control and holds which columns the
 // reader has expanded.

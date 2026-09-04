@@ -1,7 +1,8 @@
 // A shared ticking "now", so every elapsed/relative label on a page counts up
 // on its own instead of freezing between data fetches.
 //
-// Operator directive (Phase 6b round 7): "một dạng real-time update". Overview
+// Operator directive (Phase 6b round 7): "a kind of real-time update".
+// Overview
 // already re-fetched every 5s, but every timestamp on it was formatted against
 // `Date.now()` at render time — so a label only moved when the fetch happened
 // to change something else on the page, and a page with no changes looked

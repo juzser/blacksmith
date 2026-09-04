@@ -1511,6 +1511,25 @@ than appearing in it.
 
 ### Fixed
 
+- **The repo asked for one language and nothing read the rule back (D-268).**
+  `AGENTS.md` says every artifact here is English. A hundred and ten lines
+  across thirty-nine files quoted the operator's directives verbatim in
+  Vietnamese, because quoting the person who asked is the right instinct and
+  the operator writes in Vietnamese — each comment defensible alone, the
+  aggregate not. A maintainer who does not read Vietnamese met a citation they
+  could not evaluate, which is worse than no comment: an explanation you can
+  see and cannot read says *this was decided elsewhere, by someone else*, the
+  precise opposite of what the comment was for. Every quotation is now
+  English and every one still names its source — `Operator directive (Phase
+  10):`, `Round 7 (operator directive: …)` — so the reader still learns that a
+  constant exists because it was asked for, and can now learn what was asked.
+  The verbatim originals stay in git history, in `state/events/*.jsonl`, and
+  in the records of the past this deliberately leaves alone: a finding that
+  quotes a bug report *is* the report. `repoLanguage.test.ts` is the reader
+  the rule never had — the fourth guard of this shape after D-259, D-265 and
+  D-267, and, per D-119, it asserts against its own walk as well as against
+  the repo, since a scan that silently reaches nothing passes.
+
 - **YAGNI was enforced by a lens the reviewer was never given (D-267).**
   `docs/standards/agent-constraints.md` and `factory/policies/severity.yml`
   both named "the reviewer's `over-engineering` lens" as the thing enforcing

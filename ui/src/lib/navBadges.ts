@@ -2,7 +2,8 @@
 // shell pulse (composables/usePulse.ts).
 //
 // Why a badge and not a toast. The operator asked whether an event, trigger
-// or dispatch should raise a toast, "để hệ thống có cảm giác đang chạy". It
+// or dispatch should raise a toast, "so the system feels like it is running".
+// It
 // should not, for reasons that are properties of this transport rather than
 // matters of taste:
 //

@@ -16,7 +16,8 @@ test.describe('Flow', () => {
     await expect(page.locator('table.sr-only')).toBeAttached();
   });
 
-  // Round 11 ("Flow node cần tách nhau ra"): the separation is asserted as
+  // Round 11 ("flow nodes need to be spaced apart"): the separation is
+  // asserted as
   // arithmetic in ui/test/flowLayout.test.ts, which runs everywhere. This is
   // the same claim against the real rendered boxes — it only runs where a
   // browser exists, which is why it is not the only place the claim is made.

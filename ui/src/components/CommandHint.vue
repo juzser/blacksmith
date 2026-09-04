@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// Operator directive (Phase 6b round 10): "Thêm block nho nhỏ ở Overview để
-// hướng dẫn dùng các command /bs, hoặc trong Projects với command /bs new để
-// tạo project mới."
+// Operator directive (Phase 6b round 10): "add a small block on the Overview
+// showing how to use the /bs commands, or on Projects with /bs new for
+// creating a new project."
 //
 // The dashboard shows what the factory did; nothing on it starts anything.
 // Every verb lives in the `/bs` skill (.claude/skills/bs/SKILL.md), which is

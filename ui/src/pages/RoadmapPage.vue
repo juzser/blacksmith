@@ -4,8 +4,8 @@
 // progress bar (3 most recent DONE tasks, success tone + relative ts; 3 NEXT
 // tasks, neutral, plan/dependency order).
 //
-// Operator directive (Phase 6b round 6): "Trong dashboard, phần roadmap,
-// display theo dạng VueFlow" — the card list becomes a @vue-flow/core
+// Operator directive (Phase 6b round 6): "in the dashboard, the roadmap
+// section, display it as VueFlow" — the card list becomes a @vue-flow/core
 // diagram, same sanctioned dependency and same house pattern as FlowPage
 // (custom DOM nodes styled with kit tokens, useVueFlow() viewport controls in
 // a Panel rather than the unsanctioned @vue-flow/controls package, sr-only
@@ -21,8 +21,9 @@
 // layout as pure functions so it is unit-tested under ui/vitest.config.ts's
 // node environment instead of only through Playwright.
 //
-// Operator directive (Phase 6b round 8): "hiển thị line nối giữa các node
-// thẳng, có animation ở node đang running" — edges become `type: 'straight'`
+// Operator directive (Phase 6b round 8): "draw the connector lines between
+// nodes straight, and animate the node that is running" — edges become
+// `type: 'straight'`
 // (a milestone node is content-sized, so same-lane nodes share a top edge but
 // not a height, and Vue Flow's default bezier bowed between their offset
 // handles), and .roadmap-node--live gains a pulsing ring on top of its live

@@ -12,8 +12,8 @@
 // Phase 6b, a supplementary lessons() call for the pending-lessons chip) —
 // not a fully independent per-zone fetch.
 //
-// Phase 6b round 7 (operator directive: "Tôi cần nhìn được ở Dashboard cái gì
-// đang chạy, một dạng real-time update, để ý đến các mốc thời gian"): the
+// Phase 6b round 7 (operator directive: "I need to see on the Dashboard what
+// is running, a kind of real-time update; mind the timestamps"): the
 // polling was already here, the EVIDENCE of it was not. Three additions, all
 // leaning on the timestamps the API already returns: a LiveStatus indicator
 // (state + age of the last successful load + manual Refresh), a 1s useNow()
@@ -30,12 +30,13 @@
 // that still answers /api/pulse is a page problem, not a liveness one, and
 // the Banner is the surface that says so.
 //
-// Phase 6b round 9 (operator directive: "trong phần overview, tôi muốn thấy
-// cái gì đang running ... thêm animation nhỏ cho các indicator ở chip với các
-// agent đang thực sự hoạt động. Các update hoặc block cần động hơn để thấy
-// thực sự factory đang chạy"). Three parts: a "Now running" card that names
-// the tasks (the grouped card below answers *who* is running, by role·tier —
-// it took a disclosure click to find out *what*); chip/dot animation spent
+// Phase 6b round 9 (operator directive: "on the overview I want to see what is
+// running ... add a small animation to the chip indicators for the agents that
+// are actually working. Updates and blocks need more motion, so you can
+// actually see the factory running"). Three parts: a "Now running" card that
+// names the tasks (the grouped card below answers *who* is running, by
+// role·tier — it took a disclosure click to find out *what*); chip/dot
+// animation spent
 // only on agents lib/liveness.ts can call `working` (IdentityChip's `live`
 // prop); and a one-shot flash on the blocks whose data actually changed under
 // the poll, driven by a signature of that data rather than by the fetch —
@@ -237,7 +238,7 @@ const liveAgentGroups = computed<LiveAgentGroupUI[]>(() => {
 const leftAgentGroups = computed(() => liveAgentGroups.value.filter((_, i) => i % 2 === 0));
 const rightAgentGroups = computed(() => liveAgentGroups.value.filter((_, i) => i % 2 === 1));
 
-// Round 7: the one sentence that answers "cái gì đang chạy" without expanding
+// Round 7: the one sentence that answers "what is running" without expanding
 // a single group — how many agents, and how long the oldest has been at it.
 // The second half is the part that carries information: 8 agents at 30s is a
 // healthy factory, 8 agents where the oldest is at 2h is a wedged one.
@@ -259,9 +260,9 @@ const runningSummary = computed(() => {
   return clauses.join(', ');
 });
 
-// Dogfood round 2 — operator: "Không thấy overview update, và nên thay thông
-// tin trong block now running bằng các session đang chạy hiện tại, có
-// animation indicator".
+// Dogfood round 2 — operator: "the overview never updates, and the now-running
+// block should show the sessions that are running right now, with an animated
+// indicator".
 //
 // Round 9's version of this card listed `liveAgentEntries` longest-running
 // first, capped at 8. In the real state/smith.db that made it permanently
@@ -269,8 +270,8 @@ const runningSummary = computed(() => {
 // and 12 rows from a session that ended on 2026-08-07 were still `live` on
 // 2026-08-11. Longest-running-first put those twelve ghosts at the top, the
 // cap of 8 meant nothing else ever reached the card, and the block never
-// changed no matter what the factory did — the "không thấy update" the
-// operator reported.
+// changed no matter what the factory did — the "never updates" the operator
+// reported.
 //
 // So the unit of this card is now the SESSION (queries.ts runningSessions()),
 // ordered by what appended an event most recently, with its own activity
@@ -399,8 +400,9 @@ function signed(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-// Operator directive (Phase 6b round 10): "Thêm block nho nhỏ ở Overview để
-// hướng dẫn dùng các command /bs". Wording taken from the subcommand table in
+// Operator directive (Phase 6b round 10): "add a small block on the Overview
+// showing how to use the /bs commands". Wording taken from the subcommand
+// table in
 // .claude/skills/bs/SKILL.md so the hint cannot drift into describing commands
 // that do something else. The last two appear only when there is actually
 // something waiting — a permanent "/bs waivers" line next to a rail card that
@@ -504,8 +506,8 @@ const bsCommands = computed<CommandHintItem[]>(() => {
       </template>
     </MetricGrid>
 
-    <!-- Operator directive (dogfood round 2): "nên thay thông tin trong block
-         now running bằng các session đang chạy hiện tại, có animation
+    <!-- Operator directive (dogfood round 2): "the now-running block should
+         show the sessions that are running right now, with an animated
          indicator". One row per SESSION, most recently active first, each
          with a pulsing dot while it is genuinely appending events. A session
          that has gone quiet keeps its row but loses the pulse and collapses

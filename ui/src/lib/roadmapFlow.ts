@@ -1,5 +1,5 @@
 // Pure layout for RoadmapPage's VueFlow diagram (operator directive,
-// Phase 6b round 6: "Trong dashboard, phần roadmap, display theo dạng
+// Phase 6b round 6: "in the dashboard, the roadmap section, display it as
 // VueFlow"). Kept out of the .vue file so it is unit-testable under
 // ui/vitest.config.ts's `environment: node` — the same split FlowPage's
 // wave layout would have wanted.
@@ -36,11 +36,12 @@ export interface RoadmapFlowEdge {
   source: string;
   target: string;
   /**
-   * Operator directive (round 8): "hiển thị line nối giữa các node thẳng".
-   * Vue Flow's default edge is a bezier, which only looks straight when both
-   * handles share a y. Milestone nodes are content-sized (goal length,
-   * mini-timeline row count), so within a lane they share a TOP edge but not
-   * a height — the handles sit at different y and the bezier bows into an
+   * Operator directive (round 8): "draw the connector lines between nodes
+   * straight". Vue Flow's default edge is a bezier, which only looks straight
+   * when both handles share a y. Milestone nodes are content-sized (goal
+   * length, mini-timeline row count), so within a lane they share a TOP edge
+   * but not a height — the handles sit at different y and the bezier bows into
+   * an
    * S-curve. `straight` draws the connector as the direct line between the
    * two handles instead.
    */
@@ -60,8 +61,9 @@ function bySequence(a: MilestoneProgress, b: MilestoneProgress): number {
 /**
  * The one kind the Roadmap page shows by default.
  *
- * Operator directive (Phase 10): "không hiện roadmap của dogfood và chính
- * blacksmith. Chỉ hiển thị các project new với blacksmith." The page's
+ * Operator directive (Phase 10): "do not show the roadmap for dogfood or for
+ * blacksmith itself -- show only new projects built with blacksmith." The
+ * page's
  * question is "what has this factory built for me", and the factory's own
  * ten phases plus the four milestones of a project built to exercise it are
  * not answers to it -- they are the machinery, and they were burying the

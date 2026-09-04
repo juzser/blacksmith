@@ -54,8 +54,9 @@ function goToProject(project: string) {
   router.push({ name: 'overview-project', params: { project } });
 }
 
-// Operator directive (Phase 6b round 10): "hoặc trong Projects với command
-// /bs new để tạo project mới". This page is a hub with no "new project"
+// Operator directive (Phase 6b round 10): "or on Projects with the /bs new
+// command for creating a new project". This page is a hub with no "new
+// project"
 // affordance, because creating one is not something the dashboard can do —
 // `smith new` scaffolds a repo on disk. Naming the command is the honest
 // version of that button. Descriptions follow .claude/skills/bs/SKILL.md.

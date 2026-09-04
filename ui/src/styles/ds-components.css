@@ -22,7 +22,7 @@
     opacity: 0.5;
   }
 }
-/* Operator directive (round 8): "có animation ở node đang running". An
+/* Operator directive (round 8): "animate the node that is running". An
    expanding, fading ring — box-shadow ONLY, never opacity. That distinction
    is the whole reason this is a separate keyframe from ds-pulse: pulsing a
    whole content node's opacity oscillates the contrast of every word inside
@@ -45,8 +45,9 @@
     opacity: 1;
   }
 }
-/* Operator directive (Phase 6b round 9): "Các update hoặc block cần động hơn
-   để thấy thực sự factory đang chạy." A one-shot ring that marks the block
+/* Operator directive (Phase 6b round 9): "updates and blocks need more motion,
+   so you can actually see the factory running." A one-shot ring that marks
+   the block
    whose data just changed under the 5s poll, then gets out of the way.
    box-shadow, not background/opacity — like ds-ring-pulse, it must not move
    the text's own contrast ratio while it plays, and it must not reflow
@@ -500,8 +501,8 @@ a.live-agent-entry:focus-visible {
   font-size: var(--ds-text-xs);
   color: var(--ds-text-subtle);
 }
-/* Operator directive (dogfood round 2): "nên thay thông tin trong block now
-   running bằng các session đang chạy hiện tại, có animation indicator". Round
+/* Operator directive (dogfood round 2): "the now-running block should show the
+   sessions that are running right now, with an animated indicator". Round
    9's .now-running-list was one flat grid of agent rows; the unit is now the
    session, so this is a vertical list of blocks — each a session header plus,
    only while that session is active, its own agent rows indented under it.
@@ -1914,8 +1915,8 @@ a.live-agent-entry:focus-visible {
   color: var(--ds-text-subtlest);
 }
 
-/* Roadmap as a VueFlow diagram (Phase 6b round 6 operator directive: "phần
-   roadmap, display theo dạng VueFlow"). Replaces the card-list rules
+/* Roadmap as a VueFlow diagram (Phase 6b round 6 operator directive: "the
+   roadmap section, display it as VueFlow"). Replaces the card-list rules
    (.ds-card--capped / .roadmap-groups / .roadmap-group /
    .roadmap-group-separator), which had no other users once RoadmapPage
    stopped rendering <article> cards in stacked project groups — deleted
@@ -1943,7 +1944,7 @@ a.live-agent-entry:focus-visible {
 }
 /* The milestone the factory is actually on. Was border-only, on the reasoning
    that Flow's pulsing dot marks a live AGENT and a milestone has none — the
-   operator overrode that in round 8 ("có animation ở node đang running"): the
+   operator overrode that in round 8 ("animate the node that is running"): the
    whole point of the diagram is answering "where is work now", and a 1px
    border recolour does not carry that across a 720px canvas.
    The ring is the motion channel; border-color is the static one, so the
@@ -2024,7 +2025,7 @@ a.live-agent-entry:focus-visible {
      clamped to two lines because summarize()'s char cap alone cannot stop a
      single unbroken token like a path or a URL.)
 
-     Operator directive (round 11): "tách nhau ra và hiển thị rõ ràng hơn" —
+     Operator directive (round 11): "spaced apart and shown more clearly" —
      separation is geometry, clarity is contrast, so the node also moves from
      the flat --ds-surface it shared with the canvas onto a raised surface
      with the standard card shadow and radius. Each node now reads as an
@@ -2189,7 +2190,7 @@ a.live-agent-entry:focus-visible {
   gap: var(--ds-space-1-5);
 }
 
-/* Sessions canvas (operator directive: "Làm kiểu T1", after reading nodeterm).
+/* Sessions canvas (operator directive: "do it the T1 way", after nodeterm).
    The dot classes are NOT redefined here — .running-session__dot* and
    .live-agent-entry__dot* are reused verbatim from the Overview rules above,
    so the two surfaces reading /api/overview speak one visual vocabulary and a

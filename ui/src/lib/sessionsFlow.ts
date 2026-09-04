@@ -1,6 +1,6 @@
-// Pure layout for the Sessions canvas — the operator's T1 answer to "có cách
-// nào đưa dạng node flow tương tự [nodeterm] lên black-smith chạy trên
-// browser không?".
+// Pure layout for the Sessions canvas — the operator's T1 answer to "is there
+// a way to bring a node flow like [nodeterm]'s into black-smith, running in
+// the browser?".
 //
 // nodeterm's idea worth taking is not its terminals, it is that *cards are
 // live sessions*: the spatial canvas shows the runs themselves, not a static
@@ -99,8 +99,9 @@ export const SESSION_BAND_CAP = 8;
 /**
  * How many agents a band draws before it stops and offers the rest.
  *
- * Operator directive (Phase 10): "Phần session cần tổ chức lại để dễ nhìn hơn
- * khi có nhiều subagent được dispatch." A band was as tall as its agent stack
+ * Operator directive (Phase 10): "the sessions view needs reorganising so it
+ * is easier to read when many subagents are dispatched." A band was as tall as
+ * its agent stack
  * with nothing above it, and `sessionsFlowNodes()` gives a row the height of its
  * tallest band -- so one session that dispatched twenty subagents made a 1720px
  * row, dragged its two row-mates down into all that blank space, and shrank the

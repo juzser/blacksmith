@@ -98,8 +98,8 @@ export function summarize(text: string, maxChars = 90): string {
  * "7s" / "3m" / "2h 13m" / "2d 4h" — how long something has been RUNNING, as
  * opposed to formatRelative()'s "…ago" for something that already happened.
  *
- * Operator directive (Phase 6b round 7): "để ý đến các mốc thời gian để hiển
- * thị tốt hơn". A live agent's `dispatchedAt` (api.ts LiveAgentEntry) was only
+ * Operator directive (Phase 6b round 7): "mind the timestamps so they display
+ * better". A live agent's `dispatchedAt` (api.ts LiveAgentEntry) was only
  * ever a native tooltip, so the one number that says "this one is stuck" —
  * how long it has been running — was invisible. Two units at most: the
  * seconds inside a 2-hour run are noise, and a ticking label has to stay

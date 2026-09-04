@@ -350,13 +350,14 @@ with a Lozenge tone.
   a milestone DAG would need the roadmap projection to carry
   `depends_on`, which it does not.
 - **2026-08-11 (Phase 6b round 6) — Flow node labels are summarised.**
-  Operator directive 6 ("một block bị quá dài… chỉ cần tóm tắt ngắn"). The
+  Operator directive 6 ("a block is far too long… a short summary is
+  enough"). The
   node shows `summarize(title)`; the full `tasks.objective` stays in the
   node's native tooltip, the `sr-only` table, and Task detail. This is a
   deliberate lossy render, flagged because §A.2's wireframe says "title"
   without qualifying it.
 - **2026-08-11 (Phase 6b round 7) — "real-time" means a graded polling
-  indicator, not push.** Operator directive 7 asked for "một dạng real-time
+  indicator, not push.** Operator directive 7 asked for "a kind of real-time
   update"; design-spec.md §8's no-WebSockets reasoning is unchanged, so
   what shipped is `LiveStatus.vue` + `lib/liveness.ts` grading the age of
   the last *successful* load against the poll interval
@@ -378,7 +379,8 @@ with a Lozenge tone.
   nothing saying so. This changes Timeline and Kanban behaviour too, by
   design, not as a side effect.
 - **2026-08-11 (Phase 6b round 8) — Roadmap edges are `straight`, not the
-  default bezier.** Operator: "hiển thị line nối giữa các node thẳng". The
+  default bezier.** Operator: "draw the connector lines between nodes
+  straight". The
   bezier was not a styling choice, it was the Vue Flow default, and it only
   renders as a straight line when both handles share a `y`. Milestone nodes
   are content-sized, so same-lane nodes share a top edge but not a height —
@@ -398,7 +400,8 @@ with a Lozenge tone.
   node than everyone else.
 - **2026-08-27 (shell liveness round) — "did something just happen" is a
   badge, not a toast.** Operator directive 9 asked for a toast on each
-  event/trigger/dispatch "để hệ thống có cảm giác đang chạy". Declined, on
+  event/trigger/dispatch "so the system feels like it is running". Declined,
+  on
   transport grounds rather than taste: `useToast` already means "*your*
   action landed" (Task detail waive/deny, Lessons approve/reject) and a
   toast the operator did not cause overloads it; the data arrives by poll,

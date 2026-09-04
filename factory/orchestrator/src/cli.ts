@@ -1216,7 +1216,7 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  // "Duyệt nhanh" is one command, and it is one command without any guard
+  // "Approve it fast" is one command, and it is one command without any guard
   // being relaxed: `amendPlan` still demands a rationale, findings, and
   // sites. Approval supplies them from what the worker already recorded.
   if (namespace === 'plan' && action === 'approve') {
