@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { REPO_ROOT } from '../src/paths.js';
+import { PROJECTS_DIR, REPO_ROOT, WORKSPACES_DIR } from '../src/paths.js';
 import {
   factoryProjects,
   missingProjects,
@@ -161,6 +161,33 @@ describe('missingProjects', () => {
   it('is empty when the roadmap cannot be read', () => {
     const missing = missingProjects({ roadmapPath: path.join(scratch, 'nope.md'), roots: [root] });
     expect(missing).toEqual([]);
+  });
+});
+
+// Branch gap the coder's own coverage run named: `opts.roots` and
+// `opts.roadmapPath` are each optional, and every test above always supplies
+// both, so the default-value branch of each (the one cli.ts actually takes,
+// since it never passes `roots` and only passes `roadmapPath` when
+// `--roadmap` was given) had never run. This is the real production path,
+// not a defensive arm -- `smith projects list` with no flags takes it every
+// time.
+describe('collectProjects defaults (branch coverage: opts.roots / opts.roadmapPath omitted)', () => {
+  it('falls back to PROJECTS_DIR and WORKSPACES_DIR when roots is omitted', () => {
+    write(milestone('missing-bootstrap', 'projects-test-default-roots-xyz'));
+    const missing = missingProjects({ roadmapPath });
+    expect(missing).toEqual([
+      { name: 'projects-test-default-roots-xyz', roots: [PROJECTS_DIR, WORKSPACES_DIR] },
+    ]);
+  });
+
+  // The shipped roadmap.md is never asserted on for content (task-2 struck
+  // rows this same epic, so pinning a declared project would grade a
+  // different file before and after wave 1) -- only that reading it through
+  // the default path still answers with this clone first, same as every
+  // fixture-roadmap case above.
+  it('reads the shipped roadmap.md when roadmapPath is omitted too', () => {
+    const refs = factoryProjects();
+    expect(refs[0]).toEqual({ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true });
   });
 });
 
