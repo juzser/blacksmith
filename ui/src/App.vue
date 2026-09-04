@@ -13,12 +13,19 @@ import { useBreadcrumb } from './composables/useBreadcrumb.js';
 import { useNow } from './composables/useNow.js';
 import { useProjectContext } from './composables/useProjectContext.js';
 import { PULSE_POLL_MS, usePulse } from './composables/usePulse.js';
+import { useSessionContext } from './composables/useSessionContext.js';
 import { useTheme } from './composables/useTheme.js';
 import { useViewport } from './composables/useViewport.js';
-import { fetchProjects } from './lib/api.js';
+import { fetchProjects, fetchSessions } from './lib/api.js';
 import { lastEventLabel } from './lib/liveness.js';
 import { badgeLabel } from './lib/navBadges.js';
 import { SCOPABLE_ROUTES } from './lib/projectScope.js';
+import {
+  SCOPE_WIDTH_OPTIONS,
+  SESSION_SCOPABLE_ROUTES,
+  type SessionOption,
+  sessionOptions,
+} from './lib/sessionScope.js';
 import { NAV_ITEMS } from './nav.js';
 
 const router = useRouter();
@@ -27,6 +34,7 @@ const { theme, toggle } = useTheme();
 const { crumbs } = useBreadcrumb();
 const { isCollapsedWidth, isMobileWidth } = useViewport();
 const { project, setProject } = useProjectContext();
+const { sessionScope, width, setSession, setWidth } = useSessionContext();
 
 const sheetOpen = ref(false);
 const activeId = computed(() => {
@@ -57,17 +65,55 @@ async function loadProjectOptions() {
     // Non-fatal — the switcher just shows "All projects" only.
   }
 }
-onMounted(loadProjectOptions);
+onMounted(() => {
+  loadProjectOptions();
+  loadSessionOptions();
+});
 watch(
   () => route.name,
   () => {
     if (showProjectSwitcher.value) loadProjectOptions();
+    if (showSessionPicker.value) loadSessionOptions();
   },
 );
+// A project switch re-cuts the list, and the run selected before it may not
+// belong to the new project at all. It stays selectable regardless -- see
+// loadSessionOptions' note -- so this refreshes the offer, not the selection.
+watch(project, () => {
+  if (showSessionPicker.value) loadSessionOptions();
+});
 
 function onSwitchProject(value: string) {
   setProject(value || undefined);
 }
+
+// Session picker (topbar). Same IFF as the project switcher, and the same
+// reason for keeping the route set in a lib: shown exactly where a page reads
+// the scope. SESSION_SCOPABLE_ROUTES is the eight pages that do.
+const showSessionPicker = computed(() => SESSION_SCOPABLE_ROUTES.has(String(route.name)));
+const sessionList = ref<{ sessionId: string; liveAgentCount: number }[]>([]);
+const sessionSelectOptions = computed<SessionOption[]>(() =>
+  sessionOptions(sessionList.value, sessionScope.value?.session ?? ''),
+);
+
+// Scoped by project, never by session. Scoping the list by the selection it
+// offers is how a picker becomes a trapdoor: choose run A and the only run
+// left to choose is A, with no way back to B but the URL bar.
+async function loadSessionOptions() {
+  try {
+    sessionList.value = await fetchSessions(undefined, project.value);
+  } catch {
+    // Non-fatal, and deliberately not cleared: the last known list still
+    // names the run the operator is scoped to. The <select> keeps that
+    // selection either way -- sessionOptions() re-adds a value the list has
+    // forgotten (D-43's argument, one layer down).
+  }
+}
+
+// The width control only exists while there is a session to widen. That is
+// not decoration: `lineage` without `session` is the pair /api/* refuses, and
+// a control that cannot be reached cannot send it.
+const showScopeWidth = computed(() => showSessionPicker.value && sessionScope.value !== undefined);
 
 function selectNav(id: string) {
   const item = NAV_ITEMS.find((it) => it.id === id);
@@ -148,6 +194,21 @@ const factoryPulseTitle = computed(() =>
             :options="projectOptions"
             aria-label="Project"
             @update:model-value="onSwitchProject"
+          />
+          <Select
+            v-if="showSessionPicker"
+            class="app-topbar__session"
+            :model-value="sessionScope?.session ?? ''"
+            :options="sessionSelectOptions"
+            aria-label="Session"
+            @update:model-value="setSession"
+          />
+          <Select
+            v-if="showScopeWidth"
+            :model-value="width"
+            :options="[...SCOPE_WIDTH_OPTIONS]"
+            aria-label="Session scope width"
+            @update:model-value="setWidth"
           />
           <Tooltip :label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
             <button

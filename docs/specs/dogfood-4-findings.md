@@ -13267,7 +13267,39 @@ continuation session through `appendEvent` + `rebuild`, then assert that
 `?session` alone reads one window of the epic while `?session&lineage=true`
 reads all of it, on kanban, timeline and flow alike.
 
-**Related:** [[D-263]], [[D-261]].
+**The deferred half has now shipped, 2026-09-04, branch
+`feat/the-dashboard-can-be-asked-about-one-session`.** The door the paragraph
+above declined to build a road to exists: a session picker in the topbar of
+every page that consumes the scope, plus a width control — *This session* /
+*With its lineage* — that appears only once a run is picked. `api.ts` sends
+both, through one `applySessionScope()` so a fetch cannot set the first and
+forget the second. Three things are worth carrying forward from building it.
+
+The scope is an object, not two parameters: `SessionScope` requires `session`,
+so the pair this finding's server half refuses is unrepresentable in the
+client rather than remembered by it. An unreadable `lineage` in the URL fails
+*narrow* where the server fails loud, on the argument that the query string
+has nobody to tell — showing less than was asked is an error the operator can
+see and undo in a click, showing more is an error that looks like an answer.
+And the picker's own list is fetched unscoped by session: a list cut by the
+selection it offers is a trapdoor, where choosing run A leaves A as the only
+run left to choose.
+
+The picker is fed by a new `/api/sessions` — the thin-projection shape
+`/api/projects` already had — rather than by a shell-level call to
+`/api/overview`. That was a correctness fix, not an economy: the shell asks on
+every scopable page, and the two pages that poll `/api/overview` every 5s are
+the same two whose D-226/D-240 guards fail that endpoint deliberately. A frame
+sharing a URL with a page puts the frame's picker inside the page's outage and
+the page's error state inside the frame's, and it showed up exactly there —
+both guards went red, because the shell's fetch consumed the one failure the
+spec had budgeted for the page.
+
+Not covered, and known: the sidebar pushes a bare path, so `?session` is
+dropped by nav clicks — as `?project` already is. That is one bug about the
+navigation, not two about the scopes, and it wants its own finding.
+
+**Related:** [[D-263]], [[D-261]], [[D-266]], [[D-226]], [[D-240]].
 
 ## D-265 — a code in the docs is not a code in the source
 

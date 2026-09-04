@@ -65,6 +65,7 @@ import { useFlashOnChange } from '../composables/useFlashOnChange.js';
 import { useNow } from '../composables/useNow.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import { agentScopeLabel } from '../lib/agentScope.js';
 import {
   fetchLessons,
@@ -91,6 +92,7 @@ import { nothingPending, type PendingReviewCounts, pendingClauses } from '../lib
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 
 const POLL_MS = 5000;
 
@@ -111,7 +113,7 @@ async function load() {
   // attempt and put nothing in its place: a dashboard whose server is down
   // spent most of each interval looking like a healthy one (D-226, D-240).
   try {
-    data.value = await fetchOverview(undefined, project.value);
+    data.value = await fetchOverview(sessionScope.value, project.value);
     error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -137,7 +139,7 @@ onMounted(() => {
   setBreadcrumb([{ label: project.value ? `${project.value} · Overview` : 'Overview' }]);
   load();
 });
-watch(project, () => {
+watch([project, sessionKey], () => {
   setBreadcrumb([{ label: project.value ? `${project.value} · Overview` : 'Overview' }]);
   loading.value = true;
   load();

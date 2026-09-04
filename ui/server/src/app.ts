@@ -493,6 +493,20 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
+  // The topbar session picker's feed -- the same thin-projection shape as
+  // /api/projects below, and for the same reason. The shell asks for this on
+  // every scopable page, and what it wants is a list of ids; routing it
+  // through /api/overview would ship the stat row, the epics in flight and the
+  // review queue alongside, on every route change, to be thrown away.
+  app.get('/api/sessions', (c) => {
+    const project = c.req.query('project');
+    const result = overview(handle.db, {
+      ...sessionScope(c),
+      ...(project ? { project } : {}),
+    });
+    return c.json(result.runningSessions);
+  });
+
   app.get('/api/projects', (c) => {
     const result = overview(handle.db, sessionScope(c));
     return c.json(result.projects ?? []);
