@@ -66,10 +66,15 @@ smith projects list [--roadmap <file>] [--json]
 - **`stop`** sends SIGTERM to the pid in the lock and clears the file.
 - **`projects list`** is not a daemon verb, it is the answer to the daemon's
   hardest flag: every repo this factory is answerable for, itself first, then
-  each project its roadmap declares that has a checkout to read. It ends with
-  the `--project` line to paste into `run` or `start`. `--roadmap <file>` reads
-  a roadmap other than the shipped one; `--json` prints the same thing with the
-  flag line under `flags`.
+  each project its roadmap declares that has a checkout to read. A declared
+  project with no checkout under either root is printed too, marked `?`
+  rather than `*` (self) or a space (resolved), naming both roots it was
+  looked for under — it never joins the `--project` line, since there is no
+  directory to paste. `--roadmap <file>` reads a roadmap other than the
+  shipped one; `--json` prints the same thing, with declared-and-missing
+  projects in their own `missing` field rather than mixed into `projects`.
+  Exit stays 0 either way — not finding a checkout is an answer, not an
+  error.
 
 Flags worth knowing:
 
@@ -86,8 +91,10 @@ Flags worth knowing:
   by default — `--project` adds to that, it never replaces it. Omitted for
   everything else, the check does not run on anything but this clone; present
   but with no pnpm or no lockfile, it returns nothing rather than failing the
-  tick. **Repeat it once per repo** — `--project workspaces/envkit` adds one
-  more project this clone built, and each repo gets its own finding. One repo
+  tick. **Repeat it once per repo** — `--project workspaces/<child-repo>` adds
+  one more project this clone built, and each repo gets its own finding.
+  (`<child-repo>` is illustrative, not a checkout this repo currently
+  declares — `smith projects list` names the real ones, if any.) One repo
   without a lockfile costs you that repo's reading and nothing else.
 
   You do not have to remember the list. `smith projects list` reads the
@@ -107,7 +114,9 @@ Flags worth knowing:
 
 ## 3. What one tick reports
 
-`status.json` and the tail of `daemon.log` both carry a `TickReport`:
+`status.json` and the tail of `daemon.log` both carry a `TickReport`. The
+example below is historical output from when this repo dogfooded an `envkit`
+checkout; `dogfood-envkit-1` is a sample session id, not a live one:
 
 ```json
 {
@@ -228,10 +237,14 @@ closes. The maintenance pass reads this clone plus every repo `--project`
 names, so a child project left off the line is not *reported as unwatched* —
 it is simply never mentioned again, which reads identically to a repo whose
 dependencies are all current. The finding turns that silence into a sentence,
-and it clears the only way it should: add the flag. Nothing here reports a
-project the roadmap declares but that has no checkout on this machine,
-because there would be no lockfile to read and therefore no flag that could
-make the finding go away.
+and it clears the only way it should: add the flag. The daemon still reports
+nothing about a project the roadmap declares but that has no checkout on this
+machine, because there would be no lockfile to read and therefore no flag
+that could make the finding go away — an alarm nothing can ever clear is
+worse than no alarm. `smith projects list` is a different question, asked by
+a human rather than an interval: it answers with the declared-and-missing
+project marked `?` (§2), because a checkout an operator went looking for is
+worth naming even when the daemon has nothing to alarm about.
 
 The factory's own clone is in the pass by default, and that is deliberate — a
 factory that watched everything it built except itself has the same blind
@@ -469,7 +482,9 @@ a healthy one, so a probe that asked only "is the pid alive" passed a watcher
 that had published nothing since Tuesday — which is precisely the condition a
 watcher exists to break. It now fails the probe.
 
-The JSON keeps the two apart, for a check that does parse:
+The JSON keeps the two apart, for a check that does parse. This is again
+historical output, with `dogfood-envkit-1` a sample session id rather than a
+live one:
 
 ```console
 $ smith daemon status

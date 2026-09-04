@@ -217,7 +217,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: '[--roadmap <file>] [--json]',
     summary:
       'List every repo this factory maintains -- itself and what it built -- with the ' +
-      '--project flags that watch them.',
+      '--project flags that watch them, and flag any declared project it found no ' +
+      'checkout for.',
   },
   {
     command: 'scheduler run',

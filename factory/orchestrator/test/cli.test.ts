@@ -1917,6 +1917,39 @@ describe('cli.ts (built binary)', () => {
     expect(existsSync(path.join(targetDir, 'package.json'))).toBe(true);
   });
 
+  // AC3: the row shape a human-invoked inventory owes an operator, not the
+  // daemon's alarm shape. `--project` never gets a directory that is not
+  // there, so a declared-and-missing project is marked with `?` -- distinct
+  // from `*` (self) and the space that marks a resolved project -- and named
+  // with both roots it was looked for under, in both the printed rows and
+  // --json's own `missing` field. Exit stays 0: not finding a checkout is an
+  // answer, not an error.
+  it('projects list: marks a declared project with no checkout, keeps it off the --project line', () => {
+    const roadmapPath = path.join(scratchDir, 'projects-list-missing-roadmap.md');
+    writeFileSync(
+      roadmapPath,
+      '# Roadmap\n\n## missing-bootstrap\n- id: missing-bootstrap\n' +
+        '- status: completed\n- project: cli-projects-missing-xyz\n' +
+        '- epics: []\n- goal: whatever.\n',
+    );
+
+    const printed = runCli(['projects', 'list', '--roadmap', roadmapPath]);
+    expect(printed.status).toBe(0);
+    expect(printed.stdout).toContain('? cli-projects-missing-xyz\t');
+    expect(printed.stdout).not.toMatch(/--project [^\n]*cli-projects-missing-xyz/);
+
+    const json = runCli(['projects', 'list', '--roadmap', roadmapPath, '--json']);
+    expect(json.status).toBe(0);
+    const result = JSON.parse(json.stdout);
+    expect(result.missing).toEqual([expect.objectContaining({ name: 'cli-projects-missing-xyz' })]);
+    expect(
+      (result.projects as Array<{ name: string }>).some(
+        (p) => p.name === 'cli-projects-missing-xyz',
+      ),
+    ).toBe(false);
+    expect(result.flags).not.toContain('cli-projects-missing-xyz');
+  });
+
   it('mcp init: layers the surface onto a scaffolded project and makes the milestone due', () => {
     const targetDir = path.join(scratchDir, 'wt', 'cli-mcp-project');
     const roadmapPath = path.join(scratchDir, 'mcp-roadmap.md');

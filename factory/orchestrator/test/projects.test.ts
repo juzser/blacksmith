@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { REPO_ROOT } from '../src/paths.js';
-import { factoryProjects, resolveProjectDirs, unwatchedProjects } from '../src/projects.js';
+import {
+  factoryProjects,
+  missingProjects,
+  resolveProjectDirs,
+  unwatchedProjects,
+} from '../src/projects.js';
 import { FACTORY_PROJECT } from '../src/roadmap.js';
 
 // One scratch tree per test: a roadmap file, and a `roots/` beside it standing
@@ -117,6 +122,45 @@ describe('factoryProjects', () => {
     writeFileSync(roadmapPath, '## broken\n- id: a\n- status: nonsense\n', 'utf8');
     const refs = factoryProjects({ roadmapPath, roots: [root] });
     expect(refs).toEqual([{ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true }]);
+  });
+});
+
+// AC1/AC2: a declared project with no checkout used to vanish entirely
+// (the `drops a declared...` case above). It still does from
+// `factoryProjects()` -- that register stays additive-only -- but it is no
+// longer unreported: `missingProjects()` is where it now surfaces, separate
+// from `ProjectRef` so nothing holding one can be handed a `dir` that is not
+// there. Fixture roadmaps only, never the shipped one: task-2 struck every
+// live `envkit` row this same epic, so a test pinned to the shipped file
+// would grade a different repository before and after wave 1.
+describe('missingProjects', () => {
+  it('names a declared project with no checkout, with both roots it searched', () => {
+    write(milestone('envkit-bootstrap', 'envkit'));
+    const legacy = path.join(scratch, 'legacy');
+    mkdirSync(legacy);
+    const missing = missingProjects({ roadmapPath, roots: [root, legacy] });
+    expect(missing).toEqual([{ name: 'envkit', roots: [root, legacy] }]);
+  });
+
+  it('is empty once the checkout appears under a root', () => {
+    checkout('envkit');
+    write(milestone('envkit-bootstrap', 'envkit'));
+    expect(missingProjects({ roadmapPath, roots: [root] })).toEqual([]);
+  });
+
+  it('names a missing project once however many milestones declare it', () => {
+    write(milestone('envkit-bootstrap', 'envkit') + milestone('envkit-config-loader', 'envkit'));
+    expect(missingProjects({ roadmapPath, roots: [root] })).toHaveLength(1);
+  });
+
+  it('never reports the factory itself as missing', () => {
+    write(milestone('phase-1'));
+    expect(missingProjects({ roadmapPath, roots: [root] })).toEqual([]);
+  });
+
+  it('is empty when the roadmap cannot be read', () => {
+    const missing = missingProjects({ roadmapPath: path.join(scratch, 'nope.md'), roots: [root] });
+    expect(missing).toEqual([]);
   });
 });
 
