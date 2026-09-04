@@ -23,6 +23,27 @@ than appearing in it.
 
 ### Added
 
+- **The dashboard can be asked about one run, and about that run's lineage.**
+  D-263/D-264 taught the server to read `?session` and `?lineage` on every read
+  route and then deliberately stopped there, because "a session picker in the
+  UI is a feature in its own right". This is that feature. Every page that
+  consumes the scope — Overview, Sessions, Timeline, Kanban, Flow, Errors,
+  Analytics — carries a session picker in the topbar beside the project
+  switcher, and picking a run adds a width control: **This session** or **With
+  its lineage**. The choice rides in the route query, so a scoped view survives
+  a reload and can be pasted to somebody else, and clearing the run clears the
+  widening with it — `lineage` with no `session` is the pair the server
+  refuses, and `SessionScope` makes it unrepresentable rather than unsent. It
+  matters most on Sessions, the page the operator asked to be able to read when
+  a screenful of dispatched wave-runners is on it: since D13 an epic spans three
+  sessions, so "what did this epic do" is a question about a lineage and the
+  dashboard had no way to ask it about anything narrower than the whole state
+  dir. The rules live in `ui/src/lib/sessionScope.ts` under 46 unit tests, not
+  in the `.vue` files that neither tsc nor biome checks here, and the topbar
+  picker is fed by a new thin `/api/sessions` route rather than by a second
+  shell-level caller of `/api/overview` — the two pages that poll that endpoint
+  every 5s are also the two whose outage guards fail it deliberately.
+
 - **An agent may now dispatch agents, and `factory/policies/delegation.yml`
   says which one.** D13 closed on "the orchestrator cannot be split"; this is
   the third and last step of splitting it. `.claude/agents/wave-runner.md` is
@@ -1508,6 +1529,32 @@ than appearing in it.
   the rule never had — the fourth guard of this shape after D-259, D-265 and
   D-267, and, per D-119, it asserts against its own walk as well as against
   the repo, since a scan that silently reaches nothing passes.
+
+- **YAGNI was enforced by a lens the reviewer was never given (D-267).**
+  `docs/standards/agent-constraints.md` and `factory/policies/severity.yml`
+  both named "the reviewer's `over-engineering` lens" as the thing enforcing
+  the coder's YAGNI constraint. `.claude/agents/reviewer.md` — the only file a
+  dispatched reviewer actually reads — carried a behavioral-drift lens and no
+  over-engineering lens at all; the category survived as one string in a
+  vocabulary list. Worse, the output contract made it unraisable anyway:
+  `failure_scenario` requires `{inputs, expected, actual}` as "the wrong
+  output or crash it produces", and over-engineered code returns the right
+  answer, so the reviewer was instructed to drop the category itself. The
+  same-mistake rule that escalates it S3 → S2 then handed it to a verifier
+  that refutes by default anything without a wrong output. The lens now
+  exists, with a closed tag vocabulary (`delete:`, `stdlib:`, `native:`,
+  `yagni:`, `shrink:`) that each demand a **named replacement** — the
+  "proposed simplification" the severity policy already promised, made
+  checkable. Its failure scenario is read as a change rather than a crash
+  (criterion + replacement → the shape asked for vs the shape shipped), with
+  no schema widened, and the verifier is given the grounds that refute one: a
+  second real call site, a test the replacement breaks, or a spec line
+  requiring the abstraction. `.claude/agents/coder.md` gains the ladder the
+  `stdlib:`/`native:` tags read against, so they flag a rung skipped rather
+  than a rule never given. `test/docLenses.test.ts` now parses every lens a
+  document attributes to a role — out of the markdown instruction surface and
+  `factory/policies/*.yml` alike — and fails when the role's template does not
+  carry it.
 
 - **A lineage that only walked upward could not see the wave it dispatched
   (D-266).** P9-7 shipped lineage for a chain — a session that runs out of

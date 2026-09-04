@@ -332,6 +332,40 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  // The topbar session picker's feed. It exists as a route of its own rather
+  // than as one more caller of /api/overview because the shell fetches it on
+  // every scopable page: the picker wants a list of ids, and the overview
+  // payload it would otherwise have to ask for carries the stat row, the
+  // epics in flight and the review queue with it. /api/projects set the
+  // precedent -- a thin projection off the same query, one line wide.
+  it('GET /api/sessions returns the picker feed, and never drifts from the overview it projects', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/sessions');
+    expect(res.status).toBe(200);
+    const body = await json<Array<{ sessionId: string; liveAgentCount: number }>>(res);
+    expect(body.map((s) => s.sessionId)).toContain(SESSION_ID);
+
+    const full = await json<{ runningSessions: unknown[] }>(
+      await handle.app.request('/api/overview'),
+    );
+    expect(body).toEqual(full.runningSessions);
+    closeApp(handle);
+  });
+
+  it('GET /api/sessions narrows to a project', async () => {
+    const handle = app();
+    const mine = await json<Array<{ sessionId: string }>>(
+      await handle.app.request('/api/sessions?project=black-smith'),
+    );
+    expect(mine.map((s) => s.sessionId)).toContain(SESSION_ID);
+
+    const elsewhere = await json<Array<{ sessionId: string }>>(
+      await handle.app.request('/api/sessions?project=no-such-project'),
+    );
+    expect(elsewhere).toEqual([]);
+    closeApp(handle);
+  });
+
   it('GET /api/tasks/:taskId 200s for a known task, 404s for an unknown one', async () => {
     const handle = app();
     const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}`);

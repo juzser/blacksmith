@@ -24,6 +24,7 @@ import Toolbar from '../components/ds/Toolbar.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import { fetchTimeline, type TimelineEntry } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { KIND_OPTIONS, matchesKind, titleFor } from '../lib/timelineDisplay.js';
@@ -32,6 +33,7 @@ const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Timeline' }]);
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 
 /** Null until a fetch lands. That distinction is the whole guard on the empty state below. */
 const entries = ref<TimelineEntry[] | null>(null);
@@ -52,6 +54,7 @@ async function load() {
   // its own flight, leaving the bare empty state in its place (D-226).
   try {
     entries.value = await fetchTimeline({
+      session: sessionScope.value,
       project: project.value,
       decisionsOnly: decisionsOnly.value,
     });
@@ -64,7 +67,7 @@ async function load() {
 }
 
 onMounted(load);
-watch([project, decisionsOnly], load);
+watch([project, sessionKey, decisionsOnly], load);
 const { refresh } = usePoll(load, 15000);
 
 function matchesSearch(entry: TimelineEntry): boolean {

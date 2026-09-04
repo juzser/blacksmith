@@ -38,6 +38,12 @@ branch directly.
   generics, layers, or extension points; new patterns come from the spec,
   not from you. No TODO scaffolding for imagined futures, no drive-by
   refactors.
+- **Take the smallest rung that holds.** Already in this codebase, then the
+  standard library, then the platform or framework you already run on, then a
+  dependency the project already has — a *new* dependency last, and only when
+  the criterion names it or a `spec_change_request` wins one. The reviewer's
+  over-engineering lens reads the same ladder back: a `stdlib:` or `native:`
+  finding is a rung you skipped.
 - **Context discipline.** Read only claimed paths + files the spec
   references; repo-wide exploration is the researcher's job, on the
   researcher's budget. You cannot emit an event — only the node that

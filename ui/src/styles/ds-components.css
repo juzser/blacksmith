@@ -1319,6 +1319,18 @@ a.live-agent-entry:focus-visible {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* The topbar session picker. A native <select> sizes itself to its widest
+   option, and a session id is an operator-chosen string with no length rule
+   on it -- one long wave id would push the theme toggle off the right edge,
+   and the frame would resize every time a project switch re-cut the list.
+   Capped and ellipsised: the id leads the label, so what a truncation costs
+   is the " . N live" suffix, and the full text is there the moment the
+   picker is opened. Same argument as .app-topbar__pulse's nowrap -- a topbar
+   that reflows on data is a topbar that twitches. */
+.app-topbar__session {
+  max-width: 26ch;
+  text-overflow: ellipsis;
+}
 .app-scroll {
   flex: 1;
   min-height: 0;

@@ -43,6 +43,7 @@ import IdentityChip from '../components/IdentityChip.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import { agentScopeLabel } from '../lib/agentScope.js';
 import { fetchOverview, type OverviewResult, type RunningSession } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
@@ -68,6 +69,7 @@ import {
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
+const { sessionScope, sessionKey } = useSessionContext();
 const { zoomIn, zoomOut, fitView, nodes: storeNodes } = useVueFlow();
 
 // Same cadence and same endpoint as Overview (design-spec.md §8: polling,
@@ -93,7 +95,7 @@ const graphNow = ref(new Date().toISOString());
 
 async function load() {
   try {
-    data.value = await fetchOverview(undefined, project.value);
+    data.value = await fetchOverview(sessionScope.value, project.value);
     // Only advanced on a SUCCESSFUL fetch — same rule as Overview's
     // last-updated stamp. A failed poll must let the canvas age, not silently
     // re-date the states it is already showing.
@@ -120,8 +122,10 @@ onMounted(() => {
 // — flipping it there would flash the skeleton over the canvas every tick.
 // Raising it on a project switch is what stops the previous project's bands
 // sitting under the new project's breadcrumb while the new fetch is in flight.
-// Same split as OverviewPage, which polls the same endpoint.
-watch(project, () => {
+// Same split as OverviewPage, which polls the same endpoint. A session scope
+// change earns the same treatment for the same reason -- it swaps which runs
+// the canvas draws, not just how many.
+watch([project, sessionKey], () => {
   setBreadcrumb([{ label: project.value ? `${project.value} · Sessions` : 'Sessions' }]);
   loading.value = true;
   load();

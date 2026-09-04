@@ -3,6 +3,8 @@
 // field — kept as local interfaces rather than importing across the
 // server/client boundary (ui/ and ui/server/ are separate TS projects; see
 // ui/server/src/app.ts's header comment for why they don't share a build).
+import { applySessionScope, type SessionScope } from './sessionScope.js';
+
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
@@ -374,9 +376,9 @@ export interface AnalyticsResult {
   providerAgreement: ProviderAgreementStat[];
 }
 
-export function fetchOverview(session?: string, project?: string): Promise<OverviewResult> {
+export function fetchOverview(session?: SessionScope, project?: string): Promise<OverviewResult> {
   const q = new URLSearchParams();
-  if (session) q.set('session', session);
+  applySessionScope(q, session);
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/overview${qs ? `?${qs}` : ''}`);
@@ -395,20 +397,43 @@ export interface PulseResult {
   lessonsPending: number;
 }
 
-export function fetchPulse(session?: string, project?: string): Promise<PulseResult> {
+export function fetchPulse(session?: SessionScope, project?: string): Promise<PulseResult> {
   const q = new URLSearchParams();
-  if (session) q.set('session', session);
+  applySessionScope(q, session);
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/pulse${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchProjects(session?: string): Promise<ProjectOverviewSummary[]> {
-  return getJson(`/api/projects${session ? `?session=${encodeURIComponent(session)}` : ''}`);
+/**
+ * The topbar session picker's feed: /api/overview's `runningSessions` slice on
+ * its own.
+ *
+ * A route of its own rather than a call to fetchOverview() for two reasons.
+ * The shell asks on every scopable page and wants a list of ids, not the stat
+ * row and review queue that would ride along. And the two pages that poll
+ * /api/overview every 5s are the ones whose e2e guards fail that endpoint
+ * deliberately -- a shell-level caller of the same URL puts the frame's
+ * picker inside the page's outage, and the page's error state inside the
+ * frame's.
+ */
+export function fetchSessions(session?: SessionScope, project?: string): Promise<RunningSession[]> {
+  const q = new URLSearchParams();
+  applySessionScope(q, session);
+  if (project) q.set('project', project);
+  const qs = q.toString();
+  return getJson(`/api/sessions${qs ? `?${qs}` : ''}`);
+}
+
+export function fetchProjects(session?: SessionScope): Promise<ProjectOverviewSummary[]> {
+  const q = new URLSearchParams();
+  applySessionScope(q, session);
+  const qs = q.toString();
+  return getJson(`/api/projects${qs ? `?${qs}` : ''}`);
 }
 
 export interface TimelineParams {
-  session?: string;
+  session?: SessionScope;
   task?: string;
   epic?: string;
   project?: string;
@@ -418,7 +443,7 @@ export interface TimelineParams {
 
 export function fetchTimeline(params: TimelineParams = {}): Promise<TimelineEntry[]> {
   const q = new URLSearchParams();
-  if (params.session) q.set('session', params.session);
+  applySessionScope(q, params.session);
   if (params.task) q.set('task', params.task);
   if (params.epic) q.set('epic', params.epic);
   if (params.project) q.set('project', params.project);
@@ -430,12 +455,12 @@ export function fetchTimeline(params: TimelineParams = {}): Promise<TimelineEntr
 
 export function fetchKanban(
   epic?: string,
-  session?: string,
+  session?: SessionScope,
   project?: string,
 ): Promise<KanbanColumn[]> {
   const q = new URLSearchParams();
   if (epic) q.set('epic', epic);
-  if (session) q.set('session', session);
+  applySessionScope(q, session);
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/kanban${qs ? `?${qs}` : ''}`);
@@ -445,29 +470,35 @@ export function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
   return getJson(`/api/tasks/${encodeURIComponent(taskId)}`);
 }
 
-export function fetchLessons(session?: string): Promise<LessonsResult> {
-  return getJson(`/api/lessons${session ? `?session=${encodeURIComponent(session)}` : ''}`);
+export function fetchLessons(session?: SessionScope): Promise<LessonsResult> {
+  const q = new URLSearchParams();
+  applySessionScope(q, session);
+  const qs = q.toString();
+  return getJson(`/api/lessons${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchErrors(session?: string, project?: string): Promise<ErrorsResult> {
+export function fetchErrors(session?: SessionScope, project?: string): Promise<ErrorsResult> {
   const q = new URLSearchParams();
-  if (session) q.set('session', session);
+  applySessionScope(q, session);
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/errors${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchAnalytics(session?: string, project?: string): Promise<AnalyticsResult> {
+export function fetchAnalytics(session?: SessionScope, project?: string): Promise<AnalyticsResult> {
   const q = new URLSearchParams();
-  if (session) q.set('session', session);
+  applySessionScope(q, session);
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/analytics${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchRoadmap(session?: string, project?: string): Promise<MilestoneProgress[]> {
+export function fetchRoadmap(
+  session?: SessionScope,
+  project?: string,
+): Promise<MilestoneProgress[]> {
   const q = new URLSearchParams();
-  if (session) q.set('session', session);
+  applySessionScope(q, session);
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/roadmap${qs ? `?${qs}` : ''}`);
@@ -496,10 +527,10 @@ export interface FlowGraph {
 }
 
 export function fetchFlow(
-  params: { session?: string; project?: string; epic?: string; planVersion?: number } = {},
+  params: { session?: SessionScope; project?: string; epic?: string; planVersion?: number } = {},
 ): Promise<FlowGraph> {
   const q = new URLSearchParams();
-  if (params.session) q.set('session', params.session);
+  applySessionScope(q, params.session);
   if (params.project) q.set('project', params.project);
   if (params.epic) q.set('epic', params.epic);
   if (params.planVersion !== undefined) q.set('planVersion', String(params.planVersion));
