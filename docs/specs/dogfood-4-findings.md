@@ -14474,3 +14474,665 @@ it would have caught all three of this epic's instances.
 event 214, and the artifact-declaration firings at 192 and 224.
 
 **Related:** [[D-274]], [[D-277]].
+
+## D-282 — three ids were reserved, never written, and two records cite one
+
+**Severity:** S3-minor.
+
+**Where:** `docs/specs/dogfood-4-findings.md`, the jump from D-259 (line 13024)
+to D-263 (line 13139).
+
+**How it opened.** A citation sweep over this repo's markdown found twelve
+`[[D-nnn]]` references that resolve to no heading. Ten of them have an
+explanation that lives outside this file. One does not: `[[D-261]]` is cited
+twice, at line 13217 as the sole `**Related:**` line of D-263 and again at line
+13302 among D-264's five, and D-260, D-261 and D-262 were never written at all.
+
+The gap is not a deletion. The file jumps straight from D-259 to D-263, and the
+two citations were written by records that came after the gap, which means the
+author of D-263 and D-264 believed D-261 existed when they wrote the reference.
+Whatever those three ids were reserved for is unrecoverable: no draft, no
+heading, no commit that removed one. The only evidence they were ever meant to
+exist is the two records that point at the hole.
+
+What makes this worth a record rather than a fix is the direction of the loss.
+A dangling citation is normally repaired by finding the record it meant. Here
+there is nothing to find, so the repair is either to delete the two references,
+which destroys the evidence that something was intended, or to repoint them at
+a record that says so. This is that record.
+
+**The fix.** The two citations are left in place and this record is the thing
+they now resolve to once repointed. The sweep that found them is
+`factory/orchestrator/test/docCitations.test.ts`, and `D-261` sits in its
+`KNOWN_UNRESOLVED` set with the reason stated inline, so the exception is
+visible in the test rather than in a reviewer's memory. Repointing the two
+`**Related:**` lines at this id removes it from that set without a test change,
+because the set is asserted as a subset rather than an equality.
+
+**Measured, 2026-09-05.** 187 distinct ids across the corpus, spanning D-14 to
+D-281, with gaps at 49-111, 113-127 and 260-262. 137 distinct ids are cited;
+twelve resolve to nothing.
+
+**Status: open, recorded 2026-09-05, branch `smith/phase-10/followup-236629eb`**
+— the sweep is green with the twelve named; the repointing is deliberately not
+done in the same change that adds the guard.
+
+**Related:** [[D-153]].
+
+## D-283 — the epic ingested its plan after it had finished executing it
+
+**Severity:** S2-major.
+
+**Where:** `state/events/phase-10-2026-09-04.jsonl`; `smith plan ingest`
+(`factory/orchestrator/src/cli.ts:1099`).
+
+**How it opened.** `plan ingest` is described in its own source comment as
+"where a task starts existing as far as the log — and so the DB, the kanban
+and every dashboard number — is concerned". In this epic it ran at events 285
+through 292. The last wave-merged is event 284.
+
+So the eight tasks of plan v2 began existing, as rows, after all three waves
+had been coded, graded, gated and landed. Every event before 285 that named one
+of them — 42 dispatches, 18 gate outcomes, 8 merges — named an id with no row
+behind it, and each of those events created the row as a side effect, with no
+epic, no claims, no objective and no budget. That is precisely the condition
+D-46 and P9-29 introduced `plan ingest` to end, and the epic that added the
+ingest step to the playbook is the epic that ran without it.
+
+Nothing failed loudly. The read model answered every query in a normal voice
+the whole time, because a task row that springs into being from a
+`dispatch_decision` looks exactly like a task row, only emptier. What made the
+gap visible at all was the ingest itself: running it near the end produced eight
+`task-added` events whose payloads all carry `task_status: todo`, aimed at eight
+tasks the log had already recorded as merged.
+
+**What saved it was a guard written for a different reason.** D-18b put a
+terminal-status check in front of `task-added` in the projector
+(`db/projector.ts:612`) so that an amendment re-emitting a task could not revert
+a merged one to `todo`. That guard is the only thing standing between this
+epic's late ingest and eight completed tasks silently reverting. The remedy for
+one defect turned out to be the containment for another, which is luck, not
+design — and the guard covers only three of the six event types that write
+`taskStatus` ([[D-284]]).
+
+**The fix.** Not applied in code. The ordering is a playbook property, not a
+CLI one: `/bs run` step 1 should ingest the plan as the same act that admits the
+first wave, and `wave admit` is the natural place to refuse a wave whose task
+ids have no `task-added` behind them. A check that costs one query — does every
+id in this wave have a row minted by an ingest — would have failed at event 18
+rather than been noticed at event 292.
+
+**Measured, 2026-09-05.** wave-merged at events 116, 117, 118, 154, 212, 213,
+283, 284; task-added at 143, 146 (the two follow-ups, minted from findings) and
+285-292 (plan v2's eight). No `plan ingest` before event 285.
+
+**Status: open, recorded 2026-09-05** — the late ingest is on the log and its
+effects were contained by D-18b; nothing was corrected retroactively, because a
+projection is a function of the log and rewriting the log to fix a projection is
+the worse of the two options.
+
+**Related:** [[D-284]].
+
+## D-284 — five definitions of "terminal", and the narrowest guards the exit
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/db/projector.ts:284`, `db/queries.ts:473`,
+`claims.ts:607`, `waveNext.ts:47`, `epic.ts:78`.
+
+**How it opened.** A task's status decides three different things: whether the
+projector may overwrite it, whether a claim on its files is still contested, and
+whether the epic may close. Each of those questions is answered by its own set,
+and the five sets are pairwise inconsistent.
+
+- `db/projector.ts:284` `TERMINAL_TASK_STATUSES` — completed, superseded,
+  failed, escalated, waived.
+- `db/queries.ts:473` `NON_TERMINAL_TASK_STATUSES` — todo, ready,
+  in-progress, grading, reviewing, merging, blocked.
+- `claims.ts:607` `CLOSED_TO_FURTHER_WORK` — completed, waived, superseded.
+- `waveNext.ts:47` `TERMINAL_TASK_STATUSES` — completed, waived.
+- `epic.ts:78` `TERMINAL_OK_TASK_STATUSES` — completed, waived.
+
+Two files define the identical name with different contents. One of the five is
+written as the complement, so a status added to `taxonomy.yml` tomorrow is
+silently terminal in `queries.ts` and non-terminal in the other four without a
+line changing anywhere.
+
+**The second half is worse than the disagreement.** The projector's set exists
+to stop a late event from regressing a task that is already done, and it is
+applied to exactly three of the six handlers that write `taskStatus`:
+`task-added` (line 612), `dispatch_decision` (line 634) and `error-logged`
+(line 666). The three that are unguarded are the three that assign the strongest
+statuses. `gate-outcome` writes `blocked`, `reviewing` or `merging`
+unconditionally (line 638). `wave-merged` writes `completed` unconditionally
+(line 650). `task-superseded` writes `superseded` unconditionally (line 656).
+
+So a `gate-outcome` arriving after a merge regresses a `completed` task to
+`blocked`, and a `task-superseded` pushes it to `superseded` — which is
+terminal to the projector and to `claims.ts`, but is **not** in `epic.ts`'s
+`TERMINAL_OK_TASK_STATUSES`, so the epic can never close again and no command
+can move the row back. The narrowest of the five sets is the one guarding the
+exit.
+
+**Reachable, not observed.** Eight tasks reached `wave-merged` in this epic
+(events 116, 117, 118, 154, 212, 213, 283, 284) and no `gate-outcome` follows
+any of them, so nothing here was actually regressed. It is recorded as reachable
+rather than as damage.
+
+**And `waived` is read by three of the five sets and written by nothing.**
+`waivers.ts:93` transitions *findings*, not tasks. The only handler that can put
+`waived` on a task row is `task-added`, from a plan file's initial status. So
+`epic.ts` will accept a waived task as a legitimate close, and the factory has
+no verb that produces one — which is exactly the disposition this epic needs
+for `phase-10/followup-bab1a179` and cannot express.
+
+**The fix.** Not applied. One exported set with one name, expressed positively,
+with the complement derived rather than typed; the guard applied to every
+handler that writes `taskStatus`, not to three of six; and either a
+`smith task waive` verb or the removal of `waived` from the statuses the epic
+verdict honours, so that a status the close reads is a status something can
+write.
+
+**Status: open, recorded 2026-09-05** — measured by reading all five
+definitions and all six projector handlers on the integration branch.
+
+**Related:** [[D-283]].
+
+## D-285 — the factory mints a task its own lookup cannot find
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/cli.ts`, `findings for-dispatch` against
+`waveNext.ts`.
+
+**How it opened.** Preparing the wave-4 dispatch, `smith findings for-dispatch
+--plan factory/specs/active/phase-10/plan-v2.json --task
+phase-10/followup-236629eb` exited `cli.task-not-in-plan`. Moments earlier
+`smith wave next` had named that same task as one of the two the wave admits,
+and `smith wave check` had accepted the wave as valid.
+
+Both commands are individually correct. A follow-up task is minted by finding
+reattribution as a `task-added` event, so it exists in the log and in the
+read-model, and `wave next` finds it there — its own help text says it reads
+follow-up tasks from the lineage log. `findings for-dispatch` resolves the task
+through the plan *file*, because the claims it intersects open findings against
+come from the plan. A task no plan version declares has no claims there, so the
+lookup misses and the command refuses.
+
+**Why this is S2 rather than an ergonomics complaint.** The open-findings splice
+is not decoration. [[D-26]] records a wave-3 coder that rewrote the exact region
+a wave-2 finding named and preserved the bug, because nothing put the finding in
+front of it. Every follow-up task in this factory is, by construction, the task
+most likely to touch a region a finding already names — and it is precisely the
+class of task for which the splice cannot run. The guard is absent exactly where
+it was designed to bite, and its absence reads to the orchestrator as an error
+message rather than as a missing control.
+
+**The factory had already said so.** `lesson-raised-4b7fa22305e5` was approved
+before this wave and spliced into this very dispatch: two features that each
+refuse to guess can still deadlock, because refusing is not the same as agreeing
+on who decides, and a system that mints work in one component and validates it
+in another must share one answer to "does this task exist", not two correct
+ones.
+
+**The fix.** Not applied. Give `findings for-dispatch` the resolution `wave
+next` already has: when `--session` is present and the task id is absent from
+the plan, read the task's claims from the `task-added` event that minted it.
+Refusing is the one behaviour that cannot be right, because the operator sees an
+error, shrugs, and dispatches without the block. For wave 4 the two overlapping
+findings were spliced by hand and labelled as such — a hand splice is not the
+guard, it is the workaround the guard exists to make unnecessary.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#304`,
+reproduced against `plan-v2.json` on the integration branch.
+
+**Related:** [[D-26]], [[D-286]].
+
+## D-286 — a follow-up whose only claim is immutable is born unsatisfiable
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/attribution.ts`, `emitFollowUpTask`.
+
+**How it opened.** Wave 4 computed as both follow-up tasks — disjoint claims,
+clean symbol graph — and was admitted with one. `phase-10/followup-bab1a179` was
+held back because it cannot be discharged by any legal edit. It declares exactly
+one claim, `factory/specs/active/phase-10/plan-v2.json`, and its objective is to
+correct acceptance-criterion prose quoting a stale baseline. A plan version file
+is immutable by contract: a plan is not edited, a successor version is cut.
+
+So a coder dispatched at that claim produces either a refused write or a silent
+rewrite of the record every gate in this epic was run against. Cutting a plan v3
+to fix one criterion's prose would re-open an epic whose eight real tasks have
+all landed and invalidate the version those gates ran at. The correction is
+worth recording; it is not worth a plan version.
+
+This is not a wave narrowed because a narrow one felt safer, which the run
+playbook forbids. The held-back task is not risky to run — it is impossible to
+satisfy honestly.
+
+**The second half is the part with no verb.** Reattribution minted the task
+without asking whether the finding names a file the factory allows anyone to
+edit. Having minted it, the factory has no way to close it: the only honest
+status is `waived`, and `waived` is read by three of the five terminal sets and
+written by nothing ([[D-284]]). The disposition is an operator decision at epic
+close that no command can currently record.
+
+**The fix.** Not applied, and it is two fixes. Before minting,
+`emitFollowUpTask` should refuse a follow-up whose claim set is entirely inside
+an immutable root — a plan version, a closed epic's spec — and route the finding
+to the waiver batch instead. After minting, a `smith task waive` verb should
+exist so that a status the epic verdict honours is a status something can write.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#302`; the
+task is still `todo` and is one of the blockers on `smith epic verdict`.
+
+**Related:** [[D-284]], [[D-285]].
+
+## D-287 — the record namespace has two authorities and no index
+
+**Severity:** S2-major.
+
+**Where:** `docs/specs/dogfood-4-findings.md`,
+`docs/specs/dogfood-envkit-findings.md`.
+
+**How it opened.** The wave-4 coder was dispatched to build a guard resolving
+every `[[D-nnn]]` citation against the decision records. Its prompt named
+exactly one record file, `dogfood-4-findings.md`, three separate times — in the
+objective, in AC2 and in AC3. There are two. `dogfood-envkit-findings.md`
+carries 35 distinct ids in the range 14..48; `dogfood-4-findings.md` carries 152
+in the range 112..281.
+
+A guard that indexes one file and sweeps citations across the whole corpus
+reports every citation to an id in 14..48 as broken. The coder would then have
+been correct, under the dispatch's own escalation clause, to narrow the sweep
+until it passed — a guard that passes by not looking. The failure mode is a
+green test certifying half the corpus, and the half it certifies is the half the
+dispatch happened to name.
+
+**How it was caught.** Not by review of the prompt. The orchestrator was
+drafting its own records in a scratchpad while the coder ran, checked six ids it
+intended to cite, and found that none of them had a heading in the file the
+dispatch named. Looking for them found the second file. That is the same
+accident that caught the three instances already recorded under [[D-281]].
+
+**What the union then showed.** 187 distinct ids across a space running to 281,
+so the space is sparse by a wide margin and a negative fixture cannot be minted
+by picking a plausible-looking id — D-48, the obvious choice, exists in the
+envkit file. Twelve cited ids resolve to nothing at all: 49, 77, 104, 113, 116,
+118, 119, 120, 121, 126, 127 and 261. Seven of those were minted in a sibling
+clone and never travelled.
+
+**The fix.** Partly applied. The correction reached the coder before it
+committed: index the union, return the source file per id rather than a bare
+set, make the per-file floor per file so a union that loses one file still
+fails, and keep the envkit file out of the task's claims so a broken citation
+there is reported and not edited. What is *not* applied is the thing that would
+stop this recurring — nothing declares which files own the namespace, so the
+next reader will infer it from whichever file they opened first.
+
+**Status: partly applied, recorded 2026-09-05, branch
+`smith/phase-10/integration`** — the guard landed with the union; the namespace
+still has no declaration.
+
+**Related:** [[D-281]], [[D-289]].
+
+## D-288 — a turn budget stated only in a prompt is a belief, not a budget
+
+**Severity:** S2-major.
+
+**Where:** `.claude/skills/bs/SKILL.md`, the dispatch contract.
+
+**How it opened.** The wave-4 coder was dispatched with a stated turn budget of
+60, exactly as the dispatch contract instructs. It stopped at 40 turns,
+mid-sentence, on the line "Now let's run the test file." It had written the
+guard and not run it, had not written its result file, and had not committed.
+The harness cap is 40, and 40 is not the number the prompt carried.
+
+**Why this is not a footnote.** The contract singles this budget out as the one
+the orchestrator *must* restate, and gives the reason: the role templates carry
+a `maxTurns` key Claude Code does not read, so the number is only true if the
+prompt says it. That remedy does not hold. Saying it does not make it true
+either. The prompt is a channel to the agent, not to the scheduler, so what the
+instruction actually produces is an agent pacing itself for room it does not
+have.
+
+And the pacing is the damage. An agent told it has 60 turns spends its first 40
+the way a 60-turn plan would — reading widely, building the general case,
+deferring the run and the write-up to the back third. The cutoff then lands
+precisely on the deferred third. An agent told nothing would have paced against
+uncertainty and written earlier. The stated number was worse than silence.
+
+The same dispatch declared a 90,000-token cap and measured past it, so neither
+number in the prompt bound anything. The difference is that a token overrun is
+visible afterwards and a turn cutoff is visible only as an unfinished sentence.
+And an approved lesson rode along in the same message as the number it condemns:
+a constraint stated only in a prompt is a request, and if the plan writes it
+down like a limit, something has to be able to say no.
+
+**The fix.** Applied to the run, not to the contract. The agent was resumed with
+the correction stated plainly — that the 60 was the orchestrator's error and not
+enforceable — and given a numbered finish-do-not-improve sequence with the owed
+result file second, before lint and before the commit, so a second cutoff would
+still leave an artifact behind. The contract itself should either stop
+instructing the orchestrator to state a budget it cannot enforce, or state the
+cap that actually binds, paired with the instruction that makes a cutoff
+survivable: write the owed artifact first and refine it, never last.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#307`;
+observed twice this wave, coder told 60 stopped at 40, grader told 40 stopped at
+15.
+
+**Related:** [[D-281]].
+
+## D-289 — a scanner of markdown syntax matched the documentation of the syntax
+
+**Severity:** S2-major.
+
+**Where:** the orchestrator's own corpus measurement,
+`docs/specs/dogfood-4-findings.md:2647`.
+
+**How it opened.** While correcting [[D-287]] the orchestrator told the running
+coder that ids 14 and 32 each carry a heading in *both* record files, and to
+assert that collision in a test. The collision does not exist. Re-measured with
+a scanner that tracks fenced-block state, the envkit file owns 14..48 and
+`dogfood-4-findings.md` owns 112..281, and the intersection is empty.
+
+The scan used `^## D-(\d+)\b` against every line. Two lines matched inside a
+fenced code block, at `dogfood-4-findings.md:2647` and `:2649`, where they are
+quoted *examples* of heading syntax. Those two phantoms pulled the file's
+apparent low bound from 112 down to 14 and manufactured both apparent
+collisions. The corrected counts are 152 headings, not 154, over 112..281.
+
+**What makes it S2 is that the corpus already contained the warning.**
+[[D-153]], in the same file, is a record about duplicate ids that states the
+discriminator in prose and then predicts this exact failure: a naive scan would
+have reported five false collisions in the envkit file and been switched off.
+The orchestrator read that file, cited from it, and wrote the naive scan anyway.
+The record was not missing, unclear or wrong — it was simply not adjacent to the
+moment of use. Nothing in this repo turns a record into something that fires.
+
+**The near miss has a shape worth keeping.** The false collision was a claim
+*about* the corpus that would have become a test asserting it. Had the coder
+implemented it, the guard would have shipped green — because the coder's own
+scanner, if it shared the fence bug, would have seen the same two phantoms and
+agreed. Two components making the same parsing mistake agree, and their
+agreement reads as verification.
+
+**A true fact the re-measure surfaced.** An id legitimately carries more than
+one heading within a single file: the envkit file does it five times, on 14, 26,
+28, 31 and 32, in the forms "(evidence added)" and "addendum". So the invariant
+a guard may assert is not one-heading-per-id but no-id-defined-in-two-files, and
+a citation resolves to the first heading. That is what [[D-153]] was written to
+prevent anyone rediscovering, and it was rediscovered.
+
+**The fix.** Applied to the claim, not to the class. The retraction reached the
+coder in flight with the corrected index, the fence-state requirement, the
+continuation convention, and an instruction to read [[D-153]] before finalising
+the scanner. Any measurement of a corpus that quotes itself should be re-run
+with fences honoured before its number is handed to anyone as a fact.
+
+**Status: applied to the wave, class open, recorded 2026-09-05** — event
+`phase-10-2026-09-04#308`.
+
+**Related:** [[D-153]], [[D-287]].
+
+## D-290 — a reattributed follow-up carries two different claim lists
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/attribution.ts`, `emitFollowUpTask`.
+
+**How it opened.** `phase-10/followup-236629eb` was minted by reattribution as a
+`task-added` event declaring one claim,
+`factory/orchestrator/test/docCommands.test.ts` — the file the originating
+finding was anchored to. The dispatch that actually ran it declared three:
+`docCitations.test.ts`, `helpers/docRecords.ts` and
+`docs/specs/dogfood-4-findings.md`. The intersection of the two lists is empty.
+
+Both are defensible in isolation. A finding is anchored to the file where it was
+observed, and that is the only file reattribution knows about; the work of
+adding a guard lands in new files beside it. But the claim list is what the
+factory uses to answer two separate questions — which findings to splice into
+the dispatch, and which paths the worker may write — and those two questions
+were answered from different lists, on the same task, in the same wave.
+
+The write-side list was never checked against the mint-side one, because nothing
+compares them. The gate's own worktree checks pass either way: the coder wrote
+only inside the dispatch's three, and the `task-added` row's single claim was
+simply never touched.
+
+**Why it is worth a record.** A claim list is the factory's only account of who
+may edit what, and the claim graph is what bounds fan-out ([[D-186]] orders
+admission on the plan's edges; the wave check tests claims for disjointness). A
+task with two claim lists has a disjointness answer that depends on which list
+you ask, so two follow-ups anchored to the same file will look conflicting when
+they are not, and two follow-ups writing the same new file will look disjoint
+when they are not.
+
+**The fix.** Not applied. Either reattribution should mint the follow-up with no
+claims at all and require the dispatch to declare them — making the absence
+visible — or the dispatch should be refused when its claims do not contain the
+minted ones, so widening is an explicit act with a recorded reason. Silently
+carrying both is the option that leaves neither list trustworthy.
+
+**Status: open, recorded 2026-09-05** — events `phase-10-2026-09-04#146` and
+`#305`, read directly from the log.
+
+**Related:** [[D-285]], [[D-286]].
+
+## D-291 — a prompt that restates a schema in prose is a fork of that schema
+
+**Severity:** S2-major.
+
+**Where:** the wave-4 grader brief, against
+`factory/specs/schema/grader-verdict.schema.json`.
+
+**How it opened.** The wave-4 grader wrote `structured_output` with the keys
+`status`, `round`, `criteria`, `overall`, `gaps` and `findings`. The schema the
+gate validates against is `additionalProperties: false` over exactly `round`,
+`criteria`, `overall` and `gaps`. The two extra keys are forbidden.
+
+The grader did not err. The dispatch brief instructed, verbatim, that
+`structured_output` carry a `status` key valued pass, fail or partial — noting
+pointedly that the key is `status`, not `verdict` — a per-criterion verdict with
+evidence, and `findings: []` or the real findings raised. The grader obeyed the
+brief exactly. Its verdict is not defective; its envelope is, and the envelope
+was specified by the orchestrator.
+
+The wrong shape has a traceable origin: a true fact about the *items* was
+carried up a level. Each entry in `criteria` is required to carry `criterion`,
+`status` and `evidence` — `status` is the correct key there. The brief promoted
+it to the top of `structured_output`, where the schema has `overall`. `findings`
+has no home in this schema at any level: a grader's findings reach the gate
+through `--evidence`, a channel distinct from `--grader`.
+
+**Caught by reading, not by the gate.** The schema was read before the gate ran.
+Had it not been, `gate.ts` validates the grader verdict *before* the tests, so
+the block would have cost the whole test pass — the early-return defect where a
+paperwork failure leaves `testResult` null and the check script never runs at
+all.
+
+**Why it is worse in kind than the earlier instances.** This is the fourth
+instance this epic of the class [[D-281]] names. The first three were acceptance
+criteria carrying facts a diligent agent could have checked against the repo.
+This one specified an output contract, so obedience *was* the failure mode and
+diligence could not have saved it.
+
+**The fix.** Applied to the artifact, not to the composer. The verdict was
+repackaged keeping `round`, all nine criteria byte-for-byte, `overall` and the
+single `gaps` string, dropping only the two forbidden keys; the grader's own
+file in the worktree was deliberately left untouched as the record of what it
+wrote. The composer should validate the shape it asks for against the schema the
+gate will use — every judge role has a named schema, and a brief describing
+`structured_output` in prose is a second, uncontrolled copy of it that drifted
+the first time it was written.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#312`.
+
+**Related:** [[D-281]], [[D-288]].
+
+## D-292 — every token figure this epic recorded was an estimate
+
+**Severity:** S2-major.
+
+**Where:** every `budget-check-result` in
+`state/events/phase-10-2026-09-04.jsonl`.
+
+**How it opened.** Preparing the wave-4 gate, the orchestrator went looking for
+a real token meter for the first time this epic and found one. Each dispatched
+subagent leaves a JSONL transcript whose assistant messages carry a usage object
+with fresh input, output, cache-creation and cache-read counts. Summing those
+gives a measurement. Every figure this epic recorded instead came from the
+orchestrator's estimate.
+
+**How it was proven.** Numeric-only extraction over all 37 subagent transcripts
+in the session, computing five candidate accountings each — in+out,
+in+cache-creation+out, in+cache-creation, all four summed, and output alone —
+and testing all 185 resulting values against the eight distinct `tokensUsed`
+figures the epic recorded. Zero matches. No accounting of any transcript
+reproduces any recorded number, which rules out "metered under a different
+convention" and leaves "estimated".
+
+**How wrong, and in which direction.** By an order of magnitude, in the
+direction that hides overruns. The wave-4 coder measures 332 fresh input,
+844,035 cache-creation input and 28,981 output across 166 assistant turns,
+against a `task.coder` cap of 150,000. The four tasks the gate did flag as
+overruns were flagged on estimates that understated real usage, so those
+overruns are real and larger; the four it did not flag cannot be assumed clean.
+`epic.cap_tokens` is 4,000,000 and the epic reports well under it; on measured
+input the coders alone are already past it.
+
+**Why it went unnoticed.** The estimates are non-round — 103,530, not 100,000 —
+so they read as measurements. Nothing in the gate can tell an estimate from a
+reading: both are integers that satisfy the schema. And the field was moved out
+of the agent's half of the result precisely because an agent cannot read its own
+meter and will invent a satisfying number. The same failure then reappeared one
+level up, in the orchestrator that was given the field because it was supposed
+to have the instrument.
+
+**The accounting chosen now**, stated so a later reader can convert rather than
+guess: `input_tokens` is fresh input plus cache-creation input, the tokens
+actually written into the model's context for the first time; `output_tokens` is
+output. Cache reads are recorded separately rather than folded in — the wave-4
+coder read 9,991,313 cached tokens, real context throughput billed at a
+fraction, which would make the figure incomparable with every other row in this
+epic.
+
+**The fix.** Not applied in code. The orchestrator should not be the meter:
+either the harness surfaces a dispatch's usage to its caller, or `smith` grows a
+verb that reads the transcript sidecar for an agent id and prints the four
+numbers, so `gate run --input-tokens` is fed by a command rather than by a
+recollection. The eight earlier figures are deliberately not rewritten — the log
+is append-only, and a corrected number written now would be a second estimate
+dressed as a repair. The transcripts still exist, so a later pass can measure
+each task and record the corrections as their own events.
+
+**Measured, 2026-09-05.** Wave-4 coder: 166 turns, 844,367 recorded input,
+28,981 output. Wave-4 grader: 39 turns, 168,324 input, 3,768 output.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#314`. Filed
+as a hallucination rather than an overrun: the overrun is real and secondary,
+the primary defect is that eight integers were produced without an instrument
+and presented as measurements.
+
+**Related:** [[D-294]].
+
+## D-293 — the artifact home is a path no one tells the writer
+
+**Severity:** S3-minor.
+
+**Where:** `factory/orchestrator/src/artifacts.ts:64`, and every dispatch prompt
+that asks for an artifact.
+
+**How it opened.** The wave-4 coder wrote its result to a sensible-looking path
+and the gate reported the declared artifact `outside-home`. The rule is one
+line: `artifactHome(taskId, artifactsDir)` resolves the artifacts directory
+against the **full task id**, slashes included. A task called
+`phase-10/followup-236629eb` therefore owns
+`<artifacts-dir>/phase-10/followup-236629eb/`, two directories deep, and
+`checkArtifacts` resolves each declared `path` relative to that home and refuses
+anything that escapes it.
+
+Nothing that reaches the agent says so. The prompt carries the absolute worktree
+path, the claims, the caps and the turn budget; the artifact is described by
+name. The agent has to infer a directory layout from a task id, and the
+inference that fails is the natural one — treating the id as a flat name, or
+writing the path it would use for a file in the repo.
+
+**Why nineteen tasks got it right.** Every earlier task in this epic was
+dispatched with its artifact path stated absolutely in the prompt, because the
+judge-declaration discipline requires an absolute `--artifact` before the
+dispatch. The follow-ups are the tasks that skipped that step — a follow-up is
+minted by attribution rather than planned, and the dispatch that carries it was
+composed by hand. So the rule held nineteen times not because it was known but
+because a different discipline happened to spell the path out.
+
+**The one place it is written is unusable.** The contract documents the home
+with a placeholder that a reader cannot resolve without reading `artifacts.ts` —
+it names the shape, not an example with a slash in the id, which is precisely
+the case that breaks. Documentation that is correct and unusable is the failure
+mode [[D-277]] already recorded from the other direction: there, a full relative
+path doubled under the same `path.resolve`, and the remedy was to repackage to a
+basename. Both are the same missing sentence.
+
+**The fix.** Not applied. The remedy is symmetrical with the one the worktree
+already gets: emit the absolute artifact home into the dispatch prompt, computed
+by `artifactHome` rather than composed by hand, so the agent is told where to
+write instead of deducing it. A second, cheaper half is to have the gate's
+`outside-home` message print the home it computed — the agent that gets it wrong
+is exactly the reader who needs the value.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#328`.
+
+**Related:** [[D-277]], [[D-281]].
+
+## D-294 — a task outside the plan file is a task with no budget at all
+
+**Severity:** S2-major.
+
+**Where:** `factory/orchestrator/src/gate.ts:1382`, `runBudgetCheck`.
+
+**How it opened.** The wave-4 gate returned `budgetCheck.status: 'not-declared'`
+with an empty `overruns` array, and the verdict read as clean. The task had
+spent 873,348 tokens against a `task.coder.cap_tokens` of 150,000 — 5.8 times
+the cap — and changed 464 lines against a `cap_diff_lines` of 400. Neither was
+checked, because neither cap was ever loaded.
+
+**The mechanism.** `runBudgetCheck` takes its budget from `input.budget`, which
+`cli.ts` populates in `budgetFromFlags` by reading the per-task caps off the
+`--plan` file. When `input.budget` is undefined the function returns
+`not-declared` **before** calling `measureDiff`, so `diffLines` is absent rather
+than zero — the diff is not measured at all, not measured and found small.
+Nothing anywhere in `gate.ts` reads `budgets.yml`; the role caps in that file
+are consulted only by `budgetAlarm.ts` and `escalation.ts`, neither of which
+runs at the gate.
+
+A follow-up task is not in the plan file. It is minted by attribution from a
+finding, appended to the log as `task-added`, and dispatched — so for every
+follow-up this factory produces, the budget check is structurally inert. The two
+most expensive tasks of this epic were the two the gate priced at nothing.
+
+**Why `not-declared` is the dangerous spelling.** It is true and it is useless.
+The status is honest about the input and silent about the consequence, and it
+renders next to `checked` in a verdict a human reads quickly. Compare the shape
+[[D-292]] records: there, an estimate stood where a measurement belonged and
+read as a measurement. Here, an unmeasured quantity reads as a measured one that
+came in under budget. Both defects survive because a clean-looking field is
+indistinguishable from a clean result.
+
+**The fix.** Not applied. `runBudgetCheck` should fall back to the role caps in
+`budgets.yml` when the plan declares nothing — the role is already on the gate
+invocation as `--agent`, so the lookup needs no new input — and report a
+distinct status, `checked-from-policy`, so a reader can tell a plan-declared cap
+from a policy default. `not-declared` should then mean only what it says: this
+role is priced nowhere, which today is true of the planner and the tester and is
+its own gap. The `unmeasurable` branch stays as it is; it already does the right
+thing, checking token overruns when the diff cannot be measured.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#329`.
+`gate.ts:857` documents the follow-up case deliberately, so this is a known hole
+rather than an oversight — recorded at S2 because the hole is exactly the class
+of task that has no plan to bound it.
+
+**Related:** [[D-292]], [[D-286]].
