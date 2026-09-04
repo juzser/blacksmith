@@ -19,10 +19,13 @@
 //     reporting that it was reading its own -- D-133's shape exactly: a
 //     well-formed wrong answer is worse than a refusal.
 //
-//   * A declared project with no checkout is reported by nothing here. There
-//     is no repo to read, so a finding about it would be one an operator
-//     cannot act on and can never clear -- and daemon.ts's factory-width note
-//     says what an alarm that cannot return to zero costs.
+//   * A declared project with no checkout never enters `factoryProjects()`.
+//     There is no repo to read, so a finding about it would be one an
+//     operator cannot act on and can never clear -- and daemon.ts's
+//     factory-width note says what an alarm that cannot return to zero costs.
+//     `missingProjects()` reports the same fact for a human-invoked inventory
+//     instead: an interval alarm and an operator asking `smith projects list`
+//     a question are answered differently on purpose (docs/runbooks/ops.md).
 //
 // Nothing in here throws. It is a reader for a watcher, and the roadmap is an
 // operator-edited file: a watcher that dies over a half-written bullet is
@@ -49,17 +52,23 @@ export interface FactoryProjectsOptions {
   roots?: readonly string[];
 }
 
-/**
- * The factory's own clone, then every distinct project its roadmap declares
- * that has a checkout under one of the roots, in first-declared order.
- *
- * Self leads on purpose. A factory that watched its children and not itself
- * would have the same blind spot the other way round, and it is the one entry
- * that needs no roadmap and no search to be certain of.
- */
-export function factoryProjects(opts: FactoryProjectsOptions = {}): ProjectRef[] {
+/** A roadmap declaration with no checkout under any root -- named, never a `ProjectRef`. */
+export interface MissingProjectRef {
+  /** The roadmap's `- project:` value. */
+  name: string;
+  /** Every root that was searched, in search order, so an operator can see where to put it. */
+  roots: readonly string[];
+}
+
+interface CollectedProjects {
+  refs: ProjectRef[];
+  missing: MissingProjectRef[];
+}
+
+function collectProjects(opts: FactoryProjectsOptions): CollectedProjects {
   const roots = opts.roots ?? [PROJECTS_DIR, WORKSPACES_DIR];
   const refs: ProjectRef[] = [{ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true }];
+  const missing: MissingProjectRef[] = [];
 
   let milestones: { project: string }[];
   try {
@@ -67,7 +76,7 @@ export function factoryProjects(opts: FactoryProjectsOptions = {}): ProjectRef[]
   } catch {
     // Unreadable or unparseable. The one thing still known is this clone, and
     // reporting that is strictly better than reporting nothing.
-    return refs;
+    return { refs, missing };
   }
 
   const seen = new Set<string>([FACTORY_PROJECT]);
@@ -76,10 +85,40 @@ export function factoryProjects(opts: FactoryProjectsOptions = {}): ProjectRef[]
     if (seen.has(name)) continue;
     seen.add(name);
     const dir = firstCheckout(name, roots);
-    if (dir === null) continue;
+    if (dir === null) {
+      missing.push({ name, roots });
+      continue;
+    }
     refs.push({ name, dir, self: false });
   }
-  return refs;
+  return { refs, missing };
+}
+
+/**
+ * The factory's own clone, then every distinct project its roadmap declares
+ * that has a checkout under one of the roots, in first-declared order.
+ *
+ * Self leads on purpose. A factory that watched its children and not itself
+ * would have the same blind spot the other way round, and it is the one entry
+ * that needs no roadmap and no search to be certain of.
+ *
+ * A declaration with no checkout never appears here -- see `missingProjects`.
+ */
+export function factoryProjects(opts: FactoryProjectsOptions = {}): ProjectRef[] {
+  return collectProjects(opts).refs;
+}
+
+/**
+ * Every distinct project the roadmap declares that has no checkout under any
+ * root, in first-declared order.
+ *
+ * Kept separate from `factoryProjects()` on purpose: widening `ProjectRef.dir`
+ * to `null` or to a path that does not exist would hand every existing
+ * caller -- `unwatchedProjects()` and the daemon's read layer among them -- a
+ * directory that is not there. This is additive instead.
+ */
+export function missingProjects(opts: FactoryProjectsOptions = {}): MissingProjectRef[] {
+  return collectProjects(opts).missing;
 }
 
 /** The first root that actually holds a directory of this name. */

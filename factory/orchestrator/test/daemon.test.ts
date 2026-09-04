@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -28,7 +36,7 @@ import { roadmapPage } from '../src/db/queries.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
 import { REPO_ROOT } from '../src/paths.js';
-import { resolveProjectDirs } from '../src/projects.js';
+import { factoryProjects, resolveProjectDirs } from '../src/projects.js';
 import { FACTORY_PROJECT } from '../src/roadmap.js';
 import type { OutdatedPackage, SchedulerPolicy } from '../src/scheduler.js';
 
@@ -1488,6 +1496,37 @@ describe('the repos nothing is watching', () => {
     });
     expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
     expect(readDirs).not.toContain(REPO_ROOT);
+  });
+
+  // AC4: the daemon's rule (projects.ts's header) stays intact -- a
+  // regression guard, not a differential, since the null was already true
+  // and stays true. A fixture roadmap (never the shipped one, per
+  // test/projects.test.ts) declares a project with no checkout under either
+  // root; the real `factoryProjects()` -- not a mock -- already drops it, so
+  // the same fold and the same options raise nothing about it, same as
+  // before this task's change to projects.ts.
+  it('raises nothing for a declared project with no checkout, same fold, same options', () => {
+    const scratch = mkdtempSync(path.join(tmpdir(), 'smith-daemon-missing-'));
+    try {
+      const roadmapPath = path.join(scratch, 'roadmap.md');
+      const root = path.join(scratch, 'roots');
+      mkdirSync(root);
+      writeFileSync(
+        roadmapPath,
+        '# Roadmap\n\n## envkit-bootstrap\n- id: envkit-bootstrap\n' +
+          '- status: completed\n- project: envkit\n- epics: []\n- goal: whatever.\n',
+      );
+      const refs = factoryProjects({ roadmapPath, roots: [root] });
+      const findings = inspectFactory([], {
+        now: NOW,
+        schedulerPolicy: SCHEDULER,
+        readProjects: () => refs,
+        projectDirs: resolveProjectDirs(undefined),
+      });
+      expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
 

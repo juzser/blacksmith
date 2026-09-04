@@ -1778,16 +1778,25 @@ async function main(): Promise<number> {
   // it scaffolds. Without this the `unwatched-project` finding would name a
   // repo and leave the operator to reconstruct the rest of the list by hand.
   if (namespace === 'projects' && action === 'list') {
-    const { factoryProjects } = await import('./projects.js');
-    const refs = factoryProjects(flags.roadmap === undefined ? {} : { roadmapPath: flags.roadmap });
+    const { factoryProjects, missingProjects } = await import('./projects.js');
+    const roadmapOpts = flags.roadmap === undefined ? {} : { roadmapPath: flags.roadmap };
+    const refs = factoryProjects(roadmapOpts);
+    const missing = missingProjects(roadmapOpts);
+    // The flag line is built from `refs` alone, so a declared-and-missing
+    // project can never reach it -- there is no directory to paste.
     const flagLine = refs.map((ref) => `--project ${ref.dir}`).join(' ');
     if (flags.json) {
-      printJson({ projects: refs, flags: flagLine });
+      printJson({ projects: refs, missing, flags: flagLine });
     } else {
       // The flag line last, because it is the line the operator copies, and a
       // thing to copy is easier to find at the bottom than in the middle.
+      // `?` marks a declared-and-missing project -- distinct from `*` (self)
+      // and the space that marks a resolved project.
       for (const ref of refs) {
         process.stdout.write(`${ref.self ? '*' : ' '} ${ref.name}\t${ref.dir}\n`);
+      }
+      for (const m of missing) {
+        process.stdout.write(`? ${m.name}\tnot found under ${m.roots.join(', ')}\n`);
       }
       process.stdout.write(`\n${flagLine}\n`);
     }

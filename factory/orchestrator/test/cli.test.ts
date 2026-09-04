@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1915,6 +1915,85 @@ describe('cli.ts (built binary)', () => {
     // The tree survives its own red gate — deleting it would delete the
     // evidence the operator needs to fix it.
     expect(existsSync(path.join(targetDir, 'package.json'))).toBe(true);
+  });
+
+  // AC3: the row shape a human-invoked inventory owes an operator, not the
+  // daemon's alarm shape. `--project` never gets a directory that is not
+  // there, so a declared-and-missing project is marked with `?` -- distinct
+  // from `*` (self) and the space that marks a resolved project -- and named
+  // with both roots it was looked for under, in both the printed rows and
+  // --json's own `missing` field. Exit stays 0: not finding a checkout is an
+  // answer, not an error.
+  it('projects list: marks a declared project with no checkout, keeps it off the --project line', () => {
+    const roadmapPath = path.join(scratchDir, 'projects-list-missing-roadmap.md');
+    writeFileSync(
+      roadmapPath,
+      '# Roadmap\n\n## missing-bootstrap\n- id: missing-bootstrap\n' +
+        '- status: completed\n- project: cli-projects-missing-xyz\n' +
+        '- epics: []\n- goal: whatever.\n',
+    );
+
+    const printed = runCli(['projects', 'list', '--roadmap', roadmapPath]);
+    expect(printed.status).toBe(0);
+    expect(printed.stdout).toContain('? cli-projects-missing-xyz\t');
+    expect(printed.stdout).not.toMatch(/--project [^\n]*cli-projects-missing-xyz/);
+
+    const json = runCli(['projects', 'list', '--roadmap', roadmapPath, '--json']);
+    expect(json.status).toBe(0);
+    const result = JSON.parse(json.stdout);
+    expect(result.missing).toEqual([expect.objectContaining({ name: 'cli-projects-missing-xyz' })]);
+    expect(
+      (result.projects as Array<{ name: string }>).some(
+        (p) => p.name === 'cli-projects-missing-xyz',
+      ),
+    ).toBe(false);
+    expect(result.flags).not.toContain('cli-projects-missing-xyz');
+  });
+
+  // The degenerate case above only ever has self and one missing project, so
+  // it cannot tell `?` apart from the space that marks an ordinary resolved
+  // project -- a test that only checks `?` is present would still pass if
+  // `*` were later reused for missing too. This roadmap declares one project
+  // that resolves and one that does not, so all three markers (`*`, ` `, `?`)
+  // are on one page together, and the --json shape is read as a whole: the
+  // pre-existing `projects` entries keep their old fields, `missing` sits
+  // beside them rather than folding into them.
+  it('projects list: three markers on one page, and --json adds missing beside projects, not into it', () => {
+    const workspace = path.join(REPO_ROOT, 'workspaces', 'cli-projects-present-xyz');
+    mkdirSync(workspace, { recursive: true });
+    try {
+      const roadmapPath = path.join(scratchDir, 'projects-list-mixed-roadmap.md');
+      writeFileSync(
+        roadmapPath,
+        '# Roadmap\n\n## present-bootstrap\n- id: present-bootstrap\n' +
+          '- status: completed\n- project: cli-projects-present-xyz\n' +
+          '- epics: []\n- goal: whatever.\n\n' +
+          '## missing-bootstrap\n- id: missing-bootstrap\n' +
+          '- status: completed\n- project: cli-projects-missing-xyz\n' +
+          '- epics: []\n- goal: whatever.\n',
+      );
+
+      const printed = runCli(['projects', 'list', '--roadmap', roadmapPath]);
+      expect(printed.status).toBe(0);
+      const rows = printed.stdout.split('\n');
+      expect(rows.some((r) => /^\* /.test(r))).toBe(true);
+      expect(rows.some((r) => /^  cli-projects-present-xyz\t/.test(r))).toBe(true);
+      expect(rows.some((r) => /^\? cli-projects-missing-xyz\t/.test(r))).toBe(true);
+      expect(printed.stdout).toMatch(/--project [^\n]*cli-projects-present-xyz/);
+      expect(printed.stdout).not.toMatch(/--project [^\n]*cli-projects-missing-xyz/);
+
+      const json = runCli(['projects', 'list', '--roadmap', roadmapPath, '--json']);
+      const result = JSON.parse(json.stdout);
+      expect(result.projects).toEqual([
+        expect.objectContaining({ name: 'black-smith', self: true }),
+        expect.objectContaining({ name: 'cli-projects-present-xyz', self: false }),
+      ]);
+      expect(result.missing).toEqual([
+        expect.objectContaining({ name: 'cli-projects-missing-xyz' }),
+      ]);
+    } finally {
+      rmSync(path.join(REPO_ROOT, 'workspaces'), { recursive: true, force: true });
+    }
   });
 
   it('mcp init: layers the surface onto a scaffolded project and makes the milestone due', () => {
