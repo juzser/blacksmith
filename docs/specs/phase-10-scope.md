@@ -62,6 +62,14 @@ scheduler passes so the clone stops being invisible to its own watcher.
 **Whose call.** The operator's, and it is the fork that decides the shape of
 everything else in this file.
 
+**Settled 2026-09-04 — a real epic, epic id `phase-10`, through `/bs run`.**
+The operator took the fork above: Phase 10 runs as a real epic on this repo,
+not branch-by-branch the way Phase 9 did. This clone joins the daemon and
+scheduler passes by default rather than through a hand-typed `--project`
+flag, with `--no-self` as the way out. This is the decision taken, not a
+claim that the code has merged — the merged proof is epic AC1 through AC3
+and task-6's close-out.
+
 ## P10-2 — The guides say both judges ship off; codex is live
 
 **Evidence.** `factory/policies/crosscheck.yml:75` reads `enabled: auto` for
@@ -186,6 +194,13 @@ currently folding zero of.
 
 **Whose call.** Sequencing is the operator's; the plan already exists.
 
+**Settled 2026-09-04 — struck.** The item's premise is false for this
+clone: `workspaces/` is empty, the only checkout inside the sibling clone
+whose remote resolves to `juzser/maestro` has already run
+`envkit-mcp-followup`. The fork this item posed — adopt envkit into this
+clone, leave the rows while correcting their goal lines, or strike — was
+answered strike. This is task-2's work, recorded as [[D-271]].
+
 ## P10-6 — Phase 10 has no epic id
 
 **Evidence.** `- epics: []` on the `phase-10` milestone.
@@ -201,6 +216,11 @@ its tasks, or record in the goal line that this phase was built by hand.
 
 **Whose call.** Follows directly from P10-1's answer.
 
+**Settled 2026-09-04 — `- epics: [phase-10]`.** `roadmapPage()` joins
+milestones to tasks through that list, so an empty list is a milestone that
+can never show progress however much work lands. This is task-2's edit,
+made as part of planning Phase 10 as an epic.
+
 ## Carried, not scope
 
 - **P9-35(b)**, the embedding-similarity novelty gate, stays deliberately
@@ -215,11 +235,12 @@ its tasks, or record in the goal line that this phase was built by hand.
   typing `smith` in this directory is driving the other repository.
   Repointing it is a change outside the clone and needs an explicit yes.
 
-## The forks — all three settled, 2026-09-04
+## The forks — all four settled, 2026-09-04
 
-They were three, and only the first blocked the rest. The operator answered
-all three in one pass; each answer is recorded at the item it governs, and
-this is the index.
+They were three, and only the first blocked the rest; a fourth, posed inside
+P10-5, was settled the same date. The operator answered all four in one
+pass; each answer is recorded at the item it governs, and this is the
+index.
 
 1. **Does Phase 10 run as a real epic on this repo, or as branch-by-branch
    items the way Phase 9 did?** — **A real epic, through `/bs run`.** P10-1's
@@ -238,7 +259,13 @@ this is the index.
    offered — neither, and axis two stays recorded-but-not-gating — was
    available and was not taken; what was taken is narrower than it looks,
    because a shadow judge still does not vote.
+4. **Does `envkit-mcp-followup` get run inside this clone, or struck?** —
+   **Struck.** See P10-5. The other two options — adopting envkit into this
+   clone, or leaving the rows while correcting their goal lines — were
+   available and not taken.
 
 What is left after the forks is P10-1, P10-5 and P10-6, and they are one
 piece of work: plan `phase-10` as an epic, run it, and let the events it
-emits be the first real input the instruments have ever folded.
+emits be the first real input the instruments have ever folded. What is
+left after this one is P10-1 and P10-6, which are this epic's work, and
+P10-5, which is struck.
