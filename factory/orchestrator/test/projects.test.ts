@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { REPO_ROOT } from '../src/paths.js';
-import { factoryProjects, unwatchedProjects } from '../src/projects.js';
+import { factoryProjects, resolveProjectDirs, unwatchedProjects } from '../src/projects.js';
 import { FACTORY_PROJECT } from '../src/roadmap.js';
 
 // One scratch tree per test: a roadmap file, and a `roots/` beside it standing
@@ -117,6 +117,33 @@ describe('factoryProjects', () => {
     writeFileSync(roadmapPath, '## broken\n- id: a\n- status: nonsense\n', 'utf8');
     const refs = factoryProjects({ roadmapPath, roots: [root] });
     expect(refs).toEqual([{ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true }]);
+  });
+});
+
+describe('resolveProjectDirs', () => {
+  // The union, not a replacement: `--project /elsewhere` watches /elsewhere
+  // AND this clone, not /elsewhere alone (contract clause 1).
+  it('adds REPO_ROOT by default, ahead of whatever --project named', () => {
+    expect(resolveProjectDirs(['/repo/envkit'])).toEqual([REPO_ROOT, '/repo/envkit']);
+  });
+
+  it('adds REPO_ROOT even when nothing was passed', () => {
+    expect(resolveProjectDirs(undefined)).toEqual([REPO_ROOT]);
+  });
+
+  // `--no-self` is the only way to leave it out.
+  it('drops REPO_ROOT when self is false', () => {
+    expect(resolveProjectDirs(['/repo/envkit'], { self: false })).toEqual(['/repo/envkit']);
+  });
+
+  it('leaves nothing behind when self is false and nothing else was named', () => {
+    expect(resolveProjectDirs(undefined, { self: false })).toEqual([]);
+  });
+
+  // REPO_ROOT present exactly once and path-resolved, even if the operator
+  // also typed its absolute path explicitly.
+  it('resolves paths and never duplicates REPO_ROOT', () => {
+    expect(resolveProjectDirs([REPO_ROOT])).toEqual([REPO_ROOT]);
   });
 });
 
