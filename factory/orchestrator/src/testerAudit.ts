@@ -10,12 +10,18 @@
 // say what their author decided to assert.
 //
 // The only evidence of a separate turn the event log can hold is a separate
-// `dispatch_decision`. No role template grants `Agent`, so a dispatch is
-// written by the orchestrator once per agent it invokes, never by an agent
-// about itself (.claude/skills/bs/SKILL.md, "You own the log for what you
-// dispatch"). That is why this module reads dispatches and not, say, file
+// `dispatch_decision`, written by the node that dispatched and never by an
+// agent about itself (.claude/skills/bs/SKILL.md, "You own the log for what
+// you dispatch"). That is why this module reads dispatches and not, say, file
 // authorship: authorship is not in the log, and inventing a proxy for it
 // would be a check that answers a question it cannot see.
+//
+// delegation.yml can grant `Agent`, so "the node that dispatched" is no longer
+// always the operator session -- and this audit does not care, because the two
+// conditions delegation.ts enforces are exactly the two this reading needs: a
+// grantee owns its own log, and no grant hands a role its own auditor from the
+// `role_isolation` pairs below. Run `smith delegation check` beside this one;
+// a coder granted `Agent(tester)` would make every pass here meaningless.
 //
 // Required-role semantics, which is why this is not another pair in
 // dispatchAudit.ts. There, a critic that never ran raises no check at all —

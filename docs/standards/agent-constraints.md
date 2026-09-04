@@ -174,10 +174,11 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
   emits `dispatch_decision` before the call and `task-result-recorded` (or
   `error-logged`) after — never the dispatched agent itself, which cannot
   report its own mid-flight death.
-- **No role template is granted `Agent`.** Flat topology today: one session
-  dispatches, one log, one unbroken causal chain. Scoped grants like
-  `Agent(tester, grader)` are a real capability and are deliberately not
-  used yet — see below for why.
+- **Who may hold `Agent` is `factory/policies/delegation.yml`, and nothing
+  else.** A role template that lists `Agent` in `tools` with no grant behind
+  it is a violation, and so is a grant whose role ships no template: the
+  policy an operator reads and the file the harness enforces must be the same
+  rule (D-191). Today the file holds exactly one grant, `wave-runner`.
 - **Nesting is no longer blocked by the event log** (P9-7, 2026-08-08). A
   `session-start` may name a `causal_parent` in *another* session's log, so
   "session A's decision at event X spawned this one" is expressible and reads
@@ -186,16 +187,22 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
   newest session. A cross-session parent on any other event type is still
   `events.cross-session-parent-not-root`, so each session keeps exactly one
   entry edge and the log stays a tree of sessions rather than a graph.
-- **What blocks nesting now is that a dispatched agent is not a session.**
-  The first rule above binds a log to the node that dispatches; a role
-  template granted `Agent` would dispatch without owning one. The tier that
-  would fix that does not exist yet — `.claude/skills/bs/` holds one
-  epic-level playbook and no disposable wave-level one — so the shipped
-  answer to "an epic outlasts your window" is splitting the epic across
-  operator sessions, each a real session whose root chains to the last
-  (SKILL.md, "Splitting an epic across sessions"), not nesting dispatch
-  under a template. `docs/specs/dogfood-envkit-findings.md` D13 tracks the
-  steps that remain.
+- **A grantee must open its own session before it dispatches** (D13 step 3,
+  2026-09-03). That is what reconciles a grant with the first rule: a
+  dispatched agent that runs `smith session start <id> --continues <the
+  dispatch event id>` *is* a dispatching node with a log of its own, and its
+  dispatches chain back to the epic that admitted it rather than crowding
+  into the epic's own log under someone else's name. `smith delegation check
+  <session-id>` asserts it lineage-wide and is fail-closed: a grantee that
+  has not opened its log yet reads `unverifiable`, not `ok`.
+- **A grant may not hand a role its own judge.** `smith delegation check`
+  refuses a grant that lets a role dispatch itself, its auditor from
+  `crosscheck.yml` `role_isolation.pairs`, or its critic from
+  `asymmetric_roles.pairs`. Without that, widening one list would silently
+  disarm the two checks that read a second dispatch as proof of a second
+  turn — a worker that picks and prompts its own auditor is grading itself.
+  `wave-runner` satisfies all three by construction: it is nobody's worker
+  and nobody's finder.
 - **Return discipline is mandatory under uncapped fan-out.** Every worker
   writes its full result to `state/results/<task-id>.json` and returns only
   `{status, severity_counts, artifact_path}`. The dispatcher reads the file

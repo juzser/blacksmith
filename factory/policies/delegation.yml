@@ -1,0 +1,44 @@
+# Blacksmith — who may hold `Agent` (dispatch topology, architecture §4)
+#
+# Every other policy here tunes how work is judged. This one decides who may
+# create work at all, so it lives in its own file: an operator widening a
+# provider list in crosscheck.yml should not be one keystroke away from
+# widening a dispatch grant.
+#
+# The rule the factory has always run on is "the dispatching node owns the
+# event log for what it dispatches" (docs/standards/agent-constraints.md).
+# Until D13 step 3 that was enforced by granting `Agent` to nobody, which also
+# capped an epic at one operator session. A grantee that opens its own session
+# with `smith session start <id> --continues <dispatch-event-id>` is a real
+# dispatching node with a real log, so the cap can lift without the rule
+# bending.
+#
+# What a grant may not do — asserted by `smith delegation check` and by
+# delegation.test.ts against the shipped files, so a widened grant fails CI:
+#
+#   - dispatch itself (a role that dispatches itself writes dispatches about
+#     itself, and `smith tester check` reads a second dispatch as proof of a
+#     second turn),
+#   - dispatch its own auditor from crosscheck.yml `role_isolation.pairs`
+#     (a coder that picks and prompts its own tester grades itself), or
+#   - dispatch its own critic from crosscheck.yml `asymmetric_roles.pairs`
+#     (a finder that picks its critic's model closes the tunnel-vision hole
+#     crosscheck.yml exists to open).
+#
+# `wave-runner` satisfies all three by construction: it is nobody's worker and
+# nobody's finder. It is the only grant, and it is meant to stay the only one
+# until a second role has an epic-shaped reason to outlive a window.
+
+version: 1
+
+grants:
+  wave-runner:
+    # One wave of `.claude/skills/bs/wave.md`, steps 2-10. Not planner and not
+    # spec-reviewer: planning is the epic tier's, and a wave that could re-plan
+    # itself could plan its way out of the plan it was admitted under.
+    may_dispatch: [coder, tester, grader, reviewer, verifier,
+                   security-reviewer, uiux, researcher, merger, scribe]
+    # The whole point. A wave-runner that dispatches without opening a log
+    # writes its wave's dispatches into the epic's log under its own name, and
+    # every check that reads a dispatch as a separate turn starts lying.
+    must_open_session: true

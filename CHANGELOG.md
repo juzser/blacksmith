@@ -38,11 +38,40 @@ than appearing in it.
   a screenful of dispatched wave-runners is on it: since D13 an epic spans three
   sessions, so "what did this epic do" is a question about a lineage and the
   dashboard had no way to ask it about anything narrower than the whole state
-  dir. The rules live in `ui/src/lib/sessionScope.ts` under 45 unit tests, not
+  dir. The rules live in `ui/src/lib/sessionScope.ts` under 46 unit tests, not
   in the `.vue` files that neither tsc nor biome checks here, and the topbar
   picker is fed by a new thin `/api/sessions` route rather than by a second
   shell-level caller of `/api/overview` — the two pages that poll that endpoint
   every 5s are also the two whose outage guards fail it deliberately.
+
+- **An agent may now dispatch agents, and `factory/policies/delegation.yml`
+  says which one.** D13 closed on "the orchestrator cannot be split"; this is
+  the third and last step of splitting it. `.claude/agents/wave-runner.md` is
+  a thirteenth role holding a scoped `Agent(coder, tester, …)` grant and
+  running one admitted wave, so an epic can hand a wide wave away entirely
+  instead of spending its own window on it. Every other template still holds
+  no `Agent` at all. The grant is not free: `smith delegation check
+  <session-id>` reports the topology and the run as two halves of one answer,
+  because they fail apart — a sound topology can be disobeyed, and an obeyed
+  one can be unsound. It refuses a role that dispatches itself, a worker that
+  dispatches its own auditor from `crosscheck.yml`'s `role_isolation.pairs`,
+  a finder that dispatches its own critic from `asymmetric_roles.pairs`, a
+  template holding `Agent` that no grant names (and a grant naming a template
+  that does not, D-191), and a scoped `Agent(…)` whose scope disagrees with
+  the policy — the harness enforces the template at dispatch time while the
+  audits read the policy, so a disagreement is a rule nobody applies. At run
+  time it asserts the one thing the grant is bought with: a grantee opens its
+  own session against the `dispatch_decision` that started it, **before** it
+  dispatches anything. That is what keeps `smith tester check` and `smith
+  dispatch check` sound, both of which read a second dispatch as evidence of
+  a second turn and can only do so while the dispatching node owns the log it
+  writes into. Fail-closed on `unverifiable` as well as on `violation`: a
+  wave-runner that has not opened its log *yet* is not a pass, because it is
+  the same silence a green would hide. The read folds the lineage (D-119),
+  which here is the whole point — a wave-runner's dispatches land in its own
+  log, so a session-scoped read would find the delegation it exists to audit
+  absent and call that fine. `delegationCli.test.ts` drives the built binary
+  over every status the verb can return, including the sibling-scoped control.
 
 - **`/bs run` is two playbooks, so an epic stops carrying every wave's turns.**
   `.claude/skills/bs/SKILL.md` is now the epic tier — it plans, admits one wave

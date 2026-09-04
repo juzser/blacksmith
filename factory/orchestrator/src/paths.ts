@@ -40,6 +40,8 @@ export const LESSONS_MD_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'less
 /** The shipped role templates — read at dispatch for their `<!-- LESSONS:<scope> -->` markers (P9-2). */
 export const AGENTS_DIR = path.join(REPO_ROOT, '.claude', 'agents');
 export const CROSSCHECK_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'crosscheck.yml');
+/** Who may hold `Agent` — read by `smith delegation check` (delegation.ts, D13 step 3). */
+export const DELEGATION_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'delegation.yml');
 export const BUDGETS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'budgets.yml');
 /** How much judgment an epic buys — read by `smith effort show` (effort.ts). */
 export const EFFORT_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'effort.yml');

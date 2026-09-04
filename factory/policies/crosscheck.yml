@@ -210,10 +210,15 @@ role_isolation:
   # downstream still goes green.
   #
   # The only evidence of a separate turn the event log can hold is a separate
-  # `dispatch_decision`: no role template grants `Agent`, so a dispatch is
-  # written by the orchestrator once per agent it invokes, never by an agent
+  # `dispatch_decision`, written by the node that dispatched, never by an agent
   # about itself. `smith tester check <session>` asserts that against the log
   # after the fact, per `testgate-result`.
+  #
+  # That reading survives delegation.yml granting `Agent` because of what the
+  # grant costs: a grantee must open its own session first, so its dispatches
+  # are its own log's, and no grant may hand a role its own auditor from the
+  # `pairs` below. `smith delegation check` enforces both, which is what keeps
+  # a widened grant from quietly disarming this file.
   #
   # One entry, and it is meant to stay one until a second role starts grading
   # work it could have written: every other grader in the pipeline is a judge,
