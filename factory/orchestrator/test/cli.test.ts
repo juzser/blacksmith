@@ -2039,6 +2039,10 @@ describe('cli.ts (built binary)', () => {
       sessionId,
       '--dry',
       'true',
+      // This clone is in the pass by default; --no-self keeps this test's
+      // scope to the session-event question it actually asks rather than
+      // this checkout's own dependency state.
+      '--no-self',
       '--state-dir',
       eventsDir,
     ]);
@@ -2049,6 +2053,40 @@ describe('cli.ts (built binary)', () => {
 
     const tailResult = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
     expect(JSON.parse(tailResult.stdout)).toHaveLength(1); // dry run appended nothing
+  });
+
+  // `--no-self` is declared in usage.ts for this command (docCommands.test.ts
+  // checks it); this pins that the parser actually accepts it rather than
+  // failing "unknown flag", which a doc-only declaration would not catch.
+  it('scheduler run --dry accepts --no-self', () => {
+    const sessionId = `cli-scheduler-noself-${Date.now()}`;
+    const eventsDir = path.join(scratchDir, 'scheduler-noself-events');
+    runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    const { status } = runCli([
+      'scheduler',
+      'run',
+      '--session',
+      sessionId,
+      '--dry',
+      'true',
+      '--no-self',
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(status).toBe(0);
   });
 
   // `scheduler admit` is the second half of the same tick: `run --dry` says
@@ -2081,6 +2119,10 @@ describe('cli.ts (built binary)', () => {
       'admit',
       '--session',
       sessionId,
+      // See the --dry test above: keep this clone out so the assertions
+      // below stay about admission classification, not this checkout's
+      // own dependency state.
+      '--no-self',
       '--state-dir',
       eventsDir,
     ]);
@@ -2098,6 +2140,37 @@ describe('cli.ts (built binary)', () => {
 
     const tailResult = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
     expect(JSON.parse(tailResult.stdout)).toHaveLength(1); // admitting appended nothing
+  });
+
+  // Same reason as `scheduler run --dry accepts --no-self`: a flag declared
+  // only in usage.ts and never parsed would fail this with "unknown flag".
+  it('scheduler admit accepts --no-self', () => {
+    const sessionId = `cli-admit-noself-${Date.now()}`;
+    const eventsDir = path.join(scratchDir, 'admit-noself-events');
+    runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    const { status } = runCli([
+      'scheduler',
+      'admit',
+      '--session',
+      sessionId,
+      '--no-self',
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(status).toBe(0);
   });
 
   // The wiring the test above cannot see. A RecheckProposal names a task id and
@@ -9472,6 +9545,51 @@ describe('cli.ts (built binary)', () => {
       // The invariant a --once run shares with a killed loop: the lock is the
       // daemon's, and a daemon that has exited does not have one.
       expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+    });
+
+    // The behaviour the union rule ships: an operator who typed no --project
+    // at all used to get an `unwatched-project` finding naming this clone
+    // (the whole point of the fix); now they get none, restating nothing the
+    // process did not already know.
+    it('is in the pass by default, so an omitted --project raises no unwatched-project for it', () => {
+      const { dir, stateDir } = fixture();
+      const { status, stdout } = runCli([
+        'daemon',
+        'run',
+        '--once',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+      ]);
+      expect(status).toBe(0);
+      const findings = JSON.parse(stdout).last.findings as Array<{ kind: string; subject: string }>;
+      expect(
+        findings.filter((f) => f.kind === 'unwatched-project' && f.subject === REPO_ROOT),
+      ).toEqual([]);
+    });
+
+    // `--no-self` accepted and honoured: excluding this clone still raises no
+    // finding for it (suppressed, not merely uncounted).
+    it('--no-self excludes this clone and still raises no finding for it', () => {
+      const { dir, stateDir } = fixture();
+      const { status, stdout } = runCli([
+        'daemon',
+        'run',
+        '--once',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+        '--no-self',
+      ]);
+      expect(status).toBe(0);
+      const findings = JSON.parse(stdout).last.findings as Array<{ kind: string; subject: string }>;
+      expect(
+        findings.filter((f) => f.kind === 'unwatched-project' && f.subject === REPO_ROOT),
+      ).toEqual([]);
     });
 
     it('exits 1 from `status` when nobody is watching, last tick and all', () => {

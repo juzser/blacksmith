@@ -187,7 +187,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'daemon run',
     positionals: '',
-    flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>...] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>...] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]`,
     summary:
       'Watch the event log in the foreground: budgets, stale agents, work that is due. ' +
       'Never dispatches.',
@@ -195,7 +195,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'daemon start',
     positionals: '',
-    flags: `[--interval <seconds>] [--dir <dir>] [--project <dir>...] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    flags: `[--interval <seconds>] [--dir <dir>] [--project <dir>...] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]`,
     summary: 'Spawn `daemon run` detached, logging to <dir>/daemon.log. Prints the spawned pid.',
   },
   {
@@ -222,14 +222,14 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'scheduler run',
     positionals: '',
-    flags: `[--dry] [--now <iso>] [--project <dir>...] ${EVENTS_DIR}`,
+    flags: `[--dry] [--now <iso>] [--project <dir>...] [--no-self] ${EVENTS_DIR}`,
     summary: 'Propose and enact the next scheduler moves for a session. --dry proposes only.',
   },
   {
     command: 'scheduler admit',
     positionals: '',
     flags:
-      '--session <id> [--state-dir <dir>] [--now <iso>] [--project <dir>...] ' +
+      '--session <id> [--state-dir <dir>] [--now <iso>] [--project <dir>...] [--no-self] ' +
       '[--policy <file>] [--crosscheck <file>]',
     summary:
       "Classify what's due into auto or operator per scheduler.yml autonomy. Enacts nothing.",

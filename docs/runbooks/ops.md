@@ -41,9 +41,9 @@ read at different times.
 
 ```
 smith daemon run    [--interval <seconds>] [--once] [--dir <dir>]
-                    [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]
+                    [--project <dir>] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]
 smith daemon start  [--interval <seconds>] [--dir <dir>]
-                    [--project <dir>] [--db <path>] [--no-db] [--state-dir <dir>]
+                    [--project <dir>] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]
 smith daemon status [--dir <dir>]
 smith daemon stop   [--dir <dir>]
 
@@ -82,18 +82,24 @@ Flags worth knowing:
   different locks, which is correct, while two daemons on one checkout is what
   the lock exists to prevent.
 - `--project <dir>` enables the maintenance pass for that repo: a best-effort
-  `pnpm outdated --json` in that directory. Omitted, the check does not run at
-  all; present but with no pnpm or no lockfile, it returns nothing rather than
-  failing the tick. **Repeat it once per repo** — `--project . --project
-  workspaces/envkit` watches the factory and one of the projects it built, and
-  each repo gets its own finding. One repo without a lockfile costs you that
-  repo's reading and nothing else.
+  `pnpm outdated --json` in that directory. This clone is already in the pass
+  by default — `--project` adds to that, it never replaces it. Omitted for
+  everything else, the check does not run on anything but this clone; present
+  but with no pnpm or no lockfile, it returns nothing rather than failing the
+  tick. **Repeat it once per repo** — `--project workspaces/envkit` adds one
+  more project this clone built, and each repo gets its own finding. One repo
+  without a lockfile costs you that repo's reading and nothing else.
 
   You do not have to remember the list. `smith projects list` reads the
   roadmap's `- project:` bullets — the register `smith new` writes to
   when it scaffolds a project — and prints the whole `--project` line for you
   to paste. A repo it names and this pass does not gets an
   `unwatched-project` finding, so forgetting one is loud rather than silent.
+- `--no-self` drops this clone out of the pass — the one way to leave it out,
+  since there is otherwise no flag needed to put it in. It also clears the
+  `unwatched-project` finding this clone would otherwise never raise: opting
+  a repo out of the pass and still being warned about it would make the
+  finding one nothing can silence.
 - `--no-db` skips the read-model refresh. The findings still come out; the
   dashboard just goes on serving whatever the last projection wrote. Use it if
   the SQLite file lives somewhere the daemon's user cannot write.
@@ -156,7 +162,7 @@ Finding kinds, and where each one comes from:
 | `maintenance` | `info` | Dependencies `pnpm outdated` reports behind in one repo, with the scheduler's confidence. Needs `--project`; one finding per `--project`, and the subject names the repo. |
 | `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. The one kind that needs a log with records in it — see the note on a factory that has built nothing. |
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
-| `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
+| `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Itself is in the pass by default and only raises this when `--no-self` left it out. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
 | `unreadable-log` | `attention` | A session log could not be read. |
 | `projection-failed` | `attention` | A read-model refresh threw. `sessionId` names the lineage being folded, or is `null` when the tick had no session to fold and was refreshing the roadmap alone. |
 
@@ -218,19 +224,24 @@ current epic, or read a live log back with `smith wave audit` — and never an
 alarm, because nothing here is known to be wrong.
 
 `unwatched-project` is the same rule applied to the flags rather than to the
-closes. The maintenance pass reads exactly the repos `--project` names, so a
-child project left off the line is not *reported as unwatched* — it is simply
-never mentioned again, which reads identically to a repo whose dependencies are
-all current. The finding turns that silence into a sentence, and it clears the
-only way it should: add the flag. Nothing here reports a project the roadmap
-declares but that has no checkout on this machine, because there would be no
-lockfile to read and therefore no flag that could make the finding go away.
+closes. The maintenance pass reads this clone plus every repo `--project`
+names, so a child project left off the line is not *reported as unwatched* —
+it is simply never mentioned again, which reads identically to a repo whose
+dependencies are all current. The finding turns that silence into a sentence,
+and it clears the only way it should: add the flag. Nothing here reports a
+project the roadmap declares but that has no checkout on this machine,
+because there would be no lockfile to read and therefore no flag that could
+make the finding go away.
 
-The factory's own clone is the first thing this kind will name, and that is
-deliberate — a factory that watched everything it built except itself has the
-same blind spot pointing the other way. It is also the one entry that is never
-resolved by name: this checkout is known, while the roadmap's project *name* is
-a directory name that may well match some unrelated repo sitting beside this
+The factory's own clone is in the pass by default, and that is deliberate — a
+factory that watched everything it built except itself has the same blind
+spot pointing the other way. Requiring an explicit flag for a fact the daemon
+already knows would only train an operator to stop reading the alarm. `--no-self`
+is the one way to leave it out, and it clears the finding along with the pass
+— an opt-out that still raised the alarm it opted out of would be one nothing
+could ever silence. This clone is also the one entry that is never resolved by
+name: this checkout is known, while the roadmap's project *name* is a
+directory name that may well match some unrelated repo sitting beside this
 one.
 
 ### A factory that has built nothing still has repos to tend

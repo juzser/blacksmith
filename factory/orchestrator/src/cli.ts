@@ -1547,7 +1547,13 @@ async function main(): Promise<number> {
     const now = isoDateFlag(flags, 'now') ?? new Date();
     // `repeated`, not `flags`: --project may name several repos, and the
     // last-occurrence-wins read would silently watch only the final one.
-    const input = { events, now, ...(repeated.project ? { projectDirs: repeated.project } : {}) };
+    // This clone joins the pass by default (contract clause 1); `--no-self`
+    // is the refusal path.
+    const { resolveProjectDirs } = await import('./projects.js');
+    const projectDirs = resolveProjectDirs(repeated.project, {
+      self: flags['no-self'] !== 'true',
+    });
+    const input = { events, now, projectDirs };
 
     if (dry) {
       printJson({ proposals: computeProposals(input) });
@@ -1600,11 +1606,14 @@ async function main(): Promise<number> {
     // `recheck.days_elapsed` but was consulted only for `autonomy:` would
     // classify proposals the operator's own policy never made.
     const policy = loadSchedulerPolicy(flags.policy);
+    // This clone joins the pass by default (contract clause 1); `--no-self`
+    // is the refusal path.
+    const { resolveProjectDirs } = await import('./projects.js');
     const proposals = computeProposals({
       events,
       now,
       policy,
-      ...(repeated.project ? { projectDirs: repeated.project } : {}),
+      projectDirs: resolveProjectDirs(repeated.project, { self: flags['no-self'] !== 'true' }),
     });
 
     // A RecheckProposal names a task and no paths, so without this the
@@ -1649,11 +1658,17 @@ async function main(): Promise<number> {
     // list they should have covered belongs. A tick handed no register raises
     // no `unwatched-project`, which keeps inspectFactory's answer a function of
     // its arguments.
-    const { factoryProjects } = await import('./projects.js');
+    const { factoryProjects, resolveProjectDirs } = await import('./projects.js');
+    // This clone joins the pass by default (contract clause 1); `--no-self`
+    // is the refusal path. It has to drop this clone from BOTH sides of the
+    // fold: leaving it in the register while pulling it from `projectDirs`
+    // would still fold to an `unwatched-project` finding for it, which is
+    // exactly the alarm `--no-self` exists to silence.
+    const self = flags['no-self'] !== 'true';
     const tickOpts: TickOptions = {
       ...eventOptsFromFlags(flags),
-      ...(repeated.project ? { projectDirs: repeated.project } : {}),
-      readProjects: () => factoryProjects(),
+      projectDirs: resolveProjectDirs(repeated.project, { self }),
+      readProjects: () => factoryProjects().filter((ref) => self || !ref.self),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
@@ -1723,6 +1738,7 @@ async function main(): Promise<number> {
       ...(repeated.project ?? []).flatMap((dir) => ['--project', dir]),
       ...(flags.db === undefined ? [] : ['--db', flags.db]),
       ...(flags['no-db'] === 'true' ? ['--no-db'] : []),
+      ...(flags['no-self'] === 'true' ? ['--no-self'] : []),
       ...(flags['state-dir'] === undefined ? [] : ['--state-dir', flags['state-dir']]),
     ];
     const child = spawn(process.execPath, [process.argv[1] as string, ...argv], {

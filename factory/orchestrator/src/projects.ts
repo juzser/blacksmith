@@ -92,6 +92,28 @@ function firstCheckout(name: string, roots: readonly string[]): string | null {
 }
 
 /**
+ * The directories a maintenance pass should read: this clone's REPO_ROOT,
+ * path-resolved and present exactly once, joined with whatever `--project`
+ * named -- a union, never a replacement, so `--project /elsewhere` watches
+ * `/elsewhere` AND this clone rather than `/elsewhere` alone.
+ *
+ * `opts.self: false` is `--no-self`: the one way to leave this clone out.
+ * Nothing else does -- there is no default a flag cannot be handed to say no
+ * to, because a default an operator cannot refuse is policy welded shut.
+ *
+ * This is the one rule the three `--project` call sites in cli.ts share; none
+ * of them re-derives it.
+ */
+export function resolveProjectDirs(
+  projectDirs: readonly string[] | undefined,
+  opts: { self?: boolean } = {},
+): string[] {
+  const resolved = (projectDirs ?? []).map((dir) => path.resolve(dir));
+  const withSelf = opts.self === false ? resolved : [path.resolve(REPO_ROOT), ...resolved];
+  return [...new Set(withSelf)];
+}
+
+/**
  * The repos in `refs` that `projectDirs` does not name.
  *
  * Both sides are resolved before they are compared, because the operator types
