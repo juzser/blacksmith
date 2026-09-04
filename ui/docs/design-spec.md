@@ -543,8 +543,8 @@ or 0 with no dependencies) — exposed via `GET /api/flow`
 docs/standards/stack.md; the positioning itself is `ui/src/lib/
 flowLayout.ts`, kept out of the `.vue` file so it is unit-testable.
 
-**Superseded by operator directive (round 11)** — "Flow node cần tách nhau
-ra và hiển thị rõ ràng hơn":
+**Superseded by operator directive (round 11)** — "flow nodes need to be
+spaced apart and shown more clearly":
 
 - *Wave bands are gone.* This spec asked for "horizontal-layered background
   stripes", and they shipped as absolutely-positioned divs behind the
@@ -604,8 +604,8 @@ records what shipped)
 
 Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
 
-5. **Roadmap as a graph** — "Trong dashboard, phần roadmap, display theo
-   dạng VueFlow". §5.4's provisional Table/card list is superseded: the
+5. **Roadmap as a graph** — "in the dashboard, the roadmap section, display
+   it as VueFlow". §5.4's provisional Table/card list is superseded: the
    page renders as a `@vue-flow/core` diagram using the same house pattern
    as §A.2's Flow page — custom DOM nodes on the kit's tokens, `useVueFlow()`
    viewport controls in a `Panel` (never the unsanctioned
@@ -634,8 +634,9 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
    bands: those are painted in canvas coordinates and drift out of register
    the moment the operator pans.
 
-6. **Flow nodes are summaries, not paragraphs** — "một block bị quá dài,
-   và quá nhiều text, chỉ cần tóm tắt ngắn". A Flow node's `title` is
+6. **Flow nodes are summaries, not paragraphs** — "a block is far too long
+   and has far too much text, a short summary is enough". A Flow node's
+   `title` is
    `tasks.objective`, which runs 900–1500 characters on the live plan. The
    node label and its `aria-label` are `summarize()`d and the label is
    line-clamped; the full objective stays reachable three ways — the node's
@@ -643,9 +644,9 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
    links to. Focusing a node should announce where it goes, not read out a
    paragraph.
 
-7. **Overview liveness + elapsed time** — "Tôi cần nhìn được ở Dashboard
-   cái gì đang chạy, một dạng real-time update, để ý đến các mốc thời gian
-   để hiển thị tốt hơn". §8's "no WebSockets, poll every 5s" rule is
+7. **Overview liveness + elapsed time** — "I need to see on the Dashboard
+   what is running, a kind of real-time update; mind the timestamps so they
+   display better". §8's "no WebSockets, poll every 5s" rule is
    unchanged — the gap was never freshness, it was *evidence* of freshness:
    a page whose server had died looked exactly like a quiet factory.
 
@@ -678,9 +679,10 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
 
 ### A.5 Operator directive 8 (Phase 6b round 8)
 
-8. **Roadmap connectors and the running node** — "Flow trong roadmap, hiển
-   thị line nối giữa các node thẳng, có animation ở node đang running".
-   Amends A.4-5's wireframe on two points; everything else there stands.
+8. **Roadmap connectors and the running node** — "in the roadmap's flow, draw
+   the connector lines between nodes straight, and animate the node that is
+   running". Amends A.4-5's wireframe on two points; everything else there
+   stands.
 
    - **Edges are `type: 'straight'`.** Vue Flow's default edge is a bezier,
      which reads as straight *only* when both handles share a `y`. A
@@ -708,11 +710,11 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
 
 ### A.6 Operator directive 9 (shell liveness round)
 
-9. **The toast question, answered no** — "Có nên thêm toast thông báo khi có
-   event, trigger hoặc dispatch vừa xảy ra, để hệ thống có cảm giác đang
-   chạy?" The need is real and the mechanism was wrong. What shipped instead
-   keeps the feeling of a running system on a surface the operator can come
-   back to.
+9. **The toast question, answered no** — "should there be a toast when an
+   event, trigger or dispatch has just happened, so the system feels like it
+   is running?" The need is real and the mechanism was wrong. What shipped
+   instead keeps the feeling of a running system on a surface the operator
+   can come back to.
 
    - **No toast on an event, a trigger or a dispatch.** `useToast` already
      means exactly one thing — *your* action landed — and it is used only by

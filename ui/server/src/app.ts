@@ -169,8 +169,8 @@ function lessonSession(db: SmithDb, lessonId: string): string {
 }
 
 /**
- * The read path's freshness gate — operator report, dogfood round 2: "Chưa
- * thấy kanban update, inprogress chưa thấy task nào."
+ * The read path's freshness gate — operator report, dogfood round 2: "the
+ * kanban still is not updating, and in-progress shows no tasks at all."
  *
  * The DB is a projection; `state/events/<session>.jsonl` is the record. Every
  * read route here queries the single connection createApp() opens, and until

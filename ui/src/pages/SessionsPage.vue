@@ -1,9 +1,9 @@
 <script setup lang="ts">
 // Sessions — a spatial canvas of the runs that are happening right now.
 //
-// Operator directive: "Đọc repo này https://github.com/eneskirca/nodeterm, có
-// cách nào đưa dạng node flow tương tự lên black-smith chạy trên browser
-// không?" → "Làm kiểu T1".
+// Operator directive: "read this repo https://github.com/eneskirca/nodeterm --
+// is there a way to bring a node flow like it into black-smith, running in the
+// browser?" → "do it the T1 way".
 //
 // The idea taken from nodeterm is the one that costs nothing to adopt: on its
 // board the CARDS ARE LIVE SESSIONS, not a static plan. Everything this page

@@ -71,8 +71,8 @@ test.describe('Sessions', () => {
   });
 
   test('draws the whole graph inside the canvas, with nothing to drag to', async ({ page }) => {
-    // The request behind this layout was "giảm không gian phải drag để view" —
-    // reduce the space you have to drag through. That is one measurable claim:
+    // The request behind this layout was "reduce the space you have to drag
+    // through to see it". That is one measurable claim:
     // after fit-view-on-init, every node the canvas drew is already inside the
     // canvas box. A layout that spends the wrong axis fails this by putting
     // cards below the fold, which no unit test on positions can see.

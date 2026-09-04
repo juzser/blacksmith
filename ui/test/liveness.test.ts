@@ -190,8 +190,8 @@ describe('lib/liveness.ts longestRunningSince()', () => {
   });
 });
 
-// Operator directive (dogfood round 2): "nên thay thông tin trong block now
-// running bằng các session đang chạy hiện tại, có animation indicator".
+// Operator directive (dogfood round 2): "the now-running block should show the
+// sessions that are running right now, with an animated indicator".
 describe('lib/liveness.ts sessionActivity()', () => {
   it('is "active" while the session appended an event inside the window', () => {
     expect(sessionActivity('2026-08-05T11:52:00.000Z', now)).toBe('active');

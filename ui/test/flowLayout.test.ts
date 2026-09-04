@@ -21,8 +21,9 @@ import {
   zoomTier,
 } from '../src/lib/flowLayout.js';
 
-// Operator directive (Phase 6b round 11): "Flow node cần tách nhau ra và hiển
-// thị rõ ràng hơn". "Tách nhau ra" is a geometric claim, and no browser is
+// Operator directive (Phase 6b round 11): "flow nodes need to be spaced apart
+// and shown more clearly". "Spaced apart" is a geometric claim, and no browser
+// is
 // reachable from this session (ui/playwright.config.ts points at a chromium
 // binary that isn't installed), so it is asserted here as arithmetic over the
 // boxes the layout reserves rather than left to a screenshot nobody can take.

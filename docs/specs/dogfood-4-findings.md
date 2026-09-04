@@ -13456,3 +13456,75 @@ assertions updated to the new oldest-end semantics with the reason recorded
 in place.
 
 **Related:** [[D-119]], [[D-263]], [[D-264]], [[D-163]].
+
+---
+
+## D-268 — a rule with no reader is a rule that has already drifted
+
+**Severity:** S3-minor. Nothing computed a wrong answer. What was lost was the
+ability of a reader to find out *why* a thing was built the way it was, which
+is the whole load-bearing claim of a repo that says its output stands alone.
+
+**Where:** 110 lines across 39 files — `ui/src/lib/`, `ui/src/pages/`,
+`ui/src/components/`, `ui/src/styles/ds-components.css`, `ui/docs/DESIGN.md`,
+`ui/docs/design-spec.md`, `ui/e2e/`, `ui/test/`, `ui/server/src/app.ts`,
+`factory/orchestrator/src/cli.ts`, `factory/orchestrator/src/db/queries.ts`
+and three orchestrator tests. `AGENTS.md`:
+
+> **Language.** All artifacts in this repo (docs, code, commits, agent
+> prompts) are English.
+
+**How it opened.** Not by anyone deciding against the rule. Quoting the
+operator verbatim is the obviously right instinct when you have just been
+handed a directive — the quotation is the evidence that the design answers a
+real request rather than a preference — and the operator writes in
+Vietnamese. So each comment was defensible on its own, and by Phase 10 there
+were a hundred and ten of them.
+
+The failure is what the aggregate does to a reader. `roadmapFlow.ts` explains
+its default filter by quoting eleven Vietnamese words; a maintainer who does
+not read Vietnamese sees a rule with a citation they cannot evaluate, which is
+worse than no comment at all — a comment they can see is an explanation, and
+cannot read, reads as *this was decided elsewhere, by someone else*. That is
+the precise opposite of what these comments were written to do.
+
+Every one of the three guards before this one had the same shape: `AGENTS.md`,
+a standard, or a skill asserted something about a surface, and nothing read the
+two back against each other. D-259 for commands, D-265 for error codes, D-267
+for review lenses. A rule nothing reads is a rule that drifts, and it drifts
+quietly, because each individual step is small and locally reasonable.
+
+**The fix.** Translate, keep the attribution. Every quotation is now English
+and every one still names where it came from — `Operator directive (Phase
+10):`, `Round 7 (operator directive: …)`, `operator report, dogfood round 2:`.
+Nothing is anonymised into house prose: the reader still learns that the
+constant exists because the operator asked for it, and can now learn *what*
+they asked for.
+
+The verbatim Vietnamese is not destroyed. It is in git history, in
+`state/events/*.jsonl`, and in the records of the past this change
+deliberately does not touch — this file's own D-252 and D-255, and
+`dogfood-mcp-close.md`. A finding that quotes a bug report *is* the report;
+rewriting it would be editing the record rather than the repo. That exclusion
+is not a new rule, it is `instructionSurface.ts`'s existing `recordOfThePast()`
+line, now doing a second job.
+
+`factory/orchestrator/test/repoLanguage.test.ts` is the reader the rule never
+had. It walks every file with a prose extension through the same
+`SKIP_DIRS`/`excludedBecause` surface the other three doc guards use —
+`markdownFiles()` is now a one-line call to a general `filesUnder()`, because
+the helper's own docblock warns against two answers to "which surface do we
+read". The character class is written as `\u` escapes rather than as letters,
+since the guard is inside the surface it scans and a guard that has to exempt
+itself has a hole in it.
+
+Its second test is the D-119 floor: a scan whose walk silently reaches nothing
+passes. `PROSE_EXTENSIONS` must therefore each be *found*, which is why `.js`
+is not in the list — the repo has none outside build output. That assertion
+caught its own first draft.
+
+**Status: fixed, 2026-09-04, branch `fix/the-repo-speaks-one-language`** —
+two tests in `factory/orchestrator/test/repoLanguage.test.ts`, green over 110
+translated lines, with the guard reporting `file:line` for anything new.
+
+**Related:** [[D-267]], [[D-265]], [[D-259]], [[D-119]].

@@ -334,8 +334,8 @@ export interface LiveAgentEntry {
 /**
  * One projected session, with just enough context for the Overview's "Now
  * running" card to say what that run is doing (dogfood round 2 operator
- * directive: "nên thay thông tin trong block now running bằng các session
- * đang chạy hiện tại").
+ * directive: "the now-running block should show the sessions that are running
+ * right now").
  *
  * There is no `session-ended` event anywhere in the vocabulary, so this query
  * cannot report "running" as a fact — it reports `lastEventAt`, and the UI

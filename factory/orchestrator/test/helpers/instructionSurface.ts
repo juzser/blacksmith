@@ -67,25 +67,33 @@ export function excludedBecause(rel: string): string | undefined {
 }
 
 /**
- * Every markdown file under a directory.
+ * Every file under a directory whose name the caller keeps.
  *
  * `withFileTypes` rather than a `statSync` per entry, matching the walker in
  * `test/helpers/eventTypeScan.ts`: `Dirent.isDirectory()` is false for a
  * symlink, so a pnpm workspace link or a dangling worktree symlink is stepped
  * over instead of followed into a cycle or thrown on as ENOENT.
  */
-export function markdownFiles(dir: string, out: string[] = []): string[] {
+export function filesUnder(
+  dir: string,
+  keep: (name: string) => boolean,
+  out: string[] = [],
+): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
     a.name.localeCompare(b.name),
   )) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (!SKIP_DIRS.has(entry.name)) markdownFiles(full, out);
+      if (!SKIP_DIRS.has(entry.name)) filesUnder(full, keep, out);
       continue;
     }
-    if (entry.isFile() && entry.name.endsWith('.md')) out.push(full);
+    if (entry.isFile() && keep(entry.name)) out.push(full);
   }
   return out;
+}
+
+export function markdownFiles(dir: string, out: string[] = []): string[] {
+  return filesUnder(dir, (name) => name.endsWith('.md'), out);
 }
 
 /** The repo-relative markdown that governs an agent, in walk order. */

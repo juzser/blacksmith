@@ -8,7 +8,7 @@ test.describe('Roadmap', () => {
     await page.goto('/roadmap');
     await expect(page.locator('h1')).toHaveText('Roadmap');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
-    // Round 6 ("display theo dạng VueFlow"): the milestone name now appears
+    // Round 6 ("display it as VueFlow"): the milestone name now appears
     // twice — once in its flow node, once in the sr-only order table — so this
     // is scoped to the node rather than left as a bare getByText (which would
     // trip Playwright's strict mode).
@@ -34,11 +34,12 @@ test.describe('Roadmap', () => {
   test('marks the in-progress milestone as the live node (operator directive, round 8)', async ({
     page,
   }) => {
-    // "có animation ở node đang running" — the class is what is assertable
+    // "animate the node that is running" — the class is what is assertable
     // here; the pulse itself is a CSS keyframe, and asserting a computed
     // animation frame would be testing the browser, not the app.
     //
-    // The other half of round 8 ("line nối giữa các node thẳng") is NOT
+    // The other half of round 8 ("connector lines between nodes straight") is
+    // NOT
     // asserted here on purpose: global-setup seeds phase-6a under
     // black-smith and phase-6b under demo-hub, i.e. one milestone per lane,
     // and roadmapFlowEdges() only chains WITHIN a lane — so this fixture

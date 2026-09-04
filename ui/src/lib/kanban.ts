@@ -59,8 +59,9 @@ export function foldIntoColumns<T extends KanbanTaskLike>(
 /**
  * How many tasks a column draws before it stops and offers the rest.
  *
- * Operator directive (Phase 10): "limit mỗi cột max 10 tasks, sau đó có thể
- * view more. Tránh phải scroll rất dài." A column is an unbounded list of
+ * Operator directive (Phase 10): "cap each column at ten tasks, with a view
+ * more after that -- avoid having to scroll a very long way." A column is an
+ * unbounded list of
  * cards inside a page that already scrolls, so a Completed column holding two
  * hundred merged tasks pushed every other column's contents off the screen --
  * the board stopped being a board and became one very long list with four

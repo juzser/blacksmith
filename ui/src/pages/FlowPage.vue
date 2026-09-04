@@ -17,8 +17,8 @@
 // nodes get a small pulsing dot (`.flow-node__live`) instead of pulsing
 // the whole node border.
 //
-// Operator directive (Phase 6b round 11): "Flow node cần tách nhau ra và
-// hiển thị rõ ràng hơn". The geometry that used to sit here as two bare
+// Operator directive (Phase 6b round 11): "flow nodes need to be spaced apart
+// and shown more clearly". The geometry that used to sit here as two bare
 // constants now lives in lib/flowLayout.ts, where it is unit-tested. Two
 // things changed as a result:
 //
@@ -385,8 +385,9 @@ function goToTask(taskId: string) {
               @click="goToTask(data.taskId)"
               @keydown.enter="goToTask(data.taskId)"
             >
-              <!-- Operator directive (round 6): "một block bị quá dài, và quá
-                   nhiều text, chỉ cần tóm tắt ngắn". `title` here is
+              <!-- Operator directive (round 6): "a block is far too long and
+                   has far too much text -- a short summary is enough".
+                   `title` here is
                    tasks.objective (db/queries.ts:1406) — a paragraph, 942-1472
                    chars on the live plan — so the node label is summarize()d to
                    one sentence and the CSS clamps it to two lines. The full
@@ -395,7 +396,7 @@ function goToTask(taskId: string) {
                    page this node links to. Same reason the aria-label is
                    summarized: focusing a node should announce where it goes,
                    not read out a paragraph. -->
-              <!-- Round 11 ("hiển thị rõ ràng hơn"): the node used to show a
+              <!-- Round 11 ("shown more clearly"): the node used to show a
                    summarized objective and nothing that named the task. Two
                    nodes whose objectives summarize alike were indistinguishable
                    at a glance. The id is the eyebrow line, mono and clipped to

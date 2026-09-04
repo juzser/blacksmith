@@ -178,7 +178,7 @@ describe('specChange — a worker proposes, the operator decides', () => {
         blocking: true,
         sites: ['src/parse.ts'],
       });
-      // Both halves of "duyệt nhanh": the diff the operator would otherwise
+      // Both halves of "approve it fast": the diff the operator would otherwise
       // hand-author, and the argument they would otherwise have to reconstruct.
       expect(proposed?.record.payload.changes).toEqual(supersedeQuotes());
       expect(proposal.diff.superseded).toEqual([TASK_ID]);

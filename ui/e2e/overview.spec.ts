@@ -22,7 +22,7 @@ test.describe('Overview', () => {
   test('shows a liveness indicator that reports the age of the last successful load', async ({
     page,
   }) => {
-    // Round 7 ("một dạng real-time update, để ý đến các mốc thời gian"): the
+    // Round 7 ("a kind of real-time update; mind the timestamps"): the
     // page has polled every 5s since 6a, but nothing on screen said so. The
     // label starts at "Connecting…" and must resolve to a real state once the
     // first fetch lands — that transition IS the feature. The indicator itself

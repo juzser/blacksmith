@@ -1,7 +1,7 @@
 // "Is this page still live, and what has been running longest?" — the pure
 // half of the Overview's real-time zone (operator directive, Phase 6b round
-// 7: "Tôi cần nhìn được ở Dashboard cái gì đang chạy, một dạng real-time
-// update, để ý đến các mốc thời gian để hiển thị tốt hơn").
+// 7: "I need to see on the Dashboard what is running, a kind of real-time
+// update; mind the timestamps so they display better").
 //
 // The mechanism stays polling, not sockets — design-spec.md §8 ("No
 // WebSockets") and composables/usePoll.ts. What was missing was not fresher
@@ -99,7 +99,7 @@ export type AgentActivity = 'working' | 'stalled' | 'unknown';
  * Mirrors `DEFAULT_STALE_HOURS = 4` in
  * factory/orchestrator/src/agents-registry.ts, which is what `detectStale()`
  * uses to decide a live agent has stopped being one (D-23/P9-12). The UI does
- * not get to invent its own threshold for "đang thực sự hoạt động" — if that
+ * not get to invent its own threshold for "actually working" — if that
  * constant moves, this one moves with it.
  *
  * `LiveAgentEntry` carries no heartbeat (api.ts), only `dispatchedAt`, so age

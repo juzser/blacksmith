@@ -1174,16 +1174,16 @@ describe('timeline() covers the gate/graph event vocabulary (P9-37)', () => {
 });
 
 /**
- * Operator directive (dogfood round 2): "Không thấy overview update, và nên
- * thay thông tin trong block now running bằng các session đang chạy hiện tại,
- * có animation indicator."
+ * Operator directive (dogfood round 2): "the overview never updates, and the
+ * now-running block should show the sessions that are running right now, with
+ * an animated indicator."
  *
  * The Overview's "Now running" card was fed by `liveAgentEntries` sorted
  * longest-running-first, and the `agents` table keeps a row `live` until a
  * terminal event closes it out. In the real state/smith.db the twelve oldest
  * `live` rows are all from a session whose last event was five days ago, so
  * the card was permanently occupied by ghosts and never changed — exactly the
- * "không thấy update" the operator reported. `runningSessions` answers the
+ * "never updates" the operator reported. `runningSessions` answers the
  * question the card should have been answering: which SESSIONS have appended
  * anything lately.
  */

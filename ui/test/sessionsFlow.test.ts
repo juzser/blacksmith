@@ -603,8 +603,9 @@ function unevenBands(n: number, busyIndex: number, busyAgents: number) {
 }
 
 /**
- * Operator directive (Phase 10): "Phần session cần tổ chức lại để dễ nhìn hơn
- * khi có nhiều subagent được dispatch." A band's height was unbounded in agent
+ * Operator directive (Phase 10): "the sessions view needs reorganising so it
+ * is easier to read when many subagents are dispatched." A band's height was
+ * unbounded in agent
  * count while `sessionsFlowNodes()` takes the tallest band in a row as the row's
  * height -- so one session that dispatched twenty subagents dragged its
  * row-mates down with it and collapsed the fit zoom for every band on the

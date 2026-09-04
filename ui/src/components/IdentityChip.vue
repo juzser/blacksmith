@@ -19,8 +19,8 @@
 // 4.5:1 in both themes (light 4.83:1, dark 7.76:1) independent of which
 // chart slot is assigned, so text contrast can never regress with a new id.
 //
-// Operator directive (Phase 6b round 9): "thêm animation nhỏ cho các
-// indicator ở chip với các agent đang thực sự hoạt động". `live` is opt-in
+// Operator directive (Phase 6b round 9): "add a small animation to the chip
+// indicators for the agents that are actually working". `live` is opt-in
 // and off by default — every other chip on the dashboard (an epic id, a
 // case, a model tier) labels a *thing*, not an activity, and a chip that
 // pulsed everywhere would say nothing. The caller decides, and the only

@@ -57,8 +57,8 @@ describe('lib/format.ts pluralize()', () => {
   });
 });
 
-// Operator directive (Phase 6b round 6): "Phần Flow, một block bị quá dài,
-// và quá nhiều text, chỉ cần tóm tắt ngắn". A flow node renders
+// Operator directive (Phase 6b round 6): "on Flow, a block is far too long and
+// has far too much text -- a short summary is enough". A flow node renders
 // tasks.objective, measured at 942–1472 chars on envkit-mcp-surface's
 // plan-v3 — summarize() is what turns that into the node's one-line label.
 describe('lib/format.ts summarize()', () => {

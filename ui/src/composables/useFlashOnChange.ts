@@ -1,8 +1,9 @@
 // "Did anything just change?" — a boolean that is true for a moment after a
 // watched signature moves, and false the rest of the time.
 //
-// Operator directive (Phase 6b round 9): "Các update hoặc block cần động hơn
-// để thấy thực sự factory đang chạy." The Overview polls every 5s, but a poll
+// Operator directive (Phase 6b round 9): "updates and blocks need more motion,
+// so you can actually see the factory running." The Overview polls every 5s,
+// but a poll
 // that returns new data looked exactly like a poll that returned the same
 // data: numbers swapped in place, silently. This is the missing half — the
 // arrival of new data becomes visible for ~1s, then gets out of the way.

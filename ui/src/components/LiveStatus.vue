@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // "Is what I'm looking at actually current?" — the freshness indicator for a
-// polled page (operator directive, Phase 6b round 7: "một dạng real-time
+// polled page (operator directive, Phase 6b round 7: "a kind of real-time
 // update"). Overview has polled every 5s since 6a, but nothing on screen said
 // so: a dashboard whose server had died looked identical to a quiet factory.
 // This shows the state AND the age behind it (lib/liveness.ts), plus a manual
