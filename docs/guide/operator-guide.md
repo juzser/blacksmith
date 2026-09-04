@@ -2050,14 +2050,16 @@ version. The dashboard's **Plan changes** filter selects all of them.
 ## 7. `smith plan quorum` + `smith epic verdict`
 
 The gate raises its own quorum cases; these two are the ones you invoke.
-Both rest on a quorum that ships one vendor short. `crosscheck.yml` ships
-`codex: enabled: auto, mode: active` and `deepseek: enabled: false`, so a box
-holding the `codex` binary has exactly one active external and a box without
-it has none. Either way `min_providers: 2` is out of reach — no quorum, no
-`judge-verdict` row from a second vendor, and the outcome rests on the native
-verdict alone (`docs/runbooks/providers.md`). A provider you enable by hand
-arrives in `mode: shadow`: it runs and records, and the outcome still rests
-on the native verdict. `smith judge preflight` says beforehand whether a
+Both rest on a quorum that ships one *voting* vendor short.
+`crosscheck.yml` ships `codex: enabled: auto, mode: active` and
+`deepseek: enabled: auto, mode: shadow`, so a box holding the `codex` binary
+and a DeepSeek key runs two external judges and counts one, and a box with
+neither runs none. Either way `min_providers: 2` is out of reach — no
+quorum, no gating `judge-verdict` row from a second vendor, and the outcome
+rests on the native verdict alone (`docs/runbooks/providers.md`). A shadow
+provider is still invoked and still recorded; it forfeits its vote and
+nothing else, so promoting deepseek after a calibration pass is the edit
+that closes the gap. `smith judge preflight` says beforehand whether a
 provider you switched on can be called at all, and
 `SMITH_CROSSCHECK_OFFLINE=1` forces every external off for one command.
 
@@ -3300,19 +3302,19 @@ check, what to back up — is [`../runbooks/ops.md`](../runbooks/ops.md).
   events tagged `needs_distillation: true`; turning one into a checkable,
   principle-level statement means dispatching a `scribe` session by hand
   today (`/bs lessons`'s playbook), not an automatic pass.
-- **Cross-provider judges are one vendor short of a quorum, and two of
-  the four triggers only fire when you run a command.** Phase 8 ships both
+- **Cross-provider judges run two and count one, and two of the four
+  triggers only fire when you run a command.** Phase 8 ships both
   transports (Codex via `codex exec`, DeepSeek via its
   OpenAI-compatible API), the quorum engine, `smith judge run`, and `smith
   stats providers`. `crosscheck.yml` ships
-  `codex: enabled: auto, mode: active`, so a box holding the binary has a
-  live external judge with gating power. It ships
-  `deepseek: enabled: false`, because whether you hold a key is a fact about
-  your box. One active external cannot satisfy `min_providers: 2`, so a
-  finding claude raised still falls to the native verdict — funding the
-  second judge or changing the quorum policy is an operator decision, not a
-  default. A provider you enable by hand arrives in `mode: shadow`,
-  recorded, and stays there until an operator promotes it
+  `codex: enabled: auto, mode: active` and
+  `deepseek: enabled: auto, mode: shadow`, so a box holding the binary and
+  the key calls both judges and only codex gates; `auto` on both means a box
+  with neither has no external judge and nothing to edit. A shadow provider
+  forfeits its vote and nothing else, so one active external cannot satisfy
+  `min_providers: 2` and a finding claude raised still falls to the native
+  verdict — promoting deepseek after a calibration pass, or changing the
+  quorum policy, is an operator decision, not a default
   (`docs/runbooks/providers.md`). `smith judge preflight` checks, without
   spending a call, that a provider you switched on can be reached at all.
   All four `quorum_triggers` now have a

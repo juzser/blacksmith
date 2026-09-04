@@ -323,6 +323,15 @@ no `--env-file`, no script that sources it. `api-transport.ts:21` reads
 written into `.env.example`'s header rather than left for the next operator to
 rediscover.
 
+> **Closed 2026-09-04, and the deferral cost what a deferral costs.** Writing
+> the workaround into `.env.example` put it in a file an operator reads once,
+> at clone time, and not in `docs/runbooks/providers.md`, which is the file
+> that tells you how to turn a provider on. Eighteen days later D-253 recorded
+> "the runbook's `set -a; source .env; set +a` precondition stands" — a
+> precondition the runbook has never carried. The operator then funded
+> DeepSeek, put the key exactly where the runbook said, and `judge preflight`
+> reported it unset. The CLI now loads `.env` itself; see [[D-270]].
+
 **D-105 — `.gitignore:18`'s `.env.*` also ignored `.env.example`,** making
 `guardrails.md`'s ".env.example is the only committed env file" unenforceable.
 Fixed in this branch with an `!.env.example` negation and a comment saying why.

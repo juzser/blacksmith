@@ -13725,3 +13725,91 @@ tests in `docPolicyValues.test.ts`; flipping `status.md` back to
 suite goes red.
 
 **Related:** [[D-268]], [[D-267]], [[D-265]], [[D-259]], [[D-119]].
+
+## D-270 — the key was where the runbook said, and the runbook was half a procedure
+
+**Severity:** S2-major.
+
+**Where:** `docs/runbooks/providers.md:99-105`, `.env.example:5-10`,
+`SECURITY.md:118-119`, `factory/orchestrator/src/preconditions.ts:45-47`.
+
+**How it opened.** The operator settled the Phase 10 fork on the second judge
+— fund it — and did the one thing the runbook asks: put `DEEPSEEK_API_KEY` in
+`.env`. `smith judge preflight` then reported the key unset. Nothing was
+broken. `providers.md` §1 says "set it in `.env` (gitignored)" and then "the
+code never reads the key from anywhere else", and both sentences are true and
+neither is the whole procedure: `apiKeyPresent` reads `process.env`, and until
+this branch nothing in the repo carried `.env` into it.
+
+The missing half was written down — in `.env.example`'s header and in
+`SECURITY.md`, both of which said plainly that nothing auto-loads the file and
+told you to run `node --env-file=.env` or `set -a; source .env; set +a`. It
+was written down in the file you read once at clone time, and absent from the
+file you read when you turn a provider on. That is the whole defect: not an
+undocumented step, a step documented away from its moment.
+
+Two records had already been here. [[D-104]] found it in the mcp run and chose
+to answer it in `.env.example`'s header. [[D-253]] passed it over with "whether
+the orchestrator should source `.env` itself is the operator's call, not a
+defect — the runbook's `set -a; source .env; set +a` precondition stands". The
+runbook has never carried that precondition. A deferral that names the wrong
+file for its own workaround is how a decision to wait becomes a decision to
+forget.
+
+**The fix.** `factory/orchestrator/src/dotenv.ts`, forty lines and no
+dependency, called once at the top of `main()` before any command resolves a
+provider. Two properties are the design and are tested as such:
+
+- **A file never beats the runner.** A name already present in the environment
+  is left alone and is not reported as loaded. CI and the daemon export
+  secrets; `.env` is a developer convenience, and a convenience that silently
+  replaces the real key is how a run bills a stale one with nothing in the log
+  to say why.
+- **It returns names, never values** — the discipline `judge preflight`
+  already keeps. Nothing here throws with a value in the message either.
+
+Not `node --env-file`: the flag covers one road to the binary, and the binary
+is reached by four (`smith`, `node dist/cli.js`, a daemon spawn, an import).
+In-process at the entry covers all of them.
+
+This closes the fork the operator settled rather than overriding [[D-253]]'s
+deferral: D-253 said the question was the operator's to answer, and putting the
+key in `.env` is that answer.
+
+**What it unblocked.** `crosscheck.yml` now ships
+`deepseek: enabled: auto, mode: shadow` — `auto` for the reason codex is
+`auto`, because the file is checked in and the key is a fact about one box, and
+`shadow` because this box chose calibration for this vendor where it declined
+it for codex. Preflight on this box, with the key only ever in `.env`:
+`deepseek: enabled=True mode=shadow status=ok`, `shadowExternal: ["deepseek"]`.
+Note what did not change: `activeExternal` is still `["codex"]` and `canDecide`
+is still `false`. A shadow provider is called and recorded and forfeits only
+its vote, so funding the judge bought recorded disagreement to read, not a
+quorum. Promotion is one edit and remains an operator decision.
+
+**The doc guard earned its keep in a day.** [[D-269]] shipped
+`docPolicyValues.test.ts` on 2026-09-04. The policy changed the same day and
+the guard immediately reported five stale sites — including four sentences
+D-269 itself had just written — at `status.md:15,48`,
+`operator-guide.md:2052,3303` and `providers.md:159`. That is the shortest
+possible demonstration of the thing it was built for: prose about a value goes
+stale at the speed the value changes, which is faster than anyone re-reads.
+
+**And the secret scan objected, correctly.** Making `.env` a file the factory
+reads made it a file operators actually fill in, and `gitleaks dir` walks the
+working tree rather than the index — so the first key placed where the runbook
+said to place it failed the gate. The scan was not wrong; it was one fact
+short. A credential in this file cannot reach the tree, because `.gitignore:21`
+forbids it, and stopping credentials reaching the tree is the whole of the
+scan's job. `.gitleaks.toml` now allowlists exactly `^\.env$` — anchored, so
+`.env.example` and `.env.local` are still scanned — and `dotenv.test.ts` asks
+`git check-ignore` whether the reason still holds. That pairing is the point:
+an allowlist whose justification can be deleted without the allowlist noticing
+is how a guard rots quietly, and this one now fails the moment the ignore does.
+
+**Status: fixed, 2026-09-04, branch `fix/a-value-nobody-read-back`** — eleven
+tests in `dotenv.test.ts`; `smith judge preflight` moves deepseek from
+`not-applicable` to `ok` with the key only in `.env` and never exported, and
+`gitleaks dir .` reports no leaks with that key in place.
+
+**Related:** [[D-104]], [[D-253]], [[D-269]], [[D-119]].

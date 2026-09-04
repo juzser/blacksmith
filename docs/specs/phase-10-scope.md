@@ -19,13 +19,13 @@ is cited and the document is named as the defect.
 | --- | --- | --- |
 | Ops runbook | built | `docs/runbooks/ops.md`, 29 KB |
 | Background process (`smith daemon`) | built | `factory/orchestrator/src/daemon.ts`; `daemon run\|start\|status\|stop` in `cli.ts` |
-| Cloudflare port of the UI | deferred, unspecced | the goal line says so; the two publish commands are deny-listed for agents in `.claude/settings.json` |
+| Cloudflare port of the UI | struck to its own milestone, 2026-09-04 | still unspecced; now `cloudflare-port` at `status: planned` in `factory/specs/roadmap.md`, so the deferral is a record rather than a blocker |
 
-So two of three landed and the third was never specced. Phase 10 cannot
-reach `completed` on its own goal line without a decision about the third,
-and `epics: []` means nothing in the read-model can show progress on it
-either way. Architecture §16 does not have a Phase 10 at all — it folds
-Cloudflare into Phase 9's "Hardening" line — so the roadmap is the only
+So two of three landed and the third was never specced. That decision has
+since been made: the third was struck to its own milestone on 2026-09-04.
+But `epics: []` still means nothing in the read-model can show progress on
+this phase either way. Architecture §16 does not have a Phase 10 at all — it
+folds Cloudflare into Phase 9's "Hardening" line — so the roadmap is the only
 place this phase exists.
 
 That is the whole of the phase as declared. What follows is what the
@@ -109,9 +109,10 @@ operator reads.
 operator-guide's own "Limitations today" already says what follows: "one
 `mode: active` provider changes no outcomes — `finder_ne_critic` excludes
 the claim's finder (the native reviewer today), leaving a below-quorum pool
-that escalates instead of deciding; you need two." DeepSeek is
-`enabled: false` at `:106` because its key "belongs to a runner, and the
-repo has never met one".
+that escalates instead of deciding; you need two." DeepSeek was off when this
+was written, because its key "belongs to a runner, and the repo has never met
+one" — true until 2026-09-04, when the operator became that runner. See the
+settlement at the foot of this item for what the file declares now.
 
 **What it means.** The mandate's second axis — a cross-prover check so that
 no judgement is made in isolation — is installed and not load-bearing.
@@ -127,6 +128,20 @@ vendor. The second weakens the rule that made the tier worth building.
 **Whose call.** The operator's. Nothing in this repo has standing to pick
 either one quietly, and `independent_finder` stays `enabled: false` with
 `send_diff: false` regardless of which is chosen.
+
+**Settled 2026-09-04 — fund the second judge, and hold it in shadow.** The
+operator chose the first exit and paid for it: `DEEPSEEK_API_KEY` is on this
+box and `crosscheck.yml` now ships `deepseek: enabled: auto, mode: shadow`.
+`min_providers: 2` is untouched, which is the point — the quorum rule was not
+weakened to make a number go green. Getting there needed a defect fixed first:
+the key was in `.env`, where the runbook says to put it, and nothing loaded
+`.env` into the process that reads it ([[D-270]]). What this buys today is a
+second vendor called and recorded on every trigger and counting nothing;
+`canDecide` is still `false` and a finding claude raises still falls to the
+native verdict. Promotion to `mode: active` is one edit, and it is the
+calibration pass in `docs/runbooks/providers.md` §3 that earns it — read the
+recorded disagreement first. **This item stays open** until that pass runs:
+funding the position is not the same as filling it.
 
 ## P10-4 — The Cloudflare port has to be built or struck
 
@@ -145,6 +160,12 @@ it from `phase-10`'s goal line and give it a `planned` milestone of its own,
 so the deferral is a record rather than a blocker.
 
 **Whose call.** The operator's — this is a scope decision, not a defect.
+
+**Settled 2026-09-04 — struck to its own milestone.** `factory/specs/roadmap.md`
+now carries `cloudflare-port` at `status: planned` with the goal line the phase
+never wrote, and Phase 10's goal line records the strike instead of carrying a
+fourth deferral. The deferral is now a record rather than a blocker, which is
+the whole difference: Phase 10 can reach `completed` on what it built.
 
 ## P10-5 — `envkit — mcp followup` is the only live test of the fourth axis
 
@@ -194,15 +215,30 @@ its tasks, or record in the goal line that this phase was built by hand.
   typing `smith` in this directory is driving the other repository.
   Repointing it is a change outside the clone and needs an explicit yes.
 
-## The forks
+## The forks — all three settled, 2026-09-04
 
-Three, and only the first blocks the rest:
+They were three, and only the first blocked the rest. The operator answered
+all three in one pass; each answer is recorded at the item it governs, and
+this is the index.
 
 1. **Does Phase 10 run as a real epic on this repo, or as branch-by-branch
-   items the way Phase 9 did?** P10-1 argues for the epic on the grounds
-   that it is the only thing that exercises the self-maintenance axes.
-2. **Is the Cloudflare port in scope, or struck to its own milestone?**
-3. **Is a second judge funded, or does the quorum policy change?** Or
-   neither, and axis two stays recorded-but-not-gating for another phase —
-   which is a defensible answer, as long as it is the chosen one rather than
-   the default one.
+   items the way Phase 9 did?** — **A real epic, through `/bs run`.** P10-1's
+   argument was accepted: an instrument that has never been pointed at
+   anything is a claim, not a capability, and the only way to make Phase 10
+   the first thing this factory builds for itself is to build it that way.
+   This also answers P10-6, which follows from it — `phase-10` gets an epic
+   id, and the items above become its task specs. The same decision adds
+   `--project /Users/ser/scatola/jobs/projects/blacksmith` to the daemon and
+   the scheduler, so the recheck and maintenance proposals the fourth axis
+   is made of are computed over this clone rather than over nothing.
+2. **Is the Cloudflare port in scope, or struck to its own milestone?** —
+   **Struck.** See P10-4.
+3. **Is a second judge funded, or does the quorum policy change?** —
+   **Funded, and held in shadow.** See P10-3. The third answer the fork
+   offered — neither, and axis two stays recorded-but-not-gating — was
+   available and was not taken; what was taken is narrower than it looks,
+   because a shadow judge still does not vote.
+
+What is left after the forks is P10-1, P10-5 and P10-6, and they are one
+piece of work: plan `phase-10` as an epic, run it, and let the events it
+emits be the first real input the instruments have ever folded.

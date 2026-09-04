@@ -1511,6 +1511,38 @@ than appearing in it.
 
 ### Fixed
 
+- **The key was where the runbook said to put it, and the runbook was half a
+  procedure (D-270).** `docs/runbooks/providers.md` tells you to set
+  `DEEPSEEK_API_KEY` in `.env`; `apiKeyPresent` reads `process.env`; nothing
+  joined the two. So the operator funded the second judge, put the key exactly
+  where the file asked, and `smith judge preflight` reported it unset. The
+  missing step was written down — in `.env.example`'s header and in
+  `SECURITY.md`, both of which said plainly that nothing auto-loads the file —
+  which is to say it was in the document you read once at clone time and absent
+  from the one you read when you turn a provider on. D-104 chose that placement
+  and D-253 then deferred the question with "the runbook's `set -a; source
+  .env; set +a` precondition stands", a precondition the runbook has never
+  carried. `factory/orchestrator/src/dotenv.ts` is the join: forty lines, no
+  dependency, called once at the top of `main()` before any command resolves a
+  provider. It sets only names the environment does not already hold, so a
+  runner's exported secret always beats a developer's file and a stale `.env`
+  can never quietly replace the key CI handed you; it returns the names it set
+  and never a value, the discipline `judge preflight` already keeps. Not `node
+  --env-file`, because the flag covers one road to the binary and the binary is
+  reached by four. With it, `crosscheck.yml` ships `deepseek: enabled: auto,
+  mode: shadow` — `auto` for the reason codex is `auto`, since the file is
+  checked in and the key is a fact about one box, and `shadow` because a shadow
+  provider is called and recorded and forfeits only its vote, which is what you
+  want to read before a second vendor gets power over a gate. Note what did not
+  change: `min_providers: 2` is untouched and `canDecide` is still false.
+  Funding the judge bought recorded disagreement, not a quorum. One knock-on,
+  because making the file readable made it a file operators fill in: `gitleaks
+  dir` walks the working tree, so the first real key failed the gate for being
+  where the runbook put it. `.gitleaks.toml` allowlists exactly `^\.env$` —
+  anchored, so `.env.example` and `.env.local` are still scanned — and a test
+  asks `git check-ignore` whether the reason for that allowlist still holds,
+  so it cannot outlive the ignore that justifies it.
+
 - **The guides said both cross-provider judges ship off; codex has been live
   for weeks (D-269).** `crosscheck.yml` reads `codex: enabled: auto, mode:
   active`, and `docs/runbooks/providers.md` says so. Four sites in

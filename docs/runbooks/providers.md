@@ -105,7 +105,12 @@ whatever you configure.
 
   `crosscheck.yml`'s `deepseek.api_key_env: DEEPSEEK_API_KEY` names the
   variable; the code never reads the key from anywhere else and never logs
-  it. A missing key fails fast with a typed error naming the variable, e.g.:
+  it. The CLI reads `.env` into its own environment at start, before any
+  command resolves a provider, and sets only names the environment does not
+  already hold — so an exported key beats the file and a stale `.env` can
+  never quietly replace the one a runner handed you. Exporting it instead
+  works exactly as well; the file is the convenience, not the contract.
+  A missing key fails fast with a typed error naming the variable, e.g.:
 
   ```json
   {"error":{"code":"provider.missing-api-key","message":"Environment variable \"DEEPSEEK_API_KEY\" is not set (required for provider \"deepseek\").","details":{"provider":"deepseek","envVar":"DEEPSEEK_API_KEY"}}}
@@ -157,14 +162,16 @@ flagged. Exactly **one** is flagged — see §4 for why that configuration
 pays for a gating provider and gets no gating.
 
 **This command answers about the box it runs on, and the answer differs
-between boxes on purpose.** What ships today is `deepseek: enabled: false`
-and `codex: enabled: auto, mode: active`, so the same commit reports two
-different sound configurations: on a box with no `codex` binary the
-provider is `not-applicable`, there are zero active externals, and there is
-nothing to say; on a box that has it, codex is the one active external and
-that advisory is printed under `notes`, because this repo declares
-`accept_non_gating_actives` (§4). Neither box exits 1, and neither box
-edits the file to get there.
+between boxes on purpose.** What ships today is
+`codex: enabled: auto, mode: active` and
+`deepseek: enabled: auto, mode: shadow`, so the same commit reports
+several sound configurations: on a box with neither the `codex` binary nor
+a DeepSeek key both externals are `not-applicable`, there are zero active
+externals, and there is nothing to say; on a box that has the binary, codex
+is the one active external and that advisory is printed under `notes`,
+because this repo declares `accept_non_gating_actives` (§4); a key adds
+deepseek as a shadow external, which is invoked and recorded and moves
+neither count. No box exits 1, and no box edits the file to get there.
 
 ## 2. Enabling a provider
 

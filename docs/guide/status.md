@@ -21,7 +21,7 @@ dashboard's Roadmap page parses.
 | 5. State + analytics | SQLite projections, `smith db` / `smith stats` | Built, merged |
 | 6. UI | Overview, Timeline, Kanban, Roadmap, Flow, Lessons, Errors, Analytics | Built, merged |
 | 7. Self-extension | Scaffolder, `/bs` operator skill, scheduler, lessons compilation | Built, merged |
-| 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — ships `codex: enabled: auto, mode: active` and `deepseek: enabled: false`; one active external cannot reach `min_providers: 2` |
+| 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — ships `codex: enabled: auto, mode: active` and `deepseek: enabled: auto, mode: shadow`; the shadow judge is called and recorded but not counted, so one active external still cannot reach `min_providers: 2` |
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
 | 10. Deployment + ops | A background watcher (`smith daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
 
@@ -45,21 +45,23 @@ operator-invoked. Same for the closing spec review. Skipping them no longer
 buys a green epic — `smith epic verdict` holds without them — but nothing
 runs them on your behalf.
 
-**3. One cross-provider judge is live, and one judge cannot carry a
-quorum.** [`crosscheck.yml`](../../factory/policies/crosscheck.yml) ships
-`codex: enabled: auto, mode: active`, so on a box that holds the `codex`
-binary there is a live external judge with gating power. It ships
-`deepseek: enabled: false`, because whether you hold a key for it is a fact
-about your box and the repo has never met yours. That leaves one active
-external against `min_providers: 2`, which a single vendor cannot reach — so
-a finding claude raised still falls to the native verdict. Funding the second
-judge or changing the quorum policy is an operator decision, not a default.
-A provider you enable by hand arrives in `mode: shadow`: verdicts are
-recorded and the native judge still decides, which is deliberate — you
-calibrate against recorded disagreement before you give a second vendor a
-vote. `smith judge preflight` says beforehand whether one you switched on can
-be reached at all. See
-[`../runbooks/providers.md`](../runbooks/providers.md).
+**3. Two cross-provider judges run, and only one of them votes.**
+[`crosscheck.yml`](../../factory/policies/crosscheck.yml) ships
+`codex: enabled: auto, mode: active` and
+`deepseek: enabled: auto, mode: shadow`, so a box holding the `codex` binary
+and a DeepSeek key calls both on every trigger and counts one. A shadow
+provider is invoked and recorded as a participant and forfeits only its
+vote, which is the whole point of the mode: you read a run of recorded
+disagreement before you give a second vendor power over a gate. So one
+active external still stands against `min_providers: 2`, and a finding
+claude raised still falls to the native verdict — promoting deepseek to
+`mode: active` after that calibration pass is the single edit that changes
+it, and it is an operator decision, not a default. `auto` on both keeps the
+file honest on every box: no binary and no key means no external judge and
+nothing to edit. The key may live in this clone's gitignored `.env`, which
+the CLI reads at start and never lets override one already exported.
+`smith judge preflight` says beforehand which of the two this box can reach.
+See [`../runbooks/providers.md`](../runbooks/providers.md).
 
 **4. The epic cap blocks at admission; nothing stops a dispatch mid-flight.**
 `smith wave check` now refuses to admit a wave whose declared cost will not

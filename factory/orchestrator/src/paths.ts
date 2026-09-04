@@ -5,6 +5,14 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '..', '..', '..');
 
+/**
+ * The repo's own `.env`, read at CLI start by `loadDotEnv`. Gitignored, and
+ * the one place `docs/runbooks/providers.md` tells an operator to put a
+ * provider key. Anchored on this module, not on cwd: an agent runs `smith`
+ * from a worktree, and the key belongs to the clone.
+ */
+export const DOTENV_PATH = path.join(REPO_ROOT, '.env');
+
 export const TAXONOMY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'taxonomy.yml');
 export const SCHEMA_DIR = path.join(REPO_ROOT, 'factory', 'specs', 'schema');
 export const SPECS_ACTIVE_DIR = path.join(REPO_ROOT, 'factory', 'specs', 'active');
