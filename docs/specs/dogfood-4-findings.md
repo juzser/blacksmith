@@ -14724,8 +14724,31 @@ an immutable root — a plan version, a closed epic's spec — and route the fin
 to the waiver batch instead. After minting, a `smith task waive` verb should
 exist so that a status the epic verdict honours is a status something can write.
 
+**Verified 2026-09-05 — three doors, and why the obvious escape fails.** The
+paragraph above assumed `waived` is merely unwritten. It is worse than that:
+the escape hatch of writing one by hand is closed by a second,
+differently-named test. `epic.ts:507-510` filters tasks that are terminal-OK
+*and* carry no `gate-outcome`, and `:658` reports each as "recorded waived with
+no gate-outcome in the log at all — nothing gated it." A hand-written status
+therefore trades the non-terminal blocker for the ungated one; the blocker
+changes name, not existence. `completed` is written by exactly one handler —
+the projector's `wave-merged` fold at `projector.ts:647-650`, which walks a
+wave's declared task ids, and this task has no branch to put in a wave.
+`superseded` is the only transition that is both writable
+(`taskEvents.ts:319`, `:599`) and folded (`projector.ts:653-656`), and
+`TERMINAL_OK_TASK_STATUSES` at `epic.ts:78` is `new Set(['completed',
+'waived'])`, which excludes it — deliberately, since an epic should not close
+by declaring its unfinished work someone else's. Three doors, three sound
+reasons, no exit. What is left is `smith epic close --override-rationale`, the
+heaviest instrument the close has and the one that signs away every other
+blocker at the same time; the run playbook forbids the orchestrator from
+writing that rationale for itself, so the disposition reaches the operator as
+an epic-wide override rather than as a decision about this task. The verb this
+record asks for must write *both* halves — a `gate-outcome` and the status
+transition — or `:658` will refuse what `:507` accepts.
+
 **Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#302`; the
-task is still `todo` and is one of the blockers on `smith epic verdict`.
+task is `blocked` and is the first blocker on `smith epic verdict`.
 
 **Related:** [[D-284]], [[D-285]].
 
@@ -15136,3 +15159,103 @@ rather than an oversight — recorded at S2 because the hole is exactly the clas
 of task that has no plan to bound it.
 
 **Related:** [[D-292]], [[D-286]].
+
+## D-295 — a dispatch outside every admission is invisible to the width audit
+
+**Severity:** S3-minor.
+
+**Where:** `factory/orchestrator/src/waveConcurrency.ts:262-288`, the per-wave
+fold behind `smith wave audit`.
+
+**How it opened.** The audit for this epic exits 0 and reports four waves with
+`widest: {declared: 3, observed: 3}` — a clean answer, and the one piece of
+evidence the operator's parallelism mandate is actually graded on. Reading the
+log behind it shows the number is a floor, not a total. Wave 1's admission
+(event `#18`) declared three tasks, and three coder dispatches (`#19`, `#20`,
+`#21`) each carry `"wave": 1`. A fourth coder ran inside the same window:
+task-8's `dispatch_decision` at `#27` carries no `wave` key at all, because it
+was dispatched out of band as the unpin that had to land before task-2 could
+run. It reached its gate at `#80`. Four agents were in flight; the audit says
+three.
+
+**The mechanism.** The fold is keyed on the declaration, not on the clock. For
+each `wave-admitted` event it takes `admission.taskIds` and looks up a run for
+each of *those* ids; a task id that appears in no admission is looked up by
+nobody, so its interval never enters any `observed` array and never reaches
+`peakOverlap`. The verdict `parallel` is then computed as `peak >= declared` —
+both sides of the comparison come from the same declaration. An out-of-band
+dispatch is not miscounted; it is not counted.
+
+**Why the error direction matters more than the error.** The audit
+under-reports, which is the safe direction for a check whose purpose is to
+prove parallelism happened: it can never manufacture width that did not occur.
+But it is the unsafe direction for the operator reading it as a measurement of
+what the factory *did*, which is what a number labelled `observed` invites. The
+same shape as [[D-292]] and [[D-294]]: a field that is honest about its input
+and silent about what it left out.
+
+**The fix.** Not applied. `peakOverlap` should run over every agent run in the
+session's window, not only over the runs of declared ids, and the wave record
+should carry a third number beside `declared` and `observed` — the runs that
+overlapped this wave while belonging to no admission. A dispatch outside every
+admission is a real thing this factory does, and it deserves a name in the
+audit rather than absence from it. Until then, `smith wave audit` answers "did
+the admitted tasks run in parallel", not "how wide did this epic get".
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#332`.
+
+**Related:** [[D-292]], [[D-294]].
+
+## D-296 — a severity never asked about, and nothing else that can close it
+
+**Severity:** S3-minor.
+
+**Where:** `factory/policies/severity.yml:55-59` against
+`factory/orchestrator/src/epic.ts:534-548`.
+
+**How it opened.** The closing waiver batch for this epic came out at seven
+findings. Six are S3-minor. The seventh, `b84d6dd7…`, is **S4-nit** — the
+wave-4 coder authoring 464 diff lines against a 400-line cap. It sits in the
+verdict's blocker list beside the six, and the epic cannot close while it is
+open. So the operator is about to be asked a question the policy says is never
+asked.
+
+**The mechanism.** Three statements, each defensible alone.
+
+`severity.yml` gives S4 `blocks_merge: false`, `semantics: logged, never
+asked`, and `on_trigger: log only; no operator interaction.` — three separate
+ways of saying an S4 is a note.
+
+`rules.waiver_semantics` says "Only S3/S4 findings are ever waived", which puts
+S4 inside the waivable set. Consistent with the above only if nothing ever
+needs to waive one.
+
+And the epic verdict's finding blockers test `finding_status` alone:
+`if (!OPEN_FINDING_STATUSES.has(f.finding_status)) continue;` then push a
+blocker. Severity is interpolated into the message and read nowhere. An open
+S4 blocks the close exactly as hard as an open S1.
+
+Compose them and an S4-nit is simultaneously waivable, unaskable, and
+epic-blocking. There is no state it can reach without an operator answering a
+question the policy forbids putting to them.
+
+**Why it is not simply "make the verdict skip S4".** That is one of two
+readings, and the wrong one to take from inside a run. `blocks_merge` is a
+statement about a *task's merge*, not about an epic's close, and an epic that
+closes over unread nits is how a diff-cap breach becomes invisible. The other
+reading — that `severity.yml`'s "never asked" was written when nothing but the
+merge gate consumed severity, and the epic verdict later grew a second consumer
+nobody re-read the policy against — is at least as likely. Either way the
+resolution is the operator's, and the honest move for this epic is to carry the
+S4 into the batch and *name it* as one the policy says should never have been
+asked. Same shape as [[D-284]]: a word with five definitions, agreeing until a
+new caller reads it.
+
+**The fix.** Not applied. Either give the epic verdict a severity test and a
+separate "unwaived nits at close" line that reports without blocking, or strike
+"never asked" from S4 and accept that a nit reaches the batch like anything
+else. One or the other — the present pair cannot both be true.
+
+**Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#334`.
+
+**Related:** [[D-284]], [[D-286]].
