@@ -2,8 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { REPO_ROOT } from '../src/paths.js';
-import { factoryProjects, unwatchedProjects } from '../src/projects.js';
+import { PROJECTS_DIR, REPO_ROOT, WORKSPACES_DIR } from '../src/paths.js';
+import {
+  factoryProjects,
+  missingProjects,
+  resolveProjectDirs,
+  unwatchedProjects,
+} from '../src/projects.js';
 import { FACTORY_PROJECT } from '../src/roadmap.js';
 
 // One scratch tree per test: a roadmap file, and a `roots/` beside it standing
@@ -117,6 +122,99 @@ describe('factoryProjects', () => {
     writeFileSync(roadmapPath, '## broken\n- id: a\n- status: nonsense\n', 'utf8');
     const refs = factoryProjects({ roadmapPath, roots: [root] });
     expect(refs).toEqual([{ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true }]);
+  });
+});
+
+// AC1/AC2: a declared project with no checkout used to vanish entirely
+// (the `drops a declared...` case above). It still does from
+// `factoryProjects()` -- that register stays additive-only -- but it is no
+// longer unreported: `missingProjects()` is where it now surfaces, separate
+// from `ProjectRef` so nothing holding one can be handed a `dir` that is not
+// there. Fixture roadmaps only, never the shipped one: task-2 struck every
+// live `envkit` row this same epic, so a test pinned to the shipped file
+// would grade a different repository before and after wave 1.
+describe('missingProjects', () => {
+  it('names a declared project with no checkout, with both roots it searched', () => {
+    write(milestone('envkit-bootstrap', 'envkit'));
+    const legacy = path.join(scratch, 'legacy');
+    mkdirSync(legacy);
+    const missing = missingProjects({ roadmapPath, roots: [root, legacy] });
+    expect(missing).toEqual([{ name: 'envkit', roots: [root, legacy] }]);
+  });
+
+  it('is empty once the checkout appears under a root', () => {
+    checkout('envkit');
+    write(milestone('envkit-bootstrap', 'envkit'));
+    expect(missingProjects({ roadmapPath, roots: [root] })).toEqual([]);
+  });
+
+  it('names a missing project once however many milestones declare it', () => {
+    write(milestone('envkit-bootstrap', 'envkit') + milestone('envkit-config-loader', 'envkit'));
+    expect(missingProjects({ roadmapPath, roots: [root] })).toHaveLength(1);
+  });
+
+  it('never reports the factory itself as missing', () => {
+    write(milestone('phase-1'));
+    expect(missingProjects({ roadmapPath, roots: [root] })).toEqual([]);
+  });
+
+  it('is empty when the roadmap cannot be read', () => {
+    const missing = missingProjects({ roadmapPath: path.join(scratch, 'nope.md'), roots: [root] });
+    expect(missing).toEqual([]);
+  });
+});
+
+// Branch gap the coder's own coverage run named: `opts.roots` and
+// `opts.roadmapPath` are each optional, and every test above always supplies
+// both, so the default-value branch of each (the one cli.ts actually takes,
+// since it never passes `roots` and only passes `roadmapPath` when
+// `--roadmap` was given) had never run. This is the real production path,
+// not a defensive arm -- `smith projects list` with no flags takes it every
+// time.
+describe('collectProjects defaults (branch coverage: opts.roots / opts.roadmapPath omitted)', () => {
+  it('falls back to PROJECTS_DIR and WORKSPACES_DIR when roots is omitted', () => {
+    write(milestone('missing-bootstrap', 'projects-test-default-roots-xyz'));
+    const missing = missingProjects({ roadmapPath });
+    expect(missing).toEqual([
+      { name: 'projects-test-default-roots-xyz', roots: [PROJECTS_DIR, WORKSPACES_DIR] },
+    ]);
+  });
+
+  // The shipped roadmap.md is never asserted on for content (task-2 struck
+  // rows this same epic, so pinning a declared project would grade a
+  // different file before and after wave 1) -- only that reading it through
+  // the default path still answers with this clone first, same as every
+  // fixture-roadmap case above.
+  it('reads the shipped roadmap.md when roadmapPath is omitted too', () => {
+    const refs = factoryProjects();
+    expect(refs[0]).toEqual({ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true });
+  });
+});
+
+describe('resolveProjectDirs', () => {
+  // The union, not a replacement: `--project /elsewhere` watches /elsewhere
+  // AND this clone, not /elsewhere alone (contract clause 1).
+  it('adds REPO_ROOT by default, ahead of whatever --project named', () => {
+    expect(resolveProjectDirs(['/repo/envkit'])).toEqual([REPO_ROOT, '/repo/envkit']);
+  });
+
+  it('adds REPO_ROOT even when nothing was passed', () => {
+    expect(resolveProjectDirs(undefined)).toEqual([REPO_ROOT]);
+  });
+
+  // `--no-self` is the only way to leave it out.
+  it('drops REPO_ROOT when self is false', () => {
+    expect(resolveProjectDirs(['/repo/envkit'], { self: false })).toEqual(['/repo/envkit']);
+  });
+
+  it('leaves nothing behind when self is false and nothing else was named', () => {
+    expect(resolveProjectDirs(undefined, { self: false })).toEqual([]);
+  });
+
+  // REPO_ROOT present exactly once and path-resolved, even if the operator
+  // also typed its absolute path explicitly.
+  it('resolves paths and never duplicates REPO_ROOT', () => {
+    expect(resolveProjectDirs([REPO_ROOT])).toEqual([REPO_ROOT]);
   });
 });
 

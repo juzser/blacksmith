@@ -7,6 +7,13 @@ Parsed by `factory/orchestrator/src/roadmap.ts`; projected into the
 with task/token stats by `factory/orchestrator/src/db/queries.ts`'s
 `roadmapPage()`/`overview()`.
 
+Four `envkit` milestones — bootstrap, config loader, MCP surface, MCP
+follow-up — were struck from this file 2026-09-04: this clone's
+`workspaces/` is empty and the only envkit checkout lives in a sibling
+clone, so a project declared here could not be reached from here. The
+removed rows are preserved verbatim, not lost, in
+`docs/specs/dogfood-4-findings.md` (D-271).
+
 Each milestone is a `## <name>` heading followed by bullet fields:
 `id` (required, stable), `status` (required — `planned` | `in-progress` |
 `completed`), `goal` (optional, one sentence), `epics` (optional, `[]` when
@@ -82,7 +89,7 @@ shows `product` by default and hides the other two, so an operator asking
 ## Phase 10 — Deployment + ops
 - id: phase-10
 - status: in-progress
-- epics: []
+- epics: [phase-10]
 - goal: The three items Phase 9 carried on its goal line. Two landed, one stays deferred. **Ops runbook** — `docs/runbooks/ops.md`, so the factory can be operated without reading the operator guide end to end. **The background process** (moved from Phase 7, then Phase 9) — shipped as `smith daemon`, and shipped deliberately narrower than the "always-on dispatch daemon" the earlier phases named: it is a *watcher*. It folds the event log on an interval and reports budgets, stale agents, due rechecks and due cadences, so that *knowing* what the factory needs no longer requires an open session; it never dispatches an agent, never enters the merge queue, and never writes outside `state/daemon/` and the derived SQLite read-model. Dispatch stays skill-guided through `/bs` — architecture §12, not a gap. **The Cloudflare port of the UI** (moved from Phase 6, then Phase 9) is no longer carried here: the operator struck it to its own `planned` milestone on 2026-09-04 (`cloudflare-port`, below), so this phase closes on what it built rather than on what it deferred for a fourth time. What remains of Phase 10 comes from the four-axis mandate and is specced in `docs/specs/phase-10-scope.md` — six items, and by operator decision of 2026-09-04 they run as a real epic on this repo rather than as branch-by-branch punch-list items, because exercising the factory on itself is the only thing that turns a built instrument into an observed one. P10-2 shipped ahead of that decision as `fix/a-value-nobody-read-back` (D-269), being a wrong operational fact in the first document an operator reads.
 
 ## Cloudflare port of the UI
@@ -91,32 +98,9 @@ shows `product` by default and hides the other two, so an operator asking
 - epics: []
 - goal: A Cloudflare port of the dashboard — Workers/Pages + D1 + Access. Carried on the goal line of Phase 6, then Phase 9, then Phase 10 without ever being specced, and struck to its own milestone by operator decision 2026-09-04 so that Phase 10 closes on what it built. Nothing is designed yet: the dashboard is local-only, the two Cloudflare release commands are deny-listed for agents by `.claude/settings.json`, and no upload path exists for the SQLite read-model every page reads. `docs/specs/black-smith-architecture.md` §16 files it under "Hardening" and never gave it a phase of its own, which is how it survived three moves — this milestone is the first place it is a thing to plan rather than a thing to postpone.
 
-## envkit — bootstrap
-- id: envkit-bootstrap
-- status: completed
-- project: envkit
-- kind: dogfood
-- epics: []
-- goal: Scaffold landed in workspaces/envkit from docs/standards/stack.md; the first epic is planned and moved to its own milestone below.
 
-## envkit — config loader
-- id: envkit-config-loader
-- status: completed
-- project: envkit
-- epics: [envkit-config-loader]
-- goal: A zero-dependency .env loader — parse, coerce, validate, one public loadConfig API. PLAN v1 signed off by the operator 2026-08-06 (dogfood-envkit-1#1): six tasks, seven edges, four waves. All six merged through the serial queue to `smith/envkit-config-loader/integration` at 8962df9 — typecheck/test/build green in-session (4 files, 159 tests), lint red only from D-42's nested worktrees. Close-out report: `docs/specs/dogfood-envkit-close.md`. Closed by operator override at `dogfood-envkit-1#69` (`epic-closed`, 2026-08-07) because `smith epic verdict` returns hold/mechanical-blockers under D-28 and cannot see the epic. Ships with one known S2 carried forward — bare CR is not a line separator in src/parse.ts (D-41).
-
-## envkit — mcp surface
-- id: envkit-mcp-surface
-- status: completed
-- project: envkit
-- epics: [envkit-mcp-surface]
-- goal: Declare and harden the MCP surface — `smith mcp check` green against docs/standards/mcp.md. Required before the final milestone can close. Plan reached v5 through five amendments, every one of them discharging an S2 the closing spec review raised (S1/S2 are unwaivable; `plan amend` is their only exit). Five tasks: redact, path guard, env_lint, env_diff_keys, and the v5 key bound. Assembled at `smith/envkit-mcp-surface/integration` 049765c3 — `integration check` green in-session at `dogfood-mcp-1#383` (lint/typecheck/build exit 0, 281 tests passing), `mcp check` manifest-clean, closing spec review at `dogfood-mcp-1#386`. Closed at `dogfood-mcp-1#403` with verdict `go` and no blockers. Three findings carried forward as granted waivers rather than a sixth amendment: ENV_KEY and ECHOABLE_KEY do not agree and task-4's clause claiming they do is false (integration-97825fcf, S3, latent — no value reaches a client), mcp.manifest.json still describes an unconditional key listing neither tool has given since v4 and stayed at version 0.2.0 across both narrowings (integration-c721a990, S3), and the duplicated ECHOABLE_KEY is graded by nothing but a comment (integration-9b8279e9, S4). All three need a follow-up epic that claims mcp.manifest.json and both tool files. Process defects this run exposed are D-119..D-127 of the dogfood-3 run — notably that an amendment discharges its S2 the instant the plan file is written, and that a task added by an amendment is invisible to `epic verdict`, whose roster here is four tasks, not five.
-
-## envkit — mcp followup
-- id: envkit-mcp-followup
+## Factory error log — GitHub issues
+- id: factory-error-log
 - status: planned
-- project: envkit
-- epics: [envkit-mcp-followup]
-- goal: Discharge the three waivers `envkit-mcp-surface` carried forward, on the files that epic could not claim. Three tasks, two edges, one wave each: a shared `src/mcp/keys.ts` that both the redactor and the two tools derive their key shape from, the tools importing it and a pair-level test that grades both surfaces at once, then `mcp.manifest.json` reconciled with the exclusion behaviour it has not described since v4 and bumped 0.2.0 -> 0.3.0 under MCP-P2. The one real fork is recorded in the plan and was decided WIDEN, not narrow: `ENV_KEY` gains the leading digit rather than `ECHOABLE_KEY` losing it, because narrowing the echo bound would make the false comment true while leaving `redactText` blind to `9SECRET=hunter2` for every other caller — `redactError` runs over arbitrary thrown messages, not only .env documents — and redact.ts's docblock already commits to over-redaction as the accepted direction. Null hypotheses re-measured in-session at integration head `049765c` rather than quoted: `redactText('9SECRET=hunter2')` returns its input byte-identical, `grep -rn ECHOABLE src/ test/` returns five hits all in src/ and none in test/, and `smith mcp check envkit` is already ok/violations [] so the manifest task's check is a regression guard. Also the dogfood #4 run: the first epic to exercise the repaired amend-pending gate (D-119, D-121, D-122, D-126, D-127) on an instrument that has been fixed, so a clean run measures the fixes rather than assuming them.
-
+- epics: []
+- goal: When the factory fails while building a project, open a GitHub issue in that project's repo. Requested by the operator 2026-09-04, and scoped by their answer to the fork the request contained: the errors reported are **the factory's own build-time errors** — a gate that returns `blocked`, a task that reaches `task_status: failed`, and every `error-logged` event — not runtime errors of the shipped product. **No code is injected into a generated project**: a project this factory builds carries no reporter, no dependency and no trace of Blacksmith beyond the "Built by blacksmith" line in its README, which is the whole point of the factory contract, so the issue is opened by the factory's own side through `gh issue create` against the project's remote. **Default ON, with a per-project disable switch** — a project that does not want its issue tracker written to says so once and the mechanism stays silent for it. Deliberately not scoped here and left to the plan: which of the three sources deduplicates against an already-open issue, what the issue body may carry given that event payloads can quote logs and diffs (`docs/standards/guardrails.md` "Secrets, keys, tokens" governs, and nothing may reach an issue unredacted), and whether the daemon or the run itself is the producer. Runs as its own epic after `phase-10` closes, by operator decision — not folded into that phase's plan.

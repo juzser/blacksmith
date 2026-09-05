@@ -796,19 +796,27 @@ describe('resolveMcpSurface', () => {
     expect(status.check?.ok).toBe(true);
   });
 
-  it('gates the real envkit surface epic in the shipped roadmap', () => {
-    // Pinned to the roadmap this repo ships rather than a fixture: envkit is
-    // the project that ran the surface epic, `smith mcp check envkit` reports
-    // MCP-M2 against it, and the epic that owes the surface must not be able
-    // to close unexamined. projectDir is scratch on purpose — workspaces/ is
-    // gitignored, so the manifest is absent on CI and `check` is null there;
-    // `required` is the property under test and is identical on every box.
+  it('resolves the default roadmap path for an epic no milestone owns', () => {
+    // This used to pin to the four MCP surface milestones one project's
+    // roadmap rows shipped, asserting `required: true` for the epic those
+    // milestones owned. The operator struck those rows on 2026-09-04 (D-271,
+    // docs/specs/dogfood-4-findings.md), so that subject no longer exists in
+    // this clone and the pin turned every rebase red. The writer-and-reader
+    // composition the old comment argued for still lives in the test above
+    // ("fires for the epic the milestone `smith mcp init` actually writes"),
+    // on a fixture roadmap. What survives here is the one branch no other
+    // test exercises: `opts.roadmapPath ?? ROADMAP_PATH` resolving with no
+    // roadmapPath at all. Asserting only `required: false` keeps this true
+    // of the shipped roadmap whatever milestones it currently declares,
+    // while still proving the default path resolves to a real, parseable
+    // roadmap -- a bad path or a parse failure would throw before this
+    // assertion runs.
     const status = resolveMcpSurface({
-      epicId: 'envkit-mcp-surface',
-      projectDir: mkScratch('bs-mcp-envkit-'),
+      epicId: 'epic-no-milestone-owns-this',
+      projectDir: mkScratch('bs-mcp-default-path-'),
     });
-    expect(status.required).toBe(true);
-    expect(status.milestoneId).toBe('envkit-mcp-surface');
+    expect(status.required).toBe(false);
+    expect(status.check).toBeNull();
   });
 
   it('carries the manifest rules to the close and deliberately not MCP-M1/M2', () => {

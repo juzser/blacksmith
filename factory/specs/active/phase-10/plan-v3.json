@@ -1,0 +1,602 @@
+{
+  "epic_id": "phase-10",
+  "version": 3,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "phase-10/task-1-watch-this-clone-by-default",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "The daemon and the scheduler read exactly the repositories `--project` names, so this clone is in the pass only when an operator hand-types the path of the repository the process is already running in. Measured: `state/daemon/status.json` at 2026-09-03T02:16:47.709Z holds exactly one finding, kind `unwatched-project`, severity `attention`, subject `/Users/ser/scatola/jobs/projects/blacksmith`, and its stated remedy is to type that path back at it. `factoryProjects()` already returns this clone unconditionally as `self: true` (projects.ts: \"the one entry that needs no roadmap and no search to be certain of\"), so the flag carries no information the process lacks, and an alarm whose only remedy is restating a known fact is the alarm ops.md argues trains an operator to stop reading. Put this clone in every daemon and scheduler pass by default, at the three sites in `cli.ts` that read the flag (scheduler run near 1550, scheduler admit near 1607, daemon run near 1653), through one exported helper in `projects.ts` so the rule is written once rather than three times, and give the operator `--no-self` to turn it off, because a default nothing can refuse is policy baked into code. What must not change: this clone is still REPO_ROOT and never a name lookup, and a child project the roadmap declares, that has a checkout, and that no flag names is still reported and still clears by adding the flag. And the flag has to exist in two places: `--no-self` is declared in `factory/orchestrator/src/usage.ts` as well as parsed in `cli.ts`, because `docCommands.test.ts` resolves every flag it parses out of the instruction surface against `flagSpecFor(namespace, action)`, and both `docs/runbooks/ops.md` and `.claude/skills/bs/SKILL.md` are inside that surface.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, and the null is measured rather than assumed. Before the fix, add a test that folds one daemon tick with no `projectDirs` and a `readProjects` returning this clone, asserting no `unwatched-project` finding whose subject is REPO_ROOT. Watch it fail and record the failure text verbatim in structured output: under the null the fold returns exactly one finding of that kind with that subject, and after the fix it returns none. If the failing and passing outputs read the same, that is a finding to report, not a criterion to tick.",
+        "One rule, one home. `factory/orchestrator/src/projects.ts` exports a single helper (the task names it) that takes the repeated `--project` values and returns the directories the pass should read, with this clone's REPO_ROOT present exactly once and path-resolved, and never obtained by looking up FACTORY_PROJECT under the roots. `cli.ts` calls that helper at all three sites; no call site re-implements the union. A grader checks by grepping for REPO_ROOT in `cli.ts` and finding no second copy of the rule.",
+        "`--no-self` is read at the same three sites. When present it excludes this clone from the pass AND suppresses the `unwatched-project` finding for it, because an opt-out that leaves its own alarm standing is an alarm that can never return to zero, which is the argument ops.md section 3 already makes. It is spelled with the `--no-` prefix `--no-db` established, and it is parsed the same way (`flags['no-self'] === 'true'`) rather than by a new convention. The exclusion is asserted at the read layer and not only at the report layer: a test asserts that the directory list the tick folds under `--no-self` does not contain REPO_ROOT, so an implementation that suppresses the finding while still opening this clone's lockfile fails. That test is the gate for the epic's AC3 clause about reading no lockfile, which otherwise names no observable at all.",
+        "`--no-self` is declared in `factory/orchestrator/src/usage.ts` for every command whose documented flag span gains it. Measured today: `usage.ts:190` is the `daemon run` flag line and `usage.ts:198` the `daemon start` one, and `docs/runbooks/ops.md:41-47` is a fenced block quoting both spans; `scheduler run` (usage.ts:225) and `scheduler admit` (usage.ts:232) are the other two sites this task touches. `docCommands.test.ts:214-219` resolves each parsed flag through `flagSpecFor()` and reports `no such flag on this command` for anything absent, and `test/helpers/instructionSurface.ts` puts ops.md and SKILL.md in the walk, so a flag written into the runbook and not into usage.ts fails the guard AC8 runs. A command whose behaviour changes but whose documented span is left without the flag is a decision, recorded in structured output rather than left implicit.",
+        "The child-project behaviour is unchanged and proven unchanged. A test using a fixture roadmap that declares a project with a checkout, named by no flag, still gets `unwatched-project` for it with the same kind, severity, subject and detail as before. This is a regression guard, not a differential, and it says so.",
+        "The daemon's mandate is untouched (epic AC9, goal clause 3): the diff adds no dispatch, no merge-queue entry and no write outside `state/daemon/` and the derived read-model. `git status --porcelain state/` is empty when the task ends, and any tick run as evidence uses `--state-dir` under a scratch directory outside the repo.",
+        "`docs/runbooks/ops.md` states what now ships. Section 2's `smith daemon run` verb block gains `--no-self`; section 3's `unwatched-project` row and the paragraph explaining it say that this clone is in the pass by default, that `--no-self` is how to leave it out, and that a child project still clears the finding by adding a flag. The paragraph's load-bearing sentences about an attention count that can never return to zero are kept, not deleted.",
+        "`.claude/skills/bs/SKILL.md`'s `/bs report` step 1 is read back against the shipped behaviour and corrected only where the change made a sentence false. If nothing there became false, the file is left untouched and the reason is recorded in structured output rather than the file being edited to look busy.",
+        "`scripts/check.sh` runs whole and green, with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed. No step that was OK degrades to SKIP. A count below baseline is a finding, never an adjusted expectation.",
+        "Structured output records: the three call sites with line numbers, the helper's exported name, the finding count before and after, and the exact `daemon run --once --state-dir <scratch>` command line and output used as evidence."
+      ],
+      "claims": [
+        "factory/orchestrator/src/projects.ts",
+        "factory/orchestrator/src/daemon.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/projects.test.ts",
+        "factory/orchestrator/test/daemon.test.ts",
+        "factory/orchestrator/test/cli.test.ts",
+        "docs/runbooks/ops.md",
+        ".claude/skills/bs/SKILL.md"
+      ],
+      "budget": {
+        "tokens": 110000,
+        "diff_lines": 300
+      },
+      "contract": {
+        "functional_clauses": [
+          "The default is a union, not a replacement: `--project /elsewhere` watches /elsewhere and this clone, not /elsewhere alone.",
+          "The helper is the only place the union rule is written; the three call sites call it and do not restate it.",
+          "`--no-self` is the refusal path, is read at all three sites, and suppresses this clone's `unwatched-project` finding as well as its inclusion in the pass.",
+          "`--no-self` exists in `usage.ts`'s flag spec for every command whose documented span quotes it, so `--help`, the runbook and the doc guard agree.",
+          "This clone is resolved as REPO_ROOT. No code path added here looks up FACTORY_PROJECT under PROJECTS_DIR or WORKSPACES_DIR.",
+          "`unwatchedProjects()` keeps its resolve-both-sides comparison, so `--project .` still matches an absolute register entry.",
+          "The `unwatched-project` finding keeps its kind, severity and detail shape for every project that is not this clone."
+        ],
+        "nonfunctional_clauses": [
+          "Nothing in `projects.ts` throws, including on an unreadable or half-written roadmap: it is a reader for a watcher (D-21).",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched; `crosscheck.yml` values are not changed.",
+          "No secret is read or written, no network call is added, no dependency is added.",
+          "No runtime state under `state/` is committed; verification ticks write to a scratch `--state-dir` outside the repo.",
+          "The daemon still never dispatches an agent, never enters the merge queue, and never writes outside `state/daemon/` and the derived read-model.",
+          "`scripts/check.sh` is run whole; the five doc guards (docCommands, docErrorCodes, docLenses, repoLanguage, docPolicyValues) must pass.",
+          "No test is deleted, skipped or renamed to make the diff pass; no assertion is loosened to accommodate the change.",
+          "The commit message and every added comment are English prose, and the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-2-strike-the-envkit-rows",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "The operator settled the P10-5 fork on 2026-09-04 (event `phase-10-2026-09-04#4`): strike the four `- project: envkit` milestone rows from this clone's roadmap, the way `cloudflare-port` was struck. The measured chain behind that answer: this clone's `workspaces/` is empty, the only envkit checkout on this box lives inside the sibling clone whose remote resolves to `juzser/maestro`, and `envkit-mcp-followup` has already been run there. This repository declares a project it cannot reach. Remove the four milestone blocks — `envkit-bootstrap`, `envkit-config-loader`, `envkit-mcp-surface`, `envkit-mcp-followup` — and in the same commit preserve every removed line verbatim in a new decision record `## D-271` in `docs/specs/dogfood-4-findings.md`, because three of those milestones are `completed` and carry the only roadmap-level evidence that this factory's dogfood runs happened, and because between a deletion and a later record there is a state where that evidence exists in git history alone. In `factory/specs/roadmap.md`, fill P10-6: `phase-10` gains `- epics: [phase-10]`, without its `- goal:` line changing by a single byte.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "The four `- project: envkit` milestone blocks are absent from `factory/specs/roadmap.md`, heading line included, leaving no orphaned blank line or dangling bullet. The parsed milestone count drops from 14 to 10, measured by running the parser rather than by counting headings in an editor, and recorded in structured output as before and after.",
+        "`## D-271` exists in `docs/specs/dogfood-4-findings.md` and holds the struck text verbatim: every removed heading, `- id:`, `- status:`, `- project:`, `- kind:`, `- epics:` and `- goal:` line appears inside a fenced block, byte-identical to what was removed. The grading differential: the removal side of `git show <sha> -- factory/specs/roadmap.md` diffed against D-271's fenced block is empty. Under struck-and-lost that diff is four milestones long. A grader reading only D-271 can reconstruct all four milestones.",
+        "D-271 argues the decision rather than just recording it: the measured chain above, the event id `phase-10-2026-09-04#4`, and the two options not taken named explicitly — adopting envkit into this clone, and leaving the four rows while correcting their goal lines. It also states where the work itself lives now, so a reader is not left thinking the runs were lost with the rows.",
+        "D-271's heading matches the file's existing convention and is appended after the highest `## D-NNN` already present. The expected predecessor is D-270. If the highest present is not D-270, the task uses the true next number and reports the discrepancy in structured output rather than guessing or renumbering anything.",
+        "The `phase-10` milestone declares `- epics: [phase-10]`, and `node factory/orchestrator/dist/cli.js epic goal --epic phase-10` still returns digest `72112f1a441a6790`, run and quoted as evidence. A changed digest means the goal line moved, which makes every recorded spec-vs-goal check stale; that is a stop-the-line failure, not a cosmetic diff.",
+        "The roadmap header is read back against what the file now holds. Any header sentence that depends on an envkit row is corrected, and the header gains one sentence pointing at D-271 so a reader of the roadmap can find the struck work without knowing it existed. The `kind` paragraph's `dogfood` explanation is kept if it is still true of the file and corrected if it is not.",
+        "Nothing live in the repository asserts a struck id or the count of 14. Measured before the diff: the e2e suite and the orchestrator tests build their own fixture roadmaps, and the two prose statements of \"14 milestones\" are historical measurements dated to earlier commits in `docs/specs/phase-10-scope.md` and `CHANGELOG.md`. Both are outside this task's claims and are left alone — a measurement dated to a commit is superseded by an appended note in a later task, never by editing the record of what was measured. If a live assertion naming a struck id is found in a test, fixture or guard, the task reports error.spec.spec-gap instead of widening its claims. One class of live reference is already known and already assigned: `docs/runbooks/ops.md:88` offers `--project . --project workspaces/envkit` as the worked example of watching a child project, and lines 109-124, 185 and 470 quote `dogfood-envkit-1` output. ops.md is in the instruction surface, not a record of the past, and it is falsified by this task's change rather than by its own. Task-4 holds that claim and owns the correction; task-2 reports what it finds there and edits none of it.",
+        "`scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed. The five doc guards pass. A count below baseline is a finding, never an adjusted expectation.",
+        "Structured output records: the line range of each removed block, the milestone count before and after from the parser, the goal digest before and after, and the D number used."
+      ],
+      "claims": [
+        "factory/specs/roadmap.md",
+        "docs/specs/dogfood-4-findings.md"
+      ],
+      "budget": {
+        "tokens": 65000,
+        "diff_lines": 240
+      },
+      "contract": {
+        "functional_clauses": [
+          "The removal and the record land in one commit; there is no intermediate commit in which the rows are gone and D-271 is not written.",
+          "Exactly four milestones are removed, and they are exactly the four carrying `- project: envkit`; no other milestone is edited except `phase-10`.",
+          "The `phase-10` edit is to its `- epics:` line only. Its `- goal:` line, `- id:` and `- status:` are untouched.",
+          "D-271 is appended, never inserted between existing records, and no existing decision record is edited.",
+          "The roadmap still parses: the file is fed to the parser after the edit and the run is recorded."
+        ],
+        "nonfunctional_clauses": [
+          "English only; markdown prose wraps at 80 characters or less, with milestone bullet lines and table rows exempt as the house rule allows; docs use the em dash.",
+          "No edit outside `claims`. The scope doc, the CHANGELOG and every source file are other tasks' claims in this same epic.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched.",
+          "No runtime state under `state/` is committed; any parser or CLI run used as evidence writes nothing into the repository.",
+          "The verbatim block in D-271 is not reformatted, rewrapped, spell-corrected or line-wrapped to 80 characters — it is quoted evidence, and the 80-character rule does not apply inside a fenced block.",
+          "No secret, no network call, no new dependency.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed; the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-3-settle-the-scope-doc",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "`docs/specs/phase-10-scope.md` is this phase's spec, and three of its items are now out of date. P10-1 poses a fork the operator has answered. P10-5 says \"Run it. The plan already exists\" of a milestone this clone cannot reach and that has already been run in another factory. P10-6 says its answer \"follows directly from P10-1\", which it now does. Record all three settlements in the shape the file already uses for a settled item — a bold `**Settled 2026-09-04 — ...**` paragraph appended to the item, not a rewrite of it. The evidence paragraphs in this file are measurements dated to commit `37db1c3`; they stay exactly as they are, and what has changed since is said in the settlement. A file that edits its own measurements to match today cannot be used to check anything tomorrow.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "P10-1 gains a settlement paragraph naming the answer (Phase 10 runs as a real epic on this repo through `/bs run`), the epic id `phase-10`, and the decision that this clone joins the daemon and scheduler passes by default rather than by a hand-typed `--project` flag, with `--no-self` as the way out. It states this as the decision taken, not as a claim that code has merged; the merged proof is epic AC1 to AC3 and task-6's close-out, and the paragraph says so.",
+        "P10-5 gains a settlement paragraph that replaces nothing and states the measured truth: the item's premise is false for this clone (`workspaces/` empty, the only checkout inside the sibling clone whose remote resolves to `juzser/maestro`, `envkit-mcp-followup` already run there), the fork was answered strike, and the two options not taken were adopting envkit into this clone and leaving the rows while correcting their goal lines. The item's original \"Whose call\" line and evidence are left intact.",
+        "The P10-5 settlement points at the strike as task-2's work, recorded as D-271. It does not read task-2's worktree and does not assert the record exists yet; if task-2 reports a different D number, task-6's close-out corrects the reference. That contingency is stated in structured output so a grader does not read a plan fact as a measurement.",
+        "P10-6 gains a settlement naming `- epics: [phase-10]` and the reason it matters — `roadmapPage()` joins milestones to tasks through that list, so an empty list is a milestone that can never show progress however much work lands — and attributes the edit to task-2.",
+        "The document's own accounting stays true. The section headed \"The forks — all three settled, 2026-09-04\" is about the original three; a fourth fork was settled on the same date, so either the heading and index are corrected to say four, or a separate short section records the fourth. The closing sentence, \"What is left after the forks is P10-1, P10-5 and P10-6\", gains a following sentence recording what is left after this one: P10-1 and P10-6 are this epic's work and P10-5 is struck.",
+        "No measured-evidence paragraph is edited. `git diff` for this file shows no change to any line under an `**Evidence.**` heading, including the \"14 milestones\" sentence, which is a measurement at `37db1c3` and is superseded by task-6's appended close-out rather than corrected here.",
+        "Prose is English, wraps at 80 characters or less outside table rows and headings, and uses the em dash. The five doc guards pass; any command name this file introduces must be a verb the CLI actually has, because `docCommands.test.ts` parses every `smith` invocation in the instruction surface.",
+        "`scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed.",
+        "Structured output records which items were edited, the exact headings added, and confirmation that no `**Evidence.**` paragraph changed."
+      ],
+      "claims": [
+        "docs/specs/phase-10-scope.md"
+      ],
+      "budget": {
+        "tokens": 60000,
+        "diff_lines": 160
+      },
+      "contract": {
+        "functional_clauses": [
+          "Settlements are appended to their items in the file's existing settled-item shape; no item is restructured or reordered.",
+          "P10-2, P10-3 and P10-4 are not touched. P10-3 in particular stays open, and nothing here implies its calibration pass has run.",
+          "The \"Carried, not scope\" section is left as it stands, including the note that the global `smith` shim drives the sibling clone.",
+          "Every factual claim added is either a decision (attributed to the operator and dated) or a measurement the task made itself and quotes.",
+          "No forward-looking claim is written as if already merged."
+        ],
+        "nonfunctional_clauses": [
+          "English only; prose wraps at 80 characters or less; em dash in docs, double hyphen in code comments.",
+          "No edit outside `claims`; the roadmap, the findings file and the CHANGELOG belong to other tasks in this epic.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched.",
+          "No runtime state under `state/` is committed; no CLI command that writes the event log is run.",
+          "No secret, no network call, no new dependency.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed; the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-4-report-the-checkout-we-cannot-find",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "`factoryProjects()` drops a declared project whose checkout it cannot find (`if (dir === null) continue`), so `smith projects list` prints a roadmap that declares `envkit` on a machine that has none exactly as it prints a roadmap that declares nothing. That silence is why this repository carried four unreachable `- project: envkit` rows until a human went looking, and `smith new` writes such a row for every project it scaffolds, so the state recurs by construction. The rule in projects.ts's header stays intact for the watcher: the daemon still raises nothing for a checkout it cannot find, because a finding an operator cannot act on can never be cleared. That is an argument about an interval alarm, not about a human-invoked inventory, which was asked a question and should answer it. Make `smith projects list` report declared-and-missing projects distinguishably, keep them out of the pasteable `--project` line, and keep the exit code 0 — failing to find a checkout is an answer, not an error.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, on fixture roadmaps and never on the shipped one. Write the failing test first: a fixture roadmap declaring a project with no directory under either root. Under the null the register returns only the entries it resolved and the command prints only those rows; after the change the missing declaration is present and marked. Both outputs are recorded verbatim in structured output. The fixture is load-bearing because task-2 removes the live instance from the shipped roadmap inside this same epic — a test that read the shipped file would grade a different repository before and after wave 1, which is exactly what `test/projects.test.ts` already warns against.",
+        "The shape change is additive and typed. Resolved entries keep `name`, `dir` and `self` exactly as they are, and `dir` remains an absolute path to a checkout that exists, so no existing consumer can be handed a directory that is not there. Declared-and-missing projects are returned by a separate exported function or in a separate field — never by widening `ProjectRef.dir` to null or to a path that does not exist — and `unwatchedProjects()` continues to see only resolvable refs.",
+        "`smith projects list` prints a missing declaration with a marker distinct from both the `*` that means self and the space that means resolved, names the project, and says where it was looked for (both roots). The row is excluded from the trailing copyable `--project` line, so the line an operator pastes stays valid. Any `--json` output carries missing declarations in a field of their own rather than mixed into the resolved list. The exit code stays 0.",
+        "The daemon is provably unchanged. A test asserts that a tick given a roadmap declaring a project with no checkout raises no finding about it, with the same fold and the same options as before. This test also passes under the null — it is a regression guard, and the criterion says so rather than dressing it up as a differential. `factory/orchestrator/src/daemon.ts` is not in this task's claims; if the change cannot be made without editing it, that is error.spec.spec-gap to the planner.",
+        "`docs/runbooks/ops.md` is corrected where this makes it false. The sentence \"Nothing here reports a project the roadmap declares but that has no checkout on this machine\" now has to say what is true of each surface: the daemon still reports nothing, and `projects list` reports it. The reason the daemon stays silent is kept in the file, because it is the argument that makes the split defensible rather than inconsistent. Section 2's `projects list` description gains the new row shape.",
+        "`.claude/skills/bs/SKILL.md`'s `/bs report` step 1 is read back and corrected only where it became false. Its parenthetical tying the step to the daemon's `unwatched-project` finding must not be left claiming the two surfaces answer the same question if they no longer do.",
+        "The runbook stops offering a checkout this repository no longer declares. `docs/runbooks/ops.md:88` presents `--project . --project workspaces/envkit` as the worked example of watching a child project. After task-2 the roadmap declares no child project at all and `workspaces/` is empty, so the example cannot be repointed at a real one: rewrite it as plainly illustrative, with a placeholder path nobody can paste and mistake for a checkout that exists, and mark the `dogfood-envkit-1` blocks at lines 109-124, 185 and 470 as historical output rather than something to reproduce. This correction is task-2's change falsifying a sentence in this task's file, which is why it is assigned here and not left to the `only where their own change made a sentence false` rule. If the task argues an example may stand as written, the argument goes into the file, because an unreachable project nobody wrote down is the exact defect this epic exists to end.",
+        "`factory/orchestrator/src/usage.ts` is claimed and edited only where this change makes it false. `projects list` already declares `[--roadmap <file>] [--json]` (usage.ts:217), so no new flag is expected; its summary, `List every repo this factory maintains -- itself and what it built -- with the --project flags that watch them`, no longer describes a command that also reports what it cannot find, so the summary is corrected. If a flag is added after all, it is declared here for the reason task-1 states. If nothing in the file becomes false, it is left untouched and the reason is recorded in structured output rather than the file being edited to look busy.",
+        "`scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed. The five doc guards pass.",
+        "Structured output records: the fixture roadmap used, the command output before and after, the marker chosen and why it cannot be confused with `*`, and explicit confirmation that `daemon.ts` was not modified."
+      ],
+      "claims": [
+        "factory/orchestrator/src/projects.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/projects.test.ts",
+        "factory/orchestrator/test/cli.test.ts",
+        "factory/orchestrator/test/daemon.test.ts",
+        "docs/runbooks/ops.md",
+        ".claude/skills/bs/SKILL.md"
+      ],
+      "budget": {
+        "tokens": 100000,
+        "diff_lines": 280
+      },
+      "contract": {
+        "functional_clauses": [
+          "`ProjectRef.dir` still points at a directory that exists, for every ref any existing caller receives.",
+          "Declared-and-missing entries never enter the `--project` line, the daemon's project list, or `unwatchedProjects()`.",
+          "`smith projects list` exits 0 whether or not a declaration is missing.",
+          "A project declared more than once in the roadmap is still reported once, missing or not: the existing `seen` de-duplication covers both paths.",
+          "Both roots are named in the output for a missing declaration, so the operator can see where a checkout would have to go.",
+          "Any flag or summary this change makes false in `usage.ts` is corrected there, so `--help`, the runbook and the doc guard agree.",
+          "Nothing in `projects.ts` throws, including when the roadmap is unreadable: the fallback is still this clone alone."
+        ],
+        "nonfunctional_clauses": [
+          "English only; markdown prose wraps at 80 characters or less; em dash in docs, double hyphen in code comments.",
+          "No edit outside `claims`; an out-of-claim need is reported as error.spec.spec-gap and not taken.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched.",
+          "The daemon still never dispatches an agent, never enters the merge queue, and never writes outside `state/daemon/` and the derived read-model.",
+          "No test reads the shipped `factory/specs/roadmap.md`; every new test builds its own fixture tree, as `test/projects.test.ts` requires.",
+          "No secret, no network call, no new dependency; no filesystem write outside a scratch temporary directory.",
+          "No runtime state under `state/` is committed.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed to make the diff pass; the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "feature",
+      "origin": "inferred",
+      "confidence": 0.85,
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-5-record-the-default-that-was-chosen",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "Task-1 changed a default an operator cannot see in any config file: this clone is now in every daemon and scheduler pass, and `--no-self` is how to say no. A default baked into code with no record is the shape D-269 was about, a fact nothing reads back. Write `## D-272` in `docs/specs/dogfood-4-findings.md` recording the decision, the two arguments it had to be reconciled with rather than ignore — projects.ts's header rule that this clone is REPO_ROOT and never a name lookup, and ops.md's rule that an attention count which cannot return to zero is worse than no count — and why self is the one entry where a `--project` flag carries no information the process lacks. Then open this epic's `## Unreleased` entry in `CHANGELOG.md` for what wave 1 landed. Every behavioural claim in the record is read back against the code that actually merged, not against the plan that asked for it. This task runs in wave 2 rather than beside task-7 in wave 3, and the reason is checkable rather than cosmetic: D-272 verifies task-1's behaviour against `cli.ts` and `projects.ts` on a branch task-4 has not yet re-edited, so what it quotes is task-1's change and nothing else. Written after wave 3, the same verification would read both changes at once and could no longer say which produced which behaviour. The split is not for width: a one-task wave verdicts `single` under `waveConcurrency.ts:181`, never `serialized`, so `wave audit` would stay green either way.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "`## D-272` is appended after the highest `## D-NNN` present in `docs/specs/dogfood-4-findings.md`, in the file's existing heading convention. The expected predecessor is D-271 from task-2 on the same integration branch; if it is not there, the task uses the true next number and reports the discrepancy in structured output rather than assuming task-2's outcome.",
+        "D-272 states the decision, quotes the two rules it had to be reconciled with by file and line, names the escape hatch `--no-self` and exactly what it suppresses, and gives the measured before and after: the single `unwatched-project` finding at `state/daemon/status.json` 2026-09-03T02:16:47.709Z, against a default tick after task-1 that raises none for this clone.",
+        "Every behavioural claim in D-272 is verified against the merged code before it is written: `factory/orchestrator/src/projects.ts` and `factory/orchestrator/src/cli.ts` as they stand on this branch, plus one `daemon run --once --state-dir <scratch>` whose command line and output are quoted. A divergence between what task-1 was asked for and what it shipped is reported as a finding, not written up as though it were the intent.",
+        "`CHANGELOG.md`'s `## Unreleased` section gains an entry for wave 1's landed work under the correct subsection, naming the strike (pointing at D-271) and the watch-self default (pointing at D-272), keyed to `phase-10`. It follows the file's existing ordering and phrasing conventions; the section is not restructured and no released entry is edited.",
+        "No decision record already in the file is edited, reordered, renumbered or reflowed. The diff for `docs/specs/dogfood-4-findings.md` is an append only, and a grader can confirm that from the diff alone.",
+        "Prose is English, wraps at 80 characters or less outside table rows and headings, and uses the em dash. The five doc guards pass — but they do not check this task's own two files, and the criterion does not pretend otherwise: `test/helpers/instructionSurface.ts:53-60` `recordOfThePast()` excludes `CHANGELOG.md` and every `docs/specs/dogfood-*` path, and `docCommands.test.ts:421-422` asserts that exclusion by name, so nothing the guard runs would notice a `smith` verb this record invents. The check is therefore the task's own: every `smith` invocation quoted in the record or the CHANGELOG is resolved against `node factory/orchestrator/dist/cli.js --help`, or the namespace's own `--help`, before it is written, and each verification is recorded in structured output.",
+        "`scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed.",
+        "Structured output records the D number used, the highest pre-existing D number found, the verification commands run, and any divergence found between task-1's spec and task-1's diff."
+      ],
+      "claims": [
+        "docs/specs/dogfood-4-findings.md",
+        "CHANGELOG.md"
+      ],
+      "budget": {
+        "tokens": 60000,
+        "diff_lines": 180
+      },
+      "contract": {
+        "functional_clauses": [
+          "The record describes shipped behaviour, checked in this task's own session, not planned behaviour.",
+          "D-272 is appended; nothing above it in the file changes.",
+          "The CHANGELOG entry names the epic and points at the decision records rather than restating them.",
+          "If task-1's change is not present on the branch this task runs from, the task reports that and writes no record about it."
+        ],
+        "nonfunctional_clauses": [
+          "English only; prose wraps at 80 characters or less; docs use the em dash and in-code comments the double hyphen.",
+          "No edit outside `claims`; `projects.ts`, `cli.ts` and the runbook belong to other tasks.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched.",
+          "No runtime state under `state/` is committed; any verification tick writes to a scratch `--state-dir` outside the repo.",
+          "No secret, no network call, no new dependency.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed; the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "chore",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-6-fold-what-this-epic-emitted",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "P10-1's claim is that every instrument this repository built folds one `session-start` line on this clone: measured at `84cd46f`, `state/events/` held exactly that, and `state/smith.db` held 14 milestones with zero epics, zero tasks, zero agents, zero findings and zero lessons. This epic is the first real input those instruments have ever had. Run them over it and write down what they said, in a close-out section appended to `docs/specs/phase-10-scope.md`. An instrument that was built and never observed is a claim; this section is the observation. Record what each one says even when what it says is zero, because a zero with a stated reason is data and a zero passed over in silence is the defect P10-1 is about.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "A close-out section is appended to `docs/specs/phase-10-scope.md`, headed so a reader can see it is the record of this epic's run rather than more scope. For each instrument it carries the exact command line run, the exit code, and the output quoted or summarised with its numbers intact. The log it folds is the host clone's, never the worktree's: `.gitignore` line 2 is `state/`, so an isolated worktree contains no `state/events/` and no `state/smith.db` to read. Every read-side invocation — `wave audit`, `budget alarm`, `kpi same-mistake`, `escalation check`, `epic width` and the db rebuild — therefore carries `--state-dir /Users/ser/scatola/jobs/projects/blacksmith/state` explicitly, and the session is this epic's own, `phase-10-2026-09-04`, confirmed by listing that directory before anything is folded rather than taken on this spec's word. All six commands accept `--state-dir` today, checked against `factory/orchestrator/src/usage.ts` at lines 156, 380, 461, 468, 513 and 707.",
+        "The instruments folded are at minimum `smith wave audit`, `smith budget alarm`, `smith kpi same-mistake` and `smith escalation check`, plus any other instrument named in P10-1's \"What it means\" paragraph. Every command line written into the file is verified to resolve against the CLI before it is written, because `docCommands.test.ts` parses every `smith` invocation in the instruction surface and a verb that does not exist fails the guard.",
+        "The fold is proven to have read the live log rather than an empty default. The number of events the session holds is quoted, and it must exceed the one-line null measured at `84cd46f` — a single `session-start`. If any instrument returns zero while that count is at or below 1, the fold read the wrong directory, and the task stops and reports that instead of writing zeros into a permanent record. `kpi same-mistake: 0` reads identically whether the corpus was empty or absent, and a well-formed wrong answer is the failure mode this epic exists to end (D-133).",
+        "The wave-audit differential is stated with both texts as they actually print, and the null was measured, not assumed. Under the null — the log as it stood at `84cd46f` — `smith wave audit` prints `waves: []`, `serialized: []`, `partial: []`, `unobserved: []`, `widest` declared 0 and observed 0, and exits **0**, not 1: `summariseWaveConcurrency` (`src/waveConcurrency.ts:326-343`) returns 1 only for a serialized wave and 2 only for an unobserved one, and an empty admission list is neither. Over this epic's log the same command reports waves 1 and 2 admitted and observed, with a widest of 3 in wave 1. Both outputs are quoted whole. If the measured widest is below 3, that is the finding this section exists to surface: it is written down as measured, never rounded up to the plan's number.",
+        "Wave 3 is recorded as in-flight and is not graded here. This task runs inside wave 3 beside task-7, and `verdictFor` (`src/waveConcurrency.ts:181-187`) reads `declared 2, peak 1` as `serialized` whenever task-7's dispatch event has not yet landed, so a wave-3 verdict taken from here would turn on dispatch order rather than on the property it means to assert. The section states the wave-3 numbers it observed and labels them mid-wave. Epic AC1's after-the-last-merge measurement is graded at the epic close, which is the only place `after the last wave merges` is true, and the section says so where it reports the number.",
+        "The read-model is measured too: the number of epics and tasks tagged `phase-10` that `state/smith.db` (or a rebuild of it from this run's log) reports, against the measured null of zero epics and zero tasks. This is epic AC2's evidence.",
+        "Zeros are explained rather than omitted. For any instrument that returns nothing — `kpi same-mistake` with no compiled lessons, for instance — the section says what input it folds and why that input is empty, so a later reader can tell \"nothing happened\" from \"nothing was measured\".",
+        "The P10-3 input is recorded and not acted on: whether this epic's crosscheck calls produced any recorded disagreement between the native reviewer and the shadow provider, and how many. The section states that promotion to `mode: active` is the operator's decision, that the calibration pass in `docs/runbooks/providers.md` section 3 is what earns it, and that `crosscheck.yml` was not touched by this epic.",
+        "The milestone count after the strike is recorded here as a measurement of the merged state, expected 10 where 14 was measured at `37db1c3`. The earlier \"14 milestones\" statements elsewhere in the repository are historical measurements and are not edited — this appended note is how they are superseded.",
+        "Nothing under `state/` is committed and no command run by this task writes the event log. Commands that would write use a scratch `--state-dir` outside the repository, and `git status --porcelain state/` is empty when the task ends.",
+        "Prose is English, wraps at 80 characters or less outside table rows, headings and quoted command output, and uses the em dash. The five doc guards pass. `scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed.",
+        "If task-2 recorded the strike under a D number other than D-271, this section corrects any reference to it that task-3 wrote, since task-3 could not read task-2's worktree."
+      ],
+      "claims": [
+        "docs/specs/phase-10-scope.md"
+      ],
+      "budget": {
+        "tokens": 80000,
+        "diff_lines": 200
+      },
+      "contract": {
+        "functional_clauses": [
+          "Every number in the section was produced by a command this task ran and quoted, not copied from this plan or from the epic spec.",
+          "An instrument that errors is recorded with its error and exit code; a failing instrument is a result, not a reason to leave it out.",
+          "The section is appended; no existing item, evidence paragraph or settlement in the file is rewritten.",
+          "No instrument is promoted, enabled or reconfigured as a side effect of measuring it."
+        ],
+        "nonfunctional_clauses": [
+          "English only; prose wraps at 80 characters or less; docs use the em dash.",
+          "No edit outside `claims`; the findings file, the CHANGELOG, the roadmap and every source file belong to other tasks.",
+          "No file under `factory/policies/` is touched; `crosscheck.yml` in particular is read and never written.",
+          "No `.claude/agents/` template is touched.",
+          "No runtime state under `state/` is committed; every writing command uses a scratch `--state-dir` outside the repository, while every read-side command is given the host clone's state directory explicitly.",
+          "Every `smith` command line written into the file resolves against the CLI, flags included: `docs/specs/phase-10-scope.md` is in the instruction surface and is not a record of the past, so `docCommands.test.ts` parses every span this task adds.",
+          "No secret, no network call, no new dependency; provider calls are not made by this task, only counted from the log.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed; the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "research",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-7-record-the-inventory-decision",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "Task-4 changed what a human-invoked inventory reports and deliberately did not change what the interval watcher reports. That split is a judgement, and a reader who finds it later without the reason will read it as an inconsistency and 'fix' it. Write `## D-273` in `docs/specs/dogfood-4-findings.md` recording it: the header rule in projects.ts that a declared project with no checkout is reported by nothing, what that rule still governs and what it does not, the difference between an alarm that fires on an interval and a question a human just asked, and the evidence that motivated the change — this repository carried four unreachable `- project: envkit` rows and no surface ever said so. Then close this epic's `## Unreleased` entry in `CHANGELOG.md` for waves 2 and 3. As with D-272, every behavioural claim is read back against the code that merged. This task and task-5 are deliberately two tasks and not one, for the reason task-5's objective states: each record is written on a branch where the change it describes is the most recent edit to the files it cites.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "`## D-273` is appended after the highest `## D-NNN` present, in the file's existing heading convention. The expected predecessor is D-272 from task-5; if it is not there, the task uses the true next number and reports the discrepancy in structured output rather than assuming task-5's outcome.",
+        "D-273 quotes projects.ts's header rule verbatim and states precisely what it still governs (the daemon finding, unchanged) and what it does not (the inventory command), so the file records a distinction with a reason rather than an exception someone will later delete.",
+        "Every behavioural claim in D-273 is verified against the merged `factory/orchestrator/src/projects.ts` and `factory/orchestrator/src/cli.ts` on this branch, and against one run of `smith projects list` over a fixture roadmap declaring a project with no checkout. The command line and its output are quoted, and the fixture is described well enough to be rebuilt.",
+        "D-273 names the motivating evidence concretely: the four `- project: envkit` rows this repository carried, that `smith new` writes such a row for every project it scaffolds so the state recurs by construction, and that the strike itself is recorded in the earlier decision record.",
+        "`CHANGELOG.md`'s `## Unreleased` entry is completed for waves 2 and 3, and the entry as a whole names the epic `phase-10` and the milestone it belongs to. The section is not restructured, no released entry is edited, and the wave 1 lines task-5 wrote are extended rather than rewritten.",
+        "No decision record already in the file is edited, reordered, renumbered or reflowed. The diff for `docs/specs/dogfood-4-findings.md` is an append only.",
+        "Prose is English, wraps at 80 characters or less outside table rows and headings, and uses the em dash. The five doc guards pass — but they do not check this task's own two files, and the criterion does not pretend otherwise: `test/helpers/instructionSurface.ts:53-60` `recordOfThePast()` excludes `CHANGELOG.md` and every `docs/specs/dogfood-*` path, and `docCommands.test.ts:421-422` asserts that exclusion by name, so nothing the guard runs would notice a `smith` verb this record invents. The check is therefore the task's own: every `smith` invocation quoted in the record or the CHANGELOG is resolved against `node factory/orchestrator/dist/cli.js --help`, or the namespace's own `--help`, before it is written, and each verification is recorded in structured output.",
+        "`scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed.",
+        "Structured output records the D number used, the highest pre-existing D number found, the fixture and commands used for verification, and any divergence found between task-4's spec and task-4's diff."
+      ],
+      "claims": [
+        "docs/specs/dogfood-4-findings.md",
+        "CHANGELOG.md"
+      ],
+      "budget": {
+        "tokens": 55000,
+        "diff_lines": 160
+      },
+      "contract": {
+        "functional_clauses": [
+          "The record describes shipped behaviour, checked in this task's own session, not planned behaviour.",
+          "D-273 is appended; nothing above it in the file changes.",
+          "The record states the daemon's behaviour is unchanged and cites the test that proves it.",
+          "If task-4's change is not present on the branch this task runs from, the task reports that and writes no record about it."
+        ],
+        "nonfunctional_clauses": [
+          "English only; prose wraps at 80 characters or less; docs use the em dash and in-code comments the double hyphen.",
+          "No edit outside `claims`; the sources, the runbook and the scope doc belong to other tasks.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched.",
+          "No runtime state under `state/` is committed; any verification run writes to a scratch directory outside the repository.",
+          "No secret, no network call, no new dependency.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed; the branch is not merged or pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "chore",
+      "origin": "inferred",
+      "confidence": 0.85,
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-8-unpin-the-gate-from-a-struck-row",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "`factory/orchestrator/test/mcp.test.ts:799-811` pins a live assertion to the four `- project: envkit` milestones the operator struck on 2026-09-04, so task-2's strike turns the unit suite red and task-2 can never land: `queue run` rebases each task's branch onto integration and runs the suite in that branch's own worktree BEFORE it integrates (`src/queue.ts:150-195`), so a fix that arrives after task-2 arrives too late. Retire the pin, and land it first. The test's stated intent -- that an epic owing an MCP surface cannot close unexamined -- loses its subject in this clone once the envkit rows are gone. What it uniquely covers, and what must survive, is `resolveMcpSurface` called with no `roadmapPath`: the `opts.roadmapPath ?? ROADMAP_PATH` default at `src/mcp.ts:611`. The sibling test directly above it already covers writer-and-reader composition, on a fixture roadmap, always with an explicit path. This is a test whose premise expired, not a bug in the code it tests: no source file is touched.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "Reproduce before fixing, in this task's own worktree, and never in another task's. `git show 3aca00a:factory/specs/roadmap.md > factory/specs/roadmap.md` puts task-2's struck roadmap in place; `npx vitest run factory/orchestrator/test/mcp.test.ts` then fails at `mcp.test.ts:810` with `AssertionError: expected false to be true` and `1 failed | 64 passed (65)`; `git checkout -- factory/specs/roadmap.md` puts it back. Quote the failure verbatim in structured output. This substitution is a measurement, not an edit: `factory/specs/roadmap.md` is task-2's claim, not this task's, so it is never committed and never left dirty.",
+        "The refit passes on both roadmaps. After the edit, `npx vitest run factory/orchestrator/test/mcp.test.ts` is green with the roadmap as shipped, and green again under the same substitute-and-restore as the first criterion. Both runs are quoted with their counts. A refit that is green on only one of the two is not done, because the two are exactly the before and after of the integration queue.",
+        "The default-`roadmapPath` branch keeps a live test. Measured before the edit, not assumed: every other `resolveMcpSurface` test in the file passes an explicit `roadmapPath`, so `opts.roadmapPath ?? ROADMAP_PATH` (`src/mcp.ts:611`) is exercised by the pinned test alone. State that measurement in structured output, and if it turns out to be false, say so rather than repeating it. After the edit at least one test still calls `resolveMcpSurface` with no `roadmapPath`, and asserts only what is true of the shipped roadmap whatever milestones it declares -- that the default resolves to a real, parseable roadmap, and that an epic no milestone owns comes back not-required.",
+        "No struck milestone id is named anywhere in the file. `grep -n envkit factory/orchestrator/test/mcp.test.ts` prints nothing when the task ends; quote that empty output. A refit that keeps the id in a comment has kept the pin in the one place no test run can catch it.",
+        "The comment is rewritten, not deleted. The block above the retired assertion records why the pin went -- the four `- project: envkit` milestones were struck by operator decision on 2026-09-04, evidence in D-271 of `docs/specs/dogfood-4-findings.md` -- where the writer-and-reader composition the old comment argued for still lives (the fixture test directly above), and what survives here (the default-path branch). A comment that argued for a decision is the record of that decision; deleting it silently loses the argument and invites the pin back.",
+        "No source file is edited. `factory/orchestrator/test/mcp.test.ts` is the only file this task changes. `resolveMcpSurface` returning not-required for an epic no milestone owns is the correct behaviour, and the strike is an operator decision, not a regression. If the work appears to require a source change, report `error.spec.spec-gap` in structured output rather than widening claims.",
+        "No other test is deleted, skipped or renamed. Report the file's test count before and after -- 65 before -- and account for the difference by naming every test added or retired.",
+        "`scripts/check.sh` runs whole in this worktree with the roadmap as shipped, and its tail is quoted verbatim along with the four suite counts. Baseline is unit 108 files / 3417 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed; account for any difference by naming the test that changed. Read the tail, not the exit code -- this script can exit 0 while printing `== FAIL ==`. A count below baseline that this diff does not explain is a finding, never an adjusted expectation.",
+        "Structured output records the reproduction, both post-fix runs, the coverage measurement, the before and after test counts, the output of `git status --porcelain factory/specs/roadmap.md` proving the substitute was restored, and the finding this task discharges: `f-phase-10/integration-0d5acd28`.",
+        "Prose is English and wraps at 80 characters or less; in-code comments use `--` rather than an em dash, matching the file. Work is committed on this task's own branch. This task integrates nothing, and does not read, run in, or write to another task's worktree."
+      ],
+      "claims": [
+        "factory/orchestrator/test/mcp.test.ts"
+      ],
+      "budget": {
+        "tokens": 70000,
+        "diff_lines": 120
+      },
+      "contract": {
+        "functional_clauses": [
+          "Retire the assertion at factory/orchestrator/test/mcp.test.ts:799-811 that requires the shipped roadmap to declare the milestone envkit-mcp-surface.",
+          "Keep a live test that calls resolveMcpSurface with no roadmapPath, so the `opts.roadmapPath ?? ROADMAP_PATH` default at src/mcp.ts:611 stays covered by something.",
+          "The file's tests pass both against the roadmap as shipped and against the roadmap with the four `- project: envkit` milestones struck.",
+          "Replace the retired block's comment with one recording why the pin went and where the coverage it argued for now lives."
+        ],
+        "nonfunctional_clauses": [
+          "No secret, no network call, no new dependency.",
+          "No file outside the single claim is committed; factory/specs/roadmap.md is substituted only as a measurement and restored before the task ends.",
+          "No source file under factory/orchestrator/src/ is edited."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "confidence": 0.95,
+      "task_status": "ready",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "phase-10/task-9-mend-what-the-verdict-read-wrong",
+      "epic_id": "phase-10",
+      "plan_version": 3,
+      "objective": "The planner's epic verdict graded 77 acceptance criteria and found five gaps, all of them documentation that says something the branch does not. One is a runbook row that states the opposite of the code it documents and contradicts its own file eleven lines earlier. Three are records this epic wrote about its own work: citations whose coordinates have drifted off the text they quote, a fold that skipped two of the five instruments its milestone names, and a milestone count that went stale the moment the file it counts grew a row. The fifth is not a defect in the work at all -- it is the plan contradicting itself about how one output should be rendered, and the honest remedy is to say so in the record rather than to redo the output. Fix all five in one pass, on the branch where the code they describe is already merged, and verify each claim against that code rather than against the report that raised it.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "The `unwatched-project` row in `docs/runbooks/ops.md` states the shipped behaviour: this clone joins the pass by default, and `--no-self` drops it from both the register and the resolved project directories, so the finding cannot be raised for it at all. The claim is read back against `factory/orchestrator/src/cli.ts:1662-1674` in this task's own session, and the corrected row is consistent with `ops.md:105-109`, which already says it correctly. Both passages are quoted in structured output with the line numbers they were found at.",
+        "Every `path:line` citation in `## D-272` of `docs/specs/dogfood-4-findings.md` is re-resolved against this branch and corrected where it has drifted -- not only the three the verdict named. The quoted text is treated as correct and is not rewritten: this is a coordinate repair, so for each citation structured output records the old coordinate, the new one, and the first line of the text found there.",
+        "`smith daemon run --once` and `smith scheduler admit` are each run over this epic's own event log and their output folded into `docs/specs/phase-10-scope.md`, closing the two instruments P10-1 names at `:45-46` that the existing fold never covered. Both are run with `--dir` pointed at a scratch directory outside this repository so no status file or lock lands in the tree, and `scheduler admit` is used rather than `scheduler run` because it classifies without enacting. The exact command lines and their output are quoted.",
+        "`docs/specs/phase-10-scope.md` records that task-6's AC1 and AC4 state incompatible requirements for the same output -- AC1 permitting each half of the wave-audit differential \"quoted or summarised with its numbers intact\", AC4 demanding it \"quoted whole\" -- and that the record satisfied AC1. It is recorded as a defect in the plan, not as work left undone, and the differential itself is not re-rendered. No file under `factory/specs/active/` is edited: a plan version is immutable, and the finding against it is discharged by this task's own landing.",
+        "The milestone count in `docs/specs/phase-10-scope.md` agrees with the branch, and the record states the command that derives it so the next reader can re-check rather than trust it. The count is taken by running that command in this task's session, not by adding one to the stale number.",
+        "No decision record already in `docs/specs/dogfood-4-findings.md` is renumbered, reordered or reflowed, and no `## D-NNN` heading is added by this task: the five gaps are corrections to existing text, and the decision records this epic still owes are the orchestrator's to write. The diff for that file is confined to citation coordinates.",
+        "Prose is English, wraps at 80 characters or less outside table rows and headings, and uses the em dash. The five doc guards pass. As task-7's spec already established, those guards do not read `docs/specs/dogfood-*`, so any `smith` invocation this task quotes is resolved against `node factory/orchestrator/dist/cli.js <namespace> --help` before it is written, and each resolution is recorded in structured output.",
+        "`scripts/check.sh` runs whole and green with the counts recorded verbatim: unit at or above 108 files / 3453 passed / 1 skipped, server 2 files / 40 passed, ui 30 files / 530 passed, e2e 140 passed. Nothing else may be running the e2e suite at the same time -- its port is fixed, so a concurrent run is a false red.",
+        "Structured output names each of the five findings this task discharges by id, and for each one states the file changed and the evidence that the change is now true of the branch. A gap the task cannot close is reported as such with its reason, never silently dropped or restated as satisfied."
+      ],
+      "claims": [
+        "docs/runbooks/ops.md",
+        "docs/specs/dogfood-4-findings.md",
+        "docs/specs/phase-10-scope.md"
+      ],
+      "budget": {
+        "tokens": 75000,
+        "diff_lines": 220
+      },
+      "contract": {
+        "functional_clauses": [
+          "Every claim written is read back against the code or the command output on this branch, in this task's own session -- never against the verdict that raised the gap.",
+          "The runbook is made to agree with the code; the code is not touched to agree with the runbook.",
+          "D-272's quoted text is preserved verbatim; only the coordinates around it move.",
+          "The two instruments are run, not described. A fold that quotes no command line and no output does not satisfy its criterion.",
+          "A gap that turns out not to exist on this branch is reported as such, with the evidence, and no edit is invented to close it."
+        ],
+        "nonfunctional_clauses": [
+          "English only; prose wraps at 80 characters or less; docs use the em dash and in-code comments the double hyphen.",
+          "No edit outside `claims`; in particular no file under `factory/specs/active/` and no source file is touched -- this task corrects records, and a plan version is immutable.",
+          "No file under `factory/policies/` and no `.claude/agents/` template is touched.",
+          "No runtime state under `state/` is committed; every verification run writes to a scratch directory outside the repository.",
+          "No secret, no network call, no new dependency.",
+          "`scripts/check.sh` is run whole; a suite count below baseline is a finding, never an adjusted expectation.",
+          "No test is deleted, skipped or renamed; the branch is not pushed by this task."
+        ],
+        "tool_allowlist": [
+          "Read",
+          "Edit",
+          "Write",
+          "Bash",
+          "Grep",
+          "Glob"
+        ]
+      },
+      "case": "chore",
+      "origin": "inferred",
+      "confidence": 0.8,
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    }
+  ],
+  "edges": [
+    {
+      "task": "phase-10/task-4-report-the-checkout-we-cannot-find",
+      "dependsOn": "phase-10/task-1-watch-this-clone-by-default",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-5-record-the-default-that-was-chosen",
+      "dependsOn": "phase-10/task-1-watch-this-clone-by-default",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-5-record-the-default-that-was-chosen",
+      "dependsOn": "phase-10/task-2-strike-the-envkit-rows",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-6-fold-what-this-epic-emitted",
+      "dependsOn": "phase-10/task-3-settle-the-scope-doc",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-6-fold-what-this-epic-emitted",
+      "dependsOn": "phase-10/task-4-report-the-checkout-we-cannot-find",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-6-fold-what-this-epic-emitted",
+      "dependsOn": "phase-10/task-5-record-the-default-that-was-chosen",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-7-record-the-inventory-decision",
+      "dependsOn": "phase-10/task-4-report-the-checkout-we-cannot-find",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-7-record-the-inventory-decision",
+      "dependsOn": "phase-10/task-5-record-the-default-that-was-chosen",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "phase-10/task-2-strike-the-envkit-rows",
+      "dependsOn": "phase-10/task-8-unpin-the-gate-from-a-struck-row",
+      "edge_type": "regression-test",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "black-smith",
+  "effort": "medium"
+}

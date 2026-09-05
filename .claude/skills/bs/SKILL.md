@@ -1037,8 +1037,12 @@ pending proposals lets them sit invisible instead of surfacing them.
    pass on. Do not assemble that list from memory: the maintenance pass
    reads one lockfile per flag and reports one proposal per repo, so a repo
    left off the line is not reported as missing, it is simply never
-   mentioned. (The daemon raises `unwatched-project` for exactly this; this
-   step is the same question asked by hand.) Then run `smith scheduler run
+   mentioned. (The daemon raises `unwatched-project` for a child project with
+   a checkout that is left off the line — not for this clone, which is in
+   the pass by default, and not for a declared project with no checkout at
+   all, which `smith projects list` marks with `?` instead of leaving it
+   off the printed list. The two surfaces no longer answer the same
+   question.) Then run `smith scheduler run
    [--dry] --session <id> [--project <dir>...]` with those flags — a
    deterministic pass over the event log, it never dispatches an agent
    itself (`factory/policies/scheduler.yml`, architecture §12). Read its

@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -27,6 +35,9 @@ import { openDb } from '../src/db/projector.js';
 import { roadmapPage } from '../src/db/queries.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
+import { REPO_ROOT } from '../src/paths.js';
+import { factoryProjects, resolveProjectDirs } from '../src/projects.js';
+import { FACTORY_PROJECT } from '../src/roadmap.js';
 import type { OutdatedPackage, SchedulerPolicy } from '../src/scheduler.js';
 
 // ---------------------------------------------------------------------------
@@ -1382,6 +1393,32 @@ describe('the repos nothing is watching', () => {
     expect(unwatched().map((f) => f.subject)).toEqual(['/repo/self', '/repo/envkit']);
   });
 
+  // AC1: the null measured, not assumed. `factoryProjects()` has always
+  // returned this clone unconditionally as `self: true`, so an
+  // `unwatched-project` finding for it carries no information the process
+  // lacks -- restating a known fact is what ops.md argues trains an operator
+  // to stop reading. `cli.ts`'s three call sites are what were fixed, by
+  // feeding the fold `resolveProjectDirs()`'s answer instead of the flag as
+  // typed; this asserts the fold itself draws the line the fix moved.
+  it('an omitted --project used to leave this clone unwatched; the union feeds it none now', () => {
+    const self = { name: FACTORY_PROJECT, dir: REPO_ROOT, self: true };
+    const opts = { now: NOW, schedulerPolicy: SCHEDULER, readProjects: () => [self] };
+    // The null: nothing was named, and nothing joined the pass for it either
+    // -- exactly what an omitted `--project` used to fold to.
+    expect(
+      inspectFactory([], { ...opts, projectDirs: [] }).filter(
+        (f) => f.kind === 'unwatched-project',
+      ),
+    ).toEqual([expect.objectContaining({ kind: 'unwatched-project', subject: REPO_ROOT })]);
+    // The fix: cli.ts now feeds `resolveProjectDirs(undefined)`'s answer,
+    // which puts REPO_ROOT in the pass by default.
+    expect(
+      inspectFactory([], { ...opts, projectDirs: resolveProjectDirs(undefined) }).filter(
+        (f) => f.kind === 'unwatched-project',
+      ),
+    ).toEqual([]);
+  });
+
   // Clearable in one flag, which is the test `factory-width` sets for any new
   // attention: an alarm that cannot return to zero teaches an operator to stop
   // reading the number, and takes the real alarms with it.
@@ -1434,6 +1471,62 @@ describe('the repos nothing is watching', () => {
       },
     });
     expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+  });
+
+  // AC3's gate: `--no-self` has to be read at the read layer, not only the
+  // report layer, or an implementation could suppress the finding while
+  // still opening this clone's lockfile. `readOutdated` is the one place
+  // that would happen -- it is called once per `opts.projectDirs` entry --
+  // so this asserts REPO_ROOT never reaches it once `resolveProjectDirs`
+  // excluded it.
+  it('--no-self keeps REPO_ROOT out of the directories the tick reads, not just the report', () => {
+    // Simulates cli.ts's daemon-run site under `--no-self`: this clone drops
+    // out of BOTH `projectDirs` and the register `readProjects` answers, the
+    // same way the CLI's `self` guard filters `factoryProjects()`.
+    const readDirs: string[] = [];
+    const findings = inspectFactory([], {
+      now: NOW,
+      schedulerPolicy: SCHEDULER,
+      readProjects: () => [],
+      projectDirs: resolveProjectDirs(undefined, { self: false }),
+      readOutdated: (dir) => {
+        readDirs.push(dir);
+        return null;
+      },
+    });
+    expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+    expect(readDirs).not.toContain(REPO_ROOT);
+  });
+
+  // AC4: the daemon's rule (projects.ts's header) stays intact -- a
+  // regression guard, not a differential, since the null was already true
+  // and stays true. A fixture roadmap (never the shipped one, per
+  // test/projects.test.ts) declares a project with no checkout under either
+  // root; the real `factoryProjects()` -- not a mock -- already drops it, so
+  // the same fold and the same options raise nothing about it, same as
+  // before this task's change to projects.ts.
+  it('raises nothing for a declared project with no checkout, same fold, same options', () => {
+    const scratch = mkdtempSync(path.join(tmpdir(), 'smith-daemon-missing-'));
+    try {
+      const roadmapPath = path.join(scratch, 'roadmap.md');
+      const root = path.join(scratch, 'roots');
+      mkdirSync(root);
+      writeFileSync(
+        roadmapPath,
+        '# Roadmap\n\n## envkit-bootstrap\n- id: envkit-bootstrap\n' +
+          '- status: completed\n- project: envkit\n- epics: []\n- goal: whatever.\n',
+      );
+      const refs = factoryProjects({ roadmapPath, roots: [root] });
+      const findings = inspectFactory([], {
+        now: NOW,
+        schedulerPolicy: SCHEDULER,
+        readProjects: () => refs,
+        projectDirs: resolveProjectDirs(undefined),
+      });
+      expect(findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1115,6 +1115,41 @@ than appearing in it.
 
 ### Changed
 
+- **Phase 10, wave 1: this clone joins its own maintenance pass by default,
+  and a struck roadmap milestone keeps its evidence.** `daemon run`,
+  `scheduler run` and `scheduler admit` now watch this checkout unless an
+  operator opts out with `--no-self`; the reconciliation with the two rules
+  that default had to hold — this clone is always `REPO_ROOT`, never a name
+  lookup, and an `unwatched-project` finding for it must be able to clear —
+  is recorded in D-272. The four `envkit` milestones `factory/specs/roadmap.md`
+  could no longer reach were struck rather than left to point at a checkout
+  this clone's tooling cannot open, their evidence preserved in D-271 rather
+  than left to git history alone.
+
+- **Phase 10, wave 2: `smith projects list` names the checkout it cannot find,
+  and the daemon still says nothing about it.** A declared project with no
+  checkout used to vanish from the inventory exactly as it still does from
+  the daemon's tick — the four unreachable `envkit` rows this repository
+  carried until an operator went looking by hand are the motivating
+  evidence, and `smith new` writes such a `- project:` row for every project
+  it scaffolds, so the state recurs by construction. `projects.ts` now
+  exports `missingProjects()` beside `factoryProjects()`; the daemon still
+  reads only the latter, so `unwatched-project` still cannot fire for a
+  checkout that does not exist — an alarm nothing can ever clear is worse
+  than no alarm. `smith projects list` reads both: a missing declaration
+  prints marked `?` (never the `*` for self or the space for resolved),
+  names both roots searched, and is dropped from the copyable `--project`
+  line; the exit code stays 0, because not finding a checkout is an answer,
+  not an error. D-273 records the split and the daemon-side test that proves
+  it held.
+
+- **Phase 10, wave 3 closes the epic's `Unreleased` entry.** The remaining
+  wave settles `docs/specs/phase-10-scope.md`'s open forks, folds the epic's
+  own instruments over its own event log as a close-out record, retires the
+  `mcp.test.ts` assertion pinned to the four struck `envkit` milestones, and
+  records this decision, D-273, which is why the split above holds. Phase 10
+  — Deployment + ops is the milestone all of it belongs to.
+
 - **The standing rule against nesting now cites a reason that is still
   true.** `docs/standards/agent-constraints.md` justified flat topology with
   a blocker that P9-7 removed on 2026-08-08: it said `causal_parent` is
