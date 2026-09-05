@@ -171,7 +171,7 @@ Finding kinds, and where each one comes from:
 | `maintenance` | `info` | Dependencies `pnpm outdated` reports behind in one repo, with the scheduler's confidence. Needs `--project`; one finding per `--project`, and the subject names the repo. |
 | `growth-review` | `info` | The 30-day growth review is due. Repo-scoped: `sessionId` is `null`. The one kind that needs a log with records in it — see the note on a factory that has built nothing. |
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
-| `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Itself is in the pass by default and only raises this when `--no-self` left it out. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
+| `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Itself is in the pass by default; `--no-self` drops it from both sides of the fold, so the finding can never be raised for it. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
 | `unreadable-log` | `attention` | A session log could not be read. |
 | `projection-failed` | `attention` | A read-model refresh threw. `sessionId` names the lineage being folded, or is `null` when the tick had no session to fold and was refreshing the roadmap alone. |
 

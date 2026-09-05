@@ -348,6 +348,19 @@ Exit 0. Three waves admitted and observed, `"widest":{"declared":3,
 The measured widest is 3, at wave 1, matching the plan's number rather than
 falling short of it.
 
+**A plan defect, not a task defect.** Task-6's AC1 permits each half of
+this differential "quoted or summarised with its numbers intact"; AC4, two
+clauses later, demands the same differential be "quoted whole". This
+section satisfies AC1: the null half above is quoted whole, and the epic
+half is summarised into the wave-by-wave list with every number intact
+(widest, declared, observed, per wave). It therefore fails AC4's stricter
+wording for the epic half, because AC1 and AC4 state two different rules
+for the same output and a single rendering cannot satisfy both. The
+defect is in the plan, not in this record:
+`factory/specs/active/phase-10/plan-v2.json` is an immutable plan
+version, so it is not edited here, and the differential above is not
+re-rendered to chase AC4 at the cost of AC1.
+
 ### Wave 3 — mid-wave, not graded here
 
 Wave 3 is this task's own wave (task-6 beside task-7), and it is still open
@@ -436,6 +449,55 @@ this is epic AC2's evidence: 1 epic, 10 tasks, where there were none.
   not this task's to act on; it is recorded here because AC7 asks for every
   non-zero output with its numbers intact, not only the zeros.
 
+### Daemon and scheduler — the two instruments the fold missed
+
+P10-1's five instruments are `wave audit`, `kpi same-mistake`,
+`budget alarm`, the scheduler, and the daemon. The fold above ran the
+first three; these two were run against this epic's own event log to
+close that gap, each with `--dir` pointed at a scratch directory outside
+this repository so no `daemon.log`, status file or lock lands in the
+tree, and `scheduler admit` rather than `scheduler run`, since `admit`
+classifies what is due without enacting anything:
+
+```
+$ node factory/orchestrator/dist/cli.js daemon run --once \
+    --dir <scratch-dir> \
+    --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
+```
+
+Exit 0. One tick, sessions `[maint-2026-09-03, phase-10-2026-09-04]`.
+`maint-2026-09-03` raised one `budget` finding at `info`, "unverifiable:
+No epic in this session has a task the log attributes to it" — this
+epic's own log is `phase-10-2026-09-04`, and that is where the rest of
+this fold stays. `phase-10-2026-09-04` raised five findings: a `budget`
+finding at `attention` — "at-risk: 2,016,300 tokens measured across 10 of
+11 task(s), 3,236,300 projected, against a 2,800,000 alarm and a
+4,000,000 cap"; an `unattributed-spend` finding at `info` — "1
+dispatch(es) (planner) name no epic, so their tokens are in no cap.
+Attribute them or accept that the session total is a floor" — the same
+planner dispatch the budget finding's own "Holes:" clause names; a
+`stale-agent` finding at `attention` — "planner (claude/frontier) has
+been live for 7.7h with no result, error or supersession — past the 4h
+threshold"; and a `maintenance` and a `growth-review` finding, both
+`info` and both `operator`-held. The tick's own counters: `attention: 2,
+newAttention: 2, autoAdmitted: 0, operatorHeld: 2, projected: 2`.
+`newAttention` is 2, not 0 — a first tick against an empty `--dir` has no
+prior state to diff against, so every finding it raises comes back
+`isNew: true`. No file this run wrote lands in the repository; `--dir`
+named a scratch directory outside it.
+
+```
+$ node factory/orchestrator/dist/cli.js scheduler admit \
+    --session phase-10-2026-09-04 \
+    --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
+```
+
+Exit 0. Two admissions, both `operator`-held: a `maintenance` proposal
+bumping 7 packages at confidence 0.5, below `autonomy.confidence_floor`
+0.8; and a `growth-review-due` proposal on the 30-day cadence, held under
+architecture §12's rule that a product-growth proposal always waits for
+an operator tick. `scheduler admit` classifies only — it enacted neither.
+
 ### P10-3 input — crosscheck disagreement, recorded and not acted on
 
 Two `judge-verdict` events fired this epic (`codex`, `mode: active`, and
@@ -459,23 +521,29 @@ touching it either.
 
 ```
 $ grep -c '^- id:' factory/specs/roadmap.md
-11
+12
 $ node factory/orchestrator/dist/cli.js stats overview --db <scratch>/rebuild.db \
     --session phase-10-2026-09-04
 ```
-— `milestoneProgress` in that output carries 11 entries: `phase-1` through
-`phase-10`, plus `cloudflare-port`.
+— `milestoneProgress` in that output carries 12 entries: `phase-1` through
+`phase-10`, plus `cloudflare-port` and `factory-error-log`.
 
-The count measured here is **11**, not the 10 this criterion states as its
+The count measured here is **12**, not the 10 this criterion states as its
 expectation. `cloudflare-port` is the eleventh: the operator's decision of
 2026-09-04 (recorded in "The forks", above, and in P10-4) struck the
 Cloudflare port to its own `planned` milestone rather than carrying it
 inside Phase 10, and that strike is itself a row this epic's own scoping
-added to the roadmap. The criterion's expectation of 10 was written before
-that row existed; the earlier "14 milestones" statements elsewhere in the
-repository (measured at `37db1c3`) are historical and are not edited by this
-note — this section is how they are superseded, going forward, without
-touching what they said at the time they were measured.
+added to the roadmap. `factory-error-log` is the twelfth: commit `1a86f10`
+appended `- id: factory-error-log` to `factory/specs/roadmap.md:103` after
+this section's count was first written, and nothing here re-derived it
+until this task's own run of the `grep -c` command above. The criterion's
+expectation of 10 was written before either row existed; the earlier
+"14 milestones" statements elsewhere in the repository (measured at
+`37db1c3`) are historical and are not edited by this note — this section is
+how they are superseded, going forward, without touching what they said at
+the time they were measured. Re-run the `grep -c` command above to check
+this count rather than trusting it: the file it counts has already grown
+once since this section was first written.
 
 ### `scripts/check.sh`
 

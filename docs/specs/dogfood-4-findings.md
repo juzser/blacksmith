@@ -13898,8 +13898,8 @@ own line, the goal line untouched by a single byte.
 
 **Severity:** S3-minor.
 
-**Where:** `factory/orchestrator/src/projects.ts:14-20,56-58,100-114` and
-`docs/runbooks/ops.md:213-214` (restated at
+**Where:** `factory/orchestrator/src/projects.ts:14-20,102-103,146-153` and
+`docs/runbooks/ops.md:222-223` (restated at
 `factory/orchestrator/src/daemon.ts:388-390`), against
 `factory/orchestrator/src/cli.ts:1656-1671` (`daemon run`) and its two
 siblings at `cli.ts:1548-1556` (`scheduler run`) and `cli.ts:1609-1616`
@@ -13909,7 +13909,7 @@ siblings at `cli.ts:1548-1556` (`scheduler run`) and `cli.ts:1609-1616`
 maintenance pass — `daemon run`, `scheduler run`, `scheduler admit` —
 learned a repo existed, and this clone was never one of the repos an
 operator typed. `factoryProjects()` already listed this clone first in its
-own register (`projects.ts:60-62`); nothing downstream read that entry
+own register (`projects.ts:70`); nothing downstream read that entry
 unless `--project` named it too, so `unwatched-project` never fired for the
 one repo every other finding in the file is about. The gap had a name
 nobody could see: `state/daemon/status.json` at 2026-09-03T02:16:47.709Z
@@ -13917,7 +13917,7 @@ recorded exactly one finding, `unwatched-project` with this clone's own
 checkout as `subject`, raised because that tick was never handed
 `--project /path/to/this/clone`.
 
-**The fix.** `resolveProjectDirs` (`projects.ts:107-114`) now joins this
+**The fix.** `resolveProjectDirs` (`projects.ts:146-153`) now joins this
 clone's `REPO_ROOT` into every project list by default; `daemon run`,
 `scheduler run` and `scheduler admit` all call it the same way, so the
 three call sites cannot drift into three answers for "does self count".
@@ -13937,9 +13937,9 @@ whether:
   directory and on this box that parent also holds `black-smith`, a
   different repo with a different remote. A name lookup would read the
   wrong repo while reporting that it read its own. `factoryProjects()`
-  honors this at `projects.ts:62`: the self entry is built once, straight
+  honors this at `projects.ts:70`: the self entry is built once, straight
   from `REPO_ROOT`, before the roadmap is even read.
-- `ops.md:213-214`'s rule — "An attention count that can never return to
+- `ops.md:222-223`'s rule — "An attention count that can never return to
   zero is worse than no count — it trains you to stop reading it,"
   restated at the call site in `daemon.ts:388-390`. `--no-self` has to
   clear the finding it creates, in one flag, the same test `factory-width`
@@ -13952,7 +13952,7 @@ process lacks. Every other repo in `factoryProjects()`'s register is found
 by searching `PROJECTS_DIR` and `WORKSPACES_DIR` for a name the roadmap
 declared, and that search can fail — a checkout can be missing, moved, or
 never cloned. This clone's own location is never in question: the running
-process already knows where it is, which is what `projects.ts:56-58` means
+process already knows where it is, which is what `projects.ts:102-103` means
 by calling self "the one entry that needs no roadmap and no search to be
 certain of." A `--project` flag for self would only ask the process to
 confirm a fact it cannot fail to have.
