@@ -88,7 +88,7 @@ shows `product` by default and hides the other two, so an operator asking
 
 ## Phase 10 — Deployment + ops
 - id: phase-10
-- status: in-progress
+- status: completed
 - epics: [phase-10]
 - goal: The three items Phase 9 carried on its goal line. Two landed, one stays deferred. **Ops runbook** — `docs/runbooks/ops.md`, so the factory can be operated without reading the operator guide end to end. **The background process** (moved from Phase 7, then Phase 9) — shipped as `smith daemon`, and shipped deliberately narrower than the "always-on dispatch daemon" the earlier phases named: it is a *watcher*. It folds the event log on an interval and reports budgets, stale agents, due rechecks and due cadences, so that *knowing* what the factory needs no longer requires an open session; it never dispatches an agent, never enters the merge queue, and never writes outside `state/daemon/` and the derived SQLite read-model. Dispatch stays skill-guided through `/bs` — architecture §12, not a gap. **The Cloudflare port of the UI** (moved from Phase 6, then Phase 9) is no longer carried here: the operator struck it to its own `planned` milestone on 2026-09-04 (`cloudflare-port`, below), so this phase closes on what it built rather than on what it deferred for a fourth time. What remains of Phase 10 comes from the four-axis mandate and is specced in `docs/specs/phase-10-scope.md` — six items, and by operator decision of 2026-09-04 they run as a real epic on this repo rather than as branch-by-branch punch-list items, because exercising the factory on itself is the only thing that turns a built instrument into an observed one. P10-2 shipped ahead of that decision as `fix/a-value-nobody-read-back` (D-269), being a wrong operational fact in the first document an operator reads.
 
@@ -97,7 +97,6 @@ shows `product` by default and hides the other two, so an operator asking
 - status: planned
 - epics: []
 - goal: A Cloudflare port of the dashboard — Workers/Pages + D1 + Access. Carried on the goal line of Phase 6, then Phase 9, then Phase 10 without ever being specced, and struck to its own milestone by operator decision 2026-09-04 so that Phase 10 closes on what it built. Nothing is designed yet: the dashboard is local-only, the two Cloudflare release commands are deny-listed for agents by `.claude/settings.json`, and no upload path exists for the SQLite read-model every page reads. `docs/specs/black-smith-architecture.md` §16 files it under "Hardening" and never gave it a phase of its own, which is how it survived three moves — this milestone is the first place it is a thing to plan rather than a thing to postpone.
-
 
 ## Factory error log — GitHub issues
 - id: factory-error-log
