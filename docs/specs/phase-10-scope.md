@@ -355,10 +355,11 @@ section satisfies AC1: the null half above is quoted whole, and the epic
 half is summarised into the wave-by-wave list with every number intact
 (widest, declared, observed, per wave). It therefore fails AC4's stricter
 wording for the epic half, because AC1 and AC4 state two different rules
-for the same output and a single rendering cannot satisfy both. The defect
-is in the plan, not in this record: `factory/specs/active/phase-10/plan-
-v2.json` is an immutable plan version, so it is not edited here, and the
-differential above is not re-rendered to chase AC4 at the cost of AC1.
+for the same output and a single rendering cannot satisfy both. The
+defect is in the plan, not in this record:
+`factory/specs/active/phase-10/plan-v2.json` is an immutable plan
+version, so it is not edited here, and the differential above is not
+re-rendered to chase AC4 at the cost of AC1.
 
 ### Wave 3 — mid-wave, not graded here
 
@@ -464,14 +465,26 @@ $ node factory/orchestrator/dist/cli.js daemon run --once \
     --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
 ```
 
-Exit 0. One tick, both sessions folded. `phase-10-2026-09-04` raised a
-`budget` finding at `attention` — "at-risk: 2,016,300 tokens measured
-across 10 of 11 task(s), 3,236,300 projected, against a 2,800,000 alarm
-and a 4,000,000 cap" — and a `stale-agent` finding: "planner
-(claude/frontier) has been live for 7.5h with no result, error or
-supersession — past the 4h threshold." A `maintenance` and a
-`growth-review` finding also came back, both `operator`-held. Two
-`attention`, zero new since this was the first tick against this dir.
+Exit 0. One tick, sessions `[maint-2026-09-03, phase-10-2026-09-04]`.
+`maint-2026-09-03` raised one `budget` finding at `info`, "unverifiable:
+No epic in this session has a task the log attributes to it" — this
+epic's own log is `phase-10-2026-09-04`, and that is where the rest of
+this fold stays. `phase-10-2026-09-04` raised five findings: a `budget`
+finding at `attention` — "at-risk: 2,016,300 tokens measured across 10 of
+11 task(s), 3,236,300 projected, against a 2,800,000 alarm and a
+4,000,000 cap"; an `unattributed-spend` finding at `info` — "1
+dispatch(es) (planner) name no epic, so their tokens are in no cap.
+Attribute them or accept that the session total is a floor" — the same
+planner dispatch the budget finding's own "Holes:" clause names; a
+`stale-agent` finding at `attention` — "planner (claude/frontier) has
+been live for 7.7h with no result, error or supersession — past the 4h
+threshold"; and a `maintenance` and a `growth-review` finding, both
+`info` and both `operator`-held. The tick's own counters: `attention: 2,
+newAttention: 2, autoAdmitted: 0, operatorHeld: 2, projected: 2`.
+`newAttention` is 2, not 0 — a first tick against an empty `--dir` has no
+prior state to diff against, so every finding it raises comes back
+`isNew: true`. No file this run wrote lands in the repository; `--dir`
+named a scratch directory outside it.
 
 ```
 $ node factory/orchestrator/dist/cli.js scheduler admit \
