@@ -4,8 +4,8 @@ import {
   GATE_BLOCKED_REASONS,
   type GateBlockedReason,
   renderBody,
-  renderTitle,
   renderComment,
+  renderTitle,
   toIssueBodyFields,
   toIssueCommentFields,
 } from '../src/errorIssues.js';
@@ -260,5 +260,170 @@ describe('foldErrorEvents', () => {
     const report = result.reports[0];
     if (!report) throw new Error('expected one report');
     expect(renderTitle(report)).toBe('epic-1/task-a: gate.blocked.tests-failed');
+  });
+
+  // Branch coverage for the remaining arms `toCandidate`, the reduce that
+  // picks each fingerprint group's newest occurrence, and the null-epic
+  // render path leave untouched by the acceptance-criterion tests above.
+
+  it('a missing payload defaults to {} and is ignored as not-blocked (asString/payload fallback)', () => {
+    const noPayload: StoredEvent = {
+      event_id: 'e-no-payload',
+      record: {
+        session_id: 'session-1',
+        actor: 'system',
+        event_type: 'gate-outcome',
+        plan_version: 1,
+        causal_parent: null,
+        payload: undefined as unknown as Record<string, unknown>,
+        ts: '2026-01-01T00:00:00.000Z',
+        task_id: 'epic-1/task-a',
+      },
+    };
+
+    const result = foldErrorEvents([noPayload], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(0);
+    expect(result.skipped).toBe(0);
+  });
+
+  it('a non-finite plan_version is treated as absent (asNumber rejects it)', () => {
+    const event = gateBlocked('epic-1/task-a', 'tests-failed', {
+      plan_version: Number.NaN,
+    });
+
+    const result = foldErrorEvents([event], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    const report = result.reports[0];
+    if (!report) throw new Error('expected one report');
+    expect(report.plan_version).toBeNull();
+
+    const body = renderBody(toIssueBodyFields(report));
+    const comment = renderComment(toIssueCommentFields(report));
+    expect(body).toContain('Plan version: (unknown)');
+    expect(comment).toContain('Plan version: (unknown)');
+  });
+
+  it('a gate-outcome that is not blocked is ignored, not folded', () => {
+    const notBlocked = ev('gate-outcome', { outcome: 'passed' }, { task_id: 'epic-1/task-a' });
+
+    const result = foldErrorEvents([notBlocked], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(0);
+    expect(result.skipped).toBe(0);
+  });
+
+  it('a blocked gate-outcome missing task_id is malformed and skipped', () => {
+    const malformed = ev('gate-outcome', { outcome: 'blocked', reason: 'tests-failed' }, {});
+
+    const result = foldErrorEvents([malformed], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(0);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('a blocked gate-outcome with a reason outside the ten-string vocabulary is malformed and skipped', () => {
+    const unknownReason = gateBlocked('epic-1/task-a', 'not-a-real-reason');
+
+    const result = foldErrorEvents([unknownReason], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(0);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('error-logged falls back to payload.task_ref when the event carries no task_id', () => {
+    const event = ev(
+      'error-logged',
+      { error: 'execution.test-failure', severity: 'S2-major', task_ref: 'epic-1/task-a' },
+      {},
+    );
+
+    const result = foldErrorEvents([event], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    const report = result.reports[0];
+    if (!report) throw new Error('expected one report');
+    expect(report.task_ref).toBe('epic-1/task-a');
+  });
+
+  it('a task-added event whose task_status is not failed is ignored', () => {
+    const notFailed = ev(
+      'task-added',
+      { task_status: 'in-progress' },
+      { task_id: 'epic-1/task-a' },
+    );
+
+    const result = foldErrorEvents([notFailed], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(0);
+    expect(result.skipped).toBe(0);
+  });
+
+  it('a failed task-added event missing task_id is malformed and skipped', () => {
+    const malformed = ev('task-added', { task_status: 'failed' }, {});
+
+    const result = foldErrorEvents([malformed], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(0);
+    expect(result.skipped).toBe(1);
+  });
+
+  it('a failed task-added event with no epic_id folds with a null epic, rendered as (none)', () => {
+    const event = ev('task-added', { task_status: 'failed' }, { task_id: 'epic-1/task-a' });
+
+    const result = foldErrorEvents([event], '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    const report = result.reports[0];
+    if (!report) throw new Error('expected one report');
+    expect(report.epic_id).toBeNull();
+
+    const body = renderBody(toIssueBodyFields(report));
+    const comment = renderComment(toIssueCommentFields(report));
+    expect(body).toContain('Epic: (none)');
+    expect(comment).toContain('Epic: (none)');
+  });
+
+  it('drops candidates from a disabled project while keeping enabled ones', () => {
+    const events: StoredEvent[] = [
+      gateBlocked('epic-1/task-a', 'tests-failed', { project: 'enabled-proj' }),
+      gateBlocked('epic-1/task-b', 'tests-failed', { project: 'disabled-proj' }),
+    ];
+    const isProjectEnabled = (project: string) => project === 'enabled-proj';
+
+    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', isProjectEnabled);
+
+    expect(result.reports).toHaveLength(1);
+    expect(result.reports[0]?.project).toBe('enabled-proj');
+  });
+
+  it('the latest-occurrence reduce picks the newest ts, and breaks ties on event id', () => {
+    // Same fingerprint group (same project/source/error_class/task_ref),
+    // fed out of chronological order so the reduce must reject an earlier
+    // `b` (accumulator stays `a`), then break a tied timestamp on event id
+    // both ways: `b` wins when its id sorts later, `a` stays when it does not.
+    const events: StoredEvent[] = [
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'e-2',
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'e-1',
+        ts: '2026-01-01T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'e-3',
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'a-0',
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+    ];
+
+    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    expect(result.reports).toHaveLength(4);
+    // Newest ts is 2026-01-03; among the three sharing it, 'e-3' sorts
+    // after both 'e-2' and 'a-0' lexicographically.
+    expect(result.reports.every((r) => r.latest_event_id === 'e-3')).toBe(true);
   });
 });
