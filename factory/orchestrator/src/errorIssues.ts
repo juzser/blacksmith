@@ -2,31 +2,20 @@ import { createHash } from 'node:crypto';
 import type { StoredEvent } from './events.js';
 
 /**
- * Pure core of the factory-error-log mechanism (epic `factory-error-log`,
- * task 2): fold the event log into reportable errors, fingerprint them, and
- * render an issue title, body and comment from named fields only.
+ * Pure core of the factory-error-log mechanism: fold the event log into
+ * reportable errors from three sources -- a blocked `gate-outcome`, a task
+ * reaching `task_status: failed`, and every `error-logged` (including
+ * hand-appended ones no in-process hook could observe) -- fingerprint them,
+ * and render an issue title/body/comment from named fields only.
  *
- * It folds the LOG, not the call sites. The three sources the epic names --
- * a `gate-outcome` blocked, a task reaching `task_status: failed`, and every
- * `error-logged` -- share no call site (`error-logged` is routinely written
- * BY HAND through `smith event append`, which no in-process hook can ever
- * observe), but they share one writer, `appendEvent`, and therefore one
- * reader: the log. A hook-shaped producer covers at most two of the three; a
- * fold over already-stored events covers all three uniformly.
- *
- * Purity: no filesystem, no network, no child process, no clock. Events
- * arrive as a parameter, `now` arrives as a parameter, and project
- * enablement arrives as a parameter -- this module never reads the roadmap.
+ * Purity: no filesystem, no network, no child process, no clock. Events,
+ * `now`, and project enablement all arrive as parameters.
  */
 
-// ---------------------------------------------------------------------------
-// Source 1 -- `gate-outcome` blocked. `reason` is one of exactly ten
-// strings, gate.ts's `GateOutcome`'s blocked arm (gate.ts:220-230). Restated
-// here because the type carries no runtime value to import; test/errorIssues
-// .test.ts ties this list back to `GateOutcome` with a compile-time equality
-// check, so the two cannot drift silently.
-// ---------------------------------------------------------------------------
-
+// Source 1: `gate-outcome` blocked. `reason` is one of exactly ten strings,
+// gate.ts's `GateOutcome`'s blocked arm (not exported as a runtime value, so
+// restated here; test/errorIssues.test.ts ties this back to `GateOutcome`
+// with a compile-time equality check).
 export type GateBlockedReason =
   | 'schema-invalid'
   | 'artifacts-missing'
@@ -39,14 +28,7 @@ export type GateBlockedReason =
   | 'coverage-evidence'
   | 'findings';
 
-/**
- * The error-class table for source 1. A `Record` over every
- * `GateBlockedReason` rather than a template literal or a switch with a
- * default arm: TypeScript refuses to compile this object if a reason is
- * ever added to or removed from the type above without updating it here, and
- * a `reason` read off an event that is not one of these ten keys is treated
- * as malformed (see `toCandidate`) rather than silently mapped to something.
- */
+/** A `Record` over every `GateBlockedReason`, not a switch with a default: a reason missing from `GateBlockedReason` fails to compile here. */
 const GATE_BLOCKED_ERROR_CLASSES: Record<GateBlockedReason, string> = {
   'schema-invalid': 'gate.blocked.schema-invalid',
   'artifacts-missing': 'gate.blocked.artifacts-missing',
@@ -61,53 +43,35 @@ const GATE_BLOCKED_ERROR_CLASSES: Record<GateBlockedReason, string> = {
 };
 
 /** Exported for the table-driven test: the ten reasons, read off the table above rather than hand-copied a second time. */
-export const GATE_BLOCKED_REASONS = Object.keys(
-  GATE_BLOCKED_ERROR_CLASSES,
-) as GateBlockedReason[];
+export const GATE_BLOCKED_REASONS = Object.keys(GATE_BLOCKED_ERROR_CLASSES) as GateBlockedReason[];
 
-/**
- * A blocked gate and a failed task carry no payload-level severity (only
- * `error-logged` does, taxonomy.yml requiring it as one of the "error"
- * record type's dimensions). Both conditions block a task outright, which is
- * exactly severity.yml's own definition of `S2-major` ("blocks merge...
- * broken core flow"), so that is the constant this module assigns them.
- */
+/** A blocked gate and a failed task carry no payload-level severity; both block a task outright, matching taxonomy.yml's `S2-major`. */
 const BLOCKING_SEVERITY = 'S2-major';
 
-/** The literal event types this fold understands, one entry per source. */
 const GATE_OUTCOME_EVENT_TYPE = 'gate-outcome';
 const ERROR_LOGGED_EVENT_TYPE = 'error-logged';
 const TASK_ADDED_EVENT_TYPE = 'task-added';
 
 /**
- * A payload string becomes a task's `task_status` in exactly one place in
- * the whole projector: `db/projector.ts`'s `case 'task-added'` arm does
- * `row.taskStatus = p.task_status ?? row.taskStatus` (db/projector.ts:612-613,
- * and see events.ts:516-519's comment on the same line) -- every other
- * assignment in that switch sets a literal from the status vocabulary, never
- * a value read off a payload. So source 2, "a task reaches
- * `task_status: failed`", can only be produced by a `task-added` event whose
- * own payload already declares `task_status: 'failed'` (a task re-added, or
- * hand-appended, already in a terminal state) -- there is no other event
- * type in this codebase that can put a task into that status. `task-added`'s
- * payload (see taskEvents.ts's `addedPayload`) carries no separate failure
- * discriminator, so this source's error class is exactly `task.failed`, with
- * no extension.
+ * Source 2: `task_status: failed` is set in exactly one place in the whole
+ * projector, `db/projector.ts`'s `case 'task-added'` arm copying
+ * `p.task_status` verbatim -- every other case assigns a hardcoded literal,
+ * never a payload-derived value. So this source is always a `task-added`
+ * event whose own payload already declares `task_status: 'failed'`, and
+ * carries no failure discriminator beyond that.
  */
 const TASK_FAILED_ERROR_CLASS = 'task.failed';
 
-/** Default project for an event stamped with none, matching events.ts's documented convention (db/queries.ts's read helpers apply the same default; the writer never does). */
+/** Default project for an event stamped with none (events.ts's documented convention; the writer never sets it, only read helpers default it). */
 const DEFAULT_PROJECT = 'black-smith';
 
 export type ErrorSource = 'gate-outcome' | 'error-logged' | 'task-failed';
 
 /**
- * One reportable error, folded from one contributing log event and enriched
- * with its fingerprint group's newest occurrence (clause 3/5). `severity`,
+ * One reportable error, folded from one contributing log event. `severity`,
  * `latest_event_id`, `timestamp`, `session_id`, `epic_id` and `plan_version`
- * describe that newest occurrence -- identical across every report sharing a
- * fingerprint -- so a caller comparing `latest_event_id` against a
- * previously stored value never has to rescan the log or recompute it.
+ * describe its fingerprint group's newest occurrence -- identical across
+ * every report sharing a fingerprint.
  */
 export interface ErrorReport {
   fingerprint: string;
@@ -125,7 +89,7 @@ export interface ErrorReport {
 
 export interface FoldResult {
   reports: ErrorReport[];
-  /** Count of events that matched one of the three sources by shape but could not be turned into a report -- a missing or malformed required field. Never thrown. */
+  /** Events matching a source's shape but missing a required field. Never thrown. */
   skipped: number;
 }
 
@@ -151,11 +115,9 @@ function asNumber(value: unknown): number | undefined {
 }
 
 /**
- * One event to a `Candidate`, or `null` when the event either is not one of
- * the three sources at all (ignored, not counted) or matches a source's
- * shape but is missing a required field (malformed, counted by the caller).
- * Distinguished by returning `'ignore'` for the former and `null` for the
- * latter.
+ * One event to a `Candidate`, `'ignore'` when it is not one of the three
+ * sources at all, or `null` when it matches a source's shape but is missing
+ * a required field (malformed, counted by the caller as `skipped`).
  */
 function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
   const { record } = event;
@@ -189,7 +151,8 @@ function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
   if (record.event_type === ERROR_LOGGED_EVENT_TYPE) {
     const errorClass = asString((payload as { error?: unknown }).error);
     const severity = asString((payload as { severity?: unknown }).severity);
-    const taskRef = asString(record.task_id) ?? asString((payload as { task_ref?: unknown }).task_ref);
+    const taskRef =
+      asString(record.task_id) ?? asString((payload as { task_ref?: unknown }).task_ref);
     if (!sessionId || !ts || !taskRef || !errorClass || !severity) return null;
     return {
       project,
@@ -228,14 +191,11 @@ function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
 }
 
 /**
- * The fingerprint is exactly this: the first 16 hex characters of a
- * SHA-256 over the NUL-joined tuple `project`, `source`, `error_class`,
- * `task_ref`. It deliberately excludes session id, epic id, plan version,
- * event id, timestamp and detail -- the failure the operator named is one
- * broken gate repeating across five rounds, and session, plan version and
- * timestamp are precisely the fields that change between those rounds. A
- * fingerprint that included any of them would be correct-looking and would
- * open five issues instead of one.
+ * The first 16 hex characters of a SHA-256 over the NUL-joined tuple
+ * `project`, `source`, `error_class`, `task_ref`. Deliberately excludes
+ * session id, epic id, plan version, event id and timestamp -- those are
+ * exactly the fields that change across repeated rounds of one broken gate,
+ * and including any of them would open one issue per round instead of one.
  */
 function computeFingerprint(
   project: string,
@@ -243,16 +203,14 @@ function computeFingerprint(
   errorClass: string,
   taskRef: string,
 ): string {
-  const material = [project, source, errorClass, taskRef].join(' ');
+  const material = [project, source, errorClass, taskRef].join('\0');
   return createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
 /**
  * Fold a stored event sequence into reportable errors. Pure: two calls with
- * identical input return byte-identical output (verified by a JSON-equality
- * test). `now` is threaded in rather than read off the clock so the fold
- * never has to reach for `Date.now()` even if a later clause needs it;
- * nothing in this task's contract branches on it, so it is otherwise unread.
+ * identical input return byte-identical output. `now` is threaded in rather
+ * than read off the clock; nothing in this contract branches on it yet.
  */
 export function foldErrorEvents(
   events: readonly StoredEvent[],
@@ -313,13 +271,9 @@ export function foldErrorEvents(
   return { reports, skipped };
 }
 
-// ---------------------------------------------------------------------------
 // Rendering -- metadata and pointers only, safe by construction. Both
 // renderers take the same shape of typed record, built from an ErrorReport,
-// never a raw source event: there is no `detail`/`text`/`string` free-text
-// field anywhere in either signature, so there is nothing for a filter to
-// miss.
-// ---------------------------------------------------------------------------
+// never a raw source event: neither signature has a free-text field.
 
 /** The fixed literal format of the machine-readable fingerprint line, exported so the dedup search and the renderer read the same constant. */
 export const FINGERPRINT_LINE_PREFIX = 'Fingerprint: ';
@@ -328,7 +282,7 @@ function fingerprintLine(fingerprint: string): string {
   return `${FINGERPRINT_LINE_PREFIX}${fingerprint}`;
 }
 
-/** The local, read-only command an operator runs to see the detail this body and comment deliberately omit. `--lineage` follows the epic across sessions, the same reason cli.ts's `event tail --lineage` does. */
+/** The local, read-only command an operator runs to see the detail this body/comment deliberately omit. */
 function smithEventCommand(sessionId: string): string {
   return `smith event tail ${sessionId} --lineage`;
 }
@@ -371,7 +325,7 @@ export function toIssueBodyFields(report: ErrorReport): IssueBodyFields {
   };
 }
 
-/** Builds a comment-renderer input record from a folded report -- the higher-volume write path gets the same allowlist-by-construction guarantee, by the same mechanism. */
+/** Builds a comment-renderer input record from a folded report -- same allowlist-by-construction guarantee, same mechanism. */
 export function toIssueCommentFields(report: ErrorReport): IssueCommentFields {
   return {
     latest_event_id: report.latest_event_id,
@@ -406,7 +360,7 @@ export function renderBody(fields: IssueBodyFields): string {
   ].join('\n');
 }
 
-/** Issue comment -- the higher-volume write path (D-load: five rounds of one broken gate write one body and four comments). Same allowlist construction. */
+/** Issue comment -- the higher-volume write path (five rounds of one broken gate write one body and four comments). Same allowlist construction. */
 export function renderComment(fields: IssueCommentFields): string {
   return [
     `New occurrence: ${fields.latest_event_id}`,

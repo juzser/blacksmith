@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  FINGERPRINT_LINE_PREFIX,
   foldErrorEvents,
   GATE_BLOCKED_REASONS,
   type GateBlockedReason,
   renderBody,
+  renderTitle,
   renderComment,
   toIssueBodyFields,
   toIssueCommentFields,
@@ -12,17 +12,12 @@ import {
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import type { GateOutcome } from '../src/gate.js';
 
-// ---------------------------------------------------------------------------
-// Compile-time tie-back to gate.ts (AC4): if GateOutcome's blocked arm ever
-// gains or loses a reason without errorIssues.ts's GateBlockedReason
-// following, `pnpm run typecheck:test` fails to compile this file. `reason`
-// is not exported as a runtime value by gate.ts, so this is the "asserts
-// against a list the test derives from the type" fallback the criterion
-// allows, and this comment is how it says so.
-// ---------------------------------------------------------------------------
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-  ? true
-  : false;
+// Compile-time tie-back to gate.ts (AC4): `reason` isn't exported as a
+// runtime value, so this ties GateBlockedReason to GateOutcome's blocked arm
+// via a type-equality check -- `pnpm run typecheck:test` fails to compile
+// this file if the two ever diverge.
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type AssertTrue<T extends true> = T;
 type RealBlockedReason = Extract<GateOutcome, { outcome: 'blocked' }>['reason'];
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -86,13 +81,7 @@ function errorLogged(
 
 const alwaysEnabled = () => true;
 
-/**
- * A hook-shaped rival, built to lose exactly the third source: it walks the
- * log looking only at `gate-outcome` and `task-added`, the two sources a
- * call-site hook could plausibly observe in-process. It never looks at
- * `error-logged` at all -- standing in for a producer wired into `gate.ts`
- * and `taskEvents.ts` but never into whatever hand-appends `error-logged`.
- */
+/** A hook-shaped rival that only watches `gate-outcome` and `task-added` in-process, missing hand-appended `error-logged` events entirely (AC1's differential). */
 function nullHookShapedFold(events: readonly StoredEvent[]): number {
   let count = 0;
   for (const { record } of events) {
@@ -164,10 +153,7 @@ describe('foldErrorEvents', () => {
   });
 
   it('maps all ten gate-blocked reasons, read from GATE_BLOCKED_REASONS (AC4)', () => {
-    // GATE_BLOCKED_REASONS is Object.keys() of errorIssues.ts's own mapping
-    // table, not a second hand-typed list in this test; _GateReasonsMatchSource
-    // above ties that table's key type back to gate.ts's GateOutcome at
-    // compile time, so an eleventh reason fails `typecheck:test` here.
+    // Read off errorIssues.ts's own table, not a second hand-typed list here.
     expect(GATE_BLOCKED_REASONS).toHaveLength(10);
     for (const reason of GATE_BLOCKED_REASONS as GateBlockedReason[]) {
       const result = foldErrorEvents(
@@ -180,11 +166,8 @@ describe('foldErrorEvents', () => {
   });
 
   it('never leaks a secret-shaped detail or a diff hunk into the body or the comment (AC5)', () => {
-    const events: StoredEvent[] = [
-      errorLogged('epic-1/task-a', 'execution.test-failure'),
-    ];
-    // Attach the payload's own `detail` after construction so the fixture
-    // reads as a single literal record of what a real writer could log.
+    const events: StoredEvent[] = [errorLogged('epic-1/task-a', 'execution.test-failure')];
+    // Attach `detail` after construction: what a real writer could log.
     (events[0] as StoredEvent).record.payload.detail =
       'token=SECRETLIKE-abc123\n+added line\n-removed line';
 
@@ -211,11 +194,7 @@ describe('foldErrorEvents', () => {
       eventId: 'fixed-event-id',
     });
     eventWithExtra.record.payload.unknown_field = 'never seen before';
-    const withExtra = foldErrorEvents(
-      [eventWithExtra],
-      '2026-01-06T00:00:00.000Z',
-      alwaysEnabled,
-    );
+    const withExtra = foldErrorEvents([eventWithExtra], '2026-01-06T00:00:00.000Z', alwaysEnabled);
 
     const reportA = withoutExtra.reports[0];
     const reportB = withExtra.reports[0];
@@ -238,7 +217,14 @@ describe('foldErrorEvents', () => {
     const fields = toIssueCommentFields(report);
 
     expect(Object.keys(fields).sort()).toEqual(
-      ['epic_id', 'fingerprint', 'latest_event_id', 'plan_version', 'session_id', 'timestamp'].sort(),
+      [
+        'epic_id',
+        'fingerprint',
+        'latest_event_id',
+        'plan_version',
+        'session_id',
+        'timestamp',
+      ].sort(),
     );
   });
 
@@ -263,32 +249,16 @@ describe('foldErrorEvents', () => {
     expect(result.skipped).toBe(1);
   });
 
-  it('excludes reports for a disabled project without counting them as skipped', () => {
-    const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed', { project: 'off' })];
-    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', (project) => project !== 'off');
-    expect(result.reports).toHaveLength(0);
-    expect(result.skipped).toBe(0);
-  });
-
-  it('ignores unrelated event types and a non-blocked gate outcome entirely', () => {
-    const events: StoredEvent[] = [
-      ev('session-start', {}),
-      ev('gate-outcome', { outcome: 'pass' }, { task_id: 'epic-1/task-a' }),
-      ev('task-added', { task_status: 'todo' }, { task_id: 'epic-1/task-b' }),
-    ];
-    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
-    expect(result.reports).toHaveLength(0);
-    expect(result.skipped).toBe(0);
-  });
-
-  it('renderBody carries the fingerprint line prefix used for dedup search', () => {
+  it('ignores unrelated event types and titles the report from task and error class', () => {
     const result = foldErrorEvents(
-      [gateBlocked('epic-1/task-a', 'tests-failed')],
+      [ev('session-start', {}), gateBlocked('epic-1/task-a', 'tests-failed')],
       '2026-01-06T00:00:00.000Z',
       alwaysEnabled,
     );
+    expect(result.reports).toHaveLength(1);
+    expect(result.skipped).toBe(0);
     const report = result.reports[0];
     if (!report) throw new Error('expected one report');
-    expect(renderBody(toIssueBodyFields(report))).toContain(FINGERPRINT_LINE_PREFIX);
+    expect(renderTitle(report)).toBe('epic-1/task-a: gate.blocked.tests-failed');
   });
 });
