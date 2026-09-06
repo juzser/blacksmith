@@ -15259,3 +15259,150 @@ else. One or the other — the present pair cannot both be true.
 **Status: open, recorded 2026-09-05** — event `phase-10-2026-09-04#334`.
 
 **Related:** [[D-284]], [[D-286]].
+
+## D-297 — an idempotence promise with no word for two of them at once
+
+**Severity:** S3-minor.
+
+**Where:** `factory/specs/active/factory-error-log/plan-v1.json`, task
+`factory-error-log/task-4-the-run-opens-it-and-says-so` — functional clause 0
+against clause 2 and acceptance criterion 8.
+
+**How it opened.** Not by review. Four spec-review rounds read this contract
+and none of them raised it; the round-4 reviewer returned S1 0, S2 0, S3 0,
+S4 3 and the loop closed clean. It was found by `codex`, one of the two
+external judges the plan quorum dispatched at `/bs plan` step 4, reasoning
+from objective lines and trigger clause text alone — its own prompt tells it
+that it has no file contents and no diff. Its rationale, verbatim:
+
+> Task 4 claims idempotence without specifying concurrency control or
+> recovery when GitHub accepts a write but the process dies before recording
+> issue-reported: concurrent reporters can both create an issue, and retries
+> can duplicate comments. Deduplicating against open issues alone does not
+> establish the promised guarantee that a doubled invocation opens nothing
+> twice.
+
+Three sub-claims, adjudicated against the plan text one at a time rather than
+accepted or rejected whole.
+
+**The mechanism.** Sub-claim one is wrong. The plan does not deduplicate
+against open issues alone: clause 1's step 4 is a log-based short-circuit that
+makes no network call at all, step 6 is the search-based one, and clause 3
+exists to explain why both are needed. The judge could not see that procedure,
+which is a fact about what the quorum ships, not about the plan.
+
+Sub-claim two is half right. If GitHub accepts the create and the process dies
+before the `issue-reported` row is appended, the next run misses at step 4,
+searches at step 5, finds the open issue at step 6, and comments. No second
+issue — the promise survives. But the recovery is a comment, and it lands on
+the issue the dead run just opened, so each failure in that window costs one
+spurious comment. Criterion 8 tests idempotence over an INTACT log — it feeds
+the first call's own `issue-reported` events back in as history — so the
+missing-row path has no instrument.
+
+Sub-claim three is right and wholly unaddressed. Measured across the whole
+111,258-byte file rather than inferred: the substring `concurren` appears
+**zero** times. So does `TOCTOU`, and so does `simultaneous`. The one `race`
+hit is the substring inside the word *trace*; the one `crash` hit belongs to
+task 6's daemon; all 35 `lock` hits are inside *blocked*. There is no lease,
+no single-flight, no advisory file anywhere in the plan. Two `reportErrors()`
+in flight at once both miss step 4, both search and both miss at step 6, and
+both create at step 7: two issues for one fingerprint.
+
+Clause 0 scopes its promise to "Called twice over the same log with the same
+recorded history it opens nothing the second time" — which is sequential, so
+the contract does not literally claim the concurrent case. It does not exclude
+it either, and task 5 ships an operator CLI verb that can run while a run is
+in flight, which is exactly how two reporters happen on one machine.
+
+**Why it stays open rather than being fixed here.** Two reasons, and the
+second is the interesting one. A plan version is immutable — `plan.ts`
+`nextVersion()` is the only writer — so the correction would have to be a plan
+v2, and the operator declined one on 2026-09-06 after being shown this gap by
+name. And the obvious remedy fights a fork the same task already settled:
+clause 2 chose "Dedup asks GitHub, not a local index" and says in capitals
+that NO local index under `state/` is created, while `state/` is where a lock
+would naturally live. So this is a design question, not a line edit, and the
+natural fix is forbidden by the clause two lines above it.
+
+**Severity, argued rather than asserted.** S3-minor, not S2. The blast radius
+is a duplicate GitHub issue, not data loss and not a security failure; the
+window is between the search and the create; every path still records one of
+the eight outcome words, so nothing goes silent.
+
+**The fix.** Not applied, accepted for v1 by the operator. Whichever version
+takes it up owes a decision on the fork clause 2 closed: either a
+single-flight guard that is not a local index — an advisory lock the search
+step itself takes, or narrowing the window by re-checking immediately before
+the create — or reopening clause 2. Criterion 8 also needs a sibling that
+drops the `issue-reported` row before the second call, so the interrupted path
+has an instrument at all.
+
+**Status: open, recorded 2026-09-06** — events
+`factory-error-log-2026-09-05#28` (the adjudication) and `#30` (the operator's
+signature accepting it).
+
+**Related:** [[D-286]], [[D-296]], [[D-298]].
+
+## D-298 — a plan version telling its reader it lacks what it has
+
+**Severity:** S3-minor.
+
+**Where:** `factory/specs/active/factory-error-log/plan-v1.json`, the
+`objective` of `factory-error-log/task-7-a-fact-nobody-can-read-is-not-a-fact`.
+
+**How it opened.** `deepseek`, the shadow judge in the same plan quorum that
+produced [[D-297]], refuted the plan. Its rationale, verbatim:
+
+> The plan text itself, under task 7's "PLAN V2 CORRECTION," states that v1
+> had neither the claim nor the migration required for the new storage, so
+> task 7's read-model contract cannot be satisfied as scoped in v1.
+
+Checked against the file: the refutation is **wrong on substance**. Task 7
+does claim `factory/orchestrator/src/db/schema.ts` and
+`factory/orchestrator/drizzle/**`, and its criterion 2 opens "The migration is
+what makes it readable", so the migration is criterion-enforced. The claim and
+the migration are both present. But the judge did not hallucinate: it quoted
+the plan accurately and drew the only conclusion that sentence supports.
+
+**The mechanism.** The objective carries the literal string:
+
+> PLAN V2 CORRECTION: this task's contract requires new STORAGE, and in v1 it
+> had neither the claim nor the migration to build it.
+
+Inside the file that IS plan v1 — which does have both. The planner was
+describing what it had just repaired between two of its own DRAFT ROUNDS and
+wrote "v1" where it meant "the previous draft". `version` never moved off 1
+through five drafts; a draft round is not a plan version. This is the same
+conflation already recorded on this epic's timeline at
+`factory-error-log-2026-09-05#10`, recurring after being recorded once.
+
+Two things make it more than a typo. The string appears exactly once in the
+whole plan and it sits in an `objective` — and objectives are precisely what
+`planQuorumJudgeRequest` ships to external judges, which is how a judge with
+no file access came to read it. And four spec-review rounds passed over it,
+because a reviewer reads a clause for what it obliges and this sentence
+obliges nothing.
+
+The cost lands later. A coder opening task 7 is told by its own objective that
+the claims it is about to edit do not exist in the version it is working from.
+
+**The fix.** Not applied and not applicable in place: the plan file is
+immutable, and [[D-286]] is the standing precedent for what a known wording
+defect costs after the freeze. The operator was shown this before signing and
+accepted it. The mitigation is procedural and owed at dispatch — task 7's
+dispatch brief carries an explicit line saying the sentence is false, that the
+claim and the migration are both in v1, and that the objective is wrong about
+itself and right about everything else.
+
+The durable repair is upstream of any one plan. A planner that writes a
+version numeral into prose is asserting a fact only the orchestrator can
+check, and nothing checks it. A draft-to-draft diff guard on the literal `v1`,
+or a plain instruction that draft rounds are never named in plan prose, would
+have caught this in any of five rounds.
+
+**Status: open, recorded 2026-09-06** — events
+`factory-error-log-2026-09-05#28` (the adjudication) and `#30` (the operator's
+signature accepting it).
+
+**Related:** [[D-286]], [[D-297]].
