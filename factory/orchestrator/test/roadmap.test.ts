@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadRoadmap, parseRoadmap, RoadmapError } from '../src/roadmap.js';
+import { isErrorTrackerWritable, loadRoadmap, parseRoadmap, RoadmapError } from '../src/roadmap.js';
 
 let scratchDirs: string[] = [];
 
@@ -43,6 +43,7 @@ describe('roadmap.ts parseRoadmap()', () => {
         epicIds: [],
         project: 'black-smith',
         kind: 'factory',
+        errorIssuesEnabled: true,
       },
       {
         milestoneId: 'phase-2',
@@ -53,6 +54,7 @@ describe('roadmap.ts parseRoadmap()', () => {
         epicIds: ['epic-1', 'epic-2'],
         project: 'black-smith',
         kind: 'factory',
+        errorIssuesEnabled: true,
       },
     ]);
   });
@@ -378,6 +380,105 @@ describe('roadmap.ts parseRoadmap() milestone kind', () => {
     expect((caught as RoadmapError).code).toBe('roadmap.conflicting-kind');
     expect((caught as RoadmapError).message).toContain('envkit-bootstrap');
     expect((caught as RoadmapError).message).toContain('envkit-mcp');
+  });
+});
+
+/**
+ * `- error_issues:` says whether the factory may open issues on a project's
+ * own tracker for its build-time errors. Default ON, matching `kind`'s shape
+ * exactly: it describes a PROJECT while being written on a MILESTONE, so one
+ * bullet settles every milestone naming that project, and an explicit
+ * disagreement is a refusal rather than a precedence rule.
+ */
+describe('roadmap.ts parseRoadmap() error_issues', () => {
+  it('parses "- error_issues: off" and reports the tracker as not writable', () => {
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+- error_issues: off
+`;
+    const milestones = parseRoadmap(md);
+    expect(isErrorTrackerWritable(milestones, milestones[0]?.project ?? '')).toBe(false);
+  });
+
+  it('throws roadmap.invalid-error-issues, never degrading to the default, on an unreadable value', () => {
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+- error_issues: maybe
+`;
+    let caught: unknown;
+    let milestones: ReturnType<typeof parseRoadmap> | undefined;
+    try {
+      milestones = parseRoadmap(md);
+    } catch (err) {
+      caught = err;
+    }
+    expect(milestones).toBeUndefined();
+    expect(caught).toBeInstanceOf(RoadmapError);
+    expect((caught as RoadmapError).code).toBe('roadmap.invalid-error-issues');
+    expect((caught as RoadmapError).message).toContain('phase-1');
+    expect((caught as RoadmapError).message).toContain('maybe');
+  });
+
+  it('throws roadmap.conflicting-error-issues when two milestones disagree about one project', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- error_issues: on
+
+## envkit — mcp surface
+- id: envkit-mcp
+- status: planned
+- project: envkit
+- error_issues: off
+`;
+    let caught: unknown;
+    try {
+      parseRoadmap(md);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(RoadmapError);
+    expect((caught as RoadmapError).code).toBe('roadmap.conflicting-error-issues');
+    expect((caught as RoadmapError).message).toContain('envkit-bootstrap');
+    expect((caught as RoadmapError).message).toContain('envkit-mcp');
+  });
+
+  it('settles error_issues project-wide from a single bullet, on the milestone that lacks it too', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- error_issues: off
+
+## envkit — mcp surface
+- id: envkit-mcp
+- status: planned
+- project: envkit
+`;
+    const milestones = parseRoadmap(md);
+    expect(isErrorTrackerWritable(milestones, 'envkit')).toBe(false);
+    const mcp = milestones.find((m) => m.milestoneId === 'envkit-mcp');
+    expect(mcp?.errorIssuesEnabled).toBe(false);
+  });
+
+  it.each([
+    ['no bullet', undefined, true],
+    ['empty bullet', '', true],
+    ['on', 'on', true],
+    ['ON', 'ON', true],
+    ['off', 'off', false],
+    ['OFF', 'OFF', false],
+  ])('%s resolves to writable=%s', (_label, bulletValue, expected) => {
+    const bullet = bulletValue === undefined ? '' : `- error_issues: ${bulletValue}\n`;
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+${bullet}`;
+    const milestones = parseRoadmap(md);
+    expect(milestones[0]?.errorIssuesEnabled).toBe(expected);
   });
 });
 

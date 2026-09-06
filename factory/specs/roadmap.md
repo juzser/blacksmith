@@ -19,8 +19,8 @@ Each milestone is a `## <name>` heading followed by bullet fields:
 `completed`), `goal` (optional, one sentence), `epics` (optional, `[]` when
 no epic has been mapped to this phase yet — the join yields zero tasks
 until an epic is tagged here), `project` (optional, defaults to
-`black-smith` — this clone), and `kind` (optional — `factory` | `dogfood` |
-`product`).
+`black-smith` — this clone), `kind` (optional — `factory` | `dogfood` |
+`product`), and `error_issues` (optional — `on` | `off`).
 
 `kind` describes the *project*, not the milestone, so one bullet anywhere in
 a project's milestones settles all of them; a second copy would only be a
@@ -31,6 +31,12 @@ a project built to exercise the factory looks, in the data, exactly like a
 project built for its own sake — the difference is intent. The Roadmap page
 shows `product` by default and hides the other two, so an operator asking
 "what has this factory built" is not reading past the factory's own phases.
+
+`error_issues` says whether the factory may open issues on a project's own
+tracker for its build-time errors. Like `kind`, it describes the *project*
+while being written on a milestone, so one bullet settles every milestone
+naming that project. It defaults to `on`, so no project needs the bullet at
+all; write `- error_issues: off` by hand to opt a project's tracker out.
 
 ## Phase 1 — Interview + standards
 - id: phase-1
