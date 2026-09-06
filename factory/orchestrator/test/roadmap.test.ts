@@ -480,6 +480,41 @@ ${bullet}`;
     const milestones = parseRoadmap(md);
     expect(milestones[0]?.errorIssuesEnabled).toBe(expected);
   });
+
+  it('settles each project independently, one off and one on', () => {
+    const md = `## envkit — bootstrap
+- id: envkit-bootstrap
+- status: completed
+- project: envkit
+- error_issues: off
+
+## black-smith — phase 1
+- id: phase-1
+- status: planned
+- error_issues: on
+`;
+    const milestones = parseRoadmap(md);
+    expect(isErrorTrackerWritable(milestones, 'envkit')).toBe(false);
+    expect(isErrorTrackerWritable(milestones, 'black-smith')).toBe(true);
+  });
+
+  it('isErrorTrackerWritable defaults to writable for a project that names no milestone at all', () => {
+    const md = `## Phase 1 — Bootstrap
+- id: phase-1
+- status: planned
+- error_issues: off
+`;
+    const milestones = parseRoadmap(md);
+    expect(isErrorTrackerWritable(milestones, 'a-project-with-no-milestones')).toBe(true);
+  });
+
+  it('the shipped roadmap.md parses with every project resolving to writable (the default)', () => {
+    const milestones = loadRoadmap();
+    const projects = new Set(milestones.map((m) => m.project));
+    for (const project of projects) {
+      expect(isErrorTrackerWritable(milestones, project)).toBe(true);
+    }
+  });
 });
 
 describe('roadmap.ts loadRoadmap()', () => {
