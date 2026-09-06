@@ -114,4 +114,31 @@ describe('git.ts', () => {
     expect(caught).toBeInstanceOf(GitCommandError);
     expect((caught as GitCommandError).stderr).toMatch(/no such remote/i);
   });
+
+  // status === null (killed by signal / never exited) is a real outcome the
+  // constructor must format distinctly from a numeric exit code, and a
+  // silent failure ("said nothing") must not read as an empty message.
+  it('formats a null status as "did not exit normally" and an empty stderr as "said nothing"', () => {
+    const error = new GitCommandError(repoDir, ['status'], null, '');
+    expect(error.status).toBeNull();
+    expect(error.stderr).toBe('');
+    expect(error.message).toContain('did not exit normally');
+    expect(error.message).toContain('and said nothing');
+  });
+
+  // A cwd that does not exist makes execFileSync fail to spawn at all: no
+  // exit status, no stderr, and node's own errno string in `code` instead --
+  // the one thing `exec`'s catch branch is there to report.
+  it('reports a spawn failure (no such cwd) with a null status and the errno in the message', () => {
+    let caught: unknown;
+    try {
+      runGit(path.join(repoDir, 'does-not-exist'), ['status']);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(GitCommandError);
+    const error = caught as GitCommandError;
+    expect(error.status).toBeNull();
+    expect(error.message).toContain('ENOENT');
+  });
 });

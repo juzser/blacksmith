@@ -147,6 +147,18 @@ describe('gh.ts', () => {
       );
     });
 
+    it('falls back to stdout for the reason when stderr is empty', () => {
+      const outcome = classifyGh(() => ({
+        status: 1,
+        stdout: 'not logged in to any GitHub hosts',
+        stderr: '',
+      }));
+      expect(outcome).toEqual({
+        outcome: 'unauthenticated',
+        reason: 'not logged in to any GitHub hosts',
+      });
+    });
+
     it('records every call the stub runner receives, so a test can assert the count', () => {
       const calls: Array<{ cmd: string; args: string[] }> = [];
       classifyGh((cmd, args) => {
