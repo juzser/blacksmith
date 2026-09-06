@@ -3,7 +3,13 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { GitCommandError, redactCredentials, runGit, runGitRaw } from '../src/git.js';
+import {
+  GitCommandError,
+  readOriginUrl,
+  redactCredentials,
+  runGit,
+  runGitRaw,
+} from '../src/git.js';
 
 describe('git.ts', () => {
   let repoDir: string;
@@ -89,5 +95,23 @@ describe('git.ts', () => {
     expect(redactCredentials('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref')).toBe(
       'fatal: ref refs/remotes/origin/HEAD is not a symbolic ref',
     );
+  });
+
+  it('reads the origin remote url', () => {
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/r.git'], {
+      cwd: repoDir,
+    });
+    expect(readOriginUrl(repoDir)).toBe('https://github.com/o/r.git');
+  });
+
+  it('throws GitCommandError naming "No such remote" when there is no origin', () => {
+    let caught: unknown;
+    try {
+      readOriginUrl(repoDir);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(GitCommandError);
+    expect((caught as GitCommandError).stderr).toMatch(/no such remote/i);
   });
 });
