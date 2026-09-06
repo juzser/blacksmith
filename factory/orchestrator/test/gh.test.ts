@@ -16,10 +16,8 @@ import {
 import { runGit } from '../src/git.js';
 import type { ProjectRef } from '../src/projects.js';
 
-// Every temp repo is set up through `runGit` (already exported by git.ts),
-// never through a direct `node:child_process` import here — the epic's
-// evidence shape is "we assert on what would have been run", and that
-// starts with this test file never touching a real process itself.
+// Real repos, set up via `runGit` (git.ts) rather than a direct
+// `node:child_process` import in this file.
 async function makeRepo(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), 'smith-gh-'));
   runGit(dir, ['init', '-q', '-b', 'main']);
@@ -113,9 +111,8 @@ describe('gh.ts', () => {
     it('resolves two different projects to two different slugs, and refuses a third', () => {
       expect(resolveProjectRepo('blacksmith', register)).toEqual({ slug: 'juzser/blacksmith' });
       expect(resolveProjectRepo('demo-rpg', register)).toEqual({ slug: 'someone/demo-rpg' });
-      // Under the null (a resolver that falls back to the process's own
-      // directory), this case would read `juzser/blacksmith` — a
-      // well-formed wrong answer for a project the register never named.
+      // Under the null (falling back to the process's own directory) this
+      // would read `juzser/blacksmith` — a well-formed wrong answer.
       expect(resolveProjectRepo('unknown-project', register)).toEqual({
         reason: 'no-checkout',
         detail: expect.any(String),
@@ -124,45 +121,39 @@ describe('gh.ts', () => {
   });
 
   describe('classifyGh', () => {
-    it('names three distinct outcomes for three distinct runner behaviours', () => {
-      const spawnFailure: CommandResult = {
-        status: null,
-        stdout: '',
-        stderr: '',
-        spawnError: 'ENOENT',
-      };
-      const notLoggedIn: CommandResult = {
-        status: 1,
-        stdout: '',
-        stderr: 'You are not logged into any GitHub hosts. Run gh auth login',
-      };
-      const ready: CommandResult = { status: 0, stdout: 'Logged in to github.com', stderr: '' };
+    const spawnFailure: CommandResult = {
+      status: null,
+      stdout: '',
+      stderr: '',
+      spawnError: 'ENOENT',
+    };
+    const notLoggedIn: CommandResult = {
+      status: 1,
+      stdout: '',
+      stderr: 'You are not logged into any GitHub hosts. Run gh auth login',
+    };
+    const ready: CommandResult = { status: 0, stdout: 'Logged in to github.com', stderr: '' };
 
-      const missing = classifyGh(() => spawnFailure);
-      const unauthenticated = classifyGh(() => notLoggedIn);
-      const readyResult = classifyGh(() => ready);
-
-      expect(missing.outcome).toBe('missing');
-      expect(unauthenticated.outcome).toBe('unauthenticated');
-      expect(readyResult.outcome).toBe('ready');
-
-      const outcomes = [missing.outcome, unauthenticated.outcome, readyResult.outcome];
+    it('names three distinct outcomes for three distinct runner behaviours, plus unknown', () => {
+      const outcomes = [
+        classifyGh(() => spawnFailure).outcome,
+        classifyGh(() => notLoggedIn).outcome,
+        classifyGh(() => ready).outcome,
+      ];
+      expect(outcomes).toEqual(['missing', 'unauthenticated', 'ready']);
       expect(new Set(outcomes).size).toBe(3);
-    });
-
-    it('classifies anything else as the explicit unknown outcome', () => {
-      const odd = classifyGh(() => ({ status: 7, stdout: '', stderr: 'some other failure' }));
-      expect(odd.outcome).toBe('unknown');
+      expect(classifyGh(() => ({ status: 7, stdout: '', stderr: 'other' })).outcome).toBe(
+        'unknown',
+      );
     });
 
     it('records every call the stub runner receives, so a test can assert the count', () => {
       const calls: Array<{ cmd: string; args: string[] }> = [];
       classifyGh((cmd, args) => {
         calls.push({ cmd, args });
-        return { status: 0, stdout: '', stderr: '' };
+        return ready;
       });
-      expect(calls).toHaveLength(1);
-      expect(calls[0]).toEqual({ cmd: 'gh', args: ['auth', 'status'] });
+      expect(calls).toEqual([{ cmd: 'gh', args: ['auth', 'status'] }]);
     });
   });
 
@@ -172,13 +163,8 @@ describe('gh.ts', () => {
     it('builds a create-issue argv as an array, delivering the body byte-for-byte', () => {
       const argv = buildCreateIssueArgv('o/r', 'title', hostileBody);
       expect(Array.isArray(argv)).toBe(true);
-      for (const el of argv) {
-        expect(typeof el).toBe('string');
-        expect(el).not.toContain('$(id)');
-      }
-      const bodyFileIndex = argv.indexOf('--body-file') + 1;
-      const bodyFilePath = argv[bodyFileIndex];
-      expect(readFileSync(bodyFilePath, 'utf8')).toBe(hostileBody);
+      expect(argv.every((el) => typeof el === 'string' && !el.includes('$(id)'))).toBe(true);
+      expect(readFileSync(argv[argv.indexOf('--body-file') + 1], 'utf8')).toBe(hostileBody);
     });
 
     it('builds a search-issues argv as an array', () => {

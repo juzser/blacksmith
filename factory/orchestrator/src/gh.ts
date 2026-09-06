@@ -1,27 +1,16 @@
-// The second half of the pure core for factory-error-log: WHICH repository a
-// project belongs to, WHETHER `gh` can be used at all, and WHAT argv the
-// three `gh` commands this epic ever runs would be. Nothing here spawns
-// `gh`. No task in this epic may run `gh issue create` against a real
-// tracker as part of its own acceptance -- opening a real issue to prove the
-// code opens issues is a side effect no gate can undo -- so the thing every
-// test in this module asserts on is the argv that WOULD have been run.
+// Pure core, part two: WHICH repository a project belongs to, WHETHER `gh`
+// can be used, and WHAT argv the three `gh` commands this epic runs would
+// be. Nothing here spawns `gh` -- every test asserts on the argv that WOULD
+// have been run.
 //
-// SECURITY (this module's whole blast radius): the commands it composes run
-// under a `gh` token with `repo` scope. It therefore never interpolates
-// untrusted text into a command string, never sets `shell: true`, never logs
-// a remote URL without `redactCredentials`, and never reads, stores, prints
-// or passes a token itself -- `readOriginUrl` (git.ts) hands back whatever
-// git reports, credentials included, and this module only ever extracts the
-// host and slug out of it, discarding the rest.
+// SECURITY: never interpolates untrusted text into a command, never sets
+// `shell: true`, never logs a URL without `redactCredentials`, never
+// reads/stores/prints a token. `readOriginUrl` hands back credentials
+// intact; this module extracts only host and slug.
 //
-// Issue bodies travel by `--body-file <temp file>`, not `--body <text>` and
-// not stdin. `execFileSync` without `shell: true` never re-parses an argv
-// element through a shell, so `--body` would already be safe from injection
-// -- but gh's own flag parser still has to accept the value, and a body with
-// embedded newlines or an argv-length limit is gh's problem, not a shell's.
-// `--body-file` sidesteps both, and unlike stdin it keeps the injected
-// runner's signature -- `(cmd, args) => result`, no stdin channel -- the same
-// shape for every command this module builds.
+// Issue bodies travel by `--body-file <temp file>`, not inline `--body` or
+// stdin: keeps gh's own flag parsing and argv-length limits out of scope,
+// and keeps the runner's `(cmd, args) => result` signature free of stdin.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,11 +24,9 @@ export interface RepoSuccess {
 }
 
 /**
- * The closed, named set of ways this module can fail to answer "which
- * repository". Never `null`, never an empty string, never a shared error --
- * D-133's rule: a well-formed wrong answer is worse than a refusal, and a
- * caller that cannot tell "no remote" from "not a repo" will report one as
- * the other.
+ * The closed, named refusal set for "which repository" -- never `null`,
+ * never a shared error (D-133): a caller must be able to tell "no remote"
+ * from "not a repo" rather than report one as the other.
  */
 export type RepoRefusalReason =
   | 'no-checkout'
@@ -89,13 +76,10 @@ export function slugFromRemoteUrl(url: string): RepoResolution {
 }
 
 /**
- * Which repository the git checkout at `dir` belongs to. Reads `origin`
- * through git.ts's `readOriginUrl` and classifies a failure into the two
- * reasons it can mean (`not-a-repo`, `no-origin`) before handing a resolved
- * URL to `slugFromRemoteUrl`. Never throws for those two cases; a
- * `GitCommandError` this function does not recognise is a programming or
- * environment error and is rethrown rather than mis-filed under one of the
- * five named reasons.
+ * Which repository the git checkout at `dir` belongs to. Classifies a
+ * `GitCommandError` from `readOriginUrl` into `not-a-repo` or `no-origin`
+ * before handing a resolved URL to `slugFromRemoteUrl`; any other error is
+ * a programming or environment fault and is rethrown, not mis-filed.
  */
 export function resolveRepoAtDir(dir: string): RepoResolution {
   let url: string;
@@ -115,14 +99,11 @@ export function resolveRepoAtDir(dir: string): RepoResolution {
 
 /**
  * Which repository a named project belongs to, answered from a register
- * handed in -- never from a name lookup under `PROJECTS_DIR`/`WORKSPACES_DIR`
- * and never a fallback to this process's own directory. `projects.ts`
- * states why: this clone's parent can hold an unrelated checkout with an
- * unrelated remote, and a name lookup would read somebody else's repository
- * while reporting it as this project's own -- D-133's shape, aimed here at
- * an outward-facing side effect (an issue filed on the wrong tracker) that
- * no gate can undo. A project the register does not name is refused as
- * `no-checkout`, not answered with any other project's slug.
+ * handed in -- never a name lookup under `PROJECTS_DIR`/`WORKSPACES_DIR` and
+ * never a fallback to this process's own directory (projects.ts: this
+ * clone's parent can hold an unrelated checkout with an unrelated remote).
+ * A project the register does not name is refused as `no-checkout`, never
+ * answered with another project's slug.
  */
 export function resolveProjectRepo(
   project: string,
@@ -166,11 +147,8 @@ function defaultRunner(cmd: string, args: string[]): CommandResult {
 }
 
 /**
- * The closed, named set of `gh` availability outcomes. A boolean collapses
- * "not installed" and "installed but not logged in" into one word, and makes
- * the operator's remedy (`brew install gh` versus `gh auth login`)
- * unguessable -- so this is at least three distinct outcomes plus an
- * explicit `unknown` for anything the other three do not recognise.
+ * The closed, named set of `gh` availability outcomes -- a boolean would
+ * collapse "not installed" and "not logged in" into one unguessable remedy.
  */
 export type GhAvailability =
   | { readonly outcome: 'ready' }
@@ -216,29 +194,11 @@ export function buildCreateIssueArgv(repo: string, title: string, body: string):
 
 /** Pure builder: the argv for `gh issue list` restricted to open issues matching `query`. */
 export function buildSearchIssuesArgv(repo: string, query: string): string[] {
-  return [
-    'issue',
-    'list',
-    '--repo',
-    repo,
-    '--state',
-    'open',
-    '--search',
-    query,
-    '--json',
-    'number,title,url',
-  ];
+  return ['issue', 'list', '--repo', repo, '--state', 'open', '--search', query];
 }
 
 /** Pure builder: the argv for `gh issue comment`. Spawns nothing. */
 export function buildCommentArgv(repo: string, issueNumber: number, body: string): string[] {
-  return [
-    'issue',
-    'comment',
-    String(issueNumber),
-    '--repo',
-    repo,
-    '--body-file',
-    writeBodyFile(body),
-  ];
+  const file = writeBodyFile(body);
+  return ['issue', 'comment', String(issueNumber), '--repo', repo, '--body-file', file];
 }
