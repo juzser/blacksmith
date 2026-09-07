@@ -169,6 +169,44 @@ The honest description of mechanism A is therefore not "a factory that never
 stops". It is: **the operator's tick is removed from everything between "this
 is due" and "here is a PR", and kept for the PR.**
 
+### 3.6 How wide "self-improve" reaches
+
+Settled by the operator 2026-09-07, against the narrow reading this scope
+first assumed: **wide**. Mechanism A may run `/bs audit` on the factory
+itself, turn findings into epics, and run them — it is not limited to epics a
+person planned.
+
+That decision makes the remaining constraints load-bearing rather than
+decorative, because the merge is now the *only* human checkpoint between "the
+factory noticed something" and "the factory changed itself". Four bounds, and
+they are the price of the wide reading rather than a hedge against it:
+
+- **A severity floor on what may be cut automatically.** Only S1 and S2
+  findings, or a finding two axes reached independently, may become an
+  auto-cut epic. S3 and S4 queue for the operator. An unbounded budget with a
+  nit-level trigger is how a loop spends a night on cosmetics, and the
+  manual audit of 2026-09-07 produced 29 S3 and 7 S4 against 9 S2 — the ratio
+  is the argument.
+- **One epic, one PR, one human merge.** §3.5 stands and is not batchable
+  here. A loop that cut ten epics overnight and asked for one merge would have
+  moved the checkpoint rather than kept it.
+- **Protected declarations.** The loop may *propose* a change to the files
+  that bound it — `factory/policies/scheduler.yml`, `autonomy.ts`,
+  `budgets.yml`, `delegation.yml`, `.claude/settings.json`, and the
+  `state/loop/enabled` marker — and such an epic classifies `operator`,
+  never `auto`. This is not a distrust of the loop; it is the observation
+  that a self-improving process permitted to widen its own leash has no fixed
+  point, and the operator's decision was to widen what the loop may *build*,
+  not what it may *permit itself*.
+- **Growth-review still never auto-classifies.** Architecture §12 keeps scope
+  with the operator unconditionally, and a finding that changes what the
+  factory *is* rather than how well it does what it already does is a growth
+  question wearing an audit's clothes.
+
+The durable findings file (§6, fork 4) stops being a nicety under the wide
+reading: without it the loop re-discovers the same S2 every run and cuts the
+same epic again.
+
 ## 4. Mechanism B — audit and maintain an outside project, on command
 
 **Scope: any project this factory can reach, triggered by the operator, never
@@ -247,7 +285,7 @@ why both are one epic rather than two.
 
 ## 6. Open forks for the operator
 
-None of these blocks the epic being cut; each is a question the plan will
+Four, after the operator closed the fifth (§3.6). None of these blocks the epic being cut; each is a question the plan will
 reach and should be answered before it does.
 
 1. **Interval for mechanism A.** The daemon defaults are a starting point,
@@ -262,12 +300,7 @@ reach and should be answered before it does.
    wave mid-flight, which is worse than not starting it. The budget is
    unbounded by decision; the turn limit is a different axis and still needs
    a number.
-4. **Whether mechanism A may start an epic no one has planned.** The
-   scheduler proposes rechecks and maintenance, both of which map to existing
-   plans. An audit finding on the factory itself does not, and "self-improve"
-   read widely would mean the loop cuts its own epics. Read narrowly it means
-   the loop runs epics the operator approved. This scope assumes **narrow**;
-   widening it is an operator decision, not a planner's.
-5. **Where `/bs audit`'s findings live.** A finding that becomes an epic has
-   a home; a finding the operator declines does not, and re-running the audit
-   next month should not re-litigate it from scratch.
+4. **Where `/bs audit`'s findings live.** Partly settled by §3.6 — a
+   durable findings file is now required, because a loop that cuts its own
+   epics must be able to tell a new finding from one it already raised. What
+   remains open is the format and whether a declined finding expires.
