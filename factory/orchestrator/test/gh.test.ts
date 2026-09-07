@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildCommentArgv,
   buildCreateIssueArgv,
@@ -13,6 +13,7 @@ import {
   resolveRepoAtDir,
   slugFromRemoteUrl,
 } from '../src/gh.js';
+import * as git from '../src/git.js';
 import { runGit } from '../src/git.js';
 import type { ProjectRef } from '../src/projects.js';
 
@@ -85,6 +86,22 @@ describe('gh.ts', () => {
 
       const reasons = [a, b, c].map((r) => ('reason' in r ? r.reason : r.slug));
       expect(new Set(reasons).size).toBe(3);
+    });
+
+    // Only a GitCommandError is classified into not-a-repo/no-origin; any
+    // other error out of readOriginUrl is a programming or environment
+    // fault and must be rethrown as-is, not mis-filed as a refusal.
+    it('rethrows an error from readOriginUrl that is not a GitCommandError', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'smith-gh-rethrow-'));
+      dirs = [dir];
+      const spy = vi.spyOn(git, 'readOriginUrl').mockImplementationOnce(() => {
+        throw new TypeError('boom');
+      });
+      try {
+        expect(() => resolveRepoAtDir(dir)).toThrow(TypeError);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 

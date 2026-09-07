@@ -2,7 +2,15 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Partial mock: every call passes through to the real execFileSync except
+// where a single test overrides it with `mockImplementationOnce`, to reach
+// exec()'s catch branch with a caught error node itself never produces.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
 import {
   GitCommandError,
   readOriginUrl,
@@ -140,5 +148,24 @@ describe('git.ts', () => {
     const error = caught as GitCommandError;
     expect(error.status).toBeNull();
     expect(error.message).toContain('ENOENT');
+  });
+
+  // A caught error carrying neither `stderr` nor a string `code` is an edge
+  // node itself never produces from execFileSync, but `exec`'s catch branch
+  // must still fall back to "" rather than throw formatting the message.
+  it('falls back to an empty stderr when the caught error has neither stderr nor a string code', () => {
+    vi.mocked(execFileSync).mockImplementationOnce(() => {
+      throw new Error('no stderr, no code here');
+    });
+    let caught: unknown;
+    try {
+      runGit(repoDir, ['status']);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(GitCommandError);
+    const error = caught as GitCommandError;
+    expect(error.stderr).toBe('');
+    expect(error.message).toContain('and said nothing');
   });
 });
