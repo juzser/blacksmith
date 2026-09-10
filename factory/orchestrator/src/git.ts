@@ -84,3 +84,17 @@ export function runGit(cwd: string, args: string[]): string {
 export function runGitRaw(cwd: string, args: string[]): string {
   return exec(cwd, args);
 }
+
+/**
+ * The `origin` remote's URL, exactly as git reports it — credentials and
+ * all, since redaction happens only on the error path inside `exec`. Throws
+ * `GitCommandError` when `cwd` is not a git repository at all, or when it is
+ * one but has no `origin` remote. This function does not tell those two
+ * apart: git's own stderr already differs ("not a git repository" versus "No
+ * such remote"), and the one caller that needs to classify it (`gh.ts`) reads
+ * that text itself rather than this file growing a second refusal taxonomy
+ * beside the one it already has (`GitCommandError`).
+ */
+export function readOriginUrl(cwd: string): string {
+  return runGit(cwd, ['remote', 'get-url', 'origin']);
+}
