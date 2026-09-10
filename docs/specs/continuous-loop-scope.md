@@ -203,7 +203,7 @@ they are the price of the wide reading rather than a hedge against it:
   factory *is* rather than how well it does what it already does is a growth
   question wearing an audit's clothes.
 
-The durable findings file (§6, fork 4) stops being a nicety under the wide
+The durable findings file (§6.4) stops being a nicety under the wide
 reading: without it the loop re-discovers the same S2 every run and cuts the
 same epic again.
 
@@ -283,24 +283,98 @@ why both are one epic rather than two.
 - **No self-improve loop in the plugin.** §3.3.
 - **Not a service, not a container.** Unchanged from `plugin-port-scope.md`.
 
-## 6. Open forks for the operator
+## 6. The four forks, closed 2026-09-10
 
-Four, after the operator closed the fifth (§3.6). None of these blocks the epic being cut; each is a question the plan will
-reach and should be answered before it does.
+All four were put to the operator and all four were answered. They are
+recorded here as decisions rather than questions, because a decision that
+lives only in a transcript is a decision the next session has to re-take.
 
-1. **Interval for mechanism A.** The daemon defaults are a starting point,
-   but a loop that spawns a full epic run is not a loop that folds an event
-   log, and the right number is probably hours rather than minutes.
-2. **What the loop does with a failed child.** Retry the same epic next
-   iteration, hold it and move on, or stop the loop. The escalation ladder
-   already answers this shape for tasks (bounded retry → higher model tier →
-   operator); the question is whether an epic-level loop reuses the ladder or
-   declares its own.
-3. **`--max-turns` for the headless child.** A cap that is too low abandons a
-   wave mid-flight, which is worse than not starting it. The budget is
-   unbounded by decision; the turn limit is a different axis and still needs
-   a number.
-4. **Where `/bs audit`'s findings live.** Partly settled by §3.6 — a
-   durable findings file is now required, because a loop that cuts its own
-   epics must be able to tell a new finding from one it already raised. What
-   remains open is the format and whether a declined finding expires.
+### 6.1 Mechanism A runs back-to-back, with no interval
+
+**Decision: no interval.** When one iteration finishes, the next begins.
+
+There is no timer to tune because the loop is not sampling a condition — it
+is working a queue. An interval is the right shape for a poller (`smith
+daemon` folds an event log every few minutes because nothing is asking it to)
+and the wrong shape for a worker: an hour's wait after a wave that took
+forty minutes is an hour in which the queue it just measured goes stale.
+
+What ends the loop is §3.5, not a clock: the queue is empty, the next epic
+classifies `operator`, or the infrastructure failed. **A loop paced by its own
+stop conditions cannot run away in a way an interval would have caught** —
+the ceiling is the whitelist in `scheduler.yml` and the human merge, both of
+which bind identically at any cadence.
+
+### 6.2 A failed child reuses the escalation ladder
+
+**Decision: reuse it, one tier up.** `budgets.yml`'s `escalation_ladder`
+already answers this shape for a task, and an epic is not different enough to
+earn a second ladder:
+
+1. **Retry once at the same tier.** A first failure is usually the spec, not
+   the model (dispatch contract, "Round counting and escalation") — and that
+   argument does not weaken when the unit is an epic.
+2. **Escalate to opus.** Logged in the `dispatch_decision` with the reason,
+   the same as a task escalation, so the cost is attributable afterwards.
+3. **Stop and report.** Not "hold it and move on": an epic that failed twice
+   has an unmerged branch and a half-answered finding, and a loop that steps
+   over it accumulates exactly the debt nobody is watching. The loop stops
+   and the operator reads one report, which is rung 3 of the ladder as
+   written.
+
+A second, epic-specific ladder was the alternative and was rejected for the
+reason `smith escalation check` exists at all: a rule that is checkable is
+worth more than a rule that is tailored, and that check counts
+`gate-outcome`/`blocked` rounds against the one ladder in `budgets.yml`.
+
+### 6.3 `--max-turns 300` for the headless child
+
+**Decision: 300.**
+
+The cap is a runaway guard, not a budget — the budget is unbounded by §3.4,
+and the two axes must not be conflated. 300 is chosen to sit well above a
+real wave and well below an unbounded spin: the manual runs this scope was
+written from spent tens of turns per task and low hundreds per wave, so a
+wave that reaches 300 has stopped converging rather than merely being large.
+
+Two consequences, both deliberate:
+
+- **A cut is an `error-logged` event, not a silent exit.** §6.2's ladder then
+  applies to it like any other failure — `taxonomy.yml`'s `execution` group
+  has no class for a turn-cap cutoff today, which is a gap the implementing
+  epic has to close rather than route around.
+- **The number is a declaration, and Claude Code does not read it from a
+  template.** Same defect the dispatch contract already names for `maxTurns`
+  (agent-interviews.md M-4): it is only true if the invocation passes it. For
+  the headless child that means the flag on the command line, not a line in a
+  spec.
+
+### 6.4 Findings live in `<project>/.blacksmith/findings.jsonl`
+
+**Decision: append-only JSONL under the audited project's own state root, and
+a `declined` finding expires after 90 days.**
+
+- **Location.** `<project>/.blacksmith/` is already the `STATE_ROOT` the
+  operator approved for the plugin port (`plugin-port-scope.md`, PP-1). An
+  audit's findings are state a run produced *about that project*, so they
+  belong with that project — not in the factory clone, which under a plugin is
+  a read-only marketplace cache that may be replaced on the next update.
+- **Format: append-only JSONL.** The same shape as the event log, for the same
+  reason: two writers appending lines cannot corrupt each other's records, and
+  a history that is only ever added to can be replayed. Status changes are
+  new lines, never edits — the current state of a finding is a fold over its
+  lines, exactly as `finding-transitioned` folds in `state/events/`.
+- **Dedupe.** By fingerprint, so a re-audit recognises a finding it already
+  raised. This is what §3.6 requires of the wide reading: without it the loop
+  re-cuts the same epic every iteration.
+- **`declined` expires after 90 days.** A finding the operator declined is a
+  judgment about the code as it stood, and code moves. Ninety days is long
+  enough that a re-audit does not nag about a decision from last week, and
+  short enough that a decline cannot silently become a permanent exemption
+  nobody revisits. An expired decline returns as a fresh finding, not as a
+  reopened one — it must argue its case against the code that exists now.
+
+Note what this file is **not**: it is not a waiver store. A waiver is a
+factory-side act with an audit trail in the event log
+(`waiver-granted`/`waiver-denied`); a decline here is an operator's answer to
+an audit's question about their own project, and it expires.
