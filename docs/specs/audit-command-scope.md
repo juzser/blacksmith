@@ -20,7 +20,18 @@ and the shape settled 2026-09-07:
 
 Everything below is downstream of those two sentences. Where this file and
 `continuous-loop-scope.md` §4.1 disagree, §4.1 is the older draft and this
-file wins; the one place they appear to disagree outright is settled in §1.3.
+file wins. It disagrees in exactly two places and both are named here, because
+a reversal a reader has to discover for themselves is a reversal that gets
+implemented twice:
+
+- §4.1's *"the audit itself writes nothing to the audited project"* against
+  fork 4's findings file living in `<project>/.blacksmith/`. This one is
+  apparent rather than real, and §1.3 settles it.
+- §4.1 step 1's *"findings that different axes reached by different routes are
+  folded into one"* against this file's refusal to merge them. This one **is**
+  real: §4.1 made consolidation a merge, §3.1 makes it a clustering that is
+  handed over to be judged. §3.1 says why, and carries the reversal in its own
+  text so it cannot be read as a refinement.
 
 ## 1. What the command is
 
@@ -110,11 +121,21 @@ of them is an auditor, while every `dispatch_decision` names one. So:
 
 - **Add `auditor` to the `agent` enum**, with one template
   `.claude/agents/auditor.md`. The axis is not a role — it travels in the
-  dispatch prompt and in the store's own `axis` field — so one template with
-  four instantiations, not four templates that would drift apart.
-- **The security axis dispatches `security-reviewer`**, which already exists
-  and already carries the threat-model discipline this axis needs. Reusing it
-  costs nothing and inventing a second security prompt costs a divergence.
+  dispatch prompt and in the store's own `axis` field — so one new template
+  with three instantiations (performance, code quality, architecture), not
+  three templates that would drift apart.
+- **The security axis dispatches `security-reviewer`** unchanged, which
+  already exists and already carries the threat-model discipline this axis
+  needs. Reusing it costs nothing and inventing a second security prompt costs
+  a divergence.
+
+So: four axes, two templates — three `auditor` dispatches and one
+`security-reviewer` dispatch. The `agent` field on the security axis's
+`dispatch_decision` is therefore `security-reviewer`, not `auditor`: that
+field names the template that actually ran, and anyone later querying
+dispatches by agent needs it to be true. The axis is never carried by `agent`
+for any of the four — it is carried by the store's `axis` field and by the
+dispatch prompt.
 
 Two adjacent gaps are recorded here rather than fixed here, because both are
 factory defects with a life outside this command: `finding_category` has no
@@ -152,11 +173,33 @@ categories, so their fingerprints differ by construction. Two axes agreeing is
 the strongest ranking signal the audit produces, and a fingerprint match would
 never see it.
 
-The consequence is deliberate: `smith audit consolidate` computes the
-path-clusters **and hands them over to be judged**, it does not merge them.
-Two findings in one file are often two defects. The deterministic half finds
-the candidates; the judgment half decides whether a cluster is one finding or
-several, and writes that decision back as a line.
+The consequence is deliberate, and it is the reversal of
+`continuous-loop-scope.md` §4.1 step 1 that the preamble names:
+`smith audit consolidate` computes the path-clusters **and hands them over to
+be judged**, it does not merge them. Two findings in one file are often two
+defects, and a merge performed by a path match destroys the second one
+silently — which is the worse of the two failures, because a duplicate row is
+visible at the hard stop and a swallowed defect is not.
+
+The deterministic half finds the candidates; the judgment half decides whether
+a cluster is one finding or several. Naming that half precisely, because "it
+is judged" is not an actor:
+
+- **Who.** The `/bs audit` playbook session — the same session that dispatched
+  the axes. Not an agent: the judgment is made in front of the operator, at
+  the hard stop, where they can overrule it in one word.
+- **On what.** `audit consolidate`'s cluster output, which prints each
+  member's fingerprint, axis, severity, summary and failure scenario side by
+  side. Same file, different axes, and the three fields are what distinguish
+  "two routes to one defect" from "two defects that happen to share a file".
+- **Persisted by what.** `smith audit decide --decision merge --same-as
+  <surviving-fingerprint>`, which appends a `merged` line for each member
+  folded into another. The survivor is then accepted or declined on its own,
+  and carries the merged members' evidence into the epic criterion.
+
+A cluster nobody merges stays several findings. That is the safe default in
+the same direction as the rest of this section: the audit over-reports and
+lets a person collapse it, rather than under-reporting and calling it tidy.
 
 ### 3.2 Ranking
 
@@ -209,9 +252,39 @@ verifier judging the diffs that epic produces.
 
 ### 4.3 Status is a line, never an edit
 
-`raised`, `accepted`, `declined`, `fixed`. A status change appends a new line
-naming the fingerprint and the new status. The current state of a finding is a
-fold over its lines, exactly as `finding-transitioned` folds in the event log.
+`raised`, `merged`, `accepted`, `declined`, `fixed`. A status change appends a
+new line naming the fingerprint and the new status. The current state of a
+finding is a fold over its lines, exactly as `finding-transitioned` folds in
+the event log.
+
+**Every status names the verb that writes it.** A status vocabulary with a
+member no verb reaches is a state an implementer must invent a route into, and
+two implementers invent two:
+
+| status | written by | means |
+| --- | --- | --- |
+| `raised` | `audit record` | an axis reported it and the fold did not suppress it |
+| `merged` | `audit decide --decision merge --same-as <fp>` | the same defect as another member of its path-cluster (§3.1); the survivor carries it from here |
+| `accepted` | `audit decide --decision accept` | it becomes epic scope (§5) |
+| `declined` | `audit decide --decision decline` | the operator said no; expires in 90 days (§4.4) |
+| `fixed` | `audit resolve --epic <epic-id>` | the epic that carried it closed |
+
+`fixed` is the one that outlives the audit, and that is why it needs a verb of
+its own rather than a clause in `audit close`: the audit closes in the same
+sitting, the epic closes days later. The chain is `audit cut` stamping the
+epic id it rendered onto each accepted finding, the epic running its ordinary
+course, and `/bs run`'s epic-close step calling `audit resolve --epic
+<epic-id>` — which appends one `fixed` line per finding that epic carried. If
+that call never happens the store is stale but not wrong: the findings stay
+`accepted`, which is exactly what they are.
+
+**What the fold suppresses on a later run is decided by the folded status, not
+by the fingerprint's mere presence.** `raised`, `merged` and `accepted`
+suppress a re-raise — it is in the store, already judged or already in an
+epic. `declined` suppresses it until it expires (§4.4). `fixed` does **not**:
+a fingerprint that comes back after its epic closed is a regression, and the
+one thing an audit must never do is stay quiet about one. It returns as a
+fresh `raised` line, over a history that still shows the earlier `fixed`.
 
 ### 4.4 A decline expires after 90 days, at fold time
 
@@ -242,7 +315,9 @@ as waivers in the UI or the report.
 Accepted findings become one roadmap milestone and one epic spec — `- project:
 <name>`, `- kind: product` — and then `/bs run` takes over unchanged. There is
 no audit-specific run path: the value of the command is the insight and the
-ranking, and an epic it cut is an ordinary epic.
+ranking, and an epic it cut is an ordinary epic. The one thread back is the
+epic id `audit cut` stamps onto each accepted finding, which is what lets
+`audit resolve` mark them `fixed` when that epic closes (§4.3).
 
 Scope discipline at the cut: **one epic**. An audit that accepted fourteen
 findings produces one epic with fourteen criteria, not fourteen epics — the
@@ -251,7 +326,7 @@ fanning out epics moves that checkpoint rather than keeping it.
 
 ## 6. The command surface
 
-Six verbs under a new `smith audit` namespace, each documented in
+Seven verbs under a new `smith audit` namespace, each documented in
 `usage.ts`'s `COMMANDS` register before it is reachable (the dispatcher
 refuses an undocumented command, and `test/usage.test.ts` asserts the reverse
 inclusion).
@@ -259,11 +334,21 @@ inclusion).
 | verb | does |
 | --- | --- |
 | `audit open <project-dir>` | resolve the project, create `.blacksmith/`, cut the detached read-only worktree, fingerprint it, print the axis manifest and the store's live findings as dedupe context |
-| `audit record --axis <axis> --evidence <file>` | validate one axis's evidence, fingerprint each item, drop what the store already holds, append the rest |
-| `audit consolidate` | fold the store, compute path-clusters, rank by severity → convergence → confidence, print the ranked list |
-| `audit decide --fingerprint <fp> --decision accept\|decline` | append the operator's answer |
-| `audit cut` | render the roadmap milestone and the epic spec from the accepted findings |
-| `audit close` | `worktree verify`, remove the read-only worktree, close the audit in the event log |
+| `audit record <project-dir> --axis <axis> --evidence <file>` | validate one axis's evidence, fingerprint each item, drop what the fold suppresses (§4.3), append the rest as `raised` |
+| `audit consolidate <project-dir>` | fold the store, compute path-clusters, rank by severity → convergence → confidence, print the ranked list with each cluster's members side by side |
+| `audit decide <project-dir> --fingerprint <fp> --decision accept\|decline\|merge [--same-as <fp>]` | append the operator's answer; `--same-as` is required by `merge` and refused by the other two |
+| `audit cut <project-dir> --epic <epic-id>` | render the roadmap milestone and the epic spec from the accepted findings, stamping that epic id onto each of them |
+| `audit resolve <project-dir> --epic <epic-id>` | append a `fixed` line for every finding that epic carried. Called from `/bs run`'s epic-close step, not from inside the audit — see §4.3 |
+| `audit close <project-dir>` | `worktree verify`, remove the read-only worktree, close the audit in the event log |
+
+**The project directory is a positional on every verb, not only on `open`.**
+§1.2 resolves it once and carries it through every call; the CLI has to be
+able to be told the same thing. Nothing here reads a cwd and nothing keeps a
+"current audit" in a file on the side — a bare `audit record` with no project
+named would have to guess, and §1.1 does not forbid two audits being open at
+once (two projects are two `.blacksmith/` directories, with nothing shared
+between them). Naming the project on every line is what makes those two
+sequences of calls impossible to confuse, and it costs one positional.
 
 Every write verb takes the ordinary event envelope (`--session`,
 `--causal-parent`, `[--plan-version]`, `[--actor]`, `[--state-dir]`), because
