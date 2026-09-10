@@ -106,7 +106,7 @@ shows `product` by default and hides the other two, so an operator asking
 
 ## Claude status bar — audit wave 1 (signing, hardening, Keychain ACL)
 - id: csb-audit-1
-- status: in-progress
+- status: completed
 - epics: [csb-audit-1]
 - project: claude-status-bar-macos
 - kind: product
