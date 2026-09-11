@@ -185,7 +185,7 @@ context_window:
                                # against the caps above — compacting is not a
                                # way around the 150k coder cap.
   compacting_roles: [planner, coder, tester, researcher, uiux, scribe]
-  narrowing_roles: [reviewer, verifier, grader, spec-reviewer, security-reviewer, merger]
+  narrowing_roles: [reviewer, verifier, grader, spec-reviewer, security-reviewer, merger, auditor]
   # narrowing_roles hold evidence rather than build on it: a judge that compacts
   # summarizes away the diff it is judging, and a merger that compacts loses one
   # side of the conflict. At 60% they narrow scope and return a verdict on what

@@ -19,6 +19,17 @@ import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type ParsedArgs, parseArgs } from './args.js';
+import {
+  type AuditAxis,
+  type AuditDecision,
+  closeAudit,
+  consolidateAudit,
+  cutAudit,
+  decideAudit,
+  openAudit,
+  recordAudit,
+  resolveAudit,
+} from './audit.js';
 import { checkBudgetAlarm } from './budgetAlarm.js';
 import type { TaskBudget } from './budgets.js';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
@@ -1021,6 +1032,97 @@ async function main(): Promise<number> {
         ...(doc ? { usage: usageLine(doc) } : {}),
       },
     );
+  }
+
+  // -- audit --------------------------------------------------------------
+  // Seven verbs, one positional: the project directory (docs/specs/
+  // audit-command-scope.md §6). Nothing here reads a cwd, and the only state
+  // between verbs is the manifest `audit open` writes under `.blacksmith/`.
+  // Axis and decision are validated in audit.ts, so the casts below are the
+  // same non-load-bearing shape as `plan validate`'s.
+  if (namespace === 'audit' && action === 'open') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit open')) as [string];
+    printJson(await openAudit(projectDir, eventContextFromFlags(flags), eventOptsFromFlags(flags)));
+    return 0;
+  }
+
+  if (namespace === 'audit' && action === 'record') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit record')) as [string];
+    const axis = requireFlag(flags, 'axis') as AuditAxis;
+    const evidence = readJsonFile<unknown>(requireFlag(flags, 'evidence'));
+    printJson(
+      await recordAudit(
+        projectDir,
+        axis,
+        evidence,
+        eventContextFromFlags(flags),
+        eventOptsFromFlags(flags),
+      ),
+    );
+    return 0;
+  }
+
+  if (namespace === 'audit' && action === 'consolidate') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit consolidate')) as [string];
+    printJson(consolidateAudit(projectDir));
+    return 0;
+  }
+
+  if (namespace === 'audit' && action === 'decide') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit decide')) as [string];
+    printJson(
+      await decideAudit(
+        projectDir,
+        {
+          fingerprint: requireFlag(flags, 'fingerprint'),
+          decision: requireFlag(flags, 'decision') as AuditDecision,
+          ...(flags['same-as'] === undefined ? {} : { sameAs: flags['same-as'] }),
+          ...(flags.note === undefined ? {} : { note: flags.note }),
+        },
+        eventContextFromFlags(flags),
+        eventOptsFromFlags(flags),
+      ),
+    );
+    return 0;
+  }
+
+  if (namespace === 'audit' && action === 'cut') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit cut')) as [string];
+    printJson(
+      await cutAudit(
+        projectDir,
+        { epicId: requireFlag(flags, 'epic'), title: requireFlag(flags, 'title') },
+        eventContextFromFlags(flags),
+        eventOptsFromFlags(flags),
+      ),
+    );
+    return 0;
+  }
+
+  if (namespace === 'audit' && action === 'resolve') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit resolve')) as [string];
+    printJson(
+      await resolveAudit(
+        projectDir,
+        requireFlag(flags, 'epic'),
+        eventContextFromFlags(flags),
+        eventOptsFromFlags(flags),
+      ),
+    );
+    return 0;
+  }
+
+  if (namespace === 'audit' && action === 'close') {
+    const [projectDir] = requirePositionals(positional, usageFor('audit close')) as [string];
+    printJson(
+      await closeAudit(
+        projectDir,
+        { force: flags.force === 'true' },
+        eventContextFromFlags(flags),
+        eventOptsFromFlags(flags),
+      ),
+    );
+    return 0;
   }
 
   if (namespace === 'plan' && action === 'validate') {

@@ -1325,6 +1325,16 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   'recheck-proposed',
   'maintenance-proposed',
   'growth-review-due',
+  // The audit verbs (audit.ts, docs/specs/audit-command-scope.md §6). An
+  // audit runs against a project outside this factory and carries no task_id,
+  // so nothing else on the timeline would show that it happened; each verb's
+  // event is stamped with the project's name for the multi-project view.
+  'audit-opened',
+  'audit-finding-raised',
+  'audit-decision',
+  'audit-cut',
+  'audit-resolved',
+  'audit-closed',
 ];
 
 let cachedTaxonomy: Taxonomy | undefined;

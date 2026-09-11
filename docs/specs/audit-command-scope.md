@@ -114,10 +114,11 @@ the command is noisy.
 The fence matters as much as the content: a project's `CLAUDE.md` is a file
 this factory did not write, spliced into a prompt this factory composed.
 
-### 2.4 Attribution, and the role that does not exist yet
+### 2.4 Attribution, and the role that did not exist
 
-`factory/policies/taxonomy.yml`'s `agent` enum has thirteen members and none
-of them is an auditor, while every `dispatch_decision` names one. So:
+When this was written, `factory/policies/taxonomy.yml`'s `agent` enum had
+thirteen members and none of them was an auditor, while every
+`dispatch_decision` names one. So (done at taxonomy version 9):
 
 - **Add `auditor` to the `agent` enum**, with one template
   `.claude/agents/auditor.md`. The axis is not a role — it travels in the
@@ -153,6 +154,15 @@ was built for, and an audit whose four axes share one model's blind spot
 converges on agreement that means nothing.
 
 Standing operator constraint: **fable is not used**, on any axis.
+
+**Recorded gap, not met by the playbook.** The factory's judges are Claude
+Code sessions, and nothing dispatches one on another vendor's model:
+`smith judge run` calls a provider by hand with a verdict request, and
+`smith crossfind run` reads a diff, never a tree. So until a mechanism
+exists that hands a whole worktree to a second provider and gets evidence
+back, the four axes run on Claude models and the playbook says so rather
+than inventing a dispatch. The clause stands as the requirement; this
+paragraph is the defect that keeps it from being met.
 
 ## 3. What happens to the four returns
 
@@ -297,10 +307,13 @@ The expiry is computed **when the store is folded**, not by a sweeper: a
 nothing is deleted, the append-only property holds, and there is no background
 job to forget to run.
 
-An expired decline comes back as a **fresh** finding, not a reopened one. It
-argues its case against the code as it now stands, which is the whole reason
-the expiry exists — the decline was a judgment about code that has since
-moved.
+An expired decline comes back as a **fresh** finding, not a reopened one: a
+judge that raises the same fingerprint after the 90 days is recorded as a new
+`raised` line, and the hard stop asks about it again with no memory of the
+old answer. It argues its case against the code as it now stands, which is
+the whole reason the expiry exists — the decline was a judgment about code
+that has since moved. The one thing the expiry does not do is act on its own:
+a declined fingerprint no judge re-raises stays declined, expired or not.
 
 ### 4.5 It is not a waiver store
 
@@ -354,10 +367,24 @@ Every write verb takes the ordinary event envelope (`--session`,
 `--causal-parent`, `[--plan-version]`, `[--actor]`, `[--state-dir]`), because
 an audit is a run and a run that leaves no trail cannot be reported on.
 
+Two paths are fixed by `open` rather than chosen by the caller, so every
+later verb can find them from the project directory alone. The manifest is
+`<project-dir>/.blacksmith/audit.json` — audit id, project, worktree, HEAD,
+baseline fingerprint, session and opening event — and its presence *is* the
+"open" state: `record` and `close` read it and refuse `audit.not-open`
+without it, `open` refuses `audit.already-open` with it. `decide`, `cut` and
+`resolve` read the store alone and need no manifest, so an answer given
+after the worktree is gone is still an answer.
+The worktree is `<parent>/.wt/<project>/audit`, detached at HEAD beside the
+project, the same neighbourhood task worktrees use; a directory already
+there with no manifest naming it is `audit.worktree-exists`, left for the
+operator to remove rather than reused.
+
 The judgment half is a playbook, not a script: `.claude/skills/bs/audit.md`,
-read from a `## /bs audit <project>` section in `SKILL.md` — the same split
-`/bs run` already uses for `wave.md`, and for the same reason. An audit
-outlives the section that starts it.
+one row of the router table in `SKILL.md` and read only when the verb runs
+— the same split every other `/bs` verb uses since the console was cut into
+per-verb playbooks, and for the same reason. An audit outlives the turn that
+starts it.
 
 ## 7. `/bs maintain` is not in this file
 

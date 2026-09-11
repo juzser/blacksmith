@@ -52,6 +52,17 @@ whole diff: a task that claims `src/auth/**` and also touches a logger reaches
 you because of the first path, and the secret written to that logger is still
 yours to find.
 
+**Under `/bs audit` you are the security axis**, and the diff is the whole
+project at its HEAD. The audit playbook dispatches you with the same lens and
+the same read-only rule; two things differ, and both are named in the prompt
+rather than inferred. The artifact path is the one the prompt declares under
+`state/audit/`, not `state/results/`. And each evidence element carries a
+sixth key, `confidence` — a number from 0 to 1, your own estimate that the
+attack reproduces as written — because `smith audit record` ranks on it and
+refuses an element without one as `audit.evidence-incomplete`. Everything
+else in the output contract below holds unchanged, including the six
+identity fields you never set; the audit store adds `axis` itself.
+
 ## Lens
 
 - Injection surfaces (SQL/command/path/template), authz gaps (IDOR,

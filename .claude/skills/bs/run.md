@@ -247,7 +247,11 @@ playbooks are written to prevent.
     It re-runs the verdict, then emits `epic-closed` on `go` and refuses
     (exit 1, no event) on `hold`. **Never pass `--override-rationale`
     yourself** — closing over a hold is the operator's call; ask for it and
-    quote the blockers.
+    quote the blockers. If the epic was cut by `/bs audit`
+    ([`audit.md`](audit.md) step 10), follow the close with
+    `smith audit resolve <project-dir> --epic <epic> --session <session-id> --causal-parent <event-id>`
+    so every finding the epic carried is marked `fixed` in the project's
+    audit store — the store, not the epic, is where a finding's life ends.
 17. Open **one integration PR per epic**
     (`smith/<epic>/integration` → target repo `main`) with the scribe-
     written body (`/bs report`'s playbook, [`report.md`](report.md)) —
