@@ -138,6 +138,43 @@ nothing.
 - claim_path: **
 - statement: A wrapper that collapses a child's exit signal into an exit code has deleted the only evidence that distinguishes a crash from a failure, and every diagnosis downstream of it will be about the wrong subsystem.
 
+### lesson-raised-7299eef43e7d: npm-packlist drops `.gitignore` and `.npmignore` unconditionally, eve...
+
+- lesson_id: lesson-raised-7299eef43e7d
+- claim_path: {package.json,factory/scaffold/**}
+- statement: npm-packlist drops `.gitignore` and `.npmignore` unconditionally, even inside directories the `files` allowlist names; a scaffold that must ship one ships a template under another name (`.gitignore.tmpl`) and renames it on write.
+
+### lesson-raised-699f909a6ab2: `npm pack --json` stdout carries the `prepare` script's echo before t...
+
+- lesson_id: lesson-raised-699f909a6ab2
+- claim_path: package.json
+- statement: `npm pack --json` stdout carries the `prepare` script's echo before the JSON; parse from the first `[` or `{`, not the whole stream.
+
+### lesson-raised-fee67ee36513: In a backtick `smith` span, the `docCommands` lint reads an unspaced ...
+
+- lesson_id: lesson-raised-fee67ee36513
+- claim_path: {docs,.claude}/**
+- statement: In a backtick `smith` span, the `docCommands` lint reads an unspaced `|` as alternation between verbs and a spaced ` | ` as a shell pipe; write the one you mean.
+
+### lesson-raised-96cb1b268004: `tsc` does not delete orphaned outputs; a deleted source leaves its `...
+
+- lesson_id: lesson-raised-96cb1b268004
+- claim_path: factory/orchestrator/dist/**
+- statement: `tsc` does not delete orphaned outputs; a deleted source leaves its `dist/*.js` behind and the tarball ships it. Clean `dist/` before a pack.
+
+### lesson-raised-f78f3641f4bd: A `files` allowlist is a claim about what the product is, true only o...
+
+- lesson_id: lesson-raised-f78f3641f4bd
+- finding_category: correctness
+- claim_path: package.json
+- statement: A `files` allowlist is a claim about what the product is, true only once someone installs the tarball into an empty directory and runs it; a packaging change is not done until that install proof has run.
+
+### lesson-raised-ccadfedf2299: A packaging guard reads each path constant's spelling from source tex...
+
+- lesson_id: lesson-raised-ccadfedf2299
+- claim_path: factory/orchestrator/test/packaging.test.ts
+- statement: A packaging guard reads each path constant's spelling from source text, not its runtime value, because under an install the roots resolve to places the test suite can never stand.
+
 ## case-type
 
 _(none yet)_
@@ -233,6 +270,91 @@ _(none yet)_
 
 - lesson_id: lesson-raised-b8db8efe922d
 - statement: An agent that owes a file should write it before refining it: the declared-artifact check catches an agent that ended on an intention only after the tokens are spent, and if that agent could write to shared state, only after the damage has spread.
+
+### lesson-raised-66bfd37ce01a: Never override the commit author with `git -c user.email=...`; the re...
+
+- lesson_id: lesson-raised-66bfd37ce01a
+- statement: Never override the commit author with `git -c user.email=...`; the repo's configured identity is the author, and a per-command override writes a commit under the wrong name that a rewrite has to undo.
+
+### lesson-raised-962e5eed0b7b: A skill's `description:` frontmatter is system-prompt cost on every t...
+
+- lesson_id: lesson-raised-962e5eed0b7b
+- statement: A skill's `description:` frontmatter is system-prompt cost on every turn; keep it to routing, not prose.
+
+### lesson-raised-c11ee5a1819d: A truncated listing (`| head -N`) is not a measurement; count from th...
+
+- lesson_id: lesson-raised-c11ee5a1819d
+- statement: A truncated listing (`| head -N`) is not a measurement; count from the full output or a counter before stating a number.
+
+### lesson-raised-cf980af1e570: After a pipe, `$?` is the last stage's exit code; use `${pipestatus[n...
+
+- lesson_id: lesson-raised-cf980af1e570
+- statement: After a pipe, `$?` is the last stage's exit code; use `${pipestatus[n]}` (zsh) and read it before any subshell, which discards it. The "unknown flag exits 0" observation was this.
+
+### lesson-raised-fc0191ec66ae: `cd` inside a compound command re-scopes the rest of it, and the work...
+
+- lesson_id: lesson-raised-fc0191ec66ae
+- statement: `cd` inside a compound command re-scopes the rest of it, and the working directory resets between tool calls; use absolute paths or `git -C <dir>` rather than relying on a prior `cd`.
+
+### lesson-raised-0d7ff58845b2: `pnpm biome check` must run from the repo root; run from `factory/orc...
+
+- lesson_id: lesson-raised-0d7ff58845b2
+- statement: `pnpm biome check` must run from the repo root; run from `factory/orchestrator` it checks a different file set and reports a different baseline.
+
+### lesson-raised-720003607334: Resolve another branch's merge conflict in a throwaway worktree off `...
+
+- lesson_id: lesson-raised-720003607334
+- statement: Resolve another branch's merge conflict in a throwaway worktree off `origin/<branch>` (`git worktree add --quiet <dir> -b <branch> origin/<ref>`), never by switching the current tree.
+
+### lesson-raised-49b3f7dc407d: When both sides of a conflict appended to the same list (a CHANGELOG ...
+
+- lesson_id: lesson-raised-49b3f7dc407d
+- statement: When both sides of a conflict appended to the same list (a CHANGELOG section, a `files` allowlist), the resolution is the union of both additions, not a pick of one side.
+
+### lesson-raised-5b1e157a4b4d: A red `main` makes every PR's check meaningless; fix `main` first, th...
+
+- lesson_id: lesson-raised-5b1e157a4b4d
+- statement: A red `main` makes every PR's check meaningless; fix `main` first, then re-run the PR checks against it.
+
+### lesson-raised-47c273e5949b: Every `.md` under the instruction surface is doc-linted, so a scope d...
+
+- lesson_id: lesson-raised-47c273e5949b
+- statement: Every `.md` under the instruction surface is doc-linted, so a scope doc that names a verb not yet built turns `main` red; declare it with a self-expiring `<!-- PLANNED-NAMESPACE: <ns> -->` marker rather than widening the lint's exclusion list.
+
+### lesson-raised-6e713c40cfc7: `git stash` unstages a `git mv`; the rename comes back as a delete pl...
+
+- lesson_id: lesson-raised-6e713c40cfc7
+- statement: `git stash` unstages a `git mv`; the rename comes back as a delete plus an untracked file, so re-stage the rename after `stash pop`.
+
+### lesson-raised-9b485954d931: `rm -rf` is hook-blocked outside `workspaces/` and `state/`; remove a...
+
+- lesson_id: lesson-raised-9b485954d931
+- statement: `rm -rf` is hook-blocked outside `workspaces/` and `state/`; remove a worktree with `git worktree remove --force` and a file with a targeted `rm`.
+
+### lesson-raised-ffadc4019340: Verify a new guard by mutation, not by a green run: reintroduce each ...
+
+- lesson_id: lesson-raised-ffadc4019340
+- statement: Verify a new guard by mutation, not by a green run: reintroduce each defect it claims to catch and watch it fail by name before trusting the pass.
+
+### lesson-raised-3c9f8b1c9d17: `npm publish` answering `404 ...
+
+- lesson_id: lesson-raised-3c9f8b1c9d17
+- statement: `npm publish` answering `404 ... is not in this registry` for a scoped package is an authentication failure in disguise, not a missing package; check `npm whoami` before anything else.
+
+### lesson-raised-43a115153ca8: npm's read path lags a first publish by roughly 45 seconds; confirm a...
+
+- lesson_id: lesson-raised-43a115153ca8
+- statement: npm's read path lags a first publish by roughly 45 seconds; confirm a publish with `npm access list packages`, not `npm view`, before concluding it failed.
+
+### lesson-raised-b223426aa4f6: `grep -r ...
+
+- lesson_id: lesson-raised-b223426aa4f6
+- statement: `grep -r ... --include=...` with no path argument reads stdin and hangs the tool call forever; always pass an explicit root.
+
+### lesson-raised-bc8c041f3a8c: A hand-maintained list inside a guard is the hole the guard was built...
+
+- lesson_id: lesson-raised-bc8c041f3a8c
+- statement: A hand-maintained list inside a guard is the hole the guard was built to close; derive the list from the source it checks (a `roots` array in `packaging.test.ts` did not name `ROADMAP_PATH`, so the guard passed the very gap it existed to catch).
 
 ## security
 
