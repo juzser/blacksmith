@@ -27,6 +27,22 @@ than appearing in it.
 
 ### Added
 
+- **The turn cap the harness does read.** M-4 (2026-08-05) called the
+  templates' `maxTurns` inert and moved the turn budget into the dispatch
+  prompt. Dogfooding `csb-audit-1` measured the opposite eight times — Claude
+  Code stops an `Agent`-tool subagent at exactly the template's number,
+  whatever the prompt promised (FD-7, FD-14) — and on 2026-09-11 the planner
+  for `csb-signing-policy-1` was cut at its template's 20 against a stated
+  40 with nothing written, the second planner lost that way. So the roles
+  reverse: `dispatch.md` now carries the template's `maxTurns` verbatim and
+  never a higher figure, `budgets.yml`, `agent-constraints.md`,
+  `extending.md`, `continuous-loop-scope.md` §6.3 and the `plan validate`
+  message say why `max_turns` still has no task-level reader (the ceiling is
+  per role, and a plan cannot move it), M-4 carries a dated correction,
+  `scripts/check.sh` refuses a template whose `maxTurns` is missing or not a
+  positive integer (an absent key ships an uncapped role), and
+  `.claude/agents/planner.md` goes from 20 to 40 — the coder's number, and
+  the one every planner brief had been stating.
 - **0.1.1 — what the tarball owes an installer.** 0.1.0 was published and then
   installed, and the install is where the three defects below became visible;
   all three are the same defect, which is that `paths.ts` derived every path

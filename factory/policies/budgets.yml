@@ -62,9 +62,12 @@
 # Every other number below is prompt-level: read by agents from their own
 # template and by the operator from the /bs playbook. They are requests, not
 # limits, and the sections that follow say which is which. `max_turns` is no
-# longer among them at all — no dispatch harness can enforce a turn limit
-# (agent-interviews.md M-4), so plan validation now rejects it as a task budget
-# field and the number belongs in the dispatch prompt.
+# longer among them at all: the turn ceiling is the role template's
+# `maxTurns` (`.claude/agents/<role>.md`), which Claude Code enforces per
+# dispatch (measured 2026-09-07/-11, dogfood-csb-audit-1 FD-7 and FD-14 —
+# agent-interviews.md M-4 had called it inert), and a plan cannot raise or
+# lower a role's ceiling. So plan validation rejects it as a task budget
+# field, and the dispatch prompt restates the template's number verbatim.
 #
 # No concurrency cap on cost grounds, by design (removed 2026-08-05). Workers
 # run in isolated worktrees on disjoint path claims, so parallelism is bounded

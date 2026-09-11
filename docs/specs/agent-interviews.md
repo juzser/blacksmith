@@ -203,6 +203,18 @@ an inert key is a lie unless the prompt makes it true.
 > Answer: ✅ Recorded 2026-08-05 — (c). The key stays as recorded intent;
 > the turn budget is now carried into every dispatch by the `/bs` skill's
 > "Dispatch contract" section, where the agent can actually read it.
+>
+> **Correction, 2026-09-11.** The premise was wrong: Claude Code *does* read
+> `maxTurns` and stops the subagent at exactly that many turns, whatever the
+> prompt promised. Measured eight times over two sessions
+> (`docs/specs/dogfood-csb-audit-1-findings.md` FD-7, FD-14): a
+> security-reviewer told 20 cut at its template's 15, a verifier likewise,
+> and a planner told 40 cut at its template's 20 — twice, the second time on
+> 2026-09-11 while planning `csb-signing-policy-1`, with nothing written.
+> (c) survives with the roles reversed: the template is the limit and the
+> prompt restates it, never the other way round. `scripts/check.sh` now
+> requires `maxTurns` as a positive integer on every template, and the
+> planner's went from 20 to 40.
 
 ### Topology under uncapped fan-out
 

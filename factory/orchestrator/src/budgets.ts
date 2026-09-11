@@ -272,11 +272,13 @@ export interface TaskBudget {
  * visible, so plan validation can say "you wrote down a limit nobody can
  * apply" instead of the plan quietly implying otherwise.
  *
- * `max_turns` is null on purpose, and not because the wiring is pending: a turn
- * limit has to live in the dispatch harness, and the Agent tool exposes no
- * turns parameter (agent-interviews.md M-4, answered (c) on 2026-08-05 — the
- * number is carried into the dispatch prompt by the /bs skill, where it is a
- * request to the agent, not a limit on it).
+ * `max_turns` is null on purpose, and not because the wiring is pending: the
+ * turn limit lives in the dispatch harness, which reads the role template's
+ * `maxTurns` (`.claude/agents/<role>.md`) — per role, never per task
+ * (agent-interviews.md M-4, answered (c) on 2026-08-05 and corrected
+ * 2026-09-11 once the cap was measured). A plan cannot raise or lower a
+ * role's ceiling, so a number here would be a second copy the harness never
+ * consults; the /bs dispatch contract restates the template's value instead.
  */
 export const TASK_BUDGET_FIELD_READERS: Readonly<Record<keyof TaskBudget, string | null>> =
   Object.freeze({

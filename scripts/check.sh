@@ -125,6 +125,12 @@ import yaml
 root = sys.argv[1]
 fail = False
 required = ["name", "description", "model", "tools"]
+# `maxTurns` is enforced by Claude Code as the subagent's turn ceiling
+# (dogfood-csb-audit-1 FD-7/FD-14, measured 2026-09-07 and 2026-09-11), so
+# a template without it ships an uncapped role and a non-integer value is
+# a cap of unknown effect. Checked apart from `required` because `0` is
+# falsy and must be refused by name, not read as missing.
+turn_key = "maxTurns"
 
 files = sorted(glob.glob(os.path.join(root, ".claude", "agents", "*.md")))
 with open(os.path.join(root, "factory", "policies", "taxonomy.yml")) as fh:
@@ -171,11 +177,15 @@ for f in files:
         fail = True
         continue
     missing = [k for k in required if not fm.get(k)]
+    turns = fm.get(turn_key)
     if missing:
         print(f"FAIL {rel}: missing frontmatter field(s) {missing}")
         fail = True
+    elif not (isinstance(turns, int) and not isinstance(turns, bool) and turns > 0):
+        print(f"FAIL {rel}: {turn_key} must be a positive integer (the harness enforces it as the turn ceiling), got {turns!r}")
+        fail = True
     else:
-        print(f"OK   {rel}: name={fm['name']} model={fm['model']}")
+        print(f"OK   {rel}: name={fm['name']} model={fm['model']} {turn_key}={turns}")
 
 sys.exit(1 if fail else 0)
 PY

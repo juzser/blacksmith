@@ -6,10 +6,16 @@ per-dispatch envelope, not a role prompt — the templates still own those
 
 **Carry into the prompt** (the agent cannot see any of this otherwise): the
 task spec or the one question · the **absolute** worktree path · the path
-claims it may touch · its token cap · **its turn budget**. That last one is
-why it is listed: the templates carry a `maxTurns` key that Claude Code does
-not read (agent-interviews.md M-4) — the number is only true if the prompt
-says it, so say it.
+claims it may touch · its token cap · **its turn budget, copied verbatim
+from the template's `maxTurns`**. That last one is why it is listed: Claude
+Code enforces the template's `maxTurns` on every `Agent`-tool dispatch
+(measured 2026-09-07 and again 2026-09-11 — dogfood-csb-audit-1 FD-7, FD-14),
+and the agent cannot see how many turns it has left. A prompt that promises
+more than the template is a fiction the agent plans against and gets cut in
+the middle of (a planner told 40 under a template saying 20 stopped twice
+with nothing written). So state the template's number, never a higher one,
+and tell every role that owes a file to write it before it refines it. A
+role that keeps running out is a template to raise, not a prompt to inflate.
 
 **Splice the compiled lessons into every prompt** (agent-interviews.md N-9,
 P9-2). Before you dispatch, run
