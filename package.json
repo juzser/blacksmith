@@ -1,7 +1,6 @@
 {
-  "name": "black-smith",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@juzser/blacksmith",
+  "version": "0.1.0",
   "type": "module",
   "description": "Autonomous agent factory — loop runner and worktree engine.",
   "keywords": [
@@ -26,6 +25,9 @@
   },
   "author": "juzser (https://github.com/juzser)",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=22"
   },
@@ -33,6 +35,16 @@
   "bin": {
     "smith": "factory/orchestrator/dist/cli.js"
   },
+  "files": [
+    "factory/orchestrator/dist",
+    "!factory/orchestrator/dist/**/*.d.ts",
+    "factory/orchestrator/drizzle",
+    "!factory/orchestrator/drizzle/meta/*_snapshot.json",
+    "factory/policies",
+    "factory/specs/schema",
+    "factory/scaffold",
+    ".claude/agents"
+  ],
   "scripts": {
     "prepare": "pnpm run build",
     "check": "bash scripts/check.sh",
@@ -57,30 +69,30 @@
     "test:e2e": "pnpm build:server && pnpm build:ui && playwright test --config ui/playwright.config.ts"
   },
   "dependencies": {
-    "@hono/node-server": "2.1.1",
-    "@vue-flow/core": "1.48.2",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.2",
-    "hono": "4.13.7",
     "picomatch": "4.0.7",
-    "vue": "3.5.42",
-    "vue-router": "5.3.1",
     "yaml": "2.9.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",
+    "@hono/node-server": "2.1.1",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.4.1",
     "@vitejs/plugin-vue": "6.0.8",
     "@vitest/coverage-v8": "5.0.0",
+    "@vue-flow/core": "1.48.2",
     "drizzle-kit": "0.31.10",
+    "hono": "4.13.7",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.2.2",
-    "vitest": "5.0.0"
+    "vitest": "5.0.0",
+    "vue": "3.5.42",
+    "vue-router": "5.3.1"
   }
 }
