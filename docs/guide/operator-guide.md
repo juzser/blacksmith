@@ -1457,7 +1457,7 @@ smith gate run epic-1/task-1 \
   criterion that is not `pass` blocks the task before a single check command
   runs. **Optional** — omit it and the pipeline is schema check → tests →
   findings, which is what an ad-hoc gate run with no grading pass wants. The
-  factory always passes it (`.claude/skills/bs/SKILL.md` step 7).
+  factory always passes it (`.claude/skills/bs/wave.md` step 7).
 - `findings.json` — `Array<{ filePath, finding: {...} }>` from
   reviewer/verifier, matching `finding.schema.json` minus the computed
   `fingerprint`.

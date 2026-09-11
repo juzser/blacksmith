@@ -16,7 +16,7 @@
 # HOST: `smith security triggers --task <spec.json>` reads this file and
 # returns the triggers that fired, with the claim and the glob that fired each
 # one (factory/orchestrator/src/security.ts, punch list P9-4). The dispatcher
-# in `.claude/skills/bs/SKILL.md` runs that verb rather than eyeballing the
+# in `.claude/skills/bs/dispatch.md` runs that verb rather than eyeballing the
 # list. Match semantics live with the host; the two rules worth knowing before
 # editing globs below are stated inline.
 

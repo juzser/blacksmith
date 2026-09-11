@@ -34,12 +34,15 @@ that matter most:
 ## Driving the factory
 
 [`.claude/skills/bs/SKILL.md`](.claude/skills/bs/SKILL.md) is the operator
-console (`/bs new|plan|run|status|ui|waivers|lessons|report`). Its playbooks
-own the dispatch contract, the event-log envelope, and the lessons splice —
-use them rather than improvising a dispatch.
+console (`/bs new|plan|run|status|ui|waivers|lessons|report`) and a router:
+it carries the event-log envelope and routes each verb to its own playbook
+beside it, read when that verb runs. The playbooks own the lessons splice
+and the loop; [`dispatch.md`](.claude/skills/bs/dispatch.md) owns the
+dispatch contract every one of them dispatches under — use them rather than
+improvising a dispatch.
 
-`/bs run` is two files, because an epic outlives its waves. `SKILL.md` is the
-epic tier: it plans, admits one wave, and closes the epic.
-[`wave.md`](.claude/skills/bs/wave.md) is the wave tier — steps 2-10,
-worktrees through merge queue — and is read from inside a run, never invoked
-on its own.
+`/bs run` is two files, because an epic outlives its waves.
+[`run.md`](.claude/skills/bs/run.md) is the epic tier: it admits one wave
+and closes the epic. [`wave.md`](.claude/skills/bs/wave.md) is the wave
+tier — steps 2-10, worktrees through merge queue — and is read from inside
+a run, never invoked on its own.

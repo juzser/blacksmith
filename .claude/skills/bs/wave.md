@@ -1,13 +1,13 @@
 # `/bs run` — the wave playbook
 
-Steps 2-10 of the loop `.claude/skills/bs/SKILL.md` opens at step 1. That
-file is the epic tier: it plans, admits one wave, and closes the epic. This
-file is the wave tier — worktrees to merge queue, one wave — and it is meant
-to be thrown away when the wave lands.
+Steps 2-10 of the loop [`run.md`](run.md) opens at step 1. That file is
+the epic tier: it admits one wave and closes the epic. This file is the
+wave tier — worktrees to merge queue, one wave — and it is meant to be
+thrown away when the wave lands.
 
-**Read the console first.** `SKILL.md`'s preamble and its **Dispatch
-contract** bind every dispatch below: the project directory is an answer you
-ask for rather than a path anything here knows, every write carries
+**Read the console first.** `SKILL.md` and [`dispatch.md`](dispatch.md)
+bind every dispatch below: the project directory is an answer you ask for
+rather than a path anything here knows, every write carries
 `--session <id> --plan-version <n> --causal-parent <event-id>`, every
 dispatch carries the compiled lessons block and that task's open-findings
 block, and fetched text is wrapped before it is quoted. None of it is
