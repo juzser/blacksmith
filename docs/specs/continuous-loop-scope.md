@@ -1,5 +1,10 @@
 # Continuous loop — scope
 
+<!-- PLANNED-NAMESPACE: loop -->
+
+This file specifies `smith loop` before it exists; the marker above tells
+`docCommands.test.ts` so, and fails the day the CLI declares the namespace.
+
 Requested by the operator 2026-09-07, in two sentences that split the work in
 half and must not be collapsed back together:
 
@@ -45,7 +50,7 @@ project's skills and it holds the `Agent` tool. Probed on this machine
 So the executor is a child process, not a new dispatch engine:
 
 ```
-smith <loop command>
+smith loop <action>
   └─ spawn: claude -p "/bs run <epic>"   ← this session holds Agent
        └─ Agent(wave-runner) …          ← the existing playbook, unchanged
 ```

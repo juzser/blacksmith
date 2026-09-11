@@ -1,5 +1,11 @@
 # Blacksmith — Roadmap
 
+<!-- PLANNED-NAMESPACE: loop -->
+
+A milestone names the surface it will ship before it ships it; the marker
+above is how `docCommands.test.ts` is told, and it fails once `loop` is a
+namespace the CLI declares.
+
 Source of truth for the Overview/Roadmap dashboard pages' milestone
 progress (`docs/specs/black-smith-architecture.md` §10, §16 "Build order").
 Parsed by `factory/orchestrator/src/roadmap.ts`; projected into the
