@@ -25,6 +25,14 @@ dashboard's Roadmap page parses.
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
 | 10. Deployment + ops | A background watcher (`smith daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
 
+Two things sit beside the phases rather than inside one. **`/bs audit`** is
+built: an existing project is read on four axes from a detached worktree,
+the findings are ranked, the operator decides at a hard stop, and one epic is
+cut — [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md)
+is the contract. And the **CLI is on npm** as `@juzser/blacksmith`: the
+`smith` binary and what it reads, which is not the console, the dashboard or
+the docs — those still run from a clone, and so does driving an epic.
+
 ## The five things to know before you rely on it
 
 **1. The daemon watches; it does not drive.** `smith daemon` (Phase 10) runs

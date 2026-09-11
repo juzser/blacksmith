@@ -1,10 +1,14 @@
 # Changelog
 
-Blacksmith has **no versioned releases**. It runs from a clone, not from a
-registry: `package.json` is `version: 0.0.0`, there are no git tags, and the
-only supported revision is `main`. So this file is not a list of releases —
-it is a list of what landed, in the order it landed, keyed to the milestones
-in [`factory/specs/roadmap.md`](factory/specs/roadmap.md).
+Blacksmith has one versioned artifact and it is not the whole factory. The
+`smith` CLI — the binary plus the policies, schemas, scaffold templates, agent
+role files and migrations it reads — is published to npm as
+`@juzser/blacksmith`; `package.json` carries that version and a `v<version>`
+git tag marks each publish. Everything else — the `/bs` console, the
+dashboard, the docs, the roadmap — runs from a clone, and the only supported
+revision of the clone is `main`. So this file is not a list of releases — it
+is a list of what landed, in the order it landed, keyed to the milestones in
+[`factory/specs/roadmap.md`](factory/specs/roadmap.md).
 
 Dates are the day the roadmap first recorded a milestone as `completed`,
 derived from the development history that preceded this repository. They mark
@@ -22,6 +26,39 @@ entries below record development that predates this repo's git history rather
 than appearing in it.
 
 ### Added
+
+- **The CLI ships as a package.** `@juzser/blacksmith` 0.1.0 is the `smith`
+  binary and exactly what it reads at runtime: `factory/orchestrator/dist`,
+  the drizzle migrations, `factory/policies`, `factory/specs/schema`,
+  `factory/scaffold` and `.claude/agents` — 173 files, 575 KB packed. The
+  `files` allowlist is the contract and `packaging.test.ts` holds it: every
+  read-only root `paths.ts` resolves is shipped, `dependencies` is exactly the
+  set of bare imports under `src/`, and no scaffold template is named
+  `.gitignore`, because npm-packlist drops that name wherever it sits — the
+  base template is `.gitignore.tmpl` now and the scaffolder strips the suffix.
+  The five UI-only packages moved to `devDependencies` so an install of the
+  CLI does not pull Vue. Stated plainly: a registry install runs from its
+  install directory and keeps `state/` and `factory/specs/active/` there;
+  `smith new` without `--target-dir` scaffolds beside it; and `smith new`
+  fails with `roadmap.unreadable` because `factory/specs/roadmap.md` is not
+  shipped. The clone is still the working path for driving an epic.
+
+- **An audit is a command, not a conversation.** `/bs audit <project-dir>`
+  reads an existing project — built here or not — on four fixed axes
+  (performance, code quality, architecture, security) from a detached
+  read-only worktree cut at `HEAD`, folds the four returns into path-clusters
+  ranked by severity, convergence and confidence, and **stops** for the
+  operator to accept, decline or merge each finding before it renders one
+  roadmap milestone and one epic spec from the accepted ones. The verbs are
+  `smith audit open|record|consolidate|decide|cut|resolve|close`; the store is
+  `<project-dir>/.blacksmith/findings.jsonl`, append-only, folded on read,
+  where a decline expires after 90 days and a `fixed` finding that comes back
+  is raised fresh as a regression. The working tree of the audited project is
+  never written; `.blacksmith/` is state, and the `.gitignore` line is a
+  question asked once at the hard stop, never an edit made on the operator's
+  behalf. [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md)
+  is the contract; [`.claude/skills/bs/audit.md`](.claude/skills/bs/audit.md)
+  is the playbook.
 
 - **The dashboard can be asked about one run, and about that run's lineage.**
   D-263/D-264 taught the server to read `?session` and `?lineage` on every read

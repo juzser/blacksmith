@@ -2,7 +2,8 @@
 
 What you actually do, in the order you meet it. Six steps, two of which need
 you; the rest is the factory's job. Step 0 comes before all of them and
-happens once per project.
+happens once per project — and it has two forms, one for a project that does
+not exist yet and one for a project that already does.
 
 This is the bridge between the README's summary and
 [`operator-guide.md`](operator-guide.md), which walks the same ground with
@@ -17,6 +18,7 @@ is your console:
 |---|---|
 | `/bs new <project> [--ui]` | Scaffold a new target project from the stack standard |
 | `/bs mcp <project>` | Layer the MCP surface on, at its own milestone |
+| `/bs audit <project-dir>` | Audit an existing project on four axes, rank, decide at a hard stop, cut one epic |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner |
 | `/bs run <epic>` | Admit a wave and drive it through the loop (the epic tier is [`run.md`](../../.claude/skills/bs/run.md); steps 2-10 live in the sibling playbook [`wave.md`](../../.claude/skills/bs/wave.md)) |
 | `/bs status` | Live agent count, budget burn, epic phase |
@@ -82,6 +84,41 @@ exposing; running it on day one would declare nothing.
 Nothing in the built project points back here. No dependency, no
 Blacksmith-shaped config, no docs about the factory — one `Built by
 Blacksmith` line in its README and that is the whole trace.
+
+## 0b. Or have something to fix — `/bs audit <project-dir>`
+
+The other form of step 0, for a project that already exists — built by
+Blacksmith or not. Instead of scaffolding, the factory reads: four judges
+(three `auditor` dispatches and a `security-reviewer`) look at the project at
+`HEAD` on four fixed axes — performance, code quality, architecture, security —
+and each comes back with evidence, not opinions. They read from a detached
+worktree the command cut for the purpose, so the project's own working tree
+is never the thing under the judges' hands; the worktree is verified against
+its opening fingerprint before it is removed, and a judge that moved what it
+was judging is discarded rather than believed.
+
+What the audit leaves in the project is one directory, `.blacksmith/`, and it
+is state rather than source: the findings store the four axes append to, kept
+across runs so a second audit does not re-ask what the first one settled. It
+will show up untracked in the project's `git status`; the command asks once,
+at the stop below, whether to add the `.gitignore` line, and never edits that
+file on its own.
+
+Then the returns are folded into one ranked list and **the command stops**.
+Per finding you **accept** or **decline** — or **merge** two that are the same
+defect reached by two routes. A decline is remembered for 90 days and then
+expires, so a re-audit argues its case against the code as it now stands
+rather than against last quarter's answer. The accepted findings become one
+roadmap milestone and one epic spec; from there it is step 1 against that
+epic, and everything after it is unchanged. When the epic closes, its
+findings are marked fixed — and one that comes back after that is a
+regression, raised fresh.
+
+The playbook is [`audit.md`](../../.claude/skills/bs/audit.md); the contract
+it keeps — what "writes nothing to the project" means, why consolidation
+clusters rather than merges, why a decline expires — is
+[`../specs/audit-command-scope.md`](../specs/audit-command-scope.md). The
+verbs underneath are `smith audit open|record|consolidate|decide|cut|resolve|close`.
 
 ## 1. Say what you want — `/bs plan <goal>`
 
@@ -181,4 +218,5 @@ you on a schedule.
 | Every `smith` command | `smith --help`, or [`operator-guide.md`](operator-guide.md) |
 | What the dashboard shows | [`dashboard.md`](dashboard.md) |
 | What is actually built vs. planned | [`status.md`](status.md) |
+| What an audit promises the project it reads | [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md) |
 | Why the factory is shaped this way | [`../specs/black-smith-architecture.md`](../specs/black-smith-architecture.md) |
