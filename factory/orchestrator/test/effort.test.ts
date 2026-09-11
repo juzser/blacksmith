@@ -67,7 +67,7 @@ describe('loadEffortPolicy', () => {
     expect(loaded.invariants.length).toBeGreaterThan(0);
   });
 
-  it('ships `huge` as the flow SKILL.md already writes — a no-op tier, by design', () => {
+  it('ships `huge` as the flow the `/bs` playbooks already write — a no-op tier, by design', () => {
     // The regression guard for the whole feature. If someone tunes `huge`,
     // every epic that never asked for a tier changes behaviour silently.
     const huge = loadEffortPolicy().tiers.huge;
@@ -266,10 +266,10 @@ describe('resolveEffort', () => {
 describe('the playbooks actually ask for the tier', () => {
   const SKILLS_DIR = path.join(REPO_ROOT, '.claude/skills/bs');
   const skill = readFileSync(path.join(SKILLS_DIR, 'SKILL.md'), 'utf8');
-  const section = (heading: string): string =>
-    skill.slice(skill.indexOf(heading), skill.indexOf('\n## ', skill.indexOf(heading) + 1));
-  const plan = section('## `/bs plan');
-  const run = section('## `/bs run');
+  // One playbook per verb: `/bs plan` and the epic tier of `/bs run` are
+  // files beside the console, not sections of it.
+  const plan = readFileSync(path.join(SKILLS_DIR, 'plan.md'), 'utf8');
+  const run = readFileSync(path.join(SKILLS_DIR, 'run.md'), 'utf8');
 
   /**
    * Every playbook in the skill directory, read by shape rather than by a list
