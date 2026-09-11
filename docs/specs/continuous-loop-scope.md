@@ -348,11 +348,12 @@ Two consequences, both deliberate:
   applies to it like any other failure — `taxonomy.yml`'s `execution` group
   has no class for a turn-cap cutoff today, which is a gap the implementing
   epic has to close rather than route around.
-- **The number is a declaration, and Claude Code does not read it from a
-  template.** Same defect the dispatch contract already names for `maxTurns`
-  (agent-interviews.md M-4): it is only true if the invocation passes it. For
-  the headless child that means the flag on the command line, not a line in a
-  spec.
+- **The number is true only where the harness reads it.** An `Agent`-tool
+  subagent is capped by its template's `maxTurns`, which Claude Code enforces
+  (agent-interviews.md M-4, corrected 2026-09-11). A headless child is not
+  dispatched through a template, so nothing caps it but the invocation
+  itself: for it the number is the flag on the command line, not a line in
+  a spec.
 
 ### 6.4 Findings live in `<project>/.blacksmith/findings.jsonl`
 

@@ -14,8 +14,10 @@ format (YAML frontmatter + body-as-system-prompt). There are 12 today:
 To add one:
 
 1. **Write the file** `.claude/agents/<role>.md` with required
-   frontmatter fields `name`, `description`, `model`, `tools` (plus
-   `maxTurns`, conventionally). `description` should say what the role does
+   frontmatter fields `name`, `description`, `model`, `tools`, and
+   `maxTurns` — a positive integer that Claude Code enforces as the agent's
+   turn ceiling, so leaving it out ships an uncapped role. `description`
+   should say what the role does
    *and* when to dispatch it — it's the routing signal, not just a label.
 2. **Add `<role>` to the taxonomy's `agent` dimension**
    (`factory/policies/taxonomy.yml`) — `scripts/check.sh` diffs the set of

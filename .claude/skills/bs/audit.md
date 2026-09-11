@@ -94,8 +94,9 @@ the `audit_id` the way you keep a session id.
    - **Compose the prompt** with: the axis name (exactly one); the
      absolute worktree path, and that it is read-only; the artifact path
      from the declaration above, verbatim; the turn budget from the
-     template's `maxTurns` (the number is only true if the prompt says
-     it); the fenced excerpts; the lessons block; and for the security
+     template's `maxTurns` (the harness enforces that number, so the
+     prompt may restate it but never raise it — `dispatch.md`); the fenced
+     excerpts; the lessons block; and for the security
      axis, that each element carries `confidence` and lives under
      `state/audit/`. Emit `dispatch_decision` before the call and
      `task-result-recorded` or `error-logged` after it, as for any judge.

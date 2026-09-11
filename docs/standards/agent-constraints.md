@@ -163,10 +163,16 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
 - `researcher` and `uiux` are `medium` rather than `low` because both make
   judgment calls — researcher on external source quality (it holds
   `WebFetch`/`WebSearch`), uiux on design-system fit.
-- **`maxTurns` is inert.** Zero of the 31 agents in the official plugin
-  marketplace set it and the Agent tool exposes no turns parameter. The key
-  stays in the templates as recorded intent; the turn budget is delivered
-  where an agent can actually read it — the `/bs` skill's dispatch contract.
+- **`maxTurns` is the ceiling, and the harness enforces it.** The
+  2026-08-05 reading — inert, kept as recorded intent — was wrong: Claude
+  Code stops an `Agent`-tool subagent at the template's `maxTurns` exactly
+  (measured 2026-09-07 and 2026-09-11, dogfood-csb-audit-1 FD-7, FD-14), and
+  the agent cannot see how many turns it has left. The template's number is
+  therefore a real per-role budget; the `/bs` dispatch contract restates it
+  in the prompt verbatim so the agent can plan against it, and never a
+  higher figure. Read-only judges sit at 15, the planner and coder at 40,
+  the tester at 30, the wave-runner at 60 — raise the template, not the
+  prompt, when a role keeps being cut short.
 
 ## dispatch topology (factory-wide, 2026-08-05)
 

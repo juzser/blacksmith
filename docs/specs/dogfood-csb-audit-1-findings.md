@@ -286,6 +286,14 @@ is wrong for this dispatch path.
 mandate for worktree roles; record the observed turn count on
 `task-result-recorded`.
 
+*Landed 2026-09-11* — after the planner was cut at 20 against a stated 40 a
+second time, in the successor session `csb-signing-policy-1-2026-09-11`,
+with nothing written: the dispatch contract, `budgets.yml`,
+`agent-constraints.md`, `extending.md` and M-4 now say the template is the
+ceiling and the prompt restates it; `scripts/check.sh` requires `maxTurns`
+as a positive integer; `planner.md` went from 20 to 40. The turn count on
+`task-result-recorded` stays a convention, not a schema field.
+
 ---
 
 ## FD-15 — the amendment machinery cannot express "the criterion is misworded and already satisfied" — observed

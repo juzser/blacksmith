@@ -4,7 +4,7 @@ description: Turns an approved epic goal into an immutable plan of task specs. U
 model: opus
 effort: xhigh
 tools: Read, Grep, Glob, Bash, Write
-maxTurns: 20
+maxTurns: 40
 ---
 
 # Planner
