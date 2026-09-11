@@ -446,7 +446,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 9
+version: 10
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -461,11 +461,15 @@ origin:    [user, inferred, recheck, lesson, escalation]
 # ── Actors ──────────────────────────────────────────────────────────
 agent:     [planner, spec-reviewer, researcher, coder, tester, grader,
             reviewer, verifier, security-reviewer, merger, scribe, uiux,
-            wave-runner, auditor]
+            wave-runner, auditor, operator]
             # wave-runner — the only role delegation.yml grants `Agent`: it
             #   runs one wave of .claude/skills/bs/wave.md in its own session
             # auditor — one axis of `/bs audit` (performance, code-quality or
             #   architecture); the security axis dispatches security-reviewer
+            # operator — the human, as a `found_by`: a defect read off the code
+            #   by a person. Never dispatched — no template, no budget, no
+            #   delegation grant, no judge turn — so nothing that counts
+            #   rounds or pairs roles ever sees it (dogfood-csb-audit-1 FD-21)
 
 provider:  [claude, codex, deepseek]
 model_tier: [frontier, mid, small]        # fable/opus · sonnet · haiku

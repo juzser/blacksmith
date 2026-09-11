@@ -1183,7 +1183,10 @@ Two shortcuts, both on `gate run` (§5):
 
 - `--evidence <path> --found-by <role>` **reports for you** when that role has a
   turn open, so the normal path is dispatch → judge writes → gate, one command
-  instead of two. A `--found-by` role nobody dispatched is unaffected.
+  instead of two. A `--found-by` role nobody dispatched is unaffected —
+  `operator` included: a defect you read off the code yourself goes in as
+  `--found-by operator` (on `gate run` or `findings raise`), and no turn, round
+  or judge pairing is ever expected behind it (taxonomy v10, FD-21).
 - `--no-findings <role>` (repeatable) records an operator **attestation**:
   `artifact_path: null`, `finding_count: 0`, `attested_by: operator`. It is
   deliberately distinguishable in the log from a judge that wrote `[]`, because
