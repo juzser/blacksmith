@@ -2,8 +2,22 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { GitCommandError, redactCredentials, runGit, runGitRaw } from '../src/git.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Partial mock: every call passes through to the real execFileSync except
+// where a single test overrides it with `mockImplementationOnce`, to reach
+// exec()'s catch branch with a caught error node itself never produces.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
+import {
+  GitCommandError,
+  readOriginUrl,
+  redactCredentials,
+  runGit,
+  runGitRaw,
+} from '../src/git.js';
 
 describe('git.ts', () => {
   let repoDir: string;
@@ -89,5 +103,69 @@ describe('git.ts', () => {
     expect(redactCredentials('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref')).toBe(
       'fatal: ref refs/remotes/origin/HEAD is not a symbolic ref',
     );
+  });
+
+  it('reads the origin remote url', () => {
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/o/r.git'], {
+      cwd: repoDir,
+    });
+    expect(readOriginUrl(repoDir)).toBe('https://github.com/o/r.git');
+  });
+
+  it('throws GitCommandError naming "No such remote" when there is no origin', () => {
+    let caught: unknown;
+    try {
+      readOriginUrl(repoDir);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(GitCommandError);
+    expect((caught as GitCommandError).stderr).toMatch(/no such remote/i);
+  });
+
+  // status === null (killed by signal / never exited) is a real outcome the
+  // constructor must format distinctly from a numeric exit code, and a
+  // silent failure ("said nothing") must not read as an empty message.
+  it('formats a null status as "did not exit normally" and an empty stderr as "said nothing"', () => {
+    const error = new GitCommandError(repoDir, ['status'], null, '');
+    expect(error.status).toBeNull();
+    expect(error.stderr).toBe('');
+    expect(error.message).toContain('did not exit normally');
+    expect(error.message).toContain('and said nothing');
+  });
+
+  // A cwd that does not exist makes execFileSync fail to spawn at all: no
+  // exit status, no stderr, and node's own errno string in `code` instead --
+  // the one thing `exec`'s catch branch is there to report.
+  it('reports a spawn failure (no such cwd) with a null status and the errno in the message', () => {
+    let caught: unknown;
+    try {
+      runGit(path.join(repoDir, 'does-not-exist'), ['status']);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(GitCommandError);
+    const error = caught as GitCommandError;
+    expect(error.status).toBeNull();
+    expect(error.message).toContain('ENOENT');
+  });
+
+  // A caught error carrying neither `stderr` nor a string `code` is an edge
+  // node itself never produces from execFileSync, but `exec`'s catch branch
+  // must still fall back to "" rather than throw formatting the message.
+  it('falls back to an empty stderr when the caught error has neither stderr nor a string code', () => {
+    vi.mocked(execFileSync).mockImplementationOnce(() => {
+      throw new Error('no stderr, no code here');
+    });
+    let caught: unknown;
+    try {
+      runGit(repoDir, ['status']);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(GitCommandError);
+    const error = caught as GitCommandError;
+    expect(error.stderr).toBe('');
+    expect(error.message).toContain('and said nothing');
   });
 });
