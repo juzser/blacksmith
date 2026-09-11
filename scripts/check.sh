@@ -129,7 +129,16 @@ required = ["name", "description", "model", "tools"]
 files = sorted(glob.glob(os.path.join(root, ".claude", "agents", "*.md")))
 with open(os.path.join(root, "factory", "policies", "taxonomy.yml")) as fh:
     tax_agents = set(yaml.safe_load(fh)["agent"])
+# `operator` is the human as a `found_by` value — never dispatched, so no
+# template by design (taxonomy v10, dogfood-csb-audit-1 FD-21). A template
+# with `model`/`tools` frontmatter for a role nobody dispatches would be a
+# false declaration, so the equality below is over dispatched roles only.
+never_dispatched = {"operator"}
+tax_agents -= never_dispatched
 template_names = {os.path.splitext(os.path.basename(f))[0] for f in files}
+if template_names & never_dispatched:
+    print(f"FAIL: template for a never-dispatched role: {', '.join(sorted(template_names & never_dispatched))}")
+    fail = True
 if template_names != tax_agents:
     missing = tax_agents - template_names
     extra = template_names - tax_agents
