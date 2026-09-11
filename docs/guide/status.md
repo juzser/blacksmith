@@ -30,8 +30,10 @@ built: an existing project is read on four axes from a detached worktree,
 the findings are ranked, the operator decides at a hard stop, and one epic is
 cut — [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md)
 is the contract. And the **CLI is on npm** as `@juzser/blacksmith`: the
-`smith` binary and what it reads, which is not the console, the dashboard or
-the docs — those still run from a clone, and so does driving an epic.
+`smith` binary, what it reads and the `/bs` playbooks, which is not the
+dashboard or the docs — those still come from a clone. Installed, it writes
+under `.blacksmith/` in the directory you run it from, or wherever
+`SMITH_HOME` points.
 
 ## The five things to know before you rely on it
 

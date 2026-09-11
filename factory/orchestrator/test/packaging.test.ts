@@ -1,15 +1,7 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  AGENTS_DIR,
-  DB_MIGRATIONS_DIR,
-  LESSONS_MD_PATH,
-  REPO_ROOT,
-  SCAFFOLD_DIR,
-  SCHEMA_DIR,
-  TAXONOMY_PATH,
-} from '../src/paths.js';
+import { REPO_ROOT, SCAFFOLD_DIR } from '../src/paths.js';
 
 // ---------------------------------------------------------------------------
 // What the published tarball must carry, pinned without running `npm pack`.
@@ -41,6 +33,71 @@ function isShipped(rel: string): boolean {
   return shipped.some((entry) => rel === entry || rel.startsWith(`${entry}/`));
 }
 
+interface PathConstant {
+  /** The identifier the constant is joined onto, or `none` if it is computed. */
+  readonly anchor: string;
+  /** The literal segments below that anchor, as one repo-relative path. */
+  readonly rel: string;
+}
+
+/**
+ * Every path constant `paths.ts` exports, read out of its source text.
+ *
+ * Out of the *text*, not out of the module: what the allowlist has to agree
+ * with is the path as it is spelled, and under an install both roots resolve
+ * somewhere this suite could never stand. So the anchor is the first argument
+ * of the `path.join` the constant is built from and the rest are its literal
+ * segments -- a constant built by calling a function instead (the two roots,
+ * and `PROJECTS_DIR`) reports `none` and has to be excused by name below.
+ * Initializers in that file contain no semicolons, so one non-greedy match per
+ * declaration is enough, and it survives the formatter wrapping a long join.
+ */
+function declaredPathConstants(): Map<string, PathConstant> {
+  const src = readFileSync(
+    path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'paths.ts'),
+    'utf8',
+  );
+  const declared = new Map<string, PathConstant>();
+  for (const match of src.matchAll(/export const ([A-Z][A-Z0-9_]*) = ([^;]+);/g)) {
+    const call = /^path\.(?:join|resolve)\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,([\s\S]*)\)$/.exec(
+      (match[2] as string).trim(),
+    );
+    const segments = [...(call?.[2] ?? '').matchAll(/'([^']*)'/g)].map((seg) => seg[1] as string);
+    declared.set(match[1] as string, {
+      anchor: call?.[1] ?? 'none',
+      rel: segments.length > 0 ? path.join(...segments) : '',
+    });
+  }
+  return declared;
+}
+
+/** The anchors themselves: roots, not paths under a root. */
+const ROOTS = new Set(['REPO_ROOT', 'WORK_ROOT']);
+
+/**
+ * The constants the CLI *writes*. Each is held to hanging off `WORK_ROOT` and
+ * to being absent from the allowlist; everything else `paths.ts` exports is
+ * held to the opposite.
+ */
+const WRITTEN = new Set([
+  'DOTENV_PATH',
+  'SANDBOX_LEASE_DIR',
+  'SPECS_ACTIVE_DIR',
+  'STATE_ARTIFACTS_DIR',
+  'STATE_DAEMON_DIR',
+  'STATE_DB_PATH',
+  'STATE_EVENTS_DIR',
+  'WORKSPACES_DIR',
+]);
+
+/** Constants that are under neither root, each with the reason. */
+const UNROOTED = new Map([
+  [
+    'PROJECTS_DIR',
+    "Where a project `smith new` creates goes, which is outside this tree by construction (D-42) -- beside the clone when there is one, and the operator's own directory when the CLI is an installed package.",
+  ],
+]);
+
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
     const abs = path.join(dir, entry);
@@ -59,21 +116,67 @@ describe('the published package', () => {
     expect(isShipped(manifest.bin.smith as string)).toBe(true);
   });
 
-  it('ships every read-only root paths.ts resolves', () => {
-    // The state roots are deliberately absent: `state/` is written at run
-    // time, and a tarball entry for it would be an empty directory npm drops
-    // anyway. Everything the CLI only *reads* is here.
-    const roots = [
-      DB_MIGRATIONS_DIR,
-      SCHEMA_DIR,
-      SCAFFOLD_DIR,
-      AGENTS_DIR,
-      path.dirname(TAXONOMY_PATH),
-      LESSONS_MD_PATH,
-    ];
-    for (const abs of roots) {
-      const rel = path.relative(REPO_ROOT, abs);
+  it('ships every root paths.ts reads, and ships none it writes', () => {
+    // This check used to hold a hand-written list of the six roots somebody
+    // remembered, and `ROADMAP_PATH` was simply not in it -- so 0.1.0 shipped
+    // with `smith new` failing on `roadmap.unreadable` at the first ENOENT a
+    // user could reach. A list inside a guard is the hole the guard exists to
+    // close, so the list is gone: membership is now read off `paths.ts`, and
+    // *shipped* is the default. A constant added there joins this check the
+    // moment it is declared, and the only way out is the two named exceptions
+    // below, each of which is itself checked.
+    const declared = declaredPathConstants();
+    expect(declared.size, 'the declaration scan read nothing out of paths.ts').toBeGreaterThan(25);
+
+    for (const [name, { anchor, rel }] of declared) {
+      if (ROOTS.has(name)) continue;
+
+      if (UNROOTED.has(name)) {
+        expect(anchor, `${name} is excused as unrooted but hangs off ${anchor}`).toBe('none');
+        continue;
+      }
+      if (WRITTEN.has(name)) {
+        expect(anchor, `${name} is written by the CLI and must hang off WORK_ROOT`).toBe(
+          'WORK_ROOT',
+        );
+        // The other half of the bargain, and the one with teeth: a written
+        // path inside the tarball is a directory `npm i` replaces wholesale,
+        // so shipping one deletes the operator's own state on every upgrade.
+        expect(isShipped(rel), `${rel} is written at run time and must not ship`).toBe(false);
+        continue;
+      }
+      expect(anchor, `${name} is read by the CLI and must hang off REPO_ROOT`).toBe('REPO_ROOT');
       expect(isShipped(rel), `${rel} is read by the CLI and not in package.json#files`).toBe(true);
+      expect(
+        existsSync(path.join(REPO_ROOT, rel)),
+        `${rel} is in package.json#files and not in the tree`,
+      ).toBe(true);
+    }
+  });
+
+  it('keeps every excused constant earning its excuse', () => {
+    // An exception outlives what it excused: a constant can be renamed or
+    // deleted and leave its entry here reading like a decision. Both lists are
+    // held to naming something `paths.ts` still declares.
+    const declared = declaredPathConstants();
+    for (const name of [...ROOTS, ...WRITTEN, ...UNROOTED.keys()]) {
+      expect(
+        declared.has(name),
+        `${name} is classified here but paths.ts no longer exports it`,
+      ).toBe(true);
+    }
+  });
+
+  it('ships the operator console it tells people to drive it from', () => {
+    // `.claude/agents` ships because the orchestrator reads the role templates
+    // out of it. `.claude/skills/bs` is the other half of the same product --
+    // the `/bs` playbooks that dispatch those roles -- and an install that
+    // carries the roles without the playbooks is a CLI with no way in.
+    for (const rel of ['.claude/agents/coder.md', '.claude/skills/bs/SKILL.md']) {
+      expect(isShipped(rel), `${rel} is part of the product and not in package.json#files`).toBe(
+        true,
+      );
+      expect(existsSync(path.join(REPO_ROOT, rel)), `${rel} is not in the tree`).toBe(true);
     }
   });
 

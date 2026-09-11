@@ -196,13 +196,17 @@ npm i -g @juzser/blacksmith && smith --help
 ```
 
 That package is the `smith` binary plus everything it reads at runtime — the
-policies, the JSON Schemas, the scaffold templates, the agent role files, the
-database migrations. It is **not** the whole factory: the `/bs` console, the
-dashboard, the docs and the roadmap stay in the clone, and a registry install
-keeps its state (`state/`, `factory/specs/active/`) under its own install
-directory rather than beside the project it is working on. Driving an epic
-still means a Claude Code session opened in a clone. Take the package when you
-want `smith` on a machine without a clone; take the clone for everything else.
+policies, the JSON Schemas, the scaffold templates, the roadmap, the agent role
+files, the `/bs` playbooks, the database migrations. It is **not** the whole
+factory: the dashboard, the docs and the test suite stay in the clone.
+
+Installed, `smith` writes beside **you**, not beside itself: state, epic plans
+and your `.env` go under `.blacksmith/` in the directory you run it from, and
+`smith new` creates a project there too. (In a clone it still writes into the
+clone, as it always has — the layout under the root is identical either way.)
+`SMITH_HOME` overrides the root if you want one fixed home for several
+projects. Take the package when you want `smith` on a machine without a clone;
+take the clone for everything else.
 
 ## Using it
 
@@ -341,8 +345,9 @@ analytics, dashboard, self-extension, cross-provider judges, hardening. Phase 10
 is half in: `smith daemon` watches the factory in the background and its ops
 runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
-what you accept. And the CLI is on npm as `@juzser/blacksmith` — the binary and
-what it reads, not the console or the dashboard, which still run from a clone.
+what you accept. And the CLI is on npm as `@juzser/blacksmith` — the binary,
+what it reads and the `/bs` playbooks, not the dashboard or the docs, which
+still come from a clone.
 
 The one thing to know up front: **the daemon watches, it does not drive.** It
 tells you what the factory needs — budget alarms, agents that never came back,
