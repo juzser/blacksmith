@@ -312,11 +312,9 @@ describe('renderFindingBlock', () => {
 // ---------------------------------------------------------------------------
 
 describe('the dispatch contract actually asks for this block', () => {
-  const skill = readFileSync(path.join(REPO_ROOT, '.claude/skills/bs/SKILL.md'), 'utf8');
-  const contract = skill.slice(
-    skill.indexOf('## Dispatch contract'),
-    skill.indexOf('\n## ', skill.indexOf('## Dispatch contract') + 1),
-  );
+  // The contract is a file of its own beside the console, read before the
+  // first dispatch a playbook makes and not by a verb that dispatches nothing.
+  const contract = readFileSync(path.join(REPO_ROOT, '.claude/skills/bs/dispatch.md'), 'utf8');
 
   it('names the verb an orchestrator has to run before a worktree dispatch', () => {
     expect(contract).not.toBe('');

@@ -11,7 +11,7 @@
 //
 // The only evidence of a separate turn the event log can hold is a separate
 // `dispatch_decision`, written by the node that dispatched and never by an
-// agent about itself (.claude/skills/bs/SKILL.md, "You own the log for what
+// agent about itself (.claude/skills/bs/dispatch.md, "You own the log for what
 // you dispatch"). That is why this module reads dispatches and not, say, file
 // authorship: authorship is not in the log, and inventing a proxy for it
 // would be a check that answers a question it cannot see.

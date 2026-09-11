@@ -193,7 +193,7 @@ export function isLaterEvent(
  *
  * D-245. The envelope's `task_id` is the field every projector keys on, and
  * every machine producer stamps it. The payload copy is what a hand-written
- * dispatch carries: `.claude/skills/bs/SKILL.md` lists the dispatch payload's
+ * dispatch carries: `.claude/skills/bs/dispatch.md` lists the dispatch payload's
  * four required fields and never says where the task id goes, so the operator
  * writes it in beside them. 15 of 19 dispatches in dogfood-envkit-1 and 14 of
  * 82 in dogfood-demo-rpg-1 name their task only there.

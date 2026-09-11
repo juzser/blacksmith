@@ -338,10 +338,10 @@ describe('an epic session and the wave sessions it fans out into (D13 step 2)', 
 // ---------------------------------------------------------------------------
 describe('the two playbooks the topology above exists for (D13 step 2)', () => {
   const SKILLS_DIR = path.join(REPO_ROOT, '.claude', 'skills', 'bs');
-  const skill = readFileSync(path.join(SKILLS_DIR, 'SKILL.md'), 'utf8');
+  // The epic tier used to be a section of SKILL.md; it is a file of its own
+  // now, one playbook per verb, so the console loads only the verb it runs.
+  const runSection = readFileSync(path.join(SKILLS_DIR, 'run.md'), 'utf8');
   const wave = readFileSync(path.join(SKILLS_DIR, 'wave.md'), 'utf8');
-  const head = skill.indexOf('## `/bs run');
-  const runSection = skill.slice(head, skill.indexOf('\n## ', head + 1));
 
   /** The loop's own step numbers, as the ordered lists actually render them. */
   const stepsIn = (text: string): number[] =>
