@@ -62,6 +62,15 @@ export type MilestoneKind = 'factory' | 'dogfood' | 'product';
 export const MILESTONE_KINDS: readonly MilestoneKind[] = ['factory', 'dogfood', 'product'];
 
 /**
+ * The accepted vocabulary for `- error_issues:`, matched case-insensitively
+ * after trimming. Shown here, not just referenced, so a reader never has to
+ * go hunting for what the bullet accepts.
+ */
+export const ERROR_ISSUES_VALUES = ['on', 'off'] as const;
+
+type ErrorIssuesValue = (typeof ERROR_ISSUES_VALUES)[number];
+
+/**
  * The kind a project carries when no milestone of its own declares one.
  *
  * `product` for everything that is not this clone, so a project registered by
@@ -95,6 +104,17 @@ export interface MilestoneDef {
    * same answer it would have given.
    */
   kind: MilestoneKind;
+  /**
+   * Whether the factory may open issues on this project's own tracker for
+   * its build-time errors -- see `error_issues:` and `isErrorTrackerWritable`.
+   * Derived from `- error_issues:` the same way `kind` is derived from
+   * `- kind:`: it describes a PROJECT while being written on a MILESTONE, so
+   * one bullet settles every milestone naming that project. Defaults to
+   * `true` when the bullet is absent (or empty), so every roadmap.md written
+   * before the bullet existed still parses to the same answer it would have
+   * given.
+   */
+  errorIssuesEnabled: boolean;
 }
 
 function bulletValue(line: string, key: string): string | null {
@@ -171,6 +191,10 @@ function isMilestoneKind(value: string): value is MilestoneKind {
   return (MILESTONE_KINDS as readonly string[]).includes(value);
 }
 
+function isErrorIssuesValue(value: string): value is ErrorIssuesValue {
+  return (ERROR_ISSUES_VALUES as readonly string[]).includes(value);
+}
+
 /**
  * Settle every milestone's kind project-wide, and independently of the order
  * the milestones happen to sit in.
@@ -218,10 +242,55 @@ function resolveKinds(milestones: MilestoneDef[], explicit: (MilestoneKind | nul
   }
 }
 
+/**
+ * Settle every milestone's `error_issues` project-wide, the same shape as
+ * resolveKinds() above and for the same reason: the bullet describes a
+ * project while being written on a milestone, so the answer must not depend
+ * on which milestone carries it, or on which milestone in the project a
+ * writer later appends without the bullet.
+ *
+ * A second, differently-behaving pass rather than generalising resolveKinds()
+ * itself, because resolveKinds() is typed to MilestoneKind -- restating the
+ * shape is acceptable, a second RULE is not.
+ */
+function resolveErrorIssues(
+  milestones: MilestoneDef[],
+  explicit: (ErrorIssuesValue | null)[],
+): void {
+  const declared = new Map<string, { value: ErrorIssuesValue; by: string }>();
+  for (let i = 0; i < milestones.length; i += 1) {
+    const m = milestones[i] as MilestoneDef;
+    const value = explicit[i] ?? null;
+    if (value === null) continue;
+    const first = declared.get(m.project);
+    if (first === undefined) {
+      declared.set(m.project, { value, by: m.milestoneId });
+      continue;
+    }
+    if (first.value !== value) {
+      throw new RoadmapError(
+        'roadmap.conflicting-error-issues',
+        `Project "${m.project}" is error_issues "${first.value}" on milestone "${first.by}" but "${value}" on "${m.milestoneId}" — every milestone naming one project must agree.`,
+        {
+          project: m.project,
+          id: m.milestoneId,
+          value,
+          conflictsWith: first.by,
+          conflictsWithValue: first.value,
+        },
+      );
+    }
+  }
+  for (const m of milestones) {
+    m.errorIssuesEnabled = (declared.get(m.project)?.value ?? 'on') === 'on';
+  }
+}
+
 /** Parse the full roadmap.md text into milestone rows, in file order. */
 export function parseRoadmap(markdown: string): MilestoneDef[] {
   const milestones: MilestoneDef[] = [];
   const explicitKinds: (MilestoneKind | null)[] = [];
+  const explicitErrorIssues: (ErrorIssuesValue | null)[] = [];
   const seenIds = new Set<string>();
   const sections = markdown.split(/\n(?=## )/);
   let sequence = 0;
@@ -240,6 +309,7 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
     let epicsRaw: string | null = null;
     let project: string = FACTORY_PROJECT;
     let kindRaw: string | null = null;
+    let errorIssuesRaw: string | null = null;
 
     for (const rawLine of lines.slice(1)) {
       const line = rawLine.trim();
@@ -274,6 +344,14 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
       const kindVal = bulletValue(line, 'kind');
       if (kindVal !== null && kindVal !== '') {
         kindRaw = kindVal;
+        continue;
+      }
+      // Absent and empty both mean "on" -- the same reading `- kind:` and
+      // `- project:` give an empty bullet, and unlike `- epics:` (where `[]`
+      // is a declaration with meaning), empty carries no meaning of its own.
+      const errorIssuesVal = bulletValue(line, 'error_issues');
+      if (errorIssuesVal !== null && errorIssuesVal !== '') {
+        errorIssuesRaw = errorIssuesVal;
       }
     }
 
@@ -330,6 +408,23 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
     }
     explicitKinds.push(kind);
 
+    let errorIssuesValue: ErrorIssuesValue | null = null;
+    if (errorIssuesRaw !== null) {
+      const normalized = errorIssuesRaw.toLowerCase();
+      // A value the parser cannot read must refuse, never degrade to the
+      // default -- an unreadable value arriving downstream as a deliberate
+      // "on" would be the same bug parseEpicIds()'s docblock records.
+      if (!isErrorIssuesValue(normalized)) {
+        throw new RoadmapError(
+          'roadmap.invalid-error-issues',
+          `Milestone "${id}" has error_issues "${errorIssuesRaw}" — expected one of ${ERROR_ISSUES_VALUES.join(', ')}.`,
+          { id, errorIssues: errorIssuesRaw },
+        );
+      }
+      errorIssuesValue = normalized;
+    }
+    explicitErrorIssues.push(errorIssuesValue);
+
     // Read after the id is known and validated, so the refusal names the
     // milestone the way invalid-status does -- the bullets are
     // order-independent, and `- epics:` may well come first in the block.
@@ -346,10 +441,13 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
       project,
       // Provisional -- resolveKinds() below settles it project-wide.
       kind: defaultKindFor(project),
+      // Provisional -- resolveErrorIssues() below settles it project-wide.
+      errorIssuesEnabled: true,
     });
   }
 
   resolveKinds(milestones, explicitKinds);
+  resolveErrorIssues(milestones, explicitErrorIssues);
   return milestones;
 }
 
@@ -417,6 +515,23 @@ export function roadmapDeclaresId(markdown: string, id: string): boolean {
 /** Read and parse roadmap.md from disk (defaults to the real repo path). */
 export function loadRoadmap(roadmapPath: string = ROADMAP_PATH): MilestoneDef[] {
   return parseRoadmap(readRoadmapText(roadmapPath));
+}
+
+/**
+ * Is this project's issue tracker writable -- may the factory open issues on
+ * it for its own build-time errors? The only supported way to ask: reading
+ * `MilestoneDef.errorIssuesEnabled` off a single milestone directly would
+ * answer for that milestone's row rather than for the project, and
+ * `resolveErrorIssues` already settled that one bullet settles the whole
+ * project, so a second caller re-deriving that rule from raw fields would be
+ * the duplication this reader exists to prevent.
+ *
+ * Defaults to writable for a project that names no milestone at all, matching
+ * the bullet's own default.
+ */
+export function isErrorTrackerWritable(milestones: MilestoneDef[], project: string): boolean {
+  const milestone = milestones.find((m) => m.project === project);
+  return milestone === undefined ? true : milestone.errorIssuesEnabled;
 }
 
 /**
