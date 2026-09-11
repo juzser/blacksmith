@@ -310,6 +310,12 @@ Turns `node factory/orchestrator/dist/cli.js plan validate ...` into
 `smith plan validate ...`. Every example in the docs works either way. This
 one writes outside the clone, so an agent must ask first.
 
+The registry package is the other route to the same command: `npm i -g
+@juzser/blacksmith` (or `npx @juzser/blacksmith` for one call) gives you
+`smith` with no clone at all. It is the CLI and what it reads, not the console
+or the dashboard — README "From npm" says exactly where that line falls — and
+an agent running this file must ask before that install too.
+
 ---
 
 ## Part 3 — Optional extras

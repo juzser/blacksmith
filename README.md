@@ -185,6 +185,25 @@ asks before touching anything outside the clone, and it doubles as the human
 version — per-platform setup (macOS, Debian/Ubuntu, Fedora, Alpine, WSL2),
 troubleshooting, and the known platform gaps stated rather than papered over.
 
+### From npm
+
+The CLI alone is also on the registry as
+[`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith):
+
+```bash
+npx @juzser/blacksmith --help          # one-off
+npm i -g @juzser/blacksmith && smith --help
+```
+
+That package is the `smith` binary plus everything it reads at runtime — the
+policies, the JSON Schemas, the scaffold templates, the agent role files, the
+database migrations. It is **not** the whole factory: the `/bs` console, the
+dashboard, the docs and the roadmap stay in the clone, and a registry install
+keeps its state (`state/`, `factory/specs/active/`) under its own install
+directory rather than beside the project it is working on. Driving an epic
+still means a Claude Code session opened in a clone. Take the package when you
+want `smith` on a machine without a clone; take the clone for everything else.
+
 ## Using it
 
 ### Starting a new project
@@ -226,6 +245,30 @@ tools worth declaring.
 → **[Step 0 of the operator loop](docs/guide/operator-loop.md)** has the same
 ground with the failure modes spelled out.
 
+### Auditing an existing project
+
+The other way in. A project that already exists — built here or not — is
+audited, not scaffolded: say **`/bs audit <project-dir>`** and four judges read
+it at `HEAD` on four fixed axes — performance, code quality, architecture,
+security — from a detached, read-only worktree the command cuts and verifies
+against its opening fingerprint before it removes it. The project's working
+tree is never touched; the one thing the audit leaves behind is
+`<project-dir>/.blacksmith/`, state rather than source, where the findings
+accumulate across runs, so a second audit does not re-ask what the first one
+settled — though a finding that comes back after its fix does, as a regression.
+
+The returns are folded into one ranked list and **the command stops**. You
+accept or decline each finding — a decline is remembered for 90 days — and
+the accepted ones become one roadmap milestone and one epic spec. From there
+it is the ordinary loop: `/bs plan` against that epic, then `/bs run`, and
+closing the epic marks its findings fixed. There is no audit-specific run
+path; the command's value is the insight and the ranking.
+
+Underneath it is the `smith audit` family — `open`, `record`, `consolidate`,
+`decide`, `cut`, `resolve`, `close` — and
+[`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) is the
+contract each of them keeps.
+
 ### The loop
 
 Day to day, from a Claude Code session opened in this repo:
@@ -234,6 +277,7 @@ Day to day, from a Claude Code session opened in this repo:
 |---|---|
 | `/bs new <project> [--ui]` | Scaffold a new target project from your stack answers |
 | `/bs mcp <project>` | Layer the MCP surface on and make its milestone due |
+| `/bs audit <project-dir>` | Audit an existing project on four axes, rank, decide at a hard stop, cut one epic |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner + spec-reviewer |
 | `/bs run <epic>` | Admit a wave and drive it through the loop to merge |
 | `/bs status` | Live agent count, budget burn, epic phase |
@@ -295,7 +339,10 @@ a public issue.
 Phases 1–9 are built and merged: loop runner, worktree engine, gates, state and
 analytics, dashboard, self-extension, cross-provider judges, hardening. Phase 10
 is half in: `smith daemon` watches the factory in the background and its ops
-runbook is written; the hosted UI stays deferred.
+runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
+is built: an existing project can be read on four axes and one epic cut from
+what you accept. And the CLI is on npm as `@juzser/blacksmith` — the binary and
+what it reads, not the console or the dashboard, which still run from a clone.
 
 The one thing to know up front: **the daemon watches, it does not drive.** It
 tells you what the factory needs — budget alarms, agents that never came back,
@@ -318,6 +365,7 @@ version in
 | [`docs/guide/status.md`](docs/guide/status.md) | What is real today |
 | [`docs/guide/extending.md`](docs/guide/extending.md) | Adding agents, policies, taxonomy values |
 | [`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md) | Why it is shaped this way |
+| [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) | What `/bs audit` promises an audited project, and why |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `smith daemon` unattended |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
