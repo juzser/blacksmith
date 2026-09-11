@@ -106,7 +106,8 @@ task. See
 
 Blacksmith is run on Blacksmith, and the defect logs from doing so are kept
 rather than tidied away: `docs/specs/dogfood-4-findings.md`,
-`docs/specs/dogfood-envkit-findings.md`, `docs/specs/phase-9-punch-list.md`.
-They are large and internal. Most of what the gates and policies do exists
-because one of those entries forced it — which is also the argument for
-keeping them readable.
+`docs/specs/dogfood-envkit-findings.md`, `docs/specs/phase-9-punch-list.md`,
+and — the first run against a project that is not this repo —
+`docs/specs/dogfood-csb-audit-1-findings.md`. They are large and internal.
+Most of what the gates and policies do exists because one of those entries
+forced it — which is also the argument for keeping them readable.
