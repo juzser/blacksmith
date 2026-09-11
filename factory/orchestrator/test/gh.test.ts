@@ -193,7 +193,9 @@ describe('gh.ts', () => {
       const argv = buildCreateIssueArgv('o/r', 'title', hostileBody);
       expect(Array.isArray(argv)).toBe(true);
       expect(argv.every((el) => typeof el === 'string' && !el.includes('$(id)'))).toBe(true);
-      expect(readFileSync(argv[argv.indexOf('--body-file') + 1], 'utf8')).toBe(hostileBody);
+      expect(readFileSync(argv[argv.indexOf('--body-file') + 1] as string, 'utf8')).toBe(
+        hostileBody,
+      );
     });
 
     it('builds a search-issues argv as an array', () => {
@@ -207,7 +209,7 @@ describe('gh.ts', () => {
       expect(Array.isArray(argv)).toBe(true);
       expect(argv).toContain('42');
       const bodyFileIndex = argv.indexOf('--body-file') + 1;
-      expect(readFileSync(argv[bodyFileIndex], 'utf8')).toBe(hostileBody);
+      expect(readFileSync(argv[bodyFileIndex] as string, 'utf8')).toBe(hostileBody);
     });
   });
 });
