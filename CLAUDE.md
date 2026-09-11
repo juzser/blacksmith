@@ -34,7 +34,8 @@ that matter most:
 ## Driving the factory
 
 [`.claude/skills/bs/SKILL.md`](.claude/skills/bs/SKILL.md) is the operator
-console (`/bs new|plan|run|status|ui|waivers|lessons|report`) and a router:
+console (`/bs new|plan|run|audit|status|ui|waivers|lessons|report`) and a
+router:
 it carries the event-log envelope and routes each verb to its own playbook
 beside it, read when that verb runs. The playbooks own the lessons splice
 and the loop; [`dispatch.md`](.claude/skills/bs/dispatch.md) owns the

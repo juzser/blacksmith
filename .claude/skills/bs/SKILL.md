@@ -1,6 +1,6 @@
 ---
 name: bs
-description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from a Claude Code session inside this repo.
+description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from a Claude Code session inside this repo.
 ---
 
 # /bs — Blacksmith operator console
@@ -84,6 +84,7 @@ that drifts.
 | `/bs mcp <project>` | Layer the MCP surface on and make its milestone due | [`mcp.md`](mcp.md) |
 | `/bs plan <goal>` | Draft or re-plan an epic with the planner + spec-reviewer | [`plan.md`](plan.md) |
 | `/bs run <epic>` | Admit a wave and drive it through the loop to merge | [`run.md`](run.md), the epic tier, which reads [`wave.md`](wave.md) for steps 2-10 |
+| `/bs audit <project-dir>` | Audit a project on four axes, rank, decide at a hard stop, cut one epic | [`audit.md`](audit.md) |
 | `/bs status` | Live agent count, budget burn, epic phase | [`status.md`](status.md) |
 | `/bs ui` | Serve the local dashboard | [`ui.md`](ui.md) |
 | `/bs waivers` | Answer the pending S3/S4 waiver batch for an epic | [`waivers.md`](waivers.md) |
@@ -95,7 +96,7 @@ is the **dispatch contract**: what a prompt must carry, the lessons and
 findings splices, return discipline, round counting and the escalation
 ladder, the judge fingerprint and artifact rules, who owns the log. It binds
 every agent any playbook dispatches, so read it before the first dispatch a
-`plan`, `run`, `lessons` or `report` makes — and not at all for a verb that
-dispatches nothing. [`wave.md`](wave.md) holds steps 2-10 of `/bs run`, the
+`plan`, `run`, `audit`, `lessons` or `report` makes — and not at all for a
+verb that dispatches nothing. [`wave.md`](wave.md) holds steps 2-10 of `/bs run`, the
 half that drives a single wave; it is read from inside a run, never invoked
 on its own.

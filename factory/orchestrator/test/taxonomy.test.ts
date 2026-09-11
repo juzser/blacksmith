@@ -181,8 +181,9 @@ describe('loadTaxonomy (real repo file)', () => {
     // to 6 by the spec-vs-goal gate, which added `goal-check-recorded` to
     // gate_event; to 7 by the worker-proposed amendment path, which added
     // `spec-change-proposed` and `spec-change-decided` to graph_event; to 8 by
-    // D13 step 3, which added `wave-runner` to agent.
-    expect(tx.version).toBe(8);
+    // D13 step 3, which added `wave-runner` to agent; to 9 by `/bs audit`,
+    // which added `auditor` to agent.
+    expect(tx.version).toBe(9);
     for (const dim of [
       'case',
       'origin',

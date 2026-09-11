@@ -60,6 +60,55 @@ const STATS = '[--db <file>] [--session <id>] [--lineage]';
 
 export const COMMANDS: readonly CommandDoc[] = [
   {
+    command: 'audit open',
+    positionals: '<project-dir>',
+    flags: EVENTS_DIR,
+    summary:
+      'Open an audit on a project: cut a detached read-only worktree at HEAD, fingerprint it, write .blacksmith/audit.json, print the axes and the live findings.',
+  },
+  {
+    command: 'audit record',
+    positionals: '<project-dir>',
+    flags: `--axis <performance|code-quality|architecture|security> --evidence <file> ${EVENTS_DIR}`,
+    summary:
+      "Record one axis's evidence: validate, fingerprint, drop what the store already suppresses, append the rest as raised.",
+  },
+  {
+    command: 'audit consolidate',
+    positionals: '<project-dir>',
+    flags: '',
+    summary:
+      'Fold the store and print the path-clusters ranked by severity, convergence, confidence. Reads only.',
+  },
+  {
+    command: 'audit decide',
+    positionals: '<project-dir>',
+    flags: `--fingerprint <fp> --decision <accept|decline|merge> [--same-as <fp>] [--note <text>] ${EVENTS_DIR}`,
+    summary:
+      "Append the operator's answer on one finding. merge requires --same-as; accept and decline refuse it.",
+  },
+  {
+    command: 'audit cut',
+    positionals: '<project-dir>',
+    flags: `--epic <epic-id> --title <text> ${EVENTS_DIR}`,
+    summary:
+      'Render a roadmap milestone and an epic spec from the accepted findings and stamp the epic id onto each.',
+  },
+  {
+    command: 'audit resolve',
+    positionals: '<project-dir>',
+    flags: `--epic <epic-id> ${EVENTS_DIR}`,
+    summary:
+      'Append a fixed line for every finding the epic carried. Run from the epic-close step.',
+  },
+  {
+    command: 'audit close',
+    positionals: '<project-dir>',
+    flags: `[--force] ${EVENTS_DIR}`,
+    summary:
+      'Verify the worktree against its opening fingerprint, remove it, delete the manifest, close the audit in the log.',
+  },
+  {
     command: 'plan validate',
     positionals: '<plan.json>',
     flags: '',

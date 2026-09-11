@@ -56,6 +56,42 @@ export interface FreeEventType {
  */
 export const FREE_EVENT_TYPES: FreeEventType[] = [
   {
+    eventType: 'audit-opened',
+    writtenBy: 'src',
+    reason:
+      'Written by audit.ts openAudit (`smith audit open`) when the detached read-only worktree is cut and fingerprinted. An audit is an operator verb on a project outside this factory (docs/specs/audit-command-scope.md §6): it carries no task_id and no plan, so no dimension declares it, and the payload names the audit id the store lines cite.',
+  },
+  {
+    eventType: 'audit-finding-raised',
+    writtenBy: 'src',
+    reason:
+      'Written by audit.ts recordAudit (`smith audit record`) once per axis, before the raised lines are appended to `.blacksmith/findings.jsonl` so each line can carry the event id. It is not `finding-raised`: an audit finding is not a task finding (no task_id, a different schema), and the payload counts what the fold suppressed as well as what was written.',
+  },
+  {
+    eventType: 'audit-decision',
+    writtenBy: 'src',
+    reason:
+      "Written by audit.ts decideAudit (`smith audit decide`): the operator's accept, decline or merge on one finding, which is the hard stop of the audit playbook made durable. Free because it is a person's answer on a project outside this factory, not a dispatch; the store line it precedes carries the same event id.",
+  },
+  {
+    eventType: 'audit-cut',
+    writtenBy: 'src',
+    reason:
+      'Written by audit.ts cutAudit (`smith audit cut`) when accepted findings are stamped with an epic id and rendered into a milestone and a spec. It is the provenance edge from an audit to the epic it became; the epic itself is then planned and run through the ordinary verbs, which declare their own types.',
+  },
+  {
+    eventType: 'audit-resolved',
+    writtenBy: 'src',
+    reason:
+      "Written by audit.ts resolveAudit (`smith audit resolve`) from the epic-close step: every finding the epic carried gets a `fixed` line. Free for the same reason as the rest of the family — it is a status on the project's own store, not on a task — and idempotent, so a repeated close writes an empty `fixed` list rather than a second line per finding.",
+  },
+  {
+    eventType: 'audit-closed',
+    writtenBy: 'src',
+    reason:
+      'Written by audit.ts closeAudit (`smith audit close`) after the worktree is verified against the fingerprint taken at open and removed. The payload carries the drift, so a `--force` close leaves on the timeline exactly what moved under the audit; no dimension declares it because the worktree it names belongs to no task.',
+  },
+  {
     eventType: 'session-start',
     writtenBy: 'src',
     reason:
