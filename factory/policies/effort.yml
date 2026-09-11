@@ -9,9 +9,9 @@
 #
 # HOST: `smith effort show --plan <plan.json>` reads this file plus the plan's
 # own `effort` field and returns the profile for that epic
-# (factory/orchestrator/src/effort.ts). `.claude/skills/bs/SKILL.md` runs that
-# verb at the top of `/bs plan` and `/bs run` and obeys the answer, rather than
-# eyeballing the table below.
+# (factory/orchestrator/src/effort.ts). `.claude/skills/bs/plan.md` and
+# `run.md` run that verb at the top of `/bs plan` and `/bs run` and obey the
+# answer, rather than eyeballing the table below.
 #
 # Scope note: the tier is per EPIC, not per project. It is chosen at `/bs plan`
 # time and stored on the plan file, so one project can run a `small` epic in
@@ -43,15 +43,15 @@ security_floor: medium
 
 # ── The tiers ───────────────────────────────────────────────────────
 #
-# Read top to bottom as a subtraction: `huge` is the flow as
-# `.claude/skills/bs/SKILL.md` writes it today, unchanged; `medium` drops the
+# Read top to bottom as a subtraction: `huge` is the flow as the `/bs`
+# playbooks (`.claude/skills/bs/`) write it today, unchanged; `medium` drops the
 # judgment steps that pay off least per call; `small` drops the pre-code
 # deliberation as well. Every knob below names a step that is a *judgment* —
 # an agent forming an opinion. Nothing mechanical appears here by construction.
 tiers:
   huge:
     summary: >
-      The full flow, exactly as SKILL.md writes it. Large or important
+      The full flow, exactly as the `/bs` playbooks write it. Large or important
       projects, anything user-facing, anything whose failure is expensive.
     # /bs run step 3 — dispatch `researcher` for a pre-code unknown.
     pre_code_research: when-needed

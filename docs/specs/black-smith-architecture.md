@@ -84,7 +84,12 @@ black-smith/
 │   └── skills/bs/
 │       ├── SKILL.md              # the /bs operator console (Phase 7) — Claude
 │       │                          #   Code's own skill-discovery convention;
-│       │                          #   epic tier: plan, admit a wave, close
+│       │                          #   the router: envelope + one row per verb
+│       ├── dispatch.md           # the dispatch contract every playbook binds to
+│       ├── <verb>.md             # one playbook per verb, read when it runs:
+│       │                          #   new, mcp, plan, run (the epic tier: admit
+│       │                          #   a wave, close), status, ui, waivers,
+│       │                          #   lessons, report
 │       └── wave.md               # wave tier: /bs run steps 2-10, one wave,
 │                                  #   thrown away when it lands (D13 step 2)
 ├── factory/

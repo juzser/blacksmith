@@ -15,16 +15,16 @@ import { evaluatePlanSecurityTriggers, type PlanQuorumSecurityTrigger } from './
  * "recall, do not ask" failure sensitive-paths.yml and crosscheck.yml were
  * each written to end. This module ends it for step count: the tiers are
  * declared in the policy file, the plan file names one, and
- * `smith effort show` answers so `.claude/skills/bs/SKILL.md` never has to
+ * `smith effort show` answers so the `/bs` playbooks never have to
  * decide twice.
  *
  * Two invariants make the feature safe to ship:
  *
  * 1. **`huge` is today's flow, unchanged.** Nothing about black-smith's own
  *    behaviour moves until an epic is assigned a lower tier — effort.test.ts
- *    pins every `huge` knob to what SKILL.md already writes, so a future tune
- *    of `huge` has to be a deliberate edit to a red test rather than a quiet
- *    regression for every epic that never asked for a tier.
+ *    pins every `huge` knob to what the `/bs` playbooks already write, so a
+ *    future tune of `huge` has to be a deliberate edit to a red test rather
+ *    than a quiet regression for every epic that never asked for a tier.
  * 2. **A tier scales judgment steps only.** Never a mechanical oracle, never a
  *    guardrail: gates, coverage, claim disjointness, worktree isolation, the
  *    security-reviewer's own dispatch triggers, operator sign-off, and the
@@ -62,8 +62,9 @@ const CLOSING_SPEC_REVIEW = ['always', 'when-plan-amended'] as const;
 
 /**
  * One tier's answer for every judgment step the flow can scale. Each field
- * names a step in `.claude/skills/bs/SKILL.md`; the doc comments there and the
- * policy file's inline comments are the same statement, deliberately.
+ * names a step in `.claude/skills/bs/plan.md`, `run.md` or `wave.md`; the
+ * doc comments there and the policy file's inline comments are the same
+ * statement, deliberately.
  */
 export interface EffortProfile {
   summary: string;

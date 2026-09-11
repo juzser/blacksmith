@@ -391,7 +391,7 @@ Calibration loop:
      your gate's timeout budget for real epics. `null` means no run
      reported one, which is not the same as fast.
 3. `/bs report`'s digest surfaces a one-line provider-calibration note
-   while any provider is still `mode: shadow` (`.claude/skills/bs/SKILL.md`)
+   while any provider is still `mode: shadow` (`.claude/skills/bs/report.md`)
    — no separate dashboard page ships for this in Phase 8 (CLI-only,
    `smith stats providers`; a UI page is explicitly out of scope here).
 
