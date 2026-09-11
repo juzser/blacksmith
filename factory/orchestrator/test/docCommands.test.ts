@@ -56,6 +56,33 @@ const SHELL_OPERATORS = new Set(['|', '||', '&&', ';', '<', '>', '>>', '&', '#',
  */
 const INVOKED = /(?:^|[\s(;&$])(?:smith|node[ \t]+\S*cli\.js)(?=[ \t])/g;
 
+/**
+ * How a document declares a namespace it specifies but the CLI does not ship.
+ *
+ * A scope doc is written *before* the verb exists -- that is what it is for.
+ * `docs/specs/continuous-loop-scope.md` fixes the shape of `smith loop` so a
+ * planner can cut the epic from it, and the roadmap names the same family in
+ * the milestone the epic will be cut from. Held to the shipped table, both
+ * documents are defects on the day they are correct, and the only ways out are
+ * to exclude `docs/specs/` wholesale -- which `instructionSurface.ts` refuses,
+ * with reasons -- or to stop writing the surface down.
+ *
+ * So the document declares it, in one line, by name. That keeps the guard's
+ * actual claim intact: a `smith <x>` span still resolves against the shipped
+ * table unless some file said in writing that `<x>` is not shipped yet. And it
+ * expires by itself -- the day the CLI declares the namespace, the marker
+ * fails as a lie rather than sitting there excusing real drift.
+ */
+const PLANNED = /^<!--\s*PLANNED-NAMESPACE:\s*([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\s*-->$/;
+
+/** The namespaces one document declares planned rather than shipped. */
+function plannedNamespaces(markdown: string): string[] {
+  return markdown
+    .split('\n')
+    .map((line) => PLANNED.exec(line.trim())?.[1])
+    .filter((name): name is string => name !== undefined);
+}
+
 interface Invocation {
   readonly line: number;
   /** Non-flag words after the command, in order, before the first flag. At most two. */
@@ -227,6 +254,8 @@ function problemsWith(invocation: Invocation, where: string): Problem[] {
 interface SurfaceFile {
   readonly rel: string;
   readonly invocations: readonly Invocation[];
+  /** Namespaces this file declares planned; every other one is held to the table. */
+  readonly planned: readonly string[];
 }
 
 /**
@@ -236,10 +265,14 @@ interface SurfaceFile {
  */
 let cached: SurfaceFile[] | undefined;
 function surface(): SurfaceFile[] {
-  cached ??= instructionFiles().map((rel) => ({
-    rel,
-    invocations: parseInvocations(readFileSync(path.join(REPO_ROOT, rel), 'utf8')),
-  }));
+  cached ??= instructionFiles().map((rel) => {
+    const markdown = readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    return {
+      rel,
+      invocations: parseInvocations(markdown),
+      planned: plannedNamespaces(markdown),
+    };
+  });
   return cached;
 }
 
@@ -379,15 +412,56 @@ describe('problemsWith', () => {
   });
 });
 
+describe('plannedNamespaces', () => {
+  // Pinned against fixtures for the reason the other two parsers are: a marker
+  // that quietly stopped parsing would excuse nothing and read as a clean run.
+  it('reads the marker on its own line, and only there', () => {
+    expect(plannedNamespaces('<!-- PLANNED-NAMESPACE: loop -->')).toEqual(['loop']);
+    expect(plannedNamespaces('  <!--PLANNED-NAMESPACE:loop-->  ')).toEqual(['loop']);
+    expect(plannedNamespaces(['<!-- PLANNED-NAMESPACE: loop -->', 'text'].join('\n'))).toEqual([
+      'loop',
+    ]);
+  });
+
+  it('does not read one out of prose, a code span, or a sentence around it', () => {
+    // Otherwise any document could excuse any namespace by quoting this file,
+    // and the guard would be disarmed by the paragraph explaining it.
+    expect(plannedNamespaces('Write `<!-- PLANNED-NAMESPACE: loop -->` at the top.')).toEqual([]);
+    expect(plannedNamespaces('See <!-- PLANNED-NAMESPACE: loop --> above.')).toEqual([]);
+    expect(plannedNamespaces('<!-- PLANNED-NAMESPACE: Loop -->')).toEqual([]);
+  });
+});
+
 describe('the documented smith commands are the shipped smith commands', () => {
   it('names only commands and flags the CLI declares', () => {
-    const problems = surface().flatMap(({ rel, invocations }) =>
-      invocations.flatMap((invocation) => problemsWith(invocation, `${rel}:${invocation.line}`)),
+    const problems = surface().flatMap(({ rel, invocations, planned }) =>
+      invocations
+        .filter((invocation) => !planned.includes(invocation.words[0] ?? ''))
+        .flatMap((invocation) => problemsWith(invocation, `${rel}:${invocation.line}`)),
     );
     expect(
       problems.map((problem) => `${problem.where}  ${problem.wrote}  — ${problem.reason}`),
       'a document told an agent to run a command that does not exist',
     ).toEqual([]);
+  });
+
+  it('keeps every planned namespace unshipped, and written', () => {
+    // The same bargain `docErrorCodes.ts` strikes with NOT_ERROR_CODES: an
+    // exemption outlives what it exempted in both directions. The CLI can start
+    // declaring the namespace, and the document can stop naming it — and either
+    // way the marker is now a hole in the guard that reads like a decision.
+    for (const { rel, invocations, planned } of surface()) {
+      for (const namespace of planned) {
+        expect(
+          NAMESPACES.has(namespace),
+          `${rel} declares "${namespace}" planned but the CLI now ships it`,
+        ).toBe(false);
+        expect(
+          invocations.some((invocation) => invocation.words[0] === namespace),
+          `${rel} declares "${namespace}" planned but names no such command`,
+        ).toBe(true);
+      }
+    }
   });
 
   it('actually resolved the instruction surface', () => {
