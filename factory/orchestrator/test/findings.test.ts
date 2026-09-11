@@ -343,6 +343,37 @@ describe('findings.ts', () => {
       expect(findings).toHaveLength(0);
     });
 
+    // FD-21 (dogfood-csb-audit-1-findings.md): two defects read off the
+    // target by a person had nowhere to go, because `found_by` is
+    // taxonomy-valued over `agent` and the only actors listed were roles the
+    // factory dispatches. `operator` is the human, and a finding they raise
+    // has no dispatch, no round and no judge turn behind it — which the gate
+    // already tolerates (a `--found-by` with no open turn closes nothing).
+    it('accepts a finding the operator read off the code themselves (found_by: operator)', async () => {
+      const result = await raiseFinding(
+        { finding: draft({ found_by: 'operator' }), filePath: 'src/foo.ts' },
+        rootCtx(),
+        { stateDir },
+      );
+      expect(result.suppressed).toBe(false);
+      if (result.suppressed) throw new Error('unreachable');
+      expect(result.finding.found_by).toBe('operator');
+
+      const findings = await listFindings(ctx.sessionId, {}, { stateDir });
+      expect(findings.map((f) => f.found_by)).toEqual(['operator']);
+    });
+
+    it('still refuses a found_by the taxonomy does not list — operator is a value, not a free-text door', async () => {
+      await expect(
+        raiseFinding({ finding: draft({ found_by: 'human' }), filePath: 'src/foo.ts' }, rootCtx(), {
+          stateDir,
+        }),
+      ).rejects.toThrow(FindingError);
+
+      const findings = await listFindings(ctx.sessionId, {}, { stateDir });
+      expect(findings).toHaveLength(0);
+    });
+
     it('suppresses a re-raise of an already-waived fingerprint instead of duplicating it', async () => {
       // S3, not draft()'s S2 default: this is a test about dedup, and a waiver
       // over an S2 is a thing severity.yml never lets an operator grant.
