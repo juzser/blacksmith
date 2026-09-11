@@ -27,6 +27,33 @@ than appearing in it.
 
 ### Added
 
+- **0.1.1 — what the tarball owes an installer.** 0.1.0 was published and then
+  installed, and the install is where the three defects below became visible;
+  all three are the same defect, which is that `paths.ts` derived every path
+  from the repo root and a package has no repo. `factory/specs/roadmap.md` and
+  `.claude/skills` join the `files` allowlist — without the first, `smith new`
+  failed at `roadmap.unreadable` on the first command a new user would run;
+  without the second, an install carried the agent role files but not the
+  `/bs` playbooks that dispatch them. And the eight paths the CLI *writes* now
+  hang off a work root rather than off the package: `state/`,
+  `factory/specs/active/`, the sandbox leases and `.env` go to `.blacksmith/`
+  under the working directory when `smith` is an installed package, to the
+  clone when it is a clone, and to `SMITH_HOME` when that is set. `smith new`
+  without `--target-dir` likewise scaffolds into the working directory rather
+  than into `node_modules/@juzser`. The layout *under* the root is unchanged
+  on purpose — `state/events/<session>.jsonl` is spelled in runbooks, role
+  templates and `guardrails.yml`'s write roots, and only the anchor moved.
+
+  `packaging.test.ts` no longer keeps a hand-written list of the roots to
+  check, which is how `ROADMAP_PATH` was missed: it reads every constant out
+  of `paths.ts`, and shipped-and-read-only is the default. A constant that
+  writes must hang off the work root and must *not* ship (a written path
+  inside the tarball is a directory `npm i` replaces, so shipping one deletes
+  the operator's state on upgrade); anything else must ship and must exist.
+  Both exception lists are checked back against `paths.ts`. Verified by
+  mutation rather than by a green run — each of the five ways to reintroduce
+  one of these defects was tried, and each fails the suite by name.
+
 - **The CLI ships as a package.** `@juzser/blacksmith` 0.1.0 is the `smith`
   binary and exactly what it reads at runtime: `factory/orchestrator/dist`,
   the drizzle migrations, `factory/policies`, `factory/specs/schema`,

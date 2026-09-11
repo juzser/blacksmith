@@ -312,9 +312,24 @@ one writes outside the clone, so an agent must ask first.
 
 The registry package is the other route to the same command: `npm i -g
 @juzser/blacksmith` (or `npx @juzser/blacksmith` for one call) gives you
-`smith` with no clone at all. It is the CLI and what it reads, not the console
-or the dashboard — README "From npm" says exactly where that line falls — and
-an agent running this file must ask before that install too.
+`smith` with no clone at all. It is the CLI, what it reads and the `/bs`
+playbooks, not the dashboard or the docs — README "From npm" says exactly
+where that line falls — and an agent running this file must ask before that
+install too.
+
+Installed that way, `smith` writes under `.blacksmith/` in the directory you
+run it from rather than into its own package directory, which the next
+`npm i -g` would replace wholesale. That covers `state/`,
+`factory/specs/active/` and the `.env` Part 3 tells you to write. Set
+`SMITH_HOME` to point all of it somewhere fixed instead:
+
+```bash
+export SMITH_HOME=~/.blacksmith      # one home for several projects
+```
+
+A clone ignores the question: it keeps writing into itself, as it always has,
+unless `SMITH_HOME` says otherwise. The layout under the root is the same
+either way, so every `state/...` path in these docs stays true.
 
 ---
 

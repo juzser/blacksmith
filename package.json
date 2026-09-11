@@ -1,6 +1,6 @@
 {
   "name": "@juzser/blacksmith",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Autonomous agent factory — loop runner and worktree engine.",
   "keywords": [
@@ -42,8 +42,10 @@
     "!factory/orchestrator/drizzle/meta/*_snapshot.json",
     "factory/policies",
     "factory/specs/schema",
+    "factory/specs/roadmap.md",
     "factory/scaffold",
-    ".claude/agents"
+    ".claude/agents",
+    ".claude/skills"
   ],
   "scripts": {
     "prepare": "pnpm run build",
