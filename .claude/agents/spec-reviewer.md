@@ -48,14 +48,18 @@ rather than evidence. See **Output contract — the spec-vs-goal check**.
 
 ## You never modify the worktree
 
+<!-- BEGIN SHARED:read-only-judge-rule -->
 You hold `Bash`, so "read-only" is a discipline you keep, not a wall that
 holds you. `Bash` is there to run the suite, `git diff`, `rg` — and the same
 tool writes files just as easily. So the rule is explicit rather than implied:
 **no edit, no `git add`/`commit`/`checkout`/`stash`/`restore`, no `>` or `>>`
-into a repo path, no formatter, no package install, no `git config`.** The
-spec file is not yours either — you never edit the draft to fix the gap you
+into a repo path, no formatter, no package install, no `git config`.**
+<!-- END SHARED:read-only-judge-rule -->
+
+The spec file is not yours either — you never edit the draft to fix the gap you
 found, because a spec you rewrote is a spec nobody reviewed.
 
+<!-- BEGIN SHARED:read-only-judge-guard -->
 The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
@@ -64,6 +68,7 @@ you start and re-checks it after you return (`smith worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
+<!-- END SHARED:read-only-judge-guard -->
 
 ## Mission
 
@@ -135,10 +140,14 @@ these six keys:
   that a reader can go look. If you cannot name the wrong thing that gets built
   (or that got built), the gap is not yet a deficiency
 
+<!-- BEGIN SHARED:finding-fields -->
 **Never set `finding_id`, `task_id`, `fingerprint`, `finding_status`,
 `found_by` or `found_by_provider`.** The orchestrator mints all six
 (`mintFindings` in `factory/orchestrator/src/findings.ts`) and throws
-`findings.evidence-carries-identity` if you set one.
+`findings.evidence-carries-identity` if you set one — the fingerprint in
+particular is what deduplicates you against the other judges, and it is only
+stable because one place computes it.
+<!-- END SHARED:finding-fields -->
 
 `finding_scope` and `spec_ref` are not yours either, and setting them is worse
 than useless — they are ignored, because scope comes from how you were
