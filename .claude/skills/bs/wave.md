@@ -191,7 +191,7 @@ one thing this playbook never asks you to.
      zero findings.
    - The gate scores tests it did not write, so once it has run, make the log
      say who did: `smith tester check <session-id> --task <task-id>`
-     (`crosscheck.yml` `role_isolation`, operator-guide/wave.md §2d). Exit 1
+     (`crosscheck.yml` `role_isolation`, operator-guide/dispatch-audits.md §2d). Exit 1
      means no `tester` dispatch precedes this task's `testgate-result`, the
      coder and tester dispatches share one `agent_id`, or the answer is
      unknowable. A
