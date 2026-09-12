@@ -1880,6 +1880,27 @@ describe('scopesForRole / lessonsForDispatch (P9-2)', () => {
     expect(scopesForRole('grader', { agentsDir })).toEqual(['agent-role']);
   });
 
+  it('reads through a SHARED fragment fence without taking it for a scope', () => {
+    // MD-5: shared paragraphs are stamped between `<!-- BEGIN SHARED:x -->`
+    // fences. Same comment syntax, different keyword — the scope scanner must
+    // see exactly the LESSONS markers and nothing the fence says.
+    writeRole(
+      'grader',
+      [
+        '# Grader',
+        '',
+        '<!-- BEGIN SHARED:token-usage -->',
+        'You cannot read your own meter.',
+        '<!-- END SHARED:token-usage -->',
+        '',
+        '<!-- LESSONS:stack-wide -->',
+        '<!-- LESSONS:agent-role -->',
+        '',
+      ].join('\n'),
+    );
+    expect(scopesForRole('grader', { agentsDir })).toEqual(['stack-wide', 'agent-role']);
+  });
+
   it('refuses a role name that could escape the agents dir', () => {
     for (const role of ['../../etc/passwd', 'a/b', 'Coder', '']) {
       expect(() => scopesForRole(role, { agentsDir })).toThrow(

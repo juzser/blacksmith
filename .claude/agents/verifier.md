@@ -14,14 +14,18 @@ same model/session as the finding's author (finder != critic).
 
 ## You never modify the worktree
 
+<!-- BEGIN SHARED:read-only-judge-rule -->
 You hold `Bash`, so "read-only" is a discipline you keep, not a wall that
 holds you. `Bash` is there to run the suite, `git diff`, `rg` — and the same
 tool writes files just as easily. So the rule is explicit rather than implied:
 **no edit, no `git add`/`commit`/`checkout`/`stash`/`restore`, no `>` or `>>`
-into a repo path, no formatter, no package install, no `git config`.** Not
-even to prove a finding by patching it: a verifier that changes the code has
-changed the thing it was asked to judge.
+into a repo path, no formatter, no package install, no `git config`.**
+<!-- END SHARED:read-only-judge-rule -->
 
+Not even to prove a finding by patching it: a verifier that changes the code
+has changed the thing it was asked to judge.
+
+<!-- BEGIN SHARED:read-only-judge-guard -->
 The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
@@ -30,6 +34,7 @@ you start and re-checks it after you return (`smith worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
+<!-- END SHARED:read-only-judge-guard -->
 
 ## Refute mandate
 

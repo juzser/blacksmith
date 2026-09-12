@@ -40,6 +40,44 @@ Run `bash scripts/check.sh` before opening a PR — it catches all of the
 above mechanically; don't rely on review to catch a taxonomy/template
 mismatch.
 
+### Shared fragments
+
+Some paragraphs are the same contract in several templates — the judges'
+read-only rule, the workers' `token_usage` note, the finding-field
+prohibition. Each of those lives once, in `.claude/fragments/<name>.md`, and
+is stamped into every template that carries it between two whole-line
+fences:
+
+```
+<!-- BEGIN SHARED:<name> -->
+...the fragment file, byte for byte...
+<!-- END SHARED:<name> -->
+```
+
+The fragment is the source; the fenced copy is what the agent reads, so a
+template still works with nothing but its own file. Fragment names match
+`[a-z][a-z0-9-]*`, fences do not nest, and the directory holds only fragment
+files — a `README.md` there is `fragments.invalid-fragment-name`.
+
+To change one, edit the fragment and run
+
+```
+node scripts/sync-shared-fragments.mjs          # rewrite every drifted region
+node scripts/sync-shared-fragments.mjs --check  # report, exit 1 on drift
+```
+
+`factory/orchestrator/test/templateFragments.test.ts` is the gate: it fails on
+any region whose body differs from its fragment, on a fragment no template
+carries, and on the shipped fragment list changing without the test's
+expected-carrier table changing with it. The script is the repair, not the
+check — the test runs under `scripts/check.sh` with everything else.
+
+Fragments live under `.claude/fragments/`, not `.claude/agents/_shared/`,
+because the Claude Code agent loader recurses into `.claude/agents/`: a
+front-matter file anywhere below it registers as an agent. The
+`<!-- LESSONS:<scope> -->` markers are unaffected — the lessons splice reads
+markers only and steps over a `SHARED:` fence.
+
 ## Add a judge provider
 
 There is no code step. The judge tier is provider-agnostic by contract
@@ -173,13 +211,14 @@ hand-authored). To add a new one:
 
 ## Docs-mirror invariants
 
-Two invariants `scripts/check.sh` enforces mechanically, and one it does
-not (own it in review):
+Three invariants are enforced mechanically — two by `scripts/check.sh`
+directly, one by the test suite it runs — and one is not (own it in review):
 
 | Invariant | Enforced by |
 |---|---|
 | `taxonomy.yml`'s `agent` dimension == `.claude/agents/*.md` basenames | `scripts/check.sh` "Agent templates: frontmatter" section |
 | Every `x-taxonomy` value in `factory/specs/schema/*.json` names a real `taxonomy.yml` dimension | `scripts/check.sh` "x-taxonomy dimensions referenced in schemas exist in taxonomy.yml" section |
+| Every `SHARED:<name>` region in `.claude/agents/*.md` equals `.claude/fragments/<name>.md` byte for byte, and every fragment has a carrier | `factory/orchestrator/test/templateFragments.test.ts` (repair with `node scripts/sync-shared-fragments.mjs`) |
 | `taxonomy.yml` mirrors architecture.md §8 prose value-for-value | **Not mechanically checked** — a manual review item on every taxonomy PR |
 
 ## Event log vs. projections: source of truth vs. derived

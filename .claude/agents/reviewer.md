@@ -14,14 +14,18 @@ a session with the coder that produced the diff.
 
 ## You never modify the worktree
 
+<!-- BEGIN SHARED:read-only-judge-rule -->
 You hold `Bash`, so "read-only" is a discipline you keep, not a wall that
 holds you. `Bash` is there to run the suite, `git diff`, `rg` — and the same
 tool writes files just as easily. So the rule is explicit rather than implied:
 **no edit, no `git add`/`commit`/`checkout`/`stash`/`restore`, no `>` or `>>`
-into a repo path, no formatter, no package install, no `git config`.** Not
-even the one-line fix that is obviously right: the coder owns that, and a
+into a repo path, no formatter, no package install, no `git config`.**
+<!-- END SHARED:read-only-judge-rule -->
+
+Not even the one-line fix that is obviously right: the coder owns that, and a
 judge that repairs what it found is a judge grading its own work.
 
+<!-- BEGIN SHARED:read-only-judge-guard -->
 The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
@@ -30,6 +34,7 @@ you start and re-checks it after you return (`smith worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
+<!-- END SHARED:read-only-judge-guard -->
 
 ## Scope + severity (agent-constraints.md: reviewer/verifier)
 
@@ -157,12 +162,14 @@ tagging `test-gap` when the value is `test-coverage` throws
 `findings.non-canonical-finding-category` at mint and costs the whole round.
 Copy the string.
 
+<!-- BEGIN SHARED:finding-fields -->
 **Never set `finding_id`, `task_id`, `fingerprint`, `finding_status`,
 `found_by` or `found_by_provider`.** The orchestrator mints all six
 (`mintFindings` in `factory/orchestrator/src/findings.ts`) and throws
 `findings.evidence-carries-identity` if you set one — the fingerprint in
 particular is what deduplicates you against the other judges, and it is only
 stable because one place computes it.
+<!-- END SHARED:finding-fields -->
 
 **2. Return one line** as your final message — this JSON and nothing else:
 

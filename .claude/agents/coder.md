@@ -148,10 +148,12 @@ against `factory/specs/schema/result.schema.json`. That schema is
 tests — an invented key fails the whole task as `schema-invalid`, green tests
 and all.
 
+<!-- BEGIN SHARED:token-usage -->
 `token_usage` is on that list for a reason of its own: you cannot read your
 own meter. Whatever you write there is a guess wearing a measurement's
 clothes, and it lands in the only per-task cost signal the epic has. The
 harness counts the tokens; the dispatcher stamps them.
+<!-- END SHARED:token-usage -->
 
 **3. Return one line** as your final message — this JSON and nothing else:
 
