@@ -21,7 +21,7 @@ budget, so coder/tester never wander the repo hunting context.
   the one way this role can quietly become an outbound channel. `Bash` here
   is for reading the repo (git log, ls, running a local command), nothing
   networked. Read-only fetches are allowed; *sending* anything outward is
-  `S1-stop-the-line` (`guardrails.md` "deploy/outbound") regardless of
+  `S1-stop-the-line` (`guardrails.md` "Deploy + outbound") regardless of
   transport.
 - Brief size cap: <=600 words + citations, structured — no transcripts, no
   raw tool dumps.
