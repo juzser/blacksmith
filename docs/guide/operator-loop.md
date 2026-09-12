@@ -31,7 +31,7 @@ One thing to know up front: those playbooks are dispatch instructions for
 your orchestrator session, **not a background daemon**. Nothing advances
 while the session is closed. `smith daemon` runs in the background and will
 tell you what the factory needs while you are away, but it watches and never
-dispatches — see [Limitations today](operator-guide.md#limitations-today) and
+dispatches — see [Limitations today](operator-guide/limitations.md#limitations-today) and
 [the ops runbook](../runbooks/ops.md).
 
 ## 0. Have something to build in — `/bs new <project>`
@@ -156,7 +156,7 @@ to care which — every status read folds the whole lineage, so `/bs status` and
 the dashboard answer about the epic regardless of how many sessions it took.
 What keeps that honest is `smith delegation check <session-id>`: a dispatched
 wave that did not open its own log fails it rather than reporting an empty
-wave ([operator-guide §2e](operator-guide.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)).
+wave ([operator-guide §2e](operator-guide/wave.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)).
 
 Want to look in? `/bs status` gives you live agent count, budget burn and epic
 phase; `/bs ui` serves the [dashboard](dashboard.md) if you would rather watch
@@ -179,7 +179,7 @@ The severity contract in full:
 
 Declared in [`factory/policies/severity.yml`](../../factory/policies/severity.yml);
 the semantics from your chair are in
-[operator-guide §8](operator-guide.md#8-severity--waiver-semantics-from-the-operators-chair).
+[operator-guide §8](operator-guide/severity-and-budget.md#8-severity--waiver-semantics-from-the-operators-chair).
 
 ## 5. Review the PR — the one thing you must read
 

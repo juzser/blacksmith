@@ -35,7 +35,8 @@ session with `smith session start <session-id>` if one isn't already
 running — it writes the root and prints the event id everything else hangs
 off as `--causal-parent`. Run it once: it refuses a session that already
 has a log, and names the last event in it so you have the anchor either way
-(`docs/guide/operator-guide.md` §5). To continue an epic in a new session,
+(`docs/guide/operator-guide/queue-and-gate.md` §5). To continue an epic in a
+new session,
 `smith session start <new-id> --continues <old-session>#<index>` (§5b). Once
 you have, pass `--lineage` alongside `--session` on every `smith stats` read:
 without it each page answers about the window you are standing in, not about

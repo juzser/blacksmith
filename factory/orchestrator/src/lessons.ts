@@ -9,7 +9,7 @@
 //       a small fixed marker list (never/not/don't/...) — a
 //       same-shingle-shape contradiction phrased another way (e.g. "avoid"
 //       vs "prefer") still auto-novelty-rejects silently. Documented, not
-//       hidden — see docs/guide/operator-guide.md.
+//       hidden — see docs/guide/operator-guide/lessons-and-daemon.md.
 //   (b) compileLessons() — approved lessons -> factory/policies/lessons.md,
 //       round-tripping through severity.ts's parseLessons() (the same-mistake
 //       gate's own reader). Every bullet value is rendered through
@@ -171,7 +171,7 @@ export interface NoveltyResult {
  * This is NOT real negation detection — it will miss a prohibition phrased
  * without one of these words (e.g. "avoid" vs "prefer"). Residual limitation,
  * documented rather than hidden: see this file's header comment and
- * docs/guide/operator-guide.md.
+ * docs/guide/operator-guide/lessons-and-daemon.md.
  *
  * What is compared is WHETHER a statement prohibits, not which word it
  * prohibits with. English spells a prohibition four ways in this list alone,

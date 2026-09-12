@@ -326,7 +326,7 @@ describe('the playbooks actually ask for the tier', () => {
   });
 
   it('promises the operator guide documents the verb it tells them to run', () => {
-    const guide = readFileSync(path.join(REPO_ROOT, 'docs/guide/operator-guide.md'), 'utf8');
+    const guide = readFileSync(path.join(REPO_ROOT, 'docs/guide/operator-guide/setup.md'), 'utf8');
     expect(guide).toContain('smith effort show');
     expect(guide).toContain('factory/policies/effort.yml');
   });

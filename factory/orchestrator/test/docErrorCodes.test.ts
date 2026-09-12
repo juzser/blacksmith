@@ -241,17 +241,28 @@ describe('the documented error codes are the raised error codes', () => {
   it('actually resolved both sides', () => {
     // Floors well under today's counts, so this fails on a scanner that breaks
     // rather than on prose or sources that get edited. The named files are the
-    // ones an operator reads first and the contract the orchestrator reads
-    // before any dispatch; the console itself routes and names no code.
+    // ones an operator reads first — the guide is a directory of parts behind
+    // a router that names no code, so its claims are summed over the parts —
+    // and the contract the orchestrator reads before any dispatch; the console
+    // itself routes and names no code.
     expect(scan.subclasses.size).toBeGreaterThan(40);
     expect(scan.codes.size).toBeGreaterThan(200);
     expect(scan.namespaces.size).toBeGreaterThan(40);
     const claims = surface(scan).flatMap((file) => file.claims);
     expect(claims.length).toBeGreaterThan(30);
-    for (const rel of ['docs/guide/operator-guide.md', '.claude/skills/bs/dispatch.md']) {
-      const file = surface(scan).find((entry) => entry.rel === rel);
-      expect(file?.claims.length ?? 0, `${rel} contributed no code claims`).toBeGreaterThan(0);
-    }
+    const guide = surface(scan).filter((entry) =>
+      entry.rel.startsWith('docs/guide/operator-guide/'),
+    );
+    expect(guide.length, 'the operator guide has no parts').toBeGreaterThan(1);
+    expect(
+      guide.reduce((n, entry) => n + entry.claims.length, 0),
+      'docs/guide/operator-guide/ contributed no code claims',
+    ).toBeGreaterThan(0);
+    const dispatch = surface(scan).find((entry) => entry.rel === '.claude/skills/bs/dispatch.md');
+    expect(
+      dispatch?.claims.length ?? 0,
+      '.claude/skills/bs/dispatch.md contributed no code claims',
+    ).toBeGreaterThan(0);
   });
 
   it('sees every raise site, or names the ones it cannot', () => {

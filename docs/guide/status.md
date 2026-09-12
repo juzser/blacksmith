@@ -3,7 +3,7 @@
 Blacksmith is built in phases, and the honest answer to "does it work yet"
 differs per phase. This page is the summary. The unflinching version — every
 place the framing is ahead of the code — is
-[operator-guide "Limitations today"](operator-guide.md#limitations-today),
+[operator-guide "Limitations today"](operator-guide/limitations.md#limitations-today),
 and it is worth reading before you rely on any of this.
 
 The machine-readable source of the same milestones is
@@ -100,7 +100,7 @@ judge or scheduler can approve it: `smith plan approve` is an operator command,
 and approving is what calls `plan amend` with no guard relaxed. An unanswered
 proposal is a queue item the daemon reports, and a blocking one is a stalled
 task. See
-[operator-guide §6b](operator-guide.md#6b-worker-proposed-spec-changes--the-third-exit).
+[operator-guide §6b](operator-guide/findings.md#6b-worker-proposed-spec-changes--the-third-exit).
 
 ## Dogfooding record
 

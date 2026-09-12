@@ -147,7 +147,7 @@ one thing this playbook never asks you to.
    --findings findings.json --session ... --plan-version N
    --causal-parent ...` (schema check → grader verdict → tests → coverage
    evidence → findings intake → severity decision,
-   `docs/guide/operator-guide.md` §5).
+   `docs/guide/operator-guide/queue-and-gate.md` §5).
    - `--grader` takes step 6's file, latest round. A criterion that came back
      `fail` or `partial` blocks before any check command runs — the outcome is
      `blocked` with `reason: "grader-fail"`, and the payload's
@@ -191,9 +191,10 @@ one thing this playbook never asks you to.
      zero findings.
    - The gate scores tests it did not write, so once it has run, make the log
      say who did: `smith tester check <session-id> --task <task-id>`
-     (`crosscheck.yml` `role_isolation`, operator-guide §2d). Exit 1 means no
-     `tester` dispatch precedes this task's `testgate-result`, the coder and
-     tester dispatches share one `agent_id`, or the answer is unknowable. A
+     (`crosscheck.yml` `role_isolation`, operator-guide/wave.md §2d). Exit 1
+     means no `tester` dispatch precedes this task's `testgate-result`, the
+     coder and tester dispatches share one `agent_id`, or the answer is
+     unknowable. A
      coder that writes and runs its own tests grades itself and every gate
      downstream still goes green — step 5 is what prevents that, and this is
      the log checking that step 5 happened.
@@ -219,7 +220,8 @@ one thing this playbook never asks you to.
     `proven` break — this task removed an export a file outside its claims
     still imports — and that is a bounce to the coder, not a merge. A
     `possible` / `signature-changed` entry exits 0 and is a note: the
-    scanner reads text, not types (operator-guide §2). Then admit into the
+    scanner reads text, not types (operator-guide/wave.md §2). Then admit
+    into the
     merge queue: `smith queue run <epic> --project <project-dir>
     --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
     `rebase-conflict` outcome, dispatch **`merger`**

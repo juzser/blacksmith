@@ -63,10 +63,11 @@ none of it is restated here.
    `smith lessons audit <session-id> [--lessons <file>] [--state-dir <dir>]`.
    It **recommends only**; every removal is still the operator's call, the
    same boundary step 2 draws. Read the two evidence classes apart
-   (operator-guide §10b): `retire`/`unreachable` is structural — an earlier
-   entry shadows this one, provable from the corpus text alone — while
-   `idle`/`rescope` needs a log showing the entry was actually loaded and
-   still did not fire. `no-evidence` means the audit could not see enough,
-   and is **never** a reason to drop an entry. Contradictions are reported,
+   (operator-guide/lessons-and-daemon.md §10b): `retire`/`unreachable` is
+   structural — an earlier entry shadows this one, provable from the corpus
+   text alone — while `idle`/`rescope` needs a log showing the entry was
+   actually loaded and still did not fire. `no-evidence` means the audit
+   could not see enough, and is **never** a reason to drop an entry.
+   Contradictions are reported,
    not resolved: two entries that disagree are a question for the operator,
    not something a tool should pick a winner in.

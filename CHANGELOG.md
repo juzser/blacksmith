@@ -1195,6 +1195,26 @@ than appearing in it.
 
 ### Changed
 
+- **The guide an operator reads is not one file.** `docs/guide/operator-guide.md`
+  had grown to 184 kB and 3,341 lines — every question about the loop was
+  answered somewhere in it, and every agent handed it for one of those
+  questions paid for the other eight parts as well, the same 180 kB on every
+  dispatch. It is now an 8 kB router over nine parts under
+  `docs/guide/operator-guide/`, split by *when in the loop you reach for it*:
+  setup, the wave and its dispatch audits, worktrees and judges, the queue and
+  the gate, findings, closing an epic, severity and budget, lessons and the
+  daemon, and today's limitations. Section numbers are unchanged, so every
+  `§n` citation elsewhere in the repo still names the text it always named;
+  the citations that carried the file path were repointed to the part that
+  now holds the section (`grader.md`, `lessons.md`, `wave.md`, `run.md`,
+  `SKILL.md`, `providers.md`, `black-smith-architecture.md`), and the two
+  tests that pinned the guide's content — `effort.test.ts` on `smith effort
+  show`, `docErrorCodes.test.ts` on the guide contributing code claims — read
+  the part and the directory respectively rather than the router, which
+  routes and names no code. Historical `operator-guide.md:<line>` citations
+  inside closed decision records (`phase-10-scope.md` D-269) are left as the
+  record they are.
+
 - **Phase 10, wave 1: this clone joins its own maintenance pass by default,
   and a struck roadmap milestone keeps its evidence.** `daemon run`,
   `scheduler run` and `scheduler admit` now watch this checkout unless an
