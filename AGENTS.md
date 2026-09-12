@@ -14,7 +14,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Install / bootstrap / verify this repo (executable runbook) | `INSTALL.md` |
 | Architecture — 17 numbered sections, 78 kB: read only the `§` a cite names (`grep -n '^## ' docs/specs/black-smith-architecture.md` is the map), never the whole file | `docs/specs/black-smith-architecture.md` |
 | Operator interview (Phase 1) | `docs/specs/black-smith-interview.md` |
-| Per-agent interviews (constraints per role) | `docs/specs/agent-interviews.md` |
+| Per-agent interviews (constraints per role) — cited by id (`N-9`, `M-6`); the ids are bold leads, not headings, so start from the index, which maps each id to its lines and heading: read the id's paragraph, not the file | `docs/specs/agent-interviews-index.md`, then `docs/specs/agent-interviews.md` |
 | This operator's stack answers (install interview) | `factory/policies/stack.yml` |
 | What reads those answers, and what the templates honour | `docs/standards/stack.md` |
 | Per-agent constraints (compiled from interview) | `docs/standards/agent-constraints.md` |
@@ -33,6 +33,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge preflight`, `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
 | Who may dispatch, and what they owe for it (`smith delegation check`) | `factory/policies/delegation.yml`, `factory/orchestrator/src/delegation.ts` |
 | Background watcher (`smith daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
+| Which spec is a contract, a scope, or a record of the past — the records (`D-nnn`, `P9-n`, `FD-n`) are cited by id and never loaded whole | `docs/specs/README.md` |
 | Everything else under `docs/` and `factory/policies/` — one line per file, with who it is for | `docs/README.md` |
 
 ## Operating rules

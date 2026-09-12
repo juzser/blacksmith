@@ -2,15 +2,20 @@
 
 Every doc in `docs/` and every policy in `factory/policies/`, one line each.
 Read on demand — nothing here is meant to be preloaded (`AGENTS.md`
-"progressive disclosure").
+"progressive disclosure"). The specs directory has its own index,
+[`specs/README.md`](specs/README.md), because the files there are not all
+the same kind: it says which are contracts, which are scopes, and which are
+records of the past that are cited by id and never opened whole.
 
 | Doc | Description | Audience |
 |---|---|---|
 | [`specs/black-smith-architecture.md`](specs/black-smith-architecture.md) | Full architecture spec (v3, 17 sections): loop, worktrees, cross-check, taxonomy, gates, self-extension, PR flow, stack standard, build order, evidence base | operator, contributor, agent |
 | [`specs/black-smith-interview.md`](specs/black-smith-interview.md) | The operator interview: the stack half runs at install time and lands in `factory/policies/stack.yml`; the rest (budgets, severity calibration, gates) compiled into `standards/agent-constraints.md` | operator |
-| [`specs/agent-interviews.md`](specs/agent-interviews.md) | Per-agent-role interview; answers compile into `standards/agent-constraints.md` and, from Phase 2, into `.claude/agents/` | operator, contributor |
+| [`specs/agent-interviews.md`](specs/agent-interviews.md) | Per-agent-role interview; answers compile into `standards/agent-constraints.md` and, from Phase 2, into `.claude/agents/`. Cited by id — start from the index below | operator, contributor |
+| [`specs/agent-interviews-index.md`](specs/agent-interviews-index.md) | One row per interview id (`P-1`..`N-12`): the lines it spans, the heading it sits under, one clause on what it decided, and the two ids both called `M-1` | operator, contributor, agent |
 | [`specs/phase-10-scope.md`](specs/phase-10-scope.md) | Phase 10 as measured rather than as declared: the six defects (P10-1..P10-6) found by pointing the factory at itself, the four forks and their answers, and the close-out of the epic that fixed them | operator, contributor |
 | [`specs/audit-command-scope.md`](specs/audit-command-scope.md) | The `/bs audit` contract: four fixed read-only axes, what "writes nothing to the project" means when `.blacksmith/` is state, why consolidation clusters rather than merges, the hard stop, the append-only findings store with 90-day declines, and the seven `smith audit` verbs | operator, contributor, agent |
+| [`specs/README.md`](specs/README.md) | Every file under `specs/` by kind — contract, scope, or record of the past — with the cite-by-id recipe for the records, so nobody opens a 782 kB file to check one finding | operator, contributor, agent |
 | [`standards/stack.md`](standards/stack.md) | What the install interview's stack answers mean, who reads each one, and which the shipped templates honour, record, or refuse — the answers themselves live in `factory/policies/stack.yml` | operator, contributor |
 | [`standards/agent-constraints.md`](standards/agent-constraints.md) | Per-agent constraint blocks (TDD strictness, coverage floor, severity calibration, budgets, context-window compaction) — source of truth until fully baked into templates | contributor, agent |
 | [`standards/guardrails.md`](standards/guardrails.md) | Hard rules the factory enforces mechanically (secrets, git actions, filesystem, deploy/outbound, CI) — violations are S1 unless stated otherwise | operator, contributor, agent |
