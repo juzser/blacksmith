@@ -17,9 +17,10 @@
 // - 'user' — what waivers.ts, lessons.ts and prompts.ts default to when no
 //   actor is supplied, which is how every decision made through the UI is
 //   attributed (ui/server never passes one).
-// - 'operator' — what docs/guide/operator-guide.md and .claude/skills/bs/
-//   SKILL.md hand the operator, in all six of their `--actor` examples,
-//   including the `smith waivers apply` line that writes waiver-granted.
+// - 'operator' — what docs/guide/operator-guide/*.md and .claude/skills/bs/
+//   SKILL.md hand the operator, in every `--actor` example they carry (three
+//   today), including the `smith waivers apply` line in
+//   severity-and-budget.md that writes waiver-granted.
 // - 'operator-skill' — what the operator's own console passes; 467 of the 668
 //   recorded events carry it. It is a skill rather than a person, and it is
 //   here anyway: it acts only on a turn the operator took, and the decision

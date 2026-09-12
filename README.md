@@ -357,7 +357,7 @@ and nothing advances.
 
 → **[What is built, what is not](docs/guide/status.md)**, and the unflinching
 version in
-[Limitations today](docs/guide/operator-guide.md#limitations-today).
+[Limitations today](docs/guide/operator-guide/limitations.md#limitations-today).
 
 ## Docs
 

@@ -55,7 +55,8 @@ file asked for would be running it below the floor.
      and that is not enough: the two tasks sit on either end of an import
      edge the plan declared no dependency for. Split the wave and run the
      producer first — there is no override for a crossing, because the
-     declared-edge case is already refused above it (operator-guide §2).
+     declared-edge case is already refused above it
+     (operator-guide/wave.md §2).
    - `wave check` is also where the wave is priced and where
      `max_in_flight_tasks` is enforced (`budgets.yml`, `over-fan-out`).
      `wave next` deliberately asks neither question: a proposer that also

@@ -101,9 +101,10 @@ does not quietly pass the gate — it blocks it as invalid.
 
 ## What the gate does with this file
 
-`smith gate run --grader <file>` reads it, ahead of the test gate (`docs/guide/
-operator-guide.md` §5). The verdict is read from `.structured_output`, so a
-file that puts it anywhere else blocks the gate rather than being ignored. Any
+`smith gate run --grader <file>` reads it, ahead of the test gate
+(`docs/guide/operator-guide/queue-and-gate.md` §5). The verdict is read from
+`.structured_output`, so a file that puts it anywhere else blocks the gate
+rather than being ignored. Any
 criterion that is not `pass` blocks the gate — including a `partial` under an
 `overall: "pass"`, because the per-criterion line is the one carrying evidence.
 `run_status: "dead"` blocks too: a task whose spec had no checkable acceptance

@@ -144,8 +144,9 @@ async function buildDecisionsLensFixture(opts: EventOpts): Promise<void> {
   parent = userLesson.event_id;
 
   // 8. waiver-granted with actor: 'operator' — D-163's sibling, D-164. This is
-  //    the actor string docs/guide/operator-guide.md:1276 hands the operator
-  //    for exactly this command, and 'user' is the one the UI writes when no
+  //    the actor string docs/guide/operator-guide/severity-and-budget.md:26
+  //    hands the operator for exactly this command, and 'user' is the one the
+  //    UI writes when no
   //    --actor is passed. Both are the same person deciding the same thing.
   const operatorWaiver = await appendEvent(
     {

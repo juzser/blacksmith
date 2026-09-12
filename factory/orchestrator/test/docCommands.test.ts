@@ -50,9 +50,9 @@ const SHELL_OPERATORS = new Set(['|', '||', '&&', ';', '<', '>', '>>', '&', '#',
  *
  * Two spellings, because the docs have two. `smith` is the linked shim, and
  * `node <path>/cli.js` is what `docs/guide/operator-guide.md` declares
- * canonical for every one of its examples — necessarily, since the pre-install
- * docs run before the shim exists. Anchoring on `smith` alone leaves the
- * documents a new operator follows first outside the guard.
+ * canonical for every example under `operator-guide/` — necessarily, since
+ * the pre-install docs run before the shim exists. Anchoring on `smith` alone
+ * leaves the documents a new operator follows first outside the guard.
  */
 const INVOKED = /(?:^|[\s(;&$])(?:smith|node[ \t]+\S*cli\.js)(?=[ \t])/g;
 

@@ -465,7 +465,7 @@ because that is not one problem per finding: it is *this* section's arithmetic
 reported once per finding. Exit `1` on an open disagreement, **`2` when
 nothing was gated at all**, `0` only when there is genuinely nothing open — so
 a box running with one active external never reads as clean by accident. Full
-description in `docs/guide/operator-guide.md` §3c.
+description in `docs/guide/operator-guide/worktrees-and-judges.md` §3c.
 
 The other reason it exists lives in `mode: shadow`. Promotion (§4) is what
 makes an escalation reach the caller: `gate.ts` returns one only when an
