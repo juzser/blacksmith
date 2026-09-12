@@ -9,10 +9,10 @@ Every command in it was run against a built `factory/orchestrator/dist/cli.js`
 on `main` while writing this doc; flag names and output shapes are copied
 from the actual JSON the CLI printed, not from the source alone.
 
-**This file is the index, not the guide.** The guide is the nine files under
+**This file is the index, not the guide.** The guide is the ten files under
 [`operator-guide/`](operator-guide/) below. An operator reads it one question
 at a time — "was the critic actually adversarial?", "why is the gate holding
-this?" — and an agent handed the whole thing pays for the eight parts it did
+this?" — and an agent handed the whole thing pays for the nine parts it did
 not ask about, which is the same 180 kB every time. So the split is by *when
 you reach for it*, in the loop's own order.
 
@@ -31,17 +31,26 @@ tier buys, create the project the factory builds in, validate the plan.
 - [0b. `smith new` — the project the factory builds in](operator-guide/setup.md#0b-smith-new--the-project-the-factory-builds-in)
 - [1. Plan JSON → `smith plan validate`](operator-guide/setup.md#1-plan-json--smith-plan-validate)
 
-## [The wave and its dispatch audits](operator-guide/wave.md)
+## [The wave](operator-guide/wave.md)
 
-Admitting a wave, and the five audits that ask whether the dispatches
-inside it were real ones.
+Admitting a wave: the plan-vs-code scanner, what it can prove and what it
+cannot, and the `next` / `audit` / `schedule` / `claims impact` reads
+around it.
 
 - [2. `smith wave check`](operator-guide/wave.md#2-smith-wave-check)
-- [2a. `smith security triggers` — the security-reviewer's dispatch condition](operator-guide/wave.md#2a-smith-security-triggers--the-security-reviewers-dispatch-condition)
-- [2b. `smith dispatch check` — was the critic actually adversarial?](operator-guide/wave.md#2b-smith-dispatch-check--was-the-critic-actually-adversarial)
-- [2c. `smith escalation check` — did the ladder actually get climbed?](operator-guide/wave.md#2c-smith-escalation-check--did-the-ladder-actually-get-climbed)
-- [2d. `smith tester check` — did a tester grade the code, or did the coder?](operator-guide/wave.md#2d-smith-tester-check--did-a-tester-grade-the-code-or-did-the-coder)
-- [2e. `smith delegation check` — did the node that dispatched own its log?](operator-guide/wave.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)
+
+## [The dispatch audits](operator-guide/dispatch-audits.md)
+
+The five audits that ask whether the dispatches inside an admitted wave
+were real ones. Split from the wave part because a session asking "was
+the critic actually adversarial?" was paying for the scanner's twenty
+kilobytes first.
+
+- [2a. `smith security triggers` — the security-reviewer's dispatch condition](operator-guide/dispatch-audits.md#2a-smith-security-triggers--the-security-reviewers-dispatch-condition)
+- [2b. `smith dispatch check` — was the critic actually adversarial?](operator-guide/dispatch-audits.md#2b-smith-dispatch-check--was-the-critic-actually-adversarial)
+- [2c. `smith escalation check` — did the ladder actually get climbed?](operator-guide/dispatch-audits.md#2c-smith-escalation-check--did-the-ladder-actually-get-climbed)
+- [2d. `smith tester check` — did a tester grade the code, or did the coder?](operator-guide/dispatch-audits.md#2d-smith-tester-check--did-a-tester-grade-the-code-or-did-the-coder)
+- [2e. `smith delegation check` — did the node that dispatched own its log?](operator-guide/dispatch-audits.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)
 
 ## [Worktrees and judges](operator-guide/worktrees-and-judges.md)
 

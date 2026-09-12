@@ -156,7 +156,7 @@ to care which — every status read folds the whole lineage, so `/bs status` and
 the dashboard answer about the epic regardless of how many sessions it took.
 What keeps that honest is `smith delegation check <session-id>`: a dispatched
 wave that did not open its own log fails it rather than reporting an empty
-wave ([operator-guide §2e](operator-guide/wave.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)).
+wave ([operator-guide §2e](operator-guide/dispatch-audits.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)).
 
 Want to look in? `/bs status` gives you live agent count, budget burn and epic
 phase; `/bs ui` serves the [dashboard](dashboard.md) if you would rather watch
