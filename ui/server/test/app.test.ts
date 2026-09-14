@@ -158,6 +158,71 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  /**
+   * `AppOpts.nowIso` pins the clock every time-dependent answer is computed
+   * against. The fixture's agents were dispatched moments ago by the wall
+   * clock, so an unpinned app calls both working; a clock pinned five hours
+   * ahead must call both stalled -- on the overview, the picker feed, the
+   * project rows and the Flow DAG alike, because one pinned instant that
+   * reached only some routes would be worse than none (the screenshot
+   * harness pins the browser to the same instant; ui/e2e/global-setup.ts).
+   */
+  it('AppOpts.nowIso pins the working/stalled clock on every route that reports it', async () => {
+    const live = app();
+    const wall = await json<{ workingAgentCount: number; stalledAgentCount: number }>(
+      await live.app.request('/api/overview'),
+    );
+    expect(wall).toMatchObject({ workingAgentCount: 2, stalledAgentCount: 0 });
+    closeApp(live);
+
+    const fiveHoursAhead = new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString();
+    const pinned = createApp({ dbPath, stateDir, roadmapPath, nowIso: fiveHoursAhead });
+    const overviewBody = await json<{
+      liveAgentCount: number;
+      workingAgentCount: number;
+      stalledAgentCount: number;
+      runningSessions: Array<{ liveAgentCount: number; workingAgentCount: number }>;
+      projects: Array<{ project: string; liveAgentCount: number; workingAgentCount: number }>;
+    }>(await pinned.app.request('/api/overview'));
+    expect(overviewBody).toMatchObject({
+      liveAgentCount: 2,
+      workingAgentCount: 0,
+      stalledAgentCount: 2,
+    });
+    expect(overviewBody.runningSessions[0]).toMatchObject({
+      liveAgentCount: 2,
+      workingAgentCount: 0,
+    });
+    expect(overviewBody.projects.find((p) => p.project === 'black-smith')).toMatchObject({
+      liveAgentCount: 2,
+      workingAgentCount: 0,
+    });
+
+    const sessionsBody = await json<Array<{ workingAgentCount: number }>>(
+      await pinned.app.request('/api/sessions'),
+    );
+    expect(sessionsBody[0]).toMatchObject({ workingAgentCount: 0 });
+
+    const projectsBody = await json<Array<{ project: string; workingAgentCount: number }>>(
+      await pinned.app.request('/api/projects'),
+    );
+    expect(projectsBody.find((p) => p.project === 'black-smith')).toMatchObject({
+      workingAgentCount: 0,
+    });
+
+    const flow = await json<{
+      nodes: Array<{
+        taskId: string;
+        liveAgentRole: string | null;
+        workingAgentRole: string | null;
+      }>;
+    }>(await pinned.app.request('/api/flow'));
+    const liveNodes = flow.nodes.filter((n) => n.liveAgentRole !== null);
+    expect(liveNodes).toHaveLength(2);
+    expect(liveNodes.every((n) => n.workingAgentRole === null)).toBe(true);
+    closeApp(pinned);
+  });
+
   it('GET /api/timeline filters by task', async () => {
     const handle = app();
     const res = await handle.app.request(`/api/timeline?task=${encodeURIComponent(TASK_1)}`);

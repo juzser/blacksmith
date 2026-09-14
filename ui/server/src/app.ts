@@ -70,6 +70,15 @@ export interface AppOpts {
    * lessonsPolicy comment in createApp().
    */
   schedulerPolicy?: SchedulerPolicy;
+  /**
+   * A fixed clock for screenshot harnesses, never for operators. Production
+   * omits it and every request reads the wall clock, so "working" (a
+   * dispatch within DEFAULT_STALE_HOURS) keeps ticking; the e2e harness pins
+   * the browser to ui/e2e/fixtureClock.ts's instant and passes the same one
+   * here (`smith ui serve --now-iso`), because a fixed browser clock is only
+   * half a fixed page once the server computes time-dependent facts too.
+   */
+  nowIso?: string;
 }
 
 export interface AppHandle {
@@ -394,6 +403,10 @@ export function createApp(opts: AppOpts): AppHandle {
   // operator to click Approve discovers. Unguarded for the same reason
   // noveltyOptsFromFlags() is — a missing policy is an error, not a default.
   const lessonsPolicy = (opts.schedulerPolicy ?? loadSchedulerPolicy()).lessons;
+  // Spread into every clock-dependent query rather than resolved to a
+  // default here: an absent pin must stay absent so each query reads the
+  // wall clock per call (AppOpts.nowIso), not the instant the server booted.
+  const clock = opts.nowIso ? { nowIso: opts.nowIso } : {};
 
   /**
    * The session half of every read route's scope, in one place (D-263).
@@ -455,7 +468,9 @@ export function createApp(opts: AppOpts): AppHandle {
   // --- Reads: one route per §10 page query -----------------------------
   app.get('/api/overview', (c) => {
     const project = c.req.query('project');
-    return c.json(overview(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json(
+      overview(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+    );
   });
 
   app.get('/api/timeline', (c) => {
@@ -500,15 +515,19 @@ export function createApp(opts: AppOpts): AppHandle {
   // review queue alongside, on every route change, to be thrown away.
   app.get('/api/sessions', (c) => {
     const project = c.req.query('project');
-    const result = overview(handle.db, {
-      ...sessionScope(c),
-      ...(project ? { project } : {}),
-    });
+    const result = overview(
+      handle.db,
+      {
+        ...sessionScope(c),
+        ...(project ? { project } : {}),
+      },
+      clock,
+    );
     return c.json(result.runningSessions);
   });
 
   app.get('/api/projects', (c) => {
-    const result = overview(handle.db, sessionScope(c));
+    const result = overview(handle.db, sessionScope(c), clock);
     return c.json(result.projects ?? []);
   });
 
@@ -540,12 +559,16 @@ export function createApp(opts: AppOpts): AppHandle {
     const epic = c.req.query('epic');
     const planVersion = parsePlanVersion(c.req.query('planVersion'));
     return c.json(
-      flowGraph(handle.db, {
-        ...sessionScope(c),
-        ...(project ? { project } : {}),
-        ...(epic ? { epicId: epic } : {}),
-        ...(planVersion !== undefined ? { planVersion } : {}),
-      }),
+      flowGraph(
+        handle.db,
+        {
+          ...sessionScope(c),
+          ...(project ? { project } : {}),
+          ...(epic ? { epicId: epic } : {}),
+          ...(planVersion !== undefined ? { planVersion } : {}),
+        },
+        clock,
+      ),
     );
   });
 

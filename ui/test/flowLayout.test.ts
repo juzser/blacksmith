@@ -34,6 +34,7 @@ function task(taskId: string, wave: number, over: Partial<FlowNode> = {}): FlowN
     taskStatus: 'in-progress',
     title: null,
     liveAgentRole: null,
+    workingAgentRole: null,
     planVersion: 1,
     wave,
     ...over,

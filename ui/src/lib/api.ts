@@ -70,6 +70,17 @@ export interface RunningSession {
   eventCount: number;
   /** `agents` rows still `live` for this session. Includes stale ghosts. */
   liveAgentCount: number;
+  /**
+   * The subset of `liveAgentCount` dispatched within the factory's own 4h
+   * staleness window (agents-registry.ts DEFAULT_STALE_HOURS) as of the
+   * server's clock. Additive next to `liveAgentCount` rather than replacing
+   * it: the ghosts are still a fact worth stating ("3 stalled not shown"),
+   * just no longer one worth drawing (operator directive, running-only
+   * liveness). The client's own `agentActivity()` decides the same question
+   * from `liveAgentEntries` against the browser clock; this field exists for
+   * the surfaces that get the count without the entries (session picker).
+   */
+  workingAgentCount: number;
   /** The most recent event's type — what this session just did. */
   lastEventType: string | null;
   /**
@@ -120,6 +131,8 @@ export interface RecentDispatch {
 export interface ProjectOverviewSummary {
   project: string;
   liveAgentCount: number;
+  /** Of `liveAgentCount`, the ones inside the 4h window — see RunningSession.workingAgentCount. */
+  workingAgentCount: number;
   epicsInFlight: string[];
   tokensSpent: number;
   tokensBudget: number | null;
@@ -138,6 +151,14 @@ export interface OverviewResult {
   liveAgents: LiveAgentGroup[];
   liveAgentEntries: LiveAgentEntry[];
   liveAgentCount: number;
+  /**
+   * `liveAgentCount` split by the factory's 4h window (see
+   * RunningSession.workingAgentCount): `working + stalled === liveAgentCount`.
+   * The Overview's "Active agents" stat reads `working` and states `stalled`
+   * beside it, so a registry full of ghosts no longer reads as a busy factory.
+   */
+  workingAgentCount: number;
+  stalledAgentCount: number;
   /** Every projected session, most recently active first. */
   runningSessions: RunningSession[];
   /** Epics with non-terminal work and no `epic-closed` event. */
@@ -149,6 +170,12 @@ export interface OverviewResult {
   milestoneProgress: MilestoneProgress[];
   recentDispatches: RecentDispatch[];
   liveAgentCountDelta5m: number;
+  /**
+   * `workingAgentCount` now minus the working count five minutes ago, the
+   * window re-folded at the cutoff — one population measured at both ends, so
+   * an agent ageing past 4h shows as a -1 here and nowhere else.
+   */
+  workingAgentCountDelta5m: number;
   budgetUsedPctPointDelta1h: number | null;
   projects?: ProjectOverviewSummary[];
 }
@@ -509,6 +536,12 @@ export interface FlowNode {
   taskStatus: string;
   title: string | null;
   liveAgentRole: string | null;
+  /**
+   * `liveAgentRole` restricted to the 4h window — null when the only live
+   * agent on this task is a stalled ghost. Drives the Flow node's pulse, which
+   * `liveAgentRole` no longer does: a pulse is a claim that work is happening.
+   */
+  workingAgentRole: string | null;
   planVersion: number | null;
   wave: number;
 }

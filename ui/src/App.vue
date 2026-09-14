@@ -91,7 +91,7 @@ function onSwitchProject(value: string) {
 // reason for keeping the route set in a lib: shown exactly where a page reads
 // the scope. SESSION_SCOPABLE_ROUTES is the eight pages that do.
 const showSessionPicker = computed(() => SESSION_SCOPABLE_ROUTES.has(String(route.name)));
-const sessionList = ref<{ sessionId: string; liveAgentCount: number }[]>([]);
+const sessionList = ref<{ sessionId: string; workingAgentCount: number }[]>([]);
 const sessionSelectOptions = computed<SessionOption[]>(() =>
   sessionOptions(sessionList.value, sessionScope.value?.session ?? ''),
 );

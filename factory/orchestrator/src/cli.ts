@@ -3669,6 +3669,21 @@ async function main(): Promise<number> {
     // Node stack trace on stdout with no error.code, the one shape every other
     // error from this CLI has.
     const port = boundedIntFlag(flags, 'port', { min: 1, max: 65535 }) ?? 4680;
+    // A fixed clock for screenshot harnesses; never for operators. The server
+    // now decides time-dependent facts itself (a live agent is *working* only
+    // within DEFAULT_STALE_HOURS of its dispatch), and ui/e2e pins the browser
+    // clock to one fixture instant — a pinned page over an unpinned server
+    // would draw every fixture agent as stalled. Unset, every request reads
+    // the wall clock (AppOpts.nowIso). Validated here, before the import, for
+    // the same reason --port is: a typo should cost a message, not a build.
+    const nowIso = flags['now-iso'];
+    if (nowIso !== undefined && Number.isNaN(Date.parse(nowIso))) {
+      throw new SmithError(
+        'ui.invalid-now',
+        `--now-iso must be an ISO-8601 timestamp Date.parse can read, got "${nowIso}".`,
+        { flag: 'now-iso', value: nowIso },
+      );
+    }
     // ui/server is a separate TS project (ui/server/tsconfig.json) built to
     // ui/server/dist/index.js — dynamically imported here (via a computed,
     // non-literal specifier, so tsc never tries to fold it into THIS
@@ -3685,6 +3700,7 @@ async function main(): Promise<number> {
         stateDir?: string;
         roadmapPath?: string;
         specsDir?: string;
+        nowIso?: string;
       }) => {
         close: () => void;
       };
@@ -3718,6 +3734,7 @@ async function main(): Promise<number> {
       ...(stateDir ? { stateDir } : {}),
       ...(roadmapPath ? { roadmapPath } : {}),
       ...(specsDir ? { specsDir } : {}),
+      ...(nowIso !== undefined ? { nowIso } : {}),
     });
     return 0;
   }

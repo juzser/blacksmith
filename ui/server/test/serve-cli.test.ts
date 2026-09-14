@@ -114,4 +114,30 @@ describe('smith ui serve (built binary)', () => {
     expect(names, `server stderr:\n${stderr}`).toEqual([MILESTONE]);
     expect(milestones[0]?.status).toBe('in-progress');
   }, 60_000); // spawns the built CLI and waits for a real HTTP server
+
+  /**
+   * ui/e2e pins the browser clock to one fixture instant and, since the server
+   * decides working-vs-stalled itself, passes the same instant as --now-iso.
+   * app.test.ts proves AppOpts.nowIso moves that line; this proves the flag
+   * reaches it through the CLI. The fixture's dispatches are stamped at the
+   * wall clock, so a pin five hours ahead is the one instant at which every
+   * live agent is past DEFAULT_STALE_HOURS: unpinned, the same db reports them
+   * all working, so a dropped flag cannot pass by accident.
+   */
+  it('forwards --now-iso, so the served working/stalled split is read at the pinned instant', async () => {
+    const fiveHoursAhead = new Date(Date.now() + 5 * 3.6e6).toISOString();
+    await serve(['--now-iso', fiveHoursAhead]);
+
+    const overview = (await (await fetch(`http://127.0.0.1:${PORT}/api/overview`)).json()) as {
+      liveAgentCount: number;
+      workingAgentCount: number;
+      stalledAgentCount: number;
+    };
+
+    expect(overview, `server stderr:\n${stderr}`).toMatchObject({
+      liveAgentCount: 2,
+      workingAgentCount: 0,
+      stalledAgentCount: 2,
+    });
+  }, 60_000); // spawns the built CLI and waits for a real HTTP server
 });

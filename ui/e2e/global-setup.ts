@@ -6,7 +6,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizeFixtureClock } from './fixtureClock.js';
+import { FIXTURE_NOW_ISO, normalizeFixtureClock } from './fixtureClock.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(here, '..', '..');
@@ -145,6 +145,14 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
       stateDir,
       '--roadmap-path',
       roadmapPath,
+      // A fixed timeline is only half a fixed label. harness.ts pins the
+      // browser clock to this same instant, and the server now computes
+      // time-dependent facts of its own (a live agent is working or stalled
+      // by its age at *the server's* now) — so both halves must agree, or a
+      // corpus normalised to January reads as all-stalled from any later
+      // wall clock.
+      '--now-iso',
+      FIXTURE_NOW_ISO,
     ],
     { stdio: 'pipe', env: process.env },
   );

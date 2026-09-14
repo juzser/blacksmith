@@ -49,6 +49,50 @@ test.describe('Flow', () => {
     await expect(page).toHaveURL(/\/tasks\//);
   });
 
+  // Running-only liveness: the pulse and the role Lozenge are a claim that
+  // work is happening, so they follow `workingAgentRole` (inside the 4h
+  // dispatch window) and not `liveAgentRole`. A node whose only live row is a
+  // stalled ghost is drawn like any other task. A synthetic graph, so every
+  // count on the canvas is known before it is asserted.
+  test('pulses only the nodes with a working agent', async ({ page }) => {
+    const flowNode = (
+      taskId: string,
+      wave: number,
+      liveAgentRole: string | null,
+      workingAgentRole: string | null,
+    ) => ({
+      taskId,
+      taskStatus: 'in_progress',
+      title: null,
+      liveAgentRole,
+      workingAgentRole,
+      planVersion: 1,
+      wave,
+    });
+    await page.route('**/api/flow*', (route) =>
+      route.fulfill({
+        json: {
+          nodes: [
+            flowNode('t-working', 0, 'coder', 'coder'),
+            // Live row past the 4h line: liveAgentRole set, workingAgentRole null.
+            flowNode('t-stalled', 0, 'coder', null),
+            flowNode('t-unassigned', 1, null, null),
+          ],
+          edges: [],
+          waves: [['t-working', 't-stalled'], ['t-unassigned']],
+          planVersions: [1],
+        },
+      }),
+    );
+    await page.goto('/flow');
+    await expect(page.locator('.flow-node')).toHaveCount(3);
+    await expect(page.locator('.flow-node--live')).toHaveCount(1);
+    await expect(page.locator('.flow-node--live .flow-node__id')).toHaveText('t-working');
+    await expect(page.locator('.flow-node__live')).toHaveText(['running']);
+    await expect(page.locator('.flow-node .ds-loz', { hasText: 'coder' })).toHaveCount(1);
+    await expect(page.locator('.flow-node', { hasText: 't-stalled' })).not.toContainText('running');
+  });
+
   test('never sits on the skeleton when the epic list is what failed', async ({ page }) => {
     // Same shape as Kanban's: the picker's /api/overview fetch was awaited
     // before the graph's own, unguarded, so a failure there meant fetchFlow()

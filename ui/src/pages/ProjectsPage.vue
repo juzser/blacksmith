@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // Projects hub (Phase 6b, operator requirement) — app default route (`/`
-// redirects here). One card per project: live agents, open findings by
+// redirects here). One card per project: working agents, open findings by
 // severity, current epic + milestone progress, last activity, budget burn,
 // epic identity chips (operator directive 2).
 import { computed, onMounted, ref } from 'vue';
@@ -44,6 +44,15 @@ onMounted(load);
 const projects = computed<ProjectOverviewSummary[]>(() => overview.value?.projects ?? []);
 /** The fetch's own verdict. `!loading` is not it: loading goes false on failure too. */
 const loaded = computed(() => overview.value !== null);
+
+// The stat counts agents inside the factory's 4h window (running-only rule);
+// a live row past that line is stalled, and is stated rather than folded in
+// so the two numbers still add up to the project's `liveAgentCount`.
+function agentStatLabel(p: ProjectOverviewSummary): string {
+  const stalled = p.liveAgentCount - p.workingAgentCount;
+  const label = pluralize(p.workingAgentCount, 'working agent');
+  return stalled > 0 ? `${label} (${stalled} stalled)` : label;
+}
 
 function budgetPct(p: ProjectOverviewSummary): number | null {
   if (!p.tokensBudget || p.tokensBudget === 0) return null;
@@ -111,8 +120,8 @@ const newProjectCommands: CommandHintItem[] = [
         <div style="font-weight: var(--ds-weight-semibold); font-size: var(--ds-text-xl)">{{ p.project }}</div>
         <div class="project-card__stats">
           <div class="project-card__stat">
-            <span class="project-card__stat-value">{{ p.liveAgentCount }}</span>
-            <span class="project-card__stat-label">{{ pluralize(p.liveAgentCount, 'live agent') }}</span>
+            <span class="project-card__stat-value">{{ p.workingAgentCount }}</span>
+            <span class="project-card__stat-label">{{ agentStatLabel(p) }}</span>
           </div>
           <div class="project-card__stat">
             <span class="project-card__stat-value">{{ p.epicsInFlight.length }}</span>

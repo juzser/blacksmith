@@ -380,7 +380,7 @@ function goToTask(taskId: string) {
           <template #node-task="{ data }">
             <div
               class="flow-node"
-              :class="{ 'flow-node--live': !!data.liveAgentRole }"
+              :class="{ 'flow-node--live': !!data.workingAgentRole }"
               role="link"
               tabindex="0"
               :aria-label="`${summarize(data.title ?? data.taskId)}, ${data.taskStatus}, opens task detail`"
@@ -409,14 +409,17 @@ function goToTask(taskId: string) {
               <span class="flow-node__title">{{ summarize(data.title ?? data.taskId) }}</span>
               <div class="flow-node__tags">
                 <Lozenge :tone="taskStatusTone(data.taskStatus)" variant="subtle">{{ data.taskStatus }}</Lozenge>
-                <Lozenge v-if="data.liveAgentRole" variant="outline">{{ data.liveAgentRole }}</Lozenge>
+                <Lozenge v-if="data.workingAgentRole" variant="outline">{{ data.workingAgentRole }}</Lozenge>
               </div>
               <!-- Operator directive 1 (Phase 6b round 3): a small pulsing
                    dot distinct from the node border, rather than pulsing the
                    whole node — reduced-motion keeps the dot filled (static)
                    and this same "running" text, which is always rendered
-                   (not sr-only), so nothing disappears when motion drops. -->
-              <span v-if="data.liveAgentRole" class="flow-node__live">
+                   (not sr-only), so nothing disappears when motion drops.
+                   Driven by `workingAgentRole`, not `liveAgentRole`: a pulse
+                   is a claim that work is happening, and a live row past the
+                   4h stale line is not evidence of that (running-only rule). -->
+              <span v-if="data.workingAgentRole" class="flow-node__live">
                 <span class="flow-node__live-dot" aria-hidden="true" />
                 running
               </span>

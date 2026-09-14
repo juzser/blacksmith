@@ -25,6 +25,8 @@ import {
   agentActivity,
   byRuntimeDesc,
   bySessionRecency,
+  isSessionRunning,
+  partitionAgents,
   type SessionActivity,
   sessionActivity,
   workingCount,
@@ -118,6 +120,15 @@ export interface SessionGroup {
   session: RunningSession;
   /** Live agents dispatched by this session, longest-running first. */
   agents: LiveAgentEntry[];
+  /**
+   * Every live agent under this session, counting the ones `agents` no longer
+   * lists. Set by runningGroups() once it has narrowed `agents` to the working
+   * ones; absent on a group straight from sessionGroups(), where `agents` IS
+   * the whole set. Carried so the session node can still say "2 working ·
+   * 3 stalled not drawn" — a filtered band that reported only what it drew
+   * would be claiming the ghosts were never there.
+   */
+  liveAgentCount?: number;
 }
 
 export type SessionsFlowNodeData =
@@ -186,6 +197,75 @@ export function sessionGroups(overview: OverviewResult): SessionGroup[] {
 export function unattachedAgents(overview: OverviewResult): LiveAgentEntry[] {
   const known = new Set((overview.runningSessions ?? []).map((s) => s.sessionId));
   return byRuntimeDesc((overview.liveAgentEntries ?? []).filter((a) => !known.has(a.sessionId)));
+}
+
+/**
+ * The orphans worth a banner — the ones still working — and how many the
+ * banner is not naming. A stalled orphan is a ghost of a ghost (no session,
+ * no terminal event, past 4h) and drawing it would put the loudest warning on
+ * the page under the least evidence; but it is still counted, because the
+ * summary line must add up to `liveAgentCount`.
+ */
+export function workingUnattached(
+  overview: OverviewResult,
+  nowIso: string,
+): { agents: LiveAgentEntry[]; hidden: number } {
+  const parts = partitionAgents(unattachedAgents(overview), nowIso);
+  // Already in byRuntimeDesc order: partitionAgents() filters without sorting.
+  return { agents: parts.working, hidden: parts.stalled + parts.unknown };
+}
+
+/**
+ * The bands the canvas draws under the running-only rule, and what it hid.
+ *
+ * Operator directive (running-only liveness): "remove idle sessions from the
+ * session display, keep only the ones running. Same for idle agents." Layered
+ * on top of sessionGroups() rather than folded into it: the grouping is a
+ * pure fact about the payload and its tests stand; this is a judgement
+ * against the clock, and it takes `nowIso` from the page's reactive `graphNow`
+ * so a band crossing the 15-minute line leaves on the next tick, not the next
+ * reload.
+ *
+ * A filter, not a sort: bands keep sessionGroups()' recency order, and a kept
+ * band lists only its working agents (still longest-running first — a filter
+ * over a sorted list is sorted) and carries the whole live count as
+ * `liveAgentCount`. `hiddenAgents` is every live agent not drawn: the stalled
+ * and unreadable ones under kept bands, plus *all* agents under hidden bands —
+ * a stalled agent under an idle session is hidden twice over and must still
+ * be counted once. `hiddenSessions` is the idle ones; `hiddenUnknownSessions`
+ * the ones dropped for an unreadable `lastEventAt`, kept apart so the
+ * operator is told the truth about why (liveness.ts hiddenSessionsLabel).
+ */
+export function runningGroups(
+  groups: readonly SessionGroup[],
+  nowIso: string,
+): {
+  groups: SessionGroup[];
+  hiddenSessions: number;
+  hiddenUnknownSessions: number;
+  hiddenAgents: number;
+} {
+  const kept: SessionGroup[] = [];
+  let hiddenSessions = 0;
+  let hiddenUnknownSessions = 0;
+  let hiddenAgents = 0;
+  for (const group of groups) {
+    if (isSessionRunning(group.session, group.agents, nowIso)) {
+      const parts = partitionAgents(group.agents, nowIso);
+      hiddenAgents += parts.stalled + parts.unknown;
+      kept.push({
+        session: group.session,
+        agents: parts.working,
+        liveAgentCount: group.agents.length,
+      });
+      continue;
+    }
+    hiddenAgents += group.agents.length;
+    if (sessionActivity(group.session.lastEventAt, nowIso) === 'unknown')
+      hiddenUnknownSessions += 1;
+    else hiddenSessions += 1;
+  }
+  return { groups: kept, hiddenSessions, hiddenUnknownSessions, hiddenAgents };
 }
 
 /**
@@ -419,7 +499,9 @@ export function sessionsFlowNodes(
           kind: 'session',
           session: group.session,
           activity: sessionActivity(group.session.lastEventAt, nowIso),
-          agentCount: group.agents.length,
+          // The carried total when runningGroups() has narrowed `agents`;
+          // otherwise `agents` is the whole set and its length is the count.
+          agentCount: group.liveAgentCount ?? group.agents.length,
           workingAgents: workingCount(group.agents, nowIso),
         },
         sourcePosition: 'right',

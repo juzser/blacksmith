@@ -539,14 +539,19 @@ a.live-agent-entry:focus-visible {
   flex-shrink: 0;
   background: var(--ds-text-subtlest);
 }
-.running-session__dot--active {
+/* --working: the session is quiet on its own events but an agent dispatched
+   inside the 4h window is still on it. Running either way, so the same
+   pulse; the Lozenge beside it is what tells the two apart. */
+.running-session__dot--active,
+.running-session__dot--working {
   background: var(--ds-info-bold);
   animation:
     ds-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite,
     ds-ring-pulse 2s ease-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .running-session__dot--active {
+  .running-session__dot--active,
+  .running-session__dot--working {
     animation: none;
   }
 }

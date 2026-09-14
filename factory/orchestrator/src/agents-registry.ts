@@ -382,3 +382,29 @@ export function detectStale(
 export function liveAgents(agents: readonly AgentRecord[]): AgentRecord[] {
   return agents.filter((a) => a.status === 'live');
 }
+
+/**
+ * Whether a dispatch at `dispatchedAt` still counts as *working* at `nowIso`:
+ * the dashboard's answer to "is anyone actually on this right now", as
+ * opposed to "has no terminal event closed it yet" (`liveAgents`). Same
+ * arithmetic and the same strict `>` as `detectStale` — working is the
+ * complement of stale over the live set — kept as one predicate so the
+ * queries that count, group and label agents cannot drift from the
+ * threshold the registry warns on.
+ *
+ * Two readings `detectStale`'s loop leaves implicit are pinned here because
+ * the dashboard renders them: a dispatch whose timestamp does not parse is
+ * NOT working (NaN compares false in both directions, which would otherwise
+ * read as "not stale, so working" — an unreadable clock is never evidence
+ * of activity), and a future-dated dispatch IS working (clock skew between
+ * the writer and the reader is not staleness).
+ */
+export function isWorkingAt(
+  dispatchedAt: string,
+  nowIso: string,
+  staleHours: number = DEFAULT_STALE_HOURS,
+): boolean {
+  const liveHours = (new Date(nowIso).getTime() - new Date(dispatchedAt).getTime()) / 3.6e6;
+  if (Number.isNaN(liveHours)) return false;
+  return liveHours <= staleHours;
+}

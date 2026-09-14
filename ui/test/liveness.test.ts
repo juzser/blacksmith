@@ -6,12 +6,18 @@ import {
   agentActivity,
   byRuntimeDesc,
   bySessionRecency,
+  hiddenAgentsLabel,
+  hiddenSessionsLabel,
+  isSessionRunning,
   lastEventLabel,
   livenessLabel,
   livenessLevel,
   longestRunningSince,
+  partitionAgents,
+  partitionSessions,
   SESSION_ACTIVE_WITHIN_MS,
   sessionActivity,
+  workingAgents,
   workingCount,
 } from '../src/lib/liveness.js';
 
@@ -43,6 +49,7 @@ function session(sessionId: string, lastEventAt: string): RunningSession {
     eventCount: 12,
     lastEventType: 'dispatch_decision',
     liveAgentCount: 1,
+    workingAgentCount: 1,
     projects: ['black-smith'],
   };
 }
@@ -276,5 +283,198 @@ describe('lib/liveness.ts lastEventLabel()', () => {
     expect(lastEventLabel('2026-08-05T11:59:58.000Z', now)).toBe('last event just now');
     expect(lastEventLabel('2026-08-05T11:58:00.000Z', now)).toBe('last event 2m ago');
     expect(lastEventLabel('2026-08-01T12:00:00.000Z', now)).toBe('last event 4d ago');
+  });
+});
+
+// Operator directive (running-only liveness): "remove idle sessions from the
+// session display, keep only the ones running. Same for idle agents." The
+// filters below are the pure half of that; the pages only render what they
+// return and state what they hid.
+const WORKING_AT = '2026-08-05T11:40:00.000Z';
+const STALLED_AT = '2026-08-05T07:00:00.000Z';
+const ACTIVE_EVENT = '2026-08-05T11:50:00.000Z';
+const QUIET_EVENT = '2026-08-05T11:30:00.000Z';
+
+function agentIn(sessionId: string, id: string, dispatchedAt: string): LiveAgentEntry {
+  return { ...entry(id, dispatchedAt), sessionId };
+}
+
+describe('lib/liveness.ts workingAgents()', () => {
+  it('keeps only the entries inside the window, in input order', () => {
+    const kept = workingAgents(
+      [
+        entry('b', WORKING_AT),
+        entry('stalled', STALLED_AT),
+        entry('a', '2026-08-05T11:00:00.000Z'),
+        entry('bad', 'not-a-date'),
+      ],
+      now,
+    );
+    expect(kept.map((e) => e.id)).toEqual(['b', 'a']);
+  });
+
+  it('is still "working" exactly at the threshold and not one millisecond past it', () => {
+    const boundary = new Date(new Date(now).getTime() - AGENT_STALE_AFTER_MS).toISOString();
+    const pastIt = new Date(new Date(now).getTime() - AGENT_STALE_AFTER_MS - 1).toISOString();
+    expect(
+      workingAgents([entry('edge', boundary), entry('past', pastIt)], now).map((e) => e.id),
+    ).toEqual(['edge']);
+  });
+
+  it('does not mutate its input', () => {
+    const input = [entry('stalled', STALLED_AT), entry('a', WORKING_AT)];
+    workingAgents(input, now);
+    expect(input.map((e) => e.id)).toEqual(['stalled', 'a']);
+  });
+});
+
+describe('lib/liveness.ts partitionAgents()', () => {
+  it('names the working ones and counts the rest by why they were hidden', () => {
+    const parts = partitionAgents(
+      [
+        entry('a', WORKING_AT),
+        entry('s1', STALLED_AT),
+        entry('bad', 'not-a-date'),
+        entry('s2', '2026-08-05T06:00:00.000Z'),
+      ],
+      now,
+    );
+    expect(parts.working.map((e) => e.id)).toEqual(['a']);
+    expect(parts.stalled).toBe(2);
+    expect(parts.unknown).toBe(1);
+  });
+
+  it('is all zeros for an empty group', () => {
+    expect(partitionAgents([], now)).toEqual({ working: [], stalled: 0, unknown: 0 });
+  });
+});
+
+describe('lib/liveness.ts isSessionRunning()', () => {
+  it('is running on event recency alone — a session need not have dispatched anyone yet', () => {
+    expect(isSessionRunning(session('s', ACTIVE_EVENT), [], now)).toBe(true);
+  });
+
+  it('is running at the 15-minute boundary and idle one millisecond past it', () => {
+    const boundary = new Date(new Date(now).getTime() - SESSION_ACTIVE_WITHIN_MS).toISOString();
+    const pastIt = new Date(new Date(now).getTime() - SESSION_ACTIVE_WITHIN_MS - 1).toISOString();
+    expect(isSessionRunning(session('s', boundary), [], now)).toBe(true);
+    expect(isSessionRunning(session('s', pastIt), [], now)).toBe(false);
+  });
+
+  it('rescues an event-quiet session that still has a working agent', () => {
+    expect(isSessionRunning(session('s', QUIET_EVENT), [entry('a', WORKING_AT)], now)).toBe(true);
+  });
+
+  it('is NOT rescued by a stalled agent — past 4h the agent is not evidence of anything', () => {
+    expect(isSessionRunning(session('s', QUIET_EVENT), [entry('a', STALLED_AT)], now)).toBe(false);
+  });
+
+  it('is NOT rescued by an agent with an unreadable dispatch timestamp', () => {
+    expect(isSessionRunning(session('s', QUIET_EVENT), [entry('a', 'not-a-date')], now)).toBe(
+      false,
+    );
+  });
+
+  it('treats an unreadable lastEventAt as no evidence, so only a working agent can carry it', () => {
+    expect(isSessionRunning(session('s', 'not-a-date'), [], now)).toBe(false);
+    expect(isSessionRunning(session('s', 'not-a-date'), [entry('a', WORKING_AT)], now)).toBe(true);
+  });
+});
+
+describe('lib/liveness.ts partitionSessions()', () => {
+  it('keeps running sessions most-recent-first and counts the idle ones', () => {
+    const parts = partitionSessions(
+      [
+        session('quiet', QUIET_EVENT),
+        session('older-active', '2026-08-05T11:48:00.000Z'),
+        session('newest', ACTIVE_EVENT),
+        session('dead', '2026-08-05T06:00:00.000Z'),
+      ],
+      [],
+      now,
+    );
+    expect(parts.running.map((s) => s.sessionId)).toEqual(['newest', 'older-active']);
+    expect(parts.idle).toBe(2);
+    expect(parts.unknown).toBe(0);
+  });
+
+  it('matches agents to sessions by sessionId — a working agent elsewhere rescues nothing', () => {
+    const parts = partitionSessions(
+      [session('mine', QUIET_EVENT), session('other', QUIET_EVENT)],
+      [agentIn('mine', 'a', WORKING_AT), agentIn('other', 'b', STALLED_AT)],
+      now,
+    );
+    expect(parts.running.map((s) => s.sessionId)).toEqual(['mine']);
+    expect(parts.idle).toBe(1);
+  });
+
+  it('files an unreadable timestamp under unknown, never under running or idle', () => {
+    const parts = partitionSessions([session('bad', 'not-a-date')], [], now);
+    expect(parts).toEqual({ running: [], idle: 0, unknown: 1 });
+  });
+
+  it('lets a working agent carry a session whose own timestamp is unreadable', () => {
+    const parts = partitionSessions(
+      [session('bad', 'not-a-date')],
+      [agentIn('bad', 'a', WORKING_AT)],
+      now,
+    );
+    expect(parts.running.map((s) => s.sessionId)).toEqual(['bad']);
+    expect(parts.unknown).toBe(0);
+  });
+
+  it('does not mutate either input', () => {
+    const sessions = [session('b', QUIET_EVENT), session('a', ACTIVE_EVENT)];
+    const agents = [agentIn('b', 'x', WORKING_AT), agentIn('a', 'y', STALLED_AT)];
+    partitionSessions(sessions, agents, now);
+    expect(sessions.map((s) => s.sessionId)).toEqual(['b', 'a']);
+    expect(agents.map((a) => a.id)).toEqual(['x', 'y']);
+  });
+
+  it('is empty for no sessions', () => {
+    expect(partitionSessions([], [], now)).toEqual({ running: [], idle: 0, unknown: 0 });
+  });
+});
+
+describe('lib/liveness.ts hiddenSessionsLabel()', () => {
+  it('says nothing when nothing was hidden — a "0 not shown" line is noise', () => {
+    expect(hiddenSessionsLabel(0, 0)).toBe('');
+  });
+
+  it('pluralises the idle count', () => {
+    expect(hiddenSessionsLabel(1, 0)).toBe('1 idle session not shown');
+    expect(hiddenSessionsLabel(3, 0)).toBe('3 idle sessions not shown');
+  });
+
+  it('appends the unreadable-timestamp count so no session vanishes unnamed', () => {
+    expect(hiddenSessionsLabel(3, 1)).toBe(
+      '3 idle sessions not shown, 1 with an unreadable timestamp',
+    );
+  });
+
+  it('still names unreadable-timestamp sessions when no idle ones were hidden', () => {
+    expect(hiddenSessionsLabel(0, 1)).toBe('1 session with an unreadable timestamp not shown');
+    expect(hiddenSessionsLabel(0, 2)).toBe('2 sessions with an unreadable timestamp not shown');
+  });
+});
+
+describe('lib/liveness.ts hiddenAgentsLabel()', () => {
+  it('says nothing when nothing was hidden', () => {
+    expect(hiddenAgentsLabel(0, 0)).toBe('');
+  });
+
+  it('pluralises the stalled count', () => {
+    expect(hiddenAgentsLabel(1, 0)).toBe('1 stalled agent not shown');
+    expect(hiddenAgentsLabel(11, 0)).toBe('11 stalled agents not shown');
+  });
+
+  it('appends the unreadable-timestamp count', () => {
+    expect(hiddenAgentsLabel(11, 1)).toBe(
+      '11 stalled agents not shown, 1 with an unreadable timestamp',
+    );
+  });
+
+  it('still names unreadable-timestamp agents when no stalled ones were hidden', () => {
+    expect(hiddenAgentsLabel(0, 1)).toBe('1 agent with an unreadable timestamp not shown');
   });
 });

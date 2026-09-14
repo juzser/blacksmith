@@ -13,6 +13,7 @@ function node(taskId: string, planVersion: number | null): FlowNode {
     taskStatus: 'ready',
     title: null,
     liveAgentRole: null,
+    workingAgentRole: null,
     planVersion,
     wave: 0,
   };

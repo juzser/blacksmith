@@ -104,7 +104,8 @@ export const SESSION_SCOPABLE_ROUTES: ReadonlySet<string> = new Set([
  *  overview payload satisfies it without being imported. */
 export interface SessionPickerEntry {
   sessionId: string;
-  liveAgentCount: number;
+  /** Agents inside the factory's 4h window — api.ts RunningSession.workingAgentCount. */
+  workingAgentCount: number;
 }
 
 function firstString(value: unknown): string | undefined {
@@ -219,11 +220,18 @@ export function sessionOptions(
 }
 
 /** The id, plus the one fact that tells a screenful of dispatched runs apart:
- *  how many agents are still live under it. Omitted at zero rather than
- *  written as "0 live" -- most rows in the list are finished runs, and a
- *  column of zeroes is noise in front of the ids being scanned. */
+ *  how many agents are still working under it. Omitted at zero rather than
+ *  written as "0 working" -- most rows in the list are finished runs, and a
+ *  column of zeroes is noise in front of the ids being scanned.
+ *
+ *  "working", not "live" (operator directive, running-only liveness): a
+ *  `live` registry row that nothing closed out four hours ago is a ghost, and
+ *  three ghosts made an abandoned run look like the busiest one on the list.
+ *  The picker itself still offers every session -- it is a scope selector,
+ *  not a liveness display -- so only the number changed meaning. No plural:
+ *  "working" is the predicate, not the noun. */
 function sessionLabel(session: SessionPickerEntry): string {
-  return session.liveAgentCount > 0
-    ? `${session.sessionId} · ${session.liveAgentCount} live`
+  return session.workingAgentCount > 0
+    ? `${session.sessionId} · ${session.workingAgentCount} working`
     : session.sessionId;
 }
