@@ -39,14 +39,30 @@ import { epicOfTaskId } from './taskId.js';
  * entry still open under that task, because after a task-level failure nobody
  * is still running.
  *
+ * An epic-level dispatch — a planner, a spec-reviewer, a scribe, sent for
+ * the epic with no task id — closes on a terminal event that also names no
+ * task and does name its role (F2, the cross-provider UI check of
+ * 2026-09-14). Its Result is recorded as a `task-result-recorded` with no
+ * task id and `agent_role` in the payload, and until F2 every terminal branch
+ * was guarded on the task id, so ten such results across the real logs closed
+ * nothing: a planner that returned in four minutes read as live for the rest
+ * of the epic. The event speaks for the latest still-open epic-level entry of
+ * that role in the same session — latest because a result belongs to the
+ * dispatch that caused it, and that is the most recent one — and steps back
+ * when the two name different epics. There is no supersession at this level
+ * (D-244): a second planner dispatch is a second round, not a replacement,
+ * and a terminal event that names no role closes nothing here, because
+ * guessing which agent a session-level error was about is the D-244 mistake
+ * one level up.
+ *
  * Above all of those sits `epic-closed` (D-187). Every close named so far
- * needs a task id to speak through, so an agent whose task simply never
- * reported — and an epic-level dispatch, which has no task id to speak
- * through at all — stayed `live` past the verdict, past the end of the run,
- * forever. The epic's own terminal event is the only thing that can say
- * otherwise, and it closes what is still open under that epic in that session
- * as `abandoned`: not superseded (nothing replaced them) and not an error
- * (they were never judged), just outrun by the run they belonged to.
+ * needs a task id or a role to speak through, so an agent whose task simply
+ * never reported — and an epic-level dispatch whose Result never came —
+ * stayed `live` past the verdict, past the end of the run, forever. The
+ * epic's own terminal event is the only thing that can say otherwise, and it
+ * closes what is still open under that epic in that session as `abandoned`:
+ * not superseded (nothing replaced them) and not an error (they were never
+ * judged), just outrun by the run they belonged to.
  */
 
 export const DISPATCH_EVENT_TYPE = 'dispatch_decision';
@@ -213,6 +229,33 @@ function closeOpen(
 }
 
 /**
+ * Close the epic-level entry a task-less terminal event speaks for: the
+ * latest still-open dispatch of `role` in `sessionId` (F2). `epicId` is the
+ * event's own claim about which epic it belongs to; when both sides name one
+ * and they differ, the event is another epic's and closes nothing here. The
+ * list is scanned from the end because the most recent dispatch of a role is
+ * the one whose Result this is.
+ */
+function closeOpenEpicLevel(
+  openEpicLevel: AgentRecord[],
+  sessionId: string,
+  role: string,
+  epicId: string | undefined,
+  eventId: string,
+  ts: string,
+  terminalType: TerminalType,
+): void {
+  for (let i = openEpicLevel.length - 1; i >= 0; i--) {
+    const entry = openEpicLevel[i];
+    if (!entry || entry.sessionId !== sessionId || entry.agentRole !== role) continue;
+    if (epicId && entry.epicId && entry.epicId !== epicId) continue;
+    closeEntry(entry, eventId, ts, terminalType);
+    openEpicLevel.splice(i, 1);
+    return;
+  }
+}
+
+/**
  * Fold a session's full event history into agent registry rows. Pure
  * function over the event list — used identically by db/projector.ts's
  * full rebuild and incremental apply paths (no separate incremental state
@@ -221,7 +264,8 @@ function closeOpen(
 export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
   const open = new Map<string, AgentRecord>();
   // Dispatches with no task id have no correlation key, so they cannot live in
-  // `open` — but they are still open, and `epic-closed` still speaks for them.
+  // `open` — but they are still open: a task-less terminal naming their role
+  // closes the latest of them (F2), and `epic-closed` sweeps the rest.
   let openEpicLevel: AgentRecord[] = [];
   const records: AgentRecord[] = [];
 
@@ -272,47 +316,97 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
 
     if (record.event_type === TASK_RESULT_EVENT_TYPE) {
       // The Result names its author in `agent` (result.schema.json's required
-      // field). A hand-appended one that omits it still closes the task.
-      const payload = record.payload as { agent?: string };
+      // field). A hand-appended one that omits it still closes the task. An
+      // epic-level one, recorded by hand with no task id, spells the role as
+      // `agent_role` — the dispatch's own key — in every real log so far, so
+      // the fold reads either.
+      const payload = record.payload as { agent?: string; agent_role?: string; epic_id?: string };
       // Both levels: result.schema.json names the task in the payload, and the
       // dispatch this closes may have named it only there too (D-245).
       const taskId = eventTaskId(record);
+      const role = payload.agent ?? payload.agent_role ?? null;
       if (taskId) {
-        closeOpen(open, taskId, payload.agent ?? null, event_id, record.ts, 'result');
+        closeOpen(open, taskId, role, event_id, record.ts, 'result');
+      } else if (role) {
+        closeOpenEpicLevel(
+          openEpicLevel,
+          record.session_id,
+          role,
+          payload.epic_id,
+          event_id,
+          record.ts,
+          'result',
+        );
       }
       continue;
     }
 
     if (record.event_type === JUDGE_REPORT_EVENT_TYPE) {
-      const payload = record.payload as { agent_role?: string };
+      const payload = record.payload as { agent_role?: string; epic_id?: string };
       const taskId = eventTaskId(record);
       if (taskId) {
         closeOpen(open, taskId, payload.agent_role ?? null, event_id, record.ts, 'result');
+      } else if (payload.agent_role) {
+        closeOpenEpicLevel(
+          openEpicLevel,
+          record.session_id,
+          payload.agent_role,
+          payload.epic_id,
+          event_id,
+          record.ts,
+          'result',
+        );
       }
       continue;
     }
 
     if (record.event_type === JUDGE_VERDICT_EVENT_TYPE) {
-      const payload = record.payload as { agent?: string; ok?: boolean };
+      const payload = record.payload as { agent?: string; ok?: boolean; epic_id?: string };
       const taskId = eventTaskId(record);
+      // A run that produced no schema-valid verdict did not do its job, and
+      // `ok: false` is how the log says so. Closing it as a result would let
+      // a provider failing every call read exactly like one answering every
+      // call — the distinction providerAgreement() exists to measure.
+      const terminal: TerminalType = payload.ok === false ? 'error' : 'result';
       if (taskId) {
-        // A run that produced no schema-valid verdict did not do its job, and
-        // `ok: false` is how the log says so. Closing it as a result would let
-        // a provider failing every call read exactly like one answering every
-        // call — the distinction providerAgreement() exists to measure.
-        const terminal: TerminalType = payload.ok === false ? 'error' : 'result';
         closeOpen(open, taskId, payload.agent ?? null, event_id, record.ts, terminal);
+      } else if (payload.agent) {
+        closeOpenEpicLevel(
+          openEpicLevel,
+          record.session_id,
+          payload.agent,
+          payload.epic_id,
+          event_id,
+          record.ts,
+          terminal,
+        );
       }
       continue;
     }
 
     if (record.event_type === ERROR_EVENT_TYPE) {
-      const payload = record.payload as { task_ref?: string; agent_role?: string };
+      const payload = record.payload as {
+        task_ref?: string;
+        agent_role?: string;
+        epic_id?: string;
+      };
       // `task_ref` is this event's own spelling; eventTaskId covers the two
       // the rest of the log uses (D-245).
       const taskId = eventTaskId(record) ?? payload.task_ref;
       if (taskId) {
         closeOpen(open, taskId, payload.agent_role ?? null, event_id, record.ts, 'error');
+      } else if (payload.agent_role) {
+        // Only with a role: a session-level error names nobody, and every
+        // epic-level agent stays where it was.
+        closeOpenEpicLevel(
+          openEpicLevel,
+          record.session_id,
+          payload.agent_role,
+          payload.epic_id,
+          event_id,
+          record.ts,
+          'error',
+        );
       }
       continue;
     }
@@ -330,10 +424,10 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
         closeEntry(entry, event_id, record.ts, 'abandoned');
         open.delete(key);
       }
-      // The epic-level half keeps D-187's reasoning for an entry nothing
-      // places -- no task id and no `epic_id` on its dispatch means no other
-      // terminal event can ever name it, so the run's own verdict is the last
-      // thing that can close it. But an entry that DID name an epic is placed,
+      // The epic-level half keeps D-187's reasoning for an entry whose Result
+      // never came -- no task id means only a terminal naming its role (F2)
+      // or the run's own verdict can close it, and this is the verdict. But
+      // an entry that DID name an epic is placed,
       // and one session runs several epics in a row: sweeping the lot closed
       // the next epic's planner, live and working, on the previous epic's
       // verdict (D-234).
