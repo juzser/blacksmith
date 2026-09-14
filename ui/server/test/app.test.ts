@@ -166,6 +166,9 @@ describe('ui/server app.ts', () => {
    * project rows and the Flow DAG alike, because one pinned instant that
    * reached only some routes would be worse than none (the screenshot
    * harness pins the browser to the same instant; ui/e2e/global-setup.ts).
+   * The Kanban card's chip joined the list on 2026-09-14 (fix n of the
+   * cross-provider UI check): it was the one route left reading the wall
+   * clock, so a pinned screenshot drew a pulsing chip beside a stalled DAG.
    */
   it('AppOpts.nowIso pins the working/stalled clock on every route that reports it', async () => {
     const live = app();
@@ -220,6 +223,13 @@ describe('ui/server app.ts', () => {
     const liveNodes = flow.nodes.filter((n) => n.liveAgentRole !== null);
     expect(liveNodes).toHaveLength(2);
     expect(liveNodes.every((n) => n.workingAgentRole === null)).toBe(true);
+
+    const kanbanBody = await json<Array<{ tasks: Array<{ agentActivity: string | null }> }>>(
+      await pinned.app.request('/api/kanban'),
+    );
+    const activities = kanbanBody.flatMap((c) => c.tasks.map((t) => t.agentActivity));
+    expect(activities.filter((a) => a === 'stalled')).toHaveLength(2);
+    expect(activities).not.toContain('working');
     closeApp(pinned);
   });
 

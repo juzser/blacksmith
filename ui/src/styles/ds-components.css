@@ -1558,6 +1558,13 @@ a.live-agent-entry:focus-visible {
   gap: var(--ds-space-1);
 }
 
+/* Cross-provider UI check of 2026-09-14, fix (n): the agent chip on a task
+   nobody is on any more names who did the work, and sits back so it cannot
+   be read as someone still there. Same value as a disabled side item. */
+.kanban-card__agent--gone {
+  opacity: 0.55;
+}
+
 /* --- Raw form elements (disclosed simplification, DESIGN.md's primitive
    inventory) --- TimelinePage's search <input> and KanbanPage's epic
    <select> are plain elements this phase, not a built kit Field/Input/

@@ -553,7 +553,9 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/kanban', (c) => {
     const epic = c.req.query('epic');
     const project = c.req.query('project');
-    return c.json(kanban(handle.db, epic, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json(
+      kanban(handle.db, epic, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+    );
   });
 
   // The app shell's own poll — "is the factory still moving, and what has

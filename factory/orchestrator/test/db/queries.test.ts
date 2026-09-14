@@ -443,6 +443,7 @@ describe('db/queries.ts', () => {
           title: 'Add the widget renderer.',
           agentRole: 'coder',
           agentModelTier: 'mid',
+          agentActivity: null,
           milestoneId: null,
           tags: { case: 'feature', origin: 'user', severity: null },
         },
@@ -455,6 +456,7 @@ describe('db/queries.ts', () => {
           title: 'Simplify the config loader.',
           agentRole: 'coder',
           agentModelTier: 'small',
+          agentActivity: 'working',
           milestoneId: null,
           tags: { case: 'refactor', origin: 'user', severity: null },
         },
@@ -466,6 +468,7 @@ describe('db/queries.ts', () => {
           title: 'Fix the flaky import resolution.',
           agentRole: 'coder',
           agentModelTier: 'small',
+          agentActivity: null,
           milestoneId: null,
           tags: { case: 'bugfix', origin: 'user', severity: null },
         },
@@ -481,10 +484,36 @@ describe('db/queries.ts', () => {
           title: 'Add the settings panel.',
           agentRole: 'coder',
           agentModelTier: 'mid',
+          agentActivity: 'working',
           milestoneId: null,
           tags: { case: 'feature', origin: 'user', severity: 'S2-major' },
         },
       ]);
+    });
+
+    // Cross-provider UI check of 2026-09-14, fix (n): the card's chip read
+    // "coder · mid" on a completed task as though someone were still on it.
+    // The dispatch row says who was last sent; only the agents row says who
+    // is still there, and the card needs the second answer next to the first.
+    it('says whether an agent is still on the task, not only who was last sent', () => {
+      const byId = (columns: ReturnType<typeof kanban>) =>
+        new Map(columns.flatMap((c) => c.tasks).map((t) => [t.taskId, t]));
+
+      const now = byId(kanban(handle.db, EPIC_ID));
+      // task-1's coder returned a result and task-3's logged an error: both
+      // dispatches are the latest for their task, and nobody is on either.
+      expect(now.get(TASK_1)?.agentActivity).toBeNull();
+      expect(now.get(TASK_3)?.agentActivity).toBeNull();
+      // task-2 and task-4 have no terminal event, so their coders are working.
+      expect(now.get(TASK_2)?.agentActivity).toBe('working');
+      expect(now.get(TASK_4)?.agentActivity).toBe('working');
+
+      // The same live rows seen from a clock years on are stalled, not gone:
+      // the registry still says live, the stale window says nothing recent.
+      const later = byId(kanban(handle.db, EPIC_ID, {}, { nowIso: '2031-01-01T00:00:00.000Z' }));
+      expect(later.get(TASK_4)?.agentActivity).toBe('stalled');
+      expect(later.get(TASK_2)?.agentActivity).toBe('stalled');
+      expect(later.get(TASK_1)?.agentActivity).toBeNull();
     });
 
     it('supports an "all epics" mode when epicId is omitted', () => {

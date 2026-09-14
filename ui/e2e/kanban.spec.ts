@@ -80,6 +80,7 @@ test.describe('Kanban', () => {
       title: taskId,
       agentRole: null,
       agentModelTier: null,
+      agentActivity: null,
       milestoneId: null,
       tags: { case: null, origin: null, severity: null },
     });
@@ -116,6 +117,7 @@ test.describe('Kanban', () => {
                 title: 'replaced',
                 agentRole: null,
                 agentModelTier: null,
+                agentActivity: null,
                 milestoneId: null,
                 tags: { case: null, origin: null, severity: null },
               },

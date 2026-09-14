@@ -214,6 +214,12 @@ export interface KanbanTask {
   title: string | null;
   agentRole: string | null;
   agentModelTier: string | null;
+  /**
+   * Whether the agent the chip names is still on the task — read off the
+   * agents rows, not the dispatch (fix n of the 2026-09-14 cross-provider
+   * UI check: `agentRole` alone says who was *sent*). `null` is nobody.
+   */
+  agentActivity: 'working' | 'stalled' | null;
   milestoneId: string | null;
   tags: KanbanTag;
 }
