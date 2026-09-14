@@ -989,3 +989,70 @@ describe('db/projector.ts — a merged task is done, whatever the log says about
     }
   });
 });
+
+describe('db/projector.ts — an error-logged moves a task only when its severity says so', () => {
+  let stateDir: string;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-error-severity-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-error-severity-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  async function logError(taskId: string, error: string, severity: string): Promise<void> {
+    const events = await readEvents(SESSION_ID, { stateDir });
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'error-logged',
+        task_id: taskId,
+        plan_version: 1,
+        causal_parent: events[events.length - 1]?.event_id ?? null,
+        payload: { error, severity, task_ref: taskId, detail: 'fixture' },
+      },
+      { stateDir },
+    );
+  }
+
+  async function statusOf(taskId: string): Promise<string> {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const row = allRows(handle.db).tasks.find((t) => t.taskId === taskId);
+      return row?.taskStatus ?? '(no row)';
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  it('an S3-minor or S4-nit error leaves the task where it was', async () => {
+    // taxonomy.yml: S3 is "real but waivable; batched to operator at epic
+    // end", S4 is "logged, never asked". Neither stops the task, so neither
+    // may show it as blocked. The fixture leaves TASK_4 in-progress.
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+    await logError(TASK_4, 'economy.budget-exceeded', 'S3-minor');
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+    await logError(TASK_4, 'execution.tool-failure', 'S4-nit');
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+  });
+
+  it('a minor coordination error is a note too, not an escalation', async () => {
+    await logError(TASK_4, 'coordination.starvation', 'S3-minor');
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+  });
+
+  it('an S2-major error blocks the task and an S1 coordination error escalates it', async () => {
+    await logError(TASK_4, 'contract.schema-violation', 'S2-major');
+    expect(await statusOf(TASK_4)).toBe('blocked');
+    await logError(TASK_4, 'coordination.deadlock', 'S1-stop-the-line');
+    expect(await statusOf(TASK_4)).toBe('escalated');
+  });
+});

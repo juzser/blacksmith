@@ -316,6 +316,12 @@ const TERMINAL_TASK_STATUSES = new Set([
   'waived',
 ]);
 
+/**
+ * Severities that record an error without stopping the task (taxonomy.yml
+ * `severity`). An `error-logged` at one of these leaves `task_status` alone.
+ */
+const NOTE_ONLY_SEVERITIES = new Set(['S3-minor', 'S4-nit']);
+
 interface TaskAddedPayload {
   epic_id?: string;
   case?: string;
@@ -700,6 +706,15 @@ export function foldTasks(
         const row = touch(taskId, record.ts, record.session_id);
         row.project = record.project ?? row.project;
         if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) break;
+        // Severity decides whether the task moves; the error class decides
+        // where. taxonomy.yml: S3 is "real but waivable; batched to operator
+        // at epic end", S4 is "logged, never asked" — a budget note or a
+        // tool hiccup at that level is on the record but the task carries on,
+        // and showing it as blocked is what the board did for 43 of the 55
+        // errors logged so far. A record with no severity is treated as
+        // major: the write path requires the field, so its absence means a
+        // log this reader does not own.
+        if (NOTE_ONLY_SEVERITIES.has(p.severity ?? '')) break;
         row.taskStatus = p.error?.startsWith('coordination.') ? 'escalated' : 'blocked';
         break;
       }
