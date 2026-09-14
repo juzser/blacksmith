@@ -310,6 +310,42 @@ describe('issueReporter.ts', () => {
     expect(bucket('create')).toHaveLength(1);
   });
 
+  // --- AC4 gap: a search that exits 0 but returns something the module
+  // cannot read as an issue list must fail the same way a nonzero exit
+  // does (reason: 'search-failed'), via a different branch (parseSearchResult
+  // returning null) than the "search exits non-zero" row already covers.
+  it.each<{ name: string; stdout: string }>([
+    { name: 'stdout is not JSON at all', stdout: 'not json' },
+    { name: 'stdout is valid JSON but not an array', stdout: JSON.stringify({ items: [] }) },
+    {
+      name: 'stdout is an array but an item is missing body',
+      stdout: JSON.stringify([{ number: 1 }]),
+    },
+    {
+      name: 'stdout is an array but an item has a non-string body',
+      stdout: JSON.stringify([{ number: 1, body: 42 }]),
+    },
+  ])(
+    'search exits 0 with unreadable output: $name (AC4 search-failed branch)',
+    async ({ stdout }) => {
+      const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
+      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const events = await fiveGateRounds('epic-1/task-unreadable-search').then((all) =>
+        all.slice(0, 1),
+      );
+      const { runner, bucket } = makeStub({
+        search: () => ({ status: 0, stdout, stderr: '' }),
+      });
+
+      const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+
+      expect(record?.outcome).toBe('failed');
+      expect(record?.reason).toBe('search-failed');
+      expect(bucket('create')).toHaveLength(0);
+      expect(bucket('comment')).toHaveLength(0);
+    },
+  );
+
   // --- AC4: the full outcome table ---
   it('grades the full (outcome, reason) pairing table (AC4)', async () => {
     const okDir = await makeRepo('git@github.com:juzser/blacksmith.git');
