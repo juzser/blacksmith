@@ -13,7 +13,7 @@
 // Kept out of the .vue files so it is unit-tested under ui/vitest.config.ts's
 // `environment: node` — same split as lib/roadmapFlow.ts.
 import type { LiveAgentEntry, RunningSession } from './api.js';
-import { formatRelative } from './format.js';
+import { formatRelative, pluralize } from './format.js';
 
 /**
  * `connecting` — nothing has loaded yet.
@@ -122,8 +122,48 @@ export function agentActivity(entry: LiveAgentEntry, nowIso: string): AgentActiv
 }
 
 /** How many of these agents are actually working — the count the pulse claims. */
-export function workingCount(entries: LiveAgentEntry[], nowIso: string): number {
+export function workingCount(entries: readonly LiveAgentEntry[], nowIso: string): number {
   return entries.filter((e) => agentActivity(e, nowIso) === 'working').length;
+}
+
+/**
+ * The entries that are actually working, in the order they came — this is a
+ * filter, not a sort, so callers compose it with byRuntimeDesc() rather than
+ * getting an ordering they did not ask for.
+ *
+ * Operator directive (running-only liveness): "remove idle sessions from the
+ * session display, keep only the ones running. Same for idle agents." The
+ * pages used to draw every `live` registry row and animate the working ones;
+ * now they draw only these and *state* the rest (partitionAgents()).
+ */
+export function workingAgents(
+  entries: readonly LiveAgentEntry[],
+  nowIso: string,
+): LiveAgentEntry[] {
+  return entries.filter((e) => agentActivity(e, nowIso) === 'working');
+}
+
+/**
+ * The working entries by name, and the hidden ones by *why* they were hidden.
+ * Two counts rather than one because they are two different messages: a
+ * stalled agent is a fact about the factory (nothing closed it out in 4h); an
+ * unreadable timestamp is a fact about the data, and the operator should not
+ * be told the former when the truth is the latter.
+ */
+export function partitionAgents(
+  entries: readonly LiveAgentEntry[],
+  nowIso: string,
+): { working: LiveAgentEntry[]; stalled: number; unknown: number } {
+  const working: LiveAgentEntry[] = [];
+  let stalled = 0;
+  let unknown = 0;
+  for (const e of entries) {
+    const activity = agentActivity(e, nowIso);
+    if (activity === 'working') working.push(e);
+    else if (activity === 'stalled') stalled += 1;
+    else unknown += 1;
+  }
+  return { working, stalled, unknown };
 }
 
 function dispatchedMs(a: LiveAgentEntry): number {
@@ -213,4 +253,85 @@ export function bySessionRecency(sessions: RunningSession[]): RunningSession[] {
 /** How many runs are actually producing events — the count the pulse claims. */
 export function activeSessionCount(sessions: RunningSession[], nowIso: string): number {
   return sessions.filter((s) => sessionActivity(s.lastEventAt, nowIso) === 'active').length;
+}
+
+/**
+ * Whether a session belongs on a "running" surface at all.
+ *
+ * Event recency alone is not enough. Measured on the same logs that set
+ * SESSION_ACTIVE_WITHIN_MS, about one inter-event gap in ten is longer than
+ * that window, while a single coder commonly runs 12–35 minutes between the
+ * dispatch event and its terminal one. An event-only rule would therefore
+ * hide a session precisely while its agent is mid-task — the one moment the
+ * operator most wants to see it. A *working* agent (agentActivity, 4h
+ * window) is proof the session is not idle, so it carries the session even
+ * when the event stream is quiet. A stalled or unknown agent carries nothing:
+ * neither is evidence of progress, and a stalled agent under a quiet session
+ * is exactly the picture of a run that died.
+ *
+ * `agentsOfSession` is the caller's responsibility to scope by `sessionId`;
+ * partitionSessions() does that over the whole entry list.
+ */
+export function isSessionRunning(
+  session: RunningSession,
+  agentsOfSession: readonly LiveAgentEntry[],
+  nowIso: string,
+): boolean {
+  return (
+    sessionActivity(session.lastEventAt, nowIso) === 'active' ||
+    workingCount(agentsOfSession, nowIso) > 0
+  );
+}
+
+/**
+ * The running sessions, most recent first, and the hidden ones counted by
+ * why. `agents` is the whole `liveAgentEntries` list; matching by `sessionId`
+ * happens here so every page applies the same rule.
+ *
+ * `unknown` is a session whose `lastEventAt` is unreadable *and* which no
+ * working agent vouches for. It is never `running` — an unreadable clock is
+ * not evidence of activity — and it is not folded into `idle` either, so the
+ * operator is told "1 with an unreadable timestamp" rather than a false
+ * "idle".
+ */
+export function partitionSessions(
+  sessions: readonly RunningSession[],
+  agents: readonly LiveAgentEntry[],
+  nowIso: string,
+): { running: RunningSession[]; idle: number; unknown: number } {
+  const running: RunningSession[] = [];
+  let idle = 0;
+  let unknown = 0;
+  for (const s of sessions) {
+    const own = agents.filter((a) => a.sessionId === s.sessionId);
+    if (isSessionRunning(s, own, nowIso)) running.push(s);
+    else if (sessionActivity(s.lastEventAt, nowIso) === 'unknown') unknown += 1;
+    else idle += 1;
+  }
+  return { running: bySessionRecency(running), idle, unknown };
+}
+
+/**
+ * "3 idle sessions not shown, 1 with an unreadable timestamp" — the sentence
+ * every surface that hides something must print (repo rule: stated, never
+ * dropped silently). Empty when nothing was hidden: a standing "0 not shown"
+ * line would train the operator to stop reading it.
+ *
+ * The unknown-only form spells out the noun ("1 session with an unreadable
+ * timestamp not shown") because "0 idle sessions not shown, 1 with an
+ * unreadable timestamp" is a true sentence that reads as a bug.
+ */
+function hiddenLabel(hidden: number, hiddenWord: string, unknown: number, noun: string): string {
+  if (hidden === 0 && unknown === 0) return '';
+  if (hidden === 0) return `${pluralize(unknown, noun)} with an unreadable timestamp not shown`;
+  const tail = unknown > 0 ? `, ${unknown} with an unreadable timestamp` : '';
+  return `${pluralize(hidden, `${hiddenWord} ${noun}`)} not shown${tail}`;
+}
+
+export function hiddenSessionsLabel(idle: number, unknown: number): string {
+  return hiddenLabel(idle, 'idle', unknown, 'session');
+}
+
+export function hiddenAgentsLabel(stalled: number, unknown: number): string {
+  return hiddenLabel(stalled, 'stalled', unknown, 'agent');
 }

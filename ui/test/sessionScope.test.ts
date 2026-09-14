@@ -203,8 +203,8 @@ describe('lib/sessionScope.ts — the width control', () => {
   });
 });
 
-function entry(sessionId: string, liveAgentCount = 0) {
-  return { sessionId, liveAgentCount };
+function entry(sessionId: string, workingAgentCount = 0) {
+  return { sessionId, workingAgentCount };
 }
 
 describe('lib/sessionScope.ts — sessionOptions', () => {
@@ -219,17 +219,28 @@ describe('lib/sessionScope.ts — sessionOptions', () => {
     expect(options.map((o) => o.value)).toEqual([ALL_SESSIONS, 'sess-b', 'sess-a']);
   });
 
-  it('names the live agents under a session, which is what tells two apart', () => {
+  it('names the WORKING agents under a session (was "live"): a stalled ghost does not tell two apart', () => {
     // The operator's case is a screenful of dispatched wave-runners. An id
-    // alone does not say which of them is still doing something.
+    // alone does not say which of them is still doing something — and neither
+    // does a `live` count that includes agents nothing closed out four hours
+    // ago (operator directive, running-only liveness). The picker still lists
+    // every session (it is a scope selector, not a liveness display); only
+    // the number beside the id changed meaning.
     const options = sessionOptions([entry('sess-a', 3), entry('sess-b', 0)], ALL_SESSIONS);
-    expect(options[1]).toEqual({ value: 'sess-a', label: 'sess-a · 3 live' });
+    expect(options[1]).toEqual({ value: 'sess-a', label: 'sess-a · 3 working' });
     expect(options[2]).toEqual({ value: 'sess-b', label: 'sess-b' });
+  });
+
+  it('says "1 working", not "1 workings", for a single agent', () => {
+    expect(sessionOptions([entry('sess-a', 1)], ALL_SESSIONS)[1]).toEqual({
+      value: 'sess-a',
+      label: 'sess-a · 1 working',
+    });
   });
 
   it('never emits two options with the same value', () => {
     const values = sessionOptions(
-      [entry('sess-a'), entry('sess-a'), { sessionId: ALL_SESSIONS, liveAgentCount: 0 }],
+      [entry('sess-a'), entry('sess-a'), { sessionId: ALL_SESSIONS, workingAgentCount: 0 }],
       ALL_SESSIONS,
     ).map((o) => o.value);
     expect(new Set(values).size).toBe(values.length);

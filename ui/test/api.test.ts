@@ -22,6 +22,8 @@ function overview(epicsInFlight: string[], closedEpics: ClosedEpic[]): OverviewR
     liveAgents: [],
     liveAgentEntries: [],
     liveAgentCount: 0,
+    workingAgentCount: 0,
+    stalledAgentCount: 0,
     runningSessions: [],
     epicsInFlight,
     closedEpics,
@@ -30,6 +32,7 @@ function overview(epicsInFlight: string[], closedEpics: ClosedEpic[]): OverviewR
     milestoneProgress: [],
     recentDispatches: [],
     liveAgentCountDelta5m: 0,
+    workingAgentCountDelta5m: 0,
     budgetUsedPctPointDelta1h: null,
   };
 }

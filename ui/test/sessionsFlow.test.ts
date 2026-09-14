@@ -11,6 +11,7 @@ import {
   bandsPerRowFor,
   FIT_MAX_ZOOM,
   MAX_BANDS_PER_ROW,
+  runningGroups,
   SESSION_BAND_CAP,
   SESSION_NODE_H,
   SESSION_NODE_W,
@@ -22,6 +23,7 @@ import {
   unattachedAgents,
   visibleAgents,
   visibleBands,
+  workingUnattached,
 } from '../src/lib/sessionsFlow.js';
 import { nth } from './helpers.js';
 
@@ -33,6 +35,7 @@ function session(over: Partial<RunningSession> & { sessionId: string }): Running
     lastEventAt: NOW,
     eventCount: 1,
     liveAgentCount: 0,
+    workingAgentCount: 0,
     lastEventType: 'task-created',
     projects: ['black-smith'],
     ...over,
@@ -56,6 +59,8 @@ function overview(over: Partial<OverviewResult>): OverviewResult {
     liveAgents: [],
     liveAgentEntries: [],
     liveAgentCount: 0,
+    workingAgentCount: 0,
+    stalledAgentCount: 0,
     runningSessions: [],
     epicsInFlight: [],
     closedEpics: [],
@@ -64,6 +69,7 @@ function overview(over: Partial<OverviewResult>): OverviewResult {
     milestoneProgress: [],
     recentDispatches: [],
     liveAgentCountDelta5m: 0,
+    workingAgentCountDelta5m: 0,
     budgetUsedPctPointDelta1h: null,
     ...over,
   };
@@ -143,6 +149,208 @@ describe('lib/sessionsFlow.ts unattachedAgents()', () => {
     // …and the orphan must not silently appear under some other session.
     const grouped = sessionGroups(data).flatMap((g) => g.agents.map((a) => a.id));
     expect(grouped).toEqual(['attached']);
+  });
+});
+
+// Operator directive (running-only liveness): "remove idle sessions from the
+// session display, keep only the ones running. Same for idle agents." The
+// canvas keeps sessionGroups() as its grouping and applies this on top, so the
+// grouping tests above stand and the filter is one function with one rule.
+describe('lib/sessionsFlow.ts runningGroups()', () => {
+  it('keeps only running sessions, most recent first, and counts the idle ones', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [
+          session({ sessionId: 'quiet', lastEventAt: QUIET_SINCE }),
+          session({ sessionId: 'older-active', lastEventAt: '2026-08-13T11:50:00.000Z' }),
+          session({ sessionId: 'newest' }),
+          session({ sessionId: 'dead', lastEventAt: LONG_AGO }),
+        ],
+      }),
+    );
+    const running = runningGroups(groups, NOW);
+
+    expect(running.groups.map((g) => g.session.sessionId)).toEqual(['newest', 'older-active']);
+    expect(running.hiddenSessions).toBe(2);
+    expect(running.hiddenUnknownSessions).toBe(0);
+    expect(running.hiddenAgents).toBe(0);
+  });
+
+  it('keeps an event-quiet session whose agent is still working, not one whose agent stalled', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [
+          session({ sessionId: 'rescued', lastEventAt: QUIET_SINCE }),
+          session({ sessionId: 'abandoned', lastEventAt: QUIET_SINCE }),
+        ],
+        liveAgentEntries: [
+          agent({ id: 'busy', sessionId: 'rescued', dispatchedAt: '2026-08-13T11:30:00.000Z' }),
+          agent({ id: 'ghost', sessionId: 'abandoned', dispatchedAt: LONG_AGO }),
+        ],
+      }),
+    );
+    const running = runningGroups(groups, NOW);
+
+    expect(running.groups.map((g) => g.session.sessionId)).toEqual(['rescued']);
+    expect(running.hiddenSessions).toBe(1);
+    // The ghost under the hidden session is hidden too, and said so.
+    expect(running.hiddenAgents).toBe(1);
+  });
+
+  it('draws only the working agents of a kept band, longest-running first', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [session({ sessionId: 's' })],
+        liveAgentEntries: [
+          agent({ id: 'recent', sessionId: 's', dispatchedAt: '2026-08-13T11:55:00.000Z' }),
+          agent({ id: 'stalled', sessionId: 's', dispatchedAt: LONG_AGO }),
+          agent({ id: 'oldest', sessionId: 's', dispatchedAt: '2026-08-13T09:00:00.000Z' }),
+          agent({ id: 'unreadable', sessionId: 's', dispatchedAt: 'not-a-date' }),
+        ],
+      }),
+    );
+    const running = runningGroups(groups, NOW);
+
+    expect(nth(running.groups, 0).agents.map((a) => a.id)).toEqual(['oldest', 'recent']);
+    expect(running.hiddenAgents).toBe(2);
+  });
+
+  it('carries the whole live count on a kept band so the node can say "2 working · 3 not drawn"', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [session({ sessionId: 's' })],
+        liveAgentEntries: [
+          agent({ id: 'w1', sessionId: 's' }),
+          agent({ id: 'w2', sessionId: 's' }),
+          agent({ id: 'g1', sessionId: 's', dispatchedAt: LONG_AGO }),
+          agent({ id: 'g2', sessionId: 's', dispatchedAt: LONG_AGO }),
+          agent({ id: 'g3', sessionId: 's', dispatchedAt: LONG_AGO }),
+        ],
+      }),
+    );
+    const kept = nth(runningGroups(groups, NOW).groups, 0);
+
+    expect(kept.agents).toHaveLength(2);
+    expect(kept.liveAgentCount).toBe(5);
+    // …and sessionsFlowNodes() reports that total, not the drawn subset, while
+    // drawing only the working agents.
+    const nodes = sessionsFlowNodes([kept], NOW);
+    expect(nodes.map((n) => n.id)).toEqual(['session::s', 'agent::w1', 'agent::w2']);
+    const node = nodeById(nodes, 'session::s');
+    expect(node.data.kind === 'session' && node.data.agentCount).toBe(5);
+    expect(node.data.kind === 'session' && node.data.workingAgents).toBe(2);
+    expect(sessionsFlowEdges([kept], NOW).map((e) => e.target)).toEqual(['agent::w1', 'agent::w2']);
+  });
+
+  it('sums hiddenAgents across kept and dropped bands', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [
+          session({ sessionId: 'kept' }),
+          session({ sessionId: 'dropped', lastEventAt: QUIET_SINCE }),
+        ],
+        liveAgentEntries: [
+          agent({ id: 'kw', sessionId: 'kept' }),
+          agent({ id: 'kg', sessionId: 'kept', dispatchedAt: LONG_AGO }),
+          agent({ id: 'dg1', sessionId: 'dropped', dispatchedAt: LONG_AGO }),
+          agent({ id: 'dg2', sessionId: 'dropped', dispatchedAt: 'not-a-date' }),
+        ],
+      }),
+    );
+    expect(runningGroups(groups, NOW).hiddenAgents).toBe(3);
+  });
+
+  it('files a session with an unreadable timestamp and no working agent under hiddenUnknownSessions', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [
+          session({ sessionId: 'bad', lastEventAt: 'not-a-date' }),
+          session({ sessionId: 'bad-but-busy', lastEventAt: 'not-a-date' }),
+        ],
+        liveAgentEntries: [agent({ id: 'w', sessionId: 'bad-but-busy' })],
+      }),
+    );
+    const running = runningGroups(groups, NOW);
+
+    expect(running.groups.map((g) => g.session.sessionId)).toEqual(['bad-but-busy']);
+    expect(running.hiddenSessions).toBe(0);
+    expect(running.hiddenUnknownSessions).toBe(1);
+  });
+
+  it('flips a band out on the next tick once its last event ages past 15 minutes', () => {
+    // The page recomputes from the reactive clock, so a session crossing the
+    // line disappears without a reload — this is the arithmetic that makes
+    // that true.
+    const groups = sessionGroups(
+      overview({ runningSessions: [session({ sessionId: 's', lastEventAt: NOW })] }),
+    );
+    const justInside = '2026-08-13T12:15:00.000Z';
+    const justPast = '2026-08-13T12:15:00.001Z';
+
+    expect(runningGroups(groups, justInside).groups).toHaveLength(1);
+    expect(runningGroups(groups, justPast).groups).toHaveLength(0);
+    expect(runningGroups(groups, justPast).hiddenSessions).toBe(1);
+  });
+
+  it('does not mutate the groups it was given', () => {
+    const groups = sessionGroups(
+      overview({
+        runningSessions: [session({ sessionId: 's' })],
+        liveAgentEntries: [
+          agent({ id: 'w', sessionId: 's' }),
+          agent({ id: 'g', sessionId: 's', dispatchedAt: LONG_AGO }),
+        ],
+      }),
+    );
+    const before = nth(groups, 0).agents.map((a) => a.id);
+    runningGroups(groups, NOW);
+    expect(nth(groups, 0).agents.map((a) => a.id)).toEqual(before);
+    expect(before).toHaveLength(2);
+    expect(nth(groups, 0).liveAgentCount).toBeUndefined();
+  });
+
+  it('is empty, with nothing hidden, for no groups', () => {
+    expect(runningGroups([], NOW)).toEqual({
+      groups: [],
+      hiddenSessions: 0,
+      hiddenUnknownSessions: 0,
+      hiddenAgents: 0,
+    });
+  });
+});
+
+describe('lib/sessionsFlow.ts workingUnattached()', () => {
+  it('names only the working orphans and counts the rest', () => {
+    const data = overview({
+      runningSessions: [session({ sessionId: 'known' })],
+      liveAgentEntries: [
+        agent({ id: 'attached', sessionId: 'known' }),
+        agent({
+          id: 'orphan-recent',
+          sessionId: 'vanished',
+          dispatchedAt: '2026-08-13T11:55:00.000Z',
+        }),
+        agent({
+          id: 'orphan-old',
+          sessionId: 'vanished',
+          dispatchedAt: '2026-08-13T10:00:00.000Z',
+        }),
+        agent({ id: 'orphan-ghost', sessionId: 'vanished', dispatchedAt: LONG_AGO }),
+        agent({ id: 'orphan-unreadable', sessionId: 'gone', dispatchedAt: 'not-a-date' }),
+      ],
+    });
+    const result = workingUnattached(data, NOW);
+
+    expect(result.agents.map((a) => a.id)).toEqual(['orphan-old', 'orphan-recent']);
+    expect(result.hidden).toBe(2);
+  });
+
+  it('is empty with nothing hidden when every agent has a session', () => {
+    const data = overview({
+      runningSessions: [session({ sessionId: 'known' })],
+      liveAgentEntries: [agent({ id: 'attached', sessionId: 'known' })],
+    });
+    expect(workingUnattached(data, NOW)).toEqual({ agents: [], hidden: 0 });
   });
 });
 
