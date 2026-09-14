@@ -363,11 +363,16 @@ const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_byte
  * reachable by typo.
  */
 function judgeBudgetFromFlags(flags: Record<string, string>): JudgeBudget {
+  // No default for max_output_tokens: the ceiling is per model, and an unset
+  // field lets the provider's policy entry (crosscheck.yml max_tokens) or the
+  // model's own default apply.
+  const maxOutputTokens = boundedIntFlag(flags, 'max-output-tokens', { min: 1 });
   return {
     timeout_ms: boundedIntFlag(flags, 'timeout-ms', { min: 1 }) ?? DEFAULT_JUDGE_BUDGET.timeout_ms,
     max_output_bytes:
       boundedIntFlag(flags, 'max-output-bytes', { min: 1 }) ??
       DEFAULT_JUDGE_BUDGET.max_output_bytes,
+    ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
   };
 }
 

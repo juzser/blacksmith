@@ -115,12 +115,46 @@ export type JudgeOutputResult =
 const ARRAY_VALUED_SCHEMAS: ReadonlySet<string> = new Set(['finding', 'finding-evidence']);
 
 /**
+ * The list a judge answered with for an array-valued schema, or undefined when
+ * it answered with some other shape. A bare array is the list. An object with
+ * exactly one key whose value is an array is the list wrapped — the shape an
+ * API judge under `response_format: json_object` has to produce, because that
+ * mode refuses a top-level array (FD-41; deepseek-chat answered
+ * `{"findings":[...]}` and lost the whole review to `schema-invalid`).
+ * Anything else — a bare record, a wrapper with a second key, a scalar — is
+ * refused: `balancedJsonCandidates` never descends into a value it has
+ * yielded, so this is the only place a wrapped list can be recognised, and it
+ * recognises exactly that one shape rather than searching for an array
+ * somewhere inside the answer.
+ */
+function unwrapArray(parsed: unknown): unknown[] | undefined {
+  if (Array.isArray(parsed)) return parsed;
+  if (typeof parsed !== 'object' || parsed === null) return undefined;
+  const keys = Object.keys(parsed);
+  if (keys.length !== 1) return undefined;
+  const inner = (parsed as Record<string, unknown>)[keys[0] as string];
+  return Array.isArray(inner) ? inner : undefined;
+}
+
+function describeShape(parsed: unknown): string {
+  if (Array.isArray(parsed)) return 'an array';
+  if (parsed === null) return 'null';
+  if (typeof parsed === 'object') return `an object with ${Object.keys(parsed).length} key(s)`;
+  return `a ${typeof parsed}`;
+}
+
+/**
  * Extract + schema-validate a judge's raw text response. `finding.schema.json`
  * describes ONE finding, but a `kind: review` judge's contract
- * (.claude/agents/reviewer.md) returns an ARRAY of findings — so an array
- * top-level value against an ARRAY_VALUED_SCHEMAS name validates element-wise;
- * every other schema (e.g. "judge-verdict") validates the parsed value
- * directly against its own object shape.
+ * (.claude/agents/reviewer.md) returns an ARRAY of findings — so against an
+ * ARRAY_VALUED_SCHEMAS name the top-level value must be that array, bare or
+ * wrapped in one single-key object (see `unwrapArray`), and validates
+ * element-wise; the value returned is the array itself, unwrapped. A bare
+ * record is refused there even when it would validate on its own: one finding
+ * where a list was asked for is a judge that misread its contract, and
+ * accepting it would file the answer as a review of exactly one issue. Every
+ * other schema (e.g. "judge-verdict") validates the parsed value directly
+ * against its own object shape.
  */
 export function extractAndValidate(
   rawText: string,
@@ -130,9 +164,22 @@ export function extractAndValidate(
   const { taxonomy, schemas } = resolve(opts);
 
   const validateOne = (parsed: unknown): JudgeOutputResult => {
-    if (ARRAY_VALUED_SCHEMAS.has(schemaName) && Array.isArray(parsed)) {
+    if (ARRAY_VALUED_SCHEMAS.has(schemaName)) {
+      const items = unwrapArray(parsed);
+      if (items === undefined) {
+        return {
+          valid: false,
+          reason: 'schema-invalid',
+          errors: [
+            {
+              path: '',
+              message: `expected an array of ${schemaName} records (or one object whose single key holds that array); got ${describeShape(parsed)}`,
+            },
+          ],
+        };
+      }
       const errors: ValidationIssue[] = [];
-      parsed.forEach((item, index) => {
+      items.forEach((item, index) => {
         const result = validateRecord(schemas, taxonomy, schemaName, item);
         if (!result.valid) {
           errors.push(
@@ -141,7 +188,7 @@ export function extractAndValidate(
         }
       });
       if (errors.length > 0) return { valid: false, reason: 'schema-invalid', errors };
-      return { valid: true, value: parsed };
+      return { valid: true, value: items };
     }
 
     const result = validateRecord(schemas, taxonomy, schemaName, parsed);

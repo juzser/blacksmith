@@ -382,6 +382,36 @@ providers:
     expect(() => parseCrosscheckPolicy(apiProvider('no'))).toThrow(CrosscheckError);
   });
 
+  // FD-37: a `transport: api` provider may cap one answer's tokens. Optional
+  // — the ceiling is per model — and when set it must be a count the request
+  // builder can send as max_tokens.
+  describe('max_tokens on an api provider', () => {
+    const apiProvider = (extra: string): string =>
+      `providers:\n  claude: { kind: native, enabled: true }\n  deepseek:\n    kind: api\n    transport: api\n    base_url: https://example.invalid\n    model: m\n    api_key_env: X\n${extra}`;
+
+    const apiConfig = (extra: string) => {
+      const deepseek = parseCrosscheckPolicy(apiProvider(extra)).providers.deepseek;
+      if (deepseek?.kind !== 'api' || deepseek.transport !== 'api') {
+        throw new Error('expected an api-transport provider');
+      }
+      return deepseek;
+    };
+
+    it('is absent when the policy does not set it', () => {
+      expect('maxTokens' in apiConfig('')).toBe(false);
+    });
+
+    it('is carried through when set', () => {
+      expect(apiConfig('    max_tokens: 16384\n').maxTokens).toBe(16384);
+    });
+
+    it.each(['0', '-5', '1.5', 'many', 'true'])('refuses %s', (literal) => {
+      expect(() => parseCrosscheckPolicy(apiProvider(`    max_tokens: ${literal}\n`))).toThrow(
+        CrosscheckError,
+      );
+    });
+  });
+
   it('rejects a finder_ne_critic the assertion cannot read', () => {
     // This one fails toward MORE checking -- a truthy string keeps the rule
     // enforced -- but an operator who writes `no` and is not told still got

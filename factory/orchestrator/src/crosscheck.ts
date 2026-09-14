@@ -71,6 +71,12 @@ export interface ApiProviderConfig {
   model: string;
   apiKeyEnv: string;
   responseFormatJsonObject: boolean;
+  /**
+   * `max_tokens` for one answer, when the policy sets one. Absent means the
+   * model's own ceiling — for a reasoning model that is the whole completion
+   * window, so a cap here is a bound on what one verdict may cost.
+   */
+  maxTokens?: number;
 }
 
 export type ProviderConfig = NativeProviderConfig | CliProviderConfig | ApiProviderConfig;
@@ -207,6 +213,7 @@ interface RawProviderYaml {
   model?: string;
   api_key_env?: string;
   response_format_json_object?: boolean;
+  max_tokens?: number;
 }
 
 interface RawPlanQuorumYaml {
@@ -373,6 +380,19 @@ function quorumNumber(field: string, value: number): number {
     );
   }
   return value;
+}
+
+/** A token count: `quorumNumber` plus "whole and above zero", which is what a provider accepts as max_tokens. */
+function positiveInteger(field: string, value: number): number {
+  const n = quorumNumber(field, value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new CrosscheckError(
+      'crosscheck.invalid-policy',
+      `crosscheck.yml ${field} must be a positive integer; got ${JSON.stringify(value)}.`,
+      { field, value },
+    );
+  }
+  return n;
 }
 
 function quorumBoolean(field: string, value: boolean): boolean {
@@ -559,6 +579,9 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
         `providers.${name}.response_format_json_object`,
         raw.response_format_json_object ?? true,
       ),
+      ...(raw.max_tokens === undefined
+        ? {}
+        : { maxTokens: positiveInteger(`providers.${name}.max_tokens`, raw.max_tokens) }),
     };
   }
 

@@ -725,7 +725,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'crossfind request',
     positionals: '',
     flags:
-      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>]',
+      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>]',
     summary:
       'Print the finder request without sending it — exactly what would leave the machine. Refuses when send_diff is false.',
   },
@@ -739,7 +739,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'crossfind run',
     positionals: '',
-    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>] ${EVENTS_DIR}`,
+    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] ${EVENTS_DIR}`,
     summary:
       'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
   },
