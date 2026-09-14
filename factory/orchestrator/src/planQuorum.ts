@@ -135,6 +135,11 @@ function taskNonfunctionalClauses(t: TaskSpecRecord): string[] {
   return Array.isArray(clauses) ? clauses.filter((c): c is string => typeof c === 'string') : [];
 }
 
+function taskAcceptanceCriteria(t: TaskSpecRecord): string[] {
+  const criteria = t.acceptance_criteria;
+  return Array.isArray(criteria) ? criteria.filter((c): c is string => typeof c === 'string') : [];
+}
+
 function taskConfidence(t: TaskSpecRecord): number | undefined {
   return typeof t.confidence === 'number' ? t.confidence : undefined;
 }
@@ -321,11 +326,16 @@ const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_byte
  * Pure prompt builder, mirrors quorum.ts's findingJudgeRequest() and
  * epic.ts's epicVerdictJudgeRequest() style and trust boundary: the prompt
  * carries the CLAIM ONLY (epic id, plan version, task ids/objectives/
- * case/token budgets, edge count, fired triggers with their evidence) —
- * never file contents, never a diff. The tasks it lists are `livePlanTasks`,
- * not `plan.tasks`: this prompt is the whole of what the critic sees, so a
- * superseded record listed here is an objective the plan withdrew, offered to
- * a judge as the plan's current ask (D-185). Carries
+ * case/token budgets, each task's acceptance criteria and nonfunctional
+ * clauses, edge count, fired triggers with their evidence) — never file
+ * contents, never a diff. The criteria are part of the claim, not evidence
+ * for it: FD-46 (csb-signing-policy-1) had both external critics refute
+ * plan-v1 for missing a case its task already listed as a criterion, because
+ * the prompt showed them the objective and nothing under it. The tasks it
+ * lists are `livePlanTasks`, not `plan.tasks`: this prompt is the whole of
+ * what the critic sees, so a superseded record listed here is an objective
+ * the plan withdrew, offered to a judge as the plan's current ask (D-185).
+ * Carries
  * asymmetric_roles.critic_mandate ("refute, not confirm"): the judge's
  * mandate is to REFUTE the plan's soundness; it critiques the plan, it does
  * not authorize any change to it.
@@ -342,7 +352,18 @@ export function planQuorumJudgeRequest(
           .map((t) => {
             const caseValue = taskCase(t) ?? '(no case)';
             const objective = typeof t.objective === 'string' ? t.objective : '(no objective)';
-            return `  ${t.task_id} [${caseValue}, ${taskTokens(t)} tokens]: ${objective}`;
+            const criteria = taskAcceptanceCriteria(t);
+            const clauses = taskNonfunctionalClauses(t);
+            return [
+              `  ${t.task_id} [${caseValue}, ${taskTokens(t)} tokens]: ${objective}`,
+              '    acceptance criteria:',
+              ...(criteria.length > 0
+                ? criteria.map((c) => `      - ${c}`)
+                : ['      (no acceptance criteria)']),
+              ...(clauses.length > 0
+                ? ['    nonfunctional clauses:', ...clauses.map((c) => `      - ${c}`)]
+                : []),
+            ].join('\n');
           })
           .join('\n')
       : '  (no tasks)';
