@@ -54,6 +54,7 @@ import {
   type StoredEvent,
 } from '../events.js';
 import {
+  findingScope,
   foldFindingsDetailed,
   missingProjectionFields,
   type SkippedFindingRecord,
@@ -1570,6 +1571,10 @@ function projectFindings(
       waiverId: finding.waiver_id ?? null,
       raisedAt: stamp.raisedAt,
       updatedAt: stamp.updatedAt,
+      // Through findingScope(), not the raw field: absence means diff.
+      findingScope: findingScope(finding),
+      specPlanVersion: finding.spec_ref?.plan_version ?? null,
+      criterionRef: finding.spec_ref?.criterion_ref ?? null,
     });
   }
   handle.db.transaction((txDb) => {

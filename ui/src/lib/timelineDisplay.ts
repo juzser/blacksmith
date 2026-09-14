@@ -2,6 +2,7 @@
 // grouping by EVENT KIND only, never status — actual outcome renders as a
 // Lozenge (taxonomy.ts) alongside it, never via tint alone.
 import type { TimelineEntry } from './api.js';
+import { specRefLabel } from './specRef.js';
 
 export type RowTint = 'blue' | 'slate' | 'lilac';
 
@@ -481,8 +482,21 @@ export function titleFor(entry: TimelineEntry): string {
       if (verdict === 'unrecorded') return 'Gate outcome — no outcome recorded';
       return `Gate outcome — ${String(p.outcome)}`;
     }
-    case 'finding-raised':
-      return `Finding raised — ${String(p.summary ?? p.finding_id ?? '')}`;
+    case 'finding-raised': {
+      // The payload is the finding itself (findings.ts raiseFinding), so a
+      // spec finding carries `finding_scope` and `spec_ref` flat in it.
+      const ref =
+        typeof p.spec_ref === 'object' && p.spec_ref !== null
+          ? (p.spec_ref as { plan_version?: unknown; criterion_ref?: unknown })
+          : {};
+      const label = specRefLabel({
+        findingScope: typeof p.finding_scope === 'string' ? p.finding_scope : null,
+        specPlanVersion: typeof ref.plan_version === 'number' ? ref.plan_version : null,
+        criterionRef: typeof ref.criterion_ref === 'string' ? ref.criterion_ref : null,
+      });
+      const summary = String(p.summary ?? p.finding_id ?? '');
+      return label ? `Finding raised — ${summary} (${label})` : `Finding raised — ${summary}`;
+    }
     case 'finding-transitioned':
       return `Finding transitioned — ${String(p.to_status ?? '')}`;
     case 'severity-decisions':

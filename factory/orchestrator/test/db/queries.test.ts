@@ -658,6 +658,11 @@ describe('db/queries.ts', () => {
       expect(detail?.findings[0]).toMatchObject({
         findingId: 'finding-1',
         findingStatus: 'fix-verified',
+        // What TaskDetailPage reads to label a spec finding — a diff finding
+        // carries the scope and no criterion.
+        findingScope: 'diff',
+        specPlanVersion: null,
+        criterionRef: null,
       });
       expect(detail?.artifacts).toHaveLength(1);
       expect(detail?.branch).toBe(`smith/${EPIC_ID}/task-1`);

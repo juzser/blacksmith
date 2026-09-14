@@ -8,10 +8,12 @@ import { kanban, lessonsPage } from '../../src/db/queries.js';
 import * as schema from '../../src/db/schema.js';
 import { appendEvent, readEvents } from '../../src/events.js';
 import {
+  type EventContext,
   foldFindingsDetailed,
   listFindings,
   REQUIRED_FOLD_FIELDS,
   REQUIRED_PROJECTION_FIELDS,
+  raiseFinding,
 } from '../../src/findings.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
 
@@ -110,6 +112,12 @@ describe('db/projector.ts', () => {
     expect(findingById['finding-4']).toMatchObject({
       findingStatus: 'confirmed',
       severity: 'S2-major',
+      // A diff finding: the scope column is filled in (absent means `diff`,
+      // findings.ts findingScope()), and the spec_ref columns stay null
+      // because there is no criterion to name.
+      findingScope: 'diff',
+      specPlanVersion: null,
+      criterionRef: null,
     });
 
     const agentByTask = Object.fromEntries(rows.agents.map((a) => [a.taskId, a]));
@@ -369,8 +377,9 @@ describe('db/projector.ts — a legacy finding that cannot fill a notNull column
 
 describe('findings table notNull columns vs REQUIRED_PROJECTION_FIELDS', () => {
   // Filled by the projector itself, never read off the payload, so they can
-  // never be the reason a record is unprojectable.
-  const PROJECTOR_SUPPLIED = ['session_id', 'raised_at', 'updated_at'];
+  // never be the reason a record is unprojectable. `finding_scope` is derived
+  // through findingScope(), which reads absence as `diff`.
+  const PROJECTOR_SUPPLIED = ['session_id', 'raised_at', 'updated_at', 'finding_scope'];
 
   it('every notNull column is either projector-supplied or a required payload field', () => {
     const notNullColumns = Object.values(getTableColumns(schema.findings))
@@ -1054,5 +1063,89 @@ describe('db/projector.ts — an error-logged moves a task only when its severit
     expect(await statusOf(TASK_4)).toBe('blocked');
     await logError(TASK_4, 'coordination.deadlock', 'S1-stop-the-line');
     expect(await statusOf(TASK_4)).toBe('escalated');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item (k) of the csb-signing-policy-1 dogfood. A spec finding is minted with
+// `finding_scope: 'spec'` and a `spec_ref` naming the plan version and the
+// criterion it failed (findings.ts, D-33/P9-9) — and neither ever reached the
+// projection. The findings table carried scope-less rows, so the dashboard
+// showed a spec-reviewer's finding as one more correctness row with no way
+// to tell which acceptance criterion it was about.
+// ---------------------------------------------------------------------------
+
+describe('spec findings carry their criterion into the findings table', () => {
+  let stateDir: string;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-spec-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-spec-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('projects finding_scope, spec_plan_version and criterion_ref', async () => {
+    const events = await readEvents(SESSION_ID, { stateDir });
+    const last = events[events.length - 1];
+    if (!last) throw new Error('fixture wrote no events');
+    const ctx: EventContext = {
+      sessionId: SESSION_ID,
+      planVersion: 1,
+      causalParent: last.event_id,
+    };
+    const raised = await raiseFinding(
+      {
+        finding: {
+          finding_id: 'finding-spec',
+          task_id: TASK_2,
+          finding_category: 'correctness',
+          finding_scope: 'spec',
+          spec_ref: { plan_version: 1, criterion_ref: `${TASK_2}:criterion-1` },
+          severity: 'S2-major',
+          finding_status: 'raised',
+          summary: 'the plan never says what the refactor must preserve',
+          failure_scenario: {
+            inputs: 'read criterion-1 against the diff',
+            expected: 'a behaviour the test can pin',
+            actual: 'the criterion names none',
+          },
+          found_by: 'spec-reviewer',
+        },
+        filePath: 'src/widget.ts',
+      },
+      ctx,
+      { stateDir },
+    );
+    if (raised.suppressed) throw new Error('finding-spec unexpectedly suppressed');
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const rows = handle.db.select().from(schema.findings).all();
+      const byId = Object.fromEntries(rows.map((f) => [f.findingId, f]));
+      expect(byId['finding-spec']).toMatchObject({
+        taskId: TASK_2,
+        findingScope: 'spec',
+        specPlanVersion: 1,
+        criterionRef: `${TASK_2}:criterion-1`,
+      });
+      // The fixture's own findings are all diff findings and say so.
+      for (const id of ['finding-1', 'finding-2', 'finding-4']) {
+        expect(byId[id]).toMatchObject({
+          findingScope: 'diff',
+          specPlanVersion: null,
+          criterionRef: null,
+        });
+      }
+    } finally {
+      handle.sqlite.close();
+    }
   });
 });

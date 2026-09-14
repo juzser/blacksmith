@@ -266,6 +266,9 @@ export interface TaskDetail {
     findingStatus: string;
     summary: string;
     waiverId: string | null;
+    findingScope: string;
+    specPlanVersion: number | null;
+    criterionRef: string | null;
   }>;
   artifacts: Array<{ id: string; type: string; path: string; description: string | null }>;
   branch: string | null;

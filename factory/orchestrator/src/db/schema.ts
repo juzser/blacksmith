@@ -228,6 +228,13 @@ export const findings = sqliteTable(
     raisedAt: text('raised_at').notNull(),
     updatedAt: text('updated_at').notNull(),
     project: text('project'), // Phase 6b — see eventsRaw's project comment above.
+    // What a spec finding is about (findings.ts SpecRef). The scope is filled
+    // in from findingScope(), so an absent field lands as 'diff' rather than
+    // as a null the reader has to know the default for; the two spec_ref
+    // columns are null on every diff finding because there is no criterion.
+    findingScope: text('finding_scope').notNull().default('diff'),
+    specPlanVersion: integer('spec_plan_version'),
+    criterionRef: text('criterion_ref'),
   },
   (t) => [
     index('findings_session_idx').on(t.sessionId),

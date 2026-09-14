@@ -28,6 +28,7 @@ import {
   type TimelineEntry,
 } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
+import { specRefLabel } from '../lib/specRef.js';
 import {
   agentStatusTone,
   findingStatusTone,
@@ -232,6 +233,8 @@ function agentChipLabel(role: string, modelTier: string | null): string {
               <Lozenge v-else-if="column.key === 'findingStatus'" :tone="findingStatusTone(String(row.findingStatus))">{{ row.findingStatus }}</Lozenge>
               <template v-else-if="column.key === 'summary'">
                 <div>{{ row.summary }}</div>
+                <!-- A spec finding names the criterion it is about; a diff finding renders nothing here. -->
+                <div v-if="specRefLabel(row as never)" style="margin-top: var(--ds-space-1); font-family: var(--ds-font-mono); font-size: var(--ds-text-xs); color: var(--ds-text-subtle)">{{ specRefLabel(row as never) }}</div>
                 <div v-if="canWaive(row as never)" style="margin-top: var(--ds-space-2); display: flex; gap: var(--ds-space-2)">
                   <Popover label="Waive finding" :open="openPopover === (row as never as { fingerprint: string }).fingerprint" @close="openPopover = null">
                     <template #trigger>
