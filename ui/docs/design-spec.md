@@ -463,7 +463,8 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 - **No WebSockets — poll, stated per surface:**
   - **The app shell** (`/api/pulse`, added by §A.6): poll every **5s** on every page. This is the only poll that is not a page's own — it carries the freshness indicator and the nav arrival badges, both of which have to be true on pages that do not poll at all.
   - **Overview** (stat row + live-agents feed): poll every **5s** — this is explicitly the "what's running right now" page (§7 of the architecture doc), the one place sub-10s freshness matters.
-  - **Timeline, Kanban**: poll every **15s**, paused via the Page Visibility API when the tab is hidden, plus a manual `Button` "Refresh" in the Toolbar (`Toolbar.prompt.md`'s documented `end` slot pattern) for on-demand freshness.
+  - **Timeline, Kanban, Flow**: poll every **15s**, paused via the Page Visibility API when the tab is hidden, plus a manual `Button` "Refresh" in the Toolbar (`Toolbar.prompt.md`'s documented `end` slot pattern) for on-demand freshness. Flow's poll retains view state across a tick — `retainFlowView()` (`ui/src/lib/flowView.ts`) keeps an expanded wave or edge-type filter that still exists in the freshly fetched graph, instead of resetting either on every success (D-243).
+  - **Projects**: poll every **15s**, same as Timeline/Kanban/Flow, paused with the tab — this hub has no Toolbar of its own, so the topbar's shared Refresh (below) is its only manual control (D-243).
   - **Task detail, Lessons, Errors, Analytics**: **manual refresh only**, no auto-poll — these are pages the operator is actively reading/deciding on; a table or findings list re-sorting under their cursor mid-read is a worse UX than a slightly stale view with an explicit Refresh button.
   - **Why poll, not WebSockets:** the projections are read-only SQLite queries behind a small local API with no auth; a single local operator doesn't need sub-second push. §10's own "Cloudflare later" plan is explicitly a data-layer port (SQLite → D1) "not a rewrite" — plain HTTP polling carries over unchanged, while a WebSocket layer would need Durable Objects at the eventual Workers port, extra migration surface with no demonstrated UX need at v1.
   - **Mutation-race interaction with polling:** no optimistic UI anywhere — Waive/Deny/Approve/Edit/Reject disable their control and guard `if (saving) return` (per `ux-conventions.md` §3) until the server responds; the next poll tick (or the mutation's own response) is what updates the UI. This avoids a poll racing an in-flight write.
@@ -756,9 +757,12 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      have reloaded the shell's pulse and left the page under it untouched.
      Rather than teach the shell what each page fetches, `usePoll` gained a
      module-level refresh signal that every mounted poller watches, so all
-     four polling pages answer it with no per-page wiring. The watcher is
+     polling pages answer it with no per-page wiring. The watcher is
      registered inside `usePoll`'s setup call, so Vue's effect scope disposes
      it with the component and an unmounted page cannot be woken by it.
+     Projects and Flow were the last two scoped pages to join this list
+     (D-243) — until then, the topbar's Refresh silently did nothing on
+     either.
    - **Supersedes §2's "Right: theme toggle only."** The topbar's right side
      now carries the pulse readout, `LiveStatus`, the project `Select` (§A.1)
      and the theme toggle. Still no user menu and no masking toggle — the

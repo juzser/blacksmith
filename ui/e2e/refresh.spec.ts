@@ -82,3 +82,96 @@ test.describe('Manual refresh (design-spec §8)', () => {
     });
   }
 });
+
+/**
+ * D-243: Projects and Flow neither polled nor answered the shared topbar
+ * Refresh (`LiveStatus.vue`'s "Refresh now" button, wired through
+ * usePoll.ts's `triggerGlobalRefresh()`). Every other scoped page (Overview,
+ * Sessions, Kanban, Timeline) already answers it via its own `usePoll(...)`;
+ * these two now join them at the 15s cadence design-spec.md §8 states for
+ * Kanban/Timeline.
+ */
+test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
+  test('Projects: topbar Refresh re-fetches the overview', async ({ page }) => {
+    await page.goto('/projects');
+    await expect(
+      page.getByRole('link', { name: /black-smith project, opens overview/ }),
+    ).toBeVisible();
+
+    const refetched = page.waitForResponse((r) => r.url().includes('/api/overview'));
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await refetched;
+  });
+
+  test('Projects: keeps its content on screen while the topbar Refresh is in flight', async ({
+    page,
+  }) => {
+    await page.goto('/projects');
+    await expect(
+      page.getByRole('link', { name: /black-smith project, opens overview/ }),
+    ).toBeVisible();
+    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+
+    await page.route('**/api/**', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+
+    // Read synchronously, inside the route's hold — see the manual-refresh
+    // block above for why a retrying matcher would prove nothing here.
+    expect(await page.locator('.ds-skeleton').count()).toBe(0);
+    expect(
+      await page.getByRole('link', { name: /black-smith project, opens overview/ }).count(),
+    ).toBe(1);
+  });
+
+  test('Flow: topbar Refresh re-fetches the graph', async ({ page }) => {
+    await page.goto('/flow');
+    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
+
+    const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'));
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await refetched;
+  });
+
+  test('Flow: keeps its content on screen while the topbar Refresh is in flight', async ({
+    page,
+  }) => {
+    await page.goto('/flow');
+    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
+    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+
+    await page.route('**/api/**', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+
+    expect(await page.locator('.ds-skeleton').count()).toBe(0);
+    expect(await page.locator('.flow-wave-label').count()).toBeGreaterThan(0);
+  });
+
+  // Round 12's per-wave disclosure is view state, not graph data — a poll
+  // tick (or a topbar Refresh) must not fold an operator's open wave back up
+  // underneath them. retainFlowView() (lib/flowView.ts) is what load() now
+  // defers to instead of the unconditional reset load() used to do on every
+  // success.
+  test('Flow: an expanded wave survives a topbar Refresh', async ({ page }) => {
+    await page.goto('/flow');
+    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
+
+    const toggle = page.locator('.flow-wave-label__more').first();
+    await expect(toggle).toBeVisible();
+    const labelBeforeToggle = await toggle.textContent();
+    await toggle.click();
+    await expect(toggle).not.toHaveText(labelBeforeToggle ?? '');
+    const labelAfterToggle = await toggle.textContent();
+
+    const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'));
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await refetched;
+
+    await expect(toggle).toHaveText(labelAfterToggle ?? '');
+  });
+});
