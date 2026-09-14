@@ -77,16 +77,15 @@ import {
 } from '../lib/api.js';
 import { formatDateTime, formatElapsed, formatRelative, pluralize } from '../lib/format.js';
 import {
-  AGENT_STALE_AFTER_MS,
-  activeSessionCount,
-  agentActivity,
   byRuntimeDesc,
-  bySessionRecency,
+  hiddenAgentsLabel,
+  hiddenSessionsLabel,
   longestRunningSince,
+  partitionAgents,
+  partitionSessions,
   SESSION_ACTIVE_WITHIN_MS,
   type SessionActivity,
   sessionActivity,
-  workingCount,
 } from '../lib/liveness.js';
 import { nothingPending, type PendingReviewCounts, pendingClauses } from '../lib/pendingReview.js';
 
@@ -195,6 +194,21 @@ function goToKanban() {
   router.push('/kanban');
 }
 
+// Operator directive (running-only): the dashboard shows what is working
+// and says what it is not showing. A `live` registry row is not proof of
+// work — rows stay live until a terminal event closes them, and the factory
+// itself reports a row stale after 4h (liveness.ts, AGENT_STALE_AFTER_MS).
+// So every agent surface on this page is fed from this partition, computed
+// against the ticking `now`: an agent crossing the line drops out on the
+// next tick, not on the next fetch. What drops out is counted, never
+// dropped silently.
+const agentParts = computed(() => partitionAgents(data.value?.liveAgentEntries ?? [], now.value));
+const workingEntries = computed(() => agentParts.value.working);
+// '' when nothing is hidden, so `v-if` on it renders no empty line.
+const hiddenAgentsLine = computed(() =>
+  hiddenAgentsLabel(agentParts.value.stalled, agentParts.value.unknown),
+);
+
 // Operator directive (Phase 6b round 5): the flat capped list (round 4)
 // doesn't scale past a handful of agents either — replaced with role·tier
 // GROUPS (IdentityChip + count), each a Disclosure trigger (same
@@ -203,7 +217,7 @@ function goToKanban() {
 // already carries everything a group needs (role, tier, taskId).
 const liveAgentGroups = computed<LiveAgentGroupUI[]>(() => {
   const byKey = new Map<string, LiveAgentGroupUI>();
-  for (const a of data.value?.liveAgentEntries ?? []) {
+  for (const a of workingEntries.value) {
     const key = `${a.agentRole}|${a.modelTier}`;
     const existing = byKey.get(key);
     if (existing) {
@@ -243,21 +257,20 @@ const rightAgentGroups = computed(() => liveAgentGroups.value.filter((_, i) => i
 // The second half is the part that carries information: 8 agents at 30s is a
 // healthy factory, 8 agents where the oldest is at 2h is a wedged one.
 //
-// Round 9 splits the count: "8 agents working" was a claim the data did not
+// Round 9 split the count: "8 agents working" was a claim the data did not
 // support, because it counted agents the factory itself would already report
-// as stale. Agents whose timestamp is unreadable (`unknown`) are counted in
-// neither clause rather than being described as stalled — that would be a
-// second unsupported claim, just in the other direction.
-const STALE_HOURS = AGENT_STALE_AFTER_MS / (60 * 60 * 1000);
+// as stale. The card now lists only the working ones, so the middle clause
+// states what it hides. Agents whose timestamp is unreadable (`unknown`) are
+// named as such rather than described as stalled — that would be a second
+// unsupported claim, just in the other direction.
 const runningSummary = computed(() => {
-  const entries = data.value?.liveAgentEntries ?? [];
-  if (entries.length === 0) return '';
-  const stalled = entries.filter((a) => agentActivity(a, now.value) === 'stalled').length;
-  const clauses = [`${pluralize(workingCount(entries, now.value), 'agent')} working`];
-  if (stalled > 0) clauses.push(`${stalled} with no update in over ${STALE_HOURS}h`);
-  const since = longestRunningSince(entries);
+  const working = workingEntries.value;
+  if (working.length === 0) return '';
+  const clauses = [`${pluralize(working.length, 'agent')} working`];
+  if (hiddenAgentsLine.value) clauses.push(hiddenAgentsLine.value);
+  const since = longestRunningSince(working);
   if (since !== null) clauses.push(`longest running ${formatElapsed(since, now.value)}`);
-  return clauses.join(', ');
+  return clauses.join(' · ');
 });
 
 // Dogfood round 2 — operator: "the overview never updates, and the now-running
@@ -275,26 +288,43 @@ const runningSummary = computed(() => {
 //
 // So the unit of this card is now the SESSION (queries.ts runningSessions()),
 // ordered by what appended an event most recently, with its own activity
-// state. A session's live agents are shown UNDER it, and only while that
-// session is itself active — an agent row cannot claim to be running now if
-// its whole run has been quiet for hours.
+// state.
+//
+// Running-only: a session gets a row only while it is RUNNING — an event
+// within SESSION_ACTIVE_WITHIN_MS, or at least one working agent (the second
+// half matters: agents commonly run 12-35 min between events, so an
+// event-only rule hid runs that were mid-task). Idle sessions are counted in
+// the summary and the footer, not listed. Under each row only the WORKING
+// agents appear; a stalled row cannot claim to be running now, and the
+// note under the row says how many of them there are.
 const SESSION_CAP = 5;
 const SESSION_AGENT_CAP = 6;
 
 interface RunningSessionRow {
   session: RunningSession;
   activity: SessionActivity;
-  /** Live agents to show under an active session, longest-running first. */
+  /** Working agents to show under the session, longest-running first. */
   agents: LiveAgentEntry[];
-  /** Agents past SESSION_AGENT_CAP on an active session — stated, never dropped silently. */
+  /** Working agents past SESSION_AGENT_CAP — stated, never dropped silently. */
   hiddenAgents: number;
   /**
-   * Rows still `live` under a session that is NOT active. Named for what it
-   * is: no terminal event was ever recorded, which is not the same as work
-   * in progress. This is the ghost count that used to fill the whole card.
+   * The session's live-but-not-working rows, already worded ('' when there
+   * are none). Stalled rows are the ghosts that used to fill the whole
+   * card; an unreadable timestamp is named as such, not counted as stalled.
    */
-  unclosedAgents: number;
+  hiddenAgentsNote: string;
 }
+
+const sessionParts = computed(() =>
+  partitionSessions(
+    data.value?.runningSessions ?? [],
+    data.value?.liveAgentEntries ?? [],
+    now.value,
+  ),
+);
+const hiddenSessionsLine = computed(() =>
+  hiddenSessionsLabel(sessionParts.value.idle, sessionParts.value.unknown),
+);
 
 const runningSessionRows = computed<RunningSessionRow[]>(() => {
   const agentsBySession = new Map<string, LiveAgentEntry[]>();
@@ -303,16 +333,16 @@ const runningSessionRows = computed<RunningSessionRow[]>(() => {
     list.push(a);
     agentsBySession.set(a.sessionId, list);
   }
-  return bySessionRecency(data.value?.runningSessions ?? []).map((session) => {
-    const activity = sessionActivity(session.lastEventAt, now.value);
-    const agents = byRuntimeDesc(agentsBySession.get(session.sessionId) ?? []);
-    const active = activity === 'active';
+  // `running` already comes back most-recently-active first.
+  return sessionParts.value.running.map((session) => {
+    const parts = partitionAgents(agentsBySession.get(session.sessionId) ?? [], now.value);
+    const agents = byRuntimeDesc(parts.working);
     return {
       session,
-      activity,
-      agents: active ? agents.slice(0, SESSION_AGENT_CAP) : [],
-      hiddenAgents: active ? Math.max(0, agents.length - SESSION_AGENT_CAP) : 0,
-      unclosedAgents: active ? 0 : agents.length,
+      activity: sessionActivity(session.lastEventAt, now.value),
+      agents: agents.slice(0, SESSION_AGENT_CAP),
+      hiddenAgents: Math.max(0, agents.length - SESSION_AGENT_CAP),
+      hiddenAgentsNote: hiddenAgentsLabel(parts.stalled, parts.unknown),
     };
   });
 });
@@ -320,54 +350,71 @@ const nowRunning = computed(() => runningSessionRows.value.slice(0, SESSION_CAP)
 const hiddenRunning = computed(() => Math.max(0, runningSessionRows.value.length - SESSION_CAP));
 
 const SESSION_ACTIVE_MINUTES = SESSION_ACTIVE_WITHIN_MS / (60 * 1000);
-const ACTIVITY_TONE: Record<SessionActivity, 'info' | 'neutral'> = {
+// A listed row is running on one half of the rule or the other: its own
+// events ('active'), or an agent vouching for it while the events are quiet
+// ('working'). 'idle' is not a word a row here can carry — it is what the
+// footer calls the sessions this card does NOT list, and a row under "Now
+// running" that reads "idle" looks like the filter failed.
+type RowState = 'active' | 'working' | 'unknown';
+const ROW_TONE: Record<RowState, 'info' | 'neutral'> = {
   active: 'info',
-  idle: 'neutral',
+  working: 'info',
   unknown: 'neutral',
 };
-const ACTIVITY_WORD: Record<SessionActivity, string> = {
-  active: 'active',
-  idle: 'idle',
-  unknown: 'unknown',
-};
+function rowState(row: RunningSessionRow): RowState {
+  if (row.activity === 'active') return 'active';
+  // Event-idle or an unreadable event time: only a working agent could have
+  // kept the row on the page, so that is the state it reports. The 'unknown'
+  // branch is unreachable while partitionSessions keeps those rows out.
+  return row.agents.length > 0 || row.hiddenAgents > 0 ? 'working' : 'unknown';
+}
 
 // The state is never carried by the dot's colour alone — this is the same
 // fact in words, and it is what a screen reader reads out.
 function sessionStateLabel(row: RunningSessionRow): string {
   const when = formatRelative(row.session.lastEventAt, now.value);
+  if (rowState(row) === 'working') {
+    // The events half is stated as what it is — quiet, or unreadable — and
+    // never as more than the log supports.
+    const events =
+      row.activity === 'unknown'
+        ? 'last event time unreadable'
+        : `no event for over ${SESSION_ACTIVE_MINUTES} minutes`;
+    return `${events}, ${pluralize(row.agents.length + row.hiddenAgents, 'agent')} working`;
+  }
   if (row.activity === 'unknown') return 'last event time unreadable';
-  if (row.activity === 'active') return `active, last event ${when}`;
-  return `idle for over ${SESSION_ACTIVE_MINUTES} minutes, last event ${when}`;
+  return `active, last event ${when}`;
 }
 
 // Round 9's summary counted agents; this one counts runs, because that is
-// what the card now lists. Idle sessions are named rather than hidden — a
-// factory with four sessions and none active is a real state the operator
-// needs to be able to read off this line.
+// what the card now lists. Idle sessions are no longer listed, so they are
+// counted here instead — a factory with four sessions and none running is a
+// real state the operator needs to be able to read off this line.
 const sessionsSummary = computed(() => {
-  const sessions = data.value?.runningSessions ?? [];
-  if (sessions.length === 0) return '';
-  const active = activeSessionCount(sessions, now.value);
-  const clauses = [`${pluralize(active, 'session')} active`];
-  if (sessions.length > active) clauses.push(`${sessions.length - active} idle`);
-  const newest = bySessionRecency(sessions)[0];
+  const running = sessionParts.value.running;
+  if (running.length === 0) return '';
+  const clauses = [`${pluralize(running.length, 'session')} running`];
+  if (hiddenSessionsLine.value) clauses.push(hiddenSessionsLine.value);
+  const newest = running[0];
   if (newest) clauses.push(`last event ${formatRelative(newest.lastEventAt, now.value)}`);
-  return clauses.join(', ');
+  return clauses.join(' · ');
 });
 
 // The signatures behind the flash. Ids only, deliberately: the elapsed labels
 // re-render every second off useNow(), and folding them in would flash every
 // block once a second forever. What should flash is a dispatch appearing or an
 // agent finishing — a change in WHICH rows exist, not in how they read.
+// Both run over the SHOWN sets: an agent stalling out of the card, or a
+// session going idle and leaving it, is exactly such a change.
 const agentsSignature = () =>
-  (data.value?.liveAgentEntries ?? []).map((a) => `${a.id}:${a.taskId ?? ''}`).join('|');
+  workingEntries.value.map((a) => `${a.id}:${a.taskId ?? ''}`).join('|');
 // Dogfood round 2: for the sessions card the meaningful change is a session
 // APPENDING something — that is the one signal that says the factory is
 // working right now — so the signature is (session, last event), not just
 // which sessions exist. A poll where nothing was appended still does not
 // flash.
 const sessionsSignature = () =>
-  (data.value?.runningSessions ?? []).map((s) => `${s.sessionId}:${s.lastEventAt}`).join('|');
+  sessionParts.value.running.map((s) => `${s.sessionId}:${s.lastEventAt}`).join('|');
 const dispatchSignature = () =>
   (data.value?.recentDispatches ?? []).map((d) => d.eventId).join('|');
 const { flashing: agentsFlash } = useFlashOnChange(agentsSignature);
@@ -378,7 +425,7 @@ const { flashing: dispatchFlash } = useFlashOnChange(dispatchSignature);
 // full (<=6), collapsed once there are more. A manual toggle on a specific
 // group always wins over this default (tracked separately so it survives
 // the 5s poll re-fetch instead of snapping back).
-const defaultGroupsExpanded = computed(() => (data.value?.liveAgentEntries.length ?? 0) <= 6);
+const defaultGroupsExpanded = computed(() => workingEntries.value.length <= 6);
 const manuallyOpened = ref<Set<string>>(new Set());
 const manuallyClosed = ref<Set<string>>(new Set());
 function isGroupExpanded(key: string): boolean {
@@ -462,14 +509,20 @@ const bsCommands = computed<CommandHintItem[]>(() => {
           :class="{ 'ds-flash': agentsFlash }"
           aria-label="Active agents, view in Flow"
         >
+          <!-- Working, not merely live: the stalled rows are named in the
+               hint so the number never quietly shrinks past them. -->
           <StatCard
             label="Active agents"
-            :value="data.liveAgentCount"
+            :value="data.workingAgentCount"
             icon="bot"
             tint="blue"
-            :delta="signed(data.liveAgentCountDelta5m)"
+            :delta="signed(data.workingAgentCountDelta5m)"
             delta-tone="neutral"
-            hint="vs 5 min ago"
+            :hint="
+              data.stalledAgentCount > 0
+                ? `vs 5 min ago · ${data.stalledAgentCount} stalled not counted`
+                : 'vs 5 min ago'
+            "
           />
         </router-link>
         <router-link to="/analytics" class="ds-stat-link" aria-label="Budget used, view in Analytics">
@@ -508,90 +561,93 @@ const bsCommands = computed<CommandHintItem[]>(() => {
 
     <!-- Operator directive (dogfood round 2): "the now-running block should
          show the sessions that are running right now, with an animated
-         indicator". One row per SESSION, most recently active first, each
-         with a pulsing dot while it is genuinely appending events. A session
-         that has gone quiet keeps its row but loses the pulse and collapses
-         to its header — and says plainly how many of its agents were never
-         closed out, because those rows are the reason this card used to look
-         frozen (script section). -->
+         indicator". One row per RUNNING session, most recently active first,
+         each with a pulsing dot while it is genuinely appending events. A
+         session that has gone quiet and has no agent still working is not
+         listed at all — it is counted in the summary and the footer, because
+         those rows are the reason this card used to look frozen (script
+         section). The card itself stays between runs (D-241): an idle
+         factory is a state to read, not a reason to take the block away.
+         Only the first-ever run has nothing to read yet, and the
+         illustration below covers that. -->
     <Card
-      v-if="!loading && data && nowRunning.length > 0"
+      v-if="!loading && data && !isFirstRun"
       title="Now running"
       :class="{ 'ds-flash': sessionsFlash }"
     >
       <template #action>
         <Button variant="ghost" size="sm" @click="router.push('/flow')">View →</Button>
       </template>
-      <p class="live-agents-summary">{{ sessionsSummary }}</p>
-      <ul class="running-session-list">
-        <li v-for="row in nowRunning" :key="row.session.sessionId" class="running-session">
-          <div class="running-session__head">
-            <span
-              class="running-session__dot"
-              :class="`running-session__dot--${row.activity}`"
-              aria-hidden="true"
-            />
-            <span class="running-session__id" :title="`started ${formatDateTime(row.session.startedAt)}`">
-              {{ row.session.sessionId }}
-            </span>
-            <Lozenge :tone="ACTIVITY_TONE[row.activity]">{{ ACTIVITY_WORD[row.activity] }}</Lozenge>
-            <span class="running-session__state">{{ sessionStateLabel(row) }}</span>
-          </div>
-          <p class="running-session__meta">
-            {{ pluralize(row.session.eventCount, 'event') }}
-            <template v-if="row.session.lastEventType">
-              · last <code>{{ row.session.lastEventType }}</code>
-            </template>
-            <template v-if="row.session.projects.length > 0">
-              · {{ row.session.projects.join(', ') }}
-            </template>
-          </p>
-          <!-- An agent row appears only under a session that is itself
-               active: "running now" has to be true of the run, not just of a
-               registry row nobody closed. -->
-          <ul v-if="row.agents.length > 0" class="running-session__agents">
-            <li v-for="a in row.agents" :key="a.id">
-              <component
-                :is="a.taskId ? 'router-link' : 'div'"
-                :to="a.taskId ? `/tasks/${encodeURIComponent(a.taskId)}` : undefined"
-                class="live-agent-entry"
-                :title="`started ${formatDateTime(a.dispatchedAt)}`"
-                :aria-label="
-                  a.taskId
-                    ? `${a.agentRole} on ${a.modelTier}, working on ${a.taskId}, running ${formatElapsed(a.dispatchedAt, now)}, opens task detail`
-                    : undefined
-                "
-              >
-                <span
-                  class="live-agent-entry__dot"
-                  :class="`live-agent-entry__dot--${agentActivity(a, now)}`"
-                  aria-hidden="true"
-                />
-                <IdentityChip
-                  :id="a.agentRole"
-                  :label="`${a.agentRole} · ${a.modelTier}`"
-                  :live="agentActivity(a, now) === 'working'"
-                />
-                <span class="live-agent-entry__task">{{ agentScopeLabel(a) }}</span>
-                <span class="live-agent-entry__elapsed">{{
-                  formatElapsed(a.dispatchedAt, now)
-                }}</span>
-              </component>
-            </li>
-          </ul>
-          <!-- Never a silent cap, in either direction. -->
-          <p v-if="row.hiddenAgents > 0" class="running-session__note">
-            +{{ row.hiddenAgents }} more in Live agents below
-          </p>
-          <p v-else-if="row.unclosedAgents > 0" class="running-session__note">
-            {{ pluralize(row.unclosedAgents, 'agent') }} still marked live, no terminal event
-            recorded
-          </p>
-        </li>
-      </ul>
-      <p v-if="hiddenRunning > 0" class="now-running-more">
-        +{{ hiddenRunning }} older {{ hiddenRunning === 1 ? 'session' : 'sessions' }} not shown
-      </p>
+      <template v-if="nowRunning.length > 0">
+        <p class="live-agents-summary">{{ sessionsSummary }}</p>
+        <ul class="running-session-list">
+          <li v-for="row in nowRunning" :key="row.session.sessionId" class="running-session">
+            <div class="running-session__head">
+              <span
+                class="running-session__dot"
+                :class="`running-session__dot--${rowState(row)}`"
+                aria-hidden="true"
+              />
+              <span class="running-session__id" :title="`started ${formatDateTime(row.session.startedAt)}`">
+                {{ row.session.sessionId }}
+              </span>
+              <Lozenge :tone="ROW_TONE[rowState(row)]">{{ rowState(row) }}</Lozenge>
+              <span class="running-session__state">{{ sessionStateLabel(row) }}</span>
+            </div>
+            <p class="running-session__meta">
+              {{ pluralize(row.session.eventCount, 'event') }}
+              <template v-if="row.session.lastEventType">
+                · last <code>{{ row.session.lastEventType }}</code>
+              </template>
+              <template v-if="row.session.projects.length > 0">
+                · {{ row.session.projects.join(', ') }}
+              </template>
+            </p>
+            <!-- Only WORKING agents get a row: "running now" has to be true
+                 of the agent, not just of a registry row nobody closed. -->
+            <ul v-if="row.agents.length > 0" class="running-session__agents">
+              <li v-for="a in row.agents" :key="a.id">
+                <component
+                  :is="a.taskId ? 'router-link' : 'div'"
+                  :to="a.taskId ? `/tasks/${encodeURIComponent(a.taskId)}` : undefined"
+                  class="live-agent-entry"
+                  :title="`started ${formatDateTime(a.dispatchedAt)}`"
+                  :aria-label="
+                    a.taskId
+                      ? `${a.agentRole} on ${a.modelTier}, working on ${a.taskId}, running ${formatElapsed(a.dispatchedAt, now)}, opens task detail`
+                      : undefined
+                  "
+                >
+                  <span
+                    class="live-agent-entry__dot live-agent-entry__dot--working"
+                    aria-hidden="true"
+                  />
+                  <IdentityChip :id="a.agentRole" :label="`${a.agentRole} · ${a.modelTier}`" live />
+                  <span class="live-agent-entry__task">{{ agentScopeLabel(a) }}</span>
+                  <span class="live-agent-entry__elapsed">{{
+                    formatElapsed(a.dispatchedAt, now)
+                  }}</span>
+                </component>
+              </li>
+            </ul>
+            <!-- Never a silent cap, and never a silent filter. -->
+            <p v-if="row.hiddenAgents > 0" class="running-session__note">
+              +{{ row.hiddenAgents }} more in Live agents below
+            </p>
+            <p v-if="row.hiddenAgentsNote" class="running-session__note">
+              {{ row.hiddenAgentsNote }}
+            </p>
+          </li>
+        </ul>
+        <p v-if="hiddenRunning > 0" class="now-running-more">
+          +{{ hiddenRunning }} older {{ hiddenRunning === 1 ? 'session' : 'sessions' }} not shown
+        </p>
+        <p v-if="hiddenSessionsLine" class="now-running-more">{{ hiddenSessionsLine }}</p>
+      </template>
+      <template v-else>
+        <EmptyState icon="play" inline>No sessions running.</EmptyState>
+        <p v-if="hiddenSessionsLine" class="now-running-more">{{ hiddenSessionsLine }}</p>
+      </template>
     </Card>
 
     <!-- First-run empty: the app's one designated illustration slot. The
@@ -653,7 +709,10 @@ const bsCommands = computed<CommandHintItem[]>(() => {
             </div>
           </div>
         </div>
-        <EmptyState v-else icon="bot" inline>No agents running right now.</EmptyState>
+        <template v-else>
+          <EmptyState icon="bot" inline>No agents working right now.</EmptyState>
+          <p v-if="hiddenAgentsLine" class="now-running-more">{{ hiddenAgentsLine }}</p>
+        </template>
       </Card>
 
       <Card title="Recent dispatch decisions" :class="{ 'ds-flash': dispatchFlash }">

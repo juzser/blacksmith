@@ -1,5 +1,33 @@
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+
+// Payload rows for the running-only test below, dated as offsets from the
+// browser's pinned clock (harness.ts) so every label they render is exact.
+// The lines that matter are liveness.ts's: a session is active for 15
+// minutes after its last event, an agent is working for 4h after dispatch.
+const minutesAgo = (minutes: number): string =>
+  new Date(Date.parse(FIXTURE_NOW_ISO) - minutes * 60_000).toISOString();
+const session = (sessionId: string, lastEventAt: string, working: number, live: number) => ({
+  sessionId,
+  startedAt: minutesAgo(6 * 60),
+  lastEventAt,
+  eventCount: 3,
+  liveAgentCount: live,
+  workingAgentCount: working,
+  lastEventType: 'task-created',
+  projects: ['black-smith'],
+});
+const agent = (id: string, sessionId: string, dispatchedAt: string) => ({
+  id,
+  sessionId,
+  agentRole: 'coder',
+  provider: 'anthropic',
+  modelTier: 'sonnet',
+  taskId: `task-${id}`,
+  epicId: 'epic-1',
+  dispatchedAt,
+});
 
 // The canvas half of the Sessions page. Layout arithmetic (band order, band
 // height, which edge animates) is asserted in ui/test/sessionsFlow.test.ts,
@@ -50,12 +78,16 @@ test.describe('Sessions', () => {
     // kept the pre-measurement positions and drew one tall column forever.
     await page.route('**/api/overview*', async (route) => {
       const payload = await (await route.fetch()).json();
+      // Dated after the pinned clock (harness.ts), which sessionActivity()
+      // clamps to "just now": every one of these bands is running, so the
+      // running-only rule hides none of them and the tiling gets its eight.
       payload.runningSessions = Array.from({ length: 8 }, (_, i) => ({
         sessionId: `sess-tiling-${i}`,
         startedAt: '2026-08-13T10:00:00.000Z',
         lastEventAt: `2026-08-13T11:${String(50 - i).padStart(2, '0')}:00.000Z`,
         eventCount: 3,
         liveAgentCount: 0,
+        workingAgentCount: 0,
         lastEventType: 'task-created',
         projects: ['black-smith'],
       }));
@@ -119,6 +151,7 @@ test.describe('Sessions', () => {
         lastEventAt: `2026-08-13T11:${String(50 - i).padStart(2, '0')}:00.000Z`,
         eventCount: 3,
         liveAgentCount: 0,
+        workingAgentCount: 0,
         lastEventType: 'task-created',
         projects: ['black-smith'],
       }));
@@ -163,6 +196,123 @@ test.describe('Sessions', () => {
         canvas.x + canvas.width + 0.5,
       );
     }
+  });
+
+  // Running-only liveness (operator directive): "remove idle sessions from
+  // the session display, keep only the ones running. Same for idle agents."
+  // The arithmetic is asserted in ui/test/sessionsFlow.test.ts; this is the
+  // page's side of it -- what the canvas draws, and that every band, agent
+  // and orphan it does not draw is counted somewhere in words. The counts
+  // are the claim, so each is asserted verbatim.
+  test('draws only running bands and working agents, and counts the rest', async ({ page }) => {
+    await page.route('**/api/overview*', async (route) => {
+      const payload = await (await route.fetch()).json();
+      payload.runningSessions = [
+        // Active on its own events: 3 minutes is inside the 15-minute line.
+        session('sess-active', minutesAgo(3), 1, 2),
+        // Quiet for 40 minutes, but its agent was dispatched 20 minutes ago:
+        // running on the agent half of the rule.
+        session('sess-quiet', minutesAgo(40), 1, 1),
+        // Quiet for 40 minutes and its only live row is 5h old: idle.
+        session('sess-idle', minutesAgo(40), 0, 1),
+        // Nothing for 5 hours and nothing live: idle.
+        session('sess-done', minutesAgo(5 * 60), 0, 0),
+      ];
+      payload.liveAgentEntries = [
+        agent('a-working', 'sess-active', minutesAgo(30)),
+        agent('a-stalled', 'sess-active', minutesAgo(5 * 60)),
+        agent('q-working', 'sess-quiet', minutesAgo(20)),
+        agent('i-stalled', 'sess-idle', minutesAgo(5 * 60)),
+        // Two rows whose session is not in the payload at all: the working
+        // one is named in the banner, the stalled one only counted.
+        agent('o-working', 'sess-gone', minutesAgo(10)),
+        agent('o-stalled', 'sess-gone', minutesAgo(5 * 60)),
+      ];
+      payload.liveAgentCount = 6;
+      payload.workingAgentCount = 3;
+      payload.stalledAgentCount = 3;
+      await route.fulfill({ json: payload });
+    });
+    await page.goto('/sessions');
+
+    // The toolbar line adds up over the whole payload: 2 + 2 sessions,
+    // 3 + 3 agents, the orphans included on the agent side.
+    await expect(page.locator('.ds-toolbar__count')).toHaveText(
+      '2 sessions running · 2 idle sessions not shown · 3 agents working · 3 stalled agents not shown',
+    );
+
+    // Two bands, one agent each; the idle bands and the stalled rows are not
+    // in the DOM at all.
+    await expect(page.locator('.session-node')).toHaveCount(2);
+    await expect(page.locator('.session-node__id')).toHaveText(['sess-active', 'sess-quiet']);
+    await expect(page.locator('.agent-node')).toHaveCount(2);
+    await expect(page.locator('.agent-node__task')).toHaveText([
+      'task-a-working',
+      'task-q-working',
+    ]);
+    await expect(page.getByText('sess-idle')).toHaveCount(0);
+    await expect(page.getByText('sess-done')).toHaveCount(0);
+
+    // The band with a stalled row says so on the card; the one without does
+    // not carry an empty clause.
+    const agentLines = page.locator('.session-node__agents');
+    await expect(agentLines.nth(0)).toContainText('1 agent working · 1 stalled agent not shown');
+    await expect(agentLines.nth(1)).toContainText('1 agent working');
+    await expect(agentLines.nth(1)).not.toContainText('stalled');
+
+    // A drawn band never calls itself idle: the quiet session is on the
+    // canvas because its agent vouches for it, and the band says that. "idle"
+    // is the footer's word for the runs the rule left off the canvas.
+    const quiet = page.locator('.session-node', { hasText: 'sess-quiet' });
+    await expect(quiet.locator('.session-node__head .ds-loz')).toHaveText('working');
+    await expect(quiet.locator('.session-node__meta')).toContainText(
+      'no event for over 15 minutes, 1 agent working',
+    );
+    const active = page.locator('.session-node', { hasText: 'sess-active' });
+    await expect(active.locator('.session-node__head .ds-loz')).toHaveText('active');
+
+    // Under the canvas: the running-only line alone, since nothing was capped.
+    await expect(page.locator('.sessions-canvas__more')).toHaveText(['2 idle sessions not shown']);
+
+    // The working orphan is named; the stalled one is in the summary's count
+    // and nowhere else.
+    await expect(page.locator('.ds-banner')).toHaveCount(1);
+    await expect(page.locator('.ds-banner')).toContainText(
+      '1 working agent with no session on this canvas (coder · sess-gone)',
+    );
+
+    // The sr-only alternative describes the drawn graph, not the payload.
+    await expect(page.locator('table.sr-only caption')).toHaveText(
+      'Sessions: 2 running, most recently active first',
+    );
+    await expect(page.locator('table.sr-only tbody tr')).toHaveCount(2);
+  });
+
+  // The other end of the same rule: nothing running is an empty canvas, and
+  // the line under it says what the rule took off it -- as distinct from the
+  // API-failed state below, which claims nothing about the factory.
+  test('an idle factory is an empty canvas that says what it hides', async ({ page }) => {
+    await page.route('**/api/overview*', async (route) => {
+      const payload = await (await route.fetch()).json();
+      payload.runningSessions = [
+        session('sess-idle-1', minutesAgo(60), 0, 1),
+        session('sess-idle-2', minutesAgo(60), 0, 0),
+      ];
+      payload.liveAgentEntries = [agent('one-stalled', 'sess-idle-1', minutesAgo(5 * 60))];
+      payload.liveAgentCount = 1;
+      payload.workingAgentCount = 0;
+      payload.stalledAgentCount = 1;
+      await route.fulfill({ json: payload });
+    });
+    await page.goto('/sessions');
+    await expect(page.getByText('No sessions are running')).toBeVisible();
+    await expect(page.locator('.sessions-canvas')).toHaveCount(0);
+    await expect(page.locator('.sessions-canvas__more')).toHaveText(['2 idle sessions not shown']);
+    // No working agent, so the summary has no "working" clause to state.
+    await expect(page.locator('.ds-toolbar__count')).toHaveText(
+      '0 sessions running · 2 idle sessions not shown · 1 stalled agent not shown',
+    );
+    await expect(page.locator('.ds-banner')).toHaveCount(0);
   });
 
   test('never overlaps two rendered nodes', async ({ page }) => {

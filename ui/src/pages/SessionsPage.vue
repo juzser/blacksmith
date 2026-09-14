@@ -45,25 +45,33 @@ import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { agentScopeLabel } from '../lib/agentScope.js';
-import { fetchOverview, type OverviewResult, type RunningSession } from '../lib/api.js';
+import {
+  fetchOverview,
+  type LiveAgentEntry,
+  type OverviewResult,
+  type RunningSession,
+} from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { formatDateTime, formatElapsed, formatRelative, pluralize } from '../lib/format.js';
 import {
   type AgentActivity,
-  activeSessionCount,
   agentActivity,
+  hiddenAgentsLabel,
+  hiddenSessionsLabel,
+  partitionAgents,
   SESSION_ACTIVE_WITHIN_MS,
   type SessionActivity,
 } from '../lib/liveness.js';
 import {
   AGENT_VISIBLE_CAP,
   bandsPerRowFor,
+  runningGroups,
   SESSION_BAND_CAP,
   sessionGroups,
   sessionsFlowEdges,
   sessionsFlowNodes,
-  unattachedAgents,
   visibleBands,
+  workingUnattached,
 } from '../lib/sessionsFlow.js';
 
 const router = useRouter();
@@ -133,14 +141,37 @@ watch([project, sessionKey], () => {
 const { refresh } = usePoll(load, POLL_MS);
 
 const allGroups = computed(() => (data.value ? sessionGroups(data.value) : []));
-// `runningSessions` is every projected session, not just the live ones, so the
-// canvas caps what it draws and states the remainder — see lib/sessionsFlow.ts.
-const groups = computed(() => visibleBands(allGroups.value).shown);
-const hiddenBands = computed(() => visibleBands(allGroups.value).hidden);
-// Agents whose session is not in the payload. They are named in a Banner
-// rather than drawn, because the canvas has nowhere honest to put them:
-// inventing a parent node would be inventing data. See lib/sessionsFlow.ts.
-const orphans = computed(() => (data.value ? unattachedAgents(data.value) : []));
+// `runningSessions` is every projected session, not just the running ones.
+// The running-only rule (lib/sessionsFlow.ts runningGroups) drops the idle
+// bands and, inside each kept band, the stalled agents; it reads `graphNow`,
+// so a band crossing the 15-minute line leaves on the next successful poll.
+// What survives is then capped, and both remainders are stated: the rule's
+// in the toolbar summary and under the canvas, the cap's under the canvas.
+const running = computed(() => runningGroups(allGroups.value, graphNow.value));
+const groups = computed(() => visibleBands(running.value.groups).shown);
+const hiddenBands = computed(() => visibleBands(running.value.groups).hidden);
+// '' when nothing is hidden, so `v-if` on it renders no empty line.
+const hiddenSessionsLine = computed(() =>
+  hiddenSessionsLabel(running.value.hiddenSessions, running.value.hiddenUnknownSessions),
+);
+// Every live agent in the payload, orphans included, split by the same clock
+// the bands are: this is what the summary's working/stalled counts add up
+// from, so they sum to `liveAgentEntries.length` whatever the canvas drew.
+const agentParts = computed(() =>
+  partitionAgents(data.value?.liveAgentEntries ?? [], graphNow.value),
+);
+const hiddenAgentsLine = computed(() =>
+  hiddenAgentsLabel(agentParts.value.stalled, agentParts.value.unknown),
+);
+// Working agents whose session is not in the payload. They are named in a
+// Banner rather than drawn, because the canvas has nowhere honest to put them:
+// inventing a parent node would be inventing data. Stalled orphans are not
+// named, only counted — they are in `agentParts`. See lib/sessionsFlow.ts.
+const orphans = computed(() =>
+  data.value
+    ? workingUnattached(data.value, graphNow.value)
+    : { agents: [] as LiveAgentEntry[], hidden: 0 },
+);
 
 // How many band columns to tile is decided from the canvas's MEASURED box, not
 // from a device breakpoint: the sidebar collapses at 1024px, so a narrower
@@ -165,8 +196,9 @@ watch(canvasEl, (el) => {
   canvasObserver?.disconnect();
   canvasObserver = undefined;
   if (!el) {
-    // The canvas leaves the page whenever the last run finishes (EmptyState
-    // takes the `groups.length === 0` branch) and comes back with the next one.
+    // The canvas leaves the page whenever the last run finishes or goes idle
+    // (EmptyState takes the `running.groups.length === 0` branch) and comes
+    // back with the next one.
     // Dropping the flag with it is what keeps `measured` meaning "canvasSize is
     // the box currently on screen": the window can be resized across that gap,
     // and a flow that mounts against the pre-gap measurement gets its correction
@@ -203,8 +235,9 @@ function toggleExpanded(sessionId: string) {
   if (!next.delete(sessionId)) next.add(sessionId);
   expandedSessions.value = next;
 }
-// A poll can retire a session out of `visibleBands()`; its id would otherwise
-// sit in the set forever and re-open the band if the run came back.
+// A poll can retire a session out of `runningGroups()` or `visibleBands()`;
+// its id would otherwise sit in the set forever and re-open the band if the
+// run came back.
 watch(groups, (gs) => {
   const alive = new Set(gs.map((g) => g.session.sessionId));
   if ([...expandedSessions.value].every((id) => alive.has(id))) return;
@@ -256,11 +289,25 @@ const flowEdges = computed(() =>
 );
 
 const SESSION_ACTIVE_MINUTES = SESSION_ACTIVE_WITHIN_MS / (60 * 1000);
-const ACTIVITY_TONE: Record<SessionActivity, 'info' | 'neutral'> = {
+// A drawn band is running on one half of the rule or the other: its own
+// events ('active'), or an agent vouching for it while the events are quiet
+// ('working'). 'idle' is not a word a band can carry — it is what the line
+// under the canvas calls the runs that are NOT drawn, and a band that reads
+// "idle" looks like the running-only rule failed. Same words as Overview's
+// rows: the two surfaces must never disagree about what a run is doing.
+type BandState = 'active' | 'working' | 'unknown';
+const BAND_TONE: Record<BandState, 'info' | 'neutral'> = {
   active: 'info',
-  idle: 'neutral',
+  working: 'info',
   unknown: 'neutral',
 };
+function bandState(activity: SessionActivity, workingAgents: number): BandState {
+  if (activity === 'active') return 'active';
+  // Event-idle or an unreadable event time: only a working agent could have
+  // kept the band on the canvas, so that is the state it reports. 'unknown'
+  // is unreachable while runningGroups() keeps such bands off the canvas.
+  return workingAgents > 0 ? 'working' : 'unknown';
+}
 const AGENT_TONE: Record<AgentActivity, 'info' | 'warning' | 'neutral'> = {
   working: 'info',
   stalled: 'warning',
@@ -268,38 +315,57 @@ const AGENT_TONE: Record<AgentActivity, 'info' | 'warning' | 'neutral'> = {
 };
 
 // Counted through lib/liveness.ts, the same thresholds Overview's card uses:
-// the two surfaces must never disagree about which runs are active.
-// Counted over EVERY session in the payload, not just the bands that fit —
-// the count is a claim about the factory, and capping it at SESSION_BAND_CAP
-// would make it a claim about the viewport instead. What was left undrawn is
-// stated separately, below the canvas.
+// the two surfaces must never disagree about which runs are running.
+// Counted over EVERY running session in the payload, not just the bands that
+// fit — the count is a claim about the factory, and capping it at
+// SESSION_BAND_CAP would make it a claim about the viewport instead. What the
+// running-only rule hid is stated here, in the same breath as the count it
+// was taken out of; what the cap left undrawn is stated below the canvas.
 const summary = computed(() => {
-  const sessions = allGroups.value.map((g) => g.session);
-  if (sessions.length === 0) return '';
-  const active = activeSessionCount(sessions, graphNow.value);
-  const clauses = [`${pluralize(active, 'session')} active`];
-  if (sessions.length > active) clauses.push(`${sessions.length - active} idle`);
-  const agents = allGroups.value.reduce((n, g) => n + g.agents.length, 0);
-  if (agents > 0) clauses.push(pluralize(agents, 'live agent'));
+  const agentsInPayload = (data.value?.liveAgentEntries ?? []).length;
+  if (allGroups.value.length === 0 && agentsInPayload === 0) return '';
+  const clauses = [`${pluralize(running.value.groups.length, 'session')} running`];
+  if (hiddenSessionsLine.value) clauses.push(hiddenSessionsLine.value);
+  const working = agentParts.value.working.length;
+  if (working > 0) clauses.push(`${pluralize(working, 'agent')} working`);
+  if (hiddenAgentsLine.value) clauses.push(hiddenAgentsLine.value);
   return clauses.join(' · ');
 });
 
 // The state is never carried by a dot's colour alone — this is the same fact
 // in words, and it is what a screen reader gets.
-function sessionStateLabel(session: RunningSession, activity: SessionActivity): string {
+function sessionStateLabel(
+  session: RunningSession,
+  activity: SessionActivity,
+  workingAgents: number,
+): string {
   const when = formatRelative(session.lastEventAt, graphNow.value);
+  if (bandState(activity, workingAgents) === 'working') {
+    // The events half is stated as what it is — quiet, or unreadable — and
+    // never as more than the log supports.
+    const events =
+      activity === 'unknown'
+        ? 'last event time unreadable'
+        : `no event for over ${SESSION_ACTIVE_MINUTES} minutes`;
+    return `${events}, ${pluralize(workingAgents, 'agent')} working`;
+  }
   if (activity === 'unknown') return 'last event time unreadable';
-  if (activity === 'active') return `active, last event ${when}`;
-  return `idle for over ${SESSION_ACTIVE_MINUTES} minutes, last event ${when}`;
+  return `active, last event ${when}`;
 }
 
 // An agent that is live-but-stalled is counted separately from one that is
-// working, because those are different facts and the pulse only claims the
-// second one.
-function agentLine(agentCount: number, workingAgents: number): string {
+// working, because those are different facts and only the second one is
+// drawn. The band carries its working agents alone (runningGroups), so the
+// ones it hid are re-partitioned from the unfiltered group to be named, not
+// just subtracted: an unreadable timestamp is not "stalled", and the label
+// helper keeps the two apart.
+function agentLine(sessionId: string, agentCount: number, workingAgents: number): string {
   if (agentCount === 0) return 'no live agents';
-  if (workingAgents === agentCount) return `${pluralize(agentCount, 'agent')} working`;
-  return `${workingAgents} of ${agentCount} agents working`;
+  const line = `${pluralize(workingAgents, 'agent')} working`;
+  if (workingAgents === agentCount) return line;
+  const all = allGroups.value.find((g) => g.session.sessionId === sessionId)?.agents ?? [];
+  const parts = partitionAgents(all, graphNow.value);
+  return `${line} · ${hiddenAgentsLabel(parts.stalled, parts.unknown)}`;
 }
 
 function goToTask(taskId: string | null) {
@@ -321,14 +387,15 @@ function goToTask(taskId: string | null) {
          terminal event closes them out, so an agent can outlive the run that
          dispatched it; that is a real state an operator needs told, and the
          one thing the canvas must not do is hang it off a session it did not
-         belong to just to have somewhere to draw it. -->
-    <Banner v-if="orphans.length > 0" tone="warning">
-      {{ pluralize(orphans.length, 'live agent') }} with no session on this canvas
-      ({{ orphans.map((a) => `${a.agentRole} · ${a.sessionId}`).join(', ') }}).
+         belong to just to have somewhere to draw it. Working orphans only:
+         a stalled one is counted in the summary, not named here. -->
+    <Banner v-if="orphans.agents.length > 0" tone="warning">
+      {{ pluralize(orphans.agents.length, 'working agent') }} with no session on this canvas
+      ({{ orphans.agents.map((a) => `${a.agentRole} · ${a.sessionId}`).join(', ') }}).
       Either no terminal event was recorded for
-      {{ orphans.length === 1 ? 'it' : 'them' }}, or the run belongs to a project
+      {{ orphans.agents.length === 1 ? 'it' : 'them' }}, or the run belongs to a project
       outside the current scope. Not drawn: the canvas has nowhere honest to put
-      {{ orphans.length === 1 ? 'it' : 'them' }}.
+      {{ orphans.agents.length === 1 ? 'it' : 'them' }}.
     </Banner>
 
     <Skeleton v-if="loading" height="640" />
@@ -336,10 +403,15 @@ function goToTask(taskId: string | null) {
     <!-- Both branches require `data`. Without that, a failed FIRST fetch —
          error set, data still null, loading already false — renders the red
          banner directly above "No sessions are running", telling the operator
-         the factory is idle when the truth is that the API is unreachable. -->
-    <EmptyState v-else-if="canClaimEmpty(!!data, groups.length)" icon="play">
-      No sessions are running. Start the factory and this canvas fills in.
-    </EmptyState>
+         the factory is idle when the truth is that the API is unreachable.
+         Counted over the running bands, before the cap: an idle-only payload
+         is an empty canvas, and the line under it says what went unshown. -->
+    <template v-else-if="canClaimEmpty(!!data, running.groups.length)">
+      <EmptyState icon="play">
+        No sessions are running. Start the factory and this canvas fills in.
+      </EmptyState>
+      <p v-if="hiddenSessionsLine" class="sessions-canvas__more">{{ hiddenSessionsLine }}</p>
+    </template>
 
     <template v-else-if="data">
       <div ref="canvasEl" class="sessions-canvas">
@@ -354,30 +426,30 @@ function goToTask(taskId: string | null) {
             <article
               class="session-node"
               :class="{
-                'session-node--active': node.activity === 'active',
-                'session-node--expandable': node.agentCount > AGENT_VISIBLE_CAP,
+                'session-node--active': bandState(node.activity, node.workingAgents) !== 'unknown',
+                'session-node--expandable': node.workingAgents > AGENT_VISIBLE_CAP,
               }"
             >
               <div class="session-node__head">
                 <span
                   class="running-session__dot"
-                  :class="`running-session__dot--${node.activity}`"
+                  :class="`running-session__dot--${bandState(node.activity, node.workingAgents)}`"
                   aria-hidden="true"
                 />
                 <span
                   class="session-node__id"
                   :title="`${node.session.sessionId} · started ${formatDateTime(node.session.startedAt)}`"
                 >{{ node.session.sessionId }}</span>
-                <Lozenge :tone="ACTIVITY_TONE[node.activity as SessionActivity]">
-                  {{ node.activity }}
+                <Lozenge :tone="BAND_TONE[bandState(node.activity, node.workingAgents)]">
+                  {{ bandState(node.activity, node.workingAgents) }}
                 </Lozenge>
               </div>
               <p class="session-node__meta">
-                {{ sessionStateLabel(node.session, node.activity) }} ·
+                {{ sessionStateLabel(node.session, node.activity, node.workingAgents) }} ·
                 {{ pluralize(node.session.eventCount, 'event') }}
               </p>
               <p class="session-node__agents">
-                {{ agentLine(node.agentCount, node.workingAgents) }}
+                {{ agentLine(node.session.sessionId, node.agentCount, node.workingAgents) }}
                 <template v-if="node.session.lastEventType">
                   · last <code>{{ node.session.lastEventType }}</code>
                 </template>
@@ -390,26 +462,28 @@ function goToTask(taskId: string | null) {
                    a control below it would be the first thing off-canvas. It
                    is what `session-node--expandable` above buys the height
                    for; the same condition gates both, so the card never grows
-                   for a button that is not there. The aria-label carries the
-                   session id because a canvas of eight bands is otherwise
-                   eight identically-labelled buttons. -->
+                   for a button that is not there. Gated on the WORKING count,
+                   because those are the agents the band draws — a stalled one
+                   is stated in the line above, never stacked. The aria-label
+                   carries the session id because a canvas of eight bands is
+                   otherwise eight identically-labelled buttons. -->
               <Button
-                v-if="node.agentCount > AGENT_VISIBLE_CAP"
+                v-if="node.workingAgents > AGENT_VISIBLE_CAP"
                 class="session-node__more"
                 variant="outline"
                 size="sm"
                 :aria-expanded="expandedSessions.has(node.session.sessionId)"
                 :aria-label="
                   expandedSessions.has(node.session.sessionId)
-                    ? `Show only the ${AGENT_VISIBLE_CAP} longest-running of ${node.agentCount} agents for session ${node.session.sessionId}`
-                    : `Show all ${node.agentCount} agents for session ${node.session.sessionId}`
+                    ? `Show only the ${AGENT_VISIBLE_CAP} longest-running of ${node.workingAgents} working agents for session ${node.session.sessionId}`
+                    : `Show all ${node.workingAgents} working agents for session ${node.session.sessionId}`
                 "
                 @click="toggleExpanded(node.session.sessionId)"
               >
                 {{
                   expandedSessions.has(node.session.sessionId)
                     ? `Show top ${AGENT_VISIBLE_CAP}`
-                    : `Show all ${node.agentCount}`
+                    : `Show all ${node.workingAgents}`
                 }}
               </Button>
             </article>
@@ -467,17 +541,21 @@ function goToTask(taskId: string | null) {
       </div>
 
       <!-- Stated, never dropped silently — same contract as Overview's
-           "+N older sessions not shown". -->
+           "+N older sessions not shown". Two lines because two different
+           things hid them: the cap, and the running-only rule. -->
       <p v-if="hiddenBands > 0" class="sessions-canvas__more">
         +{{ hiddenBands }} older {{ hiddenBands === 1 ? 'session' : 'sessions' }} not drawn.
         The canvas shows the {{ SESSION_BAND_CAP }} most recently active.
       </p>
+      <p v-if="hiddenSessionsLine" class="sessions-canvas__more">{{ hiddenSessionsLine }}</p>
 
       <!-- sr-only alternative (a11y): a DOM graph carries no text alternative
            for its ORDER, nor for which agent hangs off which run. Same pattern
-           as RoadmapPage's sequence table and FlowPage's task-DAG table. -->
+           as RoadmapPage's sequence table and FlowPage's task-DAG table. Over
+           the drawn bands only — what was hidden is in the toolbar summary,
+           which is ordinary text and reaches AT already. -->
       <table class="sr-only">
-        <caption>Sessions: {{ groups.length }} runs, most recently active first</caption>
+        <caption>Sessions: {{ groups.length }} running, most recently active first</caption>
         <thead>
           <tr>
             <th scope="col">Session</th>
@@ -493,7 +571,7 @@ function goToTask(taskId: string | null) {
             <tr v-if="g.agents.length === 0">
               <td>{{ g.session.sessionId }}</td>
               <td>{{ formatRelative(g.session.lastEventAt, graphNow) }}</td>
-              <td colspan="4">no live agents</td>
+              <td colspan="4">{{ agentLine(g.session.sessionId, g.liveAgentCount ?? 0, 0) }}</td>
             </tr>
             <!-- Same clock as the canvas, deliberately: this table is the
                  alternative to the graph, not a second opinion about it. -->

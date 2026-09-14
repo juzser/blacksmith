@@ -39,6 +39,37 @@ test.describe('Projects (hub)', () => {
     await expect(page.getByText('epic in flights')).toHaveCount(0);
   });
 
+  // Running-only liveness: the agent stat is the WORKING count (inside the
+  // 4h dispatch window), and a card whose live rows include a stalled one
+  // says so in the label rather than folding it into the number. Both halves
+  // still add up to the project's liveAgentCount, so nothing is dropped.
+  test('counts working agents, and names the stalled ones beside them', async ({ page }) => {
+    const counts: Record<string, { live: number; working: number }> = {
+      'black-smith': { live: 3, working: 2 },
+      'demo-hub': { live: 1, working: 1 },
+      envkit: { live: 0, working: 0 },
+    };
+    await page.route('**/api/overview*', async (route) => {
+      const body = await (await route.fetch()).json();
+      body.projects = body.projects.map((p: { project: string }) => ({
+        ...p,
+        liveAgentCount: counts[p.project]?.live ?? 0,
+        workingAgentCount: counts[p.project]?.working ?? 0,
+      }));
+      await route.fulfill({ json: body });
+    });
+    await page.goto('/projects');
+    const card = (project: string) =>
+      page.getByRole('link', { name: new RegExp(`${project} project, opens overview`) });
+    await expect(card('black-smith').locator('.project-card__stat-value').first()).toHaveText('2');
+    await expect(card('black-smith').getByText('2 working agents (1 stalled)')).toBeVisible();
+    await expect(card('demo-hub').getByText('1 working agent', { exact: true })).toBeVisible();
+    await expect(card('envkit').getByText('0 working agents', { exact: true })).toBeVisible();
+    // The stalled clause only appears where there is something to state.
+    await expect(page.getByText('stalled')).toHaveCount(1);
+    await expect(page.getByText('live agent')).toHaveCount(0);
+  });
+
   test('clicking a project card navigates to its scoped Overview', async ({ page }) => {
     await page.goto('/projects');
     await page.getByRole('link', { name: /demo-hub project, opens overview/ }).click();
