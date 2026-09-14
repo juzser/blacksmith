@@ -215,4 +215,93 @@ describe('checkArtifacts', () => {
     await rm(home, { recursive: true, force: true });
     expect(checkArtifacts([], { taskId, artifactsDir }).ok).toBe(true);
   });
+
+  describe('a path spelled from the work root', () => {
+    // FD-5. The template says "write them under `state/artifacts/<task-id>/`",
+    // and the round-2 coder of csb-audit-1 declared exactly that:
+    // `state/artifacts/<epic>/<task>/round2-….txt`. Resolved against the home
+    // it became `<home>/state/artifacts/<epic>/<task>/…` — lexically inside,
+    // so the gate said `missing` about a file that existed and blocked the
+    // task on evidence it had. A declaration that already begins with the
+    // home's own spelling from the work root is that spelling, not a subtree.
+    let work: string;
+    let root: string;
+    let nestedHome: string;
+
+    beforeEach(async () => {
+      work = await mkdtemp(path.join(tmpdir(), 'smith-work-'));
+      root = path.join(work, 'state', 'artifacts');
+      nestedHome = artifactHome(taskId, root);
+      await mkdir(nestedHome, { recursive: true });
+    });
+
+    afterEach(async () => {
+      await rm(work, { recursive: true, force: true });
+    });
+
+    it('accepts it rather than doubling the home', async () => {
+      await writeFile(path.join(nestedHome, 'round2.txt'), 'ok');
+      const check = checkArtifacts(
+        [{ type: 'test-output', path: 'state/artifacts/epic-1/task-1/round2.txt' }],
+        { taskId, artifactsDir: root, workRoot: work },
+      );
+      expect(check.issues).toEqual([]);
+      expect(check.ok).toBe(true);
+    });
+
+    it('reports the single home, not the doubled one, when the file is absent', () => {
+      const check = checkArtifacts(
+        [{ type: 'test-output', path: 'state/artifacts/epic-1/task-1/round2.txt' }],
+        { taskId, artifactsDir: root, workRoot: work },
+      );
+      expect(check.issues).toEqual([
+        {
+          declared: 'state/artifacts/epic-1/task-1/round2.txt',
+          resolved: path.join(nestedHome, 'round2.txt'),
+          problem: 'missing',
+        },
+      ]);
+    });
+
+    it('treats the bare home spelling as naming the home itself', () => {
+      const check = checkArtifacts(
+        [{ type: 'test-output', path: 'state/artifacts/epic-1/task-1' }],
+        {
+          taskId,
+          artifactsDir: root,
+          workRoot: work,
+        },
+      );
+      expect(check.issues.map((i) => i.problem)).toEqual(['no-path']);
+    });
+
+    it("does not read another task's home spelling as this task's", async () => {
+      const other = artifactHome('epic-1/task-2', root);
+      await mkdir(other, { recursive: true });
+      await writeFile(path.join(other, 'x.txt'), 'theirs');
+      const check = checkArtifacts(
+        [{ type: 'test-output', path: 'state/artifacts/epic-1/task-2/x.txt' }],
+        {
+          taskId,
+          artifactsDir: root,
+          workRoot: work,
+        },
+      );
+      expect(check.ok).toBe(false);
+      expect(check.issues.map((i) => i.declared)).toEqual(['state/artifacts/epic-1/task-2/x.txt']);
+    });
+
+    it('leaves the prefix alone when the home does not sit under the work root', async () => {
+      // The default work root is the repo's; a test-injected artifacts dir
+      // under tmp is not beneath it, so nothing is stripped and the old
+      // reading — a subtree of the home — is the only one left.
+      const check = checkArtifacts(
+        [{ type: 'test-output', path: 'state/artifacts/epic-1/task-1/round2.txt' }],
+        { taskId, artifactsDir: root },
+      );
+      expect(check.issues.map((i) => i.resolved)).toEqual([
+        path.join(nestedHome, 'state', 'artifacts', 'epic-1', 'task-1', 'round2.txt'),
+      ]);
+    });
+  });
 });
