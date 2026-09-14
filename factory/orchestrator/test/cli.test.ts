@@ -5664,6 +5664,43 @@ describe('cli.ts (built binary)', () => {
         );
       });
 
+      // Item (j) of the csb-signing-policy-1 dogfood: the one refusal a
+      // spec-reviewer actually hit in csb-audit-1 was this one, and it was
+      // reported back as "error object with exit 0". The exit code was the
+      // pipe's, not the CLI's - but nothing here had ever pinned it either.
+      it('refuses spec evidence that names no criterion_ref, with exit 1 and no event', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const { criterion_ref: _dropped, ...noCriterion } =
+          SPEC_EVIDENCE[0] as (typeof SPEC_EVIDENCE)[0];
+
+        const result = runCli([
+          'findings',
+          'raise',
+          '--scope',
+          'spec',
+          '--evidence',
+          await specEvidenceFile('spec-nocriterion', [noCriterion]),
+          '--found-by',
+          'spec-reviewer',
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error).toMatchObject({
+          code: 'findings.spec-evidence-needs-criterion',
+          details: { index: 0 },
+        });
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised')).toEqual(
+          [],
+        );
+      });
+
       it('rejects a --scope it does not know rather than defaulting it to diff', async () => {
         const { sessionId, eventsDir, planPath } = await session();
 
