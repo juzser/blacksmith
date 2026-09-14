@@ -12,6 +12,8 @@ export interface ServeOptions {
   stateDir?: string;
   roadmapPath?: string;
   specsDir?: string;
+  /** See AppOpts.nowIso: a pinned clock for screenshot harnesses, unset in real use. */
+  nowIso?: string;
 }
 
 export interface ServerHandle {
@@ -27,6 +29,7 @@ export function serve(opts: ServeOptions): ServerHandle {
     ...(opts.stateDir ? { stateDir: opts.stateDir } : {}),
     ...(opts.roadmapPath ? { roadmapPath: opts.roadmapPath } : {}),
     ...(opts.specsDir ? { specsDir: opts.specsDir } : {}),
+    ...(opts.nowIso ? { nowIso: opts.nowIso } : {}),
     uiDistDir: UI_DIST_DIR,
   });
   const port = opts.port ?? DEFAULT_PORT;

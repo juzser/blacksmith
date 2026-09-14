@@ -858,6 +858,23 @@ describe('cli.ts (built binary)', () => {
       expect(parsed.error.message).toContain('--port');
       expect(JSON.stringify(parsed)).not.toContain('node_modules');
     });
+
+    it('ui serve --now-iso refuses a value Date.parse cannot read, before the server is even loaded', () => {
+      // The pin exists for the screenshot harness (ui/e2e/global-setup.ts):
+      // a value that does not parse would reach every query as an Invalid
+      // Date and silently mark every agent stalled on every page, which is
+      // the one outcome a "fixed clock" must never produce. Refused at the
+      // flag, like --port, so the error is the CLI's shape and not a 500.
+      for (const bad of ['yesterday', '', '2026-13-45T99:99:99Z']) {
+        const { stdout, status } = runCli(['ui', 'serve', '--now-iso', bad]);
+        expect(status, `--now-iso ${JSON.stringify(bad)}`).toBe(1);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.error.code).toBe('ui.invalid-now');
+        expect(parsed.error.message).toContain('--now-iso');
+        expect(parsed.error.details).toEqual({ flag: 'now-iso', value: bad });
+        expect(JSON.stringify(parsed)).not.toContain('node_modules');
+      }
+    });
   });
 
   // D-210 named a class and fixed one member of it. Its own corollary says why

@@ -8,8 +8,10 @@ import { and, eq, gte, inArray, lte, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
+  type AgentRecord,
   foldAgents,
   liveAgents as foldLiveAgents,
+  isWorkingAt,
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
@@ -350,6 +352,14 @@ export interface RunningSession {
   eventCount: number;
   /** `agents` rows still `live` for this session — scoped exactly like liveAgentCount. */
   liveAgentCount: number;
+  /**
+   * The subset of `liveAgentCount` dispatched within DEFAULT_STALE_HOURS of
+   * the call's `nowIso` (`isWorkingAt`). A live row outlives its agent
+   * whenever a run ends without a terminal event, so `liveAgentCount` alone
+   * keeps a session "running" for days; this is the count the dashboard's
+   * running-only rule (a session with a working agent is running) reads.
+   */
+  workingAgentCount: number;
   /** The most recent event's type — what this session just did. Null if its events are gone. */
   lastEventType: string | null;
   /**
@@ -430,6 +440,8 @@ export interface ClosedEpic {
 export interface ProjectOverviewSummary {
   project: string;
   liveAgentCount: number;
+  /** Of `liveAgentCount`, those dispatched within DEFAULT_STALE_HOURS of `nowIso` — see OverviewResult.workingAgentCount. */
+  workingAgentCount: number;
   epicsInFlight: string[];
   tokensSpent: number;
   tokensBudget: number | null;
@@ -441,6 +453,24 @@ export interface OverviewResult {
   /** Phase 6b round 4 — per-agent rows for the compact "Live agents" card (see LiveAgentEntry). */
   liveAgentEntries: LiveAgentEntry[];
   liveAgentCount: number;
+  /**
+   * Live agents whose dispatch is within DEFAULT_STALE_HOURS of `nowIso`
+   * (`isWorkingAt`, the server twin of ui/src/lib/liveness.ts's
+   * agentActivity() === 'working'). The registry only closes a row on a
+   * terminal event, so a run that was killed leaves its agents `live` for
+   * ever and `liveAgentCount` stops meaning "busy right now"; the
+   * dashboard's "Active agents" card reads this instead. `liveAgentCount`
+   * is kept as-is because first-run detection and the picker still want
+   * the raw registry count.
+   */
+  workingAgentCount: number;
+  /**
+   * `liveAgentCount - workingAgentCount`: live rows whose dispatch is older
+   * than the threshold, or whose timestamp cannot be read. Carried as its
+   * own number so every surface that hides them can say "N stalled not
+   * shown" rather than dropping them silently.
+   */
+  stalledAgentCount: number;
   /** Dogfood round 2 — every projected session, most recently active first (see RunningSession). */
   runningSessions: RunningSession[];
   /** Epics with non-terminal work AND no close on the log — see closedEpics. */
@@ -454,6 +484,15 @@ export interface OverviewResult {
   recentDispatches: RecentDispatch[];
   /** Phase 6b StatCard deltas: liveAgentCount minus its value 5 minutes ago. */
   liveAgentCountDelta5m: number;
+  /**
+   * workingAgentCount minus its value 5 minutes ago, where "working 5
+   * minutes ago" applies the same DEFAULT_STALE_HOURS window *at the cutoff*
+   * (D-170: one population, one rule, at both ends of the subtraction). An
+   * agent that crossed the threshold inside the last five minutes therefore
+   * reads as -1 here and 0 in liveAgentCountDelta5m — it stopped working,
+   * it did not stop being live.
+   */
+  workingAgentCountDelta5m: number;
   /** Phase 6b StatCard deltas: budget-used percentage-point change vs 1 hour ago; null with no known budget. */
   budgetUsedPctPointDelta1h: number | null;
   /**
@@ -831,15 +870,24 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
  * Ties on `lastEventAt` break on `sessionId` so the order is stable under the
  * dashboard's 5s poll rather than shuffling between renders.
  */
-export function runningSessions(db: SmithDb, scope: Scope = {}): RunningSession[] {
+export function runningSessions(
+  db: SmithDb,
+  scope: Scope = {},
+  opts: ClockOpts = {},
+): RunningSession[] {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
   const sessionCond = scopedToSessions(sessions.sessionId, scope);
   const rows = sessionCond
     ? db.select().from(sessions).where(sessionCond).all()
     : db.select().from(sessions).all();
 
   const liveBySession = new Map<string, number>();
+  const workingBySession = new Map<string, number>();
   for (const a of allAgentsForScope(db, scope)) {
     liveBySession.set(a.sessionId, (liveBySession.get(a.sessionId) ?? 0) + 1);
+    if (isWorkingAt(a.dispatchedAt, nowIso)) {
+      workingBySession.set(a.sessionId, (workingBySession.get(a.sessionId) ?? 0) + 1);
+    }
   }
 
   const projectsBySession = new Map<string, Set<string>>();
@@ -876,6 +924,7 @@ export function runningSessions(db: SmithDb, scope: Scope = {}): RunningSession[
         lastEventAt: s.lastEventAt,
         eventCount: s.eventCount,
         liveAgentCount: liveBySession.get(s.sessionId) ?? 0,
+        workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
         projects: [...(projectsBySession.get(s.sessionId) ?? [])].sort(),
       }))
@@ -957,8 +1006,19 @@ function inFlightEpics(
   ].sort();
 }
 
-/** One project's overview slice, computed by the same logic overview() itself uses (no drift). */
-function projectSummary(db: SmithDb, project: string, baseScope: Scope): ProjectOverviewSummary {
+/**
+ * One project's overview slice, computed by the same logic overview() itself
+ * uses (no drift). `nowIso` is the caller's single instant, not a fresh
+ * read: overview() hands every per-project summary the same "now" it used
+ * for its own counts, so the project rows and the global card can never
+ * disagree about which agents are working.
+ */
+function projectSummary(
+  db: SmithDb,
+  project: string,
+  baseScope: Scope,
+  nowIso: string,
+): ProjectOverviewSummary {
   const scope: Scope = { ...baseScope, project };
   const liveRows = allAgentsForScope(db, scope);
   const taskRows = allTasksForScope(db, scope);
@@ -978,6 +1038,7 @@ function projectSummary(db: SmithDb, project: string, baseScope: Scope): Project
   return {
     project,
     liveAgentCount: liveRows.length,
+    workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
     epicsInFlight,
     tokensSpent,
     tokensBudget,
@@ -1007,7 +1068,7 @@ const SNAPSHOT_EVENT_TYPES = REGISTRY_EVENT_TYPES as readonly string[];
  * project, so its agent stayed in the live count and vanished from the
  * historical one, and the StatCard reported an arrival that never happened.
  */
-function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
+function liveAgentsAt(db: SmithDb, scope: Scope, cutoffIso: string): AgentRecord[] {
   const conds = [lte(eventsRaw.ts, cutoffIso), inArray(eventsRaw.eventType, SNAPSHOT_EVENT_TYPES)];
   const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
   if (sessionCond) conds.push(sessionCond);
@@ -1033,9 +1094,27 @@ function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number 
     },
   }));
   const live = foldLiveAgents(foldAgents(storedEvents));
-  if (scope.project === undefined) return live.length;
+  if (scope.project === undefined) return live;
   const scopedTaskIds = new Set(allTasksForScope(db, scope).map((t) => t.taskId));
-  return live.filter((a) => a.taskId !== null && scopedTaskIds.has(a.taskId)).length;
+  return live.filter((a) => a.taskId !== null && scopedTaskIds.has(a.taskId));
+}
+
+function liveAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
+  return liveAgentsAt(db, scope, cutoffIso).length;
+}
+
+/**
+ * The "working" end of workingAgentCountDelta5m's subtraction: the agents
+ * live as of `cutoffIso` (the very re-fold liveAgentCountAt does, project
+ * scoping included) that were ALSO within DEFAULT_STALE_HOURS of dispatch
+ * *at that cutoff*. Judging the historical rows against today's clock
+ * instead would be D-170 again in a new disguise — the "now" end would
+ * apply a 4h window and the "ago" end a 4h05m one, and an agent that
+ * stalled since the cutoff would read as no change.
+ */
+function workingAgentCountAt(db: SmithDb, scope: Scope, cutoffIso: string): number {
+  return liveAgentsAt(db, scope, cutoffIso).filter((a) => isWorkingAt(a.dispatchedAt, cutoffIso))
+    .length;
 }
 
 /**
@@ -1132,13 +1211,29 @@ function tokensBudgetedAt(
   return total;
 }
 
-export interface OverviewOpts {
-  /** Injectable "now" for deterministic snapshot-delta tests; defaults to `new Date()`. */
+/**
+ * Injectable "now" for the queries whose answer depends on the clock
+ * (working vs stalled, the StatCard deltas). Defaults to the wall clock
+ * read once per call — production must tick, so nothing caches it — and is
+ * pinned only by tests and the screenshot harness (`smith ui serve
+ * --now-iso`), where a fixed browser clock is only half a fixed label if
+ * the server keeps computing "working" against real time.
+ */
+export interface ClockOpts {
   nowIso?: string;
 }
 
+export type OverviewOpts = ClockOpts;
+
 export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}): OverviewResult {
+  // One instant for everything this call reports. runningSessions(), the
+  // per-project summaries and the deltas each take the clock as an argument
+  // rather than reading it, so a request that straddles a threshold cannot
+  // count an agent as working in one field and stalled in the next.
+  const now = opts.nowIso ? new Date(opts.nowIso) : new Date();
+  const nowIso = now.toISOString();
   const liveRows = allAgentsForScope(db, scope);
+  const workingRows = liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso));
   const taskRows = allTasksForScope(db, scope);
 
   const closedEpics = closedEpicsForScope(db, scope);
@@ -1203,14 +1298,14 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     // filters them by one, so they join the list under a session scope too.
     const declaredRows = db.select({ project: milestones.project }).from(milestones).all();
     projects = distinctProjects(allTaskRowsUnfiltered, declaredRows).map((p) =>
-      projectSummary(db, p, scope),
+      projectSummary(db, p, scope, nowIso),
     );
   }
 
-  const now = opts.nowIso ? new Date(opts.nowIso) : new Date();
   const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
   const liveAgentCountDelta5m = liveRows.length - liveAgentCountAt(db, scope, fiveMinAgo);
+  const workingAgentCountDelta5m = workingRows.length - workingAgentCountAt(db, scope, fiveMinAgo);
 
   const epicByTask = new Map(
     taskRows.filter((t) => t.epicId !== null).map((t) => [t.taskId, t.epicId as string]),
@@ -1247,7 +1342,9 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
         dispatchedAt: a.dispatchedAt,
       })),
     liveAgentCount: liveRows.length,
-    runningSessions: runningSessions(db, scope),
+    workingAgentCount: workingRows.length,
+    stalledAgentCount: liveRows.length - workingRows.length,
+    runningSessions: runningSessions(db, scope, { nowIso }),
     epicsInFlight,
     closedEpics,
     tokensByEpic,
@@ -1255,6 +1352,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     milestoneProgress: milestoneProgressRows(db, scope),
     recentDispatches,
     liveAgentCountDelta5m,
+    workingAgentCountDelta5m,
     budgetUsedPctPointDelta1h,
     ...(projects ? { projects } : {}),
   };
@@ -2088,6 +2186,13 @@ export interface FlowNode {
   title: string | null;
   /** The most recent dispatch's agent role, only when the agent is currently live. */
   liveAgentRole: string | null;
+  /**
+   * `liveAgentRole` narrowed to a dispatch within DEFAULT_STALE_HOURS of
+   * the call's `nowIso` (`isWorkingAt`). The Flow page's pulsing "someone is
+   * on this" marker reads this one: a live row whose run died hours ago is
+   * still live, but nobody is on it.
+   */
+  workingAgentRole: string | null;
   planVersion: number | null;
   wave: number;
 }
@@ -2131,7 +2236,8 @@ export interface FlowFilter extends Scope {
  * stack.md: "no separate layout library" — this IS that orchestrator
  * utility, exposed via this query/endpoint per the same doc's instruction).
  */
-export function flowGraph(db: SmithDb, filter: FlowFilter = {}): FlowGraph {
+export function flowGraph(db: SmithDb, filter: FlowFilter = {}, opts: ClockOpts = {}): FlowGraph {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
   let taskRows = allTasksForScope(db, filter);
   if (filter.epicId) taskRows = taskRows.filter((t) => t.epicId === filter.epicId);
 
@@ -2197,8 +2303,15 @@ export function flowGraph(db: SmithDb, filter: FlowFilter = {}): FlowGraph {
 
   const liveRows = allAgentsForScope(db, filter);
   const liveRoleByTask = new Map<string, string>();
+  // The same last-write-wins walk, over the working rows only. Where a task
+  // carries both a stalled live row and a working one, the working role is
+  // the one to name: the marker says who is on the task, not who was
+  // dispatched to it most recently.
+  const workingRoleByTask = new Map<string, string>();
   for (const a of liveRows) {
-    if (a.taskId) liveRoleByTask.set(a.taskId, a.agentRole);
+    if (!a.taskId) continue;
+    liveRoleByTask.set(a.taskId, a.agentRole);
+    if (isWorkingAt(a.dispatchedAt, nowIso)) workingRoleByTask.set(a.taskId, a.agentRole);
   }
 
   const waveMap = waveLayers(
@@ -2211,6 +2324,7 @@ export function flowGraph(db: SmithDb, filter: FlowFilter = {}): FlowGraph {
     taskStatus: t.taskStatus,
     title: t.objective,
     liveAgentRole: liveRoleByTask.get(t.taskId) ?? null,
+    workingAgentRole: workingRoleByTask.get(t.taskId) ?? null,
     planVersion: t.planVersion,
     wave: waveMap.get(t.taskId) ?? 0,
   }));
