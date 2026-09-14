@@ -446,7 +446,7 @@ across months of runs. Changing the taxonomy is a PR that bumps `version` —
 never a runtime write. Analytics may group only by taxonomy dimensions.
 
 ```yaml
-version: 10
+version: 11
 
 # ── Work classification ─────────────────────────────────────────────
 case:      [feature, bugfix, refactor, research, spec-review, recheck,
@@ -514,7 +514,7 @@ gate_event:      [schema-check-result, artifact-check-result,
                   finding-raised, finding-reverified, finding-suppressed,
                   finding-transitioned, finding-reattributed,
                   severity-decisions, waiver-granted, waiver-denied,
-                  gate-outcome]
+                  gate-outcome, issue-reported]
                   # schema-check-result — task Result vs result.schema.json
                   # artifact-check-result — every artifacts[].path in that
                   #                       Result, resolved against the task's
@@ -629,6 +629,13 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       keyed by finding fingerprint
                   # gate-outcome        — the composed gate pipeline's
                   #                       final structured result
+                  # issue-reported      — issueReporter.ts's record of one
+                  #                       attempt to open or comment on an
+                  #                       external tracker issue for a
+                  #                       gate-outcome, task-failed or
+                  #                       error-logged candidate: outcome,
+                  #                       reason and the fingerprint group's
+                  #                       latest_event_id
 
 # ── Errors: grouped two-level classes (always logged as group.class) ─
 error:
