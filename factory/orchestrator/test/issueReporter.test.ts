@@ -3,21 +3,19 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { type ErrorReport, toIssueCommentFields } from '../src/errorIssues.js';
+import { appendEvent, type StoredEvent } from '../src/events.js';
 import type { CommandResult, CommandRunner } from '../src/gh.js';
 import { runGit } from '../src/git.js';
-import { appendEvent, type StoredEvent } from '../src/events.js';
-import { renderComment, toIssueCommentFields, type ErrorReport } from '../src/errorIssues.js';
-import type { ProjectRef } from '../src/projects.js';
 import {
   ISSUE_REPORT_OUTCOMES,
-  ISSUE_REPORT_PAYLOAD_KEYS,
   type IssueReportOutcome,
   reportErrors,
 } from '../src/issueReporter.js';
+import type { ProjectRef } from '../src/projects.js';
 
-// No test in this file ever imports node:child_process; every `gh`
-// invocation is a recorded call against a stub runner (nonfunctional
-// clause 2).
+// No test in this file spawns a real process for `gh`; every invocation
+// is a recorded call against a stub runner (nonfunctional clause 2).
 
 const CLOCK = () => '2026-02-01T00:00:00.000Z';
 const ENABLED = () => true;
@@ -231,36 +229,43 @@ describe('issueReporter.ts', () => {
   it.each([
     [
       'gate-outcome',
-      (taskId: string) => ({ outcome: 'blocked', reason: 'tests-failed' }) as const,
+      (_taskId: string) => ({ outcome: 'blocked', reason: 'tests-failed' }) as const,
     ],
     ['task-added', (_taskId: string) => ({ task_status: 'failed', epic_id: 'epic-1' }) as const],
     [
       'error-logged',
-      (taskId: string) => ({ error: 'execution.test-failure', severity: 'S2-major', task_ref: taskId }),
+      (taskId: string) => ({
+        error: 'execution.test-failure',
+        severity: 'S2-major',
+        task_ref: taskId,
+      }),
     ],
-  ] as const)('dedups five rounds of a %s source into one create, four comments (AC2)', async (eventType, payload) => {
-    const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
-    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const taskId = `epic-1/task-${eventType}`;
-    const events: StoredEvent[] = [];
-    for (let n = 1; n <= 5; n += 1) {
-      events.push(
-        await seed({
-          sessionId: `session-${eventType}-${n}`,
-          eventType,
-          payload: payload(taskId),
-          taskId,
-          planVersion: n,
-        }),
-      );
-    }
-    const { bucket, runner } = makeStub({ search: foundAfterFirst() });
+  ] as const)(
+    'dedups five rounds of a %s source into one create, four comments (AC2)',
+    async (eventType, payload) => {
+      const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
+      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const taskId = `epic-1/task-${eventType}`;
+      const events: StoredEvent[] = [];
+      for (let n = 1; n <= 5; n += 1) {
+        events.push(
+          await seed({
+            sessionId: `session-${eventType}-${n}`,
+            eventType,
+            payload: payload(taskId),
+            taskId,
+            planVersion: n,
+          }),
+        );
+      }
+      const { bucket, runner } = makeStub({ search: foundAfterFirst() });
 
-    await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+      await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
 
-    expect(bucket('create')).toHaveLength(1);
-    expect(bucket('comment')).toHaveLength(4);
-  });
+      expect(bucket('create')).toHaveLength(1);
+      expect(bucket('comment')).toHaveLength(4);
+    },
+  );
 
   // --- AC3: exact-match dedup only ---
   it('comments on an exact fingerprint-line match (AC3a)', async () => {
@@ -289,7 +294,11 @@ describe('issueReporter.ts', () => {
       search: (query) => ({
         status: 0,
         stdout: JSON.stringify([
-          { number: 3, body: `unrelated prose mentioning ${query} inline, not the line format`, url: 'u' },
+          {
+            number: 3,
+            body: `unrelated prose mentioning ${query} inline, not the line format`,
+            url: 'u',
+          },
         ]),
         stderr: '',
       }),
@@ -447,7 +456,10 @@ describe('issueReporter.ts', () => {
       project: 'black-smith',
       register,
       enabled: () => true,
-      stub: makeStub({ search: noHitOnce, create: () => ({ status: 1, stdout: '', stderr: 'boom' }) }),
+      stub: makeStub({
+        search: noHitOnce,
+        create: () => ({ status: 1, stdout: '', stderr: 'boom' }),
+      }),
       expected: { outcome: 'failed', reason: 'create-failed' },
       expectZeroWrites: false,
     });
@@ -495,12 +507,20 @@ describe('issueReporter.ts', () => {
           }),
         ])());
       candidateCount += 1;
-      const records = await reportErrors(events, row.enabled, row.register, row.stub.runner, CLOCK, {
-        stateDir,
-      });
+      const records = await reportErrors(
+        events,
+        row.enabled,
+        row.register,
+        row.stub.runner,
+        CLOCK,
+        {
+          stateDir,
+        },
+      );
       expect(records).toHaveLength(1);
       recordCount += records.length;
-      const record = records[0]!;
+      const [record] = records;
+      if (!record) throw new Error(`row "${row.name}" recorded no outcome`);
       table.push({ name: row.name, outcome: record.outcome, reason: record.reason });
       expect(record.outcome).toBe(row.expected.outcome);
       expect(record.reason).toBe(row.expected.reason);
@@ -662,9 +682,16 @@ describe('issueReporter.ts', () => {
     const dedupRunner = makeStub({ search: () => ({ status: 0, stdout: '[]', stderr: '' }) });
     await reportErrors(dedupEvents, ENABLED, register, dedupRunner.runner, CLOCK, { stateDir });
     const dedupFullLog = await readEvents('session-payload-dedup', { stateDir });
-    const dedupRecords = await reportErrors(dedupFullLog, ENABLED, register, dedupRunner.runner, CLOCK, {
-      stateDir,
-    });
+    const dedupRecords = await reportErrors(
+      dedupFullLog,
+      ENABLED,
+      register,
+      dedupRunner.runner,
+      CLOCK,
+      {
+        stateDir,
+      },
+    );
 
     const failedRunner = makeStub({ auth: 'unknown' });
     await reportErrors(failedEvents, ENABLED, register, failedRunner.runner, CLOCK, { stateDir });
@@ -676,9 +703,8 @@ describe('issueReporter.ts', () => {
 
     const openedPayload = openedLog.find((e) => e.record.event_type === 'issue-reported')?.record
       .payload;
-    const dedupPayload = dedupLog
-      .filter((e) => e.record.event_type === 'issue-reported')
-      .at(-1)?.record.payload;
+    const dedupPayload = dedupLog.filter((e) => e.record.event_type === 'issue-reported').at(-1)
+      ?.record.payload;
     const failedPayload = failedLog.find((e) => e.record.event_type === 'issue-reported')?.record
       .payload;
 
@@ -778,20 +804,20 @@ describe('issueReporter.ts', () => {
     const records = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
 
     const commentCall = calls.find((c) => bucketOf(c) === 'comment');
-    expect(commentCall).toBeDefined();
-    const body = readBodyFile(commentCall!.args);
+    if (!commentCall) throw new Error('no comment call recorded');
+    const body = readBodyFile(commentCall.args);
 
     // Reconstruct the ErrorReport the second candidate carried -- same
     // shape reportErrors folds internally -- to compute the expected text.
     const commentedRecord = records.find((r) => r.outcome === 'commented');
-    expect(commentedRecord).toBeDefined();
+    if (!commentedRecord) throw new Error('no commented record');
     const expectedFields = toIssueCommentFields({
-      latest_event_id: commentedRecord!.latest_event_id,
+      latest_event_id: commentedRecord.latest_event_id,
       timestamp: expect.any(String) as unknown as string,
       session_id: expect.any(String) as unknown as string,
       epic_id: null,
       plan_version: expect.any(Number) as unknown as number,
-      fingerprint: commentedRecord!.fingerprint,
+      fingerprint: commentedRecord.fingerprint,
     } as ErrorReport);
     void expectedFields;
     // Direct construction requires internal fields this test cannot see, so
@@ -802,8 +828,8 @@ describe('issueReporter.ts', () => {
     // proven instead by checking the comment strictly contains only the
     // renderer's fixed line shape and nothing else, and specifically that
     // it equals rendering the SAME latest_event_id/fingerprint pair.
-    expect(body).toContain(`Fingerprint: ${commentedRecord!.fingerprint}`);
-    expect(body).toContain(`New occurrence: ${commentedRecord!.latest_event_id}`);
+    expect(body).toContain(`Fingerprint: ${commentedRecord.fingerprint}`);
+    expect(body).toContain(`New occurrence: ${commentedRecord.latest_event_id}`);
   });
 
   it('never lets secret detail or a fenced diff reach an argv or the payload (AC8 secret)', async () => {
@@ -870,14 +896,18 @@ describe('issueReporter.ts', () => {
         taskId: 'epic-1/task-idem',
       }),
     ];
-    const { runner: runner1 } = makeStub({ search: () => ({ status: 0, stdout: '[]', stderr: '' }) });
+    const { runner: runner1 } = makeStub({
+      search: () => ({ status: 0, stdout: '[]', stderr: '' }),
+    });
     await reportErrors(events, ENABLED, register, runner1, CLOCK, { stateDir });
 
     const { readEvents } = await import('../src/events.js');
     const fullLog = await readEvents('session-idem', { stateDir });
 
     const { runner: runner2, bucket } = makeStub();
-    const secondRecords = await reportErrors(fullLog, ENABLED, register, runner2, CLOCK, { stateDir });
+    const secondRecords = await reportErrors(fullLog, ENABLED, register, runner2, CLOCK, {
+      stateDir,
+    });
 
     expect(bucket('create')).toHaveLength(0);
     expect(bucket('comment')).toHaveLength(0);

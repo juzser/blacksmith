@@ -25,14 +25,7 @@
  * is a required parameter, supplied by the caller (task 5), never read off
  * the filesystem by this module.
  */
-import {
-  buildCommentArgv,
-  buildCreateIssueArgv,
-  buildSearchIssuesArgv,
-  classifyGh,
-  type CommandRunner,
-  resolveProjectRepo,
-} from './gh.js';
+
 import {
   type ErrorReport,
   FINGERPRINT_LINE_PREFIX,
@@ -44,6 +37,14 @@ import {
   toIssueCommentFields,
 } from './errorIssues.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
+import {
+  buildCommentArgv,
+  buildCreateIssueArgv,
+  buildSearchIssuesArgv,
+  type CommandRunner,
+  classifyGh,
+  resolveProjectRepo,
+} from './gh.js';
 import type { ProjectRef } from './projects.js';
 
 /**
