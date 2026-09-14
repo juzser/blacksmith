@@ -151,13 +151,23 @@ playbooks are written to prevent.
     ```bash
     smith integration check --epic <epic> --project <project-dir> \
       --checks <checks.json> \
-      --session <session-id> --causal-parent <event-id>
+      --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
     Exit 1 means the assembled branch is broken. Raise a finding, fix it as
     a task, and run this again — it pins its result to the head sha, so any
     merge after it lands makes the record stale and the verdict below will
     say so.
+
+    `--plan-version <n>` is the live version, here and on every record steps
+    13-16 write. The envelope leaves the flag optional, and an omitted one
+    stamps the record `plan_version: 1` — so on an epic that amended, the
+    check, the review and the close all claim to have verified a plan that
+    no longer exists. csb-signing-policy-1 closed at v3 with its integration
+    check and its closing spec review both stamped v1
+    (`csb-signing-policy-1-2026-09-11#197`, `#202`); the goal check, passed
+    the flag, says v3. Read the version off `smith plan ingest`'s receipt and
+    pass it every time.
 13. Dispatch the **`spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
     this one reads it against the assembled branch, which is the only reading
@@ -172,8 +182,14 @@ playbooks are written to prevent.
       --plan factory/specs/active/<epic>/plan-vN.json \
       --reviewed-by spec-reviewer \
       [--evidence state/results/<epic>.spec-review-close-vN.json] \
-      --session <session-id> --causal-parent <event-id>
+      --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
+
+    Its `dispatch_decision` — and step 14's, and the planner's when it
+    renders a verdict — goes against the reserved `<epic>/integration` ref,
+    never a `<epic>/spec-review-rN` you coin for the occasion
+    ([`dispatch.md`](dispatch.md), "Dispatch a role with no claims against
+    the reserved ref").
 
     `profile.closingSpecReview` decides whether this step runs at all:
     `always` (`huge`, `medium`), or `when-plan-amended` (`small`) — a closing
@@ -220,7 +236,7 @@ playbooks are written to prevent.
       --plan factory/specs/active/<epic>/plan-vN.json \
       --coverage state/results/<epic>.goal-coverage-vN.json \
       --checked-by spec-reviewer \
-      --session <session-id> --causal-parent <event-id>
+      --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
     `covered` must name live plan task ids; `out-of-scope` must give a reason,
@@ -243,7 +259,7 @@ playbooks are written to prevent.
 
     ```bash
     smith epic verdict --epic <epic> --project <project-dir> \
-      --session <session-id> --causal-parent <event-id>
+      --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
     Mechanical oracles first: non-terminal tasks, open blocking findings, a
@@ -253,12 +269,21 @@ playbooks are written to prevent.
     reads the integration branch head to decide whether the records from
     steps 12, 13 and 14 still cover it. On `hold`, do not open the PR — report
     the `blockers` to the operator and go back to step 11.
+
+    Once the oracles pass, the judge call is real money when an external
+    provider is `active` in `crosscheck.yml`: codex spends the operator's
+    ChatGPT quota, DeepSeek spends prepaid credit, and step 16 runs the
+    verdict again before it writes, so a clean close is two spends, not one
+    (csb-signing-policy-1 wrote two `quorum-decision`s against its
+    integration ref, `#210` from the verdict and `#215` from the close).
+    Nothing in the `quorum-decision` payload names the purse, so say which
+    one it is to the operator before the first call, not after the second.
 16. Record the close. The verdict above is a read-only probe and writes
     nothing; `epic close` is what makes it a fact in the log (D-43):
 
     ```bash
     smith epic close --epic <epic> --project <project-dir> \
-      --session <session-id> --causal-parent <event-id>
+      --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
     It re-runs the verdict, then emits `epic-closed` on `go` and refuses
@@ -269,10 +294,32 @@ playbooks are written to prevent.
     `smith audit resolve <project-dir> --epic <epic> --session <session-id> --causal-parent <event-id>`
     so every finding the epic carried is marked `fixed` in the project's
     audit store — the store, not the epic, is where a finding's life ends.
-17. Open **one integration PR per epic**
-    (`smith/<epic>/integration` → target repo `main`) with the scribe-
-    written body (`/bs report`'s playbook, [`report.md`](report.md)) —
-    screenshots, test results, reviewer verdict, waivers granted, timeline
-    link. The operator
-    reviews on GitHub; this session never merges to `main`
+17. Open **one integration PR per epic** with the scribe-written body
+    (`/bs report`'s playbook, [`report.md`](report.md)) — screenshots, test
+    results, reviewer verdict, waivers granted, timeline link. The head is
+    `smith/<epic>/integration`. The base is the target repo's `main` unless
+    the epic was cut from another epic's integration branch, in which case
+    the PR stacks on that branch and the operator merges the parent's PR
+    first — csb-signing-policy-1 was cut from `smith/csb-audit-1/integration`
+    and opened PR #54 against it, behind PR #53; once the parent has merged
+    and its branch is deleted, GitHub retargets the child to `main`. The
+    operator reviews on GitHub; this session never merges to `main`
     (`docs/standards/guardrails.md`).
+
+    Before the first push, read the authorship the branch is about to make
+    public — `git log --format=%ae <base>..HEAD | sort -u` — and stop on any
+    address that is not a noreply one; a coder's worktree commit carries
+    whatever `user.email` its session inherited.
+
+    Then write the PR down. No verb records it for you: nothing in `src/`
+    opens a PR — `gh` runs in your session, never in the factory — so a
+    timeline that ends at `epic-closed` never shows what the close was for.
+    Append it by hand, under the reserved ref and the live plan version:
+
+    ```bash
+    smith event append '{"session_id":"<session-id>","actor":"orchestrator","event_type":"integration-pr-opened","task_id":"<epic>/integration","plan_version":<n>,"causal_parent":"<event-id>","payload":{"step":17,"pr_url":"<url>","pr_number":<n>,"repo":"<owner>/<repo>","base_ref":"<base>","head_ref":"smith/<epic>/integration","head_sha":"<sha>","base_sha":"<sha>","commits":<n>,"changed_files":<n>,"additions":<n>,"deletions":<n>}}'
+    ```
+
+    The receipt says whether the timeline reads the type; it does, and it
+    titles the row `<owner>/<repo>#<n> (<head> → <base>)` — the one line
+    that shows a stacked PR's base before anyone merges in the wrong order.

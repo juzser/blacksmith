@@ -77,11 +77,15 @@ quorum, because `finder_ne_critic` excludes the native claimant.
 
 ```bash
 smith epic verdict --epic epic-1 --project ../my-project \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 Run it after the last task in the plan lands and before you open the
-integration PR. Mechanical oracles run first here too, and their verdict is
+integration PR. Pass the live plan version here and on every record in
+§7a-§7e: the envelope leaves `--plan-version` optional and an omitted one
+stamps `plan_version: 1` (`eventContextFromFlags` in `cli.ts`), so an epic
+that amended to v3 closes with its check and its review claiming to have
+verified a plan that no longer exists. Mechanical oracles run first here too, and their verdict is
 final — an epic with non-terminal tasks or open blocking findings is
 `hold`ed without spending a judge call:
 
@@ -113,7 +117,7 @@ This is that run, made a logged fact:
 git -C ../my-project checkout smith/epic-1/integration
 smith integration check --epic epic-1 --project ../my-project \
   --checks checks.json \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 `checks.json` is the same `[{"name":..., "cmd":...}]` shape `smith gate run
@@ -148,7 +152,7 @@ fact.
 
 ```bash
 smith epic close --epic epic-1 --project ../my-project \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 It runs the same verdict first, then acts on it:
@@ -249,7 +253,7 @@ smith epic spec-review --epic epic-1 --project ../my-project \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --reviewed-by spec-reviewer [--reviewed-by-provider anthropic:claude-opus-5] \
   [--evidence spec-findings.json] \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 It reads the head of `smith/<epic>/integration` itself and pins the record to
@@ -303,7 +307,7 @@ then reconciled.
 ```bash
 smith crossfind run --task epic-1/task-1 \
   --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
-  --session <id> --causal-parent <event-id>
+  --session <id> --plan-version <n> --causal-parent <event-id>
 ```
 
 Every reconciled pair lands in one of four outcomes, and only one of them can
@@ -408,7 +412,7 @@ smith epic goal-check --epic epic-1 \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --coverage /tmp/coverage.json \
   --checked-by spec-reviewer [--checked-by-provider google:gemini-2.5-pro] \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 `--coverage` is a JSON array, one entry per clause:
