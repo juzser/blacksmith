@@ -30,6 +30,27 @@ describe('events.ts', () => {
     await rm(stateDir, { recursive: true, force: true });
   });
 
+  // A bare SyntaxError names neither the log nor the line, and the dashboard
+  // printed it once per session it then failed to fold (D-249).
+  it('names the log and the line when a line of it is not JSON', async () => {
+    await appendEvent(
+      {
+        session_id: 'sess-torn',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await appendFile(path.join(stateDir, 'sess-torn.jsonl'), '{"half": tru\n');
+    await expect(readEvents('sess-torn', { stateDir })).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+      details: { session_id: 'sess-torn', path: path.join(stateDir, 'sess-torn.jsonl'), line: 2 },
+    });
+  });
+
   it('stamps ts and returns a stable event_id for the first (session-root) event', async () => {
     const { event_id, record } = await appendEvent(
       {
@@ -1446,6 +1467,94 @@ describe('events.ts', () => {
         { stateDir },
       ),
     ).resolves.toMatchObject({ event_id: 'sess-19#1' });
+  });
+
+  // -------------------------------------------------------------------------
+  // The same fuse, on `task-result-recorded`. Its payload is the Result
+  // envelope, and the projector turns `artifacts[]` into rows inside the
+  // session's transaction -- so an `artifacts` that is an object (csb-audit-1
+  // #100 carried `{ claude_half, external_half, repair_brief }`) rolled the
+  // whole session back. The check is deliberately narrow: only the one field
+  // a reader iterates is pinned to its shape. The full result schema is not
+  // enforced here because real logs carry many hand-written result payloads
+  // that no reader rehydrates.
+  // -------------------------------------------------------------------------
+  describe('a task-result-recorded payload whose artifacts is not a list', () => {
+    async function root(sessionId: string): Promise<void> {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+    }
+
+    function result(artifacts: unknown): Record<string, unknown> {
+      const payload: Record<string, unknown> = {
+        task_id: 'epic-1/task-1',
+        run_status: 'done',
+        structured_output: {},
+      };
+      if (artifacts !== undefined) payload.artifacts = artifacts;
+      return payload;
+    }
+
+    it('rejects an object-shaped artifacts and writes nothing', async () => {
+      await root('sess-trr-1');
+      await expect(
+        appendEvent(
+          {
+            session_id: 'sess-trr-1',
+            actor: 'orchestrator',
+            event_type: 'task-result-recorded',
+            task_id: 'epic-1/task-1',
+            plan_version: 1,
+            causal_parent: 'sess-trr-1#0',
+            payload: result({ claude_half: 'a.json', external_half: 'b.json' }),
+          },
+          { stateDir },
+        ),
+      ).rejects.toMatchObject({ code: 'events.invalid-typed-payload' });
+      const events = await readEvents('sess-trr-1', { stateDir });
+      expect(events).toHaveLength(1);
+    });
+
+    it('accepts a list, and accepts a payload with no artifacts at all', async () => {
+      await root('sess-trr-2');
+      await expect(
+        appendEvent(
+          {
+            session_id: 'sess-trr-2',
+            actor: 'orchestrator',
+            event_type: 'task-result-recorded',
+            task_id: 'epic-1/task-1',
+            plan_version: 1,
+            causal_parent: 'sess-trr-2#0',
+            payload: result([{ type: 'diff', path: 'artifacts/task-1.diff' }]),
+          },
+          { stateDir },
+        ),
+      ).resolves.toMatchObject({ event_id: 'sess-trr-2#1' });
+      await expect(
+        appendEvent(
+          {
+            session_id: 'sess-trr-2',
+            actor: 'orchestrator',
+            event_type: 'task-result-recorded',
+            task_id: 'epic-1/task-1',
+            plan_version: 1,
+            causal_parent: 'sess-trr-2#1',
+            payload: result(undefined),
+          },
+          { stateDir },
+        ),
+      ).resolves.toMatchObject({ event_id: 'sess-trr-2#2' });
+    });
   });
 
   // D-215. `task-added` is the only event whose payload becomes a task row's

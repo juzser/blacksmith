@@ -243,7 +243,34 @@ interface ResultArtifact {
 
 interface ResultPayload {
   task_id?: string;
-  artifacts?: ResultArtifact[];
+  // Typed loosely on purpose: the row writer below checks the shape. A
+  // hand-written log (csb-audit-1#100) carried an object here, and typing it
+  // as a list let the projector call `.forEach` on it and roll back the
+  // whole session.
+  artifacts?: unknown;
+}
+
+/**
+ * A task-result-recorded whose `artifacts` could not become rows, named by
+ * the event that carried it. Same contract as SkippedFindingRecord (D-141):
+ * the session still lands, the caller is told exactly what did not.
+ */
+export interface SkippedArtifactsRecord {
+  event_id: string;
+  session_id: string;
+  task_id: string;
+  reason: string;
+}
+
+/** What projectSession() could not land while still landing the session. */
+export interface SessionProjectionReport {
+  skippedArtifacts: SkippedArtifactsRecord[];
+}
+
+function describeShape(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  return typeof value === 'object' ? 'an object' : `a ${typeof value}`;
 }
 
 interface WaiverPayload {
@@ -1017,7 +1044,8 @@ export function projectSession(
   sessionId: string,
   events: StoredEvent[],
   opts: DbOpts = {},
-): void {
+): SessionProjectionReport {
+  const skippedArtifacts: SkippedArtifactsRecord[] = [];
   handle.db.transaction((txDb) => {
     clearSession(txDb, sessionId);
 
@@ -1175,8 +1203,21 @@ export function projectSession(
         // other way round (D-245).
         const taskId = eventTask;
         if (!taskId) continue;
-        (p.artifacts ?? []).forEach((artifact, index) => {
-          if (!artifact.type || !artifact.path) return;
+        // The whole session runs inside this transaction: a throw here used
+        // to roll back every row above, so an epic three waves deep drew as
+        // nothing. Hold back the one list that cannot be read, name it, and
+        // keep going (D-141: a loud undercount beats a crash).
+        if (p.artifacts !== undefined && !Array.isArray(p.artifacts)) {
+          skippedArtifacts.push({
+            event_id,
+            session_id: record.session_id,
+            task_id: taskId,
+            reason: `payload.artifacts is ${describeShape(p.artifacts)}, not an array`,
+          });
+          continue;
+        }
+        ((p.artifacts ?? []) as ResultArtifact[]).forEach((artifact, index) => {
+          if (!artifact || typeof artifact !== 'object' || !artifact.type || !artifact.path) return;
           txDb
             .insert(schema.artifacts)
             .values({
@@ -1279,6 +1320,7 @@ export function projectSession(
 
     // `lessons` is not written here — see projectLessons() (D-199).
   });
+  return { skippedArtifacts };
 }
 
 /**
@@ -1526,13 +1568,38 @@ function projectFindings(
  * session id settles two logs that start in the same millisecond, so the
  * order is total and independent of how the caller listed them.
  */
+export interface UnreadableSessionRecord {
+  session_id: string;
+  reason: string;
+}
+
+interface SessionLogs {
+  logs: SessionLog[];
+  unreadable: UnreadableSessionRecord[];
+}
+
+/**
+ * Reads every named log. `tolerate` names the sessions whose read may fail
+ * without failing the call: those come back in `unreadable` instead of as
+ * rows. Any other session's failure is thrown as it always was.
+ */
 async function readAllSessionLogs(
   sessionIds: readonly string[],
   stateDir: string,
-): Promise<SessionLog[]> {
+  tolerate: ReadonlySet<string> = new Set(),
+): Promise<SessionLogs> {
   const logs: SessionLog[] = [];
+  const unreadable: UnreadableSessionRecord[] = [];
   for (const sessionId of sessionIds) {
-    logs.push({ sessionId, events: await readEvents(sessionId, { stateDir }) });
+    try {
+      logs.push({ sessionId, events: await readEvents(sessionId, { stateDir }) });
+    } catch (err) {
+      if (!tolerate.has(sessionId)) throw err;
+      unreadable.push({
+        session_id: sessionId,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
   logs.sort((a, b) => {
     const aStart = a.events[0]?.record.ts ?? '';
@@ -1540,7 +1607,7 @@ async function readAllSessionLogs(
     if (aStart !== bStart) return aStart < bStart ? -1 : 1;
     return a.sessionId.localeCompare(b.sessionId);
   });
-  return logs;
+  return { logs, unreadable };
 }
 
 export interface RebuildResult {
@@ -1558,6 +1625,24 @@ export interface RebuildResult {
    * missing from it.
    */
   skippedFindings: SkippedFindingRecord[];
+  /**
+   * task-result-recorded events whose `artifacts` was not a list and so
+   * contributed no artifact rows, each named by event id. ALWAYS present,
+   * `[]` when there were none, for the same reason as `skippedFindings`.
+   * Scoped to the sessions this call projected: `rebuild()` reports every
+   * session, `apply()` the one it re-folded.
+   */
+  skippedArtifacts: SkippedArtifactsRecord[];
+  /**
+   * Sessions whose log could not be read at all -- a line that is not JSON --
+   * and so contributed nothing to the global folds (`findings`, `lessons`).
+   * ALWAYS present. `rebuild()` never fills it: an explicit rebuild over a
+   * broken log throws, because "cannot tell" must not be written down as
+   * "nothing there". `apply()` fills it for every session OTHER than the one
+   * it re-folds: the dashboard applies each session in turn, and one broken
+   * log must cost the board that session, not every session (D-249).
+   */
+  unreadableSessions: UnreadableSessionRecord[];
 }
 
 /**
@@ -1579,18 +1664,26 @@ export async function rebuild(
 
     // Read each log once: the per-session projection consumes them one at a
     // time, projectLessons() and projectFindings() need them all at once.
-    const logs = await readAllSessionLogs(sessionIds, stateDir);
+    const { logs } = await readAllSessionLogs(sessionIds, stateDir);
 
     let eventsApplied = 0;
+    const skippedArtifacts: SkippedArtifactsRecord[] = [];
     for (const { sessionId, events } of logs) {
-      projectSession(handle, sessionId, events, opts);
+      const report = projectSession(handle, sessionId, events, opts);
+      skippedArtifacts.push(...report.skippedArtifacts);
       eventsApplied += events.length;
     }
     const merged = mergeSessionLogs(logs);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
     projectMilestones(handle, opts);
-    return { sessionsProcessed: sessionIds.length, eventsApplied, skippedFindings };
+    return {
+      sessionsProcessed: sessionIds.length,
+      eventsApplied,
+      skippedFindings,
+      skippedArtifacts,
+      unreadableSessions: [],
+    };
   } finally {
     handle.sqlite.close();
   }
@@ -1619,17 +1712,29 @@ export async function apply(
     // naming it anyway costs an empty read and keeps it in the global folds
     // below, which would otherwise drop the very session being applied.
     const listed = listSessionIds(stateDir);
-    const logs = await readAllSessionLogs(
+    // Every other session's log is read for the global folds only, so one of
+    // them being unreadable is reported, not thrown: this session's rows do
+    // not depend on it. The applied session's own log still throws -- that
+    // failure is the caller's to name, and there is nothing to write for it.
+    const others = new Set(listed.filter((id) => id !== sessionId));
+    const { logs, unreadable } = await readAllSessionLogs(
       listed.includes(sessionId) ? listed : [...listed, sessionId],
       stateDir,
+      others,
     );
     const events = logs.find((l) => l.sessionId === sessionId)?.events ?? [];
-    projectSession(handle, sessionId, events, opts);
+    const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
     const merged = mergeSessionLogs(logs);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
     projectMilestones(handle, opts);
-    return { sessionsProcessed: 1, eventsApplied: events.length, skippedFindings };
+    return {
+      sessionsProcessed: 1,
+      eventsApplied: events.length,
+      skippedFindings,
+      skippedArtifacts,
+      unreadableSessions: unreadable,
+    };
   } finally {
     handle.sqlite.close();
   }

@@ -57,6 +57,8 @@ describe('db/projector.ts', () => {
       sessionsProcessed: 1,
       eventsApplied: events.length,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
 
     const handle = openDb(dbPath);
@@ -738,5 +740,181 @@ describe('D-200: a finding transitioned from a continuation session', () => {
     expect(projected.map((f) => [f.findingId, f.findingStatus])).toEqual(
       listed.map((f) => [f.finding_id, f.finding_status]),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A task-result-recorded whose `artifacts` is an object instead of a list.
+// csb-audit-1#100 carried `{ claude_half, external_half, repair_brief }`;
+// the projector's `.forEach` threw on it inside the session transaction, so
+// the *whole session* rolled back and the dashboard drew nothing for an epic
+// that was three waves deep. The fix shape is D-141's: land everything that
+// can land, hold back only the rows that cannot, and name what was held.
+// ---------------------------------------------------------------------------
+describe('db/projector.ts — a task-result-recorded whose artifacts is not a list', () => {
+  let stateDir: string;
+  let dbDir: string;
+  let badEventId: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-artifacts-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-artifacts-db-'));
+    await buildFixture({ stateDir });
+    // Straight to the log, bypassing appendEvent: the write-time guard now
+    // refuses this shape (events.test.ts), so the only way it reaches a
+    // projection is from a log written before the guard existed.
+    const priorEvents = await readEvents(SESSION_ID, { stateDir });
+    const index = priorEvents.length;
+    badEventId = `${SESSION_ID}#${index}`;
+    const record = {
+      session_id: SESSION_ID,
+      actor: 'orchestrator',
+      event_type: 'task-result-recorded',
+      task_id: TASK_2,
+      plan_version: 1,
+      causal_parent: priorEvents.at(-1)?.event_id ?? null,
+      ts: '2026-08-15T00:00:00.000Z',
+      payload: {
+        task_id: TASK_2,
+        run_status: 'done',
+        structured_output: {},
+        artifacts: {
+          claude_half: 'state/results/task-2.claude.json',
+          external_half: 'state/results/task-2.external.json',
+        },
+        token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+        agent: 'spec-reviewer',
+        provider: 'claude',
+        model_tier: 'mid',
+      },
+    };
+    await appendFile(path.join(stateDir, `${SESSION_ID}.jsonl`), `${JSON.stringify(record)}\n`);
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('rebuild() still lands every task of the session instead of rolling it back', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await rebuild(dbPath, 'all', { stateDir });
+
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    expect(result.sessionsProcessed).toBe(1);
+    expect(rows.sessions.map((s) => s.sessionId)).toEqual([SESSION_ID]);
+    expect(rows.tasks.map((t) => t.taskId).sort()).toEqual([TASK_1, TASK_2, TASK_3, TASK_4].sort());
+    // The fixture's one well-formed artifact still lands; the object-shaped
+    // list contributes no rows rather than no session.
+    expect(rows.artifacts).toHaveLength(1);
+    // The task row itself is untouched by the held-back list: its status is
+    // what the fixture's gate-outcome left it at, same as a clean rebuild.
+    const task2 = rows.tasks.find((t) => t.taskId === TASK_2);
+    expect(task2?.taskStatus).toBe('reviewing');
+  });
+
+  it('names the event whose artifacts were held back, on rebuild() and on apply()', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await rebuild(dbPath, 'all', { stateDir });
+    expect(result.skippedArtifacts).toEqual([
+      expect.objectContaining({
+        event_id: badEventId,
+        session_id: SESSION_ID,
+        task_id: TASK_2,
+        reason: expect.stringContaining('array'),
+      }),
+    ]);
+
+    const applied = await apply(dbPath, SESSION_ID, { stateDir });
+    expect(applied.skippedArtifacts.map((s) => s.event_id)).toEqual([badEventId]);
+  });
+
+  it('a session with nothing held back reports an empty list, not a missing one', async () => {
+    // A second, clean session: the field is always present (D-141 — "ran and
+    // found nothing" must not look like "never ran").
+    await appendEvent(
+      {
+        session_id: 'sess-clean',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const dbPath = path.join(dbDir, 'smith.db');
+    const applied = await apply(dbPath, 'sess-clean', { stateDir });
+    expect(applied.skippedArtifacts).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The global folds read every log, so before D-249 one log that was not JSON
+// failed apply() for EVERY session -- and the dashboard, which applies each
+// session in turn, then reported every one of them as unprojectable, naming
+// none of them as the cause. The broken session is the one that cannot be
+// written; the others lose nothing but that session's findings and lessons,
+// which the result now says.
+// ---------------------------------------------------------------------------
+describe('db/projector.ts — a session whose log is not JSON', () => {
+  let stateDir: string;
+  let dbDir: string;
+  const BROKEN = 'sess-broken';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-broken-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-broken-db-'));
+    await buildFixture({ stateDir });
+    await appendEvent(
+      {
+        session_id: BROKEN,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await appendFile(path.join(stateDir, `${BROKEN}.jsonl`), 'this line is not an event\n');
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('apply() of another session still lands that session and names the one it could not read', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await apply(dbPath, SESSION_ID, { stateDir });
+    expect(result.sessionsProcessed).toBe(1);
+    expect(result.unreadableSessions).toEqual([
+      expect.objectContaining({ session_id: BROKEN, reason: expect.stringContaining('Line 2') }),
+    ]);
+    const handle = openDb(dbPath);
+    try {
+      expect(allRows(handle.db).tasks).toHaveLength(4);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('apply() of the broken session itself refuses, naming the log and the line', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await expect(apply(dbPath, BROKEN, { stateDir })).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+      details: { session_id: BROKEN, line: 2 },
+    });
+  });
+
+  it('rebuild() refuses rather than write a projection short of a session it cannot read', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await expect(rebuild(dbPath, 'all', { stateDir })).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+    });
   });
 });

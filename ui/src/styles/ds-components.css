@@ -1336,6 +1336,25 @@ a.live-agent-entry:focus-visible {
   max-width: 26ch;
   text-overflow: ellipsis;
 }
+/* The projection-incomplete notice (lib/projectionIssues.ts). A Banner with
+   the topbar's side padding and no radius on the top edge, so it reads as
+   part of the frame rather than a card that floats over the page. Each line
+   is a server message that names a log path or an event id: monospace, and
+   allowed to wrap, because the path is the part the operator needs to read. */
+.app-projection {
+  flex-shrink: 0;
+  margin: 0 var(--ds-space-4);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.app-projection__lines {
+  margin: var(--ds-space-1) 0 0;
+  padding-left: var(--ds-space-4);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading-xs);
+  overflow-wrap: anywhere;
+}
 .app-scroll {
   flex: 1;
   min-height: 0;

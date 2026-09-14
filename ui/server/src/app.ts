@@ -210,13 +210,52 @@ function lessonSession(db: SmithDb, lessonId: string): string {
  *    session, and since projectSession() clears and re-folds inside a
  *    transaction, they would serialise behind each other for no gain.
  */
-function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): () => Promise<void> {
+/**
+ * One thing the projection could not land, as `/api/pulse` reports it. The
+ * refresher below keeps these because it is the only reader that ever learns
+ * of them: `apply()` returns the report, and the operator is looking at the
+ * dashboard, not at the terminal that launched it (D-249).
+ */
+export interface ProjectionIssue {
+  sessionId: string;
+  /**
+   * `session-not-projected`: the session's own log could not be folded, so
+   * none of its rows exist -- a line that is not JSON, usually. Cleared the
+   * moment the log projects again.
+   * `artifacts-skipped`: one task-result-recorded of the session carried an
+   * `artifacts` that is not a list, so its artifact rows are missing while the
+   * rest of the session stands. Cleared when the session re-projects without
+   * it.
+   */
+  kind: 'session-not-projected' | 'artifacts-skipped';
+  /** The event whose payload was held back; only for `artifacts-skipped`. */
+  eventId?: string;
+  message: string;
+}
+
+interface Refresher {
+  refresh(): Promise<void>;
+  /** Every issue still standing after the latest scan, one per session or event. */
+  issues(): ProjectionIssue[];
+}
+
+function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Refresher {
   const projected = new Map<string, string>();
   const warned = new Map<string, string>();
   // Keyed by finding id and not by session, because apply() folds EVERY
   // session's log at once (D-200): the same quarantine comes back on every
   // poll of every session, and only a finding not named yet is news.
   const namedFindings = new Set<string>();
+  // Same rule for the artifact events, keyed by event id: apply() re-folds the
+  // session on every change to its log, and the same event is skipped again
+  // each time.
+  const namedArtifacts = new Set<string>();
+  // What the latest apply() of each session left unlanded. A session is
+  // rewritten whole on every apply, so its entry is too: set on success from
+  // the report, set on failure to the one issue there is, deleted when the
+  // report is empty. That is what lets an issue clear itself once the log
+  // behind it is repaired -- the next poll re-projects and finds nothing.
+  const issues = new Map<string, ProjectionIssue[]>();
   let inFlight: Promise<void> | null = null;
 
   async function scan(): Promise<void> {
@@ -233,8 +272,21 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): () 
       }
       if (projected.get(sessionId) === fingerprint) continue;
       try {
-        const { skippedFindings } = await applyDb(dbPath, sessionId, dbOpts);
+        const { skippedFindings, skippedArtifacts } = await applyDb(dbPath, sessionId, dbOpts);
         projected.set(sessionId, fingerprint);
+        const landed: ProjectionIssue[] = skippedArtifacts.map((skipped) => ({
+          sessionId,
+          kind: 'artifacts-skipped',
+          eventId: skipped.event_id,
+          message: `artifacts of '${skipped.task_id}' (${skipped.event_id}) are missing from the projection: ${skipped.reason}`,
+        }));
+        if (landed.length > 0) issues.set(sessionId, landed);
+        else issues.delete(sessionId);
+        for (const issue of landed) {
+          if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
+          namedArtifacts.add(issue.eventId);
+          process.stderr.write(`smith ui: ${issue.message}\n`);
+        }
         // D-141 turned "a finding that cannot fill a notNull column" from a
         // crash into a returned report, on the rule that a loud undercount
         // beats a crash and both beat a quiet one. That made the catch below
@@ -262,23 +314,28 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): () 
         // the life of the process — and the warning is printed once per
         // distinct fingerprint, so a genuinely broken log does not spam the
         // console at the poll interval.
+        const message = `could not project session '${sessionId}': ${err instanceof Error ? err.message : String(err)}`;
+        issues.set(sessionId, [{ sessionId, kind: 'session-not-projected', message }]);
         if (warned.get(sessionId) !== fingerprint) {
           warned.set(sessionId, fingerprint);
-          process.stderr.write(
-            `smith ui: could not project session '${sessionId}': ${err instanceof Error ? err.message : String(err)}\n`,
-          );
+          process.stderr.write(`smith ui: ${message}\n`);
         }
       }
     }
   }
 
-  return function refresh(): Promise<void> {
-    if (inFlight) return inFlight;
-    const run = scan().finally(() => {
-      inFlight = null;
-    });
-    inFlight = run;
-    return run;
+  return {
+    refresh(): Promise<void> {
+      if (inFlight) return inFlight;
+      const run = scan().finally(() => {
+        inFlight = null;
+      });
+      inFlight = run;
+      return run;
+    },
+    issues(): ProjectionIssue[] {
+      return [...issues.keys()].sort().flatMap((sessionId) => issues.get(sessionId) ?? []);
+    },
   };
 }
 
@@ -459,9 +516,9 @@ export function createApp(opts: AppOpts): AppHandle {
   // Fold any newly-appended events into the projection before ANY api route
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
-  const refresh = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
+  const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
   app.use('/api/*', async (_c, next) => {
-    await refresh();
+    await refresher.refresh();
     await next();
   });
 
@@ -503,9 +560,17 @@ export function createApp(opts: AppOpts): AppHandle {
   // arrived since I looked?". It sits under the refresh middleware like every
   // other read, so the frame's liveness reading and the page's data are folded
   // from the same event log at the same moment.
+  //
+  // `projectionIssues` rides on it for the same reason: what the refresher
+  // could not fold is a fact about THIS server's projection, not about the
+  // events, so it is answered here rather than by queries.ts, and on the one
+  // read every page makes rather than on a page nobody opens (D-249).
   app.get('/api/pulse', (c) => {
     const project = c.req.query('project');
-    return c.json(pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json({
+      ...pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }),
+      projectionIssues: refresher.issues(),
+    });
   });
 
   // The topbar session picker's feed -- the same thin-projection shape as

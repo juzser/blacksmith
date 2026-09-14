@@ -422,6 +422,24 @@ export interface PulseResult {
   lastEventType: string | null;
   counts: { events: number; errors: number };
   lessonsPending: number;
+  /**
+   * What the server's projection could not land — a session log it could not
+   * read, or an event whose payload it had to hold back (D-249). Every count
+   * and status the dashboard shows is computed without those events, so the
+   * shell says so above the page rather than letting a blank canvas read as an
+   * idle factory. Mirrors ProjectionIssue in ui/server/src/app.ts. Optional
+   * because a server built before the field omits it, and "the server did not
+   * say" must render as nothing to report.
+   */
+  projectionIssues?: ProjectionIssue[];
+}
+
+export interface ProjectionIssue {
+  sessionId: string;
+  kind: 'session-not-projected' | 'artifacts-skipped';
+  eventId?: string;
+  /** Already worded for an operator: names the log, the line or the event. */
+  message: string;
 }
 
 export function fetchPulse(session?: SessionScope, project?: string): Promise<PulseResult> {
