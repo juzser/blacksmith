@@ -225,6 +225,7 @@ export const KIND_OPTIONS: readonly KindOption[] = [
       'waiver-granted',
       'waiver-denied',
       'gate-outcome',
+      'issue-reported',
     ],
   },
   // The scheduler's whole output. `smith scheduler run` appends one event per
