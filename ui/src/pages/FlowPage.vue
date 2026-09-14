@@ -173,6 +173,13 @@ async function load(opts: { reset?: boolean } = {}) {
     error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
+    // A reset load that fails has nothing true left to draw: the graph on
+    // hand belongs to the scope the operator just left, while the toolbar
+    // and count above it already name the new one. Dropping it leaves the
+    // banner alone (a quiet refetch keeps its graph -- that is the D-243
+    // branch above), and the banner's Retry, computing `reset` from
+    // `graph === null` again, gets the skeleton a fresh start is owed.
+    if (reset) graph.value = null;
   } finally {
     loading.value = false;
   }

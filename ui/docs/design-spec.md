@@ -760,9 +760,9 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      polling pages answer it with no per-page wiring. The watcher is
      registered inside `usePoll`'s setup call, so Vue's effect scope disposes
      it with the component and an unmounted page cannot be woken by it.
-     Projects and Flow were the last two scoped pages to join this list
-     (D-243) — until then, the topbar's Refresh silently did nothing on
-     either.
+     Projects and Flow joined this list under D-243 — until then, the
+     topbar's Refresh silently did nothing on either. Roadmap is the one
+     scoped page that still does not answer it.
    - **Supersedes §2's "Right: theme toggle only."** The topbar's right side
      now carries the pulse readout, `LiveStatus`, the project `Select` (§A.1)
      and the theme toggle. Still no user menu and no masking toggle — the
