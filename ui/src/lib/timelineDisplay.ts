@@ -364,6 +364,10 @@ export function iconFor(entry: TimelineEntry): string {
       return 'file-text';
     case 'spec-change-decided':
       return 'scale';
+    // The PR lives on GitHub, not in this dashboard: the row is a pointer out,
+    // and the glyph says so before the operator reads the number.
+    case 'integration-pr-opened':
+      return 'external-link';
     default:
       return 'history';
   }
@@ -550,6 +554,20 @@ export function titleFor(entry: TimelineEntry): string {
       return `${String(p.agent_role ?? 'Judge')} reported — ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
     case 'epic-closed':
       return `Epic closed — ${String(p.epic_id ?? '')}: ${String(p.machine_verdict ?? '')}, ${String(p.tasks_merged ?? 0)} tasks merged`;
+    // run.md step 17. `repo#number` is the form GitHub itself resolves, and
+    // the refs matter because a stacked PR (an epic cut from another epic's
+    // integration branch) does not target `main` — the operator merging in
+    // the wrong order is exactly what the row is there to prevent. A
+    // hand-appended payload can be thin, so every field is optional and the
+    // title degrades to the bare fact rather than to `#undefined`.
+    case 'integration-pr-opened': {
+      const ref = p.pr_number === undefined ? '' : `${String(p.repo ?? '')}#${String(p.pr_number)}`;
+      const refs =
+        p.head_ref !== undefined && p.base_ref !== undefined
+          ? ` (${String(p.head_ref)} → ${String(p.base_ref)})`
+          : '';
+      return ref === '' ? 'Integration PR opened' : `Integration PR opened — ${ref}${refs}`;
+    }
     case 'lesson-candidate-raised':
       return `Lesson candidate — ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-edited':

@@ -364,6 +364,45 @@ describe('lib/timelineDisplay.ts', () => {
     });
   });
 
+  // The integration PR is the epic's terminal deliverable — the one thing the
+  // operator is asked to merge — and run.md step 17 records it with `smith
+  // event append` as `integration-pr-opened`. It reached neither the free list
+  // (queries.ts) nor a case here, so the timeline of a closed epic ended at
+  // `epic-closed` and never showed the PR the closing was for.
+  describe('the integration PR the epic opened', () => {
+    const pr = entry({
+      eventType: 'integration-pr-opened',
+      taskId: 'csb-signing-policy-1/integration',
+      payload: {
+        step: 17,
+        pr_url: 'https://github.com/juzser/claude-status-bar-macos/pull/54',
+        pr_number: 54,
+        repo: 'juzser/claude-status-bar-macos',
+        base_ref: 'smith/csb-audit-1/integration',
+        head_ref: 'smith/csb-signing-policy-1/integration',
+        head_sha: '931079e',
+        commits: 11,
+        changed_files: 11,
+      },
+    });
+
+    it('titles the row with the PR, its repo and the refs it merges', () => {
+      expect(titleFor(pr)).toBe(
+        'Integration PR opened — juzser/claude-status-bar-macos#54 (smith/csb-signing-policy-1/integration → smith/csb-audit-1/integration)',
+      );
+    });
+
+    it('gives the row an icon the registry actually has, not the generic clock', () => {
+      expect(iconFor(pr) in ICON_PATHS).toBe(true);
+      expect(iconFor(pr)).not.toBe('history');
+    });
+
+    it('still names the type when a hand-appended payload is thin', () => {
+      const thin = entry({ eventType: 'integration-pr-opened', payload: {} });
+      expect(titleFor(thin)).toBe('Integration PR opened');
+    });
+  });
+
   // D-153. The same defect one type further out, and the loudest instance of
   // it: `operator-note` ties for third most common in the factory's own logs
   // (57 of 668) and is the only one carrying the operator's reasoning in their

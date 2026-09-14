@@ -1433,6 +1433,12 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   'audit-cut',
   'audit-resolved',
   'audit-closed',
+  // The integration PR run.md step 17 opens, appended by hand through `smith
+  // event append` under `<epic>/integration`. It is the epic's terminal
+  // deliverable -- the one thing the operator is asked to merge -- and the
+  // only event written after `epic-closed`, so without it the timeline of a
+  // closed epic ends at the closing and never shows what the closing was for.
+  'integration-pr-opened',
 ];
 
 let cachedTaxonomy: Taxonomy | undefined;

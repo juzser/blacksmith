@@ -385,6 +385,48 @@ describe('db/queries.ts', () => {
       }
     });
 
+    it('shows the integration PR the epic opened (run.md step 17)', async () => {
+      // The PR is the epic's terminal deliverable — the one thing the operator
+      // is asked to merge — and run.md step 17 records it with `smith event
+      // append` as `integration-pr-opened`. A timeline whose free list does not
+      // name that type ends at `epic-closed` and never shows the PR at all.
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'operator',
+          event_type: 'integration-pr-opened',
+          task_id: `${EPIC_ID}/integration`,
+          plan_version: 1,
+          causal_parent: await lastEventId({ stateDir }),
+          payload: {
+            step: 17,
+            pr_url: 'https://github.com/juzser/example/pull/54',
+            pr_number: 54,
+            repo: 'juzser/example',
+            base_ref: 'main',
+            head_ref: `smith/${EPIC_ID}/integration`,
+            head_sha: '0123456',
+          },
+        },
+        { stateDir },
+      );
+      const dbPath = path.join(dbDir, 'integration-pr.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const prHandle = openDb(dbPath);
+      try {
+        const all = timeline(prHandle.db, { sessionId: SESSION_ID });
+        const row = all.find((e) => e.eventType === 'integration-pr-opened');
+        expect(row?.taskId).toBe(`${EPIC_ID}/integration`);
+        expect((row?.payload as Record<string, unknown> | undefined)?.pr_number).toBe(54);
+        // And it is the epic's row, not an orphan: filtering by epic keeps it.
+        expect(
+          timeline(prHandle.db, { sessionId: SESSION_ID, epicId: EPIC_ID }).map((e) => e.eventType),
+        ).toContain('integration-pr-opened');
+      } finally {
+        prHandle.sqlite.close();
+      }
+    });
+
     it('expands the causal-parent chain for one event, oldest first, ending at that event', () => {
       const entries = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_3 });
       const errorEntry = entries.find((e) => e.eventType === 'error-logged');
