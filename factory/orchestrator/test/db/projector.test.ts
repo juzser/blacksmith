@@ -232,6 +232,59 @@ describe('db/projector.ts', () => {
     expect(taskIds).toContain(TASK_1);
   });
 
+  it('never materialises a task row for an id nothing but a dispatch ever named', async () => {
+    const { appendEvent, readEvents } = await import('../../src/events.js');
+    // The csb-audit-1 session ran its planning rounds by hand, before
+    // planRefTaskId() existed, and stamped each round's dispatch with an id it
+    // made up on the spot: `<epic>/plan-r12`, `<epic>/spec-review-r15`, ...
+    // Twenty-two of them sat in the board's "In progress" column for a week,
+    // one card each, no objective, nothing ever moving them — the column was
+    // nothing BUT them. A dispatch is a fact about an agent; a task is a fact
+    // some other event (or the plan roster on disk) asserts. An id only ever
+    // named by dispatches and results is a round ref, whatever it is spelled.
+    const parent = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.event_id ?? null;
+    const dispatched = await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'dispatch_decision',
+        task_id: `${EPIC_ID}/plan-r12`,
+        plan_version: 1,
+        causal_parent: parent,
+        payload: {
+          agent_role: 'planner',
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+          reason: 'plan round 12',
+        },
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'task-result-recorded',
+        task_id: `${EPIC_ID}/plan-r12`,
+        plan_version: 1,
+        causal_parent: dispatched.event_id,
+        payload: { agent: 'planner', run_status: 'done' },
+      },
+      { stateDir },
+    );
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    const taskIds = rows.tasks.map((t) => t.taskId);
+    expect(taskIds).not.toContain(`${EPIC_ID}/plan-r12`);
+    expect(taskIds).toContain(TASK_1);
+  });
+
   it('apply() only refreshes the named session, leaving other sessions untouched', async () => {
     // A second, unrelated session in the same events dir.
     const { appendEvent } = await import('../../src/events.js');

@@ -440,29 +440,38 @@ function planRosterAliases(
   specsDir: string | undefined,
 ): Map<string, Set<string>> {
   const candidates = new Map<string, Set<string>>();
+  for (const id of planRosterTaskIds(epics, specsDir)) {
+    if (!isQualifiedTaskId(id)) continue;
+    const bare = bareTaskId(id);
+    const set = candidates.get(bare) ?? new Set<string>();
+    set.add(id);
+    candidates.set(bare, set);
+  }
+  return candidates;
+}
+
+/**
+ * Every task id the latest plan on disk lists, for every epic the log names.
+ * The one read behind both `planRosterAliases` and foldTasks()'s "is this id
+ * a task at all" check, so the two can never disagree about what a plan says.
+ */
+function planRosterTaskIds(epics: ReadonlySet<string>, specsDir: string | undefined): string[] {
+  const ids: string[] = [];
   for (const epicId of epics) {
-    let roster: readonly string[] = [];
     try {
       const version = latestPlanVersion(epicId, { specsDir });
       if (version !== null) {
-        roster = loadPlan(epicId, version, { specsDir }).tasks.map((t) => t.task_id);
+        ids.push(...loadPlan(epicId, version, { specsDir }).tasks.map((t) => t.task_id));
       }
     } catch (err) {
       console.error(
-        `db/projector.ts planRosterAliases(): plan file for "${epicId}" ` +
+        `db/projector.ts planRosterTaskIds(): plan file for "${epicId}" ` +
           `failed to load, leaving its task ids unresolved: ` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    for (const id of roster) {
-      if (!isQualifiedTaskId(id)) continue;
-      const bare = bareTaskId(id);
-      const set = candidates.get(bare) ?? new Set<string>();
-      set.add(id);
-      candidates.set(bare, set);
-    }
   }
-  return candidates;
+  return ids;
 }
 
 /**
@@ -554,6 +563,34 @@ function waveTaskIds(record: EventRecord): string[] {
   return taskId ? [taskId] : [];
 }
 
+/**
+ * The task ids one event asserts something about, spelled the way foldTasks()'s
+ * switch reads them: the envelope or payload `task_id` (D-245) for the
+ * single-task events, `payload.task_ids` for a wave's admission or merge, and
+ * `error-logged`'s own `payload.task_ref`. Kept beside the switch on purpose —
+ * the two must agree on what names a task, or the walk touches an id the
+ * pre-pass never saw.
+ */
+function assertedTaskIds(record: EventRecord): string[] {
+  switch (record.event_type) {
+    case 'wave-admitted':
+    case 'wave-merged':
+      return waveTaskIds(record);
+    case 'error-logged': {
+      const id = eventTaskId(record) ?? (record.payload as ErrorPayload).task_ref;
+      return id ? [id] : [];
+    }
+    case 'task-added':
+    case 'gate-outcome':
+    case 'task-superseded': {
+      const id = eventTaskId(record);
+      return id ? [id] : [];
+    }
+    default:
+      return [];
+  }
+}
+
 export function foldTasks(
   events: readonly StoredEvent[],
   opts: Pick<DbOpts, 'specsDir'> = {},
@@ -563,6 +600,19 @@ export function foldTasks(
   // so no later code has to ask which of two ids for one task it is holding.
   const canonical = taskIdCanonicalizer(events, opts);
   const epics = knownEpicIds(events);
+  // The ids the log asserts a task under: every id a task-level event names
+  // (`task-added`, a wave admission or merge, a gate outcome, a supersession,
+  // an error) plus what the plan roster on disk lists (D-250's task whose
+  // every event was bare and whose `task-added` never reached the log). A
+  // `dispatch_decision` is deliberately not on that list — see touch() for
+  // the twenty-two cards that taught it. Read over the whole log before the
+  // walk so the answer does not depend on which event reached the log first.
+  const declared = new Set<string>();
+  for (const { record } of events) {
+    if (record.event_type === 'dispatch_decision') continue;
+    for (const id of assertedTaskIds(record)) declared.add(canonical(id));
+  }
+  for (const id of planRosterTaskIds(epics, opts.specsDir)) declared.add(canonical(id));
 
   function touch(rawTaskId: string, ts: string, sessionId: string): TaskFoldRow {
     const taskId = canonical(rawTaskId);
@@ -587,8 +637,9 @@ export function foldTasks(
         updatedAt: ts,
         project: null,
       };
-      // Three ref shapes are NOT tasks and must never surface as kanban
-      // cards. The epic's own bare id, which `error-logged` writes into
+      // Not every id an event carries is a task, and a ref that is not a
+      // task must never surface as a kanban card. Three shapes are refused by
+      // name: the epic's own bare id, which `error-logged` writes into
       // `payload.task_ref` when the failure belongs to no single task (D-251)
       // — the phantom foldEpics() keeps itself off this fold to avoid; the
       // errors table takes that row straight from the event, so refusing the
@@ -600,18 +651,34 @@ export function foldTasks(
       // dispatch_decision/judge-verdict/quorum-decision events their quorum
       // case emits, so provider-agreement analytics can group by it like any
       // other dispatch (db/queries.ts's providerAgreement() reads eventsRaw
-      // directly, never joins tasks, so it's unaffected either way). Every
-      // event type that carries a task_id routes through this one touch()
-      // choke point (task-added, wave-admitted, dispatch_decision,
+      // directly, never joins tasks, so it's unaffected either way).
+      //
+      // The fourth refusal is the general one: an id nothing but a dispatch
+      // ever named. A session that ran its planning rounds by hand, before
+      // planRefTaskId() existed, stamped each round's dispatch with an id it
+      // made up on the spot — `<epic>/plan-r12`, `<epic>/spec-review-r15` —
+      // and twenty-two of those sat in the board's "In progress" column for
+      // a week, one card each, no objective, nothing ever moving them; the
+      // column was nothing BUT them. A dispatch is a fact about an agent and
+      // its task_id is where the agent was pointed; a task is a fact the log
+      // asserts elsewhere (`declared`, above), and a dispatch moves one that
+      // exists rather than minting one. An orphan the log DOES assert — a
+      // bare id no roster claims (D-250), an error against a ref nobody
+      // declared — keeps its row on purpose: a producer's mistake stays
+      // visible. Refusing by what the log asserts rather than by spelling
+      // means the next hand-minted ref never gets a card either.
+      //
+      // Every event type that carries a task_id routes through this one
+      // touch() choke point (task-added, wave-admitted, dispatch_decision,
       // gate-outcome, wave-merged, task-superseded, error-logged), so one
       // guard here is enough: build the row (callers below still mutate it
-      // freely) but never register a reserved ref in byId, so it never
+      // freely) but never register a refused id in byId, so it never
       // reaches foldTasks()'s returned rows or projectTasks()'s insert loop.
       const isReservedRef =
         taskId.split('/').pop() === RESERVED_TASK_ID ||
         isPlanRefTaskId(taskId) ||
         epics.has(taskId);
-      if (!isReservedRef) byId.set(taskId, row);
+      if (!isReservedRef && declared.has(taskId)) byId.set(taskId, row);
     }
     row.updatedAt = ts;
     return row;

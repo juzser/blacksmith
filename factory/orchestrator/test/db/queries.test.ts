@@ -81,7 +81,11 @@ async function budgetBurst(
   await appendFile(path.join(dir, `${session}.jsonl`), body, 'utf8');
 }
 
-/** The same burst, in dispatch_decision — the shape a wave admission writes. */
+/**
+ * The same burst, in dispatch_decision — the shape a wave admission writes.
+ * Each task is declared once first: a dispatch moves a task, it never mints
+ * one, so a burst at an undeclared id would fold to no row at all.
+ */
 async function dispatchBurst(
   dir: string,
   session: string,
@@ -89,6 +93,9 @@ async function dispatchBurst(
   rows: readonly { task: string; role: string; tier: string }[],
 ): Promise<void> {
   let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+  for (const task of new Set(rows.map((r) => r.task))) {
+    body += tiedLine('task-added', ts, { task_id: task }, session);
+  }
   for (const r of rows) {
     body += tiedLine(
       'dispatch_decision',
@@ -281,9 +288,11 @@ describe('db/queries.ts', () => {
       const wave = openDb(dbPath);
       try {
         // The fixture's own dispatches are older than 2030, so the whole slice
-        // comes from the burst: #12 down to #3, newest first.
+        // comes from the burst, newest first. The burst declares its twelve
+        // tasks (#1-#12) before it dispatches at them (#13-#24).
+        const last = 24;
         expect(overview(wave.db).recentDispatches.map((d) => d.eventId)).toEqual(
-          Array.from({ length: 10 }, (_, i) => `${session}#${12 - i}`),
+          Array.from({ length: 10 }, (_, i) => `${session}#${last - i}`),
         );
       } finally {
         wave.sqlite.close();
@@ -732,10 +741,12 @@ describe('db/queries.ts', () => {
       await rebuild(dbPath, 'all', { stateDir });
       const attemptsHandle = openDb(dbPath);
       try {
-        rewriteLast(attemptsHandle, 'dispatches', `${session}#1`);
+        // #0 is the session-start, #1 the task-added the burst declares.
+        const first = 2;
+        rewriteLast(attemptsHandle, 'dispatches', `${session}#${first}`);
         const tiedAttempts = taskDetail(attemptsHandle.db, task)?.attempts ?? [];
         expect(tiedAttempts.map((a) => a.eventId)).toEqual(
-          Array.from({ length: 12 }, (_, i) => `${session}#${i + 1}`),
+          Array.from({ length: 12 }, (_, i) => `${session}#${first + i}`),
         );
       } finally {
         attemptsHandle.sqlite.close();

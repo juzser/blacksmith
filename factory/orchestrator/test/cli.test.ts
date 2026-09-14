@@ -1801,6 +1801,27 @@ describe('cli.ts (built binary)', () => {
     expect(append1.status).toBe(0);
     const rootId = JSON.parse(append1.stdout).event_id as string;
 
+    // The plan declares the task before anything is scheduled against it: a
+    // dispatch moves a task, it never mints one, so a log that dispatched a
+    // task nothing declared projects no row for it (see projector.test.ts).
+    const appendAdded = runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-9/task-1',
+        plan_version: 1,
+        causal_parent: rootId,
+        payload: { task_id: 'epic-9/task-1', epic_id: 'epic-9' },
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(appendAdded.status).toBe(0);
+    const addedId = JSON.parse(appendAdded.stdout).event_id as string;
+
     const append2 = runCli([
       'event',
       'append',
@@ -1810,7 +1831,7 @@ describe('cli.ts (built binary)', () => {
         event_type: 'dispatch_decision',
         task_id: 'epic-9/task-1',
         plan_version: 1,
-        causal_parent: rootId,
+        causal_parent: addedId,
         payload: {
           agent_role: 'coder',
           provider: 'claude',
@@ -1836,7 +1857,7 @@ describe('cli.ts (built binary)', () => {
     expect(rebuildResult.status).toBe(0);
     expect(JSON.parse(rebuildResult.stdout)).toEqual({
       sessionsProcessed: 1,
-      eventsApplied: 2,
+      eventsApplied: 3,
       skippedFindings: [],
       skippedArtifacts: [],
       unreadableSessions: [],
@@ -1852,14 +1873,14 @@ describe('cli.ts (built binary)', () => {
 
     const timelineResult = runCli(['stats', 'timeline', '--db', dbPath, '--session', sessionId]);
     expect(timelineResult.status).toBe(0);
-    // Both appended events, and no task-added — this session never had one.
-    // The old assertion here was `toHaveLength(1)`: session-start was written
-    // as the root of the log and then dropped by timeline()'s eventType
-    // filter, so the CLI's own smoke test recorded the log's first event as
-    // invisible. Asserting the types rather than the count says which two.
+    // All three appended events. The old assertion here was `toHaveLength(1)`:
+    // session-start was written as the root of the log and then dropped by
+    // timeline()'s eventType filter, so the CLI's own smoke test recorded the
+    // log's first event as invisible. Asserting the types rather than the
+    // count says which three.
     expect(
       (JSON.parse(timelineResult.stdout) as { eventType: string }[]).map((e) => e.eventType),
-    ).toEqual(['session-start', 'dispatch_decision']);
+    ).toEqual(['session-start', 'task-added', 'dispatch_decision']);
 
     const kanbanResult = runCli([
       'stats',
@@ -1872,10 +1893,10 @@ describe('cli.ts (built binary)', () => {
       'epic-9',
     ]);
     expect(kanbanResult.status).toBe(0);
-    // The task id carries its epic, so `--epic epic-9` finds this task even
-    // though no `task-added` ever named the epic in a payload (D-49/P9-10).
-    // Before that, a dispatched task showed up in `stats overview` as a live
-    // agent and in `stats kanban --epic` as nothing at all.
+    // The task id carries its epic, so `--epic epic-9` finds this task from
+    // the id alone (D-49/P9-10). Before that, a dispatched task showed up in
+    // `stats overview` as a live agent and in `stats kanban --epic` as
+    // nothing at all.
     const kanban = JSON.parse(kanbanResult.stdout) as Array<{
       taskStatus: string;
       tasks: Array<{ taskId: string }>;
@@ -1884,8 +1905,8 @@ describe('cli.ts (built binary)', () => {
     expect(kanban[0]?.taskStatus).toBe('in-progress');
     expect(kanban[0]?.tasks.map((t) => t.taskId)).toEqual(['epic-9/task-1']);
 
-    // dispatch_decision alone (no task-added) still touches a minimal task
-    // row (task_status "in-progress"), just without case/origin/claims.
+    // The dispatch moved the declared task to "in-progress"; the row carries
+    // no case/origin/claims because this `task-added` named none.
     const taskResult = runCli(['stats', 'task', '--db', dbPath, '--task', 'epic-9/task-1']);
     expect(taskResult.status).toBe(0);
     const taskDetailJson = JSON.parse(taskResult.stdout);
@@ -1936,7 +1957,7 @@ describe('cli.ts (built binary)', () => {
     expect(applyResult.status).toBe(0);
     expect(JSON.parse(applyResult.stdout)).toEqual({
       sessionsProcessed: 1,
-      eventsApplied: 2,
+      eventsApplied: 3,
       skippedFindings: [],
       skippedArtifacts: [],
       unreadableSessions: [],

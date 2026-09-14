@@ -302,9 +302,11 @@ describe('ui/server app.ts', () => {
   });
 
   /**
-   * Appends a dispatch straight to the event log and re-projects NOTHING —
-   * exactly what the orchestrator does. The DB is downstream of the log, so
-   * a dashboard that never re-projects never sees this.
+   * Declares a task and dispatches it straight to the event log, re-projecting
+   * NOTHING — exactly what the orchestrator does: the plan is ingested (a
+   * `task-added` per task) before anything is scheduled against it, and a
+   * dispatch moves that task rather than minting one. The DB is downstream of
+   * the log, so a dashboard that never re-projects never sees either event.
    */
   async function appendDispatch(sessionId: string, taskId: string): Promise<void> {
     const existing = await readEvents(sessionId, { stateDir });
@@ -323,6 +325,18 @@ describe('ui/server app.ts', () => {
       );
       tip = root.event_id;
     }
+    const added = await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: taskId,
+        plan_version: 1,
+        causal_parent: tip,
+        payload: { task_id: taskId, epic_id: EPIC_ID },
+      },
+      { stateDir },
+    );
     await appendEvent(
       {
         session_id: sessionId,
@@ -330,7 +344,7 @@ describe('ui/server app.ts', () => {
         event_type: 'dispatch_decision',
         task_id: taskId,
         plan_version: 1,
-        causal_parent: tip,
+        causal_parent: added.event_id,
         payload: {
           agent_role: 'coder',
           provider: 'claude',
