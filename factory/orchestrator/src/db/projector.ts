@@ -1175,8 +1175,22 @@ export function projectSession(
         // other way round (D-245).
         const taskId = eventTask;
         if (!taskId) continue;
-        (p.artifacts ?? []).forEach((artifact, index) => {
-          if (!artifact.type || !artifact.path) return;
+        // result.schema.json says `artifacts` is a list, but the log has
+        // accepted an object keyed by name (csb-audit-1 #100). Calling
+        // `.forEach` on it threw out of the transaction and dropped every
+        // event after it in the session, which is exactly the one thing the
+        // projector promises never to do (see the header). A malformed list
+        // costs its own artifact rows and nothing else.
+        let artifacts: ResultArtifact[] = [];
+        if (Array.isArray(p.artifacts)) {
+          artifacts = p.artifacts;
+        } else if (p.artifacts !== undefined && p.artifacts !== null) {
+          console.error(
+            `db/projector.ts: task-result-recorded ${event_id} (session "${record.session_id}", task "${taskId}") carries a non-array "artifacts" (${typeof p.artifacts}); its artifact rows were skipped and the rest of the session was folded`,
+          );
+        }
+        artifacts.forEach((artifact, index) => {
+          if (!artifact || !artifact.type || !artifact.path) return;
           txDb
             .insert(schema.artifacts)
             .values({
