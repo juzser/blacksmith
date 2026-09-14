@@ -115,6 +115,26 @@ there means "not looked at", not "looked at and clean".
    "event_type":"plan-version-created","plan_version":1,
    "causal_parent":"...","payload":{"epic_id":"<epic>","version":1,
    "note":"<operator's own words>"}}'`.
+
+   Then write the backlog that signature approved into the log, hung off
+   the sign-off event:
+
+   ```bash
+   smith plan ingest factory/specs/active/<epic>/plan-v1.json \
+     --session <session-id> --plan-version 1 --causal-parent <sign-off event id>
+   ```
+
+   This is where a task starts existing as far as the log — and so the DB,
+   the Kanban, the Flow graph and every dashboard number — is concerned
+   (D-46, D-254): one `task-added` per task, one `edges-recorded` for the
+   DAG. Nothing downstream runs it for you, and nothing refuses to run
+   without it: `wave next` reads the plan file, so an un-ingested plan still
+   runs, and its task rows then spring into being as a side effect of the
+   first wave or gate event to name an id — with no epic, no claims, no
+   budget and no edges, which is the flat, half-empty board the 2026-09-14
+   UI check found behind two epics. It is idempotent, so run it again on a
+   resumed session; read `added` and `edges` back, and say so when either is
+   0 on a plan that has tasks or edges.
 8. If this epic opens a new roadmap milestone, add it to
    `factory/specs/roadmap.md` (planner-maintained, architecture §12) — a
    roadmap change is itself a scope change and needs the same operator nod.

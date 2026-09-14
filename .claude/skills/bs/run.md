@@ -126,7 +126,21 @@ playbooks are written to prevent.
     the epic verdict against acceptance criteria — gaps found → a NEW
     `plan-v(n+1)` with inferred tasks (never a live-graph mutation,
     architecture §12), auto-scheduled at confidence ≥0.8 else parked for an
-    operator tick.
+    operator tick. **Every new version is ingested before the loop resumes
+    on it**, whichever step cut it:
+
+    ```bash
+    smith plan ingest factory/specs/active/<epic>/plan-v<n+1>.json \
+      --session <session-id> --plan-version <n+1> --causal-parent <event-id>
+    ```
+
+    Cutting a version writes `plan-version-created` and moves the findings
+    it cites; it does not write the tasks it added. Until they are ingested
+    (`/bs plan` step 7) the new task is on no board and carries no claims,
+    budget or edges in the DB, and the first gate event to name its id
+    creates it as a bare row (D-46, D-254). It is idempotent: the tasks the
+    version carried forward are skipped, and the output's `added` should
+    equal what the amendment's `diff` added.
 12. Run the full check suite **at the project root, on the assembled
     branch**. Every gate up to here ran inside a task worktree, so every
     green you have so far is a green about a worktree — the envkit epic
@@ -177,9 +191,10 @@ playbooks are written to prevent.
     --rationale … --sites …` (§6a of the operator guide). `--sites` is every
     place that shape occurs, not only the file the finding was reported
     against — answer it before writing the changes, because it is the question
-    that decides how much the amendment fixes (D-123). It cuts plan v(n+1), so go
-    back to step 11 with the new version, and re-run this review against the
-    branch that results. Never record a spec defect as a coder failure; that is
+    that decides how much the amendment fixes (D-123). It cuts plan v(n+1):
+    ingest it (step 11's `smith plan ingest`), go back to step 11 with the new
+    version, and re-run this review against the branch that results. Never
+    record a spec defect as a coder failure; that is
     the deadlock this step exists to end.
 14. Check the plan against the **goal it was cut from**. Every gate up to
     here reads text the planner produced, so all of them go green on a plan
@@ -212,7 +227,8 @@ playbooks are written to prevent.
     and that reason is quoted back to the epic judge. `uncovered` mints an
     S2-major spec finding against the plan file — no task diff can contain
     that fix, so the answer is `smith plan amend`, which cuts v(n+1) and sends
-    you back to step 11. The command exits 0 even when it raises findings.
+    you back to step 11 — through `smith plan ingest`, as in step 13. The
+    command exits 0 even when it raises findings.
 
     **It refuses (`cli.no-epic-goal`) when the owning milestone states no
     goal, and the epic then cannot close.** That is deliberate — there is no
