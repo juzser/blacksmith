@@ -1,0 +1,355 @@
+/**
+ * Compose the three pure pieces into the run's write path: fold the log
+ * (errorIssues.ts), ask the roadmap whether a project's tracker is writable
+ * (the resolved switch, handed in), resolve the repo and classify `gh`
+ * (git.ts/gh.ts), deduplicate against already-open issues, open or comment,
+ * and record what happened as an `issue-reported` event of its own.
+ *
+ * `reportErrors()` is the one entry point a run calls right after it
+ * records an error. It is idempotent by fingerprint: called twice over the
+ * same log plus the events the first call appended, it opens and comments
+ * nothing the second time, because step 4 below reads that history back.
+ *
+ * Dedup asks GitHub, not a local index (functional clause 3). No file
+ * under `state/` tracks which fingerprints are already open. The loser's
+ * cost of that choice: one `gh issue list --search` round trip per
+ * candidate error rather than an O(1) local lookup, and every `commented`
+ * outcome pays a second `gh issue comment` round trip on top. Both are
+ * accepted because a local index would drift the moment an issue is closed
+ * or reopened by a human outside this process, and this module would have
+ * no way to notice.
+ *
+ * This module never re-implements task 2 or task 3: `errorIssues.ts`,
+ * `gh.ts` and `git.ts` are imported, never edited, and never touched here
+ * are `PROJECTS_DIR`, `process.cwd()` or `REPO_ROOT` — the project register
+ * is a required parameter, supplied by the caller (task 5), never read off
+ * the filesystem by this module.
+ */
+import {
+  buildCommentArgv,
+  buildCreateIssueArgv,
+  buildSearchIssuesArgv,
+  classifyGh,
+  type CommandRunner,
+  resolveProjectRepo,
+} from './gh.js';
+import {
+  type ErrorReport,
+  FINGERPRINT_LINE_PREFIX,
+  foldErrorEvents,
+  renderBody,
+  renderComment,
+  renderTitle,
+  toIssueBodyFields,
+  toIssueCommentFields,
+} from './errorIssues.js';
+import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
+import type { ProjectRef } from './projects.js';
+
+/**
+ * The closed, named outcome vocabulary. Exactly one of these eight words is
+ * recorded for every candidate error, always — functional clause 2.
+ */
+export const ISSUE_REPORT_OUTCOMES = [
+  'opened',
+  'commented',
+  'deduped-open',
+  'skipped-disabled',
+  'skipped-no-remote',
+  'skipped-gh-missing',
+  'skipped-unauthenticated',
+  'failed',
+] as const;
+
+export type IssueReportOutcome = (typeof ISSUE_REPORT_OUTCOMES)[number];
+
+const ISSUE_REPORTED_EVENT_TYPE = 'issue-reported';
+
+/**
+ * The `issue-reported` payload allowlist (functional clause 6, nonfunctional
+ * clause 3): named fields only, never a spread of a source event's payload.
+ * Sorted, and this is the literal the test asserts against.
+ */
+export const ISSUE_REPORT_PAYLOAD_KEYS = [
+  'error_class',
+  'fingerprint',
+  'issue_url',
+  'latest_event_id',
+  'outcome',
+  'reason',
+  'repo_slug',
+  'source',
+  'task_ref',
+] as const;
+
+/** Default project for an event stamped with none — matches events.ts's documented convention. */
+const DEFAULT_PROJECT = 'black-smith';
+
+export interface IssueReportRecord {
+  outcome: IssueReportOutcome;
+  fingerprint: string;
+  project: string;
+  source: ErrorReport['source'];
+  error_class: string;
+  task_ref: string;
+  latest_event_id: string;
+  /** Present once the repository is resolved — absent for `skipped-disabled` and `skipped-no-remote`. */
+  repo_slug?: string;
+  /** Present exactly on `opened`/`commented`. */
+  issue_url?: string;
+  /** Present on every outcome except `opened`/`commented`. */
+  reason?: string;
+}
+
+interface GhIssue {
+  number: number;
+  body: string;
+  url?: string;
+}
+
+function parseSearchResult(stdout: string): GhIssue[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  const issues: GhIssue[] = [];
+  for (const item of parsed) {
+    if (typeof item !== 'object' || item === null) return null;
+    const number = (item as { number?: unknown }).number;
+    const body = (item as { body?: unknown }).body;
+    if (typeof number !== 'number' || typeof body !== 'string') return null;
+    const url = (item as { url?: unknown }).url;
+    issues.push({ number, body, url: typeof url === 'string' ? url : undefined });
+  }
+  return issues;
+}
+
+/** The exact machine-readable fingerprint line, built the same way errorIssues.ts's renderers do. */
+function fingerprintLine(fingerprint: string): string {
+  return `${FINGERPRINT_LINE_PREFIX}${fingerprint}`;
+}
+
+/** An exact line match, not a substring: functional clause 4. */
+function findExactMatch(issues: readonly GhIssue[], fingerprint: string): GhIssue | null {
+  const line = fingerprintLine(fingerprint);
+  return issues.find((issue) => issue.body.split('\n').includes(line)) ?? null;
+}
+
+interface PriorReport {
+  project: string;
+  fingerprint: string;
+  outcome: string;
+  latest_event_id: string;
+}
+
+/**
+ * Every already-appended `issue-reported` record still open, read off the
+ * SNAPSHOT of events this call was handed — never off events this same call
+ * itself appends. That is what lets the five duplicate candidates a single
+ * broken gate produces in one round resolve through GitHub search (one
+ * create, four comments) rather than short-circuiting on each other.
+ */
+function priorOpenReports(events: readonly StoredEvent[]): PriorReport[] {
+  const out: PriorReport[] = [];
+  for (const event of events) {
+    const { record } = event;
+    if (record.event_type !== ISSUE_REPORTED_EVENT_TYPE) continue;
+    const payload = record.payload as Partial<IssueReportRecord>;
+    if (
+      payload.outcome !== 'opened' &&
+      payload.outcome !== 'commented' &&
+      payload.outcome !== 'deduped-open'
+    ) {
+      continue;
+    }
+    if (typeof payload.fingerprint !== 'string' || typeof payload.latest_event_id !== 'string') {
+      continue;
+    }
+    out.push({
+      project: record.project ?? DEFAULT_PROJECT,
+      fingerprint: payload.fingerprint,
+      outcome: payload.outcome,
+      latest_event_id: payload.latest_event_id,
+    });
+  }
+  return out;
+}
+
+function toPayload(record: IssueReportRecord): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    outcome: record.outcome,
+    fingerprint: record.fingerprint,
+    source: record.source,
+    error_class: record.error_class,
+    task_ref: record.task_ref,
+    latest_event_id: record.latest_event_id,
+  };
+  if (record.repo_slug !== undefined) payload.repo_slug = record.repo_slug;
+  if (record.issue_url !== undefined) payload.issue_url = record.issue_url;
+  if (record.reason !== undefined) payload.reason = record.reason;
+  return payload;
+}
+
+async function appendIssueReported(
+  report: ErrorReport,
+  record: IssueReportRecord,
+  opts: EventOpts,
+): Promise<StoredEvent> {
+  return appendEvent(
+    {
+      session_id: report.session_id,
+      actor: 'system',
+      event_type: ISSUE_REPORTED_EVENT_TYPE,
+      task_id: report.task_ref,
+      // Schema minimum is 1; a report folded from an event that carried no
+      // plan version (e.g. a hand-appended error-logged) has none either.
+      plan_version: report.plan_version ?? 1,
+      causal_parent: report.latest_event_id,
+      payload: toPayload(record),
+      project: report.project,
+    },
+    opts,
+  );
+}
+
+/** Functional clause 2's decision procedure, in order, stopping at the first match. */
+async function decideOutcome(
+  report: ErrorReport,
+  isProjectEnabled: (project: string) => boolean,
+  register: readonly ProjectRef[],
+  runner: CommandRunner,
+  history: readonly PriorReport[],
+): Promise<IssueReportRecord> {
+  const base = {
+    fingerprint: report.fingerprint,
+    project: report.project,
+    source: report.source,
+    error_class: report.error_class,
+    task_ref: report.task_ref,
+    latest_event_id: report.latest_event_id,
+  };
+
+  // Step 1: the switch.
+  if (!isProjectEnabled(report.project)) {
+    return { ...base, outcome: 'skipped-disabled', reason: 'switch-off' };
+  }
+
+  // Step 2: which repository.
+  const repo = resolveProjectRepo(report.project, register);
+  if (!('slug' in repo)) {
+    return { ...base, outcome: 'skipped-no-remote', reason: repo.reason };
+  }
+  const repoSlug = repo.slug;
+
+  // Step 3: can `gh` actually be used.
+  const gh = classifyGh(runner);
+  if (gh.outcome === 'missing') {
+    return {
+      ...base,
+      outcome: 'skipped-gh-missing',
+      reason: 'gh-not-on-path',
+      repo_slug: repoSlug,
+    };
+  }
+  if (gh.outcome === 'unauthenticated') {
+    return {
+      ...base,
+      outcome: 'skipped-unauthenticated',
+      reason: 'gh-unauthenticated',
+      repo_slug: repoSlug,
+    };
+  }
+  if (gh.outcome === 'unknown') {
+    return { ...base, outcome: 'failed', reason: 'gh-unknown', repo_slug: repoSlug };
+  }
+
+  // Step 4: already reported and still open, per the snapshot this call read.
+  const already = history.find(
+    (h) =>
+      h.project === report.project &&
+      h.fingerprint === report.fingerprint &&
+      h.latest_event_id === report.latest_event_id,
+  );
+  if (already) {
+    return {
+      ...base,
+      outcome: 'deduped-open',
+      reason: 'already-reported',
+      repo_slug: repoSlug,
+    };
+  }
+
+  // Step 5: search GitHub itself.
+  const searchResult = runner('gh', buildSearchIssuesArgv(repoSlug, report.fingerprint));
+  if (searchResult.status !== 0) {
+    return { ...base, outcome: 'failed', reason: 'search-failed', repo_slug: repoSlug };
+  }
+  const issues = parseSearchResult(searchResult.stdout);
+  if (issues === null) {
+    return { ...base, outcome: 'failed', reason: 'search-failed', repo_slug: repoSlug };
+  }
+
+  // Step 6: an exact fingerprint-line match gets a comment.
+  const match = findExactMatch(issues, report.fingerprint);
+  if (match) {
+    const body = renderComment(toIssueCommentFields(report));
+    const commentResult = runner('gh', buildCommentArgv(repoSlug, match.number, body));
+    if (commentResult.status !== 0) {
+      return { ...base, outcome: 'failed', reason: 'comment-failed', repo_slug: repoSlug };
+    }
+    const issueUrl = match.url ?? `https://github.com/${repoSlug}/issues/${String(match.number)}`;
+    return { ...base, outcome: 'commented', repo_slug: repoSlug, issue_url: issueUrl };
+  }
+
+  // Step 7: no match — open a new issue.
+  const fields = toIssueBodyFields(report);
+  const createResult = runner(
+    'gh',
+    buildCreateIssueArgv(repoSlug, renderTitle(fields), renderBody(fields)),
+  );
+  if (createResult.status !== 0) {
+    return { ...base, outcome: 'failed', reason: 'create-failed', repo_slug: repoSlug };
+  }
+  return {
+    ...base,
+    outcome: 'opened',
+    repo_slug: repoSlug,
+    issue_url: createResult.stdout.trim(),
+  };
+}
+
+/**
+ * Fold `events` into candidate errors, decide and act on each in order, and
+ * record every attempt as an `issue-reported` event. Never throws on a
+ * reporting failure — every path returns an outcome (functional clause 8).
+ *
+ * `isProjectEnabled` is the resolved `error_issues` switch, `register` is
+ * `projects.ts`'s `{name, dir}` list (task 5 supplies it; this module never
+ * calls `factoryProjects()` itself), `runner` is task 3's injected `gh`
+ * command runner, and `clock` supplies `now` for the fold below.
+ */
+export async function reportErrors(
+  events: readonly StoredEvent[],
+  isProjectEnabled: (project: string) => boolean,
+  register: readonly ProjectRef[],
+  runner: CommandRunner,
+  clock: () => string,
+  opts: EventOpts = {},
+): Promise<IssueReportRecord[]> {
+  // Every project's switch is applied by this module's own step 1, not by
+  // the fold: foldErrorEvents dropping a disabled project's candidates
+  // silently would lose the `skipped-disabled` record clause 2 requires.
+  const { reports } = foldErrorEvents(events, clock(), () => true);
+  const history = priorOpenReports(events);
+
+  const out: IssueReportRecord[] = [];
+  for (const report of reports) {
+    const record = await decideOutcome(report, isProjectEnabled, register, runner, history);
+    await appendIssueReported(report, record, opts);
+    out.push(record);
+  }
+  return out;
+}
