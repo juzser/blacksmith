@@ -918,3 +918,74 @@ describe('db/projector.ts — a session whose log is not JSON', () => {
     });
   });
 });
+
+describe('db/projector.ts — a merged task is done, whatever the log says about it afterwards', () => {
+  let stateDir: string;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-terminal-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-terminal-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  async function statusOf(taskId: string): Promise<string> {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const row = allRows(handle.db).tasks.find((t) => t.taskId === taskId);
+      return row?.taskStatus ?? '(no row)';
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  it('a later wave-admitted that lists the task again does not put it back to ready', async () => {
+    // A re-planned wave admits the tasks of the new plan version; when one of
+    // them is an id that already merged under the previous version, the
+    // admission is a fact about the wave, not a reopening of the task. The
+    // fixture merges TASK_1; this is the wave after it.
+    const events = await readEvents(SESSION_ID, { stateDir });
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'wave-admitted',
+        plan_version: 2,
+        causal_parent: events[events.length - 1]?.event_id ?? null,
+        payload: { epic_id: EPIC_ID, task_ids: [TASK_1, TASK_2] },
+      },
+      { stateDir },
+    );
+    expect(await statusOf(TASK_1)).toBe('completed');
+    expect(await statusOf(TASK_2)).toBe('ready');
+  });
+
+  it('a gate-outcome recorded after the merge does not move the task back to merging or blocked', async () => {
+    // A judge whose evidence lands late is gated after wave-merged; the gate's
+    // verdict is recorded, but the task it grades already shipped. The same
+    // guard dispatch_decision and error-logged apply.
+    for (const outcome of ['pass', 'blocked', 'pass-with-waivers-pending']) {
+      const events = await readEvents(SESSION_ID, { stateDir });
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'gate-outcome',
+          task_id: TASK_1,
+          plan_version: 1,
+          causal_parent: events[events.length - 1]?.event_id ?? null,
+          payload: { outcome, reason: 'late judge' },
+        },
+        { stateDir },
+      );
+      expect(await statusOf(TASK_1)).toBe('completed');
+    }
+  });
+});

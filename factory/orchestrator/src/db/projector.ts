@@ -635,7 +635,8 @@ export function foldTasks(
         // the amended task carries the new plan_version) would otherwise revert
         // a merged task to `todo`. A terminal status is a fact the log earned
         // from `wave-merged`; a static field in a plan file does not overrule
-        // it. Same guard `dispatch_decision` and `error-logged` already apply.
+        // it. `wave-admitted`, `dispatch_decision`, `gate-outcome` and
+        // `error-logged` carry the same guard.
         if (!TERMINAL_TASK_STATUSES.has(row.taskStatus))
           row.taskStatus = p.task_status ?? row.taskStatus;
         row.planVersion = p.plan_version ?? row.planVersion;
@@ -650,7 +651,12 @@ export function foldTasks(
         const p = record.payload as { epic_id?: string };
         for (const taskId of waveTaskIds(record)) {
           const row = touch(taskId, record.ts, record.session_id);
-          row.taskStatus = 'ready';
+          // A re-planned wave admits the new plan's task ids, and one of them
+          // can be an id that already merged under the previous version. The
+          // admission is a fact about the wave, not a reopening of the task:
+          // the board showed a shipped task as `ready` for the rest of the
+          // epic (D-249). Same guard as `task-added` and `dispatch_decision`.
+          if (!TERMINAL_TASK_STATUSES.has(row.taskStatus)) row.taskStatus = 'ready';
           row.epicId = epicOfTaskId(row.taskId) ?? p.epic_id ?? row.epicId;
         }
         break;
@@ -666,6 +672,9 @@ export function foldTasks(
         if (!eventTask) break;
         const p = record.payload as { outcome?: string };
         const row = touch(eventTask, record.ts, record.session_id);
+        // A judge whose evidence lands late is gated after `wave-merged`; its
+        // verdict is on the record, but the task it grades already shipped.
+        if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) break;
         if (p.outcome === 'blocked') row.taskStatus = 'blocked';
         else if (p.outcome === 'pass-with-waivers-pending') row.taskStatus = 'reviewing';
         else if (p.outcome === 'pass') row.taskStatus = 'merging';
