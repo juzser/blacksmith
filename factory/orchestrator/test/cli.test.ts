@@ -1838,6 +1838,8 @@ describe('cli.ts (built binary)', () => {
       sessionsProcessed: 1,
       eventsApplied: 2,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
 
     const overviewResult = runCli(['stats', 'overview', '--db', dbPath, '--session', sessionId]);
@@ -1936,6 +1938,8 @@ describe('cli.ts (built binary)', () => {
       sessionsProcessed: 1,
       eventsApplied: 2,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
   });
 

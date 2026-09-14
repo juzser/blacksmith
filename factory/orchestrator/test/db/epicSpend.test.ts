@@ -17,11 +17,21 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { openDb, projectSession } from '../../src/db/projector.js';
+import { type DbHandle, openDb, projectSession, projectTasks } from '../../src/db/projector.js';
 import { overview } from '../../src/db/queries.js';
 import type { StoredEvent } from '../../src/events.js';
 
 const SESSION_ID = 'sess-epic-spend-fixture';
+
+/**
+ * The tasks table is a global fold over every session's log (projectTasks()),
+ * called explicitly here for a hand-built single session -- rebuild()/apply()
+ * do this pairing for real logs.
+ */
+function project(handle: DbHandle, sessionId: string, events: StoredEvent[]): void {
+  projectSession(handle, sessionId, events);
+  projectTasks(handle, events);
+}
 const NOW = '2026-08-20T12:00:00.000Z';
 const TWO_HOURS_AGO = '2026-08-20T10:00:00.000Z';
 
@@ -125,7 +135,7 @@ describe('per-epic spend attribution (D-207)', () => {
     // The `task-2-path-guard` shape: both envelope and payload bare, while
     // the tasks table knows the task by its qualified id. taskInScope() folds
     // these twenty lines up the same file; the spend maps did not.
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null }),
       taskAdded('epic-e/task-1', 'epic-e', 1000),
       result('task-1', 'task-1', 300),
@@ -139,7 +149,7 @@ describe('per-epic spend attribution (D-207)', () => {
     // named. `events_raw.task_id` is the envelope's own field, stored
     // verbatim by the projector, and it is the same claim the payload would
     // have made.
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null }),
       taskAdded('epic-e/task-1', 'epic-e', 1000),
       result('epic-e/task-1', undefined, 700),
@@ -149,7 +159,7 @@ describe('per-epic spend attribution (D-207)', () => {
   });
 
   it('still ignores a row that names no task at all, in either place', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null }),
       taskAdded('epic-e/task-1', 'epic-e', 1000),
       result(undefined, undefined, 900),
@@ -164,7 +174,7 @@ describe('per-epic spend attribution (D-207)', () => {
     // it, and makes the per-epic column add up to more than the run. Dropping
     // it is the same answer as today's, held deliberately rather than by
     // accident.
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null }),
       taskAdded('epic-e/task-1', 'epic-e', 1000),
       taskAdded('epic-f/task-1', 'epic-f', 1000),
@@ -187,7 +197,7 @@ describe('per-epic spend attribution (D-207)', () => {
     // denominator of "an hour ago" is now read as of an hour ago too, so a
     // task-added stamped NOW would mean nothing was budgeted then and the
     // whole 50% would be the move since.
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: TWO_HOURS_AGO }),
       taskAdded('epic-e/task-1', 'epic-e', 1000, TWO_HOURS_AGO),
       result('task-1', 'task-1', 300, TWO_HOURS_AGO),

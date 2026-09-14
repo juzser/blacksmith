@@ -8,11 +8,21 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { openDb, projectSession } from '../../src/db/projector.js';
+import { type DbHandle, openDb, projectSession, projectTasks } from '../../src/db/projector.js';
 import { overview } from '../../src/db/queries.js';
 import type { StoredEvent } from '../../src/events.js';
 
 const SESSION_ID = 'sess-overview-deltas-fixture';
+
+/**
+ * The tasks table is a global fold over every session's log (projectTasks()),
+ * called explicitly here for a hand-built single session -- rebuild()/apply()
+ * do this pairing for real logs.
+ */
+function project(handle: DbHandle, sessionId: string, events: StoredEvent[]): void {
+  projectSession(handle, sessionId, events);
+  projectTasks(handle, events);
+}
 const NOW = '2026-08-04T12:00:00.000Z';
 const FIVE_MIN_AGO = '2026-08-04T11:55:00.000Z'; // exact cutoff for the 5min delta
 const ONE_HOUR_AGO = '2026-08-04T11:00:00.000Z'; // exact cutoff for the 1h delta
@@ -55,7 +65,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
   });
 
   it('empty history: liveAgentCountDelta5m is 0, budgetUsedPctPointDelta1h is null (no budget)', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null }),
     ]);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
@@ -84,7 +94,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     // Still live now (never terminated) AND live at the exact 5min-ago cutoff -> delta 0.
     expect(result.liveAgentCount).toBe(1);
@@ -113,7 +123,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     expect(result.liveAgentCount).toBe(1);
     expect(result.liveAgentCountDelta5m).toBe(1);
@@ -156,7 +166,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         payload: { agent_role: 'reviewer', round: 1, artifact: './review.json' },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     // Nobody is live now, and nobody was live five minutes ago either: the
     // judge was dispatched and reported a full hour before the cutoff.
@@ -197,7 +207,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         payload: { task_id: 'epic-1/task-1', agent: 'verifier', provider: 'codex', ok: true },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     expect(result.liveAgentCount).toBe(0);
     expect(result.liveAgentCountDelta5m).toBe(0);
@@ -225,7 +235,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         payload: { task_id: 'epic-1/task-1', token_usage: { total_tokens: 500 } },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     expect(result.budgetUsedPctPointDelta1h).toBe(0);
   });
@@ -253,7 +263,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         payload: { task_id: 'epic-1/task-1', token_usage: { total_tokens: 500 } },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     // 50% now, 0% an hour ago -> +50pp.
     expect(result.budgetUsedPctPointDelta1h).toBe(50);
@@ -292,7 +302,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         payload: { task_id: 'epic-1/task-1', token_usage: { total_tokens: 500 } },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const scoped = overview(db, { sessionId: SESSION_ID, project: 'envkit' }, { nowIso: NOW });
     const unscoped = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     // The spend is an hour old in both readings, so neither may report a rise.
@@ -328,7 +338,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const scoped = overview(db, { sessionId: SESSION_ID, project: 'envkit' }, { nowIso: NOW });
     // The agent is in scope now (its task is envkit), so it was in scope then.
     expect(scoped.liveAgentCount).toBe(1);
@@ -388,7 +398,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         payload: { task_id: 'epic-1/task-2', token_usage: { total_tokens: 100 } },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const result = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
     // 900/1000 = 90% an hour ago, 1000/10000 = 10% now.
     expect(result.budgetUsedPctPointDelta1h).toBe(-80);
@@ -419,7 +429,7 @@ describe('overview() StatCard deltas (Phase 6b fix-round)', () => {
         },
       }),
     ];
-    projectSession({ sqlite, db }, SESSION_ID, events);
+    project({ sqlite, db }, SESSION_ID, events);
     const scoped = overview(db, { sessionId: SESSION_ID, project: 'envkit' }, { nowIso: NOW });
     expect(scoped.liveAgentCount).toBe(0);
     expect(scoped.liveAgentCountDelta5m).toBe(0);

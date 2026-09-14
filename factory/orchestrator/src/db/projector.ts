@@ -153,16 +153,16 @@ function clearSession(db: SmithDb, sessionId: string): void {
   db.delete(schema.prompts).where(eq(schema.prompts.sessionId, sessionId)).run();
   db.delete(schema.dispatches).where(eq(schema.dispatches.sessionId, sessionId)).run();
   db.delete(schema.agents).where(eq(schema.agents.sessionId, sessionId)).run();
-  db.delete(schema.tasks).where(eq(schema.tasks.sessionId, sessionId)).run();
   db.delete(schema.epics).where(eq(schema.epics.sessionId, sessionId)).run();
   db.delete(schema.edges).where(eq(schema.edges.sessionId, sessionId)).run();
   db.delete(schema.errors).where(eq(schema.errors.sessionId, sessionId)).run();
   db.delete(schema.waivers).where(eq(schema.waivers.sessionId, sessionId)).run();
   db.delete(schema.artifacts).where(eq(schema.artifacts.sessionId, sessionId)).run();
-  // `lessons` and `findings` are deliberately absent, like `milestones` —
-  // projectLessons() and projectFindings() own those tables whole (D-199,
-  // D-200). Deleting by session_id here would delete a row this session
-  // raised and another session has since approved or closed.
+  // `lessons`, `findings` and `tasks` are deliberately absent, like
+  // `milestones` — projectLessons(), projectFindings() and projectTasks() own
+  // those tables whole (D-199, D-200, and the continuation case projectTasks()
+  // describes). Deleting by session_id here would delete a row this session
+  // raised and another session has since approved, closed or worked on.
 }
 
 /**
@@ -606,8 +606,7 @@ export function foldTasks(
       // gate-outcome, wave-merged, task-superseded, error-logged), so one
       // guard here is enough: build the row (callers below still mutate it
       // freely) but never register a reserved ref in byId, so it never
-      // reaches foldTasks()'s returned rows or projectSession()'s tasks-table
-      // insert loop.
+      // reaches foldTasks()'s returned rows or projectTasks()'s insert loop.
       const isReservedRef =
         taskId.split('/').pop() === RESERVED_TASK_ID ||
         isPlanRefTaskId(taskId) ||
@@ -1050,12 +1049,13 @@ function planProjectResolver(
 /**
  * foldTasks() with D-246's plan-file backfill applied.
  *
- * Both folds of the task list go through here, because both answer the same
- * question and must not answer it differently: projectSession() derives the
- * tasks, epics, dispatches, artifacts and errors rows from one, and
- * projectFindings() folds the same events again for findings.project. Split
- * the backfill across only one of them and a single task reads as demo-rpg's
- * on the board and black-smith's on the errors page.
+ * Every fold of the task list goes through here, because all of them answer
+ * the same question and must not answer it differently: projectSession()
+ * derives the epics, dispatches, artifacts and errors rows from one,
+ * projectTasks() writes the tasks table from another over every session's
+ * log, and projectFindings() folds the same events again for
+ * findings.project. Split the backfill across only one of them and a single
+ * task reads as demo-rpg's on the board and black-smith's on the errors page.
  */
 function foldTasksWithPlanProject(events: readonly StoredEvent[], opts: DbOpts): TaskFoldRow[] {
   const projectFromPlan = planProjectResolver(opts.specsDir);
@@ -1076,10 +1076,12 @@ export function projectSession(
 
     if (events.length === 0) return;
 
-    // Folded once, up here: the rows below inherit their project from it, and
-    // the tasks table is written from the very same array further down. The
-    // plan-file backfill lands here for that reason -- one insertion point,
-    // and the tasks table, the epics table and every child row come with it.
+    // Folded once, up here: the rows below inherit their project from it. The
+    // tasks table itself is NOT written from this array -- projectTasks() folds
+    // every session's log for that, because a task planned in one session and
+    // worked in its continuation is one row -- but the epics table and every
+    // child row inherit their project from this per-session fold, and the
+    // plan-file backfill lands here so they agree with the global one.
     const taskRows = foldTasksWithPlanProject(events, opts);
     const projectForTask = projectResolver(taskRows);
     const projectForEpic = new Map(
@@ -1277,28 +1279,6 @@ export function projectSession(
       }
     }
 
-    for (const task of taskRows) {
-      txDb
-        .insert(schema.tasks)
-        .values({
-          taskId: task.taskId,
-          sessionId: task.sessionId,
-          epicId: task.epicId,
-          caseTag: task.caseTag,
-          origin: task.origin,
-          taskStatus: task.taskStatus,
-          planVersion: task.planVersion,
-          objective: task.objective,
-          claims: task.claims ? JSON.stringify(task.claims) : null,
-          budgetTokens: task.budgetTokens,
-          branch: task.branch,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt,
-          project: task.project,
-        })
-        .run();
-    }
-
     for (const epic of foldEpics(events)) {
       txDb
         .insert(schema.epics)
@@ -1346,6 +1326,66 @@ export function projectSession(
     // `lessons` is not written here — see projectLessons() (D-199).
   });
   return { skippedArtifacts };
+}
+
+/**
+ * Fully replace the tasks table from EVERY session's log at once, in one
+ * causal order (mergeSessionLogs). Not session-scoped, the same shape as
+ * projectLessons() and projectFindings() below, and for the same reason.
+ *
+ * A task is planned in one session and worked in another BY DESIGN: an epic
+ * outlives an orchestrator's context window, and `smith session start
+ * --continues` (P9-7) is how the next session picks the epic up. Every event
+ * in the continuation names the same task_id the parent's `task-added` did,
+ * and `tasks.task_id` is the table's whole primary key. Folding one session
+ * at a time inserted the row twice -- once from the parent's fold, once from
+ * the continuation's -- and the second insert aborted the whole rebuild on
+ * `UNIQUE constraint failed: tasks.task_id`. The first real continuation in
+ * this factory's own logs could not be projected at all; the dashboard showed
+ * the epic without its working session.
+ *
+ * A per-session upsert would not do either. Whichever session is projected
+ * last would own the row, and listSessionIds() sorts by filename, which is
+ * nothing causal: re-applying the parent after the continuation would put the
+ * task back to `todo`. foldTasks() already knows how to fold a task's whole
+ * history in order -- terminal statuses stick, a late gate-outcome does not
+ * reopen a merged task -- so it is handed the whole history: one global key,
+ * one global fold.
+ *
+ * The row still carries the session that FIRST touched the task -- the one
+ * whose plan added it -- so `kanban({ sessionId })` keeps meaning "tasks born
+ * here", and the lineage width (D-264) is what shows the continuation's
+ * progress on them.
+ */
+export function projectTasks(
+  handle: DbHandle,
+  events: readonly StoredEvent[],
+  opts: DbOpts = {},
+): void {
+  handle.db.transaction((txDb) => {
+    txDb.delete(schema.tasks).run();
+    for (const task of foldTasksWithPlanProject(events, opts)) {
+      txDb
+        .insert(schema.tasks)
+        .values({
+          taskId: task.taskId,
+          sessionId: task.sessionId,
+          epicId: task.epicId,
+          caseTag: task.caseTag,
+          origin: task.origin,
+          taskStatus: task.taskStatus,
+          planVersion: task.planVersion,
+          objective: task.objective,
+          claims: task.claims ? JSON.stringify(task.claims) : null,
+          budgetTokens: task.budgetTokens,
+          branch: task.branch,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+          project: task.project,
+        })
+        .run();
+    }
+  });
 }
 
 /**
@@ -1500,9 +1540,10 @@ function projectFindings(
   const stamps = findingTimestamps(events);
   // A finding has no `project` of its own on the wire (findings.ts's raiseFinding()
   // predates Phase 6b) — derive it from its owning task's project, the same fold
-  // projectSession() computes, so the value always matches tasks.project exactly.
-  // Same helper as projectSession() for exactly that reason: the plan-file
-  // backfill (D-246) has to reach both folds or the invariant is a lie.
+  // projectTasks() writes the tasks table from, over the same merged events, so
+  // the value always matches tasks.project exactly. Same helper for exactly that
+  // reason: the plan-file backfill (D-246) has to reach both folds or the
+  // invariant is a lie.
   const taskRows = foldTasksWithPlanProject(events, opts);
   // projectResolver and not a Map lookup, for the reason its own docblock
   // gives: the log spells one task both `epic/task-1` and `task-1`, and a
@@ -1664,7 +1705,8 @@ export interface RebuildResult {
   skippedArtifacts: SkippedArtifactsRecord[];
   /**
    * Sessions whose log could not be read at all -- a line that is not JSON --
-   * and so contributed nothing to the global folds (`findings`, `lessons`).
+   * and so contributed nothing to the global folds (`tasks`, `findings`,
+   * `lessons`).
    * ALWAYS present. `rebuild()` never fills it: an explicit rebuild over a
    * broken log throws, because "cannot tell" must not be written down as
    * "nothing there". `apply()` fills it for every session OTHER than the one
@@ -1692,7 +1734,8 @@ export async function rebuild(
     const sessionIds = sessions === 'all' ? listSessionIds(stateDir) : [...sessions];
 
     // Read each log once: the per-session projection consumes them one at a
-    // time, projectLessons() and projectFindings() need them all at once.
+    // time; projectTasks(), projectFindings() and projectLessons() need them
+    // all at once.
     const { logs } = await readAllSessionLogs(sessionIds, stateDir);
 
     let eventsApplied = 0;
@@ -1703,6 +1746,7 @@ export async function rebuild(
       eventsApplied += events.length;
     }
     const merged = mergeSessionLogs(logs);
+    projectTasks(handle, merged, opts);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
     projectMilestones(handle, opts);
@@ -1723,10 +1767,10 @@ export async function rebuild(
  * replaces only its rows, leaving every other session's projection intact.
  * Safe to call repeatedly while a session is still running (tailing).
  *
- * The three tables that are not session-scoped are rewritten whole on every
+ * The four tables that are not session-scoped are rewritten whole on every
  * call: `milestones` from roadmap.md, and — from every session's log, which is
- * why this reads more than the one session it re-folds — `lessons` (D-199) and
- * `findings` (D-200).
+ * why this reads more than the one session it re-folds — `tasks`
+ * (projectTasks()), `lessons` (D-199) and `findings` (D-200).
  */
 export async function apply(
   dbPath: string = STATE_DB_PATH,
@@ -1754,6 +1798,7 @@ export async function apply(
     const events = logs.find((l) => l.sessionId === sessionId)?.events ?? [];
     const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
     const merged = mergeSessionLogs(logs);
+    projectTasks(handle, merged, opts);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
     projectMilestones(handle, opts);

@@ -1149,3 +1149,167 @@ describe('spec findings carry their criterion into the findings table', () => {
     }
   });
 });
+
+describe('db/projector.ts — a task continued in a second session keeps one row', () => {
+  let stateDir: string;
+  let dbDir: string;
+  const PARENT = 'sess-cont-a';
+  const CHILD = 'sess-cont-b';
+  const TASK = 'epic-c/task-1';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-continued-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-continued-db-'));
+    await buildContinuedTask();
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  /**
+   * The P9-7 shape: the epic's plan lands the task in session A; a second
+   * session opens with `--continues A#n` and does the work. `tasks.task_id`
+   * is the table's whole primary key, so the two logs describe one row.
+   */
+  async function buildContinuedTask(): Promise<void> {
+    const opts = { stateDir };
+    const rootA = await appendEvent(
+      {
+        session_id: PARENT,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      opts,
+    );
+    await appendEvent(
+      {
+        session_id: PARENT,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: rootA.event_id,
+        payload: {
+          epic_id: 'epic-c',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          plan_version: 1,
+          objective: 'Land the widget in the continuation.',
+          claims: ['src/widget.ts'],
+          budget_tokens: 2000,
+        },
+      },
+      opts,
+    );
+    const rootB = await appendEvent(
+      {
+        session_id: CHILD,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: rootA.event_id,
+        payload: {},
+      },
+      opts,
+    );
+    const dispatched = await appendEvent(
+      {
+        session_id: CHILD,
+        actor: 'orchestrator',
+        event_type: 'dispatch_decision',
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: rootB.event_id,
+        payload: {
+          agent_role: 'coder',
+          provider: 'claude',
+          model_tier: 'mid',
+          model: 'claude-sonnet-5',
+          spec_ref: 'factory/specs/active/epic-c/task-1.json',
+          reason: 'first round in the continuation',
+        },
+      },
+      opts,
+    );
+    await appendEvent(
+      {
+        session_id: CHILD,
+        actor: 'system',
+        event_type: 'gate-outcome',
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: dispatched.event_id,
+        payload: { outcome: 'blocked', reason: 'tests failed in the continuation' },
+      },
+      opts,
+    );
+  }
+
+  function taskRows(dbPath: string) {
+    const handle = openDb(dbPath);
+    try {
+      return allRows(handle.db).tasks.filter((t) => t.taskId === TASK);
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  it('rebuild over both logs lands one row carrying the continuation session progress', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await expect(rebuild(dbPath, 'all', { stateDir })).resolves.toMatchObject({
+      sessionsProcessed: 2,
+    });
+    const rows = taskRows(dbPath);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      taskId: TASK,
+      // The row belongs to the session that planned it: kanban({ sessionId })
+      // keeps meaning "tasks born here", and the lineage width shows the rest.
+      sessionId: PARENT,
+      taskStatus: 'blocked',
+      objective: 'Land the widget in the continuation.',
+      budgetTokens: 2000,
+    });
+  });
+
+  it('apply for the continuation session does not collide with the row its parent landed', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, [PARENT], { stateDir });
+    expect(taskRows(dbPath)[0]?.taskStatus).toBe('todo');
+
+    await expect(apply(dbPath, CHILD, { stateDir })).resolves.toMatchObject({
+      unreadableSessions: [],
+    });
+    const rows = taskRows(dbPath);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sessionId: PARENT, taskStatus: 'blocked' });
+  });
+
+  it('re-applying the parent session does not wipe the progress the continuation made', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    await apply(dbPath, PARENT, { stateDir });
+    const rows = taskRows(dbPath);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.taskStatus).toBe('blocked');
+  });
+
+  it('the lineage-wide board shows the task once, in the column the continuation put it in', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const columns = kanban(handle.db, 'epic-c', { sessionIds: [PARENT, CHILD] });
+      const placed = columns.flatMap((c) => c.tasks.map((t) => [c.taskStatus, t.taskId] as const));
+      expect(placed).toEqual([['blocked', TASK]]);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+});
