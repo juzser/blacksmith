@@ -9,6 +9,7 @@ import type { EventContext } from './findings.js';
 import {
   livePlanTasks,
   loadPlan,
+  PlanError,
   type PlanFile,
   type PlanOpts,
   planRefTaskId,
@@ -393,6 +394,17 @@ export interface PlanQuorumCrosscheckOptions {
 export interface PlanQuorumInput {
   epicId: string;
   version: number;
+  /**
+   * The plan itself, when it is not on disk yet. plan.md runs the quorum at
+   * step 4 and files plan-v<n>.json at step 6 -- the critique comes BEFORE
+   * the signature, so the thing being critiqued is a draft (FD-45). Without
+   * this the playbook could only be followed by writing an unsigned v1 first.
+   * When absent, the plan is read from `planOpts` as before. Either way the
+   * plan's own `epic_id`/`version` must be the ones this input names, or the
+   * record would carry one plan's identity and another plan's triggers
+   * (`plan.identity-mismatch`; D-211's one-record-one-plan rule).
+   */
+  plan?: PlanFile;
   /** Planner's self-reported confidence for the plan as a whole (trigger 3's second arm). */
   plannerConfidence?: number;
   planOpts?: PlanOpts;
@@ -518,7 +530,19 @@ export async function runPlanQuorum(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<PlanQuorumOutcome> {
-  const plan = loadPlan(input.epicId, input.version, input.planOpts);
+  const plan = input.plan ?? loadPlan(input.epicId, input.version, input.planOpts);
+  if (plan.epic_id !== input.epicId || plan.version !== input.version) {
+    throw new PlanError(
+      'plan.identity-mismatch',
+      `The plan handed to the quorum is ${plan.epic_id} version ${plan.version}, but the command names --epic ${input.epicId} --plan-version ${input.version}. One quorum record describes one plan; say which.`,
+      {
+        epic_id: plan.epic_id,
+        version: plan.version,
+        expected_epic_id: input.epicId,
+        expected_version: input.version,
+      },
+    );
+  }
   const policy = input.crosscheck?.policy ?? loadCrosscheckPolicy();
   const epicCapTokens = input.epicCapTokens ?? loadBudgetPolicy().epic.capTokens;
   const triggers = evaluatePlanQuorumTriggers(plan, policy.planQuorum, epicCapTokens, {

@@ -124,8 +124,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'plan quorum',
     positionals: '',
     flags:
-      '--epic <id> --plan-version <n> --session <id> --causal-parent <event-id> [--confidence <0-1>] [--actor <name>] [--state-dir <dir>]',
-    summary: 'Critique-only review of a drafted plan. Exit 1 means the operator must look first.',
+      '--plan-version <n> --session <id> --causal-parent <event-id> [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
+    summary:
+      'Critique-only review of a drafted plan: --plan <draft.json> before it is filed, or --epic for the filed version. Exit 1 means the operator must look first.',
   },
   {
     command: 'plan amend',

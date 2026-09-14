@@ -236,6 +236,129 @@ describe('cli.ts (built binary)', () => {
     expect(err.message).toContain('plan-v100.json');
   });
 
+  // FD-45 / FD-49 (csb-signing-policy-1). plan.md step 4 critiques the plan
+  // before step 6 files it as plan-v1.json, so the verb has to take the draft
+  // by path; and its output -- three rationales of several kB each -- is read
+  // back from a file more often than from a terminal.
+  describe('plan quorum: a draft by path, an outcome to a file (FD-45, FD-49)', () => {
+    function draftPlan(epicId: string, version = 1) {
+      return {
+        epic_id: epicId,
+        version,
+        status: 'draft',
+        tasks: [
+          {
+            task_id: `${epicId}/task-1`,
+            epic_id: epicId,
+            plan_version: version,
+            objective: 'Do the thing.',
+            output_schema_ref: 'result.schema.json',
+            acceptance_criteria: ['it works'],
+            claims: ['src/foo/**'],
+            budget: { tokens: 100, diff_lines: 10, max_turns: 5 },
+            contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+          },
+        ],
+        edges: [],
+      };
+    }
+
+    async function quorumFixture(name: string) {
+      const dir = path.join(scratchDir, `plan-quorum-${name}`);
+      const eventsDir = path.join(dir, 'events');
+      const specsDir = path.join(dir, 'specs');
+      await mkdir(specsDir, { recursive: true });
+      const draft = path.join(dir, 'draft.json');
+      await writeFile(draft, JSON.stringify(draftPlan('epic-fd45'), null, 2));
+      const sessionId = `cli-plan-quorum-${name}`;
+      expect(runCli(['session', 'start', sessionId, '--state-dir', eventsDir]).status).toBe(0);
+      const envelope = [
+        '--plan-version',
+        '1',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
+        '--specs-dir',
+        specsDir,
+      ];
+      return { dir, eventsDir, specsDir, draft, sessionId, envelope };
+    }
+
+    it('--plan <path> critiques the named draft when no plan-v<n>.json exists, and files nothing', async () => {
+      const f = await quorumFixture('draft');
+      const { stdout, status } = runCli(['plan', 'quorum', '--plan', f.draft, ...f.envelope]);
+      expect(status).toBe(0);
+      const outcome = JSON.parse(stdout);
+      expect(outcome).toMatchObject({ outcome: 'endorsed', epicId: 'epic-fd45', version: 1 });
+      // The record names the draft's epic, read from the file, not from a flag
+      // the operator had to repeat.
+      const tail = runCli(['event', 'tail', f.sessionId, '--state-dir', f.eventsDir, '--n', '10']);
+      const decisions = (
+        JSON.parse(tail.stdout) as Array<{
+          record: { event_type: string; payload: { task_id?: string } };
+        }>
+      )
+        .map((e) => e.record)
+        .filter((r) => r.event_type === 'quorum-decision');
+      expect(decisions.map((r) => r.payload.task_id)).toEqual(['epic-fd45/plan-v1']);
+      expect(existsSync(path.join(f.specsDir, 'epic-fd45'))).toBe(false);
+    });
+
+    it('--plan <path> refuses a draft whose epic_id or version is not the one the envelope names', async () => {
+      const f = await quorumFixture('mismatch');
+      const wrongEpic = runCli([
+        'plan',
+        'quorum',
+        '--plan',
+        f.draft,
+        '--epic',
+        'epic-other',
+        ...f.envelope,
+      ]);
+      expect(wrongEpic.status).toBe(1);
+      expect(JSON.parse(wrongEpic.stdout).error.code).toBe('plan.identity-mismatch');
+
+      const v2 = path.join(f.dir, 'draft-v2.json');
+      await writeFile(v2, JSON.stringify(draftPlan('epic-fd45', 2), null, 2));
+      const wrongVersion = runCli(['plan', 'quorum', '--plan', v2, ...f.envelope]);
+      expect(wrongVersion.status).toBe(1);
+      const err = JSON.parse(wrongVersion.stdout).error;
+      expect(err.code).toBe('plan.identity-mismatch');
+      expect(err.message).toContain('version 2');
+      expect(err.message).toContain('--plan-version 1');
+    });
+
+    it('--out <file> writes the outcome it prints, creating the directory, and still prints it', async () => {
+      const f = await quorumFixture('out');
+      const out = path.join(f.dir, 'nested', 'quorum-1.json');
+      const { stdout, status } = runCli([
+        'plan',
+        'quorum',
+        '--plan',
+        f.draft,
+        '--out',
+        out,
+        ...f.envelope,
+      ]);
+      expect(status).toBe(0);
+      const printed = JSON.parse(stdout);
+      expect(printed.outcome).toBe('endorsed');
+      expect(JSON.parse(await readFile(out, 'utf8'))).toEqual(printed);
+    });
+
+    it('without --plan, --epic is still required', () => {
+      const { stdout, status } = runCli(['plan', 'quorum', '--plan-version', '1']);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('cli.missing-flag');
+    });
+  });
+
   // P9-28: `cli.ts` validated flags with requireFlag and positionals not at
   // all — `positional[0] as string` is a cast, not a check. The worst of it was
   // `event tail` with no session id: it printed `[]` and exited 0, so *you

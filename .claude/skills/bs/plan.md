@@ -55,10 +55,21 @@ there means "not looked at", not "looked at and clean".
    confidence) for you:
 
    ```bash
-   smith plan quorum --epic <epic> --plan-version <n> \
+   smith plan quorum --plan <the draft's plan.json> --plan-version <n> \
      --session <session-id> --causal-parent <event-id> \
-     --confidence <your own 0–1 confidence in this plan>
+     --confidence <your own 0–1 confidence in this plan> \
+     --out <scratch>/quorum-v<n>.json
    ```
+
+   `--plan` hands over the draft itself: at this step nothing has been
+   written to `factory/specs/active/<epic>/` yet — that is step 6, on
+   approval — so the verb cannot read a `plan-v<n>.json` that does not
+   exist. (`--epic <epic>` instead of `--plan` critiques a version already
+   filed.) The draft's own `epic_id`/`version` must be the ones the command
+   names, or it refuses (`plan.identity-mismatch`) rather than record one
+   plan's identity with another plan's triggers. `--out` keeps the outcome
+   — three rationales of several kB each — where step 5 can hand it to the
+   operator whole instead of quoting a terminal.
 
    **Nothing runs this for you — you run it here** when
    `profile.planQuorum` is `always` (`huge`). At `when-triggered` (`medium`,

@@ -21,11 +21,18 @@ provider you switched on can be called at all, and
 `SMITH_CROSSCHECK_OFFLINE=1` forces every external off for one command.
 
 ```bash
-smith plan quorum --epic epic-1 --plan-version 1 \
-  --session <session-id> --causal-parent <event-id> [--confidence 0.7]
+smith plan quorum --plan <draft.json> --plan-version 1 \
+  --session <session-id> --causal-parent <event-id> [--confidence 0.7] \
+  [--out <file>]
 ```
 
-Run it after the spec-reviewer round, before you sign a plan off. It first
+Run it after the spec-reviewer round, before you sign a plan off — which
+is why it takes the draft by path: `plan-v1.json` is written on approval,
+after this critique, so there is no filed version to name yet. `--epic
+<id>` in place of `--plan` critiques a version that is already filed. The
+draft's `epic_id` and `version` must match the envelope
+(`plan.identity-mismatch` otherwise: one record, one plan). `--out` writes
+the printed outcome to a file as well. It first
 evaluates `crosscheck.yml`'s three `plan_quorum` triggers deterministically
 (`mechanical_oracles_first`) — epic budget at or above `budget_ratio` of
 the `budgets.yml` per-epic cap, an infra case or a security-sensitive
