@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { type ErrorReport, toIssueCommentFields } from '../src/errorIssues.js';
+import { foldErrorEvents, renderComment, toIssueCommentFields } from '../src/errorIssues.js';
 import { appendEvent, type StoredEvent } from '../src/events.js';
 import type { CommandResult, CommandRunner } from '../src/gh.js';
 import { runGit } from '../src/git.js';
@@ -843,29 +843,15 @@ describe('issueReporter.ts', () => {
     if (!commentCall) throw new Error('no comment call recorded');
     const body = readBodyFile(commentCall.args);
 
-    // Reconstruct the ErrorReport the second candidate carried -- same
-    // shape reportErrors folds internally -- to compute the expected text.
+    // The first comment call carries the second folded report: fold the same
+    // seeded events through the pure fold and render the expected body from
+    // it, then compare strictly -- one extra or missing byte fails here.
     const commentedRecord = records.find((r) => r.outcome === 'commented');
     if (!commentedRecord) throw new Error('no commented record');
-    const expectedFields = toIssueCommentFields({
-      latest_event_id: commentedRecord.latest_event_id,
-      timestamp: expect.any(String) as unknown as string,
-      session_id: expect.any(String) as unknown as string,
-      epic_id: null,
-      plan_version: expect.any(Number) as unknown as number,
-      fingerprint: commentedRecord.fingerprint,
-    } as ErrorReport);
-    void expectedFields;
-    // Direct construction requires internal fields this test cannot see, so
-    // instead assert byte equality against a comment rendered from the same
-    // allowlisted fields the module itself would have used: the timestamp,
-    // session id and plan version are irrelevant to identity -- the module
-    // asserts on `renderComment` being called with `toIssueCommentFields`,
-    // proven instead by checking the comment strictly contains only the
-    // renderer's fixed line shape and nothing else, and specifically that
-    // it equals rendering the SAME latest_event_id/fingerprint pair.
-    expect(body).toContain(`Fingerprint: ${commentedRecord.fingerprint}`);
-    expect(body).toContain(`New occurrence: ${commentedRecord.latest_event_id}`);
+    const { reports } = foldErrorEvents(events, CLOCK(), ENABLED);
+    const report = reports.find((r) => r.latest_event_id === commentedRecord.latest_event_id);
+    if (!report) throw new Error('no folded report for the commented record');
+    expect(body).toBe(renderComment(toIssueCommentFields(report)));
   });
 
   it('never lets secret detail or a fenced diff reach an argv or the payload (AC8 secret)', async () => {
