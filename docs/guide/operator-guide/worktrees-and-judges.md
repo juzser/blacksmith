@@ -218,6 +218,14 @@ emits `judge-reported` with `agent_role`, `round`, `artifact_path` and
 | `judges.artifact-unparseable` | The file is prose, not JSON | The agent narrated instead of reporting; re-dispatch, don't read the prose as a verdict |
 | `judges.artifact-not-a-list` | Parses, but is not a findings array | It wrote some other shape. An empty review is `[]`, written out |
 
+The grader is the exception the table allows for: its declared artifact is
+its result document (`state/results/<task-id>.grader-r<round>.json`, the file
+`gate run --grader` reads), so `judge report --role grader` accepts that shape
+beside a list and counts the criteria that did not `pass` as `finding_count`.
+A `run_status: dead` grader reported nothing gradable and counts zero. No
+other role gets that reading, and `gate run --grader <file>` closes the
+grader's turn the way `--evidence` closes a reviewer's.
+
 `judge outstanding` prints the difference between the two sets and **exits 1
 while it is non-empty**, so it is a loop condition, not just a report:
 

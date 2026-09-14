@@ -342,6 +342,37 @@ export async function recordJudgeDispatch(
   );
 }
 
+/** The one judge whose artifact is a verdict document rather than a findings list. */
+const GRADER_ROLE = 'grader';
+
+/**
+ * Count what a grader's result document holds against the task.
+ *
+ * The grader's contract is `state/results/<task-id>.grader-r<round>.json`:
+ * `{run_status, structured_output: {round, criteria[], overall}}`, the file
+ * `gate run --grader` reads. Its findings are the criteria it did not pass —
+ * `fail` and `partial` both send the task back — so that is the count the
+ * report carries. A `dead` grader is the grader's own word for "nothing here
+ * is gradable" (`checkGraderVerdict`): it reported, and found nothing to
+ * count. Anything else that is not a `criteria` array is some other shape and
+ * gets `undefined`, so the caller refuses it the way it refuses every other
+ * non-list. Schema validation stays with the gate: this decides whether the
+ * grader *reported*, not whether its verdict holds.
+ */
+function graderFindingCount(parsed: unknown): number | undefined {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  const document = parsed as Record<string, unknown>;
+  if (document.run_status === 'dead') return 0;
+  const structured = document.structured_output;
+  if (typeof structured !== 'object' || structured === null) return undefined;
+  const criteria = (structured as Record<string, unknown>).criteria;
+  if (!Array.isArray(criteria)) return undefined;
+  return criteria.filter(
+    (c) =>
+      !(typeof c === 'object' && c !== null && (c as Record<string, unknown>).status === 'pass'),
+  ).length;
+}
+
 /**
  * Read a judge's artifact and answer how many findings it holds.
  *
@@ -349,10 +380,16 @@ export async function recordJudgeDispatch(
  * different things to do about it: the file is not there (re-poke the agent),
  * it is there and is prose (the agent narrated instead of reporting), it is
  * there and parses but is not a findings list (the agent wrote some other
- * shape — a grader verdict, say, which is P9-14's business and needs its own
- * schema before anything here can accept it).
+ * shape).
+ *
+ * The grader is the one role whose declared shape is not a list: it writes a
+ * verdict document, and refusing that document left its turn closable only by
+ * a hand-written evidence file (FD-1, csb-audit-1). For `role === 'grader'`
+ * the grader result document is accepted beside the list, and the count is
+ * its non-pass criteria. No other role gets that reading — a reviewer that
+ * wrote a verdict wrote the wrong shape.
  */
-export function readJudgeArtifact(artifactPath: string): unknown[] {
+export function readJudgeArtifact(artifactPath: string, role?: string): number {
   let raw: string;
   try {
     raw = readFileSync(artifactPath, 'utf8');
@@ -375,14 +412,20 @@ export function readJudgeArtifact(artifactPath: string): unknown[] {
     );
   }
 
-  if (!Array.isArray(parsed)) {
-    throw new JudgeError(
-      'judges.artifact-not-a-list',
-      `Judge artifact "${artifactPath}" parsed to ${parsed === null ? 'null' : typeof parsed}, not a findings-evidence array. An empty review is "[]", written out.`,
-      { artifact_path: artifactPath },
-    );
-  }
-  return parsed;
+  if (Array.isArray(parsed)) return parsed.length;
+
+  const graderCount = role === GRADER_ROLE ? graderFindingCount(parsed) : undefined;
+  if (graderCount !== undefined) return graderCount;
+
+  const accepted =
+    role === GRADER_ROLE
+      ? 'a findings-evidence array or the grader result document ({run_status, structured_output: {criteria: [...]}})'
+      : 'a findings-evidence array';
+  throw new JudgeError(
+    'judges.artifact-not-a-list',
+    `Judge artifact "${artifactPath}" parsed to ${parsed === null ? 'null' : typeof parsed}, not ${accepted}. An empty review is "[]", written out.`,
+    { artifact_path: artifactPath, agent_role: role ?? null },
+  );
 }
 
 function notDispatchedMessage(
@@ -424,7 +467,7 @@ export async function recordJudgeReport(
   }
 
   const artifactPath = input.noFindings ? null : (input.artifactPath ?? turn.declaredArtifact);
-  const findingCount = artifactPath === null ? 0 : readJudgeArtifact(artifactPath).length;
+  const findingCount = artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role);
 
   await emit(
     JUDGE_REPORT_EVENT_TYPE,

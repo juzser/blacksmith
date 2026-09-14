@@ -2673,11 +2673,18 @@ async function main(): Promise<number> {
     // blocking the gate on a judge that had just handed in its evidence. One
     // close per role: a judge that splits its findings across two files still
     // owes one turn, and a second report against it would be a duplicate.
+    //
+    // FD-1 (csb-audit-1): `--grader` is the same hand-over for the grader. Its
+    // verdict document is not a findings list, so until `judge report` learned
+    // the shape the grader's turn stayed open with its verdict on the command
+    // line, and the gate blocked on the judge it was about to read.
     const evidenceGiven = evidenceSources(args);
-    if (evidenceGiven.length > 0) {
+    const graderGiven = flags.grader ? [{ foundBy: 'grader', file: flags.grader }] : [];
+    const handedIn = [...evidenceGiven, ...graderGiven];
+    if (handedIn.length > 0) {
       const turns = await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags));
       const closed = new Set<string>();
-      for (const { foundBy, file } of evidenceGiven) {
+      for (const { foundBy, file } of handedIn) {
         if (closed.has(foundBy)) continue;
         if (!turns.some((t) => t.role === foundBy && !t.reported)) continue;
         closed.add(foundBy);

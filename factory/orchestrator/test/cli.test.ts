@@ -7783,6 +7783,47 @@ describe('cli.ts (built binary)', () => {
       ]);
     });
 
+    // FD-1 (csb-audit-1). `--grader` hands the gate the grader's verdict the
+    // way `--evidence` hands it a judge's findings, but only the evidence path
+    // closed the judge's turn. A grader dispatched by `judge dispatch` then
+    // blocked its own gate as `judges-outstanding` with its verdict sitting
+    // in the same command line.
+    it('gate run --grader closes the dispatched grader whose verdict it is', async () => {
+      const { sessionId, eventsDir } = await judgeSession();
+      const files = await gateFiles(sessionId);
+      const grader = path.join(scratchDir, `${sessionId}-grader.json`);
+      dispatchJudge(sessionId, eventsDir, 'grader', grader);
+      await writeFile(
+        grader,
+        JSON.stringify({
+          run_status: 'done',
+          structured_output: {
+            round: 1,
+            criteria: [{ criterion: 'it builds', status: 'pass', evidence: 'build log' }],
+            overall: 'pass',
+          },
+        }),
+      );
+
+      const gated = gateRun(sessionId, eventsDir, files, ['--grader', grader]);
+      expect(gated.status).toBe(0);
+      expect(JSON.parse(gated.stdout).outcome).not.toBe('blocked');
+      expect(
+        judgeCli('outstanding', sessionId, eventsDir, ['--task', 'epic-1/task-1']).status,
+      ).toBe(0);
+
+      const events = runCli(['event', 'tail', sessionId, '--n', '100', '--state-dir', eventsDir]);
+      const reported = JSON.parse(events.stdout)
+        .map((e: { record: { event_type: string; payload: Record<string, unknown> } }) => e.record)
+        .filter((r: { event_type: string }) => r.event_type === 'judge-reported')
+        .map((r: { payload: Record<string, unknown> }) => [
+          r.payload.agent_role,
+          r.payload.artifact_path,
+          r.payload.finding_count,
+        ]);
+      expect(reported).toEqual([['grader', grader, 0]]);
+    });
+
     it('gate run --evidence for a role nobody dispatched behaves exactly as it did before', async () => {
       const { sessionId, eventsDir, artifact } = await judgeSession();
       const files = await gateFiles(sessionId);

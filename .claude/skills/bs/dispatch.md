@@ -279,7 +279,11 @@ smith judge outstanding --task <task-id> --session ...
 prints what is still owed and **exits 1 while anything is**, so it is the loop
 condition for a re-poke, not just a report. Passing the file to
 `gate run --evidence <path> --found-by <role>` reports for you, so the normal
-path is dispatch → judge writes → gate. `--model` is required and has no
+path is dispatch → judge writes → gate. The grader is the one judge whose
+declared shape is not a list: for `--role grader` the artifact is its result
+document (`state/results/<task-id>.grader-r<round>.json`), `finding_count` is
+its non-`pass` criteria, and `gate run --grader <file>` closes its turn the
+way `--evidence` closes the others (FD-1). `--model` is required and has no
 default: this is an ordinary dispatch record, and `smith dispatch check` (P9-23)
 compares reviewer and verifier by model id, so a placeholder here would make
 that audit answer for a session nobody ran. `--no-findings` records an operator
