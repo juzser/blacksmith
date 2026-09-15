@@ -291,6 +291,14 @@ function reportFor(field: string, value: string, source: string | null): StackAn
         note: `The uiux agent is told to ground its specs in ${value}; with design_system_source empty, no kit is copied into scaffolded projects.`,
       };
     }
+    // A relative `design_system_source` is relative to the *package*, not to
+    // the operator's repository -- which is what it has always meant and what
+    // scaffold.ts resolves it against too. Stated here because this diff moved
+    // the file the value is typed into (stack.yml is now read from the work
+    // root under an install) without moving the base it resolves against, so a
+    // reader could reasonably assume the two travel together. They do not:
+    // changing the base is a behaviour change for every existing clone and
+    // needs a matching sentence in stack.yml, which is a policy file.
     const resolved = path.isAbsolute(source) ? source : path.join(REPO_ROOT, source);
     return existsSync(resolved)
       ? {
