@@ -109,6 +109,7 @@ import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import {
   DOTENV_PATH,
   LESSONS_MD_PATH,
+  lessonsReadPath,
   REPO_ROOT,
   SANDBOX_LEASE_DIR,
   STATE_DB_PATH,
@@ -2825,7 +2826,7 @@ async function main(): Promise<number> {
     // a different number, and the half it drops is the earlier one — the half
     // that holds the first occurrence every repeat is counted against.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
-    const lessons = parseLessons(readFileSync(flags.lessons ?? LESSONS_MD_PATH, 'utf8'));
+    const lessons = parseLessons(readFileSync(flags.lessons ?? lessonsReadPath(), 'utf8'));
     const report = checkSameMistakeKpi(events, lessons, { sessionId });
     printJson(report);
     return report.ok ? 0 : 1;
@@ -3405,7 +3406,13 @@ async function main(): Promise<number> {
     const { lessonsPage } = await import('./db/queries.js');
     const { compileLessons } = await import('./lessons.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
+    // The operator's copy, not the package's: under an install the shipped one
+    // lives in node_modules, which the next `npm i` replaces wholesale. mkdir
+    // because nothing has necessarily written under factory/ in the work root
+    // before -- `smith init` seeds the two files the operator edits by hand,
+    // and this one is not among them.
     const outPath = flags.out ?? LESSONS_MD_PATH;
+    mkdirSync(path.dirname(outPath), { recursive: true });
     const handle = openDb(dbPath);
     try {
       const scope = flags.session ? { sessionId: flags.session } : {};
@@ -3462,7 +3469,7 @@ async function main(): Promise<number> {
     // question is whether an entry has EVER fired, and a session-scoped read
     // answers "not in this half of the epic" while printing `retire`.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
-    const lessons = parseLessons(readFileSync(flags.lessons ?? LESSONS_MD_PATH, 'utf8'));
+    const lessons = parseLessons(readFileSync(flags.lessons ?? lessonsReadPath(), 'utf8'));
     const report = auditLessons(events, lessons, { sessionId });
     printJson(report);
     return report.ok ? 0 : 1;

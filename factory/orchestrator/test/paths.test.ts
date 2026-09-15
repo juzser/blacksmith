@@ -159,6 +159,7 @@ describe('the work root', () => {
       paths.AGENTS_DIR,
       paths.ROADMAP_DEFAULT_PATH,
       paths.STACK_POLICY_DEFAULT_PATH,
+      paths.LESSONS_MD_DEFAULT_PATH,
     ]) {
       expect(path.relative(paths.REPO_ROOT, abs)).not.toMatch(/^\.\./);
     }
@@ -242,12 +243,15 @@ describe('a file the factory ships and the operator then edits', () => {
   it('spells both halves the same way under their root, so seeding is a copy', () => {
     // The property `smith init` depends on, and the reason a pair can be
     // stated as one relative path rather than two absolute ones.
-    expect(path.relative(paths.WORK_ROOT, paths.ROADMAP_PATH)).toBe(
-      path.relative(paths.REPO_ROOT, paths.ROADMAP_DEFAULT_PATH),
-    );
-    expect(path.relative(paths.WORK_ROOT, paths.STACK_POLICY_PATH)).toBe(
-      path.relative(paths.REPO_ROOT, paths.STACK_POLICY_DEFAULT_PATH),
-    );
+    for (const [personal, shipped] of [
+      [paths.ROADMAP_PATH, paths.ROADMAP_DEFAULT_PATH],
+      [paths.STACK_POLICY_PATH, paths.STACK_POLICY_DEFAULT_PATH],
+      [paths.LESSONS_MD_PATH, paths.LESSONS_MD_DEFAULT_PATH],
+    ]) {
+      expect(path.relative(paths.OVERLAY_ROOT, personal as string)).toBe(
+        path.relative(paths.REPO_ROOT, shipped as string),
+      );
+    }
   });
 
   it('changes nothing for an operator standing in a clone', () => {
@@ -255,7 +259,45 @@ describe('a file the factory ships and the operator then edits', () => {
     // so every read and every write names the file it named before.
     expect(paths.ROADMAP_PATH).toBe(paths.ROADMAP_DEFAULT_PATH);
     expect(paths.STACK_POLICY_PATH).toBe(paths.STACK_POLICY_DEFAULT_PATH);
+    expect(paths.LESSONS_MD_PATH).toBe(paths.LESSONS_MD_DEFAULT_PATH);
     expect(paths.roadmapReadPath()).toBe(paths.ROADMAP_DEFAULT_PATH);
     expect(paths.stackPolicyReadPath()).toBe(paths.STACK_POLICY_DEFAULT_PATH);
+    expect(paths.lessonsReadPath()).toBe(paths.LESSONS_MD_DEFAULT_PATH);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ...and the root it hangs off, which is not the work root.
+//
+// `resolveWorkRoot` lets `SMITH_HOME` beat `isClone`, on purpose: an operator
+// who wants one fixed home for several projects means it, and `state/` is
+// exactly the thing that should follow them there. The overlay files are not
+// state. All three are tracked in this repository -- declarations about *this*
+// checkout, committed beside the code they describe -- so a clone that
+// followed `SMITH_HOME` for them would seed a shadow copy under that home, and
+// from the first `smith new` the tracked roadmap in the operator's editor
+// would be a file nothing reads. No error, no signal, and the clause "an
+// existing checkout cannot tell the difference" would be quietly conditional
+// on an environment variable nobody mentioned.
+// ---------------------------------------------------------------------------
+
+describe("which root the operator's copy hangs off", () => {
+  const clone = '/home/dev/blacksmith';
+  const install = '/home/dev/app/node_modules/@juzser/blacksmith';
+
+  it('is the work root under an install, wherever the work root ended up', () => {
+    expect(paths.resolveOverlayRoot(install, '/home/dev/app/.blacksmith', false)).toBe(
+      '/home/dev/app/.blacksmith',
+    );
+    expect(paths.resolveOverlayRoot(install, '/srv/smith', false)).toBe('/srv/smith');
+  });
+
+  it('is the checkout in a clone even when SMITH_HOME moved the state elsewhere', () => {
+    // The regression this test exists for. `resolveWorkRoot` answers /srv/smith
+    // here -- correctly, for state -- and the roadmap must stay in the clone
+    // anyway, because that is where the tracked copy is.
+    const workRoot = paths.resolveWorkRoot(clone, '/anywhere', { SMITH_HOME: '/srv/smith' }, true);
+    expect(workRoot).toBe('/srv/smith');
+    expect(paths.resolveOverlayRoot(clone, workRoot, true)).toBe(clone);
   });
 });

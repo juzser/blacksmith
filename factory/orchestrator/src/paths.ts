@@ -106,7 +106,34 @@ export function resolveOverlayRead(
   return exists(personal) ? personal : shipped;
 }
 
+/**
+ * Which root the *written* half of an overlay hangs off -- and the one place
+ * the work root is deliberately not it.
+ *
+ * `SMITH_HOME` beats `isClone` in `resolveWorkRoot`, on purpose: it is how an
+ * operator says "keep one fixed home for several projects", and state is
+ * exactly the thing that should follow them there. The two overlay files are
+ * not state. `factory/specs/roadmap.md` and `factory/policies/stack.yml` are
+ * tracked files in this repo -- declarations about *this* checkout, committed
+ * beside the code they describe -- and a clone that redirected them to
+ * `$SMITH_HOME` would leave its own tracked copies still sitting in the editor
+ * looking authoritative while every reader had quietly moved on. Split brain,
+ * no error.
+ *
+ * So a clone keeps its declarations, whatever `SMITH_HOME` says about its
+ * state, and only an install -- which has no tracked copy to orphan, and whose
+ * REPO_ROOT is a directory `npm i` replaces -- moves them to the work root.
+ * This is what makes "an existing checkout changes nothing" true without a
+ * condition attached to it.
+ */
+export function resolveOverlayRoot(repoRoot: string, workRoot: string, isClone: boolean): string {
+  return isClone ? repoRoot : workRoot;
+}
+
 export const WORK_ROOT = resolveWorkRoot(REPO_ROOT, process.cwd(), process.env, IS_CLONE);
+
+/** Where the operator's copy of a shipped-then-edited file lives. */
+export const OVERLAY_ROOT = resolveOverlayRoot(REPO_ROOT, WORK_ROOT, IS_CLONE);
 
 /**
  * The operator's own `.env`, read at CLI start by `loadDotEnv`. Gitignored, and
@@ -135,7 +162,7 @@ export const DB_MIGRATIONS_DIR = path.join(REPO_ROOT, 'factory', 'orchestrator',
  */
 export const ROADMAP_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'specs', 'roadmap.md');
 /** The operator's roadmap -- the one `registerProjectInRoadmap` writes into. */
-export const ROADMAP_PATH = path.join(WORK_ROOT, 'factory', 'specs', 'roadmap.md');
+export const ROADMAP_PATH = path.join(OVERLAY_ROOT, 'factory', 'specs', 'roadmap.md');
 /** The roadmap to read: the operator's if they have one, the shipped one if not. */
 export function roadmapReadPath(): string {
   return resolveOverlayRead(ROADMAP_PATH, ROADMAP_DEFAULT_PATH);
@@ -159,7 +186,23 @@ export const WORKSPACES_DIR = path.join(WORK_ROOT, 'workspaces');
  */
 export const PROJECTS_DIR = resolveProjectsDir(REPO_ROOT, process.cwd(), IS_CLONE);
 export const SCHEDULER_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'scheduler.yml');
-export const LESSONS_MD_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'lessons.md');
+/**
+ * The compiled lessons as they ship. Read-only under this name; see
+ * LESSONS_MD_PATH for the copy `smith lessons compile` writes.
+ */
+export const LESSONS_MD_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'lessons.md');
+/**
+ * The operator's compiled lessons -- the third file that is both shipped and
+ * written. Nobody types it, so it is not an answer in the sense the other two
+ * are; it is this factory's accumulated memory, compiled from the operator's
+ * own event log by `smith lessons compile`, and an upgrade that resets it
+ * loses exactly as much.
+ */
+export const LESSONS_MD_PATH = path.join(OVERLAY_ROOT, 'factory', 'policies', 'lessons.md');
+/** The lessons to read: the operator's if they have compiled any, the shipped set if not. */
+export function lessonsReadPath(): string {
+  return resolveOverlayRead(LESSONS_MD_PATH, LESSONS_MD_DEFAULT_PATH);
+}
 /** The shipped role templates — read at dispatch for their `<!-- LESSONS:<scope> -->` markers (P9-2). */
 export const AGENTS_DIR = path.join(REPO_ROOT, '.claude', 'agents');
 export const CROSSCHECK_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'crosscheck.yml');
@@ -202,7 +245,7 @@ export const STACK_POLICY_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'polici
  * place, so this is the copy that gets edited -- under the work root, where an
  * upgrade cannot reach it.
  */
-export const STACK_POLICY_PATH = path.join(WORK_ROOT, 'factory', 'policies', 'stack.yml');
+export const STACK_POLICY_PATH = path.join(OVERLAY_ROOT, 'factory', 'policies', 'stack.yml');
 /** The stack answers to read: the operator's if they have any, the shipped questionnaire if not. */
 export function stackPolicyReadPath(): string {
   return resolveOverlayRead(STACK_POLICY_PATH, STACK_POLICY_DEFAULT_PATH);

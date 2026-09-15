@@ -72,7 +72,7 @@ function declaredPathConstants(): Map<string, PathConstant> {
 }
 
 /** The anchors themselves: roots, not paths under a root. */
-const ROOTS = new Set(['REPO_ROOT', 'WORK_ROOT']);
+const ROOTS = new Set(['REPO_ROOT', 'WORK_ROOT', 'OVERLAY_ROOT']);
 
 /**
  * The constants the CLI *writes*. Each is held to hanging off `WORK_ROOT` and
@@ -103,10 +103,17 @@ const WRITTEN = new Set([
  * anybody writes, and the two are the same relative path under two roots -- so
  * seeding one from the other is a copy, and in a clone they collapse to one
  * file and no existing checkout changes behaviour.
+ *
+ * The written half hangs off OVERLAY_ROOT rather than WORK_ROOT, and the
+ * difference is the whole of that last clause: `SMITH_HOME` moves the work
+ * root out of a clone on purpose, and these three files are tracked in the
+ * clone, so following it would orphan the committed copies. OVERLAY_ROOT is
+ * WORK_ROOT under an install and the checkout in a clone, always.
  */
 const OVERLAID = new Map([
   ['ROADMAP_PATH', 'ROADMAP_DEFAULT_PATH'],
   ['STACK_POLICY_PATH', 'STACK_POLICY_DEFAULT_PATH'],
+  ['LESSONS_MD_PATH', 'LESSONS_MD_DEFAULT_PATH'],
 ]);
 
 /** Constants that are under neither root, each with the reason. */
@@ -157,8 +164,8 @@ describe('the published package', () => {
       if (OVERLAID.has(name)) {
         const shipped = declared.get(OVERLAID.get(name) as string);
         expect(shipped, `${name} is excused as an overlay with no default beside it`).toBeDefined();
-        expect(anchor, `${name} is written by the operator and must hang off WORK_ROOT`).toBe(
-          'WORK_ROOT',
+        expect(anchor, `${name} is written by the operator and must hang off OVERLAY_ROOT`).toBe(
+          'OVERLAY_ROOT',
         );
         // The default half is held to the read rules by the branch below, on
         // its own pass through this loop. What is stated here is the pairing:

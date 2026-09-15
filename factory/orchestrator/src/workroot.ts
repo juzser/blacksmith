@@ -6,7 +6,6 @@ import {
   ROADMAP_PATH,
   SPECS_ACTIVE_DIR,
   STACK_POLICY_DEFAULT_PATH,
-  STACK_POLICY_PATH,
   STATE_ARTIFACTS_DIR,
   STATE_EVENTS_DIR,
   WORK_ROOT,
@@ -53,6 +52,14 @@ export const OVERLAY_FILES: readonly string[] = [
   path.relative(REPO_ROOT, ROADMAP_DEFAULT_PATH),
   path.relative(REPO_ROOT, STACK_POLICY_DEFAULT_PATH),
 ];
+
+// `factory/policies/lessons.md` is the third overlay in `paths.ts` and is
+// deliberately not in that list. The two above are seeded because INSTALL.md
+// has the operator open them and edit them in place -- they must exist before
+// anyone can answer. Nobody hand-edits lessons.md: it appears the first time
+// `smith lessons compile` runs, and until then reading the shipped set is the
+// right answer. Seeding a copy would freeze the lessons at install time and
+// stop every later upgrade from delivering new ones.
 
 /**
  * The directories the CLI writes into. Same derivation, same reason: the
@@ -113,12 +120,6 @@ export function seedFromShipped(personal: string, shipped: string): SeedResult {
 export function ensureWritableRoadmap(): string {
   seedFromShipped(ROADMAP_PATH, ROADMAP_DEFAULT_PATH);
   return ROADMAP_PATH;
-}
-
-/** Same, for the stack answers. */
-export function ensureWritableStackPolicy(): string {
-  seedFromShipped(STACK_POLICY_PATH, STACK_POLICY_DEFAULT_PATH);
-  return STACK_POLICY_PATH;
 }
 
 export interface InitOptions {

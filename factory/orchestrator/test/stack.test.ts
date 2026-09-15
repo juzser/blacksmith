@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { STACK_POLICY_PATH } from '../src/paths.js';
+import { STACK_POLICY_DEFAULT_PATH } from '../src/paths.js';
 import {
   checkStack,
   loadStackAnswers,
@@ -105,9 +105,12 @@ describe('parseStackAnswers', () => {
     expect(parsed.designSystemSource).toBe('./kit');
   });
 
-  it('loads the file the paths module points at', () => {
-    expect(existsSync(STACK_POLICY_PATH)).toBe(true);
-    expect(() => loadStackAnswers(STACK_POLICY_PATH)).not.toThrow();
+  it('loads the questionnaire that ships', () => {
+    // The default, not the overlay: this test means "what we put in the
+    // tarball parses". Naming STACK_POLICY_PATH would only still say that
+    // because the two collapse in a clone.
+    expect(existsSync(STACK_POLICY_DEFAULT_PATH)).toBe(true);
+    expect(() => loadStackAnswers(STACK_POLICY_DEFAULT_PATH)).not.toThrow();
   });
 });
 
