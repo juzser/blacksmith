@@ -355,6 +355,19 @@ describe('lib/timelineDisplay.ts', () => {
       expect(titleFor(entry({ eventType: 'error-report-proposed', payload: {} }))).toBe(
         'Error report proposed —  in  (0 occurrences)',
       );
+      expect(
+        titleFor(
+          entry({
+            eventType: 'error-report-proposed',
+            payload: {
+              kind: 'error-report',
+              errorClass: 'AssertionError',
+              taskRef: 'epic/task-3',
+              occurrences: 1,
+            },
+          }),
+        ),
+      ).toBe('Error report proposed — AssertionError in epic/task-3 (1 occurrence)');
     });
 
     it('gives the growth review its cadence, and degrades without a last review', () => {

@@ -791,6 +791,74 @@ describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
     }).filter((p) => p.kind === 'error-report');
     expect(proposals).toHaveLength(0);
   });
+
+  it('answers one of two fingerprints and still proposes the other', () => {
+    const events = [errorLogged('epic-1/task-1'), errorLogged('epic-1/task-2')];
+    const [first, second] = errorReports(events);
+    if (first?.kind !== 'error-report' || second?.kind !== 'error-report') {
+      throw new Error('fixture minted fewer than two proposals');
+    }
+    const answered = [
+      ...events,
+      ev({
+        event_type: 'issue-reported',
+        task_id: 'epic-1/task-1',
+        payload: {
+          outcome: 'opened',
+          fingerprint: first.fingerprint,
+          latest_event_id: first.latestEventId,
+        },
+      }),
+    ];
+    const remaining = errorReports(answered);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]?.kind === 'error-report' && remaining[0].fingerprint).toBe(
+      second.fingerprint,
+    );
+  });
+
+  it('reads isErrorTrackerEnabled per project, not once for the whole run', () => {
+    // ev() does not forward `project` (it names only the fields scheduler.ts's
+    // other fixtures need), so the project is stamped onto the record here.
+    const withProject = (event: StoredEvent, project: string): StoredEvent => ({
+      ...event,
+      record: { ...event.record, project },
+    });
+    const onEvent = withProject(
+      ev({
+        event_type: 'error-logged',
+        task_id: 'epic-1/task-1',
+        payload: {
+          task_ref: 'epic-1/task-1',
+          agent: 'coder',
+          error: 'gate.blocked',
+          severity: 'S2-major',
+        },
+      }),
+      'proj-on',
+    );
+    const offEvent = withProject(
+      ev({
+        event_type: 'error-logged',
+        task_id: 'epic-1/task-2',
+        payload: {
+          task_ref: 'epic-1/task-2',
+          agent: 'coder',
+          error: 'gate.blocked',
+          severity: 'S2-major',
+        },
+      }),
+      'proj-off',
+    );
+    const proposals = computeProposals({
+      events: [onEvent, offEvent],
+      now: NOW,
+      policy: POLICY,
+      isErrorTrackerEnabled: (project) => project === 'proj-on',
+    }).filter((p) => p.kind === 'error-report');
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0]?.kind === 'error-report' && proposals[0].project).toBe('proj-on');
+  });
 });
 
 // pnpm itself must be reachable for runPnpmOutdated's "when available"
