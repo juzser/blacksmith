@@ -216,6 +216,37 @@ async function appendIssueReported(
   );
 }
 
+/**
+ * Step 4's dedup rule, the one copy both the real path and the preview read:
+ * same project, same fingerprint, same latest event, already open.
+ */
+function priorReportFor(
+  history: readonly PriorReport[],
+  report: ErrorReport,
+): PriorReport | undefined {
+  return history.find(
+    (h) =>
+      h.project === report.project &&
+      h.fingerprint === report.fingerprint &&
+      h.latest_event_id === report.latest_event_id,
+  );
+}
+
+/**
+ * `register` is required and never defaulted: a caller that forwards
+ * `undefined` past TypeScript would otherwise fail inside
+ * `resolveProjectRepo` as a bare `Cannot read properties of undefined`,
+ * naming neither the parameter nor this module. `[]` is a legitimate
+ * register (every project refuses as `no-checkout`) and is not rejected.
+ */
+function requireRegister(register: readonly ProjectRef[], entryPoint: string): void {
+  if (!Array.isArray(register)) {
+    throw new Error(
+      `${entryPoint}: the register parameter is required (readonly ProjectRef[]), got ${String(register)}`,
+    );
+  }
+}
+
 /** Functional clause 2's decision procedure, in order, stopping at the first match. */
 async function decideOutcome(
   report: ErrorReport,
@@ -268,13 +299,7 @@ async function decideOutcome(
   }
 
   // Step 4: already reported and still open, per the snapshot this call read.
-  const already = history.find(
-    (h) =>
-      h.project === report.project &&
-      h.fingerprint === report.fingerprint &&
-      h.latest_event_id === report.latest_event_id,
-  );
-  if (already) {
+  if (priorReportFor(history, report)) {
     return {
       ...base,
       outcome: 'deduped-open',
@@ -322,6 +347,124 @@ async function decideOutcome(
   };
 }
 
+/** Preview's statement about the one step it has no instrument to measure. */
+const STEP_3_NOT_PERFORMED = 'not-performed' as const;
+
+const DECISION_NOTE =
+  'create or comment: which of the two would run is decided by the search ' +
+  'this preview deliberately does not perform';
+
+/**
+ * One candidate's preview. Either it settled at step 1, 2 or 4 without
+ * reaching a `gh` step -- `(outcome, reason)` plus the step that settled it,
+ * no argv -- or it reached the `gh` steps and carries every argv the real
+ * path could run for it, with the rendered issue body and comment text.
+ * Every record says step 3 was not performed: preview spawns no `gh`, so it
+ * reports the step as unperformed rather than guessing a word for it.
+ */
+export interface IssuePreviewRecord {
+  fingerprint: string;
+  project: string;
+  source: ErrorReport['source'];
+  error_class: string;
+  task_ref: string;
+  latest_event_id: string;
+  step_3_gh_availability: typeof STEP_3_NOT_PERFORMED;
+  /** Present exactly when the candidate settled before the `gh` steps. */
+  settled_at_step?: 1 | 2 | 4;
+  outcome?: Extract<IssueReportOutcome, 'skipped-disabled' | 'skipped-no-remote' | 'deduped-open'>;
+  reason?: string;
+  /** Present once the repository is resolved (step 2 passed). */
+  repo_slug?: string;
+  /** The gh-reaching block: all three argvs, the rendered texts, and the note. */
+  search_argv?: string[];
+  create_argv?: string[];
+  comment_argv?: string[];
+  issue_body?: string;
+  comment_text?: string;
+  decision_note?: string;
+}
+
+/**
+ * The preview-safe half of `decideOutcome`: steps 1, 2 and 4 only, through
+ * the same fold, the same `priorOpenReports` and the same `priorReportFor`
+ * the real path uses. It never invokes the runner with command `gh` and
+ * never appends an event. For a candidate that would reach the `gh` steps
+ * it BUILDS the search, create and comment argv the real path would run,
+ * and prints both create and comment because which one runs is settled by
+ * a search this helper does not perform. The comment argv's issue number is
+ * `0`, a placeholder: the real number is only known after that search.
+ *
+ * `runner` is accepted for signature parity with `reportErrors()`; nothing
+ * in this helper reaches it, and a test hands in one whose `gh` branch throws.
+ */
+export async function previewOutcomes(
+  events: readonly StoredEvent[],
+  isProjectEnabled: (project: string) => boolean,
+  register: readonly ProjectRef[],
+  runner: CommandRunner,
+  clock: () => string,
+): Promise<IssuePreviewRecord[]> {
+  requireRegister(register, 'previewOutcomes');
+  void runner;
+  const { reports } = foldErrorEvents(events, clock(), () => true);
+  const history = priorOpenReports(events);
+
+  const out: IssuePreviewRecord[] = [];
+  for (const report of reports) {
+    const base = {
+      fingerprint: report.fingerprint,
+      project: report.project,
+      source: report.source,
+      error_class: report.error_class,
+      task_ref: report.task_ref,
+      latest_event_id: report.latest_event_id,
+      step_3_gh_availability: STEP_3_NOT_PERFORMED as typeof STEP_3_NOT_PERFORMED,
+    };
+
+    // Step 1: the switch.
+    if (!isProjectEnabled(report.project)) {
+      out.push({ ...base, settled_at_step: 1, outcome: 'skipped-disabled', reason: 'switch-off' });
+      continue;
+    }
+
+    // Step 2: which repository -- git-only, and the source of the slug.
+    const repo = resolveProjectRepo(report.project, register);
+    if (!('slug' in repo)) {
+      out.push({ ...base, settled_at_step: 2, outcome: 'skipped-no-remote', reason: repo.reason });
+      continue;
+    }
+    const repoSlug = repo.slug;
+
+    // Step 3 is skipped, not guessed. Step 4: the own-log dedup.
+    if (priorReportFor(history, report)) {
+      out.push({
+        ...base,
+        settled_at_step: 4,
+        outcome: 'deduped-open',
+        reason: 'already-reported',
+        repo_slug: repoSlug,
+      });
+      continue;
+    }
+
+    const fields = toIssueBodyFields(report);
+    const issueBody = renderBody(fields);
+    const commentText = renderComment(toIssueCommentFields(report));
+    out.push({
+      ...base,
+      repo_slug: repoSlug,
+      search_argv: buildSearchIssuesArgv(repoSlug, report.fingerprint),
+      create_argv: buildCreateIssueArgv(repoSlug, renderTitle(fields), issueBody),
+      comment_argv: buildCommentArgv(repoSlug, 0, commentText),
+      issue_body: issueBody,
+      comment_text: commentText,
+      decision_note: DECISION_NOTE,
+    });
+  }
+  return out;
+}
+
 /**
  * Fold `events` into candidate errors, decide and act on each in order, and
  * record every attempt as an `issue-reported` event. Never throws on a
@@ -340,6 +483,7 @@ export async function reportErrors(
   clock: () => string,
   opts: EventOpts = {},
 ): Promise<IssueReportRecord[]> {
+  requireRegister(register, 'reportErrors');
   // Every project's switch is applied by this module's own step 1, not by
   // the fold: foldErrorEvents dropping a disabled project's candidates
   // silently would lose the `skipped-disabled` record clause 2 requires.

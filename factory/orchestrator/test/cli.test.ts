@@ -8314,7 +8314,7 @@ describe('cli.ts (built binary)', () => {
       const records = JSON.parse(stdout);
       expect(records).toHaveLength(1);
       expect(records[0].task_ref).toBe('epic-1/task-a');
-      expect(records[0].error_class).toBe('tests-failed');
+      expect(records[0].error_class).toBe('gate.blocked.tests-failed');
       expect(typeof records[0].fingerprint).toBe('string');
       expect(records[0].search_argv).toContain(records[0].fingerprint);
       expect(records[0].create_argv[0]).toBe('issue');
