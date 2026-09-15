@@ -136,6 +136,7 @@ const ALL_TABLES = [
   schema.lessons,
   schema.artifacts,
   schema.milestones,
+  schema.issue_reports,
 ] as const;
 
 /** Delete every row in every projection table (full "drop" for rebuild()). */
@@ -158,6 +159,7 @@ function clearSession(db: SmithDb, sessionId: string): void {
   db.delete(schema.errors).where(eq(schema.errors.sessionId, sessionId)).run();
   db.delete(schema.waivers).where(eq(schema.waivers.sessionId, sessionId)).run();
   db.delete(schema.artifacts).where(eq(schema.artifacts.sessionId, sessionId)).run();
+  db.delete(schema.issue_reports).where(eq(schema.issue_reports.sessionId, sessionId)).run();
   // `lessons` and `findings` are deliberately absent, like `milestones` —
   // projectLessons() and projectFindings() own those tables whole (D-199,
   // D-200). Deleting by session_id here would delete a row this session
@@ -208,6 +210,7 @@ function projectMilestones(handle: DbHandle, opts: DbOpts): void {
           epicIds: JSON.stringify(m.epicIds),
           project: m.project,
           kind: m.kind,
+          errorIssues: m.errorIssuesEnabled,
         })
         .run();
     }
@@ -233,6 +236,18 @@ interface ErrorPayload {
   severity?: string;
   task_ref?: string;
   detail?: string;
+}
+
+interface IssueReportPayload {
+  task_ref?: string;
+  error_class?: string;
+  fingerprint?: string;
+  issue_url?: string;
+  latest_event_id?: string;
+  outcome?: string;
+  reason?: string;
+  repo_slug?: string;
+  source?: string;
 }
 
 interface ResultArtifact {
@@ -1162,6 +1177,30 @@ export function projectSession(
             errorClass: cls,
             severity: p.severity,
             detail: p.detail ?? null,
+            project: record.project ?? projectForRef(p.task_ref ?? eventTask),
+          })
+          .run();
+        continue;
+      }
+
+      if (record.event_type === 'issue-reported') {
+        const p = record.payload as IssueReportPayload;
+        if (!p.fingerprint || !p.outcome) continue;
+        txDb
+          .insert(schema.issue_reports)
+          .values({
+            eventId: event_id,
+            sessionId: record.session_id,
+            ts: record.ts,
+            taskRef: p.task_ref ?? eventTask,
+            errorClass: p.error_class ?? '',
+            fingerprint: p.fingerprint,
+            issueUrl: p.issue_url ?? null,
+            latestEventId: p.latest_event_id ?? '',
+            outcome: p.outcome,
+            reason: p.reason ?? null,
+            repoSlug: p.repo_slug ?? null,
+            source: p.source ?? '',
             project: record.project ?? projectForRef(p.task_ref ?? eventTask),
           })
           .run();

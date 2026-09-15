@@ -78,6 +78,13 @@
       "when": 1788429177107,
       "tag": "0010_milestone_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789464480602,
+      "tag": "0011_issue_reports_error_issues",
+      "breakpoints": true
     }
   ]
 }

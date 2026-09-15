@@ -398,6 +398,13 @@ export interface MilestoneProgress {
    */
   kind: string;
   /**
+   * Task 7 (factory-error-log) — roadmap.ts's MilestoneDef.errorIssuesEnabled,
+   * resolved project-wide from the `- error_issues: on|off` bullet (default
+   * on). Tells the UI whether this project's errors are allowed to open
+   * issues.
+   */
+  errorIssuesEnabled: boolean;
+  /**
    * Phase 6b, operator directive 4 (mini-timeline): up to 3 most-recently-
    * completed tasks and up to 3 next-up tasks for this milestone, in plan/
    * dependency order. `null` when milestoneProgressRows() didn't compute it
@@ -796,6 +803,7 @@ function milestoneProgressRows(
       tokensBudget: hasBudget ? tokensBudget : null,
       project: m.project,
       kind: m.kind,
+      errorIssuesEnabled: m.errorIssues,
       ...(refs ? { recentDone: refs.recentDone, nextUp: refs.nextUp } : {}),
     };
   });
@@ -1414,15 +1422,21 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   // shadow verdict nobody can see is a shadow deployment nobody can evaluate,
   // which is the whole reason the mode exists.
   'cross-finding-reconciled',
-  // The scheduler's three proposals. Architecture §12 has the scheduler
+  // The scheduler's four proposals. Architecture §12 has the scheduler
   // propose and the operator dispose, so the timeline is the only place the
   // offer is ever made -- drop the row and the proposal is never put to
   // anyone. They arrive through scheduler.ts eventTypeFor(), a helper return
   // rather than a literal at the `event_type:` position, which is how all
-  // three stayed off this list without failing the P9-37 lint (Rule D).
+  // four stayed off this list without failing the P9-37 lint (Rule D).
   'recheck-proposed',
   'maintenance-proposed',
   'growth-review-due',
+  // The scheduler's error-report proposal (task 6 of factory-error-log,
+  // scheduler.ts eventTypeFor()'s 'error-report' case). Task 5's issue
+  // reporter disposes it into 'issue-reported', which reaches the timeline
+  // via the taxonomy's gate_event dimension instead -- this entry is the
+  // proposal itself, not the outcome.
+  'error-report-proposed',
   // The audit verbs (audit.ts, docs/specs/audit-command-scope.md §6). An
   // audit runs against a project outside this factory and carries no task_id,
   // so nothing else on the timeline would show that it happened; each verb's

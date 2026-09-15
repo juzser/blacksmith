@@ -264,13 +264,7 @@ export interface OffTimelineEventType {
  * separate tasks of one plan; the outlived-gap guard in eventTypes.test.ts
  * prunes it the moment the row is there.
  */
-export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [
-  {
-    eventType: 'error-report-proposed',
-    reason:
-      "Registered and drawn by task 6 of plan factory-error-log; the timeline allow-list FREE_TIMELINE_EVENT_TYPES in db/queries.ts is task 7's claim, whose first functional clause adds the type there and deletes this entry. The outlived-gap guard is what forces that deletion.",
-  },
-];
+export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [];
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', 'coverage']);
 
