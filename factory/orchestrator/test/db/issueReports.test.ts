@@ -216,6 +216,45 @@ describe('issue-reported / error-report-proposed reach the timeline and the read
     expect(rows[0]?.fingerprint).toBe('fp-ac4');
   });
 
+  // Re-projection: apply()/rebuild() re-derive a session's rows from
+  // scratch every time (clearSession()/clearAll() then re-insert), so a
+  // second pass over the same session must not throw a UNIQUE constraint
+  // violation on issue_reports.event_id.
+  it('projects the same session twice without a duplicate issue_reports row (re-projection is idempotent)', async () => {
+    const parent = await seedSession({ stateDir });
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'issue-reported',
+        task_id: TASK_ID,
+        plan_version: 1,
+        causal_parent: parent,
+        project: 'proj-a',
+        payload: {
+          outcome: 'opened',
+          fingerprint: 'fp-reproject',
+          source: 'error-logged',
+          error_class: 'execution.test-failure',
+          task_ref: TASK_ID,
+          latest_event_id: parent,
+        },
+      },
+      { stateDir },
+    );
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await apply(dbPath, SESSION_ID, { stateDir });
+    await apply(dbPath, SESSION_ID, { stateDir });
+    await rebuild(dbPath, 'all', { stateDir });
+
+    const handle = openDb(dbPath);
+    const rows = handle.db.select().from(schema.issue_reports).all();
+    handle.sqlite.close();
+
+    expect(rows).toHaveLength(1);
+  });
+
   describe('the error_issues switch reaches roadmapPage()', () => {
     const ROADMAP_MD = `# Roadmap
 
