@@ -11,7 +11,7 @@
 // entry (documented as a deviation in ui/docs/DESIGN.md).
 import { readFileSync } from 'node:fs';
 import { SmithError } from './errors.js';
-import { ROADMAP_PATH } from './paths.js';
+import { roadmapReadPath } from './paths.js';
 
 export class RoadmapError extends SmithError {}
 
@@ -464,7 +464,7 @@ export function parseRoadmap(markdown: string): MilestoneDef[] {
  * guard is around the read rather than an existsSync in front of it so a
  * directory, a permission error and a missing file all answer the same way.
  */
-export function readRoadmapText(roadmapPath: string = ROADMAP_PATH): string {
+export function readRoadmapText(roadmapPath: string = roadmapReadPath()): string {
   try {
     return readFileSync(roadmapPath, 'utf8');
   } catch (err) {
@@ -513,7 +513,7 @@ export function roadmapDeclaresId(markdown: string, id: string): boolean {
 }
 
 /** Read and parse roadmap.md from disk (defaults to the real repo path). */
-export function loadRoadmap(roadmapPath: string = ROADMAP_PATH): MilestoneDef[] {
+export function loadRoadmap(roadmapPath: string = roadmapReadPath()): MilestoneDef[] {
   return parseRoadmap(readRoadmapText(roadmapPath));
 }
 

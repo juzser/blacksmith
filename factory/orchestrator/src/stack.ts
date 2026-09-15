@@ -25,7 +25,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { SmithError } from './errors.js';
-import { REPO_ROOT, STACK_POLICY_PATH } from './paths.js';
+import { REPO_ROOT, stackPolicyReadPath } from './paths.js';
 
 export class StackError extends SmithError {}
 
@@ -164,7 +164,7 @@ export function parseStackAnswers(yamlText: string): StackAnswers {
   return answers;
 }
 
-export function loadStackAnswers(filePath: string = STACK_POLICY_PATH): StackAnswers {
+export function loadStackAnswers(filePath: string = stackPolicyReadPath()): StackAnswers {
   return parseStackAnswers(readFileSync(filePath, 'utf8'));
 }
 
