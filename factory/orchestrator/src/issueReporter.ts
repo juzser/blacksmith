@@ -233,11 +233,9 @@ function priorReportFor(
 }
 
 /**
- * `register` is required and never defaulted: a caller that forwards
- * `undefined` past TypeScript would otherwise fail inside
- * `resolveProjectRepo` as a bare `Cannot read properties of undefined`,
- * naming neither the parameter nor this module. `[]` is a legitimate
- * register (every project refuses as `no-checkout`) and is not rejected.
+ * `register` is required and never defaulted: forwarded `undefined` would
+ * otherwise fail inside `resolveProjectRepo` naming neither the parameter
+ * nor this module. `[]` is a legitimate register and is not rejected.
  */
 function requireRegister(register: readonly ProjectRef[], entryPoint: string): void {
   if (!Array.isArray(register)) {
@@ -355,12 +353,11 @@ const DECISION_NOTE =
   'this preview deliberately does not perform';
 
 /**
- * One candidate's preview. Either it settled at step 1, 2 or 4 without
- * reaching a `gh` step -- `(outcome, reason)` plus the step that settled it,
- * no argv -- or it reached the `gh` steps and carries every argv the real
- * path could run for it, with the rendered issue body and comment text.
- * Every record says step 3 was not performed: preview spawns no `gh`, so it
- * reports the step as unperformed rather than guessing a word for it.
+ * One candidate's preview: settled at step 1, 2 or 4 -- `(outcome, reason)`
+ * plus the step, no argv -- or gh-reaching, with every argv the real path
+ * could run and the rendered texts. Every record says step 3 was not
+ * performed: preview spawns no `gh`, so it reports the step as unperformed
+ * rather than guessing a word for it.
  */
 export interface IssuePreviewRecord {
   fingerprint: string;
@@ -370,13 +367,10 @@ export interface IssuePreviewRecord {
   task_ref: string;
   latest_event_id: string;
   step_3_gh_availability: typeof STEP_3_NOT_PERFORMED;
-  /** Present exactly when the candidate settled before the `gh` steps. */
   settled_at_step?: 1 | 2 | 4;
   outcome?: Extract<IssueReportOutcome, 'skipped-disabled' | 'skipped-no-remote' | 'deduped-open'>;
   reason?: string;
-  /** Present once the repository is resolved (step 2 passed). */
   repo_slug?: string;
-  /** The gh-reaching block: all three argvs, the rendered texts, and the note. */
   search_argv?: string[];
   create_argv?: string[];
   comment_argv?: string[];
@@ -387,16 +381,13 @@ export interface IssuePreviewRecord {
 
 /**
  * The preview-safe half of `decideOutcome`: steps 1, 2 and 4 only, through
- * the same fold, the same `priorOpenReports` and the same `priorReportFor`
- * the real path uses. It never invokes the runner with command `gh` and
- * never appends an event. For a candidate that would reach the `gh` steps
- * it BUILDS the search, create and comment argv the real path would run,
- * and prints both create and comment because which one runs is settled by
- * a search this helper does not perform. The comment argv's issue number is
- * `0`, a placeholder: the real number is only known after that search.
- *
- * `runner` is accepted for signature parity with `reportErrors()`; nothing
- * in this helper reaches it, and a test hands in one whose `gh` branch throws.
+ * the same fold, `priorOpenReports` and `priorReportFor` the real path uses.
+ * Never invokes the runner with command `gh`, never appends an event. For a
+ * gh-reaching candidate it BUILDS the search, create and comment argv, and
+ * prints both create and comment because which one runs is settled by a
+ * search this helper does not perform; the comment argv's issue number is
+ * `0`, a placeholder known only after that search. `runner` is accepted for
+ * signature parity with `reportErrors()`; nothing here reaches it.
  */
 export async function previewOutcomes(
   events: readonly StoredEvent[],
@@ -412,49 +403,36 @@ export async function previewOutcomes(
 
   const out: IssuePreviewRecord[] = [];
   for (const report of reports) {
-    const base = {
-      fingerprint: report.fingerprint,
-      project: report.project,
-      source: report.source,
-      error_class: report.error_class,
-      task_ref: report.task_ref,
-      latest_event_id: report.latest_event_id,
-      step_3_gh_availability: STEP_3_NOT_PERFORMED as typeof STEP_3_NOT_PERFORMED,
-    };
+    const { fingerprint, project, source, error_class, task_ref, latest_event_id } = report;
+    const base = { fingerprint, project, source, error_class, task_ref, latest_event_id };
+    const step3 = { step_3_gh_availability: STEP_3_NOT_PERFORMED as typeof STEP_3_NOT_PERFORMED };
+    const settle = (rest: Omit<IssuePreviewRecord, keyof typeof base | keyof typeof step3>) =>
+      out.push({ ...base, ...step3, ...rest });
 
     // Step 1: the switch.
-    if (!isProjectEnabled(report.project)) {
-      out.push({ ...base, settled_at_step: 1, outcome: 'skipped-disabled', reason: 'switch-off' });
+    if (!isProjectEnabled(project)) {
+      settle({ settled_at_step: 1, outcome: 'skipped-disabled', reason: 'switch-off' });
       continue;
     }
-
     // Step 2: which repository -- git-only, and the source of the slug.
-    const repo = resolveProjectRepo(report.project, register);
+    const repo = resolveProjectRepo(project, register);
     if (!('slug' in repo)) {
-      out.push({ ...base, settled_at_step: 2, outcome: 'skipped-no-remote', reason: repo.reason });
+      settle({ settled_at_step: 2, outcome: 'skipped-no-remote', reason: repo.reason });
       continue;
     }
     const repoSlug = repo.slug;
-
     // Step 3 is skipped, not guessed. Step 4: the own-log dedup.
     if (priorReportFor(history, report)) {
-      out.push({
-        ...base,
-        settled_at_step: 4,
-        outcome: 'deduped-open',
-        reason: 'already-reported',
-        repo_slug: repoSlug,
-      });
+      const reason = 'already-reported';
+      settle({ settled_at_step: 4, outcome: 'deduped-open', reason, repo_slug: repoSlug });
       continue;
     }
-
     const fields = toIssueBodyFields(report);
     const issueBody = renderBody(fields);
     const commentText = renderComment(toIssueCommentFields(report));
-    out.push({
-      ...base,
+    settle({
       repo_slug: repoSlug,
-      search_argv: buildSearchIssuesArgv(repoSlug, report.fingerprint),
+      search_argv: buildSearchIssuesArgv(repoSlug, fingerprint),
       create_argv: buildCreateIssueArgv(repoSlug, renderTitle(fields), issueBody),
       comment_argv: buildCommentArgv(repoSlug, 0, commentText),
       issue_body: issueBody,

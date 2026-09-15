@@ -57,10 +57,7 @@ const EVENTS_DIR = `${EVENTS} [--state-dir <dir>]`;
  * asked about.
  */
 const STATS = '[--db <file>] [--session <id>] [--lineage]';
-/**
- * The scope both `issues` actions accept: one session's lineage, narrowed to
- * an epic and to candidates at or after an ISO timestamp.
- */
+/** The scope both `issues` actions accept: a session's lineage, narrowed by epic and ISO since. */
 const ISSUES =
   '--session <id> [--epic <id>] [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]';
 
@@ -451,11 +448,11 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary:
       'Compute whether the security reviewer must be dispatched. A fired trigger is not a red.',
   },
-  // `issues`: the run's write path to a project's tracker. Two separate
-  // actions, never a flag on one of them, so a typo cannot promote a preview
-  // into a write. Exit status for both: 0 when every candidate resolved to a
-  // recorded outcome -- a skip is a recorded answer -- and non-zero only when
-  // the run could not be performed at all, e.g. the session log is unreadable.
+  // `issues`: the run's write path to a project's tracker. Preview is its
+  // own action, never a flag, so a typo cannot promote it into a write. Exit
+  // status for both: 0 when every candidate resolved to a recorded outcome
+  // (a skip is a recorded answer); non-zero only when the run could not be
+  // performed at all, e.g. the session log is unreadable.
   {
     command: 'issues report',
     positionals: '',

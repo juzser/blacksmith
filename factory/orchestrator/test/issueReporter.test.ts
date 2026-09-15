@@ -942,28 +942,19 @@ describe('issueReporter.ts', () => {
   it('previews A as deduped-open and B with all three argv blocks, spawning no gh and appending nothing (AC9)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-
+    const candidate = (letter: string) =>
+      seed({
+        sessionId: `session-preview-${letter}`,
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: `epic-1/task-preview-${letter}`,
+      });
     // A: reported once for real (against a stub), so the log carries a prior
-    // `issue-reported` whose fingerprint matches A.
-    const aEvents = [
-      await seed({
-        sessionId: 'session-preview-a',
-        eventType: 'gate-outcome',
-        payload: { outcome: 'blocked', reason: 'tests-failed' },
-        taskId: 'epic-1/task-preview-a',
-      }),
-    ];
-    const aStub = makeStub();
-    await reportErrors(aEvents, ENABLED, register, aStub.runner, CLOCK, { stateDir });
-    // B: a fresh candidate, never reported.
-    const bEvents = [
-      await seed({
-        sessionId: 'session-preview-b',
-        eventType: 'gate-outcome',
-        payload: { outcome: 'blocked', reason: 'tests-failed' },
-        taskId: 'epic-1/task-preview-b',
-      }),
-    ];
+    // `issue-reported` whose fingerprint matches A. B: never reported.
+    await reportErrors([await candidate('a')], ENABLED, register, makeStub().runner, CLOCK, {
+      stateDir,
+    });
+    const bEvents = [await candidate('b')];
     const logsOnDisk = async () =>
       (await readEvents('session-preview-a', { stateDir })).length +
       (await readEvents('session-preview-b', { stateDir })).length;
@@ -977,7 +968,6 @@ describe('issueReporter.ts', () => {
       if (cmd === 'gh') throw new Error(`previewOutcomes reached gh: ${args.join(' ')}`);
       return { status: 0, stdout: '', stderr: '' };
     };
-
     const records = await previewOutcomes(combined, ENABLED, register, ghThrows, CLOCK);
     expect(records).toHaveLength(2);
     const a = records.find((r) => r.task_ref === 'epic-1/task-preview-a');
@@ -985,26 +975,22 @@ describe('issueReporter.ts', () => {
     if (!a || !b) throw new Error('both candidates must be previewed');
 
     // (a) A settled deduped-open/already-reported at step 4, no argv block.
-    expect(a.outcome).toBe('deduped-open');
-    expect(a.reason).toBe('already-reported');
-    expect(a.settled_at_step).toBe(4);
-    expect(a.search_argv).toBeUndefined();
-    expect(a.create_argv).toBeUndefined();
-    expect(a.comment_argv).toBeUndefined();
+    expect([a.outcome, a.reason, a.settled_at_step]).toEqual([
+      'deduped-open',
+      'already-reported',
+      4,
+    ]);
+    expect([a.search_argv, a.create_argv, a.comment_argv]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
 
     // (b) B carries the search argv and both candidate argvs, with the
     // rendered issue body and comment text.
     expect(b.settled_at_step).toBeUndefined();
-    expect(b.search_argv).toEqual([
-      'issue',
-      'list',
-      '--repo',
-      'juzser/blacksmith',
-      '--state',
-      'open',
-      '--search',
-      b.fingerprint,
-    ]);
+    const search = ['issue', 'list', '--repo', 'juzser/blacksmith', '--state', 'open'];
+    expect(b.search_argv).toEqual([...search, '--search', b.fingerprint]);
     expect(b.create_argv?.slice(0, 4)).toEqual(['issue', 'create', '--repo', 'juzser/blacksmith']);
     expect(b.comment_argv?.slice(0, 2)).toEqual(['issue', 'comment']);
     expect(b.issue_body).toContain(`Fingerprint: ${b.fingerprint}`);
@@ -1021,27 +1007,22 @@ describe('issueReporter.ts', () => {
     expect(calls.filter((c) => c.cmd === 'gh')).toHaveLength(0);
 
     // (e) the on-disk event count is identical before and after.
-    const countAfter = await logsOnDisk();
     expect(countBefore).toBe(5);
-    expect(countAfter).toBe(countBefore);
+    expect(await logsOnDisk()).toBe(countBefore);
   });
 
-  // --- task 5 AC6: the register is a required parameter that fails at the
-  // boundary, naming itself, rather than inside resolveProjectRepo.
+  // --- task 5 AC6: the register is required and fails at the boundary,
+  // naming itself, rather than inside resolveProjectRepo.
   it('refuses with a message naming register when no register is supplied (AC6)', async () => {
+    const payload = { outcome: 'blocked', reason: 'tests-failed' };
+    const taskId = 'epic-1/task-no-register';
     const events = [
-      await seed({
-        sessionId: 'session-no-register',
-        eventType: 'gate-outcome',
-        payload: { outcome: 'blocked', reason: 'tests-failed' },
-        taskId: 'epic-1/task-no-register',
-      }),
+      await seed({ sessionId: 'session-no-register', eventType: 'gate-outcome', payload, taskId }),
     ];
     const { runner } = makeStub();
     const missing = undefined as unknown as ProjectRef[];
-    await expect(
-      reportErrors(events, ENABLED, missing, runner, CLOCK, { stateDir }),
-    ).rejects.toThrow(/register/);
+    const real = reportErrors(events, ENABLED, missing, runner, CLOCK, { stateDir });
+    await expect(real).rejects.toThrow(/register/);
     await expect(previewOutcomes(events, ENABLED, missing, runner, CLOCK)).rejects.toThrow(
       /register/,
     );

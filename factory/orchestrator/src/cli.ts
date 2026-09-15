@@ -455,11 +455,7 @@ function eventOptsFromFlags(flags: Record<string, string>): EventOpts {
   return flags['state-dir'] ? { stateDir: flags['state-dir'] } : {};
 }
 
-/**
- * The runner `issues report` hands to `reportErrors` -- git and `gh` through
- * one child-process call, never a throw. `issues preview` gets a runner that
- * throws instead: its contract is that nothing reaches one.
- */
+/** The runner `issues report` hands to `reportErrors`: git and `gh` through one call, never a throw. */
 function issueCommandRunner(cmd: string, args: string[]): CommandResult {
   try {
     const stdout = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -478,11 +474,7 @@ function issueCommandRunner(cmd: string, args: string[]): CommandResult {
 /** The event types errorIssues.ts folds candidates from; everything else is history and passes. */
 const ISSUE_CANDIDATE_TYPES = new Set(['gate-outcome', 'error-logged', 'task-added']);
 
-/**
- * `--epic`/`--since` narrow which CANDIDATES the reporter sees, never the
- * `issue-reported` history it deduplicates against: dropping old history
- * would make a scoped run re-open what an unscoped one already filed.
- */
+/** `--epic`/`--since` narrow the CANDIDATES, never the `issue-reported` history dedup reads. */
 function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, string>): StoredEvent[] {
   const epic = flags.epic;
   const since = flags.since;
