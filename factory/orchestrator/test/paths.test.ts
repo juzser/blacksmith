@@ -22,13 +22,33 @@ describe('paths.ts', () => {
       .filter((entry) => statSync(path.join(POLICIES_DIR, entry)).isFile())
       .sort();
 
-    const declared = Object.values(paths)
-      .filter((value): value is string => typeof value === 'string')
-      .filter((value) => path.dirname(value) === POLICIES_DIR)
-      .map((value) => path.basename(value))
-      .sort();
+    const declared = Object.entries(paths)
+      .filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && path.dirname(entry[1]) === POLICIES_DIR,
+      )
+      .map(([name, value]) => [name, path.basename(value)] as const);
 
-    expect(declared).toEqual(onDisk);
+    // An overlay pair is the one legal way two constants name one file: the
+    // shipped default and the operator's copy are the same relative path under
+    // two different roots, and in a clone those roots are one directory. Fold
+    // the default half back into its partner, so the comparison below still
+    // means "one policy file, one way to name it".
+    const named = declared
+      .filter(([name]) => !name.endsWith('_DEFAULT_PATH'))
+      .map(([, base]) => base)
+      .sort();
+    expect(named).toEqual(onDisk);
+
+    // ...and every default half is held to having that partner, so the filter
+    // above cannot be used to smuggle a second constant past the check.
+    const allNames = declared.map(([name]) => name);
+    for (const name of allNames.filter((n) => n.endsWith('_DEFAULT_PATH'))) {
+      expect(
+        allNames,
+        `${name} is excused as an overlay default with nothing to overlay`,
+      ).toContain(name.replace('_DEFAULT_PATH', '_PATH'));
+    }
   });
 
   // The filter above keys on path.dirname, so a constant assembled by string
@@ -127,6 +147,8 @@ describe('the work root', () => {
       paths.SPECS_ACTIVE_DIR,
       paths.WORKSPACES_DIR,
       paths.DOTENV_PATH,
+      paths.ROADMAP_PATH,
+      paths.STACK_POLICY_PATH,
     ];
     for (const abs of written) {
       expect(path.relative(paths.WORK_ROOT, abs)).not.toMatch(/^\.\./);
@@ -135,7 +157,8 @@ describe('the work root', () => {
       paths.SCHEMA_DIR,
       paths.SCAFFOLD_DIR,
       paths.AGENTS_DIR,
-      paths.ROADMAP_PATH,
+      paths.ROADMAP_DEFAULT_PATH,
+      paths.STACK_POLICY_DEFAULT_PATH,
     ]) {
       expect(path.relative(paths.REPO_ROOT, abs)).not.toMatch(/^\.\./);
     }
@@ -163,5 +186,76 @@ describe('where a new project lands', () => {
         false,
       ),
     ).toBe('/home/dev/app');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The third kind of path, which `paths.ts` had no name for.
+//
+// Most constants here are one of two things: an asset the CLI only reads,
+// which ships and hangs off REPO_ROOT, or state the CLI writes, which must not
+// ship and hangs off WORK_ROOT. Two files are both. `factory/specs/roadmap.md`
+// ships as a starting roadmap and `smith new` appends a project to it;
+// `factory/policies/stack.yml` ships as a commented questionnaire and
+// INSTALL.md Step 5 tells the operator to "change the values in place".
+//
+// Anchored on REPO_ROOT, as both were, those writes land inside the installed
+// package: `node_modules/@juzser/blacksmith/factory/...`, which the next
+// `npm i` replaces wholesale and `npx` may re-resolve from the registry. The
+// operator's answers survive until the first upgrade and then silently do not.
+// Under pnpm it is worse than losing them -- the package directory is a tree
+// of hard links into a content-addressable store, so writing through one edits
+// the copy every other project on the machine reads.
+//
+// The shape that fits is an overlay: read the operator's copy when it exists,
+// fall back to the shipped default when it does not, and write the operator's
+// copy always. In a clone WORK_ROOT and REPO_ROOT are the same directory, so
+// both halves name the same file and an existing checkout cannot tell the
+// difference -- which is what makes this safe to land mid-epic.
+// ---------------------------------------------------------------------------
+
+describe('a file the factory ships and the operator then edits', () => {
+  it('reads the operator copy when it exists', () => {
+    const personal = '/home/dev/app/.blacksmith/factory/policies/stack.yml';
+    const shipped = '/home/dev/app/node_modules/@juzser/blacksmith/factory/policies/stack.yml';
+    expect(paths.resolveOverlayRead(personal, shipped, (p) => p === personal)).toBe(personal);
+  });
+
+  it('falls back to the shipped default before anyone has answered', () => {
+    const personal = '/home/dev/app/.blacksmith/factory/policies/stack.yml';
+    const shipped = '/home/dev/app/node_modules/@juzser/blacksmith/factory/policies/stack.yml';
+    expect(paths.resolveOverlayRead(personal, shipped, () => false)).toBe(shipped);
+  });
+
+  it('writes under the work root, never into the package it shipped from', () => {
+    for (const abs of [paths.ROADMAP_PATH, paths.STACK_POLICY_PATH]) {
+      expect(path.relative(paths.WORK_ROOT, abs)).not.toMatch(/^\.\./);
+    }
+  });
+
+  it('keeps the shipped default under the package, so the tarball can carry it', () => {
+    for (const abs of [paths.ROADMAP_DEFAULT_PATH, paths.STACK_POLICY_DEFAULT_PATH]) {
+      expect(path.relative(paths.REPO_ROOT, abs)).not.toMatch(/^\.\./);
+    }
+  });
+
+  it('spells both halves the same way under their root, so seeding is a copy', () => {
+    // The property `smith init` depends on, and the reason a pair can be
+    // stated as one relative path rather than two absolute ones.
+    expect(path.relative(paths.WORK_ROOT, paths.ROADMAP_PATH)).toBe(
+      path.relative(paths.REPO_ROOT, paths.ROADMAP_DEFAULT_PATH),
+    );
+    expect(path.relative(paths.WORK_ROOT, paths.STACK_POLICY_PATH)).toBe(
+      path.relative(paths.REPO_ROOT, paths.STACK_POLICY_DEFAULT_PATH),
+    );
+  });
+
+  it('changes nothing for an operator standing in a clone', () => {
+    // The whole safety argument in two lines: in a checkout the pair collapses,
+    // so every read and every write names the file it named before.
+    expect(paths.ROADMAP_PATH).toBe(paths.ROADMAP_DEFAULT_PATH);
+    expect(paths.STACK_POLICY_PATH).toBe(paths.STACK_POLICY_DEFAULT_PATH);
+    expect(paths.roadmapReadPath()).toBe(paths.ROADMAP_DEFAULT_PATH);
+    expect(paths.stackPolicyReadPath()).toBe(paths.STACK_POLICY_DEFAULT_PATH);
   });
 });
