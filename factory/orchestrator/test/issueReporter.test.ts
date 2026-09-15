@@ -1027,4 +1027,43 @@ describe('issueReporter.ts', () => {
       /register/,
     );
   });
+
+  // --- task 5: previewOutcomes' own steps 1 and 2, untouched by the AC9
+  // fixture (which only ever reaches step 4 or the gh-reaching branch).
+  it('previews skipped-disabled at step 1 and skipped-no-remote at step 2, with no argv either way', async () => {
+    const off = await seed({
+      sessionId: 'session-preview-off',
+      eventType: 'gate-outcome',
+      payload: { outcome: 'blocked', reason: 'tests-failed' },
+      taskId: 'epic-1/task-preview-off',
+      project: 'off-project',
+    });
+    const noRemote = await seed({
+      sessionId: 'session-preview-no-remote',
+      eventType: 'gate-outcome',
+      payload: { outcome: 'blocked', reason: 'tests-failed' },
+      taskId: 'epic-1/task-preview-no-remote',
+      project: 'unregistered-project',
+    });
+    const isEnabled = (project: string) => project !== 'off-project';
+    const { runner } = makeStub();
+    const records = await previewOutcomes([off, noRemote], isEnabled, [], runner, CLOCK);
+
+    const disabled = records.find((r) => r.task_ref === 'epic-1/task-preview-off');
+    expect(disabled).toMatchObject({
+      settled_at_step: 1,
+      outcome: 'skipped-disabled',
+      reason: 'switch-off',
+    });
+    expect(disabled?.search_argv).toBeUndefined();
+
+    const noRemoteRecord = records.find((r) => r.task_ref === 'epic-1/task-preview-no-remote');
+    expect(noRemoteRecord).toMatchObject({
+      settled_at_step: 2,
+      outcome: 'skipped-no-remote',
+      reason: 'no-checkout',
+    });
+    expect(noRemoteRecord?.search_argv).toBeUndefined();
+    expect(noRemoteRecord?.repo_slug).toBeUndefined();
+  });
 });
