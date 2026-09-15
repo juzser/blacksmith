@@ -90,6 +90,7 @@ import {
   transition as transitionFinding,
 } from './findings.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
+import { loadHarnessPolicy, planWorkerTurn, summarizeHarnesses } from './harness.js';
 import { decideHookPayload } from './hookDecision.js';
 import {
   checkWorktreeImmutable,
@@ -2521,6 +2522,41 @@ async function main(): Promise<number> {
       return 0;
     }
     printJson({ sandboxes: listSandboxes(leaseDir) });
+    return 0;
+  }
+
+  // The worker-harness port. `sandbox` above governs what a judge may do once
+  // a turn is running; these two answer the question one step earlier — what
+  // runs the turn at all. Until now the answer was implicit in deployment: the
+  // orchestrator is a Claude Code session, so the only thing it could start
+  // was another one, and no dispatch anywhere recorded that.
+  //
+  // `plan` renders an invocation and returns it. It does not start it —
+  // architecture §18 rule 3: `smith` observes, and an observer that could
+  // dispatch would end up reading its own output back as evidence that a turn
+  // happened. The caller starts the process this prints.
+  //
+  // No `--policy` means the built-in policy, which is the single in-process
+  // harness this factory actually runs. There is no harness.yml to default to,
+  // on purpose: shipping one is the operator's call, not a side effect of
+  // adding the seam.
+  if (namespace === 'harness' && action === 'list') {
+    printJson(summarizeHarnesses({ policy: loadHarnessPolicy(flags.policy) }));
+    return 0;
+  }
+
+  if (namespace === 'harness' && action === 'plan') {
+    const invocation = planWorkerTurn(
+      {
+        harness: flags.harness,
+        role: requireFlag(flags, 'role'),
+        taskId: requireFlag(flags, 'task'),
+        promptFile: requireFlag(flags, 'prompt-file'),
+        worktree: flags.worktree ?? null,
+      },
+      { policy: loadHarnessPolicy(flags.policy) },
+    );
+    printJson(invocation);
     return 0;
   }
 

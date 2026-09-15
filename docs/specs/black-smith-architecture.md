@@ -299,7 +299,9 @@ JSON per schema), so any model that can honor the contract can serve.
   to the reviewer — cross-*session* diversity). The provider seam exists from
   day one so adding Codex/DeepSeek is config + adapter, not a redesign.
 - **Trust boundary.** External providers judge; they never gain write access
-  to worktrees or the factory. Their findings are data, not commands.
+  to worktrees or the factory. Their findings are data, not commands. The
+  same boundary is what §19's worker-harness port refuses to cross: a harness
+  that runs a separate program gets a judge's prompt and no worktree path.
 - **Phase 8 (built): transport + shadow mode.** `factory/orchestrator/src/
   providers/` implements the adapter layer — Codex over a CLI transport
   (`codex exec` headless, ChatGPT-subscription auth) and DeepSeek over an
@@ -1260,3 +1262,61 @@ not in the diff — it is in every verdict the factory issued afterwards.
     `state/`.** A worktree goes away through `git worktree remove --force`,
     a file through a targeted delete. *Breaks:* the operator's own checkouts,
     which live beside the factory and are not the factory's to clean up.
+
+---
+
+## 19. The worker harness port
+
+§6 gives the *judge* tier a seam: a provider is a `crosscheck.yml` entry, a
+transport reads it, and adding DeepSeek is config. The *worker* tier never got
+one. Every turn this factory has dispatched ran inside a Claude Code session,
+because the orchestrator is a Claude Code session and the `Agent` tool is the
+only thing it can start. That was true by deployment and written down nowhere.
+
+Two axes were folded into one as a result:
+
+| Axis | Question it answers | Where it lives |
+|---|---|---|
+| **provider** | which vendor's model produced the words | `taxonomy.yml` `provider:`, `crosscheck.yml` |
+| **harness** | which program held the session — tools, cwd, turn limit | `src/harness.ts` |
+
+`dispatch_decision` records the role, the provider, the tier and the model
+(§8). It records who answered and with what weight, never what ran the turn.
+`claude-code` + `claude` is the only pair that exists today; `codex-cli` +
+`codex` is the pair that makes the distinction load-bearing, and the point of
+naming the axis before that pair exists is that the second harness should be a
+config entry, not a rewrite of dispatch.
+
+**The port renders an invocation; it never starts one.** `planWorkerTurn()`
+returns a `WorkerInvocation` — in-process (a `subagent_type` and the template
+it comes from) or cli (argv, cwd, and an env allowlist) — and the caller
+spawns it. This is §18 rule 3 applied to the CLI itself: `smith` observes, and
+an observer that could dispatch would read its own output back as evidence
+that a turn happened.
+
+**The judge boundary extends across it.** §6's trust boundary says external
+providers judge and never gain write access; `providers/types.ts` enforces it
+by handing a transport nothing but `prompt`. A `cli` harness is the same far
+side one step over, so the port refuses to render a cli invocation that would
+put a worktree path in a judge role's hands (`harness.judge-worktree`). An
+in-process judge does read the worktree — under a `smith sandbox open` lease,
+which the invocation states as `sandboxRequired` rather than leaving to the
+playbook to remember. Which roles are judges is read from `guardrails.yml`
+through `policy.ts`, never copied: a second list would drift, and the
+direction it drifts in is a judge quietly reclassified as a worker.
+
+**There is no `harness.yml`.** The built-in policy — one in-process harness,
+serving every role that ships a `.claude/agents/<role>.md` — is this factory
+written down, and shipping a policy file is an operator's decision rather than
+a side effect of adding a seam. An operator who wants a second harness writes
+one anywhere and names it: `smith harness list --policy <file>`, the shape
+`smith stack show` already uses.
+
+```
+smith harness list
+smith harness plan --role coder --task epic-1/task-3 --prompt-file state/prompts/p.md --worktree ../wt/task-3
+```
+
+Env is an allowlist of variable **names**. A rendered invocation is printed as
+JSON, to a terminal and into logs; the runner resolves the values against its
+own environment, and nothing that passes through this port carries a secret.
