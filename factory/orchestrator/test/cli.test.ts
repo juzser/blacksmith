@@ -8374,7 +8374,7 @@ describe('cli.ts (built binary)', () => {
     });
 
     // Functional clause 2: `--epic` narrows the candidates to one epic.
-    it('issues preview --epic reports only that epic\'s candidates', () => {
+    it("issues preview --epic reports only that epic's candidates", () => {
       const { sessionId, eventsDir } = seedCandidates('scope', ['epic-1/task-c', 'epic-2/task-d']);
       const { stdout, status } = runCli([
         'issues',

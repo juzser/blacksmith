@@ -76,7 +76,6 @@ import {
 } from './events.js';
 import { findingsForDispatch } from './findingContext.js';
 import type { EventContext, FindingEvidence, MintContext, RaiseFindingInput } from './findings.js';
-import type { CommandResult } from './gh.js';
 import {
   AMEND_PENDING_STATUS,
   AMENDED_STATUS,
@@ -90,6 +89,7 @@ import {
   SPEC_FINDING_SCOPE,
   transition as transitionFinding,
 } from './findings.js';
+import type { CommandResult } from './gh.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
 import { decideHookPayload } from './hookDecision.js';
 import {
@@ -2531,7 +2531,9 @@ async function main(): Promise<number> {
     // The one path in this epic that runs `gh` for real.
     const { events, isEnabled, register, eventOpts } = await issueInputs(flags);
     const clock = () => new Date().toISOString();
-    printJson(await reportErrors(events, isEnabled, register, issueCommandRunner, clock, eventOpts));
+    printJson(
+      await reportErrors(events, isEnabled, register, issueCommandRunner, clock, eventOpts),
+    );
     return 0;
   }
 
