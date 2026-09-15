@@ -398,6 +398,13 @@ export interface MilestoneProgress {
    */
   kind: string;
   /**
+   * Task 7 (factory-error-log) — roadmap.ts's MilestoneDef.errorIssuesEnabled,
+   * resolved project-wide from the `- error_issues: on|off` bullet (default
+   * on). Tells the UI whether this project's errors are allowed to open
+   * issues.
+   */
+  errorIssuesEnabled: boolean;
+  /**
    * Phase 6b, operator directive 4 (mini-timeline): up to 3 most-recently-
    * completed tasks and up to 3 next-up tasks for this milestone, in plan/
    * dependency order. `null` when milestoneProgressRows() didn't compute it
@@ -796,6 +803,7 @@ function milestoneProgressRows(
       tokensBudget: hasBudget ? tokensBudget : null,
       project: m.project,
       kind: m.kind,
+      errorIssuesEnabled: m.errorIssues,
       ...(refs ? { recentDone: refs.recentDone, nextUp: refs.nextUp } : {}),
     };
   });

@@ -208,6 +208,7 @@ function projectMilestones(handle: DbHandle, opts: DbOpts): void {
           epicIds: JSON.stringify(m.epicIds),
           project: m.project,
           kind: m.kind,
+          errorIssues: m.errorIssuesEnabled,
         })
         .run();
     }
@@ -233,6 +234,18 @@ interface ErrorPayload {
   severity?: string;
   task_ref?: string;
   detail?: string;
+}
+
+interface IssueReportPayload {
+  task_ref?: string;
+  error_class?: string;
+  fingerprint?: string;
+  issue_url?: string;
+  latest_event_id?: string;
+  outcome?: string;
+  reason?: string;
+  repo_slug?: string;
+  source?: string;
 }
 
 interface ResultArtifact {
@@ -1162,6 +1175,30 @@ export function projectSession(
             errorClass: cls,
             severity: p.severity,
             detail: p.detail ?? null,
+            project: record.project ?? projectForRef(p.task_ref ?? eventTask),
+          })
+          .run();
+        continue;
+      }
+
+      if (record.event_type === 'issue-reported') {
+        const p = record.payload as IssueReportPayload;
+        if (!p.fingerprint || !p.outcome) continue;
+        txDb
+          .insert(schema.issue_reports)
+          .values({
+            eventId: event_id,
+            sessionId: record.session_id,
+            ts: record.ts,
+            taskRef: p.task_ref ?? eventTask,
+            errorClass: p.error_class ?? '',
+            fingerprint: p.fingerprint,
+            issueUrl: p.issue_url ?? null,
+            latestEventId: p.latest_event_id ?? '',
+            outcome: p.outcome,
+            reason: p.reason ?? null,
+            repoSlug: p.repo_slug ?? null,
+            source: p.source ?? '',
             project: record.project ?? projectForRef(p.task_ref ?? eventTask),
           })
           .run();
