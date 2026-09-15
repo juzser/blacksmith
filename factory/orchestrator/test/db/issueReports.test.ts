@@ -9,12 +9,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { apply, openDb, rebuild } from '../../src/db/projector.js';
 import { roadmapPage, timeline } from '../../src/db/queries.js';
 import * as schema from '../../src/db/schema.js';
 import { appendEvent, type EventOpts } from '../../src/events.js';
-import { DB_MIGRATIONS_DIR } from '../../src/paths.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const SESSION_ID = 'sess-issue-reports';
