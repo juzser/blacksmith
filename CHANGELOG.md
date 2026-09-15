@@ -27,6 +27,14 @@ than appearing in it.
 
 ### Added
 
+- **The run reports the error it just logged.** `.claude/skills/bs/dispatch.md`
+  now calls `smith issues report` right after any dispatch writes
+  `error-logged`, and `wave.md` names it as the wave-tier owner of that
+  rule. `docs/runbooks/ops.md` documents the mechanism end to end — what
+  folds in, the metadata-only issue body, the per-project `error_issues`
+  switch, the eight outcomes and their reasons, and `issues preview` as the
+  dry run (D-299).
+
 - **The turn cap the harness does read.** M-4 (2026-08-05) called the
   templates' `maxTurns` inert and moved the turn budget into the dispatch
   prompt. Dogfooding `csb-audit-1` measured the opposite eight times — Claude
