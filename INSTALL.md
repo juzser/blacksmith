@@ -10,12 +10,9 @@ clone and say *"install Blacksmith"*. The session reads
 [Part 2](#part-2--the-install-run) step by step. It will stop and ask you
 before anything that touches the machine outside the clone.
 
-Blacksmith runs **from a clone**, not as a globally installed package. The
-event log (`state/events/`) and the SQLite projection (`state/smith.db`) live
-inside the checkout — `factory/orchestrator/src/paths.ts` resolves both
-relative to the repo root — while the projects it builds land *beside* the
-clone, with their worktrees beside them. So put the clone somewhere you're
-happy to keep it, in a directory you're happy to see projects appear in.
+There are **two installs**, and they are for two different things. Read
+[Choose your install](#choose-your-install) before Part 2 — the rest of this
+file is the clone runbook, which is only one of them.
 
 ---
 
@@ -71,6 +68,71 @@ that has no `packages:` key — which is exactly how the first CI run failed, a
 week after such a file was committed carrying only build-script settings. If
 you switch to pnpm 10+, which blocks dependency build scripts by default,
 check `pnpm install`'s output rather than assuming this repo still needs none.
+
+---
+
+## Choose your install
+
+| | **A — a package, inside a project you already have** | **B — a clone** |
+|---|---|---|
+| Command | `npx @juzser/blacksmith init` | Part 2 below |
+| You get | the `smith` CLI and the agent templates, driving *this one* project | the whole factory: CLI, dashboard, its own tests and gates |
+| State lives in | `.blacksmith/` in your project | the checkout itself |
+| Upgrading | `npx @juzser/blacksmith@latest` | `git pull` |
+| Not included | the dashboard (`smith ui serve`), `scripts/check.sh`, the repo's own suite | — |
+
+Pick **A** if you have a repository and want Blacksmith to run epics in it.
+Pick **B** if you want to work on Blacksmith itself, or want the dashboard.
+
+### A — into a project you already have
+
+```bash
+cd /path/to/your-project
+npx @juzser/blacksmith init
+```
+
+`init` creates `.blacksmith/` beside your code and nothing else:
+
+```
+.blacksmith/
+  .gitignore                        # state/ and workspaces/ are this machine's
+  state/events/  state/artifacts/   # the event log and what agents produce
+  factory/specs/active/             # epic plans
+  factory/specs/roadmap.md          # a copy, for you to append to
+  factory/policies/stack.yml        # a copy, for you to answer — see Step 5
+```
+
+The last two are copies **on purpose**. They are the two files you are meant
+to edit, and the installed package is not a place to edit anything: the next
+`npm install` replaces it wholesale, so an answer typed there would survive
+until your first upgrade and then silently not. Everything the factory only
+reads — schemas, the other policies, the agent templates — stays in the
+package, where an upgrade is supposed to reach it.
+
+`init` never overwrites a file you have already edited, so running it again
+after an upgrade is safe and does nothing. Commit `.blacksmith/factory/` if
+your team shares the project: the roadmap and the stack answers are
+declarations about the project, not about your laptop.
+
+Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
+against `.blacksmith/factory/policies/stack.yml`, and
+**[Step 6](#step-6--install-the-claude-code-cli)**, the Claude Code CLI. Skip
+the rest: Steps 1–4 and 7 are about building a checkout you do not have. From
+then on every command in the docs that reads `smith …` is
+`npx @juzser/blacksmith …` for you.
+
+### B — a clone
+
+The event log (`state/events/`) and the SQLite projection (`state/smith.db`)
+live inside the checkout — `factory/orchestrator/src/paths.ts` resolves both
+relative to the repo root — while the projects it builds land *beside* the
+clone, with their worktrees beside them. So put the clone somewhere you're
+happy to keep it, in a directory you're happy to see projects appear in.
+`smith init` has nothing to do here and says so: in a clone the work root and
+the package are one directory, which is what makes the two installs one
+codebase.
+
+Part 2 is this path.
 
 ---
 
