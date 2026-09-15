@@ -44,6 +44,7 @@ import {
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
 import { type ProjectRef, unwatchedProjects } from './projects.js';
+import { FACTORY_PROJECT } from './roadmap.js';
 import {
   computeProposals,
   loadSchedulerPolicy,
@@ -73,6 +74,7 @@ export type FindingKind =
   | 'unattributed-spend'
   | 'stale-agent'
   | 'recheck'
+  | 'unreported-error'
   | 'spec-change'
   | 'maintenance'
   | 'growth-review'
@@ -295,18 +297,40 @@ export function inspectSession(
   const proposals = computeProposals({ events, now, policy: schedulerPolicy });
   const admissions = admitFor(proposals, events, opts.admission);
   for (const [index, proposal] of proposals.entries()) {
-    if (proposal.kind !== 'recheck') continue;
     const admission = admissions[index];
-    findings.push({
-      kind: 'recheck',
-      severity: 'info',
-      sessionId,
-      subject: proposal.taskId,
-      detail:
-        `Recheck due (${proposal.reasons.join(', ')}): ${proposal.mergeCount} later overlapping ` +
-        `merge(s), ${proposal.daysElapsed} day(s) elapsed, confidence ${proposal.confidence}.`,
-      ...(admission === undefined ? {} : { admission }),
-    });
+    if (proposal.kind === 'recheck') {
+      findings.push({
+        kind: 'recheck',
+        severity: 'info',
+        sessionId,
+        subject: proposal.taskId,
+        detail:
+          `Recheck due (${proposal.reasons.join(', ')}): ${proposal.mergeCount} later overlapping ` +
+          `merge(s), ${proposal.daysElapsed} day(s) elapsed, confidence ${proposal.confidence}.`,
+        ...(admission === undefined ? {} : { admission }),
+      });
+    } else if (proposal.kind === 'error-report') {
+      // An error the log holds that nobody has reported — the session died
+      // before its run could. `info`, not `attention`: the error itself was
+      // raised when it happened, and what is left is work to schedule, which
+      // the discharge command below clears. Reported here and not in
+      // inspectFactory because `issue-reported` lands in the error's own
+      // session, so this lineage is the one that can answer it.
+      const project = proposal.project === FACTORY_PROJECT ? '' : ` (${proposal.project})`;
+      findings.push({
+        kind: 'unreported-error',
+        severity: 'info',
+        sessionId,
+        subject: `error ${proposal.fingerprint}${project}`,
+        detail:
+          `Error ${proposal.fingerprint} in project ${proposal.project} ` +
+          `(${proposal.errorClass}, task ${proposal.taskRef}, ${proposal.occurrences} occurrence(s)) ` +
+          'has no issue-reported event. Report it with ' +
+          `\`smith issues report --session ${proposal.sessionId}\`; ` +
+          `\`smith issues preview --session ${proposal.sessionId}\` is the dry run.`,
+        ...(admission === undefined ? {} : { admission }),
+      });
+    }
   }
 
   return findings;
@@ -373,9 +397,10 @@ export function inspectFactory(
         ...(admission === undefined ? {} : { admission }),
       });
     }
-    // Rechecks are deliberately dropped here: inspectSession already reports
-    // each against the session that owns it, and a second copy with no session
-    // is a duplicate an operator cannot act on.
+    // Rechecks and unreported errors are deliberately dropped here:
+    // inspectSession already reports each against the session that owns it,
+    // and a second copy with no session is a duplicate an operator cannot act
+    // on.
   }
 
   // The claim this repo rests on, watched instead of waited on. `smith epic

@@ -32,8 +32,8 @@ import {
   writeStatus,
 } from '../src/daemon.js';
 import { openDb } from '../src/db/projector.js';
-import { foldErrorEvents } from '../src/errorIssues.js';
 import { roadmapPage } from '../src/db/queries.js';
+import { foldErrorEvents } from '../src/errorIssues.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
 import { REPO_ROOT } from '../src/paths.js';
@@ -1774,14 +1774,16 @@ describe('an error nobody has reported', () => {
     return { fingerprint: report.fingerprint, latestEventId: report.latest_event_id };
   }
 
-  function issueReported(
-    sessionId: string,
-    payload: Record<string, unknown>,
-  ): StoredEvent {
+  function issueReported(sessionId: string, payload: Record<string, unknown>): StoredEvent {
     return stored(
       sessionId,
       'issue-reported',
-      { outcome: 'opened', source: 'error-logged', error_class: 'economy.budget-exceeded', ...payload },
+      {
+        outcome: 'opened',
+        source: 'error-logged',
+        error_class: 'economy.budget-exceeded',
+        ...payload,
+      },
       { task_id: TASK },
     );
   }
