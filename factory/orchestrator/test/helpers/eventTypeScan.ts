@@ -188,6 +188,12 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
       'A scheduler proposal to bump outdated dependencies, from scheduler.ts eventTypeFor(). Undeclared for the same reason as recheck-proposed: architecture \u00a712 makes proposals wait for an operator tick, so the event records an offer rather than a change. Its payload carries the package list, which is what the timeline row names.',
   },
   {
+    eventType: 'error-report-proposed',
+    writtenBy: 'src',
+    reason:
+      "A scheduler proposal that an error nobody has reported be filed with the tracker, from scheduler.ts eventTypeFor(). Undeclared for the same reason as the other proposals: architecture \u00a712 has the scheduler propose and the operator dispose, and this one never leaves the operator's hands \u2014 autonomy.ts refuses it as tracker-write-never-auto even when a policy lists the kind. Its payload is the proposal itself (fingerprint, project, source, errorClass, taskRef, sessionId, latestEventId, occurrences, confidence); the timeline row names the errorClass, the taskRef and the occurrence count.",
+  },
+  {
     eventType: 'growth-review-due',
     writtenBy: 'src',
     reason:
