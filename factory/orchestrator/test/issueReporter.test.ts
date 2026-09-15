@@ -4,12 +4,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { foldErrorEvents, renderComment, toIssueCommentFields } from '../src/errorIssues.js';
-import { appendEvent, type StoredEvent } from '../src/events.js';
+import { appendEvent, readEvents, type StoredEvent } from '../src/events.js';
 import type { CommandResult, CommandRunner } from '../src/gh.js';
 import { runGit } from '../src/git.js';
 import {
   ISSUE_REPORT_OUTCOMES,
   type IssueReportOutcome,
+  previewOutcomes,
   reportErrors,
 } from '../src/issueReporter.js';
 import type { ProjectRef } from '../src/projects.js';
@@ -934,5 +935,135 @@ describe('issueReporter.ts', () => {
     expect(bucket('create')).toHaveLength(0);
     expect(bucket('comment')).toHaveLength(0);
     expect(secondRecords.every((r) => r.outcome === 'deduped-open')).toBe(true);
+  });
+  // --- task 5 AC9: previewOutcomes is gh-free and event-free at its own
+  // boundary. Under the null (preview routed through reportErrors) the
+  // runner's gh branch throws at step 3 and the log grows by two.
+  it('previews A as deduped-open and B with all three argv blocks, spawning no gh and appending nothing (AC9)', async () => {
+    const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
+    const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+    const candidate = (letter: string) =>
+      seed({
+        sessionId: `session-preview-${letter}`,
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: `epic-1/task-preview-${letter}`,
+      });
+    // A: reported once for real (against a stub), so the log carries a prior
+    // `issue-reported` whose fingerprint matches A. B: never reported.
+    await reportErrors([await candidate('a')], ENABLED, register, makeStub().runner, CLOCK, {
+      stateDir,
+    });
+    const bEvents = [await candidate('b')];
+    const logsOnDisk = async () =>
+      (await readEvents('session-preview-a', { stateDir })).length +
+      (await readEvents('session-preview-b', { stateDir })).length;
+    const combined = [...(await readEvents('session-preview-a', { stateDir })), ...bEvents];
+    const countBefore = await logsOnDisk();
+
+    // A stub whose gh branch would throw if reached at all.
+    const calls: RunnerCall[] = [];
+    const ghThrows: CommandRunner = (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'gh') throw new Error(`previewOutcomes reached gh: ${args.join(' ')}`);
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const records = await previewOutcomes(combined, ENABLED, register, ghThrows, CLOCK);
+    expect(records).toHaveLength(2);
+    const a = records.find((r) => r.task_ref === 'epic-1/task-preview-a');
+    const b = records.find((r) => r.task_ref === 'epic-1/task-preview-b');
+    if (!a || !b) throw new Error('both candidates must be previewed');
+
+    // (a) A settled deduped-open/already-reported at step 4, no argv block.
+    expect([a.outcome, a.reason, a.settled_at_step]).toEqual([
+      'deduped-open',
+      'already-reported',
+      4,
+    ]);
+    expect([a.search_argv, a.create_argv, a.comment_argv]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    // (b) B carries the search argv and both candidate argvs, with the
+    // rendered issue body and comment text.
+    expect(b.settled_at_step).toBeUndefined();
+    const search = ['issue', 'list', '--repo', 'juzser/blacksmith', '--state', 'open'];
+    expect(b.search_argv).toEqual([...search, '--search', b.fingerprint]);
+    expect(b.create_argv?.slice(0, 4)).toEqual(['issue', 'create', '--repo', 'juzser/blacksmith']);
+    expect(b.comment_argv?.slice(0, 2)).toEqual(['issue', 'comment']);
+    expect(b.issue_body).toContain(`Fingerprint: ${b.fingerprint}`);
+    const bReport = foldErrorEvents(bEvents, CLOCK(), ENABLED).reports[0];
+    if (!bReport) throw new Error('B did not fold');
+    expect(b.comment_text).toBe(renderComment(toIssueCommentFields(bReport)));
+    expect(b.decision_note).toMatch(/search/);
+
+    // (c) both records state step 3 was not performed.
+    expect(a.step_3_gh_availability).toBe('not-performed');
+    expect(b.step_3_gh_availability).toBe('not-performed');
+
+    // (d) zero recorded invocations whose command is gh.
+    expect(calls.filter((c) => c.cmd === 'gh')).toHaveLength(0);
+
+    // (e) the on-disk event count is identical before and after.
+    expect(countBefore).toBe(5);
+    expect(await logsOnDisk()).toBe(countBefore);
+  });
+
+  // --- task 5 AC6: the register is required and fails at the boundary,
+  // naming itself, rather than inside resolveProjectRepo.
+  it('refuses with a message naming register when no register is supplied (AC6)', async () => {
+    const payload = { outcome: 'blocked', reason: 'tests-failed' };
+    const taskId = 'epic-1/task-no-register';
+    const events = [
+      await seed({ sessionId: 'session-no-register', eventType: 'gate-outcome', payload, taskId }),
+    ];
+    const { runner } = makeStub();
+    const missing = undefined as unknown as ProjectRef[];
+    const real = reportErrors(events, ENABLED, missing, runner, CLOCK, { stateDir });
+    await expect(real).rejects.toThrow(/register/);
+    await expect(previewOutcomes(events, ENABLED, missing, runner, CLOCK)).rejects.toThrow(
+      /register/,
+    );
+  });
+
+  // --- task 5: previewOutcomes' own steps 1 and 2, untouched by the AC9
+  // fixture (which only ever reaches step 4 or the gh-reaching branch).
+  it('previews skipped-disabled at step 1 and skipped-no-remote at step 2, with no argv either way', async () => {
+    const off = await seed({
+      sessionId: 'session-preview-off',
+      eventType: 'gate-outcome',
+      payload: { outcome: 'blocked', reason: 'tests-failed' },
+      taskId: 'epic-1/task-preview-off',
+      project: 'off-project',
+    });
+    const noRemote = await seed({
+      sessionId: 'session-preview-no-remote',
+      eventType: 'gate-outcome',
+      payload: { outcome: 'blocked', reason: 'tests-failed' },
+      taskId: 'epic-1/task-preview-no-remote',
+      project: 'unregistered-project',
+    });
+    const isEnabled = (project: string) => project !== 'off-project';
+    const { runner } = makeStub();
+    const records = await previewOutcomes([off, noRemote], isEnabled, [], runner, CLOCK);
+
+    const disabled = records.find((r) => r.task_ref === 'epic-1/task-preview-off');
+    expect(disabled).toMatchObject({
+      settled_at_step: 1,
+      outcome: 'skipped-disabled',
+      reason: 'switch-off',
+    });
+    expect(disabled?.search_argv).toBeUndefined();
+
+    const noRemoteRecord = records.find((r) => r.task_ref === 'epic-1/task-preview-no-remote');
+    expect(noRemoteRecord).toMatchObject({
+      settled_at_step: 2,
+      outcome: 'skipped-no-remote',
+      reason: 'no-checkout',
+    });
+    expect(noRemoteRecord?.search_argv).toBeUndefined();
+    expect(noRemoteRecord?.repo_slug).toBeUndefined();
   });
 });

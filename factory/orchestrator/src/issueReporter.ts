@@ -216,6 +216,35 @@ async function appendIssueReported(
   );
 }
 
+/**
+ * Step 4's dedup rule, the one copy both the real path and the preview read:
+ * same project, same fingerprint, same latest event, already open.
+ */
+function priorReportFor(
+  history: readonly PriorReport[],
+  report: ErrorReport,
+): PriorReport | undefined {
+  return history.find(
+    (h) =>
+      h.project === report.project &&
+      h.fingerprint === report.fingerprint &&
+      h.latest_event_id === report.latest_event_id,
+  );
+}
+
+/**
+ * `register` is required and never defaulted: forwarded `undefined` would
+ * otherwise fail inside `resolveProjectRepo` naming neither the parameter
+ * nor this module. `[]` is a legitimate register and is not rejected.
+ */
+function requireRegister(register: readonly ProjectRef[], entryPoint: string): void {
+  if (!Array.isArray(register)) {
+    throw new Error(
+      `${entryPoint}: the register parameter is required (readonly ProjectRef[]), got ${String(register)}`,
+    );
+  }
+}
+
 /** Functional clause 2's decision procedure, in order, stopping at the first match. */
 async function decideOutcome(
   report: ErrorReport,
@@ -268,13 +297,7 @@ async function decideOutcome(
   }
 
   // Step 4: already reported and still open, per the snapshot this call read.
-  const already = history.find(
-    (h) =>
-      h.project === report.project &&
-      h.fingerprint === report.fingerprint &&
-      h.latest_event_id === report.latest_event_id,
-  );
-  if (already) {
+  if (priorReportFor(history, report)) {
     return {
       ...base,
       outcome: 'deduped-open',
@@ -322,6 +345,104 @@ async function decideOutcome(
   };
 }
 
+/** Preview's statement about the one step it has no instrument to measure. */
+const STEP_3_NOT_PERFORMED = 'not-performed' as const;
+
+const DECISION_NOTE =
+  'create or comment: which of the two would run is decided by the search ' +
+  'this preview deliberately does not perform';
+
+/**
+ * One candidate's preview: settled at step 1, 2 or 4 -- `(outcome, reason)`
+ * plus the step, no argv -- or gh-reaching, with every argv the real path
+ * could run and the rendered texts. Every record says step 3 was not
+ * performed: preview spawns no `gh`, so it reports the step as unperformed
+ * rather than guessing a word for it.
+ */
+export interface IssuePreviewRecord {
+  fingerprint: string;
+  project: string;
+  source: ErrorReport['source'];
+  error_class: string;
+  task_ref: string;
+  latest_event_id: string;
+  step_3_gh_availability: typeof STEP_3_NOT_PERFORMED;
+  settled_at_step?: 1 | 2 | 4;
+  outcome?: Extract<IssueReportOutcome, 'skipped-disabled' | 'skipped-no-remote' | 'deduped-open'>;
+  reason?: string;
+  repo_slug?: string;
+  search_argv?: string[];
+  create_argv?: string[];
+  comment_argv?: string[];
+  issue_body?: string;
+  comment_text?: string;
+  decision_note?: string;
+}
+
+/**
+ * The preview-safe half of `decideOutcome`: steps 1, 2 and 4 only, through
+ * the same fold, `priorOpenReports` and `priorReportFor` the real path uses.
+ * Never invokes the runner with command `gh`, never appends an event. For a
+ * gh-reaching candidate it BUILDS the search, create and comment argv, and
+ * prints both create and comment because which one runs is settled by a
+ * search this helper does not perform; the comment argv's issue number is
+ * `0`, a placeholder known only after that search. `runner` is accepted for
+ * signature parity with `reportErrors()`; nothing here reaches it.
+ */
+export async function previewOutcomes(
+  events: readonly StoredEvent[],
+  isProjectEnabled: (project: string) => boolean,
+  register: readonly ProjectRef[],
+  runner: CommandRunner,
+  clock: () => string,
+): Promise<IssuePreviewRecord[]> {
+  requireRegister(register, 'previewOutcomes');
+  void runner;
+  const { reports } = foldErrorEvents(events, clock(), () => true);
+  const history = priorOpenReports(events);
+
+  const out: IssuePreviewRecord[] = [];
+  for (const report of reports) {
+    const { fingerprint, project, source, error_class, task_ref, latest_event_id } = report;
+    const base = { fingerprint, project, source, error_class, task_ref, latest_event_id };
+    const step3 = { step_3_gh_availability: STEP_3_NOT_PERFORMED as typeof STEP_3_NOT_PERFORMED };
+    const settle = (rest: Omit<IssuePreviewRecord, keyof typeof base | keyof typeof step3>) =>
+      out.push({ ...base, ...step3, ...rest });
+
+    // Step 1: the switch.
+    if (!isProjectEnabled(project)) {
+      settle({ settled_at_step: 1, outcome: 'skipped-disabled', reason: 'switch-off' });
+      continue;
+    }
+    // Step 2: which repository -- git-only, and the source of the slug.
+    const repo = resolveProjectRepo(project, register);
+    if (!('slug' in repo)) {
+      settle({ settled_at_step: 2, outcome: 'skipped-no-remote', reason: repo.reason });
+      continue;
+    }
+    const repoSlug = repo.slug;
+    // Step 3 is skipped, not guessed. Step 4: the own-log dedup.
+    if (priorReportFor(history, report)) {
+      const reason = 'already-reported';
+      settle({ settled_at_step: 4, outcome: 'deduped-open', reason, repo_slug: repoSlug });
+      continue;
+    }
+    const fields = toIssueBodyFields(report);
+    const issueBody = renderBody(fields);
+    const commentText = renderComment(toIssueCommentFields(report));
+    settle({
+      repo_slug: repoSlug,
+      search_argv: buildSearchIssuesArgv(repoSlug, fingerprint),
+      create_argv: buildCreateIssueArgv(repoSlug, renderTitle(fields), issueBody),
+      comment_argv: buildCommentArgv(repoSlug, 0, commentText),
+      issue_body: issueBody,
+      comment_text: commentText,
+      decision_note: DECISION_NOTE,
+    });
+  }
+  return out;
+}
+
 /**
  * Fold `events` into candidate errors, decide and act on each in order, and
  * record every attempt as an `issue-reported` event. Never throws on a
@@ -340,6 +461,7 @@ export async function reportErrors(
   clock: () => string,
   opts: EventOpts = {},
 ): Promise<IssueReportRecord[]> {
+  requireRegister(register, 'reportErrors');
   // Every project's switch is applied by this module's own step 1, not by
   // the fold: foldErrorEvents dropping a disabled project's candidates
   // silently would lose the `skipped-disabled` record clause 2 requires.

@@ -14,7 +14,7 @@
 // the same modules are fine and stay up here: tsc erases them, so they cost
 // nothing at runtime. `test/cliBoot.test.ts` reads the built graph and fails if
 // the database layer creeps back into it.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -89,6 +89,7 @@ import {
   SPEC_FINDING_SCOPE,
   transition as transitionFinding,
 } from './findings.js';
+import type { CommandResult } from './gh.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
 import { decideHookPayload } from './hookDecision.js';
 import {
@@ -98,6 +99,7 @@ import {
 } from './immutability.js';
 import { collectExportDiffs, exportImpact, waveImpact } from './impact.js';
 import { integrationHeadSha, runIntegrationCheck } from './integration.js';
+import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
 import {
   outstandingJudges,
@@ -130,12 +132,14 @@ import {
   evaluateCommand,
   loadGuardrailPolicy,
 } from './policy.js';
+import { factoryProjects } from './projects.js';
 import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
 import { admit, adopt, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
+import { isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
 import { checkRuntime } from './runtime.js';
 import { checkSameMistakeKpi } from './sameMistakeKpi.js';
 import {
@@ -449,6 +453,48 @@ function eventContextFromFlags(flags: Record<string, string>): EventContext {
  */
 function eventOptsFromFlags(flags: Record<string, string>): EventOpts {
   return flags['state-dir'] ? { stateDir: flags['state-dir'] } : {};
+}
+
+/** The runner `issues report` hands to `reportErrors`: git and `gh` through one call, never a throw. */
+function issueCommandRunner(cmd: string, args: string[]): CommandResult {
+  try {
+    const stdout = execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { status: 0, stdout, stderr: '' };
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; status?: number | null; code?: string };
+    return {
+      status: typeof e.status === 'number' ? e.status : null,
+      stdout: e.stdout ?? '',
+      stderr: e.stderr ?? '',
+      ...(typeof e.code === 'string' ? { spawnError: e.code } : {}),
+    };
+  }
+}
+
+/** The event types errorIssues.ts folds candidates from; everything else is history and passes. */
+const ISSUE_CANDIDATE_TYPES = new Set(['gate-outcome', 'error-logged', 'task-added']);
+
+/** `--epic`/`--since` narrow the CANDIDATES, never the `issue-reported` history dedup reads. */
+function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, string>): StoredEvent[] {
+  const epic = flags.epic;
+  const since = flags.since;
+  if (epic === undefined && since === undefined) return events;
+  return events.filter(({ record }) => {
+    if (!ISSUE_CANDIDATE_TYPES.has(record.event_type)) return true;
+    if (epic !== undefined && !(record.task_id ?? '').startsWith(`${epic}/`)) return false;
+    return since === undefined || record.ts >= since;
+  });
+}
+
+/** Both `issues` actions read the same inputs; only the entry point differs. */
+async function issueInputs(flags: Record<string, string>) {
+  const sessionId = requireFlag(flags, 'session');
+  const eventOpts = eventOptsFromFlags(flags);
+  requireSession(sessionId, eventOpts);
+  const events = scopeIssueCandidates(await readLineageEvents(sessionId, eventOpts), flags);
+  const milestones = loadRoadmap(flags['roadmap-path']);
+  const isEnabled = (project: string) => isErrorTrackerWritable(milestones, project);
+  return { events, isEnabled, register: factoryProjects(), eventOpts };
 }
 
 /** Where plan version files are read from and written to; defaults to factory/specs/active. */
@@ -2470,6 +2516,28 @@ async function main(): Promise<number> {
       scheduledRecheck: flags.recheck === 'true',
     });
     printJson(result);
+    return 0;
+  }
+
+  if (namespace === 'issues' && action === 'report') {
+    // The one path in this epic that runs `gh` for real.
+    const { events, isEnabled, register, eventOpts } = await issueInputs(flags);
+    const clock = () => new Date().toISOString();
+    printJson(
+      await reportErrors(events, isEnabled, register, issueCommandRunner, clock, eventOpts),
+    );
+    return 0;
+  }
+
+  if (namespace === 'issues' && action === 'preview') {
+    // Same inputs, no `gh` and no event: the runner throws if anything
+    // reaches it, so a preview that spawned would fail loudly, not quietly.
+    const { events, isEnabled, register } = await issueInputs(flags);
+    const neverRun = (cmd: string): CommandResult => {
+      throw new Error(`issues preview must never run a command, asked for ${cmd}`);
+    };
+    const clock = () => new Date().toISOString();
+    printJson(await previewOutcomes(events, isEnabled, register, neverRun, clock));
     return 0;
   }
 
