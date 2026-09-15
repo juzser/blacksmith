@@ -257,11 +257,20 @@ export interface OffTimelineEventType {
  * screen drops.
  *
  * So every FREE_EVENT_TYPES entry must reach the timeline or be listed here
- * with a reason it should not. The list is empty today on purpose: of the
+ * with a reason it should not. The list was empty when it was written: of the
  * seven that were missing, none had an argument for staying hidden — they were
- * missing because the list was hand-kept, which is the whole complaint.
+ * missing because the list was hand-kept, which is the whole complaint. An
+ * entry may stand while a type's registration and its timeline row land in
+ * separate tasks of one plan; the outlived-gap guard in eventTypes.test.ts
+ * prunes it the moment the row is there.
  */
-export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [];
+export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [
+  {
+    eventType: 'error-report-proposed',
+    reason:
+      "Registered and drawn by task 6 of plan factory-error-log; the timeline allow-list FREE_TIMELINE_EVENT_TYPES in db/queries.ts is task 7's claim, whose first functional clause adds the type there and deletes this entry. The outlived-gap guard is what forces that deletion.",
+  },
+];
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git', 'coverage']);
 
