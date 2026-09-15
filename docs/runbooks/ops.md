@@ -597,11 +597,16 @@ reproducible from them.
 The daemon never opens an issue itself — section 3's `error-report-proposed`
 finding is a nudge, not an action (Files the daemon owns, §4, ignores it same
 as any other finding). The run is what acts: right after it writes an
-`error-logged` event, or after a gate records a `gate-outcome` it treats as
-an error, it calls the reporting verb once for that candidate. What gets
-folded in is exactly those two source event types — this session's own
-preview run (below) shows both `error-logged` and `gate-outcome` sources in
-one tracker's queue.
+`error-logged` event it calls the reporting verb, and that verb does not
+stop at the one candidate the run just reacted to — it re-reads the whole
+session lineage log and folds three source event types into reportable
+errors: every `error-logged` event (source `error-logged`), a `gate-outcome`
+the gate recorded as blocked (source `gate-outcome`), and a `task-added`
+event whose `task_status` is `failed` (source `task-failed`, error class
+`task.failed`, severity S2-major) — a failed task is folded in even though
+nothing ever wrote an `error-logged` event for it. This session's own
+preview run (below) shows two of the three sources, `error-logged` and
+`gate-outcome`, already queued for one tracker.
 
 **The command.** `smith issues report --session <id> [--epic <id>]
 [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]` is the only
