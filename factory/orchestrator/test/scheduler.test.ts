@@ -704,6 +704,105 @@ describe('runScheduler', () => {
   });
 });
 
+describe('computeProposals (error-report, from errorIssues.ts\'s fold)', () => {
+  const NOW = new Date('2026-08-01T00:00:00.000Z');
+  const errorLogged = (taskId = 'epic-1/task-1'): StoredEvent =>
+    ev({
+      event_type: 'error-logged',
+      task_id: taskId,
+      payload: { task_ref: taskId, agent: 'coder', error: 'gate.blocked', severity: 'S2-major' },
+    });
+  const errorReports = (events: StoredEvent[]) =>
+    computeProposals({ events, now: NOW, policy: POLICY }).filter(
+      (p) => p.kind === 'error-report',
+    );
+
+  it('mints one proposal per fingerprint, counting every occurrence', () => {
+    const proposals = errorReports([errorLogged(), errorLogged(), errorLogged('epic-1/task-2')]);
+    expect(proposals).toHaveLength(2);
+    const counts = proposals.map((p) => (p.kind === 'error-report' ? p.occurrences : -1)).sort();
+    expect(counts).toEqual([1, 2]);
+    for (const p of proposals) {
+      if (p.kind !== 'error-report') continue;
+      expect(p.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+      expect(p.taskRef).toMatch(/^epic-1\/task-/);
+      expect(p.errorClass).toBe('gate.blocked');
+    }
+  });
+
+  it('mints nothing for a fingerprint whose latest event is already reported', () => {
+    const events = [errorLogged(), errorLogged()];
+    const [only] = errorReports(events);
+    if (only?.kind !== 'error-report') throw new Error('fixture minted no proposal');
+    const answered = [
+      ...events,
+      ev({
+        event_type: 'issue-reported',
+        task_id: 'epic-1/task-1',
+        payload: {
+          outcome: 'opened',
+          fingerprint: only.fingerprint,
+          latest_event_id: only.latestEventId,
+        },
+      }),
+    ];
+    expect(errorReports(answered)).toHaveLength(0);
+  });
+
+  it('leaves a project the caller switched off alone', () => {
+    const proposals = computeProposals({
+      events: [errorLogged()],
+      now: NOW,
+      policy: POLICY,
+      isErrorTrackerEnabled: () => false,
+    }).filter((p) => p.kind === 'error-report');
+    expect(proposals).toHaveLength(0);
+  });
+});
+
+describe('runScheduler (error-report-proposed)', () => {
+  let stateDir: string;
+
+  afterEach(() => {
+    if (stateDir) rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  it('appends an error-report-proposed event carrying the proposal as payload', async () => {
+    stateDir = mkdtempSync(path.join(tmpdir(), 'smith-scheduler-run-'));
+    const { appendEvent } = await import('../src/events.js');
+    const root = await appendEvent(
+      {
+        session_id: 'sess-run3',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const events = [
+      ev({
+        event_type: 'error-logged',
+        task_id: 'epic-1/task-1',
+        payload: { agent: 'coder', error: 'gate.blocked', severity: 'S2-major' },
+      }),
+    ];
+    const ctx = { sessionId: 'sess-run3', planVersion: 1, causalParent: root.event_id };
+    await runScheduler(
+      { events, now: new Date('2026-08-01T00:00:00.000Z'), policy: POLICY },
+      ctx,
+      { stateDir },
+      false,
+    );
+    const logged = await readEvents('sess-run3', { stateDir });
+    const proposed = logged.filter((e) => e.record.event_type === 'error-report-proposed');
+    expect(proposed).toHaveLength(1);
+    expect(proposed[0]?.record.payload.kind).toBe('error-report');
+    expect(proposed[0]?.record.payload.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
 // pnpm itself must be reachable for runPnpmOutdated's "when available"
 // fallback test above to be meaningful, not a false pass from a missing binary.
 describe('environment sanity', () => {
