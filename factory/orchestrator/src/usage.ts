@@ -209,6 +209,14 @@ export const COMMANDS: readonly CommandDoc[] = [
       'ran strictly serially, 2 when a wave was admitted and the log shows no work for it.',
   },
   {
+    command: 'init',
+    positionals: '',
+    flags: '[--work-root <dir>]',
+    summary:
+      'Prepare a work root in the current directory: the state directories, and a copy of every ' +
+      'file the factory ships a default of for you to edit. Idempotent; a clone needs none of it.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',
