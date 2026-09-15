@@ -595,11 +595,7 @@ export interface ErrorReportProposal {
   latestEventId: string;
   /** How many events fold to this fingerprint. */
   occurrences: number;
-  /**
-   * Always 1: the fold is exact, and nothing here is estimated. The field
-   * exists so the proposal has the shape autonomy.ts's floor reads, and so
-   * a test can hold it above that floor and watch the kind refused anyway.
-   */
+  /** Always 1: the fold is exact. Present so autonomy.ts's floor has a number to read. */
   confidence: number;
 }
 

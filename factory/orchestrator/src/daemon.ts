@@ -397,10 +397,9 @@ export function inspectFactory(
         ...(admission === undefined ? {} : { admission }),
       });
     }
-    // Rechecks and unreported errors are deliberately dropped here:
-    // inspectSession already reports each against the session that owns it,
-    // and a second copy with no session is a duplicate an operator cannot act
-    // on.
+    // Rechecks and unreported errors are deliberately dropped here: inspectSession
+    // already reports each against the session that owns it, and a second copy
+    // with no session is a duplicate an operator cannot act on.
   }
 
   // The claim this repo rests on, watched instead of waited on. `smith epic

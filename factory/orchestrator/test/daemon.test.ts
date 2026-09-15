@@ -1778,12 +1778,7 @@ describe('an error nobody has reported', () => {
     return stored(
       sessionId,
       'issue-reported',
-      {
-        outcome: 'opened',
-        source: 'error-logged',
-        error_class: 'economy.budget-exceeded',
-        ...payload,
-      },
+      { outcome: 'opened', source: 'error-logged', ...payload },
       { task_id: TASK },
     );
   }
@@ -1842,11 +1837,7 @@ describe('an error nobody has reported', () => {
   });
 
   it('ignores a malformed issue-reported payload instead of dying on it', () => {
-    const events = [
-      loggedError('sess-1'),
-      issueReported('sess-1', { fingerprint: 42, latest_event_id: null }),
-    ];
-    expect(() => inspectSession('sess-1', events, OPTS)).not.toThrow();
+    const events = [loggedError('sess-1'), issueReported('sess-1', { fingerprint: 42 })];
     expect(unreported(inspectSession('sess-1', events, OPTS))).toHaveLength(1);
   });
 

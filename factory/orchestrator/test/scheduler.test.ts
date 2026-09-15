@@ -702,6 +702,41 @@ describe('runScheduler', () => {
       expect(logged[i]?.record.causal_parent).toBe(logged[i - 1]?.event_id);
     }
   });
+
+  it('appends an error-report-proposed event carrying the proposal as payload', async () => {
+    stateDir = mkdtempSync(path.join(tmpdir(), 'smith-scheduler-run-'));
+    const { appendEvent } = await import('../src/events.js');
+    const root = await appendEvent(
+      {
+        session_id: 'sess-run3',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const events = [
+      ev({
+        event_type: 'error-logged',
+        task_id: 'epic-1/task-1',
+        payload: { agent: 'coder', error: 'gate.blocked', severity: 'S2-major' },
+      }),
+    ];
+    const ctx = { sessionId: 'sess-run3', planVersion: 1, causalParent: root.event_id };
+    await runScheduler(
+      { events, now: new Date('2026-08-01T00:00:00.000Z'), policy: POLICY },
+      ctx,
+      { stateDir },
+      false,
+    );
+    const logged = await readEvents('sess-run3', { stateDir });
+    const proposed = logged.filter((e) => e.record.event_type === 'error-report-proposed');
+    expect(proposed).toHaveLength(1);
+    expect(proposed[0]?.record.payload.kind).toBe('error-report');
+    expect(proposed[0]?.record.payload.fingerprint).toMatch(/^[0-9a-f]{16}$/);
+  });
 });
 
 describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
@@ -755,49 +790,6 @@ describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
       isErrorTrackerEnabled: () => false,
     }).filter((p) => p.kind === 'error-report');
     expect(proposals).toHaveLength(0);
-  });
-});
-
-describe('runScheduler (error-report-proposed)', () => {
-  let stateDir: string;
-
-  afterEach(() => {
-    if (stateDir) rmSync(stateDir, { recursive: true, force: true });
-  });
-
-  it('appends an error-report-proposed event carrying the proposal as payload', async () => {
-    stateDir = mkdtempSync(path.join(tmpdir(), 'smith-scheduler-run-'));
-    const { appendEvent } = await import('../src/events.js');
-    const root = await appendEvent(
-      {
-        session_id: 'sess-run3',
-        actor: 'user',
-        event_type: 'session-start',
-        plan_version: 1,
-        causal_parent: null,
-        payload: {},
-      },
-      { stateDir },
-    );
-    const events = [
-      ev({
-        event_type: 'error-logged',
-        task_id: 'epic-1/task-1',
-        payload: { agent: 'coder', error: 'gate.blocked', severity: 'S2-major' },
-      }),
-    ];
-    const ctx = { sessionId: 'sess-run3', planVersion: 1, causalParent: root.event_id };
-    await runScheduler(
-      { events, now: new Date('2026-08-01T00:00:00.000Z'), policy: POLICY },
-      ctx,
-      { stateDir },
-      false,
-    );
-    const logged = await readEvents('sess-run3', { stateDir });
-    const proposed = logged.filter((e) => e.record.event_type === 'error-report-proposed');
-    expect(proposed).toHaveLength(1);
-    expect(proposed[0]?.record.payload.kind).toBe('error-report');
-    expect(proposed[0]?.record.payload.fingerprint).toMatch(/^[0-9a-f]{16}$/);
   });
 });
 

@@ -137,11 +137,9 @@ function securityFields(proposal: SchedulerProposal, ctx: AdmissionContext): Fie
     case 'maintenance':
       return proposal.packages.map((p) => ({ field: 'package', value: p.name }));
     case 'growth-review-due':
-      // Never reached in classify: the kind is refused ahead of the keyword
-      // match. Listed anyway so the switch stays exhaustive and a hit could
-      // still say where, should that order ever change.
       return [];
     case 'error-report':
+      // Refused ahead of the keyword match; listed so the switch stays exhaustive.
       return [
         { field: 'task ref', value: proposal.taskRef },
         { field: 'error class', value: proposal.errorClass },
