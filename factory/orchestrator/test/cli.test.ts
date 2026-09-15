@@ -8,6 +8,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // about the coder cap that reads budgets.yml through the same loader the
 // binary uses cannot drift away from the file when the cap is retuned.
 import { loadBudgetPolicy } from '../src/budgets.js';
+import { resolveRepoAtDir } from '../src/gh.js';
+import { factoryProjects } from '../src/projects.js';
 import { assertExited, runOrThrow, runProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
@@ -8222,6 +8224,216 @@ describe('cli.ts (built binary)', () => {
       expect(parsed.error.code).toBe('effort.unknown-tier');
       expect(parsed.error.message).toMatch(/tiny/);
       expect(parsed.error.message).toMatch(/small, medium, huge/);
+    });
+  });
+
+  describe('issues preview (task 5)', () => {
+    // Every test here drives `issues preview` only (nonfunctional clause 2):
+    // nothing in this describe reaches a tracker, and a `gh` shim on PATH
+    // records any process a preview would have spawned by mistake.
+    function ghShimDir(label: string): { binDir: string; marker: string } {
+      const binDir = path.join(scratchDir, `issues-${label}-bin`);
+      const marker = path.join(scratchDir, `issues-${label}-gh-invoked`);
+      mkdirSync(binDir, { recursive: true });
+      const shim = path.join(binDir, 'gh');
+      writeFileSync(shim, `#!/bin/sh\necho "$@" >> "${marker}"\nexit 1\n`);
+      chmodSync(shim, 0o755);
+      return { binDir, marker };
+    }
+
+    /** One session with `gate-outcome` candidates, one per task id given. */
+    function seedCandidates(
+      label: string,
+      taskIds: string[],
+      project?: string,
+    ): { sessionId: string; eventsDir: string } {
+      const sessionId = `cli-issues-${label}-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `${sessionId}-events`);
+      const stamp = project ? { project } : {};
+      const root = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'system',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+          ...stamp,
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(root.status).toBe(0);
+      const rootId = JSON.parse(root.stdout).event_id;
+      for (const taskId of taskIds) {
+        const gate = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'gate-outcome',
+            task_id: taskId,
+            plan_version: 1,
+            causal_parent: rootId,
+            payload: { outcome: 'blocked', reason: 'tests-failed' },
+            ...stamp,
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(gate.status).toBe(0);
+      }
+      return { sessionId, eventsDir };
+    }
+
+    function eventCount(sessionId: string, eventsDir: string): number {
+      const tail = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
+      expect(tail.status).toBe(0);
+      return JSON.parse(tail.stdout).length;
+    }
+
+    // AC1 (TDD, differential): under the null the binary refuses `issues
+    // preview` as an unknown command and exits 1; after the change it prints
+    // one JSON record per candidate, each naming its error and the argv that
+    // would run.
+    it('issues preview prints one JSON record per candidate naming its argv (AC1)', () => {
+      const { sessionId, eventsDir } = seedCandidates('ac1', ['epic-1/task-a']);
+      const { stdout, stderr, status } = runCli([
+        'issues',
+        'preview',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).toBe(0);
+      expect(stderr).toBe('');
+      const records = JSON.parse(stdout);
+      expect(records).toHaveLength(1);
+      expect(records[0].task_ref).toBe('epic-1/task-a');
+      expect(records[0].error_class).toBe('tests-failed');
+      expect(typeof records[0].fingerprint).toBe('string');
+      expect(records[0].search_argv).toContain(records[0].fingerprint);
+      expect(records[0].create_argv[0]).toBe('issue');
+      expect(records[0].comment_argv[0]).toBe('issue');
+    });
+
+    // AC2: (a) zero `gh` processes AND all three argv blocks printed; (b)
+    // the search argv carries the slug resolved from this checkout's own
+    // `origin` remote as a literal; (c) the event count is unchanged.
+    it('issues preview spawns no gh, prints all three argv blocks with the origin slug, and appends nothing (AC2)', () => {
+      const { sessionId, eventsDir } = seedCandidates('ac2', ['epic-1/task-b']);
+      const { binDir, marker } = ghShimDir('ac2');
+      const before = eventCount(sessionId, eventsDir);
+
+      const { stdout, status } = runCli(
+        ['issues', 'preview', '--session', sessionId, '--state-dir', eventsDir],
+        { PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+      );
+      expect(status).toBe(0);
+
+      // (a) the `gh` shim was never executed ...
+      expect(existsSync(marker)).toBe(false);
+      // ... and the one gh-reaching candidate printed all three argv blocks.
+      const [record] = JSON.parse(stdout);
+      const blocks = [record.search_argv, record.create_argv, record.comment_argv];
+      expect(blocks.filter((b) => Array.isArray(b) && b[0] === 'issue')).toHaveLength(3);
+
+      // (b) the slug from the register entry the CLI passed (AC6): the
+      // first `factoryProjects()` entry is this checkout, `self: true`, and
+      // its `origin` resolves to the literal below.
+      const register = factoryProjects();
+      const first = register[0];
+      if (!first) throw new Error('factoryProjects() returned no entry');
+      expect(first.self).toBe(true);
+      const resolved = resolveRepoAtDir(first.dir);
+      if (!('slug' in resolved)) throw new Error(`no slug: ${resolved.reason}`);
+      expect(resolved.slug).toBe('juzser/blacksmith');
+      expect(record.repo_slug).toBe('juzser/blacksmith');
+      expect(record.search_argv).toEqual([
+        'issue',
+        'list',
+        '--repo',
+        'juzser/blacksmith',
+        '--state',
+        'open',
+        '--search',
+        record.fingerprint,
+      ]);
+      expect(record.create_argv).toContain('juzser/blacksmith');
+      expect(record.comment_argv).toContain('juzser/blacksmith');
+      expect(record.step_3_gh_availability).toBe('not-performed');
+
+      // (c) preview appended nothing.
+      const after = eventCount(sessionId, eventsDir);
+      expect(before).toBe(2);
+      expect(after).toBe(before);
+    });
+
+    // Functional clause 2: `--epic` narrows the candidates to one epic.
+    it('issues preview --epic reports only that epic\'s candidates', () => {
+      const { sessionId, eventsDir } = seedCandidates('scope', ['epic-1/task-c', 'epic-2/task-d']);
+      const { stdout, status } = runCli([
+        'issues',
+        'preview',
+        '--session',
+        sessionId,
+        '--epic',
+        'epic-2',
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).toBe(0);
+      const records = JSON.parse(stdout);
+      expect(records.map((r: { task_ref: string }) => r.task_ref)).toEqual(['epic-2/task-d']);
+    });
+
+    // AC4: every candidate settled `skipped-disabled` at step 1 is a
+    // recorded answer, so the run exits 0 and prints no argv for it.
+    it('issues preview exits 0 when every candidate is skipped-disabled (AC4)', () => {
+      const { sessionId, eventsDir } = seedCandidates('off', ['epic-1/task-e']);
+      const roadmapPath = path.join(scratchDir, 'issues-off-roadmap.md');
+      writeFileSync(
+        roadmapPath,
+        '# Roadmap\n\n## Phase 1 — Off\n- id: phase-1\n- status: planned\n- error_issues: off\n',
+      );
+      const { stdout, status } = runCli([
+        'issues',
+        'preview',
+        '--session',
+        sessionId,
+        '--roadmap-path',
+        roadmapPath,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).toBe(0);
+      const [record] = JSON.parse(stdout);
+      expect(record.outcome).toBe('skipped-disabled');
+      expect(record.reason).toBe('switch-off');
+      expect(record.settled_at_step).toBe(1);
+      expect(record.search_argv).toBeUndefined();
+      expect(record.step_3_gh_availability).toBe('not-performed');
+    });
+
+    // AC4: a log that cannot be read at all exits non-zero -- a different
+    // code from the all-skipped run above, which is the whole point.
+    it('issues preview exits non-zero when the session log cannot be read (AC4)', () => {
+      const eventsDir = path.join(scratchDir, 'issues-unreadable-events');
+      const { stdout, status } = runCli([
+        'issues',
+        'preview',
+        '--session',
+        'no-such-session',
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).not.toBe(0);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.message).toMatch(/no-such-session/);
     });
   });
 
