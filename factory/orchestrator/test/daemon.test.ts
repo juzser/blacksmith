@@ -33,6 +33,7 @@ import {
 } from '../src/daemon.js';
 import { openDb } from '../src/db/projector.js';
 import { roadmapPage } from '../src/db/queries.js';
+import { foldErrorEvents } from '../src/errorIssues.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
 import { REPO_ROOT } from '../src/paths.js';
@@ -1743,5 +1744,105 @@ describe('the read-model of a factory with no sessions', () => {
   it('leaves the database alone when the projection is switched off', async () => {
     await tick({ projectDb: false });
     expect(existsSync(dbPath)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fork 3's other half: an error the log holds that nobody has reported. The
+// daemon PROPOSES the report and never files it — every assertion here is
+// about a finding, and the discharge is a command an operator types.
+// ---------------------------------------------------------------------------
+
+describe('an error nobody has reported', () => {
+  const OPTS = { now: NOW, budgetPolicy: BUDGET, schedulerPolicy: SCHEDULER };
+  const TASK = 'epic-1/task-3';
+
+  /** One `error-logged` event, in the shape a worker's dispatcher appends. */
+  function loggedError(sessionId: string): StoredEvent {
+    return stored(
+      sessionId,
+      'error-logged',
+      { task_ref: TASK, agent: 'coder', error: 'economy.budget-exceeded', severity: 'S2-major' },
+      { task_id: TASK },
+    );
+  }
+
+  /** The fingerprint task 2's fold assigns, read off the fold rather than restated. */
+  function fingerprintOf(events: StoredEvent[]): { fingerprint: string; latestEventId: string } {
+    const report = foldErrorEvents(events, NOW.toISOString(), () => true).reports[0];
+    if (!report) throw new Error('fixture folds to no report');
+    return { fingerprint: report.fingerprint, latestEventId: report.latest_event_id };
+  }
+
+  function issueReported(sessionId: string, payload: Record<string, unknown>): StoredEvent {
+    return stored(
+      sessionId,
+      'issue-reported',
+      { outcome: 'opened', source: 'error-logged', ...payload },
+      { task_id: TASK },
+    );
+  }
+
+  const unreported = (findings: DaemonFinding[]) =>
+    findings.filter((f) => f.kind === 'unreported-error');
+
+  it('raises one finding per fingerprint for an error with no issue-reported event', () => {
+    // Two occurrences of one fingerprint: the fold returns one report per
+    // event, and the daemon must still say it once.
+    const events = [loggedError('sess-1'), loggedError('sess-1')];
+    const { fingerprint } = fingerprintOf(events);
+    const findings = unreported(inspectSession('sess-1', events, OPTS));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe('info');
+    expect(findings[0]?.subject).toContain(fingerprint);
+    expect(findings[0]?.detail).toContain(fingerprint);
+    expect(findings[0]?.detail).toContain('2 occurrence(s)');
+    expect(findings[0]?.detail).toContain('smith issues report --session sess-1');
+  });
+
+  it('clears once a matching issue-reported event is in the log', () => {
+    const events = [loggedError('sess-1'), loggedError('sess-1')];
+    const { fingerprint, latestEventId } = fingerprintOf(events);
+    const answered = [
+      ...events,
+      issueReported('sess-1', { fingerprint, latest_event_id: latestEventId }),
+    ];
+    expect(unreported(inspectSession('sess-1', answered, OPTS))).toHaveLength(0);
+  });
+
+  it('clears on a recorded skip too — a skip is an answer', () => {
+    const events = [loggedError('sess-1')];
+    const { fingerprint, latestEventId } = fingerprintOf(events);
+    const answered = [
+      ...events,
+      issueReported('sess-1', {
+        fingerprint,
+        latest_event_id: latestEventId,
+        outcome: 'skipped-disabled',
+        reason: 'error tracker disabled',
+      }),
+    ];
+    expect(unreported(inspectSession('sess-1', answered, OPTS))).toHaveLength(0);
+  });
+
+  it('raises again when the error recurs after its report', () => {
+    const first = [loggedError('sess-1')];
+    const { fingerprint, latestEventId } = fingerprintOf(first);
+    const recurred = [
+      ...first,
+      issueReported('sess-1', { fingerprint, latest_event_id: latestEventId }),
+      loggedError('sess-1'),
+    ];
+    expect(unreported(inspectSession('sess-1', recurred, OPTS))).toHaveLength(1);
+  });
+
+  it('ignores a malformed issue-reported payload instead of dying on it', () => {
+    const events = [loggedError('sess-1'), issueReported('sess-1', { fingerprint: 42 })];
+    expect(unreported(inspectSession('sess-1', events, OPTS))).toHaveLength(1);
+  });
+
+  it('is reported by the session pass only, never again by the factory pass', () => {
+    const events = [loggedError('sess-1')];
+    expect(unreported(inspectFactory(events, OPTS))).toHaveLength(0);
   });
 });

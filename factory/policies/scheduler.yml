@@ -64,6 +64,15 @@ autonomy:
   # `growth-review-due` would not change that: architecture §12 keeps scope
   # with the operator unconditionally, so autonomy.ts denies it whatever this
   # says. The list is a ceiling, never a floor.
+  #
+  # `error-report` — the daemon proposing that an error the log holds with
+  # no `issue-reported` event be filed (`smith issues report`) — is left out
+  # on purpose, and listing it would not change that either. Filing writes
+  # to an external issue tracker under an authenticated `gh` token whose
+  # scope includes `repo`, and this block's standing decision is that
+  # anything touching auth or secrets always waits for a person; autonomy.ts
+  # refuses the kind ahead of this list (`tracker-write-never-auto`), the
+  # same shape `growth-never-auto` uses.
   auto_dispatch_kinds: [recheck, maintenance]
 
   # Rechecks are whitelisted BY REASON, and this is the one knob in the file

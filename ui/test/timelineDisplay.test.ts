@@ -337,6 +337,39 @@ describe('lib/timelineDisplay.ts', () => {
       ).toBe('Maintenance proposed — 0 outdated (none)');
     });
 
+    it('names the error class, task and count of an unreported error', () => {
+      const e = entry({
+        eventType: 'error-report-proposed',
+        payload: {
+          kind: 'error-report',
+          fingerprint: 'abc123',
+          errorClass: 'AssertionError',
+          taskRef: 'epic/task-3',
+          occurrences: 2,
+        },
+      });
+      expect(iconFor(e)).toBe('triangle-alert');
+      expect(titleFor(e)).toBe(
+        'Error report proposed — AssertionError in epic/task-3 (2 occurrences)',
+      );
+      expect(titleFor(entry({ eventType: 'error-report-proposed', payload: {} }))).toBe(
+        'Error report proposed —  in  (0 occurrences)',
+      );
+      expect(
+        titleFor(
+          entry({
+            eventType: 'error-report-proposed',
+            payload: {
+              kind: 'error-report',
+              errorClass: 'AssertionError',
+              taskRef: 'epic/task-3',
+              occurrences: 1,
+            },
+          }),
+        ),
+      ).toBe('Error report proposed — AssertionError in epic/task-3 (1 occurrence)');
+    });
+
     it('gives the growth review its cadence, and degrades without a last review', () => {
       const e = entry({
         eventType: 'growth-review-due',
@@ -355,7 +388,12 @@ describe('lib/timelineDisplay.ts', () => {
      * blank cell, not a broken build, and no assertion above would catch it.
      */
     it('gives every proposal an icon the registry actually has', () => {
-      const types = ['recheck-proposed', 'maintenance-proposed', 'growth-review-due'];
+      const types = [
+        'recheck-proposed',
+        'maintenance-proposed',
+        'growth-review-due',
+        'error-report-proposed',
+      ];
       const missing = types
         .map((eventType) => iconFor(entry({ eventType })))
         .filter((name) => !(name in ICON_PATHS));
@@ -642,7 +680,7 @@ describe('lib/timelineDisplay.ts', () => {
       expect([...chip].sort()).toEqual([...dimension].sort());
     });
 
-    // The scheduler's three event types are free strings (like
+    // The scheduler's four event types are free strings (like
     // dispatch_decision), so no taxonomy dimension lists them and the
     // gate-chip test above cannot catch their absence. It went unnoticed for
     // that reason: `smith scheduler run` is the one writer in the factory
@@ -659,7 +697,7 @@ describe('lib/timelineDisplay.ts', () => {
         (m) => m[1],
       );
       const chip = KIND_OPTIONS.find((option) => option.value === 'scheduler')?.types ?? [];
-      expect(emitted.length).toBe(3);
+      expect(emitted.length).toBe(4);
       expect([...chip].sort()).toEqual([...emitted].sort());
     });
 

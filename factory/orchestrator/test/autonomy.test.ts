@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { type AutonomyPolicy, admitProposals } from '../src/autonomy.js';
+import { SCHEDULER_POLICY_PATH } from '../src/paths.js';
 import type { SchedulerProposal } from '../src/scheduler.js';
+import { loadSchedulerPolicy } from '../src/scheduler.js';
 
 /** The shape the operator chose: rechecks and maintenance may run themselves, growth never. */
 const POLICY: AutonomyPolicy = {
@@ -152,5 +154,51 @@ describe('admitProposals', () => {
       expect(admissions.every((a) => a.decision === 'operator')).toBe(true);
       expect(admissions.every((a) => a.code === 'autonomy-disabled')).toBe(true);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The error-report proposal writes to an external tracker under an
+// authenticated `gh` token. That is a security decision, so every assertion
+// below is on the DECISION value — a branch merely being reached proves
+// nothing about what an unattended process would have done.
+// ---------------------------------------------------------------------------
+
+describe('error-report proposals', () => {
+  const errorReport = (confidence: number): SchedulerProposal =>
+    ({
+      kind: 'error-report',
+      fingerprint: '0123456789abcdef',
+      project: 'black-smith',
+      source: 'error-logged',
+      errorClass: 'economy.budget-exceeded',
+      taskRef: 'epic-1/task-3',
+      sessionId: 'sess-1',
+      latestEventId: 'sess-1#4',
+      occurrences: 2,
+      confidence,
+    }) as SchedulerProposal;
+
+  it("holds a report at 0.95 confidence, above the floor: the tracker write is the operator's", () => {
+    const [admission] = admitProposals([errorReport(0.95)], POLICY, ctx());
+    expect(admission?.decision).toBe('operator');
+    expect(admission?.code).toBe('tracker-write-never-auto');
+    expect(admission?.reason).toMatch(/gh/);
+    expect(admission?.reason).toMatch(/repo/);
+  });
+
+  it('is absent from the shipped scheduler.yml auto_dispatch_kinds', () => {
+    const shipped = loadSchedulerPolicy(SCHEDULER_POLICY_PATH);
+    expect(shipped.autonomy.autoDispatchKinds).not.toContain('error-report');
+  });
+
+  it('is still held when a hand-built policy lists the kind — the refusal is in code', () => {
+    const permissive: AutonomyPolicy = {
+      ...POLICY,
+      autoDispatchKinds: ['recheck', 'maintenance', 'error-report'],
+    };
+    const [admission] = admitProposals([errorReport(0.95)], permissive, ctx());
+    expect(admission?.decision).toBe('operator');
+    expect(admission?.code).toBe('tracker-write-never-auto');
   });
 });

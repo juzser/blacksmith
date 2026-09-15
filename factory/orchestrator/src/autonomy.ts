@@ -45,6 +45,7 @@ export type AdmissionCode =
   | 'admitted'
   | 'autonomy-disabled'
   | 'growth-never-auto'
+  | 'tracker-write-never-auto'
   | 'kind-not-whitelisted'
   | 'reason-not-whitelisted'
   | 'below-confidence-floor'
@@ -118,6 +119,8 @@ function subjectOf(proposal: SchedulerProposal): string {
     }
     case 'growth-review-due':
       return `product-growth review, ${proposal.cadenceDays}-day cadence`;
+    case 'error-report':
+      return `issue report for error ${proposal.fingerprint} (${proposal.errorClass}, task ${proposal.taskRef})`;
   }
 }
 
@@ -135,6 +138,13 @@ function securityFields(proposal: SchedulerProposal, ctx: AdmissionContext): Fie
       return proposal.packages.map((p) => ({ field: 'package', value: p.name }));
     case 'growth-review-due':
       return [];
+    case 'error-report':
+      // Refused ahead of the keyword match; listed so the switch stays exhaustive.
+      return [
+        { field: 'task ref', value: proposal.taskRef },
+        { field: 'error class', value: proposal.errorClass },
+        { field: 'project', value: proposal.project },
+      ];
   }
 }
 
@@ -159,6 +169,20 @@ function classify(
       code: 'growth-never-auto',
       reason:
         'A product-growth review proposes SCOPE, and scope is the operator\'s (architecture §12: "product-growth proposals always wait for an operator tick"). Listing the kind in auto_dispatch_kinds changes nothing.',
+    };
+  }
+
+  // Same place, same reason shape: reporting an error writes to an external
+  // issue tracker under an authenticated `gh` token whose scope includes
+  // `repo`, and scheduler.yml's autonomy block already holds that anything
+  // touching auth or secrets always waits for a person. Ahead of the
+  // whitelist so that listing the kind changes nothing.
+  if (proposal.kind === 'error-report') {
+    return {
+      decision: 'operator',
+      code: 'tracker-write-never-auto',
+      reason:
+        'Reporting an error writes to an external issue tracker under an authenticated gh token whose scope includes repo. scheduler.yml\'s autonomy block holds that anything touching auth or secrets always waits for a person, so listing "error-report" in auto_dispatch_kinds changes nothing.',
     };
   }
 
