@@ -704,7 +704,7 @@ describe('runScheduler', () => {
   });
 });
 
-describe('computeProposals (error-report, from errorIssues.ts\'s fold)', () => {
+describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
   const NOW = new Date('2026-08-01T00:00:00.000Z');
   const errorLogged = (taskId = 'epic-1/task-1'): StoredEvent =>
     ev({
@@ -713,9 +713,7 @@ describe('computeProposals (error-report, from errorIssues.ts\'s fold)', () => {
       payload: { task_ref: taskId, agent: 'coder', error: 'gate.blocked', severity: 'S2-major' },
     });
   const errorReports = (events: StoredEvent[]) =>
-    computeProposals({ events, now: NOW, policy: POLICY }).filter(
-      (p) => p.kind === 'error-report',
-    );
+    computeProposals({ events, now: NOW, policy: POLICY }).filter((p) => p.kind === 'error-report');
 
   it('mints one proposal per fingerprint, counting every occurrence', () => {
     const proposals = errorReports([errorLogged(), errorLogged(), errorLogged('epic-1/task-2')]);

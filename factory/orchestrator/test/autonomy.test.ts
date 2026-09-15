@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { SCHEDULER_POLICY_PATH } from '../src/paths.js';
-import { loadSchedulerPolicy } from '../src/scheduler.js';
 import { type AutonomyPolicy, admitProposals } from '../src/autonomy.js';
+import { SCHEDULER_POLICY_PATH } from '../src/paths.js';
 import type { SchedulerProposal } from '../src/scheduler.js';
+import { loadSchedulerPolicy } from '../src/scheduler.js';
 
 /** The shape the operator chose: rechecks and maintenance may run themselves, growth never. */
 const POLICY: AutonomyPolicy = {
@@ -179,7 +179,7 @@ describe('error-report proposals', () => {
       confidence,
     }) as SchedulerProposal;
 
-  it('holds a report at 0.95 confidence, above the floor: the tracker write is the operator\'s', () => {
+  it("holds a report at 0.95 confidence, above the floor: the tracker write is the operator's", () => {
     const [admission] = admitProposals([errorReport(0.95)], POLICY, ctx());
     expect(admission?.decision).toBe('operator');
     expect(admission?.code).toBe('tracker-write-never-auto');
