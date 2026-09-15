@@ -15406,3 +15406,79 @@ have caught this in any of five rounds.
 signature accepting it).
 
 **Related:** [[D-286]], [[D-297]].
+
+## D-299 — where the error report folds, and what it will not scrub
+
+**Severity:** S3-minor.
+
+**Where:** `.claude/skills/bs/dispatch.md:319-324`,
+`.claude/skills/bs/wave.md:36-39`, `docs/runbooks/ops.md` §10,
+`factory/orchestrator/src/issueReporter.ts`,
+`factory/orchestrator/src/scheduler.ts:734`,
+`docs/standards/guardrails.md:109-111`.
+
+**How it opened.** `factory-error-log/task-8` asked the run itself, not
+only the daemon, to report an error the moment it is recorded, so the
+capability task 4 shipped in `issueReporter.ts` has something that actually
+invokes it. Four choices the operator settled on the epic's timeline
+(`factory-error-log-2026-09-05#8`) had to be recorded rather than left as
+the planner's proposal:
+
+(a) **The fold lives in the run, not a hook on `error-logged`.** The
+daemon's `error-report-proposed` finding (`scheduler.ts:734`) is a nudge, no
+more — the daemon never opens an issue. `.claude/skills/bs/dispatch.md`'s
+paragraph on owning the dispatch log now tells the run to call the
+reporting verb right after it writes `error-logged`, and `wave.md` names
+that paragraph as the owner rather than restating it. A hook fired *on*
+`error-logged` was rejected: that event is hand-written by the run, and a
+hook on a hand-written event fires on every typo in a payload nobody meant
+to report.
+
+(b) **Dedup is GitHub-side.** The reporting verb searches
+`gh issue list --search <fingerprint>` before it opens or comments, rather
+than keeping a local index of what it has already filed. The cost of this
+choice is one `gh` search per candidate per run — paid every time, win or
+lose — against the alternative cost of a local index that can drift from
+what GitHub actually holds.
+
+(c) **This factory's own repository is included, not excluded.** Event
+`factory-error-log-2026-09-05#8`'s answer to "may the mechanism open issues
+on `juzser/blacksmith` itself": yes, no special case. The `issues preview`
+run behind this task's acceptance evidence shows exactly that — records
+whose `repo_slug` is `juzser/blacksmith` sit beside every other project's.
+The per-project `- error_issues:` switch (`roadmap.ts:65-69`, matched
+case-insensitively, absent bullet reads as `on`) is the only off ramp, and
+it is a roadmap bullet, not a branch in the reporter.
+
+(d) **The guardrails contradiction is recorded, not fixed.**
+`docs/standards/guardrails.md:109-111` promises: "The event logger redacts
+values matching a denylist (key/token/secret/password patterns) before
+write." It does not. `appendEvent` (`factory/orchestrator/src/events.ts`)
+validates against schema and taxonomy, takes two locks, and appends —
+nothing in it scrubs anything. This epic does not depend on the missing
+redactor: `issueReporter.ts`'s `issue_body` and `comment_text` renderers
+are both allowlists of named fields (`task_ref`, `error_class`, severity,
+session, epic, plan version, project, source, fingerprint, and a pointer to
+read the detail locally) built from the report struct, never a spread of
+the source event's payload, so a secret sitting in a source event's
+`detail` cannot reach either rendered text no matter what `appendEvent`
+does or does not scrub. A redactor by KNOWN VALUE — not by pattern — is
+available should a later epic want one: `factory/policies/crosscheck.yml`
+already names every provider API key by its env var, and
+`providers/api-transport.ts:95-99` already redacts a live key from an error
+body by splitting on its literal value before logging it. Event
+`factory-error-log-2026-09-05#8`, question 3, is the operator's settled
+answer: out of scope, record the contradiction, do not touch
+`guardrails.md`.
+
+The one place the spec's own count needed correcting: design decision 5
+counts three reasons under the `failed` outcome, but
+`issueReporter.ts:296-333` produces four — `gh-unknown`, `search-failed`,
+`comment-failed`, `create-failed`. `docs/runbooks/ops.md` §10's table names
+all four; this record notes the undercount rather than silently dropping
+the fourth.
+
+**Status: recorded, 2026-09-15, branch
+smith/factory-error-log/task-8-the-run-only-does-what-the-runbook-says.**
+
+**Related:** [[D-298]].
