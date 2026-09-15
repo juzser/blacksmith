@@ -602,11 +602,11 @@ stop at the one candidate the run just reacted to — it re-reads the whole
 session lineage log and folds three source event types into reportable
 errors: every `error-logged` event (source `error-logged`), a `gate-outcome`
 the gate recorded as blocked (source `gate-outcome`), and a `task-added`
-event whose `task_status` is `failed` (source `task-failed`, error class
-`task.failed`, severity S2-major) — a failed task is folded in even though
-nothing ever wrote an `error-logged` event for it. This session's own
-preview run (below) shows two of the three sources, `error-logged` and
-`gate-outcome`, already queued for one tracker.
+event whose `task_status` is `failed` (source `task-failed`,
+`error_class: task.failed`, severity S2-major) — a failed task is folded
+in even though nothing ever wrote an `error-logged` event for it. This
+session's own preview run (below) shows two of the three sources,
+`error-logged` and `gate-outcome`, already queued for one tracker.
 
 **The command.** `smith issues report --session <id> [--epic <id>]
 [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]` is the only
