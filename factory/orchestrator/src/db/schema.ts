@@ -350,8 +350,37 @@ export const milestones = sqliteTable(
     // roadmap.ts resolves for a milestone that declares neither bullet, and
     // for those two that answer is the factory's own.
     kind: text('kind').notNull().default('factory'),
+    // Task 7 (factory-error-log) -- roadmap.ts's MilestoneDef.errorIssuesEnabled,
+    // resolved per-project from the roadmap's `- error_issues: on|off` bullet
+    // (default 'on' when absent, same default roadmap.ts itself applies).
+    errorIssues: integer('error_issues', { mode: 'boolean' }).notNull().default(true),
   },
   (t) => [index('milestones_project_idx').on(t.project)],
+);
+
+/** `issue-reported` events (architecture §8, task 5 of factory-error-log). */
+export const issue_reports = sqliteTable(
+  'issue_reports',
+  {
+    eventId: text('event_id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    ts: text('ts').notNull(),
+    taskRef: text('task_ref'),
+    errorClass: text('error_class').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    issueUrl: text('issue_url'),
+    latestEventId: text('latest_event_id').notNull(),
+    outcome: text('outcome').notNull(),
+    reason: text('reason'),
+    repoSlug: text('repo_slug'),
+    source: text('source').notNull(),
+    project: text('project'), // Phase 6b — see eventsRaw's project comment above.
+  },
+  (t) => [
+    index('issue_reports_session_idx').on(t.sessionId),
+    index('issue_reports_fingerprint_idx').on(t.fingerprint),
+    index('issue_reports_outcome_idx').on(t.outcome),
+  ],
 );
 
 /** One row per artifact entry on a `task-result-recorded` event's payload. */
