@@ -24,7 +24,7 @@ const DEFAULT_PORT = 4680;
 
 /** Starts the dashboard API + static UI server, bound to 127.0.0.1 only (local-first, no auth — architecture §10). */
 export function serve(opts: ServeOptions): ServerHandle {
-  const { app, handle } = createApp({
+  const { app, handle, closeStream } = createApp({
     dbPath: opts.dbPath,
     ...(opts.stateDir ? { stateDir: opts.stateDir } : {}),
     ...(opts.roadmapPath ? { roadmapPath: opts.roadmapPath } : {}),
@@ -39,6 +39,10 @@ export function serve(opts: ServeOptions): ServerHandle {
   return {
     close: () => {
       server.close();
+      // Before the db for the reason closeApp() gives: the change stream's
+      // ticker calls apply(), and a tick that landed after the close would
+      // find the connection gone.
+      closeStream();
       handle.sqlite.close();
     },
   };

@@ -7,10 +7,19 @@
 // one page that had it. Hoisting the pill into the frame ends it everywhere,
 // and the same payload feeds the sidebar's arrival badges (lib/navBadges.ts).
 //
-// Nothing changes about the transport: design-spec.md §8 ("No WebSockets")
-// still holds. This is the same polling contract, asked once for the frame
-// instead of once more per page — /api/pulse is column-projected and never
-// reads an event body, so it costs a row count, not a log read.
+// The transport is usePoll's, whatever usePoll's is: since design-spec.md's
+// 2026-09-15 addendum to §8 that is the change stream, with this file's 5s
+// interval behind it. /api/pulse is still column-projected and never reads an
+// event body, so it costs a row count, not a log read.
+//
+// With one exemption, and it is this composable's whole reason for existing:
+// the interval here runs whether or not the stream is open (`heartbeat`). The
+// stream reports change, and every other poller is right to stand down when a
+// live one is reporting none. This poll's question is not "did anything
+// change" but "is the server answering", and silence is the ambiguity it was
+// hoisted into the frame to resolve — a frozen server and a quiet factory
+// send the same nothing. So the pill keeps asking, every five seconds, and
+// `lastUpdatedAt` keeps meaning what load()'s catch says it means.
 //
 // The state is module-level on purpose: the topbar's pill and the sidebar's
 // badges are two readings of one poll, and two polls could disagree about
@@ -48,7 +57,7 @@ async function load(project: string | undefined): Promise<void> {
 export function usePulse(project: MaybeRefOrGetter<string | undefined>) {
   const badges = computed(() => navBadges(state.value.pulse, state.value.seen));
 
-  usePoll(() => load(toValue(project)), PULSE_POLL_MS);
+  usePoll(() => load(toValue(project)), PULSE_POLL_MS, { heartbeat: true });
   // usePoll's interval does not fire until one interval has elapsed, and the
   // shell must not spend its first five seconds saying "Connecting…".
   onMounted(() => {
