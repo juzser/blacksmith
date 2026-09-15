@@ -315,6 +315,13 @@ exceptions — today one, `wave-runner` — and each of them earns it by opening
 session of its own against your dispatch's event id before it dispatches
 anything.
 
+Right after you write that `error-logged`, run `smith issues report --session
+<session-id> --state-dir <dir> [--epic <id>]` — the reporting verb records an
+`issue-reported` outcome per candidate, and a repeated call over the same
+error finds that record and moves on, so calling it again is never a mistake.
+A non-zero exit is logged and does not fail the dispatch that owns this log;
+the run keeps going.
+
 ## The task id goes on the event, not in the payload
 
 `smith event append` reads `task_id` at the top level of the JSON, beside
