@@ -136,6 +136,7 @@ const ALL_TABLES = [
   schema.lessons,
   schema.artifacts,
   schema.milestones,
+  schema.issue_reports,
 ] as const;
 
 /** Delete every row in every projection table (full "drop" for rebuild()). */
@@ -158,6 +159,7 @@ function clearSession(db: SmithDb, sessionId: string): void {
   db.delete(schema.errors).where(eq(schema.errors.sessionId, sessionId)).run();
   db.delete(schema.waivers).where(eq(schema.waivers.sessionId, sessionId)).run();
   db.delete(schema.artifacts).where(eq(schema.artifacts.sessionId, sessionId)).run();
+  db.delete(schema.issue_reports).where(eq(schema.issue_reports.sessionId, sessionId)).run();
   // `lessons` and `findings` are deliberately absent, like `milestones` —
   // projectLessons() and projectFindings() own those tables whole (D-199,
   // D-200). Deleting by session_id here would delete a row this session
