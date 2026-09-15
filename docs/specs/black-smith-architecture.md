@@ -1177,3 +1177,86 @@ they justify.
   (successor to Overstory); GitHub native stacked PRs (public preview
   2026-07-30); Cloudflare Workflows V2 + Dynamic Workflows (runtime-defined
   durable graphs).
+
+---
+
+## 18. Load-bearing rules
+
+Every rule below is already true of the code. What this section adds is the
+consequence: each one is **load-bearing**, meaning a change that violates it
+does not degrade the factory, it invalidates a claim the factory makes about
+itself. Each rule names the file that breaks and what it starts lying about.
+
+A reader deciding whether a change is safe reads this list first. A reviewer
+who finds a diff that crosses one of these lines treats it as
+`S1-stop-the-line` regardless of how small the diff is, because the damage is
+not in the diff — it is in every verdict the factory issued afterwards.
+
+1. **Events are the source of truth; projections are caches.**
+   `db/projector.ts` is the only writer of the tables in `db/schema.ts`, and
+   `rebuild()` replays every log from scratch to the same rows. *Breaks:* any
+   state that is written to the projection and not derivable from
+   `state/events/*.jsonl` is a fact with no provenance — `smith stats`,
+   the dashboard and the gate would each be entitled to a different answer,
+   and no replay could settle which was right.
+
+2. **Status is derived at read time, never stored as status.**
+   A projection may cache a *fold*, never a *judgement*. `agents-registry.ts`
+   folds `(task_id, agent_role)` into live/abandoned at read; `daemon.ts`
+   re-uses that fold rather than keeping its own. *Breaks:* a stored verdict
+   outlives the facts that produced it, so a task fixed at 10:00 still reads
+   `blocked` at 11:00 and an operator schedules work against a corpse.
+
+3. **Nothing that observes may dispatch.**
+   `scheduler.ts` ("never dispatches an agent itself") and `daemon.ts`
+   ("never dispatches an agent, never merges, never writes to a worktree")
+   emit `*-proposed` events for a human or a planner session to act on.
+   *Breaks:* an observer that can act closes its own loop — it proposes work,
+   performs it, then observes its own output as evidence that the work was
+   needed.
+
+4. **A dispatch is written by the node that owns the log it writes into.**
+   `delegation.ts` states the reading every "did two different turns happen?"
+   check depends on: two `dispatch_decision` events mean two turns only while
+   an agent cannot write a dispatch about itself. A grantee opens its own
+   session first. *Breaks:* `smith tester check` reports a tester's turn that
+   was really the coder's, and the gate stays green on evidence the graded
+   party produced.
+
+5. **Judges read; they never gain write access.**
+   `providers/types.ts` hands a transport nothing but `prompt` — no worktree
+   path, no credential beyond its own key, nothing callable. A judge's
+   findings are data, not commands. *Breaks:* the trust boundary that lets an
+   external provider score our work without being able to change it.
+
+6. **A judged worktree is fingerprinted before and verified after; a moved
+   tree discards the verdict.** `immutability.ts` raises
+   `contract.judge-mutation` for exactly this. *Breaks:* the verdict stops
+   being about the commit under review. Note the standing limit — a verifier
+   comparing two endpoints cannot see an edit that was reverted in between,
+   so a clean verdict is evidence about the endpoints only.
+
+7. **A plan file is written once; a change is a new version, never an edit.**
+   `plan.ts` raises `plan.version-exists` — "Refusing to overwrite existing
+   plan file … plans are immutable" — and nothing in this codebase deletes a
+   plan file, which is why `draftNextVersion` exists at all: an amendment has
+   to be judged legal (D-127: one that adds and supersedes nothing obligates
+   nothing) *before* a file exists to judge it against. *Breaks:* a criterion
+   that was already graded turns into a record of something nobody checked,
+   and every verdict cut against the old text silently re-scopes.
+
+8. **Every write carries the envelope, and an event id is read, never
+   computed.** `--session`, `--causal-parent`, `--plan-version` on every
+   write command; the id comes back in that command's own output. *Breaks:*
+   under fan-out the events between yours belong to sibling tasks, so a
+   guessed parent names a real event that is not the parent — it validates,
+   and the lineage is quietly wrong.
+
+9. **Verification is observed, not asserted.** No surface reports a check it
+   did not run; `scripts/check.sh` prints `SKIP` rather than a false `OK`.
+   *Breaks:* the one property that makes any of the above worth storing.
+
+10. **Destructive removal is hook-blocked outside `workspaces/` and
+    `state/`.** A worktree goes away through `git worktree remove --force`,
+    a file through a targeted delete. *Breaks:* the operator's own checkouts,
+    which live beside the factory and are not the factory's to clean up.
