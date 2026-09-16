@@ -15,6 +15,7 @@ records of the past that are cited by id and never opened whole.
 | [`specs/agent-interviews-index.md`](specs/agent-interviews-index.md) | One row per interview id (`P-1`..`N-12`): the lines it spans, the heading it sits under, one clause on what it decided, and the two ids both called `M-1` | operator, contributor, agent |
 | [`specs/phase-10-scope.md`](specs/phase-10-scope.md) | Phase 10 as measured rather than as declared: the six defects (P10-1..P10-6) found by pointing the factory at itself, the four forks and their answers, and the close-out of the epic that fixed them | operator, contributor |
 | [`specs/audit-command-scope.md`](specs/audit-command-scope.md) | The `/bs audit` contract: four fixed read-only axes, what "writes nothing to the project" means when `.blacksmith/` is state, why consolidation clusters rather than merges, the hard stop, the append-only findings store with 90-day declines, and the seven `smith audit` verbs | operator, contributor, agent |
+| [`specs/plugin-port-scope.md`](specs/plugin-port-scope.md) | What it would take to run `/bs` without a clone: why a package install gives you the `smith` verbs and not the playbooks, the five work packages a Claude Code plugin needs, what is explicitly out of scope, and the five forks the operator has to answer before an epic is cut | operator, contributor |
 | [`specs/README.md`](specs/README.md) | Every file under `specs/` by kind — contract, scope, or record of the past — with the cite-by-id recipe for the records, so nobody opens a 782 kB file to check one finding | operator, contributor, agent |
 | [`standards/stack.md`](standards/stack.md) | What the install interview's stack answers mean, who reads each one, and which the shipped templates honour, record, or refuse — the answers themselves live in `factory/policies/stack.yml` | operator, contributor |
 | [`standards/agent-constraints.md`](standards/agent-constraints.md) | Per-agent constraint blocks (TDD strictness, coverage floor, severity calibration, budgets, context-window compaction) — source of truth until fully baked into templates | contributor, agent |
@@ -46,7 +47,7 @@ records of the past that are cited by id and never opened whole.
 
 | File | Description | Audience |
 |---|---|---|
-| [`../README.md`](../README.md) | The landing page: why it exists, the features with screenshots, install (clone or npm), and the `/bs` commands — everything past that is a link, because details that live in two files drift | everyone |
+| [`../README.md`](../README.md) | The landing page: why it exists, the factory's features first and the dashboard low, the two installs and what each one actually gives you, and the `/bs` commands — everything past that is a link, because details that live in two files drift | everyone |
 | [`../INSTALL.md`](../INSTALL.md) | Executable install runbook: requirements, per-platform setup, verification, optional extras, troubleshooting, known platform gaps — written so a Claude Code session can run it end to end | operator, contributor, agent |
 | [`../AGENTS.md`](../AGENTS.md) | The router and operating rules agents read first | agent |
 | [`../CLAUDE.md`](../CLAUDE.md) | Claude Code entry point: routes to `AGENTS.md` for rules and to `INSTALL.md` for the self-install runbook — declares nothing of its own | agent |
