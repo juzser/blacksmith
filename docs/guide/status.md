@@ -30,10 +30,18 @@ built: an existing project is read on four axes from a detached worktree,
 the findings are ranked, the operator decides at a hard stop, and one epic is
 cut — [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md)
 is the contract. And the **CLI is on npm** as `@juzser/blacksmith`: the
-`smith` binary, what it reads and the `/bs` playbooks, which is not the
-dashboard or the docs — those still come from a clone. Installed, it writes
-under `.blacksmith/` in the directory you run it from, or wherever
-`SMITH_HOME` points.
+`smith` binary and everything it reads at runtime — policies, schemas,
+scaffold templates, agent role files, migrations. Not the dashboard, not the
+docs, and **not `/bs`**: that is a Claude Code skill, and a session finds
+`.claude/skills/bs/` in a clone, not under `node_modules`. The tarball carries
+the playbook files, but nothing puts them where Claude Code looks, so a package
+install gives you the `smith` verbs and the loop stays a clone's job —
+[`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) scopes the
+plugin that would change that, and it is `planned`, not cut. Installed, `smith`
+writes under `.blacksmith/` in the directory you run it from, or wherever
+`SMITH_HOME` points — true of `0.1.1`, which is in this repo. The registry
+still carries `0.1.0`, which predates `smith init`, ships no roadmap for
+`smith new` to read, and keeps state inside its own install directory.
 
 ## The five things to know before you rely on it
 

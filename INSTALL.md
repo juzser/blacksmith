@@ -76,15 +76,25 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | | **A — a package, inside a project you already have** | **B — a clone** |
 |---|---|---|
 | Command | `npx @juzser/blacksmith init` | Part 2 below |
-| You get | the `smith` CLI and the agent templates, driving *this one* project | the whole factory: CLI, dashboard, its own tests and gates |
+| You get | the `smith` CLI and everything it reads, scoped to *this one* project | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
 | Upgrading | `npx @juzser/blacksmith@latest` | `git pull` |
-| Not included | the dashboard (`smith ui serve`), `scripts/check.sh`, the repo's own suite | — |
+| Not included | **`/bs`**, the dashboard (`smith ui serve`), `scripts/check.sh`, the repo's own suite | — |
 
-Pick **A** if you have a repository and want Blacksmith to run epics in it.
-Pick **B** if you want to work on Blacksmith itself, or want the dashboard.
+Pick **A** if you want the `smith` verbs on hand in a project of your own —
+validating plans, running the gates, appending events, reading stats. Pick **B**
+for everything else, and in particular for driving an epic: `/bs plan` and
+`/bs run` are Claude Code skills a session reads out of a clone, which is the
+difference the next section spells out.
 
 ### A — into a project you already have
+
+> **Read this first: the registry is one version behind.** The published
+> version is `0.1.0`, and it predates this whole section — it has no `smith
+> init`, ships no roadmap for `smith new` to read, and keeps state inside its
+> own install directory, which the next `npm install` replaces. What follows
+> describes `0.1.1`, which is in the repo and not yet on npm. Until it is
+> published, take **B**.
 
 ```bash
 cd /path/to/your-project
@@ -114,12 +124,26 @@ after an upgrade is safe and does nothing. Commit `.blacksmith/factory/` if
 your team shares the project: the roadmap and the stack answers are
 declarations about the project, not about your laptop.
 
+**What A does not give you is `/bs`.** `/bs` is not a CLI command; it is a
+Claude Code **skill** — a router and ten playbooks under `.claude/skills/bs/`
+that a session reads and follows, dispatching the agent roles in
+`.claude/agents/`. Both directories ship inside the tarball, but an install puts
+them under `node_modules/@juzser/blacksmith/`, and Claude Code looks for skills
+and agents in the project's own `.claude/`, in `~/.claude/`, or in a plugin —
+never in `node_modules`. So under A the deterministic half is yours and the loop
+that drives it is not: run `smith` verbs directly, and take a clone when you
+want `/bs plan` and `/bs run`. Closing that gap is scoped as a Claude Code
+plugin in [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md),
+whose status is `planned` — five forks are still the operator's to answer.
+
 Then do **[Step 5](#step-5--the-stack-interview)** — the stack interview —
 against `.blacksmith/factory/policies/stack.yml`, and
-**[Step 6](#step-6--install-the-claude-code-cli)**, the Claude Code CLI. Skip
-the rest: Steps 1–4 and 7 are about building a checkout you do not have. From
-then on every command in the docs that reads `smith …` is
-`npx @juzser/blacksmith …` for you.
+**[Step 6](#step-6--install-the-claude-code-cli)**, the Claude Code CLI — the
+workers `smith` dispatches are Claude Code sessions wherever you installed from.
+Skip the rest: Steps 1–4 and 7 are about building a checkout you do not have.
+From then on every command in the docs that reads `smith …` is
+`npx @juzser/blacksmith …` for you, and every one that reads `/bs …` is a clone
+session's.
 
 ### B — a clone
 
