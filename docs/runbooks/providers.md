@@ -292,10 +292,50 @@ smith judge run --provider codex --request request.json
 `request.json` is a `JudgeRequest` (`factory/orchestrator/src/providers/
 types.ts`): `{"kind":"verify","taskId":"epic-1/task-1","inputRefs":{},
 "prompt":"...","schemaName":"judge-verdict","budget":{"timeout_ms":120000,
-"max_output_bytes":65536}}`. `--shadow` is an output-only note for your own
-bookkeeping (the printed JSON gets a `"shadow":true` field) — it does not
-change how the call runs; `crosscheck.yml`'s `mode` is the only thing that
-ever grants a provider real gating power.
+"max_output_bytes":65536}}`. `budget.max_output_tokens` is optional and is
+what `--max-output-tokens <n>` fills in: set, it is sent to an api provider as
+`max_tokens` and wins over the policy's `max_tokens`; unset, the policy value
+is sent; both unset, the vendor's own default applies. `--shadow` is an
+output-only note for your own bookkeeping (the printed JSON gets a
+`"shadow":true` field) — it does not change how the call runs;
+`crosscheck.yml`'s `mode` is the only thing that ever grants a provider real
+gating power.
+
+### Truncated and invalid answers
+
+An api provider's answer is rejected two ways, and the code tells you which
+repair to make:
+
+- **`provider.output-truncated`** — the vendor stopped the answer at its
+  output ceiling (`finish_reason: "length"`). The prompt was fine; the cap was
+  not. Raise `max_tokens` for that provider in `crosscheck.yml` (a policy
+  change — the operator's call), pass `--max-output-tokens <n>` for a one-off
+  `judge run`, or shorten the prompt. The transport does **not** nudge here:
+  a nudge re-sends the same prompt and asks for the same answer, which stops
+  at the same cap. One call, one failure, one clear message. For a
+  reasoning model the reasoning tokens count against the ceiling too, which
+  is how a plan critique against `deepseek-reasoner` ran out of room before
+  its JSON was finished (dogfood csb-signing-policy-1, FD-37).
+- **`provider.invalid-output`** — the vendor finished (`finish_reason:
+  "stop"`, or a vendor that reports none) and what it wrote is still not a
+  usable answer: no JSON, JSON the schema rejects, or a body past
+  `max_output_bytes`. This is the only case the transport nudges — one
+  retry with "return only the JSON" appended — because it is the only case
+  where the prompt is the suspect. The message says `after one retry` when
+  the nudge ran.
+
+Both carry `details.finish_reason`, `details.content_length`, `details.retried`
+and `details.content_snippet` — the first 300 and last 200 characters of what
+the vendor actually wrote, with the API key redacted — so a rejected answer is
+inspectable from the error itself instead of from a re-run with tracing on.
+
+For the array-valued schemas (`finding`, `finding-evidence`) the extractor
+also tolerates one wrapper: a vendor that must return an object
+(`response_format: json_object` refuses a top-level array) may return
+`{"findings": [...]}` — any single-key object whose one value is an array is
+unwrapped to that array. A bare record (`{"severity": ...}` where a list was
+asked for) and a two-key wrapper are refused as `schema-invalid`, with a
+message that names the shape it got.
 
 ### Turning every provider off without editing the file
 
@@ -367,9 +407,11 @@ Calibration loop:
      anything else here.
    - **`schemaFailureRate`** — fraction of runs where the provider
      **answered** and the answer could not be used: not valid JSON, valid
-     JSON the compiled schema rejects, or an answer past the output cap —
-     even after the transport's one retry-with-nudge. High here means the
-     provider/prompt pairing needs work before promotion, not that the
+     JSON the compiled schema rejects, an answer past the output cap — even
+     after the transport's one retry-with-nudge — or an answer the vendor
+     cut off at its token ceiling (`provider.output-truncated`, never
+     nudged). High here means the provider/prompt pairing, or the
+     provider's `max_tokens`, needs work before promotion, not that the
      provider is untrustworthy per se.
    - **`transportFailureRate`** — fraction of runs where **no usable answer
      ever arrived**: no API key exported, no CLI on `PATH`, a timeout, an
@@ -381,7 +423,9 @@ Calibration loop:
    - **`failuresByCode`** — the failed runs by provider error code, and the
      field that tells you which of the two repairs to make.
      `provider.missing-api-key` is one `export` in your shell;
-     `provider.invalid-output` is a prompt and a schema. `{}` means every
+     `provider.invalid-output` is a prompt and a schema;
+     `provider.output-truncated` is a `max_tokens` line in
+     `crosscheck.yml` ("Truncated and invalid answers" above). `{}` means every
      run answered. `unclassified` counts failures logged before the code
      was recorded (D-253) — those rows do not say why they failed, so they
      are charged to neither rate rather than guessed at; re-measure with

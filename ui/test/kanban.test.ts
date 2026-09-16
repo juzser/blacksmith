@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  agentChip,
   capColumn,
   foldIntoColumns,
   KANBAN_COLUMNS,
@@ -197,5 +198,67 @@ describe('lib/kanban.ts capColumn()', () => {
     const source = tasks(15);
     capColumn(source, 0);
     expect(source).toHaveLength(15);
+  });
+});
+
+// Cross-provider UI check of 2026-09-14, fix (n). The card's chip is built
+// from the latest dispatch — who was *sent* — and drew "coder · mid" on a
+// completed task exactly as it did on one being worked. kanban() now says
+// whether anyone is still there (`agentActivity`, off the agents rows); this
+// helper turns that plus the task's own status into what the chip does.
+describe('lib/kanban.ts — the agent chip says who is on the task', () => {
+  const task = (over: Partial<Parameters<typeof agentChip>[0]>) => ({
+    taskStatus: 'in-progress',
+    agentRole: 'coder',
+    agentModelTier: 'mid',
+    agentActivity: null,
+    ...over,
+  });
+
+  it('is nothing on a task never dispatched', () => {
+    expect(agentChip(task({ agentRole: null, agentModelTier: null }))).toBeNull();
+  });
+
+  it('labels role · tier, and role alone when the dispatch named no tier', () => {
+    expect(agentChip(task({ agentActivity: 'working' }))?.label).toBe('coder · mid');
+    expect(agentChip(task({ agentModelTier: null }))?.label).toBe('coder');
+  });
+
+  it('pulses only for an agent that is working now', () => {
+    expect(agentChip(task({ agentActivity: 'working' }))).toEqual({
+      label: 'coder · mid',
+      live: true,
+      gone: false,
+    });
+    // Stalled is still somebody: the registry has no terminal event, only
+    // the clock says it should have — the chip stays but stops breathing.
+    expect(agentChip(task({ agentActivity: 'stalled' }))).toEqual({
+      label: 'coder · mid',
+      live: false,
+      gone: false,
+    });
+  });
+
+  it('sits back once the agent has returned, whatever column the task is in', () => {
+    // A reviewing task whose coder has returned and whose reviewer is not
+    // yet dispatched: the chip names who did the work, and nobody is on it.
+    expect(agentChip(task({ taskStatus: 'reviewing' }))).toEqual({
+      label: 'coder · mid',
+      live: false,
+      gone: true,
+    });
+  });
+
+  it('never pulses on a task that is over', () => {
+    // A live agents row on a completed task is a registry gap (the sweep
+    // runs at epic close), not work in progress. The task's own status is
+    // the stronger claim: nobody works on a completed task.
+    for (const taskStatus of ['completed', 'waived', 'failed', 'superseded']) {
+      expect(agentChip(task({ taskStatus, agentActivity: 'working' }))).toEqual({
+        label: 'coder · mid',
+        live: false,
+        gone: true,
+      });
+    }
   });
 });

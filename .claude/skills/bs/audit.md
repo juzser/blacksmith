@@ -136,7 +136,8 @@ ended on a plan and wrote nothing: re-poke it, and
 `smith judge outstanding --session <session-id> --task <audit-id>.<axis>`
 exits 1 while the file is still owed, so it is the loop condition),
 `judges.artifact-unparseable` (it narrated), `judges.artifact-not-a-list`
-(some other shape). `audit record` then refuses the evidence itself —
+(some other shape; only `--role grader` may hand in a verdict document
+instead of a list). `audit record` then refuses the evidence itself —
 `audit.evidence-carries-identity` (the judge set `fingerprint`,
 `status`, `axis`, `audit_id`, `ts`, `epic` or `same_as`, which are the
 store's to mint), `audit.evidence-incomplete` (a `failure_scenario` leg

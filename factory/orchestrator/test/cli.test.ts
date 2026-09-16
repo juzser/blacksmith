@@ -236,6 +236,129 @@ describe('cli.ts (built binary)', () => {
     expect(err.message).toContain('plan-v100.json');
   });
 
+  // FD-45 / FD-49 (csb-signing-policy-1). plan.md step 4 critiques the plan
+  // before step 6 files it as plan-v1.json, so the verb has to take the draft
+  // by path; and its output -- three rationales of several kB each -- is read
+  // back from a file more often than from a terminal.
+  describe('plan quorum: a draft by path, an outcome to a file (FD-45, FD-49)', () => {
+    function draftPlan(epicId: string, version = 1) {
+      return {
+        epic_id: epicId,
+        version,
+        status: 'draft',
+        tasks: [
+          {
+            task_id: `${epicId}/task-1`,
+            epic_id: epicId,
+            plan_version: version,
+            objective: 'Do the thing.',
+            output_schema_ref: 'result.schema.json',
+            acceptance_criteria: ['it works'],
+            claims: ['src/foo/**'],
+            budget: { tokens: 100, diff_lines: 10, max_turns: 5 },
+            contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+          },
+        ],
+        edges: [],
+      };
+    }
+
+    async function quorumFixture(name: string) {
+      const dir = path.join(scratchDir, `plan-quorum-${name}`);
+      const eventsDir = path.join(dir, 'events');
+      const specsDir = path.join(dir, 'specs');
+      await mkdir(specsDir, { recursive: true });
+      const draft = path.join(dir, 'draft.json');
+      await writeFile(draft, JSON.stringify(draftPlan('epic-fd45'), null, 2));
+      const sessionId = `cli-plan-quorum-${name}`;
+      expect(runCli(['session', 'start', sessionId, '--state-dir', eventsDir]).status).toBe(0);
+      const envelope = [
+        '--plan-version',
+        '1',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
+        '--specs-dir',
+        specsDir,
+      ];
+      return { dir, eventsDir, specsDir, draft, sessionId, envelope };
+    }
+
+    it('--plan <path> critiques the named draft when no plan-v<n>.json exists, and files nothing', async () => {
+      const f = await quorumFixture('draft');
+      const { stdout, status } = runCli(['plan', 'quorum', '--plan', f.draft, ...f.envelope]);
+      expect(status).toBe(0);
+      const outcome = JSON.parse(stdout);
+      expect(outcome).toMatchObject({ outcome: 'endorsed', epicId: 'epic-fd45', version: 1 });
+      // The record names the draft's epic, read from the file, not from a flag
+      // the operator had to repeat.
+      const tail = runCli(['event', 'tail', f.sessionId, '--state-dir', f.eventsDir, '--n', '10']);
+      const decisions = (
+        JSON.parse(tail.stdout) as Array<{
+          record: { event_type: string; payload: { task_id?: string } };
+        }>
+      )
+        .map((e) => e.record)
+        .filter((r) => r.event_type === 'quorum-decision');
+      expect(decisions.map((r) => r.payload.task_id)).toEqual(['epic-fd45/plan-v1']);
+      expect(existsSync(path.join(f.specsDir, 'epic-fd45'))).toBe(false);
+    });
+
+    it('--plan <path> refuses a draft whose epic_id or version is not the one the envelope names', async () => {
+      const f = await quorumFixture('mismatch');
+      const wrongEpic = runCli([
+        'plan',
+        'quorum',
+        '--plan',
+        f.draft,
+        '--epic',
+        'epic-other',
+        ...f.envelope,
+      ]);
+      expect(wrongEpic.status).toBe(1);
+      expect(JSON.parse(wrongEpic.stdout).error.code).toBe('plan.identity-mismatch');
+
+      const v2 = path.join(f.dir, 'draft-v2.json');
+      await writeFile(v2, JSON.stringify(draftPlan('epic-fd45', 2), null, 2));
+      const wrongVersion = runCli(['plan', 'quorum', '--plan', v2, ...f.envelope]);
+      expect(wrongVersion.status).toBe(1);
+      const err = JSON.parse(wrongVersion.stdout).error;
+      expect(err.code).toBe('plan.identity-mismatch');
+      expect(err.message).toContain('version 2');
+      expect(err.message).toContain('--plan-version 1');
+    });
+
+    it('--out <file> writes the outcome it prints, creating the directory, and still prints it', async () => {
+      const f = await quorumFixture('out');
+      const out = path.join(f.dir, 'nested', 'quorum-1.json');
+      const { stdout, status } = runCli([
+        'plan',
+        'quorum',
+        '--plan',
+        f.draft,
+        '--out',
+        out,
+        ...f.envelope,
+      ]);
+      expect(status).toBe(0);
+      const printed = JSON.parse(stdout);
+      expect(printed.outcome).toBe('endorsed');
+      expect(JSON.parse(await readFile(out, 'utf8'))).toEqual(printed);
+    });
+
+    it('without --plan, --epic is still required', () => {
+      const { stdout, status } = runCli(['plan', 'quorum', '--plan-version', '1']);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('cli.missing-flag');
+    });
+  });
+
   // P9-28: `cli.ts` validated flags with requireFlag and positionals not at
   // all — `positional[0] as string` is a cast, not a check. The worst of it was
   // `event tail` with no session id: it printed `[]` and exited 0, so *you
@@ -1678,6 +1801,27 @@ describe('cli.ts (built binary)', () => {
     expect(append1.status).toBe(0);
     const rootId = JSON.parse(append1.stdout).event_id as string;
 
+    // The plan declares the task before anything is scheduled against it: a
+    // dispatch moves a task, it never mints one, so a log that dispatched a
+    // task nothing declared projects no row for it (see projector.test.ts).
+    const appendAdded = runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-9/task-1',
+        plan_version: 1,
+        causal_parent: rootId,
+        payload: { task_id: 'epic-9/task-1', epic_id: 'epic-9' },
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(appendAdded.status).toBe(0);
+    const addedId = JSON.parse(appendAdded.stdout).event_id as string;
+
     const append2 = runCli([
       'event',
       'append',
@@ -1687,7 +1831,7 @@ describe('cli.ts (built binary)', () => {
         event_type: 'dispatch_decision',
         task_id: 'epic-9/task-1',
         plan_version: 1,
-        causal_parent: rootId,
+        causal_parent: addedId,
         payload: {
           agent_role: 'coder',
           provider: 'claude',
@@ -1713,8 +1857,10 @@ describe('cli.ts (built binary)', () => {
     expect(rebuildResult.status).toBe(0);
     expect(JSON.parse(rebuildResult.stdout)).toEqual({
       sessionsProcessed: 1,
-      eventsApplied: 2,
+      eventsApplied: 3,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
 
     const overviewResult = runCli(['stats', 'overview', '--db', dbPath, '--session', sessionId]);
@@ -1727,14 +1873,14 @@ describe('cli.ts (built binary)', () => {
 
     const timelineResult = runCli(['stats', 'timeline', '--db', dbPath, '--session', sessionId]);
     expect(timelineResult.status).toBe(0);
-    // Both appended events, and no task-added — this session never had one.
-    // The old assertion here was `toHaveLength(1)`: session-start was written
-    // as the root of the log and then dropped by timeline()'s eventType
-    // filter, so the CLI's own smoke test recorded the log's first event as
-    // invisible. Asserting the types rather than the count says which two.
+    // All three appended events. The old assertion here was `toHaveLength(1)`:
+    // session-start was written as the root of the log and then dropped by
+    // timeline()'s eventType filter, so the CLI's own smoke test recorded the
+    // log's first event as invisible. Asserting the types rather than the
+    // count says which three.
     expect(
       (JSON.parse(timelineResult.stdout) as { eventType: string }[]).map((e) => e.eventType),
-    ).toEqual(['session-start', 'dispatch_decision']);
+    ).toEqual(['session-start', 'task-added', 'dispatch_decision']);
 
     const kanbanResult = runCli([
       'stats',
@@ -1747,10 +1893,10 @@ describe('cli.ts (built binary)', () => {
       'epic-9',
     ]);
     expect(kanbanResult.status).toBe(0);
-    // The task id carries its epic, so `--epic epic-9` finds this task even
-    // though no `task-added` ever named the epic in a payload (D-49/P9-10).
-    // Before that, a dispatched task showed up in `stats overview` as a live
-    // agent and in `stats kanban --epic` as nothing at all.
+    // The task id carries its epic, so `--epic epic-9` finds this task from
+    // the id alone (D-49/P9-10). Before that, a dispatched task showed up in
+    // `stats overview` as a live agent and in `stats kanban --epic` as
+    // nothing at all.
     const kanban = JSON.parse(kanbanResult.stdout) as Array<{
       taskStatus: string;
       tasks: Array<{ taskId: string }>;
@@ -1759,8 +1905,8 @@ describe('cli.ts (built binary)', () => {
     expect(kanban[0]?.taskStatus).toBe('in-progress');
     expect(kanban[0]?.tasks.map((t) => t.taskId)).toEqual(['epic-9/task-1']);
 
-    // dispatch_decision alone (no task-added) still touches a minimal task
-    // row (task_status "in-progress"), just without case/origin/claims.
+    // The dispatch moved the declared task to "in-progress"; the row carries
+    // no case/origin/claims because this `task-added` named none.
     const taskResult = runCli(['stats', 'task', '--db', dbPath, '--task', 'epic-9/task-1']);
     expect(taskResult.status).toBe(0);
     const taskDetailJson = JSON.parse(taskResult.stdout);
@@ -1811,8 +1957,10 @@ describe('cli.ts (built binary)', () => {
     expect(applyResult.status).toBe(0);
     expect(JSON.parse(applyResult.stdout)).toEqual({
       sessionsProcessed: 1,
-      eventsApplied: 2,
+      eventsApplied: 3,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
   });
 
@@ -5541,6 +5689,43 @@ describe('cli.ts (built binary)', () => {
         );
       });
 
+      // Item (j) of the csb-signing-policy-1 dogfood: the one refusal a
+      // spec-reviewer actually hit in csb-audit-1 was this one, and it was
+      // reported back as "error object with exit 0". The exit code was the
+      // pipe's, not the CLI's - but nothing here had ever pinned it either.
+      it('refuses spec evidence that names no criterion_ref, with exit 1 and no event', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const { criterion_ref: _dropped, ...noCriterion } =
+          SPEC_EVIDENCE[0] as (typeof SPEC_EVIDENCE)[0];
+
+        const result = runCli([
+          'findings',
+          'raise',
+          '--scope',
+          'spec',
+          '--evidence',
+          await specEvidenceFile('spec-nocriterion', [noCriterion]),
+          '--found-by',
+          'spec-reviewer',
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error).toMatchObject({
+          code: 'findings.spec-evidence-needs-criterion',
+          details: { index: 0 },
+        });
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised')).toEqual(
+          [],
+        );
+      });
+
       it('rejects a --scope it does not know rather than defaulting it to diff', async () => {
         const { sessionId, eventsDir, planPath } = await session();
 
@@ -7781,6 +7966,47 @@ describe('cli.ts (built binary)', () => {
         ['reviewer', artifact],
         ['security-reviewer', security],
       ]);
+    });
+
+    // FD-1 (csb-audit-1). `--grader` hands the gate the grader's verdict the
+    // way `--evidence` hands it a judge's findings, but only the evidence path
+    // closed the judge's turn. A grader dispatched by `judge dispatch` then
+    // blocked its own gate as `judges-outstanding` with its verdict sitting
+    // in the same command line.
+    it('gate run --grader closes the dispatched grader whose verdict it is', async () => {
+      const { sessionId, eventsDir } = await judgeSession();
+      const files = await gateFiles(sessionId);
+      const grader = path.join(scratchDir, `${sessionId}-grader.json`);
+      dispatchJudge(sessionId, eventsDir, 'grader', grader);
+      await writeFile(
+        grader,
+        JSON.stringify({
+          run_status: 'done',
+          structured_output: {
+            round: 1,
+            criteria: [{ criterion: 'it builds', status: 'pass', evidence: 'build log' }],
+            overall: 'pass',
+          },
+        }),
+      );
+
+      const gated = gateRun(sessionId, eventsDir, files, ['--grader', grader]);
+      expect(gated.status).toBe(0);
+      expect(JSON.parse(gated.stdout).outcome).not.toBe('blocked');
+      expect(
+        judgeCli('outstanding', sessionId, eventsDir, ['--task', 'epic-1/task-1']).status,
+      ).toBe(0);
+
+      const events = runCli(['event', 'tail', sessionId, '--n', '100', '--state-dir', eventsDir]);
+      const reported = JSON.parse(events.stdout)
+        .map((e: { record: { event_type: string; payload: Record<string, unknown> } }) => e.record)
+        .filter((r: { event_type: string }) => r.event_type === 'judge-reported')
+        .map((r: { payload: Record<string, unknown> }) => [
+          r.payload.agent_role,
+          r.payload.artifact_path,
+          r.payload.finding_count,
+        ]);
+      expect(reported).toEqual([['grader', grader, 0]]);
     });
 
     it('gate run --evidence for a role nobody dispatched behaves exactly as it did before', async () => {

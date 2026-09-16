@@ -157,3 +157,46 @@ export function visibleTaskCount(
   const tasks = columns.flatMap((column) => [...column.tasks]);
   return foldIntoColumns(tasks, showAll).reduce((total, column) => total + column.tasks.length, 0);
 }
+
+// Statuses under which nobody can be working on the task, whatever the
+// agents registry says: it is swept at epic close, so a live row can outlast
+// the task it was dispatched for (D-187). The task's own status is the
+// stronger claim.
+const SETTLED_STATUSES = new Set(['completed', 'waived', 'failed', 'superseded']);
+
+export interface AgentChipLike {
+  taskStatus: string;
+  agentRole: string | null;
+  agentModelTier: string | null;
+  agentActivity: 'working' | 'stalled' | null;
+}
+
+export interface AgentChip {
+  /** `role · tier`, or the role alone when the dispatch named no tier. */
+  label: string;
+  /** Somebody is on the task right now: IdentityChip's pulsing dot. */
+  live: boolean;
+  /** Nobody is on the task any more: the chip names who did the work, muted. */
+  gone: boolean;
+}
+
+/**
+ * What the card's agent chip should do. Cross-provider UI check of
+ * 2026-09-14, fix (n): the chip was built from the latest dispatch — who was
+ * *sent* — and a completed task kept its last coder there, drawn exactly as
+ * on a task being worked. `agentActivity` (kanban(), off the agents rows)
+ * says whether anyone is still there; a settled task overrides it, because a
+ * live row on a completed task is a registry gap, not work in progress.
+ * `stalled` is still somebody — no terminal event, only the clock says it
+ * should have returned — so the chip stays, without the pulse. Returns null
+ * when the task was never dispatched.
+ */
+export function agentChip(task: AgentChipLike): AgentChip | null {
+  if (!task.agentRole) return null;
+  const settled = SETTLED_STATUSES.has(task.taskStatus);
+  return {
+    label: `${task.agentRole}${task.agentModelTier ? ` · ${task.agentModelTier}` : ''}`,
+    live: task.agentActivity === 'working' && !settled,
+    gone: task.agentActivity === null || settled,
+  };
+}

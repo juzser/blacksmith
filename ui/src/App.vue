@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import Banner from './components/ds/Banner.vue';
 import Breadcrumb from './components/ds/Breadcrumb.vue';
 import Icon from './components/ds/Icon.vue';
 import Select from './components/ds/Select.vue';
@@ -19,6 +20,7 @@ import { useViewport } from './composables/useViewport.js';
 import { fetchProjects, fetchSessions } from './lib/api.js';
 import { lastEventLabel } from './lib/liveness.js';
 import { badgeLabel } from './lib/navBadges.js';
+import { projectionNotice } from './lib/projectionIssues.js';
 import { SCOPABLE_ROUTES } from './lib/projectScope.js';
 import {
   SCOPE_WIDTH_OPTIONS,
@@ -146,6 +148,11 @@ const factoryPulse = computed(() => lastEventLabel(pulse.value?.lastEventAt ?? n
 const factoryPulseTitle = computed(() =>
   pulse.value?.lastEventType ? `Last event: ${pulse.value.lastEventType}` : undefined,
 );
+// What the projection could not land. Shell-level, like the pulse, because
+// the gap is under every page at once: a session the server could not fold
+// is absent from Sessions, Kanban, Flow and every count, and each of those
+// pages would otherwise show its emptiness as a fact about the factory.
+const projection = computed(() => projectionNotice(pulse.value));
 </script>
 
 <template>
@@ -222,6 +229,15 @@ const factoryPulseTitle = computed(() =>
           </Tooltip>
         </div>
       </header>
+      <!-- Under the topbar and above the page, not inside it: the page below
+           is the thing this is warning about. Warning, not danger — the
+           server is up and answering; it is the numbers that are short. -->
+      <Banner v-if="projection" tone="warning" class="app-projection">
+        {{ projection.lead }}
+        <ul class="app-projection__lines">
+          <li v-for="line in projection.lines" :key="line">{{ line }}</li>
+        </ul>
+      </Banner>
       <div class="app-scroll">
         <main id="main">
           <router-view />

@@ -55,10 +55,21 @@ there means "not looked at", not "looked at and clean".
    confidence) for you:
 
    ```bash
-   smith plan quorum --epic <epic> --plan-version <n> \
+   smith plan quorum --plan <the draft's plan.json> --plan-version <n> \
      --session <session-id> --causal-parent <event-id> \
-     --confidence <your own 0–1 confidence in this plan>
+     --confidence <your own 0–1 confidence in this plan> \
+     --out <scratch>/quorum-v<n>.json
    ```
+
+   `--plan` hands over the draft itself: at this step nothing has been
+   written to `factory/specs/active/<epic>/` yet — that is step 6, on
+   approval — so the verb cannot read a `plan-v<n>.json` that does not
+   exist. (`--epic <epic>` instead of `--plan` critiques a version already
+   filed.) The draft's own `epic_id`/`version` must be the ones the command
+   names, or it refuses (`plan.identity-mismatch`) rather than record one
+   plan's identity with another plan's triggers. `--out` keeps the outcome
+   — three rationales of several kB each — where step 5 can hand it to the
+   operator whole instead of quoting a terminal.
 
    **Nothing runs this for you — you run it here** when
    `profile.planQuorum` is `always` (`huge`). At `when-triggered` (`medium`,
@@ -115,6 +126,26 @@ there means "not looked at", not "looked at and clean".
    "event_type":"plan-version-created","plan_version":1,
    "causal_parent":"...","payload":{"epic_id":"<epic>","version":1,
    "note":"<operator's own words>"}}'`.
+
+   Then write the backlog that signature approved into the log, hung off
+   the sign-off event:
+
+   ```bash
+   smith plan ingest factory/specs/active/<epic>/plan-v1.json \
+     --session <session-id> --plan-version 1 --causal-parent <sign-off event id>
+   ```
+
+   This is where a task starts existing as far as the log — and so the DB,
+   the Kanban, the Flow graph and every dashboard number — is concerned
+   (D-46, D-254): one `task-added` per task, one `edges-recorded` for the
+   DAG. Nothing downstream runs it for you, and nothing refuses to run
+   without it: `wave next` reads the plan file, so an un-ingested plan still
+   runs, and its task rows then spring into being as a side effect of the
+   first wave or gate event to name an id — with no epic, no claims, no
+   budget and no edges, which is the flat, half-empty board the 2026-09-14
+   UI check found behind two epics. It is idempotent, so run it again on a
+   resumed session; read `added` and `edges` back, and say so when either is
+   0 on a plan that has tasks or edges.
 8. If this epic opens a new roadmap milestone, add it to
    `factory/specs/roadmap.md` (planner-maintained, architecture §12) — a
    roadmap change is itself a scope change and needs the same operator nod.

@@ -81,7 +81,11 @@ async function budgetBurst(
   await appendFile(path.join(dir, `${session}.jsonl`), body, 'utf8');
 }
 
-/** The same burst, in dispatch_decision — the shape a wave admission writes. */
+/**
+ * The same burst, in dispatch_decision — the shape a wave admission writes.
+ * Each task is declared once first: a dispatch moves a task, it never mints
+ * one, so a burst at an undeclared id would fold to no row at all.
+ */
 async function dispatchBurst(
   dir: string,
   session: string,
@@ -89,6 +93,9 @@ async function dispatchBurst(
   rows: readonly { task: string; role: string; tier: string }[],
 ): Promise<void> {
   let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+  for (const task of new Set(rows.map((r) => r.task))) {
+    body += tiedLine('task-added', ts, { task_id: task }, session);
+  }
   for (const r of rows) {
     body += tiedLine(
       'dispatch_decision',
@@ -281,9 +288,11 @@ describe('db/queries.ts', () => {
       const wave = openDb(dbPath);
       try {
         // The fixture's own dispatches are older than 2030, so the whole slice
-        // comes from the burst: #12 down to #3, newest first.
+        // comes from the burst, newest first. The burst declares its twelve
+        // tasks (#1-#12) before it dispatches at them (#13-#24).
+        const last = 24;
         expect(overview(wave.db).recentDispatches.map((d) => d.eventId)).toEqual(
-          Array.from({ length: 10 }, (_, i) => `${session}#${12 - i}`),
+          Array.from({ length: 10 }, (_, i) => `${session}#${last - i}`),
         );
       } finally {
         wave.sqlite.close();
@@ -385,6 +394,48 @@ describe('db/queries.ts', () => {
       }
     });
 
+    it('shows the integration PR the epic opened (run.md step 17)', async () => {
+      // The PR is the epic's terminal deliverable — the one thing the operator
+      // is asked to merge — and run.md step 17 records it with `smith event
+      // append` as `integration-pr-opened`. A timeline whose free list does not
+      // name that type ends at `epic-closed` and never shows the PR at all.
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'operator',
+          event_type: 'integration-pr-opened',
+          task_id: `${EPIC_ID}/integration`,
+          plan_version: 1,
+          causal_parent: await lastEventId({ stateDir }),
+          payload: {
+            step: 17,
+            pr_url: 'https://github.com/juzser/example/pull/54',
+            pr_number: 54,
+            repo: 'juzser/example',
+            base_ref: 'main',
+            head_ref: `smith/${EPIC_ID}/integration`,
+            head_sha: '0123456',
+          },
+        },
+        { stateDir },
+      );
+      const dbPath = path.join(dbDir, 'integration-pr.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const prHandle = openDb(dbPath);
+      try {
+        const all = timeline(prHandle.db, { sessionId: SESSION_ID });
+        const row = all.find((e) => e.eventType === 'integration-pr-opened');
+        expect(row?.taskId).toBe(`${EPIC_ID}/integration`);
+        expect((row?.payload as Record<string, unknown> | undefined)?.pr_number).toBe(54);
+        // And it is the epic's row, not an orphan: filtering by epic keeps it.
+        expect(
+          timeline(prHandle.db, { sessionId: SESSION_ID, epicId: EPIC_ID }).map((e) => e.eventType),
+        ).toContain('integration-pr-opened');
+      } finally {
+        prHandle.sqlite.close();
+      }
+    });
+
     it('expands the causal-parent chain for one event, oldest first, ending at that event', () => {
       const entries = timeline(handle.db, { sessionId: SESSION_ID, taskId: TASK_3 });
       const errorEntry = entries.find((e) => e.eventType === 'error-logged');
@@ -443,6 +494,7 @@ describe('db/queries.ts', () => {
           title: 'Add the widget renderer.',
           agentRole: 'coder',
           agentModelTier: 'mid',
+          agentActivity: null,
           milestoneId: null,
           tags: { case: 'feature', origin: 'user', severity: null },
         },
@@ -455,6 +507,7 @@ describe('db/queries.ts', () => {
           title: 'Simplify the config loader.',
           agentRole: 'coder',
           agentModelTier: 'small',
+          agentActivity: 'working',
           milestoneId: null,
           tags: { case: 'refactor', origin: 'user', severity: null },
         },
@@ -466,6 +519,7 @@ describe('db/queries.ts', () => {
           title: 'Fix the flaky import resolution.',
           agentRole: 'coder',
           agentModelTier: 'small',
+          agentActivity: null,
           milestoneId: null,
           tags: { case: 'bugfix', origin: 'user', severity: null },
         },
@@ -481,10 +535,36 @@ describe('db/queries.ts', () => {
           title: 'Add the settings panel.',
           agentRole: 'coder',
           agentModelTier: 'mid',
+          agentActivity: 'working',
           milestoneId: null,
           tags: { case: 'feature', origin: 'user', severity: 'S2-major' },
         },
       ]);
+    });
+
+    // Cross-provider UI check of 2026-09-14, fix (n): the card's chip read
+    // "coder · mid" on a completed task as though someone were still on it.
+    // The dispatch row says who was last sent; only the agents row says who
+    // is still there, and the card needs the second answer next to the first.
+    it('says whether an agent is still on the task, not only who was last sent', () => {
+      const byId = (columns: ReturnType<typeof kanban>) =>
+        new Map(columns.flatMap((c) => c.tasks).map((t) => [t.taskId, t]));
+
+      const now = byId(kanban(handle.db, EPIC_ID));
+      // task-1's coder returned a result and task-3's logged an error: both
+      // dispatches are the latest for their task, and nobody is on either.
+      expect(now.get(TASK_1)?.agentActivity).toBeNull();
+      expect(now.get(TASK_3)?.agentActivity).toBeNull();
+      // task-2 and task-4 have no terminal event, so their coders are working.
+      expect(now.get(TASK_2)?.agentActivity).toBe('working');
+      expect(now.get(TASK_4)?.agentActivity).toBe('working');
+
+      // The same live rows seen from a clock years on are stalled, not gone:
+      // the registry still says live, the stale window says nothing recent.
+      const later = byId(kanban(handle.db, EPIC_ID, {}, { nowIso: '2031-01-01T00:00:00.000Z' }));
+      expect(later.get(TASK_4)?.agentActivity).toBe('stalled');
+      expect(later.get(TASK_2)?.agentActivity).toBe('stalled');
+      expect(later.get(TASK_1)?.agentActivity).toBeNull();
     });
 
     it('supports an "all epics" mode when epicId is omitted', () => {
@@ -629,6 +709,11 @@ describe('db/queries.ts', () => {
       expect(detail?.findings[0]).toMatchObject({
         findingId: 'finding-1',
         findingStatus: 'fix-verified',
+        // What TaskDetailPage reads to label a spec finding — a diff finding
+        // carries the scope and no criterion.
+        findingScope: 'diff',
+        specPlanVersion: null,
+        criterionRef: null,
       });
       expect(detail?.artifacts).toHaveLength(1);
       expect(detail?.branch).toBe(`smith/${EPIC_ID}/task-1`);
@@ -656,10 +741,12 @@ describe('db/queries.ts', () => {
       await rebuild(dbPath, 'all', { stateDir });
       const attemptsHandle = openDb(dbPath);
       try {
-        rewriteLast(attemptsHandle, 'dispatches', `${session}#1`);
+        // #0 is the session-start, #1 the task-added the burst declares.
+        const first = 2;
+        rewriteLast(attemptsHandle, 'dispatches', `${session}#${first}`);
         const tiedAttempts = taskDetail(attemptsHandle.db, task)?.attempts ?? [];
         expect(tiedAttempts.map((a) => a.eventId)).toEqual(
-          Array.from({ length: 12 }, (_, i) => `${session}#${i + 1}`),
+          Array.from({ length: 12 }, (_, i) => `${session}#${first + i}`),
         );
       } finally {
         attemptsHandle.sqlite.close();

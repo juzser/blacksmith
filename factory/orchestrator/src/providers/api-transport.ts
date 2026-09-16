@@ -12,10 +12,24 @@ export interface ApiTransportConfig {
   model: string;
   apiKeyEnv: string;
   responseFormatJsonObject: boolean;
+  /**
+   * The provider's `max_tokens` for one answer, from the policy entry. A
+   * request budget's `max_output_tokens` wins over it; when neither is set no
+   * `max_tokens` is sent and the model runs to its own ceiling — which for a
+   * reasoning model is the whole completion window (deepseek-reasoner spent
+   * 64K tokens on one plan critique that way).
+   */
+  maxTokens?: number;
 }
 
 const NUDGE = '\n\nReturn only valid JSON per schema.';
 const RESPONSE_BODY_ERROR_SNIPPET_LIMIT = 500;
+// Raw answer kept on a rejected verdict: enough head to see what the model
+// started writing, enough tail to see where it stopped. A truncated JSON
+// answer and a prose answer look alike in a bare `no-json-found`.
+const CONTENT_SNIPPET_HEAD = 300;
+const CONTENT_SNIPPET_TAIL = 200;
+const CONTENT_SNIPPET_JOINER = ' … ';
 
 function resolveApiKey(config: ApiTransportConfig, provider: string): string {
   const key = process.env[config.apiKeyEnv];
@@ -30,13 +44,37 @@ function resolveApiKey(config: ApiTransportConfig, provider: string): string {
 }
 
 interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: string } }>;
+  choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
 interface CallResult {
   content: string;
   usage?: JudgeUsage;
+  /** `stop`, `length`, ... as the provider reported it; absent when it did not. */
+  finishReason?: string;
+}
+
+/**
+ * The raw answer as it may appear in an error: the API key scrubbed the same
+ * way a non-OK body is, and bounded to head + tail so a 64K truncation shows
+ * its last bytes instead of nothing.
+ */
+function contentSnippet(content: string, apiKey: string): string {
+  const scrubbed = content.split(apiKey).join('[REDACTED]');
+  if (scrubbed.length <= CONTENT_SNIPPET_HEAD + CONTENT_SNIPPET_TAIL) return scrubbed;
+  return `${scrubbed.slice(0, CONTENT_SNIPPET_HEAD)}${CONTENT_SNIPPET_JOINER}${scrubbed.slice(-CONTENT_SNIPPET_TAIL)}`;
+}
+
+/**
+ * Whether a second call with the nudge appended can change anything. It can
+ * when the model finished on its own (`stop`) — the prompt is the suspect. It
+ * cannot when the model was cut off at `max_tokens`: the same prompt runs to
+ * the same cap and bills the same tokens. An absent finish_reason is read as
+ * `stop` so a provider that omits the field keeps the retry it always had.
+ */
+function nudgeCanHelp(finishReason: string | undefined): boolean {
+  return finishReason === undefined || finishReason === 'stop';
 }
 
 async function callOnce(
@@ -44,11 +82,12 @@ async function callOnce(
   config: ApiTransportConfig,
   apiKey: string,
   prompt: string,
-  budget: { timeout_ms: number; max_output_bytes: number },
+  budget: { timeout_ms: number; max_output_bytes: number; max_output_tokens?: number },
   fetchImpl: typeof fetch,
 ): Promise<CallResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), budget.timeout_ms);
+  const maxTokens = budget.max_output_tokens ?? config.maxTokens;
 
   let response: Response;
   try {
@@ -60,6 +99,7 @@ async function callOnce(
         messages: [{ role: 'user', content: prompt }],
         stream: false,
         ...(config.responseFormatJsonObject ? { response_format: { type: 'json_object' } } : {}),
+        ...(maxTokens === undefined ? {} : { max_tokens: maxTokens }),
       }),
       signal: controller.signal,
     });
@@ -124,13 +164,54 @@ async function callOnce(
     );
   }
 
-  const content = parsed.choices?.[0]?.message?.content ?? '';
+  const choice = parsed.choices?.[0];
+  const content = choice?.message?.content ?? '';
   return {
     content,
     usage: parsed.usage
       ? { input_tokens: parsed.usage.prompt_tokens, output_tokens: parsed.usage.completion_tokens }
       : undefined,
+    finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined,
   };
+}
+
+/**
+ * The error for an answer that never validated. Two codes, because the two
+ * situations are fixed in different places: `output-truncated` (the model
+ * stopped at the cap mid-answer) is fixed by a cap or a shorter prompt;
+ * `invalid-output` (the model finished and still did not answer the schema)
+ * is fixed at the prompt. Both carry the raw answer, scrubbed and bounded, so
+ * the operator can tell the two apart in the log instead of guessing from a
+ * reason string.
+ */
+function rejectedAnswerError(
+  provider: string,
+  apiKey: string,
+  call: CallResult,
+  result: { reason: string; errors?: unknown },
+  retried: boolean,
+): ProviderError {
+  const details = {
+    provider,
+    reason: result.reason,
+    errors: result.errors,
+    finish_reason: call.finishReason,
+    content_length: call.content.length,
+    content_snippet: contentSnippet(call.content, apiKey),
+    retried,
+  };
+  if (call.finishReason === 'length') {
+    return new ProviderError(
+      'provider.output-truncated',
+      `Provider "${provider}" API judge stopped at its output cap (finish_reason "length") after ${call.content.length} characters, before the answer closed; not retried. Raise max_tokens for the provider (crosscheck.yml) or --max-output-tokens, or shorten the prompt.`,
+      details,
+    );
+  }
+  return new ProviderError(
+    'provider.invalid-output',
+    `Provider "${provider}" API judge returned invalid output${retried ? ' after one retry' : ''}: ${result.reason}.`,
+    details,
+  );
 }
 
 /**
@@ -164,7 +245,8 @@ export async function runApiJudge(
   let call = await callOnce(provider, config, apiKey, request.prompt, request.budget, fetchImpl);
   let usage = call.usage;
   let result = extractAndValidate(call.content, request.schemaName);
-  if (!result.valid) {
+  let retried = false;
+  if (!result.valid && nudgeCanHelp(call.finishReason)) {
     call = await callOnce(
       provider,
       config,
@@ -175,13 +257,16 @@ export async function runApiJudge(
     );
     usage = addUsage(usage, call.usage);
     result = extractAndValidate(call.content, request.schemaName);
-    if (!result.valid) {
-      throw new ProviderError(
-        'provider.invalid-output',
-        `Provider "${provider}" API judge returned invalid output after one retry: ${result.reason}.`,
-        { provider, reason: result.reason, errors: 'errors' in result ? result.errors : undefined },
-      );
-    }
+    retried = true;
+  }
+  if (!result.valid) {
+    throw rejectedAnswerError(
+      provider,
+      apiKey,
+      call,
+      { reason: result.reason, errors: 'errors' in result ? result.errors : undefined },
+      retried,
+    );
   }
 
   return {

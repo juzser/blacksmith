@@ -330,6 +330,51 @@ describe('planQuorum.ts planQuorumJudgeRequest (the evidence the critic reads)',
     expect(request.prompt).toContain('Tasks: 0');
     expect(request.prompt).toContain('(no tasks)');
   });
+
+  // FD-46 (csb-signing-policy-1). Both external refutations of plan-v1 argued
+  // against a case the plan already carried in a task's acceptance_criteria,
+  // because the prompt listed each task's objective, case and budget and
+  // nothing else. A critic that cannot read the plan's criteria is critiquing
+  // the epic goal, not the plan.
+  it("hands the critic each live task's acceptance criteria and nonfunctional clauses, not only its objective", () => {
+    const plan = basePlan({
+      tasks: [
+        task({
+          acceptance_criteria: [
+            'C4: an S4 specimen is refused with the reason named.',
+            'C7: a NULL trusted list is refused.',
+          ],
+          contract: {
+            functional_clauses: ['do the thing'],
+            nonfunctional_clauses: ['N5: never leave an item with zero trusted applications.'],
+          },
+        }),
+        task({
+          task_id: 'epic-1/task-9',
+          task_status: 'superseded',
+          acceptance_criteria: ['C0: withdrawn criterion.'],
+        }),
+      ],
+    });
+    const request = planQuorumJudgeRequest(plan, [], budget);
+
+    expect(request.prompt).toContain('C4: an S4 specimen is refused with the reason named.');
+    expect(request.prompt).toContain('C7: a NULL trusted list is refused.');
+    expect(request.prompt).toContain('N5: never leave an item with zero trusted applications.');
+    // A withdrawn record's criteria are not the plan's ask either (D-185).
+    expect(request.prompt).not.toContain('C0: withdrawn criterion.');
+    // The criteria sit under the task they belong to.
+    const taskAt = request.prompt.indexOf('epic-1/task-1 [');
+    const c4At = request.prompt.indexOf('C4:');
+    expect(taskAt).toBeGreaterThan(-1);
+    expect(c4At).toBeGreaterThan(taskAt);
+  });
+
+  it('says so when a task carries no criteria, rather than listing nothing', () => {
+    const plan = basePlan({ tasks: [task({ acceptance_criteria: [] })] });
+    const request = planQuorumJudgeRequest(plan, [], budget);
+    expect(request.prompt).toContain('(no acceptance criteria)');
+  });
 });
 
 describe('planQuorum.ts runPlanQuorum (plan_quorum quorum trigger, critique-only)', () => {
@@ -539,6 +584,87 @@ describe('planQuorum.ts runPlanQuorum (plan_quorum quorum trigger, critique-only
     expect(outcome.outcome).toBe('escalated');
     if (outcome.outcome !== 'escalated') throw new Error('unreachable');
     expect(outcome.reason).toBe('insufficient-providers');
+  });
+
+  // -------------------------------------------------------------------------
+  // FD-45 (csb-signing-policy-1): plan.md step 4 runs the quorum BEFORE step 6
+  // writes plan-v1.json, but runPlanQuorum only ever read plan-v<n>.json. The
+  // playbook, followed literally, failed with plan.not-found; the session
+  // copied the draft to plan-v1.json by hand, which is a v1 that existed
+  // before anyone signed it. The seam below takes the draft itself.
+  // -------------------------------------------------------------------------
+  describe('a pre-loaded draft (FD-45)', () => {
+    it('critiques the plan it is handed when no plan-v<n>.json exists yet', async () => {
+      const draft = basePlan({ epic_id: 'epic-draft', status: 'draft' });
+
+      const outcome = await runPlanQuorum(
+        {
+          epicId: 'epic-draft',
+          version: 1,
+          plan: draft,
+          planOpts: { specsDir },
+          epicCapTokens: 10_000,
+          crosscheck: { policy: policyWith() },
+        },
+        ctx(),
+        { stateDir },
+      );
+
+      expect(outcome.outcome).toBe('endorsed');
+      expect(outcome.epicId).toBe('epic-draft');
+      const { quorum } = await quorumEvents();
+      expect(quorum).toHaveLength(1);
+      expect(quorum[0]?.record.payload).toMatchObject({
+        task_id: 'epic-draft/plan-v1',
+        endorsed_by: 'no-triggers',
+      });
+      // Still critique-only: handing over a draft never files it.
+      await expect(readFile(path.join(specsDir, 'epic-draft', 'plan-v1.json'))).rejects.toThrow();
+    });
+
+    it('refuses a draft whose own identity disagrees with the envelope (D-211: one record, one plan)', async () => {
+      await expect(
+        runPlanQuorum(
+          {
+            epicId: 'epic-draft',
+            version: 2,
+            plan: basePlan({ epic_id: 'epic-draft', version: 1 }),
+            planOpts: { specsDir },
+            epicCapTokens: 10_000,
+            crosscheck: { policy: policyWith() },
+          },
+          ctx(),
+          { stateDir },
+        ),
+      ).rejects.toMatchObject({
+        code: 'plan.identity-mismatch',
+        details: {
+          epic_id: 'epic-draft',
+          version: 1,
+          expected_epic_id: 'epic-draft',
+          expected_version: 2,
+        },
+      });
+
+      await expect(
+        runPlanQuorum(
+          {
+            epicId: 'epic-other',
+            version: 1,
+            plan: basePlan({ epic_id: 'epic-draft', version: 1 }),
+            planOpts: { specsDir },
+            epicCapTokens: 10_000,
+            crosscheck: { policy: policyWith() },
+          },
+          ctx(),
+          { stateDir },
+        ),
+      ).rejects.toMatchObject({ code: 'plan.identity-mismatch' });
+
+      // A refused critique records nothing: there is no plan to have judged.
+      const { quorum } = await quorumEvents();
+      expect(quorum).toHaveLength(0);
+    });
   });
 
   it('is critique-only: after a refute, the plan file on disk is byte-identical and no plan-mutating event exists', async () => {

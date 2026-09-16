@@ -180,10 +180,13 @@ smith gate run epic-1/task-1 \
   hands over.
 - Every `artifacts[].path` must resolve inside the task's artifact home,
   `state/artifacts/<task-id>/`, and exist there — relative paths resolve
-  against that home, directories are fine, and anything else blocks the task
-  with `reason: "artifacts-missing"` before the tests are ever run. `/tmp`, a
-  session scratchpad and a worktree all look durable at the moment the worker
-  writes the result and are gone by the time anyone opens the verdict (D-19).
+  against that home (a path that already begins with the home's own spelling
+  from the work root, `state/artifacts/<task-id>/x`, is read as that spelling
+  rather than doubled — FD-5), directories are fine, and anything else blocks
+  the task with `reason: "artifacts-missing"` before the tests are ever run.
+  `/tmp`, a session scratchpad and a worktree all look durable at the moment
+  the worker writes the result and are gone by the time anyone opens the
+  verdict (D-19).
   `--artifacts-dir <dir>` moves the root, which is for tests and replays; the
   default is the repo's `state/artifacts`.
 - `checks.json` — `Array<{ name, cmd }>`, run sequentially in the worktree

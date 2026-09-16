@@ -132,9 +132,13 @@ with exactly these three keys:
   researcher, or `spec_change_request` when the criterion itself is wrong
   (see above)
 - `artifacts` — `[{type, path, description?}]`: test output, coverage report.
-  Write them under `state/artifacts/<task-id>/`, beside your result file, and
-  name them relative to it (`coverage.txt`). The gate resolves every path there
-  and blocks if one is elsewhere or absent — `/tmp` and your scratchpad are
+  Write them under `state/artifacts/<task-id>/` — your task id is
+  `<epic>/<task>`, so that is `state/artifacts/<epic>/<task>/`, beside your
+  result file. `path` is relative to that home: `coverage.txt` is the
+  spelling. The home spelled out from the repo root
+  (`state/artifacts/<epic>/<task>/coverage.txt`) is read as the same file,
+  not as a subtree of the home; anything else the gate resolves inside the
+  home and blocks as elsewhere or absent — `/tmp` and your scratchpad are
   gone by the time anyone reads the verdict, so evidence left there is not
   evidence
 

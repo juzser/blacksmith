@@ -54,6 +54,7 @@ import {
   type StoredEvent,
 } from '../events.js';
 import {
+  findingScope,
   foldFindingsDetailed,
   missingProjectionFields,
   type SkippedFindingRecord,
@@ -152,16 +153,16 @@ function clearSession(db: SmithDb, sessionId: string): void {
   db.delete(schema.prompts).where(eq(schema.prompts.sessionId, sessionId)).run();
   db.delete(schema.dispatches).where(eq(schema.dispatches.sessionId, sessionId)).run();
   db.delete(schema.agents).where(eq(schema.agents.sessionId, sessionId)).run();
-  db.delete(schema.tasks).where(eq(schema.tasks.sessionId, sessionId)).run();
   db.delete(schema.epics).where(eq(schema.epics.sessionId, sessionId)).run();
   db.delete(schema.edges).where(eq(schema.edges.sessionId, sessionId)).run();
   db.delete(schema.errors).where(eq(schema.errors.sessionId, sessionId)).run();
   db.delete(schema.waivers).where(eq(schema.waivers.sessionId, sessionId)).run();
   db.delete(schema.artifacts).where(eq(schema.artifacts.sessionId, sessionId)).run();
-  // `lessons` and `findings` are deliberately absent, like `milestones` —
-  // projectLessons() and projectFindings() own those tables whole (D-199,
-  // D-200). Deleting by session_id here would delete a row this session
-  // raised and another session has since approved or closed.
+  // `lessons`, `findings` and `tasks` are deliberately absent, like
+  // `milestones` — projectLessons(), projectFindings() and projectTasks() own
+  // those tables whole (D-199, D-200, and the continuation case projectTasks()
+  // describes). Deleting by session_id here would delete a row this session
+  // raised and another session has since approved, closed or worked on.
 }
 
 /**
@@ -243,7 +244,34 @@ interface ResultArtifact {
 
 interface ResultPayload {
   task_id?: string;
-  artifacts?: ResultArtifact[];
+  // Typed loosely on purpose: the row writer below checks the shape. A
+  // hand-written log (csb-audit-1#100) carried an object here, and typing it
+  // as a list let the projector call `.forEach` on it and roll back the
+  // whole session.
+  artifacts?: unknown;
+}
+
+/**
+ * A task-result-recorded whose `artifacts` could not become rows, named by
+ * the event that carried it. Same contract as SkippedFindingRecord (D-141):
+ * the session still lands, the caller is told exactly what did not.
+ */
+export interface SkippedArtifactsRecord {
+  event_id: string;
+  session_id: string;
+  task_id: string;
+  reason: string;
+}
+
+/** What projectSession() could not land while still landing the session. */
+export interface SessionProjectionReport {
+  skippedArtifacts: SkippedArtifactsRecord[];
+}
+
+function describeShape(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  return typeof value === 'object' ? 'an object' : `a ${typeof value}`;
 }
 
 interface WaiverPayload {
@@ -288,6 +316,12 @@ const TERMINAL_TASK_STATUSES = new Set([
   'escalated',
   'waived',
 ]);
+
+/**
+ * Severities that record an error without stopping the task (taxonomy.yml
+ * `severity`). An `error-logged` at one of these leaves `task_status` alone.
+ */
+const NOTE_ONLY_SEVERITIES = new Set(['S3-minor', 'S4-nit']);
 
 interface TaskAddedPayload {
   epic_id?: string;
@@ -406,29 +440,38 @@ function planRosterAliases(
   specsDir: string | undefined,
 ): Map<string, Set<string>> {
   const candidates = new Map<string, Set<string>>();
+  for (const id of planRosterTaskIds(epics, specsDir)) {
+    if (!isQualifiedTaskId(id)) continue;
+    const bare = bareTaskId(id);
+    const set = candidates.get(bare) ?? new Set<string>();
+    set.add(id);
+    candidates.set(bare, set);
+  }
+  return candidates;
+}
+
+/**
+ * Every task id the latest plan on disk lists, for every epic the log names.
+ * The one read behind both `planRosterAliases` and foldTasks()'s "is this id
+ * a task at all" check, so the two can never disagree about what a plan says.
+ */
+function planRosterTaskIds(epics: ReadonlySet<string>, specsDir: string | undefined): string[] {
+  const ids: string[] = [];
   for (const epicId of epics) {
-    let roster: readonly string[] = [];
     try {
       const version = latestPlanVersion(epicId, { specsDir });
       if (version !== null) {
-        roster = loadPlan(epicId, version, { specsDir }).tasks.map((t) => t.task_id);
+        ids.push(...loadPlan(epicId, version, { specsDir }).tasks.map((t) => t.task_id));
       }
     } catch (err) {
       console.error(
-        `db/projector.ts planRosterAliases(): plan file for "${epicId}" ` +
+        `db/projector.ts planRosterTaskIds(): plan file for "${epicId}" ` +
           `failed to load, leaving its task ids unresolved: ` +
           `${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    for (const id of roster) {
-      if (!isQualifiedTaskId(id)) continue;
-      const bare = bareTaskId(id);
-      const set = candidates.get(bare) ?? new Set<string>();
-      set.add(id);
-      candidates.set(bare, set);
-    }
   }
-  return candidates;
+  return ids;
 }
 
 /**
@@ -520,6 +563,34 @@ function waveTaskIds(record: EventRecord): string[] {
   return taskId ? [taskId] : [];
 }
 
+/**
+ * The task ids one event asserts something about, spelled the way foldTasks()'s
+ * switch reads them: the envelope or payload `task_id` (D-245) for the
+ * single-task events, `payload.task_ids` for a wave's admission or merge, and
+ * `error-logged`'s own `payload.task_ref`. Kept beside the switch on purpose —
+ * the two must agree on what names a task, or the walk touches an id the
+ * pre-pass never saw.
+ */
+function assertedTaskIds(record: EventRecord): string[] {
+  switch (record.event_type) {
+    case 'wave-admitted':
+    case 'wave-merged':
+      return waveTaskIds(record);
+    case 'error-logged': {
+      const id = eventTaskId(record) ?? (record.payload as ErrorPayload).task_ref;
+      return id ? [id] : [];
+    }
+    case 'task-added':
+    case 'gate-outcome':
+    case 'task-superseded': {
+      const id = eventTaskId(record);
+      return id ? [id] : [];
+    }
+    default:
+      return [];
+  }
+}
+
 export function foldTasks(
   events: readonly StoredEvent[],
   opts: Pick<DbOpts, 'specsDir'> = {},
@@ -529,6 +600,19 @@ export function foldTasks(
   // so no later code has to ask which of two ids for one task it is holding.
   const canonical = taskIdCanonicalizer(events, opts);
   const epics = knownEpicIds(events);
+  // The ids the log asserts a task under: every id a task-level event names
+  // (`task-added`, a wave admission or merge, a gate outcome, a supersession,
+  // an error) plus what the plan roster on disk lists (D-250's task whose
+  // every event was bare and whose `task-added` never reached the log). A
+  // `dispatch_decision` is deliberately not on that list — see touch() for
+  // the twenty-two cards that taught it. Read over the whole log before the
+  // walk so the answer does not depend on which event reached the log first.
+  const declared = new Set<string>();
+  for (const { record } of events) {
+    if (record.event_type === 'dispatch_decision') continue;
+    for (const id of assertedTaskIds(record)) declared.add(canonical(id));
+  }
+  for (const id of planRosterTaskIds(epics, opts.specsDir)) declared.add(canonical(id));
 
   function touch(rawTaskId: string, ts: string, sessionId: string): TaskFoldRow {
     const taskId = canonical(rawTaskId);
@@ -553,8 +637,9 @@ export function foldTasks(
         updatedAt: ts,
         project: null,
       };
-      // Three ref shapes are NOT tasks and must never surface as kanban
-      // cards. The epic's own bare id, which `error-logged` writes into
+      // Not every id an event carries is a task, and a ref that is not a
+      // task must never surface as a kanban card. Three shapes are refused by
+      // name: the epic's own bare id, which `error-logged` writes into
       // `payload.task_ref` when the failure belongs to no single task (D-251)
       // — the phantom foldEpics() keeps itself off this fold to avoid; the
       // errors table takes that row straight from the event, so refusing the
@@ -566,19 +651,34 @@ export function foldTasks(
       // dispatch_decision/judge-verdict/quorum-decision events their quorum
       // case emits, so provider-agreement analytics can group by it like any
       // other dispatch (db/queries.ts's providerAgreement() reads eventsRaw
-      // directly, never joins tasks, so it's unaffected either way). Every
-      // event type that carries a task_id routes through this one touch()
-      // choke point (task-added, wave-admitted, dispatch_decision,
+      // directly, never joins tasks, so it's unaffected either way).
+      //
+      // The fourth refusal is the general one: an id nothing but a dispatch
+      // ever named. A session that ran its planning rounds by hand, before
+      // planRefTaskId() existed, stamped each round's dispatch with an id it
+      // made up on the spot — `<epic>/plan-r12`, `<epic>/spec-review-r15` —
+      // and twenty-two of those sat in the board's "In progress" column for
+      // a week, one card each, no objective, nothing ever moving them; the
+      // column was nothing BUT them. A dispatch is a fact about an agent and
+      // its task_id is where the agent was pointed; a task is a fact the log
+      // asserts elsewhere (`declared`, above), and a dispatch moves one that
+      // exists rather than minting one. An orphan the log DOES assert — a
+      // bare id no roster claims (D-250), an error against a ref nobody
+      // declared — keeps its row on purpose: a producer's mistake stays
+      // visible. Refusing by what the log asserts rather than by spelling
+      // means the next hand-minted ref never gets a card either.
+      //
+      // Every event type that carries a task_id routes through this one
+      // touch() choke point (task-added, wave-admitted, dispatch_decision,
       // gate-outcome, wave-merged, task-superseded, error-logged), so one
       // guard here is enough: build the row (callers below still mutate it
-      // freely) but never register a reserved ref in byId, so it never
-      // reaches foldTasks()'s returned rows or projectSession()'s tasks-table
-      // insert loop.
+      // freely) but never register a refused id in byId, so it never
+      // reaches foldTasks()'s returned rows or projectTasks()'s insert loop.
       const isReservedRef =
         taskId.split('/').pop() === RESERVED_TASK_ID ||
         isPlanRefTaskId(taskId) ||
         epics.has(taskId);
-      if (!isReservedRef) byId.set(taskId, row);
+      if (!isReservedRef && declared.has(taskId)) byId.set(taskId, row);
     }
     row.updatedAt = ts;
     return row;
@@ -608,7 +708,8 @@ export function foldTasks(
         // the amended task carries the new plan_version) would otherwise revert
         // a merged task to `todo`. A terminal status is a fact the log earned
         // from `wave-merged`; a static field in a plan file does not overrule
-        // it. Same guard `dispatch_decision` and `error-logged` already apply.
+        // it. `wave-admitted`, `dispatch_decision`, `gate-outcome` and
+        // `error-logged` carry the same guard.
         if (!TERMINAL_TASK_STATUSES.has(row.taskStatus))
           row.taskStatus = p.task_status ?? row.taskStatus;
         row.planVersion = p.plan_version ?? row.planVersion;
@@ -623,7 +724,12 @@ export function foldTasks(
         const p = record.payload as { epic_id?: string };
         for (const taskId of waveTaskIds(record)) {
           const row = touch(taskId, record.ts, record.session_id);
-          row.taskStatus = 'ready';
+          // A re-planned wave admits the new plan's task ids, and one of them
+          // can be an id that already merged under the previous version. The
+          // admission is a fact about the wave, not a reopening of the task:
+          // the board showed a shipped task as `ready` for the rest of the
+          // epic (D-249). Same guard as `task-added` and `dispatch_decision`.
+          if (!TERMINAL_TASK_STATUSES.has(row.taskStatus)) row.taskStatus = 'ready';
           row.epicId = epicOfTaskId(row.taskId) ?? p.epic_id ?? row.epicId;
         }
         break;
@@ -639,6 +745,9 @@ export function foldTasks(
         if (!eventTask) break;
         const p = record.payload as { outcome?: string };
         const row = touch(eventTask, record.ts, record.session_id);
+        // A judge whose evidence lands late is gated after `wave-merged`; its
+        // verdict is on the record, but the task it grades already shipped.
+        if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) break;
         if (p.outcome === 'blocked') row.taskStatus = 'blocked';
         else if (p.outcome === 'pass-with-waivers-pending') row.taskStatus = 'reviewing';
         else if (p.outcome === 'pass') row.taskStatus = 'merging';
@@ -664,6 +773,15 @@ export function foldTasks(
         const row = touch(taskId, record.ts, record.session_id);
         row.project = record.project ?? row.project;
         if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) break;
+        // Severity decides whether the task moves; the error class decides
+        // where. taxonomy.yml: S3 is "real but waivable; batched to operator
+        // at epic end", S4 is "logged, never asked" — a budget note or a
+        // tool hiccup at that level is on the record but the task carries on,
+        // and showing it as blocked is what the board did for 43 of the 55
+        // errors logged so far. A record with no severity is treated as
+        // major: the write path requires the field, so its absence means a
+        // log this reader does not own.
+        if (NOTE_ONLY_SEVERITIES.has(p.severity ?? '')) break;
         row.taskStatus = p.error?.startsWith('coordination.') ? 'escalated' : 'blocked';
         break;
       }
@@ -998,12 +1116,13 @@ function planProjectResolver(
 /**
  * foldTasks() with D-246's plan-file backfill applied.
  *
- * Both folds of the task list go through here, because both answer the same
- * question and must not answer it differently: projectSession() derives the
- * tasks, epics, dispatches, artifacts and errors rows from one, and
- * projectFindings() folds the same events again for findings.project. Split
- * the backfill across only one of them and a single task reads as demo-rpg's
- * on the board and black-smith's on the errors page.
+ * Every fold of the task list goes through here, because all of them answer
+ * the same question and must not answer it differently: projectSession()
+ * derives the epics, dispatches, artifacts and errors rows from one,
+ * projectTasks() writes the tasks table from another over every session's
+ * log, and projectFindings() folds the same events again for
+ * findings.project. Split the backfill across only one of them and a single
+ * task reads as demo-rpg's on the board and black-smith's on the errors page.
  */
 function foldTasksWithPlanProject(events: readonly StoredEvent[], opts: DbOpts): TaskFoldRow[] {
   const projectFromPlan = planProjectResolver(opts.specsDir);
@@ -1017,16 +1136,19 @@ export function projectSession(
   sessionId: string,
   events: StoredEvent[],
   opts: DbOpts = {},
-): void {
+): SessionProjectionReport {
+  const skippedArtifacts: SkippedArtifactsRecord[] = [];
   handle.db.transaction((txDb) => {
     clearSession(txDb, sessionId);
 
     if (events.length === 0) return;
 
-    // Folded once, up here: the rows below inherit their project from it, and
-    // the tasks table is written from the very same array further down. The
-    // plan-file backfill lands here for that reason -- one insertion point,
-    // and the tasks table, the epics table and every child row come with it.
+    // Folded once, up here: the rows below inherit their project from it. The
+    // tasks table itself is NOT written from this array -- projectTasks() folds
+    // every session's log for that, because a task planned in one session and
+    // worked in its continuation is one row -- but the epics table and every
+    // child row inherit their project from this per-session fold, and the
+    // plan-file backfill lands here so they agree with the global one.
     const taskRows = foldTasksWithPlanProject(events, opts);
     const projectForTask = projectResolver(taskRows);
     const projectForEpic = new Map(
@@ -1175,22 +1297,21 @@ export function projectSession(
         // other way round (D-245).
         const taskId = eventTask;
         if (!taskId) continue;
-        // result.schema.json says `artifacts` is a list, but the log has
-        // accepted an object keyed by name (csb-audit-1 #100). Calling
-        // `.forEach` on it threw out of the transaction and dropped every
-        // event after it in the session, which is exactly the one thing the
-        // projector promises never to do (see the header). A malformed list
-        // costs its own artifact rows and nothing else.
-        let artifacts: ResultArtifact[] = [];
-        if (Array.isArray(p.artifacts)) {
-          artifacts = p.artifacts;
-        } else if (p.artifacts !== undefined && p.artifacts !== null) {
-          console.error(
-            `db/projector.ts: task-result-recorded ${event_id} (session "${record.session_id}", task "${taskId}") carries a non-array "artifacts" (${typeof p.artifacts}); its artifact rows were skipped and the rest of the session was folded`,
-          );
+        // The whole session runs inside this transaction: a throw here used
+        // to roll back every row above, so an epic three waves deep drew as
+        // nothing. Hold back the one list that cannot be read, name it, and
+        // keep going (D-141: a loud undercount beats a crash).
+        if (p.artifacts !== undefined && !Array.isArray(p.artifacts)) {
+          skippedArtifacts.push({
+            event_id,
+            session_id: record.session_id,
+            task_id: taskId,
+            reason: `payload.artifacts is ${describeShape(p.artifacts)}, not an array`,
+          });
+          continue;
         }
-        artifacts.forEach((artifact, index) => {
-          if (!artifact || !artifact.type || !artifact.path) return;
+        ((p.artifacts ?? []) as ResultArtifact[]).forEach((artifact, index) => {
+          if (!artifact || typeof artifact !== 'object' || !artifact.type || !artifact.path) return;
           txDb
             .insert(schema.artifacts)
             .values({
@@ -1223,28 +1344,6 @@ export function projectSession(
           })
           .run();
       }
-    }
-
-    for (const task of taskRows) {
-      txDb
-        .insert(schema.tasks)
-        .values({
-          taskId: task.taskId,
-          sessionId: task.sessionId,
-          epicId: task.epicId,
-          caseTag: task.caseTag,
-          origin: task.origin,
-          taskStatus: task.taskStatus,
-          planVersion: task.planVersion,
-          objective: task.objective,
-          claims: task.claims ? JSON.stringify(task.claims) : null,
-          budgetTokens: task.budgetTokens,
-          branch: task.branch,
-          createdAt: task.createdAt,
-          updatedAt: task.updatedAt,
-          project: task.project,
-        })
-        .run();
     }
 
     for (const epic of foldEpics(events)) {
@@ -1292,6 +1391,67 @@ export function projectSession(
     }
 
     // `lessons` is not written here — see projectLessons() (D-199).
+  });
+  return { skippedArtifacts };
+}
+
+/**
+ * Fully replace the tasks table from EVERY session's log at once, in one
+ * causal order (mergeSessionLogs). Not session-scoped, the same shape as
+ * projectLessons() and projectFindings() below, and for the same reason.
+ *
+ * A task is planned in one session and worked in another BY DESIGN: an epic
+ * outlives an orchestrator's context window, and `smith session start
+ * --continues` (P9-7) is how the next session picks the epic up. Every event
+ * in the continuation names the same task_id the parent's `task-added` did,
+ * and `tasks.task_id` is the table's whole primary key. Folding one session
+ * at a time inserted the row twice -- once from the parent's fold, once from
+ * the continuation's -- and the second insert aborted the whole rebuild on
+ * `UNIQUE constraint failed: tasks.task_id`. The first real continuation in
+ * this factory's own logs could not be projected at all; the dashboard showed
+ * the epic without its working session.
+ *
+ * A per-session upsert would not do either. Whichever session is projected
+ * last would own the row, and listSessionIds() sorts by filename, which is
+ * nothing causal: re-applying the parent after the continuation would put the
+ * task back to `todo`. foldTasks() already knows how to fold a task's whole
+ * history in order -- terminal statuses stick, a late gate-outcome does not
+ * reopen a merged task -- so it is handed the whole history: one global key,
+ * one global fold.
+ *
+ * The row still carries the session that FIRST touched the task -- the one
+ * whose plan added it -- so `kanban({ sessionId })` keeps meaning "tasks born
+ * here", and the lineage width (D-264) is what shows the continuation's
+ * progress on them.
+ */
+export function projectTasks(
+  handle: DbHandle,
+  events: readonly StoredEvent[],
+  opts: DbOpts = {},
+): void {
+  handle.db.transaction((txDb) => {
+    txDb.delete(schema.tasks).run();
+    for (const task of foldTasksWithPlanProject(events, opts)) {
+      txDb
+        .insert(schema.tasks)
+        .values({
+          taskId: task.taskId,
+          sessionId: task.sessionId,
+          epicId: task.epicId,
+          caseTag: task.caseTag,
+          origin: task.origin,
+          taskStatus: task.taskStatus,
+          planVersion: task.planVersion,
+          objective: task.objective,
+          claims: task.claims ? JSON.stringify(task.claims) : null,
+          budgetTokens: task.budgetTokens,
+          branch: task.branch,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+          project: task.project,
+        })
+        .run();
+    }
   });
 }
 
@@ -1447,9 +1607,10 @@ function projectFindings(
   const stamps = findingTimestamps(events);
   // A finding has no `project` of its own on the wire (findings.ts's raiseFinding()
   // predates Phase 6b) — derive it from its owning task's project, the same fold
-  // projectSession() computes, so the value always matches tasks.project exactly.
-  // Same helper as projectSession() for exactly that reason: the plan-file
-  // backfill (D-246) has to reach both folds or the invariant is a lie.
+  // projectTasks() writes the tasks table from, over the same merged events, so
+  // the value always matches tasks.project exactly. Same helper for exactly that
+  // reason: the plan-file backfill (D-246) has to reach both folds or the
+  // invariant is a lie.
   const taskRows = foldTasksWithPlanProject(events, opts);
   // projectResolver and not a Map lookup, for the reason its own docblock
   // gives: the log spells one task both `epic/task-1` and `task-1`, and a
@@ -1518,6 +1679,10 @@ function projectFindings(
       waiverId: finding.waiver_id ?? null,
       raisedAt: stamp.raisedAt,
       updatedAt: stamp.updatedAt,
+      // Through findingScope(), not the raw field: absence means diff.
+      findingScope: findingScope(finding),
+      specPlanVersion: finding.spec_ref?.plan_version ?? null,
+      criterionRef: finding.spec_ref?.criterion_ref ?? null,
     });
   }
   handle.db.transaction((txDb) => {
@@ -1540,13 +1705,38 @@ function projectFindings(
  * session id settles two logs that start in the same millisecond, so the
  * order is total and independent of how the caller listed them.
  */
+export interface UnreadableSessionRecord {
+  session_id: string;
+  reason: string;
+}
+
+interface SessionLogs {
+  logs: SessionLog[];
+  unreadable: UnreadableSessionRecord[];
+}
+
+/**
+ * Reads every named log. `tolerate` names the sessions whose read may fail
+ * without failing the call: those come back in `unreadable` instead of as
+ * rows. Any other session's failure is thrown as it always was.
+ */
 async function readAllSessionLogs(
   sessionIds: readonly string[],
   stateDir: string,
-): Promise<SessionLog[]> {
+  tolerate: ReadonlySet<string> = new Set(),
+): Promise<SessionLogs> {
   const logs: SessionLog[] = [];
+  const unreadable: UnreadableSessionRecord[] = [];
   for (const sessionId of sessionIds) {
-    logs.push({ sessionId, events: await readEvents(sessionId, { stateDir }) });
+    try {
+      logs.push({ sessionId, events: await readEvents(sessionId, { stateDir }) });
+    } catch (err) {
+      if (!tolerate.has(sessionId)) throw err;
+      unreadable.push({
+        session_id: sessionId,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
   logs.sort((a, b) => {
     const aStart = a.events[0]?.record.ts ?? '';
@@ -1554,7 +1744,7 @@ async function readAllSessionLogs(
     if (aStart !== bStart) return aStart < bStart ? -1 : 1;
     return a.sessionId.localeCompare(b.sessionId);
   });
-  return logs;
+  return { logs, unreadable };
 }
 
 export interface RebuildResult {
@@ -1572,6 +1762,25 @@ export interface RebuildResult {
    * missing from it.
    */
   skippedFindings: SkippedFindingRecord[];
+  /**
+   * task-result-recorded events whose `artifacts` was not a list and so
+   * contributed no artifact rows, each named by event id. ALWAYS present,
+   * `[]` when there were none, for the same reason as `skippedFindings`.
+   * Scoped to the sessions this call projected: `rebuild()` reports every
+   * session, `apply()` the one it re-folded.
+   */
+  skippedArtifacts: SkippedArtifactsRecord[];
+  /**
+   * Sessions whose log could not be read at all -- a line that is not JSON --
+   * and so contributed nothing to the global folds (`tasks`, `findings`,
+   * `lessons`).
+   * ALWAYS present. `rebuild()` never fills it: an explicit rebuild over a
+   * broken log throws, because "cannot tell" must not be written down as
+   * "nothing there". `apply()` fills it for every session OTHER than the one
+   * it re-folds: the dashboard applies each session in turn, and one broken
+   * log must cost the board that session, not every session (D-249).
+   */
+  unreadableSessions: UnreadableSessionRecord[];
 }
 
 /**
@@ -1592,19 +1801,29 @@ export async function rebuild(
     const sessionIds = sessions === 'all' ? listSessionIds(stateDir) : [...sessions];
 
     // Read each log once: the per-session projection consumes them one at a
-    // time, projectLessons() and projectFindings() need them all at once.
-    const logs = await readAllSessionLogs(sessionIds, stateDir);
+    // time; projectTasks(), projectFindings() and projectLessons() need them
+    // all at once.
+    const { logs } = await readAllSessionLogs(sessionIds, stateDir);
 
     let eventsApplied = 0;
+    const skippedArtifacts: SkippedArtifactsRecord[] = [];
     for (const { sessionId, events } of logs) {
-      projectSession(handle, sessionId, events, opts);
+      const report = projectSession(handle, sessionId, events, opts);
+      skippedArtifacts.push(...report.skippedArtifacts);
       eventsApplied += events.length;
     }
     const merged = mergeSessionLogs(logs);
+    projectTasks(handle, merged, opts);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
     projectMilestones(handle, opts);
-    return { sessionsProcessed: sessionIds.length, eventsApplied, skippedFindings };
+    return {
+      sessionsProcessed: sessionIds.length,
+      eventsApplied,
+      skippedFindings,
+      skippedArtifacts,
+      unreadableSessions: [],
+    };
   } finally {
     handle.sqlite.close();
   }
@@ -1615,10 +1834,10 @@ export async function rebuild(
  * replaces only its rows, leaving every other session's projection intact.
  * Safe to call repeatedly while a session is still running (tailing).
  *
- * The three tables that are not session-scoped are rewritten whole on every
+ * The four tables that are not session-scoped are rewritten whole on every
  * call: `milestones` from roadmap.md, and — from every session's log, which is
- * why this reads more than the one session it re-folds — `lessons` (D-199) and
- * `findings` (D-200).
+ * why this reads more than the one session it re-folds — `tasks`
+ * (projectTasks()), `lessons` (D-199) and `findings` (D-200).
  */
 export async function apply(
   dbPath: string = STATE_DB_PATH,
@@ -1633,17 +1852,30 @@ export async function apply(
     // naming it anyway costs an empty read and keeps it in the global folds
     // below, which would otherwise drop the very session being applied.
     const listed = listSessionIds(stateDir);
-    const logs = await readAllSessionLogs(
+    // Every other session's log is read for the global folds only, so one of
+    // them being unreadable is reported, not thrown: this session's rows do
+    // not depend on it. The applied session's own log still throws -- that
+    // failure is the caller's to name, and there is nothing to write for it.
+    const others = new Set(listed.filter((id) => id !== sessionId));
+    const { logs, unreadable } = await readAllSessionLogs(
       listed.includes(sessionId) ? listed : [...listed, sessionId],
       stateDir,
+      others,
     );
     const events = logs.find((l) => l.sessionId === sessionId)?.events ?? [];
-    projectSession(handle, sessionId, events, opts);
+    const { skippedArtifacts } = projectSession(handle, sessionId, events, opts);
     const merged = mergeSessionLogs(logs);
+    projectTasks(handle, merged, opts);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
     projectMilestones(handle, opts);
-    return { sessionsProcessed: 1, eventsApplied: events.length, skippedFindings };
+    return {
+      sessionsProcessed: 1,
+      eventsApplied: events.length,
+      skippedFindings,
+      skippedArtifacts,
+      unreadableSessions: unreadable,
+    };
   } finally {
     handle.sqlite.close();
   }

@@ -124,8 +124,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'plan quorum',
     positionals: '',
     flags:
-      '--epic <id> --plan-version <n> --session <id> --causal-parent <event-id> [--confidence <0-1>] [--actor <name>] [--state-dir <dir>]',
-    summary: 'Critique-only review of a drafted plan. Exit 1 means the operator must look first.',
+      '--plan-version <n> --session <id> --causal-parent <event-id> [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
+    summary:
+      'Critique-only review of a drafted plan: --plan <draft.json> before it is filed, or --epic for the filed version. Exit 1 means the operator must look first.',
   },
   {
     command: 'plan amend',
@@ -748,7 +749,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'crossfind request',
     positionals: '',
     flags:
-      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>]',
+      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>]',
     summary:
       'Print the finder request without sending it — exactly what would leave the machine. Refuses when send_diff is false.',
   },
@@ -762,7 +763,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'crossfind run',
     positionals: '',
-    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>] ${EVENTS_DIR}`,
+    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] ${EVENTS_DIR}`,
     summary:
       'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
   },

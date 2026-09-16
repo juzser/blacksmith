@@ -38,6 +38,11 @@ export const JUDGE_SCHEMA_FAILURE_CODES: ReadonlySet<string> = new Set([
   'provider.invalid-output',
   'provider.malformed-response',
   'provider.output-too-large',
+  // The provider stopped writing at its output cap (finish_reason `length`)
+  // before the answer closed. The answer is unusable for the same reason a
+  // malformed one is, and the fix is the same side of the wire: a cap that
+  // fits the answer, or a prompt that asks for a shorter one.
+  'provider.output-truncated',
 ]);
 
 /** Codes raised when no usable answer arrived -- including when no request was sent. */
@@ -78,6 +83,15 @@ export type JudgeKind = 'review' | 'verify' | 'plan-critique';
 export interface JudgeBudget {
   timeout_ms: number;
   max_output_bytes: number;
+  /**
+   * Cap on the tokens the provider may generate for one answer, sent as
+   * `max_tokens` on API transports. Optional on purpose: the ceiling differs
+   * per model (a value one model accepts, another rejects as too large), so
+   * an unset field means "the provider's own default", never a number of ours.
+   * Set it per provider in `crosscheck.yml` (`max_tokens`) or per request
+   * with `--max-output-tokens`.
+   */
+  max_output_tokens?: number;
 }
 
 export interface JudgeRequest {

@@ -307,6 +307,96 @@ describe('judges.ts', () => {
       expect(report.artifactPath).toBe(elsewhere);
       expect(report.findingCount).toBe(0);
     });
+
+    // FD-1 (csb-audit-1). The grader writes a verdict document, not a findings
+    // list, so a grader dispatch minted an obligation that only a re-shaped
+    // copy of the grader's own output could discharge — round 1 closed it
+    // with a hand-written evidence file. The grader's result file is its
+    // report; the criteria it did not pass are what it found.
+    describe('for the grader', () => {
+      const graderPath = () => path.join(artifactDir, 'grader-r1.json');
+      const dispatchGrader = () => dispatch({ role: 'grader', artifactPath: graderPath() });
+      const criterion = (status: string) => ({
+        criterion: `criterion ${status}`,
+        status,
+        evidence: 'test/x.test.ts:1',
+      });
+
+      it('accepts the grader result document and counts the criteria that did not pass', async () => {
+        await dispatchGrader();
+        await writeFile(
+          graderPath(),
+          JSON.stringify({
+            run_status: 'done',
+            structured_output: {
+              round: 1,
+              criteria: [criterion('pass'), criterion('fail'), criterion('partial')],
+              overall: 'fail',
+            },
+          }),
+          'utf8',
+        );
+        const report = await recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'grader' },
+          ctx(),
+          opts(),
+        );
+        expect(report.findingCount).toBe(2);
+        expect(report.attested).toBe(false);
+        expect(outstandingJudges(await turns())).toEqual([]);
+      });
+
+      it('takes a dead grader as a report of nothing gradable, not as a missing report', async () => {
+        await dispatchGrader();
+        await writeFile(graderPath(), JSON.stringify({ run_status: 'dead' }), 'utf8');
+        const report = await recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'grader' },
+          ctx(),
+          opts(),
+        );
+        expect(report.findingCount).toBe(0);
+        expect(outstandingJudges(await turns())).toEqual([]);
+      });
+
+      it('still takes a findings array from the grader, so the round-1 workaround keeps working', async () => {
+        await dispatchGrader();
+        await writeFile(graderPath(), JSON.stringify([{ filePath: 'src/a.ts' }]), 'utf8');
+        const report = await recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'grader' },
+          ctx(),
+          opts(),
+        );
+        expect(report.findingCount).toBe(1);
+      });
+
+      it('refuses a grader document that carries no criteria', async () => {
+        await dispatchGrader();
+        await writeFile(
+          graderPath(),
+          JSON.stringify({ run_status: 'done', structured_output: { overall: 'pass' } }),
+          'utf8',
+        );
+        await expect(
+          recordJudgeReport({ taskId: 'epic-1/task-1', role: 'grader' }, ctx(), opts()),
+        ).rejects.toMatchObject({ code: 'judges.artifact-not-a-list' });
+        expect(outstandingJudges(await turns())).toHaveLength(1);
+      });
+
+      it('does not let any other role hand in a grader document', async () => {
+        await dispatch();
+        await writeFile(
+          path.join(artifactDir, 'reviewer.json'),
+          JSON.stringify({
+            run_status: 'done',
+            structured_output: { round: 1, criteria: [criterion('pass')], overall: 'pass' },
+          }),
+          'utf8',
+        );
+        await expect(
+          recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts()),
+        ).rejects.toMatchObject({ code: 'judges.artifact-not-a-list' });
+      });
+    });
   });
 
   // D-156. `readJudgeTurns` folded one session where every other deciding fold

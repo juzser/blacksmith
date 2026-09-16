@@ -104,10 +104,28 @@ nothing would discharge its finding the moment it was written, which is D-127,
 and is why neither edge can be typed at `smith findings transition`.
 
 `--changes` takes the same `{added, supersede, newEdges}` shape `nextVersion`
-uses. Omitting it is legal — a criterion can be reworded without moving a
-task — but it is also the shape a forgotten `--changes` takes, so an amendment
-whose diff moves no task prints a `warning` in the JSON and a line on stderr
-rather than silently cutting an identical version.
+uses. Omitting it used to be legal — a criterion reworded without moving a
+task — and was also the shape a forgotten `--changes` takes, so the CLI
+printed a warning and cut the version anyway. Since D-127 `amendPlan` itself
+refuses an amendment that adds and supersedes nothing, before the version
+exists: the cited finding would have had nothing to wait on.
+
+The amendment writes the version and the finding transitions, **not the tasks
+it added**. Ingest the new version before anything is scheduled against it:
+
+```bash
+smith plan ingest factory/specs/active/epic-1/plan-v2.json \
+  --session <session-id> --plan-version 2 --causal-parent <event-id>
+```
+
+That is the command that gives a task its `task-added` — its epic, claims,
+budget and `task_status: todo` in the DB — and the plan its `edges-recorded`
+(D-46, D-254). It is idempotent, so tasks v2 carried forward from v1 are
+skipped and only the ones the amendment added come back in `added`. An
+un-ingested version still runs, because the wave loop reads the plan file; what
+it does not do is appear on the Kanban or the Flow graph until a gate event
+names the task by accident, and then as a bare row with none of the above
+(the 2026-09-14 cross-provider UI check found two epics in that state).
 
 ## 6b. Worker-proposed spec changes — the third exit
 

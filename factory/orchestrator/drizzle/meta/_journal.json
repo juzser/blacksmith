@@ -78,6 +78,13 @@
       "when": 1788429177107,
       "tag": "0010_milestone_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789391823211,
+      "tag": "0011_findings_spec_ref",
+      "breakpoints": true
     }
   ]
 }

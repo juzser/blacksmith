@@ -279,10 +279,23 @@ async function readEventsAtPath(filePath: string, sessionId: string): Promise<St
     .trimEnd()
     .split('\n')
     .filter((line) => line.length > 0);
-  return lines.map((line, index) => ({
-    event_id: `${sessionId}#${index}`,
-    record: JSON.parse(line) as EventRecord,
-  }));
+  return lines.map((line, index) => {
+    let record: EventRecord;
+    try {
+      record = JSON.parse(line) as EventRecord;
+    } catch (err) {
+      // A bare SyntaxError says "Unexpected token" and nothing else: not which
+      // log, not which line. The dashboard prints this for every session it
+      // then fails to fold (the global folds read every log), so the message
+      // has to carry the path the operator needs to open.
+      throw new EventError(
+        'events.unreadable-session-log',
+        `Line ${index + 1} of ${filePath} is not JSON, so session "${sessionId}" cannot be read: ${errorText(err)}.`,
+        { session_id: sessionId, path: filePath, line: index + 1 },
+      );
+    }
+    return { event_id: `${sessionId}#${index}`, record };
+  });
 }
 
 /**
@@ -621,11 +634,38 @@ const TYPED_PAYLOAD_SCHEMAS: Record<string, string> = {
   'finding-raised': 'finding',
 };
 
+/**
+ * The one field of a `task-result-recorded` payload a reader iterates. The
+ * projector writes `artifacts[]` into rows inside the session's transaction,
+ * so an object here (csb-audit-1#100 carried `{ claude_half, external_half,
+ * repair_brief }`) rolled back the whole session and the dashboard drew
+ * nothing for it. Pinning only this field is deliberate: the full result
+ * schema is not enforced on the event, because real logs carry many
+ * hand-written result payloads that no reader rehydrates -- refusing them
+ * would refuse history for a shape nothing reads.
+ */
+function validateResultArtifactsShape(record: EventRecord): void {
+  if (record.event_type !== 'task-result-recorded') return;
+  const payload = record.payload as { artifacts?: unknown } | null | undefined;
+  const artifacts = payload?.artifacts;
+  if (artifacts === undefined || Array.isArray(artifacts)) return;
+  throw new EventError(
+    'events.invalid-typed-payload',
+    'Event payload for "task-result-recorded" carries an `artifacts` that is not an array. The projector iterates this list to write artifact rows, so any other shape becomes a crash that rolls back the whole session rather than an error here.',
+    {
+      event_type: record.event_type,
+      schema: 'result',
+      errors: [{ path: '/artifacts', message: `must be an array, got ${typeof artifacts}` }],
+    },
+  );
+}
+
 function validateTypedPayload(
   schemas: CompiledSchemaSet,
   taxonomy: Taxonomy,
   record: EventRecord,
 ): void {
+  validateResultArtifactsShape(record);
   const schemaName = TYPED_PAYLOAD_SCHEMAS[record.event_type];
   if (schemaName === undefined) return;
 

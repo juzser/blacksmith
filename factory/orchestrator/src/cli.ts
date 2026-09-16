@@ -366,11 +366,16 @@ const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_byte
  * reachable by typo.
  */
 function judgeBudgetFromFlags(flags: Record<string, string>): JudgeBudget {
+  // No default for max_output_tokens: the ceiling is per model, and an unset
+  // field lets the provider's policy entry (crosscheck.yml max_tokens) or the
+  // model's own default apply.
+  const maxOutputTokens = boundedIntFlag(flags, 'max-output-tokens', { min: 1 });
   return {
     timeout_ms: boundedIntFlag(flags, 'timeout-ms', { min: 1 }) ?? DEFAULT_JUDGE_BUDGET.timeout_ms,
     max_output_bytes:
       boundedIntFlag(flags, 'max-output-bytes', { min: 1 }) ??
       DEFAULT_JUDGE_BUDGET.max_output_bytes,
+    ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
   };
 }
 
@@ -1153,7 +1158,15 @@ async function main(): Promise<number> {
     // Critique-only (planQuorum.ts module header): exit 0 means nothing
     // needs the operator (no trigger fired, or endorsed); exit 1 means the
     // operator must look (critiqued or escalated) before approving the plan.
-    const epicId = requireFlag(flags, 'epic');
+    //
+    // FD-45: the plan may arrive by path. plan.md critiques at step 4 and
+    // files plan-v<n>.json at step 6, so at the moment this verb runs the plan
+    // is a draft with no versioned file to read; `--plan` hands over the
+    // draft itself and `--epic` then defaults to the draft's own epic_id (an
+    // explicit `--epic` must agree -- runPlanQuorum refuses one that does
+    // not). Without `--plan` the verb reads the filed version as before.
+    const draft = flags.plan ? readJsonFile<PlanFile>(flags.plan) : undefined;
+    const epicId = draft && flags.epic === undefined ? draft.epic_id : requireFlag(flags, 'epic');
     // Required for this verb, unlike the shared envelope where it defaults to
     // 1: a quorum is a critique of one specific plan version.
     requireFlag(flags, 'plan-version');
@@ -1193,11 +1206,24 @@ async function main(): Promise<number> {
     // back, neither number can be trusted. One read, one number.
     const version = ctx.planVersion;
     const outcome = await runPlanQuorum(
-      { epicId, version, ...(plannerConfidence !== undefined ? { plannerConfidence } : {}) },
+      {
+        epicId,
+        version,
+        ...(draft ? { plan: draft } : {}),
+        ...(plannerConfidence !== undefined ? { plannerConfidence } : {}),
+        planOpts: planOptsFromFlags(flags),
+      },
       ctx,
       eventOptsFromFlags(flags),
     );
     printJson(outcome);
+    // FD-49: the outcome is a few rationales of several kB each, and the
+    // playbook reads it back more often than a terminal does. Same idiom as
+    // `lessons compile --out`: write it where told, still print it.
+    if (flags.out) {
+      mkdirSync(path.dirname(flags.out), { recursive: true });
+      writeFileSync(flags.out, `${JSON.stringify(outcome, null, 2)}\n`, 'utf8');
+    }
     return outcome.outcome === 'endorsed' ? 0 : 1;
   }
 
@@ -2724,11 +2750,18 @@ async function main(): Promise<number> {
     // blocking the gate on a judge that had just handed in its evidence. One
     // close per role: a judge that splits its findings across two files still
     // owes one turn, and a second report against it would be a duplicate.
+    //
+    // FD-1 (csb-audit-1): `--grader` is the same hand-over for the grader. Its
+    // verdict document is not a findings list, so until `judge report` learned
+    // the shape the grader's turn stayed open with its verdict on the command
+    // line, and the gate blocked on the judge it was about to read.
     const evidenceGiven = evidenceSources(args);
-    if (evidenceGiven.length > 0) {
+    const graderGiven = flags.grader ? [{ foundBy: 'grader', file: flags.grader }] : [];
+    const handedIn = [...evidenceGiven, ...graderGiven];
+    if (handedIn.length > 0) {
       const turns = await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags));
       const closed = new Set<string>();
-      for (const { foundBy, file } of evidenceGiven) {
+      for (const { foundBy, file } of handedIn) {
         if (closed.has(foundBy)) continue;
         if (!turns.some((t) => t.role === foundBy && !t.reported)) continue;
         closed.add(foundBy);

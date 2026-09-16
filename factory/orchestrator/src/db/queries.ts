@@ -1433,6 +1433,12 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   'audit-cut',
   'audit-resolved',
   'audit-closed',
+  // The integration PR run.md step 17 opens, appended by hand through `smith
+  // event append` under `<epic>/integration`. It is the epic's terminal
+  // deliverable -- the one thing the operator is asked to merge -- and the
+  // only event written after `epic-closed`, so without it the timeline of a
+  // closed epic ends at the closing and never shows what the closing was for.
+  'integration-pr-opened',
 ];
 
 let cachedTaxonomy: Taxonomy | undefined;
@@ -1673,6 +1679,15 @@ export interface KanbanTag {
   severity: string | null;
 }
 
+/**
+ * Whether somebody is still on a task. `working` is a live agents row
+ * dispatched inside the stale window as of the call's `nowIso`; `stalled` is
+ * a live row older than that — the registry never saw it return, the clock
+ * says it should have. `null` is nobody: every dispatch to the task has its
+ * terminal event, or there was never one.
+ */
+export type KanbanAgentActivity = 'working' | 'stalled';
+
 export interface KanbanTask {
   taskId: string;
   taskStatus: string;
@@ -1682,6 +1697,16 @@ export interface KanbanTask {
   agentRole: string | null;
   /** Phase 6b round 3 (operator directive 2) — same dispatch's model_tier, paired with agentRole for the "role · tier" Kanban chip. */
   agentModelTier: string | null;
+  /**
+   * Whether the agent the chip names is still on the task. `agentRole` is
+   * read off the dispatch row, which records who was *sent*; a completed
+   * task keeps its last coder there forever, and the card drew that chip
+   * as if the coder were still working (cross-provider UI check of
+   * 2026-09-14, fix n). This is read off the agents row — the registry's
+   * fold, which knows about the terminal event — against the same
+   * `nowIso` the Flow page's working marker uses.
+   */
+  agentActivity: KanbanAgentActivity | null;
   /** Phase 6b — the roadmap.md milestone whose `epics:` list includes this task's epic, or null. */
   milestoneId: string | null;
   tags: KanbanTag;
@@ -1727,7 +1752,13 @@ function worstSeverity(severities: string[]): string | null {
  * task_status, tagged with case/origin/worst-open-finding severity plus
  * (Phase 6b) title/agent-role/milestone.
  */
-export function kanban(db: SmithDb, epicId?: string, scope: Scope = {}): KanbanColumn[] {
+export function kanban(
+  db: SmithDb,
+  epicId?: string,
+  scope: Scope = {},
+  opts: ClockOpts = {},
+): KanbanColumn[] {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
   const epicCond = epicId !== undefined ? eq(tasks.epicId, epicId) : undefined;
   const sessionCond = scopedToSessions(tasks.sessionId, scope);
   const taskConds = [epicCond, sessionCond].filter((c) => c !== undefined);
@@ -1784,6 +1815,16 @@ export function kanban(db: SmithDb, epicId?: string, scope: Scope = {}): KanbanC
       });
   }
 
+  // Who is still on each task, from the agents rows (live only — see
+  // allAgentsForScope). A working row wins over a stalled one on the same
+  // task for the reason flowGraph gives: the chip says who is on the task.
+  const activityByTask = new Map<string, KanbanAgentActivity>();
+  for (const a of allAgentsForScope(db, scope)) {
+    if (!a.taskId) continue;
+    if (isWorkingAt(a.dispatchedAt, nowIso)) activityByTask.set(a.taskId, 'working');
+    else if (!activityByTask.has(a.taskId)) activityByTask.set(a.taskId, 'stalled');
+  }
+
   // epicId -> milestoneId, from roadmap.md's milestones table.
   const milestoneRows = db.select().from(milestones).all();
   const milestoneByEpic = new Map<string, string>();
@@ -1800,6 +1841,7 @@ export function kanban(db: SmithDb, epicId?: string, scope: Scope = {}): KanbanC
       title: t.objective,
       agentRole: latestAgentRoleByTask.get(t.taskId)?.agentRole ?? null,
       agentModelTier: latestAgentRoleByTask.get(t.taskId)?.modelTier ?? null,
+      agentActivity: activityByTask.get(t.taskId) ?? null,
       milestoneId: t.epicId ? (milestoneByEpic.get(t.epicId) ?? null) : null,
       tags: {
         case: t.caseTag,
