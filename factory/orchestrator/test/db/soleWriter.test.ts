@@ -128,7 +128,11 @@ describe('load-bearing rule 1: a row no event produced does not survive a rebuil
     // A plausible out-of-band write: a task that is real to every reader of
     // the db and unknown to every reader of the log.
     const seed = projected[0];
-    expect(seed).toBeDefined();
+    // A throw rather than `expect(...).toBeDefined()`: under
+    // noUncheckedIndexedAccess the row is `Task | undefined`, and an
+    // expectation is a runtime check the compiler does not read. The rest of
+    // the test spreads this row into an insert, so it has to narrow here.
+    if (!seed) throw new Error('fixture: the projection holds no tasks to copy');
     const smuggled = openDb(dbPath);
     smuggled.db
       .insert(schema.tasks)
@@ -155,7 +159,7 @@ describe('load-bearing rule 1: a row no event produced does not survive a rebuil
     const before = openDb(dbPath);
     const target = before.db.select().from(schema.tasks).all()[0];
     before.sqlite.close();
-    expect(target).toBeDefined();
+    if (!target) throw new Error('fixture: the projection holds no task to edit');
 
     const edited = openDb(dbPath);
     edited.db
