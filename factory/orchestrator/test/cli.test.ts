@@ -10065,3 +10065,82 @@ describe('cli.ts (built binary)', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// `smith init` -- the one verb that exists because installing is not cloning.
+//
+// It is the first command an operator who ran `npx @juzser/blacksmith` types,
+// so a parse failure in it is the whole product failing on contact. Two things
+// are worth an end-to-end test rather than a unit one: that a namespace with
+// no action word reaches its arm at all, and that `--work-root` is a flag the
+// argv splitter knows takes a value. Both are derived rather than declared --
+// from `splitNamespaceAction` and from the usage table's flag string -- and
+// neither is visible to a test of `initWorkRoot`, which never sees argv.
+// ---------------------------------------------------------------------------
+
+describe('smith init (built binary)', () => {
+  let root: string;
+
+  beforeAll(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'smith-init-'));
+  });
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('prepares a work root, and says what it did to every file', () => {
+    const workRoot = path.join(root, 'first');
+    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    expect(status).toBe(0);
+
+    const report = JSON.parse(stdout);
+    expect(report.workRoot).toBe(workRoot);
+    expect(report.inPlace).toBe(false);
+    expect(report.gitignore).toBe('written');
+
+    for (const rel of report.directories as string[]) {
+      expect(existsSync(path.join(workRoot, rel)), `${rel} was reported and not created`).toBe(
+        true,
+      );
+    }
+    expect((report.files as { status: string }[]).length).toBeGreaterThan(1);
+    for (const file of report.files as { personal: string; status: string }[]) {
+      expect(file.status).toBe('seeded');
+      expect(existsSync(file.personal)).toBe(true);
+    }
+  });
+
+  it('is idempotent, and keeps an answer the operator already typed', () => {
+    const workRoot = path.join(root, 'second');
+    expect(runCli(['init', '--work-root', workRoot]).status).toBe(0);
+
+    const answered = (
+      JSON.parse(runCli(['init', '--work-root', workRoot]).stdout).files as {
+        personal: string;
+      }[]
+    ).find((file) => file.personal.endsWith('stack.yml'));
+    expect(answered).toBeDefined();
+    writeFileSync((answered as { personal: string }).personal, 'language: rust\n', 'utf8');
+
+    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    expect(status).toBe(0);
+    const report = JSON.parse(stdout);
+    expect(report.gitignore).toBe('kept');
+    for (const file of report.files as { status: string }[]) {
+      expect(file.status).toBe('kept');
+    }
+    expect(readFileSync((answered as { personal: string }).personal, 'utf8')).toBe(
+      'language: rust\n',
+    );
+  });
+
+  it('is listed in the usage table it is dispatched from', () => {
+    // Not just `init` -- `mcp init` would satisfy that. The flag is named
+    // because a value-taking flag the splitter does not know about is how
+    // `--work-root /tmp/x` silently becomes a work root of `--work-root`.
+    const { stdout, status } = runCli(['--help']);
+    expect(status).toBe(0);
+    expect(stdout).toContain('smith init [--work-root');
+  });
+});

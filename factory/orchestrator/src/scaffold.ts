@@ -24,9 +24,10 @@ import {
 import path from 'node:path';
 import { SmithError } from './errors.js';
 import { runGit as git } from './git.js';
-import { PROJECTS_DIR, REPO_ROOT, ROADMAP_PATH, SCAFFOLD_DIR } from './paths.js';
+import { PROJECTS_DIR, REPO_ROOT, SCAFFOLD_DIR } from './paths.js';
 import { readRoadmapText, roadmapDeclaresId } from './roadmap.js';
 import { loadStackAnswers, requireScaffoldable, type StackAnswers } from './stack.js';
+import { ensureWritableRoadmap } from './workroot.js';
 
 export class ScaffoldError extends SmithError {}
 
@@ -516,7 +517,7 @@ export function scaffoldProject(opts: ScaffoldOptions): ScaffoldResult {
  */
 export function registerProjectInRoadmap(
   projectName: string,
-  roadmapPath: string = ROADMAP_PATH,
+  roadmapPath: string = ensureWritableRoadmap(),
 ): void {
   const text = readRoadmapText(roadmapPath);
   const id = `${projectName}-bootstrap`;

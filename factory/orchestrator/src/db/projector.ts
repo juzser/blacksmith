@@ -59,7 +59,7 @@ import {
   missingProjectionFields,
   type SkippedFindingRecord,
 } from '../findings.js';
-import { DB_MIGRATIONS_DIR, ROADMAP_PATH, STATE_DB_PATH, STATE_EVENTS_DIR } from '../paths.js';
+import { DB_MIGRATIONS_DIR, roadmapReadPath, STATE_DB_PATH, STATE_EVENTS_DIR } from '../paths.js';
 import { isPlanRefTaskId, latestPlanVersion, loadPlan } from '../plan.js';
 import { loadRoadmap, type MilestoneDef } from '../roadmap.js';
 import { assertRuntimeSupported } from '../runtime.js';
@@ -180,7 +180,7 @@ function clearSession(db: SmithDb, sessionId: string): void {
  * than the whole write erroring out; logged to stderr so it is visible.
  */
 function projectMilestones(handle: DbHandle, opts: DbOpts): void {
-  const roadmapPath = opts.roadmapPath ?? ROADMAP_PATH;
+  const roadmapPath = opts.roadmapPath ?? roadmapReadPath();
   if (!existsSync(roadmapPath)) return;
 
   let defs: MilestoneDef[];

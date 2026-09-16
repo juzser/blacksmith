@@ -34,7 +34,7 @@ import { foldLessons, type LessonFoldRow } from './db/projector.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext } from './findings.js';
-import { AGENTS_DIR, LESSONS_MD_PATH } from './paths.js';
+import { AGENTS_DIR, lessonsReadPath } from './paths.js';
 import { LESSON_SCOPES, type LessonRule, parseLessons } from './severity.js';
 import { loadTaxonomy, validateTag } from './taxonomy.js';
 
@@ -754,7 +754,7 @@ export function lessonsForDispatch(
   opts: DispatchLessonsOptions = {},
 ): DispatchLessons {
   const scopes = scopesForRole(role, opts);
-  const lessonsPath = opts.lessonsPath ?? LESSONS_MD_PATH;
+  const lessonsPath = opts.lessonsPath ?? lessonsReadPath();
   let markdown: string;
   try {
     markdown = readFileSync(lessonsPath, 'utf8');

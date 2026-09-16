@@ -210,6 +210,14 @@ export const COMMANDS: readonly CommandDoc[] = [
       'ran strictly serially, 2 when a wave was admitted and the log shows no work for it.',
   },
   {
+    command: 'init',
+    positionals: '',
+    flags: '[--work-root <dir>]',
+    summary:
+      'Prepare a work root in the current directory: the state directories, and a copy of every ' +
+      'file the factory ships a default of for you to edit. Idempotent; a clone needs none of it.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',
@@ -445,6 +453,21 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: '--task <task.json> [--policy <file>] [--case <case>] [--epic-tag <tag>...] [--recheck]',
     summary:
       'Compute whether the security reviewer must be dispatched. A fired trigger is not a red.',
+  },
+  {
+    command: 'harness list',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary:
+      'The harnesses that may run a worker turn, and which roles each one serves. Built-in unless --policy names a file.',
+  },
+  {
+    command: 'harness plan',
+    positionals: '',
+    flags:
+      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>]',
+    summary:
+      'Render the invocation that would run one worker turn, as JSON. Prints it; never starts it.',
   },
   {
     command: 'sandbox open',
