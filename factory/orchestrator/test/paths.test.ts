@@ -22,13 +22,33 @@ describe('paths.ts', () => {
       .filter((entry) => statSync(path.join(POLICIES_DIR, entry)).isFile())
       .sort();
 
-    const declared = Object.values(paths)
-      .filter((value): value is string => typeof value === 'string')
-      .filter((value) => path.dirname(value) === POLICIES_DIR)
-      .map((value) => path.basename(value))
-      .sort();
+    const declared = Object.entries(paths)
+      .filter(
+        (entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && path.dirname(entry[1]) === POLICIES_DIR,
+      )
+      .map(([name, value]) => [name, path.basename(value)] as const);
 
-    expect(declared).toEqual(onDisk);
+    // An overlay pair is the one legal way two constants name one file: the
+    // shipped default and the operator's copy are the same relative path under
+    // two different roots, and in a clone those roots are one directory. Fold
+    // the default half back into its partner, so the comparison below still
+    // means "one policy file, one way to name it".
+    const named = declared
+      .filter(([name]) => !name.endsWith('_DEFAULT_PATH'))
+      .map(([, base]) => base)
+      .sort();
+    expect(named).toEqual(onDisk);
+
+    // ...and every default half is held to having that partner, so the filter
+    // above cannot be used to smuggle a second constant past the check.
+    const allNames = declared.map(([name]) => name);
+    for (const name of allNames.filter((n) => n.endsWith('_DEFAULT_PATH'))) {
+      expect(
+        allNames,
+        `${name} is excused as an overlay default with nothing to overlay`,
+      ).toContain(name.replace('_DEFAULT_PATH', '_PATH'));
+    }
   });
 
   // The filter above keys on path.dirname, so a constant assembled by string
@@ -127,6 +147,8 @@ describe('the work root', () => {
       paths.SPECS_ACTIVE_DIR,
       paths.WORKSPACES_DIR,
       paths.DOTENV_PATH,
+      paths.ROADMAP_PATH,
+      paths.STACK_POLICY_PATH,
     ];
     for (const abs of written) {
       expect(path.relative(paths.WORK_ROOT, abs)).not.toMatch(/^\.\./);
@@ -135,7 +157,9 @@ describe('the work root', () => {
       paths.SCHEMA_DIR,
       paths.SCAFFOLD_DIR,
       paths.AGENTS_DIR,
-      paths.ROADMAP_PATH,
+      paths.ROADMAP_DEFAULT_PATH,
+      paths.STACK_POLICY_DEFAULT_PATH,
+      paths.LESSONS_MD_DEFAULT_PATH,
     ]) {
       expect(path.relative(paths.REPO_ROOT, abs)).not.toMatch(/^\.\./);
     }
@@ -163,5 +187,117 @@ describe('where a new project lands', () => {
         false,
       ),
     ).toBe('/home/dev/app');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The third kind of path, which `paths.ts` had no name for.
+//
+// Most constants here are one of two things: an asset the CLI only reads,
+// which ships and hangs off REPO_ROOT, or state the CLI writes, which must not
+// ship and hangs off WORK_ROOT. Two files are both. `factory/specs/roadmap.md`
+// ships as a starting roadmap and `smith new` appends a project to it;
+// `factory/policies/stack.yml` ships as a commented questionnaire and
+// INSTALL.md Step 5 tells the operator to "change the values in place".
+//
+// Anchored on REPO_ROOT, as both were, those writes land inside the installed
+// package: `node_modules/@juzser/blacksmith/factory/...`, which the next
+// `npm i` replaces wholesale and `npx` may re-resolve from the registry. The
+// operator's answers survive until the first upgrade and then silently do not.
+// Under pnpm it is worse than losing them -- the package directory is a tree
+// of hard links into a content-addressable store, so writing through one edits
+// the copy every other project on the machine reads.
+//
+// The shape that fits is an overlay: read the operator's copy when it exists,
+// fall back to the shipped default when it does not, and write the operator's
+// copy always. In a clone WORK_ROOT and REPO_ROOT are the same directory, so
+// both halves name the same file and an existing checkout cannot tell the
+// difference -- which is what makes this safe to land mid-epic.
+// ---------------------------------------------------------------------------
+
+describe('a file the factory ships and the operator then edits', () => {
+  it('reads the operator copy when it exists', () => {
+    const personal = '/home/dev/app/.blacksmith/factory/policies/stack.yml';
+    const shipped = '/home/dev/app/node_modules/@juzser/blacksmith/factory/policies/stack.yml';
+    expect(paths.resolveOverlayRead(personal, shipped, (p) => p === personal)).toBe(personal);
+  });
+
+  it('falls back to the shipped default before anyone has answered', () => {
+    const personal = '/home/dev/app/.blacksmith/factory/policies/stack.yml';
+    const shipped = '/home/dev/app/node_modules/@juzser/blacksmith/factory/policies/stack.yml';
+    expect(paths.resolveOverlayRead(personal, shipped, () => false)).toBe(shipped);
+  });
+
+  it('writes under the work root, never into the package it shipped from', () => {
+    for (const abs of [paths.ROADMAP_PATH, paths.STACK_POLICY_PATH]) {
+      expect(path.relative(paths.WORK_ROOT, abs)).not.toMatch(/^\.\./);
+    }
+  });
+
+  it('keeps the shipped default under the package, so the tarball can carry it', () => {
+    for (const abs of [paths.ROADMAP_DEFAULT_PATH, paths.STACK_POLICY_DEFAULT_PATH]) {
+      expect(path.relative(paths.REPO_ROOT, abs)).not.toMatch(/^\.\./);
+    }
+  });
+
+  it('spells both halves the same way under their root, so seeding is a copy', () => {
+    // The property `smith init` depends on, and the reason a pair can be
+    // stated as one relative path rather than two absolute ones.
+    for (const [personal, shipped] of [
+      [paths.ROADMAP_PATH, paths.ROADMAP_DEFAULT_PATH],
+      [paths.STACK_POLICY_PATH, paths.STACK_POLICY_DEFAULT_PATH],
+      [paths.LESSONS_MD_PATH, paths.LESSONS_MD_DEFAULT_PATH],
+    ]) {
+      expect(path.relative(paths.OVERLAY_ROOT, personal as string)).toBe(
+        path.relative(paths.REPO_ROOT, shipped as string),
+      );
+    }
+  });
+
+  it('changes nothing for an operator standing in a clone', () => {
+    // The whole safety argument in two lines: in a checkout the pair collapses,
+    // so every read and every write names the file it named before.
+    expect(paths.ROADMAP_PATH).toBe(paths.ROADMAP_DEFAULT_PATH);
+    expect(paths.STACK_POLICY_PATH).toBe(paths.STACK_POLICY_DEFAULT_PATH);
+    expect(paths.LESSONS_MD_PATH).toBe(paths.LESSONS_MD_DEFAULT_PATH);
+    expect(paths.roadmapReadPath()).toBe(paths.ROADMAP_DEFAULT_PATH);
+    expect(paths.stackPolicyReadPath()).toBe(paths.STACK_POLICY_DEFAULT_PATH);
+    expect(paths.lessonsReadPath()).toBe(paths.LESSONS_MD_DEFAULT_PATH);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ...and the root it hangs off, which is not the work root.
+//
+// `resolveWorkRoot` lets `SMITH_HOME` beat `isClone`, on purpose: an operator
+// who wants one fixed home for several projects means it, and `state/` is
+// exactly the thing that should follow them there. The overlay files are not
+// state. All three are tracked in this repository -- declarations about *this*
+// checkout, committed beside the code they describe -- so a clone that
+// followed `SMITH_HOME` for them would seed a shadow copy under that home, and
+// from the first `smith new` the tracked roadmap in the operator's editor
+// would be a file nothing reads. No error, no signal, and the clause "an
+// existing checkout cannot tell the difference" would be quietly conditional
+// on an environment variable nobody mentioned.
+// ---------------------------------------------------------------------------
+
+describe("which root the operator's copy hangs off", () => {
+  const clone = '/home/dev/blacksmith';
+  const install = '/home/dev/app/node_modules/@juzser/blacksmith';
+
+  it('is the work root under an install, wherever the work root ended up', () => {
+    expect(paths.resolveOverlayRoot(install, '/home/dev/app/.blacksmith', false)).toBe(
+      '/home/dev/app/.blacksmith',
+    );
+    expect(paths.resolveOverlayRoot(install, '/srv/smith', false)).toBe('/srv/smith');
+  });
+
+  it('is the checkout in a clone even when SMITH_HOME moved the state elsewhere', () => {
+    // The regression this test exists for. `resolveWorkRoot` answers /srv/smith
+    // here -- correctly, for state -- and the roadmap must stay in the clone
+    // anyway, because that is where the tracked copy is.
+    const workRoot = paths.resolveWorkRoot(clone, '/anywhere', { SMITH_HOME: '/srv/smith' }, true);
+    expect(workRoot).toBe('/srv/smith');
+    expect(paths.resolveOverlayRoot(clone, workRoot, true)).toBe(clone);
   });
 });

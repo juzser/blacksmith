@@ -72,7 +72,7 @@ function declaredPathConstants(): Map<string, PathConstant> {
 }
 
 /** The anchors themselves: roots, not paths under a root. */
-const ROOTS = new Set(['REPO_ROOT', 'WORK_ROOT']);
+const ROOTS = new Set(['REPO_ROOT', 'WORK_ROOT', 'OVERLAY_ROOT']);
 
 /**
  * The constants the CLI *writes*. Each is held to hanging off `WORK_ROOT` and
@@ -88,6 +88,32 @@ const WRITTEN = new Set([
   'STATE_DB_PATH',
   'STATE_EVENTS_DIR',
   'WORKSPACES_DIR',
+]);
+
+/**
+ * The constants that are both: a default the tarball carries and a file the
+ * operator then writes. Each is declared twice in `paths.ts` -- the personal
+ * copy under WORK_ROOT (the key) and the shipped default under REPO_ROOT (the
+ * value) -- because the binary above has no room for a file that is read
+ * before anyone has answered and written the moment somebody does.
+ *
+ * `WRITTEN`'s teeth are "must not ship", and that is exactly what an overlay
+ * cannot promise: the default has to ship or a fresh install has nothing to
+ * read. What holds instead is that the copy npm can replace is never the copy
+ * anybody writes, and the two are the same relative path under two roots -- so
+ * seeding one from the other is a copy, and in a clone they collapse to one
+ * file and no existing checkout changes behaviour.
+ *
+ * The written half hangs off OVERLAY_ROOT rather than WORK_ROOT, and the
+ * difference is the whole of that last clause: `SMITH_HOME` moves the work
+ * root out of a clone on purpose, and these three files are tracked in the
+ * clone, so following it would orphan the committed copies. OVERLAY_ROOT is
+ * WORK_ROOT under an install and the checkout in a clone, always.
+ */
+const OVERLAID = new Map([
+  ['ROADMAP_PATH', 'ROADMAP_DEFAULT_PATH'],
+  ['STACK_POLICY_PATH', 'STACK_POLICY_DEFAULT_PATH'],
+  ['LESSONS_MD_PATH', 'LESSONS_MD_DEFAULT_PATH'],
 ]);
 
 /** Constants that are under neither root, each with the reason. */
@@ -135,6 +161,22 @@ describe('the published package', () => {
         expect(anchor, `${name} is excused as unrooted but hangs off ${anchor}`).toBe('none');
         continue;
       }
+      if (OVERLAID.has(name)) {
+        const shipped = declared.get(OVERLAID.get(name) as string);
+        expect(shipped, `${name} is excused as an overlay with no default beside it`).toBeDefined();
+        expect(anchor, `${name} is written by the operator and must hang off OVERLAY_ROOT`).toBe(
+          'OVERLAY_ROOT',
+        );
+        // The default half is held to the read rules by the branch below, on
+        // its own pass through this loop. What is stated here is the pairing:
+        // one relative path, two roots.
+        expect((shipped as PathConstant).anchor).toBe('REPO_ROOT');
+        expect(
+          (shipped as PathConstant).rel,
+          `${name} and its default must be the same path under their own root`,
+        ).toBe(rel);
+        continue;
+      }
       if (WRITTEN.has(name)) {
         expect(anchor, `${name} is written by the CLI and must hang off WORK_ROOT`).toBe(
           'WORK_ROOT',
@@ -159,7 +201,13 @@ describe('the published package', () => {
     // deleted and leave its entry here reading like a decision. Both lists are
     // held to naming something `paths.ts` still declares.
     const declared = declaredPathConstants();
-    for (const name of [...ROOTS, ...WRITTEN, ...UNROOTED.keys()]) {
+    for (const name of [
+      ...ROOTS,
+      ...WRITTEN,
+      ...UNROOTED.keys(),
+      ...OVERLAID.keys(),
+      ...OVERLAID.values(),
+    ]) {
       expect(
         declared.has(name),
         `${name} is classified here but paths.ts no longer exports it`,
