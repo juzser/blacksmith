@@ -151,107 +151,72 @@ a chat transcript.
 
 ## Install
 
-Two ways in, and they are **not** equivalent. A clone is what drives an epic.
-The package is the `smith` CLI on a machine that has no clone.
+Say **"install Blacksmith"** to a Claude Code session and it does the whole
+thing: [`INSTALL.md`](INSTALL.md) is an executable runbook, and it stops to ask
+before anything that touches your machine.
 
-### A clone — the whole factory
+By hand it is one command in a shell:
+
+```bash
+npm i -g @juzser/blacksmith
+```
+
+and two inside Claude Code:
+
+```
+/plugin marketplace add juzser/blacksmith
+/plugin install blacksmith@blacksmith
+```
+
+Then `smith init` in the project you want it to work on. That creates
+`.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
+a `stack.yml` to answer — and writes nothing anywhere else; `SMITH_HOME` moves
+that root if you want one home for several projects. You now have `/bs`.
+
+**Both halves are required.** The package
+([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the
+deterministic `smith` CLI; the plugin is `/bs` and the fourteen agent roles it
+dispatches. `smith` alone never gives you `/bs`, because Claude Code loads
+skills from a project's `.claude/`, your `~/.claude/`, or a plugin — never from
+`node_modules` — and a `/bs` with no `smith` on PATH can run nothing. Take
+`latest`: `0.1.0` predates `smith init` and keeps state inside its own install
+directory, which the next `npm i` replaces.
+
+<details>
+<summary><b>A clone instead — the whole factory</b></summary>
+
+A clone is for hacking on Blacksmith itself, and for the two things an install
+does not carry: the dashboard and this repo's own enforcement.
 
 ```bash
 git clone https://github.com/juzser/blacksmith.git && cd blacksmith
 pnpm install --frozen-lockfile
 pnpm run build                          # tsc -> factory/orchestrator/dist/
-node factory/orchestrator/dist/cli.js --help
+bash scripts/check.sh                   # the gate CI runs; ends in `== PASS ==`
 ```
 
-Verify it with the same gate CI runs (this one also needs `python3` + PyYAML):
+Open a Claude Code session in the clone and you have `/bs` already, from the
+checkout's own `.claude/` — **do not also install the plugin there.** You would
+get two of everything (`bs` and `blacksmith:bs`, `auditor` and
+`blacksmith:auditor`, once per role), pay the always-on cost twice, and the two
+copies are free to disagree: the plugin's is a pinned checkout of `main`, the
+project's is whatever branch you have out. `claude plugin disable blacksmith`
+settles it.
 
-```bash
-bash scripts/check.sh                   # ends in `== PASS ==` on a good install
-```
-
-Driving a real epic additionally needs the **Claude Code CLI** — the planner and
-every worker run as Claude Code sessions. Open one **in the clone** and you have
-`/bs`; that is the operator surface everything under [Using it](#using-it)
-assumes.
-
-**Rather not do this by hand?** Open a Claude Code session in the clone and say
-*"install Blacksmith"*. [`INSTALL.md`](INSTALL.md) is an executable runbook: it
-asks before touching anything outside the clone, and it doubles as the human
-version — per-platform setup (macOS, Debian/Ubuntu, Fedora, Alpine, WSL2),
-troubleshooting, and the known platform gaps stated rather than papered over.
-
-### The package — `smith` inside a project you already have
-
-The CLI is published as
-[`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith):
-
-```bash
-cd /path/to/your-project
-npx @juzser/blacksmith init            # creates .blacksmith/ beside your code
-npx @juzser/blacksmith --help          # or: npm i -g @juzser/blacksmith && smith --help
-```
-
-The tarball is the `smith` binary plus everything it reads at runtime — the
-policies, the JSON Schemas, the scaffold templates, the roadmap default, the
-agent role files, the database migrations. Installed, `smith` writes beside
-**you**, not beside itself: state, epic plans and your `.env` go under
-`.blacksmith/` in the directory you run it from, and `smith new` scaffolds
-there too. `SMITH_HOME` overrides that root if you want one home for several
-projects. (In a clone it still writes into the clone, as it always has — the
-layout under the root is identical either way, which is what makes the two
-installs one codebase.)
-
-### The plugin — `/bs` without a clone
-
-The package gives you the `smith` verbs. It does not give you `/bs`, and it
-cannot: `/bs` is not a CLI command but a Claude Code **skill** —
-`.claude/skills/bs/`, a router and ten playbooks a session reads and follows —
-and Claude Code loads skills from a project's `.claude/`, your `~/.claude/`, or
-a **plugin**. The tarball's copy lands under `node_modules/@juzser/blacksmith/`,
-which is none of the three.
-
-So this repository is also a plugin marketplace, and the plugin it lists is the
-same `.claude/` directory the clone uses — one source in the repository,
-nothing exported and nothing to keep in step:
-
-```bash
-# inside Claude Code
-/plugin marketplace add juzser/blacksmith
-/plugin install blacksmith@blacksmith
-```
-
-That is `/bs` and the fourteen agent roles it dispatches (~1k tokens always-on;
-the playbooks load only when a verb runs — `claude plugin details blacksmith`
-prints the current split). Install it *alongside* the package, not instead of
-it — the plugin is the playbooks and the role contracts, the package is the
-deterministic CLI every playbook calls, and a `/bs` with no `smith` on PATH can
-run nothing.
-
-**A clone does not need it.** A checkout already loads `/bs` from its own
-`.claude/`, so installing the plugin on top gives that session two of
-everything — `bs` and `blacksmith:bs`, `auditor` and `blacksmith:auditor`, once
-for each of the fourteen roles — and pays the always-on cost twice. The two are
-also free to disagree: the plugin's copy is a clone of `main` pinned at the
-moment you installed it, the project's copy is whatever branch you have checked
-out, so a working branch gives you two `/bs` whose text differs. Keep one.
-`claude plugin disable blacksmith` settles it inside a checkout; where the
-plugin is the only copy, `claude plugin marketplace update blacksmith`
-re-fetches it and a reinstall moves you onto a newer release.
-
-Two things stay clone-only on purpose. The dashboard is one: `ui/` is in
-neither the tarball nor the plugin, so `smith ui serve` answers `ui.not-built`
-in an install and means it. The other is enforcement — this repo's
-`.claude/settings.json` deny rules and the policy hook resolve paths against a
-checkout, so the plugin ships no `hooks/hooks.json` and loads neither
-(`Hooks (0)`); a `/bs` that asked you about every Bash command would be worse
-than one that asks about none. The rest of that port is scoped in
+The dashboard is clone-only because `ui/` is in neither the tarball nor the
+plugin, so `smith ui serve` answers `ui.not-built` in an install and means it.
+Enforcement is clone-only because this repo's `.claude/settings.json` deny
+rules and its policy hook resolve paths against a checkout; the plugin ships no
+`hooks/hooks.json` and loads neither (`Hooks (0)`), since a `/bs` that asked
+you about every Bash command would be worse than one that asks about none. The
+rest of that port is scoped in
 [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
 
-> **Take `latest`.** `0.1.1` is the first release that knows it is a package:
-> `smith init`, a work root beside your project, a shipped roadmap for
-> `smith new` to read. `0.1.0`, the release before it, has none of that — it
-> derives every path from a repo root and keeps state inside its own install
-> directory, which the next `npm i` replaces. Nothing above describes `0.1.0`.
+`INSTALL.md` Part 2 is the long form of the clone above: per-platform
+setup (macOS, Debian/Ubuntu, Fedora, Alpine, WSL2), the stack interview,
+troubleshooting, and the known platform gaps stated rather than papered over.
+
+</details>
 
 ## Using it
 
@@ -454,7 +419,7 @@ version in
 | [`docs/guide/extending.md`](docs/guide/extending.md) | Adding agents, policies, taxonomy values |
 | [`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md) | Why it is shaped this way |
 | [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) | What `/bs audit` promises an audited project, and why |
-| [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) | What it would take to run `/bs` without a clone |
+| [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) | How `/bs` runs without a clone, and what the plugin leaves behind |
 | [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The dashboard tour |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `smith daemon` unattended |
