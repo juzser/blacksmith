@@ -7,16 +7,15 @@ does wherever else this repo cites it.
 ## 7. `smith plan quorum` + `smith epic verdict`
 
 The gate raises its own quorum cases; these two are the ones you invoke.
-Both rest on a quorum that ships one *voting* vendor short.
+Both rest on a quorum whose reach is a fact about your box.
 `crosscheck.yml` ships `codex: enabled: auto, mode: active` and
-`deepseek: enabled: auto, mode: shadow`, so a box holding the `codex` binary
-and a DeepSeek key runs two external judges and counts one, and a box with
-neither runs none. Either way `min_providers: 2` is out of reach — no
-quorum, no gating `judge-verdict` row from a second vendor, and the outcome
-rests on the native verdict alone (`docs/runbooks/providers.md`). A shadow
-provider is still invoked and still recorded; it forfeits its vote and
-nothing else, so promoting deepseek after a calibration pass is the edit
-that closes the gap. `smith judge preflight` says beforehand whether a
+`deepseek: enabled: auto, mode: active`, so a box holding the `codex` binary
+and a DeepSeek key runs two external judges and counts both — and that is
+the only configuration that reaches `min_providers: 2`. Hold one of the two
+and the gating pool is a pool of one once the finder is excluded: no
+quorum, no second gating `judge-verdict` row, and the outcome rests on the
+native verdict alone (`docs/runbooks/providers.md`). Hold neither and no
+external runs at all. `smith judge preflight` says beforehand whether a
 provider you switched on can be called at all, and
 `SMITH_CROSSCHECK_OFFLINE=1` forces every external off for one command.
 
