@@ -79,13 +79,13 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | You get | the `smith` CLI and everything it reads, scoped to *this one* project | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
 | Upgrading | `npx @juzser/blacksmith@latest` | `git pull` |
-| Not included | **`/bs`**, the dashboard (`smith ui serve`), `scripts/check.sh`, the repo's own suite | — |
+| Not included | the dashboard (`smith ui serve`), `scripts/check.sh`, the repo's own suite — and `/bs`, which is a separate install of its own: **the plugin**, below | — |
 
 Pick **A** if you want the `smith` verbs on hand in a project of your own —
-validating plans, running the gates, appending events, reading stats. Pick **B**
-for everything else, and in particular for driving an epic: `/bs plan` and
-`/bs run` are Claude Code skills a session reads out of a clone, which is the
-difference the next section spells out.
+validating plans, running the gates, appending events, reading stats. Add the
+plugin to that if you want to drive an epic rather than operate the verbs by
+hand. Pick **B** for everything else: the dashboard, `scripts/check.sh`, the
+repo's own suite, and hacking on the factory itself.
 
 ### A — into a project you already have
 
@@ -143,6 +143,41 @@ Skip the rest: Steps 1–4 and 7 are about building a checkout you do not have.
 From then on every command in the docs that reads `smith …` is
 `npx @juzser/blacksmith …` for you, and every one that reads `/bs …` is a clone
 session's.
+
+### The plugin — `/bs`, with or without a clone
+
+`/bs` is a Claude Code skill, not a `smith` verb, and Claude Code loads skills
+from three places: a project's `.claude/`, your `~/.claude/`, and a plugin. The
+tarball's copy is under `node_modules/`, which is none of them. So this
+repository is also a plugin marketplace, and the plugin it lists is the same
+`.claude/` directory a clone uses — one source, no second copy to drift.
+
+```bash
+# inside Claude Code
+/plugin marketplace add juzser/blacksmith
+/plugin install blacksmith@blacksmith
+```
+
+You get `/bs` and the fourteen agent roles it dispatches, at roughly 1k tokens
+always-on; a playbook's body is read only when its verb runs. `claude plugin
+details blacksmith` prints the inventory and the current per-component split.
+
+Install it **alongside A**, not instead of it. The plugin is the playbooks and
+the role contracts; the package is the deterministic `smith` CLI that every
+playbook calls, and a `/bs` with no `smith` on PATH can run nothing. In a clone
+you already have both, from the checkout — installing the plugin there is
+harmless but redundant.
+
+What the plugin deliberately does **not** activate is this repo's enforcement:
+the twelve `permissions.deny` rules in `.claude/settings.json` and the policy
+hook in `.claude/hooks/`. A plugin's component set — skills, agents,
+commands, hooks, MCP and LSP servers — has no permissions in it, and it loads
+hooks only from a `hooks/hooks.json` this plugin does not ship — so
+`claude plugin details blacksmith` reports `Hooks (0)`, which is the intended
+result, not an omission. Both resolve paths against a checkout, and a hook that
+cannot find its policy binary degrades to `ask`: installed as-is it would put a
+confirmation prompt in front of every command you run. A clone keeps them,
+because in a clone the paths are real.
 
 ### B — a clone
 

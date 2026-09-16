@@ -19,8 +19,10 @@ the `audit_id` the way you keep a session id.
 nothing reads a cwd and nothing keeps a "current audit" on the side, so two
 audits on two projects cannot be confused. The project must be a git
 checkout; a directory this factory did not build is as auditable as one it
-did. Then `mkdir -p state/audit` in this clone: the judges' artifacts live
-there, under runtime state, never under the project.
+did. Then `mkdir -p state/audit` in the factory's **work root** — the clone
+itself, or the `.blacksmith/` that `smith init` made beside your code; `smith
+init` prints it as `workRoot`. The judges' artifacts live there, under runtime
+state, never under the project.
 
 ## 2. Open the audit
 
