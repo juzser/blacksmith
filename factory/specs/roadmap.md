@@ -126,7 +126,7 @@ all; write `- error_issues: off` by hand to opt a project's tracker out.
 
 ## Claude status bar — per-path-class signing policy (SEC-1 follow-up)
 - id: csb-signing-policy-1
-- status: planned
+- status: completed
 - epics: [csb-signing-policy-1]
 - project: claude-status-bar-macos
 - kind: product
