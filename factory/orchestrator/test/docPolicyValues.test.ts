@@ -35,6 +35,10 @@ import { instructionFiles } from './helpers/instructionSurface.js';
 //     ships `enabled: auto, mode: active`, so ... on findings claude raised"
 //     is a claim about codex, and reading it as one about claude too would
 //     report the document rather than the drift.
+//   - A sealed epic spec is not read at all. See SEALED_CONTRACT: its
+//     criteria are claims about one graded diff rather than about today's
+//     file, and the rule that makes them immutable is the same rule that
+//     stops this scan asking for one to be corrected.
 //
 // Which leaves prose that makes the claim without a value span — "every
 // external ships off" — outside the scan. That sentence was part of the same
@@ -80,6 +84,34 @@ const ABOUT_THE_FILE = /crosscheck\.yml|\bship(?:s|ped|ping)?\b/i;
  * is not markdown.
  */
 const QUOTES_A_SOURCE = /\b[\w./-]+\.md:\d/;
+
+/**
+ * An epic spec, which is a contract rather than a description.
+ *
+ * `factory/specs/<state>/<epic>/epic-spec.md` is written once and graded
+ * once. Architecture §18 rule 7 -- "a plan file is written once; a change is
+ * a new version, never an edit" -- and `plan.ts`'s `plan.version-exists` are
+ * the same rule, and the consequence that rule names is precisely what
+ * holding one of these to today's policy would produce: "a criterion that was
+ * already graded turns into a record of something nobody checked".
+ *
+ * Which is why this is a false positive rather than an accommodation. An
+ * acceptance criterion's subject is a *diff*, and the scan cannot see a
+ * subject. Phase 10's AC9 reads "Nothing widened ... `crosscheck.yml` still
+ * ships `deepseek: enabled: auto, mode: shadow`": the claim is that *that
+ * epic* left the file alone, it was true when graded, and it stays true about
+ * that epic after the operator promotes deepseek in some later week. Read as
+ * a claim about today it is drift; read as what it says it is, nothing has
+ * drifted. A value claim this scan cannot attribute to today's file is one it
+ * should not report, and the cost of reporting it is a demand to edit a
+ * sealed one.
+ *
+ * `factory/specs/roadmap.md` is deliberately not covered by this and would
+ * not be if it moved. It is parsed by `roadmap.ts`, projected into the
+ * `milestones` table, and edited every time a phase changes status -- a live
+ * document, whose present-tense prose drifts like any other document's.
+ */
+const SEALED_CONTRACT = /^factory\/specs\/[^/]+\/[^/]+\/epic-spec\.md$/;
 
 interface Claim {
   readonly file: string;
@@ -215,7 +247,9 @@ function claimsIn(file: string, providers: Iterable<string>): Claim[] {
 
 describe('what the guides say the policy ships', () => {
   const policy = declared();
-  const claims = instructionFiles().flatMap((file) => claimsIn(file, policy.keys()));
+  const claims = instructionFiles()
+    .filter((file) => !SEALED_CONTRACT.test(file))
+    .flatMap((file) => claimsIn(file, policy.keys()));
 
   it('reads a policy file that actually declares the fields it holds', () => {
     // The floor (D-119): every provider the guides can be wrong about has to
