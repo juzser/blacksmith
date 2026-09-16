@@ -12,7 +12,8 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Need | Read |
 |---|---|
 | Install / bootstrap / verify this repo (executable runbook) | `INSTALL.md` |
-| Architecture — 17 numbered sections, 78 kB: read only the `§` a cite names (`grep -n '^## ' docs/specs/black-smith-architecture.md` is the map), never the whole file | `docs/specs/black-smith-architecture.md` |
+| The ten rules a change may not break, and what each one makes the factory stop being able to claim — read before changing anything under `factory/orchestrator/src/` | `docs/specs/black-smith-architecture.md` §18 |
+| Architecture — 18 numbered sections, 82 kB: read only the `§` a cite names (`grep -n '^## ' docs/specs/black-smith-architecture.md` is the map), never the whole file | `docs/specs/black-smith-architecture.md` |
 | Operator interview (Phase 1) | `docs/specs/black-smith-interview.md` |
 | Per-agent interviews (constraints per role) — cited by id (`N-9`, `M-6`); the ids are bold leads, not headings, so start from the index, which maps each id to its lines and heading: read the id's paragraph, not the file | `docs/specs/agent-interviews-index.md`, then `docs/specs/agent-interviews.md` |
 | This operator's stack answers (install interview) | `factory/policies/stack.yml` |
@@ -50,6 +51,12 @@ This repo is self-governing: its rules live here, not in any other repo.
   (D-42), so it follows the project wherever that directory is: the shape is
   always `<project-parent>/.wt/<project>/<task-id>`, which for a project
   beside this repo — where `smith new` puts one — is outside this repo too.
+- **Load-bearing rules.** Ten invariants in `docs/specs/black-smith-architecture.md`
+  §18 are the ones a change may not break. They are not style: each names the
+  module that breaks and the claim the factory stops being able to make. A diff
+  that crosses one is `S1-stop-the-line` however small it is, because the damage
+  is not in the diff but in every verdict issued after it. Changing a rule itself
+  is an operator decision.
 - **Specs are contracts.** No dispatch without objective, output schema,
   acceptance criteria, tool allowlist, and budget.
 - **Declarations vs state.** Committed files are declarations. `state/`,

@@ -446,6 +446,21 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Compute whether the security reviewer must be dispatched. A fired trigger is not a red.',
   },
   {
+    command: 'harness list',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary:
+      'The harnesses that may run a worker turn, and which roles each one serves. Built-in unless --policy names a file.',
+  },
+  {
+    command: 'harness plan',
+    positionals: '',
+    flags:
+      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>]',
+    summary:
+      'Render the invocation that would run one worker turn, as JSON. Prints it; never starts it.',
+  },
+  {
     command: 'sandbox open',
     positionals: '<worktree-dir>',
     flags: '--role <role> --task <id> --session <id> [--at <iso>] [--lease-dir <dir>]',

@@ -388,6 +388,133 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  /**
+   * GET /api/stream — the change stream (design-spec.md's 2026-09-15 addendum
+   * to §8). The two tests below are the two claims the addendum makes: the
+   * frame carries facts and not a status, and the scan that produces it is
+   * the same one the read path already runs, held open on a ticker rather
+   * than duplicated.
+   *
+   * Read through a reader with an AbortController rather than res.text(): the
+   * body never ends, so anything that waits for the end waits forever.
+   */
+  describe('the change stream', () => {
+    interface Frame {
+      event: string;
+      data: string;
+    }
+
+    /** Reads SSE blocks off a live body until `want(frames)` is satisfied. */
+    async function framesUntil(
+      res: Response,
+      want: (frames: Frame[]) => boolean,
+      budgetMs = 8000,
+    ): Promise<Frame[]> {
+      const body = res.body;
+      if (body === null) throw new Error('stream had no body');
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      const frames: Frame[] = [];
+      let buffer = '';
+      const deadline = Date.now() + budgetMs;
+      try {
+        while (!want(frames)) {
+          if (Date.now() > deadline) {
+            throw new Error(`stream never satisfied the wait; saw ${JSON.stringify(frames)}`);
+          }
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let cut = buffer.indexOf('\n\n');
+          while (cut !== -1) {
+            const block = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            const event = /^event:\s*(.*)$/m.exec(block)?.[1];
+            const data = /^data:\s*(.*)$/m.exec(block)?.[1];
+            if (event !== undefined) frames.push({ event, data: data ?? '' });
+            cut = buffer.indexOf('\n\n');
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
+      return frames;
+    }
+
+    it('opens as an event stream and says so before it says anything else', async () => {
+      const handle = app();
+      const controller = new AbortController();
+      const res = await handle.app.request('/api/stream', { signal: controller.signal });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+      // `ready` and not merely an open socket: a client cannot tell a stream
+      // that is connected from one a proxy has buffered, and that difference
+      // is what decides whether it keeps its polling fallback running.
+      const frames = await framesUntil(res, (f) => f.some((x) => x.event === 'ready'));
+      const ready = frames.find((f) => f.event === 'ready');
+      expect(ready).toBeDefined();
+      expect(JSON.parse(ready?.data ?? 'null')).toEqual({ tickMs: expect.any(Number) });
+
+      controller.abort();
+      closeApp(handle);
+    });
+
+    it('reports a session that advanced, as a count of events and nothing else', async () => {
+      const handle = app();
+      const controller = new AbortController();
+      const res = await handle.app.request('/api/stream', { signal: controller.signal });
+
+      const streamed = framesUntil(res, (f) => f.some((x) => x.event === 'advanced'));
+      // Appended after the subscription is live, and delivered by the
+      // refresher's own ticker: no request is made between the append and
+      // the frame, which is the whole difference from the poll.
+      await appendDispatch(SESSION_ID, `${EPIC_ID}/task-streamed`);
+
+      const frames = await streamed;
+      const advanced = frames.find((f) => f.event === 'advanced');
+      expect(advanced).toBeDefined();
+      const payload = JSON.parse(advanced?.data ?? 'null') as {
+        sessions: Array<Record<string, unknown>>;
+      };
+      const entry = payload.sessions.find((sess) => sess.session === SESSION_ID);
+      expect(entry).toBeDefined();
+      expect(typeof entry?.events).toBe('number');
+      expect(entry?.events).toBeGreaterThan(0);
+      // Architecture §18 rules 1 and 2: the wire carries durable facts. A
+      // status on this frame would be a verdict with no event behind it, and
+      // the page's own query would be entitled to a different one.
+      expect(Object.keys(entry ?? {}).sort()).toEqual(['events', 'session']);
+
+      controller.abort();
+      closeApp(handle);
+    });
+
+    it('holds one scanner: a read request still sees what the stream projected', async () => {
+      const handle = app();
+      const controller = new AbortController();
+      const res = await handle.app.request('/api/stream', { signal: controller.signal });
+
+      const streamed = framesUntil(res, (f) => f.some((x) => x.event === 'advanced'));
+      const lateTask = `${EPIC_ID}/task-11`;
+      await appendDispatch(SESSION_ID, lateTask);
+      await streamed;
+
+      // The ticker's scan is the read path's scan. If the stream had a
+      // scanner of its own, this request's middleware would find the
+      // fingerprint unchanged, project nothing, and the row would be missing
+      // from a projection the stream had already announced.
+      const after = await json<Array<{ taskStatus: string; tasks: Array<{ taskId: string }> }>>(
+        await handle.app.request('/api/kanban'),
+      );
+      expect(inProgress(after)).toContain(lateTask);
+
+      controller.abort();
+      closeApp(handle);
+    });
+  });
+
   it('GET /api/projects returns the per-project overview breakdown', async () => {
     const handle = app();
     const res = await handle.app.request('/api/projects');
