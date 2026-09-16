@@ -74,6 +74,7 @@ import Select from '../components/ds/Select.vue';
 import Skeleton from '../components/ds/Skeleton.vue';
 import Toolbar from '../components/ds/Toolbar.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { type FlowGraph, fetchFlow, fetchOverview, selectableEpics } from '../lib/api.js';
@@ -87,6 +88,7 @@ import {
   planVersionOptions,
   zoomTier,
 } from '../lib/flowLayout.js';
+import { retainFlowView } from '../lib/flowView.js';
 import { pluralize, summarize } from '../lib/format.js';
 import { taskStatusTone } from '../lib/taxonomy.js';
 
@@ -107,10 +109,12 @@ const { zoomIn, zoomOut, fitView, viewport } = useVueFlow();
 
 // Round 12 view state. `expandedWaves` is a Set in a ref: Vue 3 tracks .has()
 // and triggers on .add()/.delete(), so the nodes recompute per wave without a
-// second reactive mirror. Both reset on every successful load() -- a wave
-// index and an edge type only mean something inside the graph they came from,
-// and a stale edge-type selection would otherwise filter a freshly loaded
-// graph down to nothing.
+// second reactive mirror. A wave index and an edge type only mean something
+// inside the graph they came from, so an input change (epic/plan
+// version/project — the watchers below) still resets both to nothing. A poll
+// tick or a topbar Refresh is not an input change, though, and used to reset
+// them too (D-243): retainFlowView() (lib/flowView.ts) is the intersection
+// load() defers to instead, on every load whose `reset` isn't forced.
 const expandedWaves = ref(new Set<number>());
 const collapseFinished = ref(true);
 const edgeTypes = ref<string[]>([]);
@@ -132,41 +136,79 @@ async function loadEpics() {
   }
 }
 
-async function load() {
-  error.value = null;
-  loading.value = true;
+// `reset` defaults to "nothing drawn yet" -- true on the very first load, and
+// forced true again by the two input-change watchers below (an epic, plan
+// version or project switch draws a different DAG, so the skeleton and a
+// fresh view are correct there). Everything else that calls load() with no
+// argument -- the 15s poll, the topbar Refresh, this page's own Refresh
+// button -- is a REFETCH of the same scope, and per D-243 must not swap the
+// canvas for a skeleton or fold the operator's expanded waves and edge-type
+// filter back to nothing: expandedWaves/edgeTypes only reset when `reset` is
+// true, and otherwise pass through retainFlowView() (lib/flowView.ts), which
+// keeps whatever still exists in the freshly fetched graph.
+async function load(opts: { reset?: boolean } = {}) {
+  const reset = opts.reset ?? graph.value === null;
+  if (reset) {
+    // Cleared on success, not on attempt: an error banner from a stale
+    // quiet refetch would otherwise flicker off during every later poll
+    // tick's in-flight window even though nothing has actually recovered
+    // yet (D-226). A `reset` load is a fresh start by definition, so it
+    // clears immediately instead of waiting on this attempt's own result.
+    error.value = null;
+    loading.value = true;
+  }
   try {
-    graph.value = await fetchFlow({
+    const next = await fetchFlow({
       session: sessionScope.value,
       project: project.value,
       epic: selectedEpic.value || undefined,
       planVersion: planVersion.value ?? undefined,
     });
-    expandedWaves.value = new Set();
-    edgeTypes.value = [];
+    graph.value = next;
+    const view = reset
+      ? { expandedWaves: new Set<number>(), edgeTypes: [] }
+      : retainFlowView({ expandedWaves: expandedWaves.value, edgeTypes: edgeTypes.value }, next);
+    expandedWaves.value = view.expandedWaves;
+    edgeTypes.value = view.edgeTypes;
+    error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
+    // A reset load that fails has nothing true left to draw: the graph on
+    // hand belongs to the scope the operator just left, while the toolbar
+    // and count above it already name the new one. Dropping it leaves the
+    // banner alone (a quiet refetch keeps its graph -- that is the D-243
+    // branch above), and the banner's Retry, computing `reset` from
+    // `graph === null` again, gets the skeleton a fresh start is owed.
+    if (reset) graph.value = null;
   } finally {
     loading.value = false;
   }
 }
 
-onMounted(async () => {
+// D-243: the topbar Refresh (LiveStatus.vue's "Refresh now") reaches this
+// page through usePoll's global signal, same as Kanban/Timeline -- and the
+// picker needs the same tick, so a project's epics stay current without
+// waiting on the [project, sessionKey] watcher below to fire. Mount runs the
+// same code as every later refresh.
+async function refreshTick() {
   await loadEpics();
   await load();
-});
-watch([selectedEpic, planVersion], load);
+}
+
+onMounted(refreshTick);
+const { refresh } = usePoll(refreshTick, 15000);
+watch([selectedEpic, planVersion], () => load({ reset: true }));
 // The project is the one input that changes the epic list itself, and
 // `load()` fetches only /api/flow — so it needs its own watcher. `setProject`
 // on /flow is a query push on the same route record, which reuses the
-// component rather than remounting it, and this page has no poll: with the
-// project folded into the watcher above, the picker stayed frozen on the
-// previous project's epics for good, and the new project's epics could not be
-// selected at all without a manual reload (D-228).
+// component rather than remounting it: without the project folded into a
+// watcher of its own, the picker stayed frozen on the previous project's
+// epics for good, and the new project's epics could not be selected at all
+// without a manual reload (D-228).
 watch([project, sessionKey], async () => {
   await loadEpics();
   selectedEpic.value = retainedEpic(selectedEpic.value, epics.value);
-  await load();
+  await load({ reset: true });
 });
 
 // Round 11: positions, wave columns and the wave-label nodes all come from
@@ -302,7 +344,7 @@ function goToTask(taskId: string) {
   <div class="app-page app-page--full-bleed">
     <PageHeader title="Flow">
       <template #actions>
-        <Button variant="ghost" size="sm" icon="refresh-cw" @click="load">Refresh</Button>
+        <Button variant="ghost" size="sm" icon="refresh-cw" @click="refresh">Refresh</Button>
       </template>
     </PageHeader>
 
@@ -340,11 +382,17 @@ function goToTask(taskId: string) {
     <Banner v-if="!error && epicsFailed" tone="warning" show-retry @retry="loadEpics">
       {{ EPIC_LIST_UNAVAILABLE }}
     </Banner>
+    <!-- Its own chain, independent of the Skeleton/EmptyState/graph one below:
+         a quiet refetch (D-243's poll/topbar Refresh) that fails must show
+         this banner WITHOUT losing the last graph drawn, and `loading` is
+         never raised for a quiet refetch (see load()'s `reset` guard) so a
+         shared v-else-if chain would have hidden this banner behind the
+         graph outright instead. -->
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
-    <Skeleton v-else-if="loading" height="500" />
+    <Skeleton v-if="loading" height="500" />
     <EmptyState v-else-if="canClaimEmpty(graph !== null, graph?.nodes.length ?? 0)" icon="git-merge">No tasks in this plan yet.</EmptyState>
 
-    <template v-else>
+    <template v-else-if="graph !== null">
       <div class="flow-canvas" :class="zoomClass">
         <VueFlow :nodes="flowNodes" :edges="flowEdges" :nodes-draggable="false" fit-view-on-init>
           <!-- Round 11: the wave header is a node, so it pans and zooms with

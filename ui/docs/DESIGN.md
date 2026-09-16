@@ -209,8 +209,8 @@ with a Lozenge tone.
 - **Theme composable:** `ui/src/composables/useTheme.ts` —
   localStorage-first, falls back to `prefers-color-scheme`.
 - **Poll composable:** `ui/src/composables/usePoll.ts` — Page Visibility API
-  pause, used at 5s (the app shell's `/api/pulse`, Overview) and 15s
-  (Timeline, Kanban, Sessions) per design-spec §8. Also exports
+  pause, used at 5s (the app shell's `/api/pulse`, Overview, Sessions) and 15s
+  (Timeline, Kanban, Projects, Flow) per design-spec §8. Also exports
   `triggerGlobalRefresh()`: the shell's Refresh button sits above the
   router and cannot know what the page under it fetches, so it bumps a
   signal every mounted poller watches.
