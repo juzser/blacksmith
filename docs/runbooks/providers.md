@@ -164,14 +164,15 @@ pays for a gating provider and gets no gating.
 **This command answers about the box it runs on, and the answer differs
 between boxes on purpose.** What ships today is
 `codex: enabled: auto, mode: active` and
-`deepseek: enabled: auto, mode: shadow`, so the same commit reports
+`deepseek: enabled: auto, mode: active`, so the same commit reports
 several sound configurations: on a box with neither the `codex` binary nor
 a DeepSeek key both externals are `not-applicable`, there are zero active
-externals, and there is nothing to say; on a box that has the binary, codex
-is the one active external and that advisory is printed under `notes`,
-because this repo declares `accept_non_gating_actives` (§4); a key adds
-deepseek as a shadow external, which is invoked and recorded and moves
-neither count. No box exits 1, and no box edits the file to get there.
+externals, and there is nothing to say; on a box that has only one of the
+two, that vendor is the one active external and the advisory is printed
+under `notes`, because this repo declares `accept_non_gating_actives` (§4);
+on a box that has both, there are two active externals, the gating pool
+survives `finder_ne_critic`, and `canDecide` is true. No box exits 1, and
+no box edits the file to get there.
 
 ## 2. Enabling a provider
 

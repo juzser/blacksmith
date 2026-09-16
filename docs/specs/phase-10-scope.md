@@ -114,7 +114,8 @@ operator reads.
 ## P10-3 — One active judge decides nothing, by construction
 
 **Evidence.** `crosscheck.yml:163` sets `min_providers: 2`. The
-operator-guide's own "Limitations today" already says what follows: "one
+operator-guide's own "Limitations today" said what followed, when this
+was written: "one
 `mode: active` provider changes no outcomes — `finder_ne_critic` excludes
 the claim's finder (the native reviewer today), leaving a below-quorum pool
 that escalates instead of deciding; you need two." DeepSeek was off when this
@@ -139,17 +140,31 @@ either one quietly, and `independent_finder` stays `enabled: false` with
 
 **Settled 2026-09-04 — fund the second judge, and hold it in shadow.** The
 operator chose the first exit and paid for it: `DEEPSEEK_API_KEY` is on this
-box and `crosscheck.yml` now ships `deepseek: enabled: auto, mode: shadow`.
+box, and `crosscheck.yml` was amended that day to enable deepseek at
+`enabled: auto` and hold it in shadow.
 `min_providers: 2` is untouched, which is the point — the quorum rule was not
 weakened to make a number go green. Getting there needed a defect fixed first:
 the key was in `.env`, where the runbook says to put it, and nothing loaded
-`.env` into the process that reads it ([[D-270]]). What this buys today is a
+`.env` into the process that reads it ([[D-270]]). What it bought was a
 second vendor called and recorded on every trigger and counting nothing;
-`canDecide` is still `false` and a finding claude raises still falls to the
-native verdict. Promotion to `mode: active` is one edit, and it is the
-calibration pass in `docs/runbooks/providers.md` §3 that earns it — read the
-recorded disagreement first. **This item stays open** until that pass runs:
+`canDecide` stayed `false` and a finding claude raised still fell to the
+native verdict. Promotion was one edit, and it was the
+calibration pass in `docs/runbooks/providers.md` §3 that had to earn it — read
+the recorded disagreement first. **This item stays open** until that pass runs:
 funding the position is not the same as filling it.
+
+**Closed 2026-09-14 — the pass ran, and the position is filled.** The operator
+read the recorded disagreement and promoted the second judge, so
+`crosscheck.yml` now ships `deepseek: enabled: auto, mode: active` beside
+`codex: enabled: auto, mode: active`. `min_providers: 2` is still untouched —
+the number went green by funding the rule, not by weakening it — and on a box
+that resolves both vendors `canDecide` is `true` for the first time. The
+trigger was an epic-final verdict that held on `insufficient-providers` with
+every participant at `confirm`, which is the shape this item predicted: a
+quorum rule doing its job and nothing to meet it. A box that resolves only one
+vendor is unchanged by any of this — a gating pool of one after
+`finder_ne_critic`, escalating rather than deciding. Rollback is one edit back
+to shadow in that file, and nothing else remembers the promotion.
 
 ## P10-4 — The Cloudflare port has to be built or struck
 
