@@ -39,8 +39,8 @@ install gives you the `smith` verbs and the loop stays a clone's job —
 [`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) scopes the
 plugin that would change that, and it is `planned`, not cut. Installed, `smith`
 writes under `.blacksmith/` in the directory you run it from, or wherever
-`SMITH_HOME` points — true of `0.1.1`, which is in this repo. The registry
-still carries `0.1.0`, which predates `smith init`, ships no roadmap for
+`SMITH_HOME` points — true of `0.1.1`, which is what the registry carries.
+`0.1.0`, the release before it, predates `smith init`, ships no roadmap for
 `smith new` to read, and keeps state inside its own install directory.
 
 ## The five things to know before you rely on it
