@@ -597,8 +597,10 @@ reproducible from them.
 The daemon never opens an issue itself — section 3's `error-report-proposed`
 finding is a nudge, not an action (Files the daemon owns, §4, ignores it same
 as any other finding). The run is what acts: right after it writes an
-`error-logged` event it calls the reporting verb, and that verb does not
-stop at the one candidate the run just reacted to — it re-reads the whole
+`error-logged` event, after a `gate-outcome` that `smith gate run` records
+as `blocked`, or after a `task-added` whose payload sets `task_status:
+failed`, it calls the reporting verb, and that verb does not stop at the
+one candidate the run just reacted to — it re-reads the whole
 session lineage log and folds three source event types into reportable
 errors: every `error-logged` event (source `error-logged`), a `gate-outcome`
 the gate recorded as blocked (source `gate-outcome`), and a `task-added`
