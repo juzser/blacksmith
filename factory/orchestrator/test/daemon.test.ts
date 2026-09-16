@@ -255,6 +255,47 @@ describe('what one tick notices', () => {
     expect(budget[0]?.detail).toMatch(/^alarm:/);
   });
 
+  // A closed epic's bill is final: nothing will be dispatched to it again, so
+  // "the projected ceiling has crossed the alarm" is a warning about spend
+  // that cannot happen. The two verdicts the daemon used to raise on every
+  // tick were csb-audit-1 (closed 2026-09-10) and phase-10 (closed 2026-09-05),
+  // both standing as `attention` for days with nobody able to act on them.
+  // `smith budget alarm` still reports the closed epic; the daemon does not.
+  it('says nothing about the budget of an epic the log has already closed', () => {
+    const events = [
+      ...overspentEpic('sess-1'),
+      stored('sess-1', 'epic-closed', {
+        epic_id: 'epic-1',
+        closed_by: 'machine',
+        machine_verdict: 'go',
+        machine_reason: 'go',
+      }),
+    ];
+    const findings = inspectSession('sess-1', events, OPTS);
+    expect(findings.filter((f) => f.kind === 'budget')).toEqual([]);
+  });
+
+  it('still raises the budget of an epic that is open beside a closed one', () => {
+    const events = [
+      ...overspentEpic('sess-1'),
+      stored('sess-1', 'wave-admitted', { epic_id: 'epic-2', wave: 1, task_ids: ['task-9'] }),
+      stored(
+        'sess-1',
+        'task-result-recorded',
+        { token_usage: { total_tokens: 90_000 } },
+        { task_id: 'task-9' },
+      ),
+      stored('sess-1', 'epic-closed', {
+        epic_id: 'epic-1',
+        closed_by: 'machine',
+        machine_verdict: 'go',
+        machine_reason: 'go',
+      }),
+    ];
+    const budget = inspectSession('sess-1', events, OPTS).filter((f) => f.kind === 'budget');
+    expect(budget.map((f) => f.subject)).toEqual(['epic-2']);
+  });
+
   it('raises an agent that has been live longer than the stale threshold', () => {
     const findings = inspectSession('sess-1', [longLiveAgent('sess-1', 9)], {
       ...OPTS,
