@@ -201,14 +201,38 @@ projects. (In a clone it still writes into the clone, as it always has — the
 layout under the root is identical either way, which is what makes the two
 installs one codebase.)
 
-**What a package install does not give you is `/bs`.** `/bs` is not a CLI
-command; it is a Claude Code **skill** — `.claude/skills/bs/`, a router and ten
-playbooks that a session reads and follows. The playbooks ship in the tarball,
-but they land under `node_modules/@juzser/blacksmith/`, which is not a place
-Claude Code looks for skills or agent definitions. So a package gives you the
-`smith` verbs and not the loop that drives them: validate plans, run the gates,
-append events, read stats — yes; `/bs plan` and `/bs run` — from a clone.
-Closing that gap is its own milestone, scoped and not yet cut:
+### The plugin — `/bs` without a clone
+
+The package gives you the `smith` verbs. It does not give you `/bs`, and it
+cannot: `/bs` is not a CLI command but a Claude Code **skill** —
+`.claude/skills/bs/`, a router and ten playbooks a session reads and follows —
+and Claude Code loads skills from a project's `.claude/`, your `~/.claude/`, or
+a **plugin**. The tarball's copy lands under `node_modules/@juzser/blacksmith/`,
+which is none of the three.
+
+So this repository is also a plugin marketplace, and the plugin it lists is the
+same `.claude/` directory the clone uses — one source, no second copy to drift:
+
+```bash
+# inside Claude Code
+/plugin marketplace add juzser/blacksmith
+/plugin install blacksmith@blacksmith
+```
+
+That is `/bs` and the fourteen agent roles it dispatches (~1k tokens always-on;
+the playbooks load only when a verb runs — `claude plugin details blacksmith`
+prints the current split). Install it *alongside* the package, not instead of
+it — the plugin is the playbooks and the role contracts, the package is the
+deterministic CLI every playbook calls, and a `/bs` with no `smith` on PATH can
+run nothing.
+
+Two things stay clone-only on purpose. The dashboard is one: `ui/` is in
+neither the tarball nor the plugin, so `smith ui serve` answers `ui.not-built`
+in an install and means it. The other is enforcement — this repo's
+`.claude/settings.json` deny rules and the policy hook resolve paths against a
+checkout, so the plugin ships no `hooks/hooks.json` and loads neither
+(`Hooks (0)`); a `/bs` that asked you about every Bash command would be worse
+than one that asks about none. The rest of that port is scoped in
 [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
 
 > **Take `latest`.** `0.1.1` is the first release that knows it is a package:

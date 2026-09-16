@@ -1,9 +1,52 @@
 # Plugin port — scope
 
 - **Milestone id:** `plugin-port`
-- **Status:** `planned`. This is a scope, not a plan. No epic is cut, no
-  constant is renamed and no directory is moved until the forks at the end
-  are answered by the operator.
+- **Status:** `partly shipped`. Three of the five forks have since been
+  answered by shipping, not by an epic — see "What has since shipped" below.
+  The rest of this document is the 2026-09-07 scope, left as written: it is
+  the measurement that the answers were chosen against, and editing it to
+  match the outcome would destroy the record of why.
+
+## What has since shipped
+
+Added 2026-09-16. Everything here was run, not recalled.
+
+- **The package (fork 1, answered).** `@juzser/blacksmith` is published, at
+  `0.1.1` on `latest`. The scoped name was taken because the bare one was
+  not available; `package.json`'s `name` moved with it, so the two names PP-3
+  complained about are one name now.
+- **PP-1 and PP-2, answered in code.** `paths.ts` splits the one anchor into
+  two: `REPO_ROOT` for what the CLI only reads and ships with, `WORK_ROOT`
+  for everything it writes, chosen by whether a `.git` sits beside the
+  package. A clone is its own work root and nothing moved there; an install
+  gets `.blacksmith/` beside the operator's own code, created by the one verb
+  that exists because installing is not cloning, `smith init`.
+- **Fork 3, answered by that split.** This clone does not migrate. In a clone
+  the work root and the package are the same directory, so `state/` stays
+  where it is and there is no second spelling to carry.
+- **Fork 2, answered: one repo, and no copy at all.** The plugin root is
+  `.claude/` **itself** — `.claude/.claude-plugin/plugin.json` — so `skills/`
+  and `agents/` under it are the same files this clone dogfoods, not an
+  export of them. The repo is its own marketplace
+  (`.claude-plugin/marketplace.json`, one entry, `source: "./.claude"`), which
+  is a shape the official marketplace already uses for most of its own
+  plugins. PP-4's fork was "which copy is canonical"; the answer is that
+  there is no second copy, and `test/pluginManifest.test.ts` is what keeps it
+  that way.
+- **Fork 4, still open, and shipped closed for now.** The plugin activates no
+  enforcement: a plugin's component set has no permissions in it, and hooks
+  load only from a `hooks/hooks.json` that is deliberately absent, so the
+  inventory reads `Hooks (0)`. `.claude/hooks/guard.sh` resolves its policy
+  binary against a checkout and degrades to `ask`, which in an install would
+  mean a confirmation prompt in front of every command. The twelve deny rules
+  stay clone-only until fork 4 is answered properly.
+- **Fork 5, answered: out.** `ui/` is in neither the tarball's `files` nor
+  the plugin, so `smith ui serve` answers `ui.not-built` in an install and
+  means it permanently. The playbook says so rather than sending an operator
+  to a build script they do not have.
+
+What is left of this milestone is fork 4, the `--state-dir`/`--project`
+coverage PP-1 counts, and PP-6's list of what a plugin cannot make true.
 - **Requested:** operator, 2026-09-07, after asking how a normal user runs
   Blacksmith today and whether Docker or an exposed service would help. The
   answer to the second question is in "Out of scope"; this document is the

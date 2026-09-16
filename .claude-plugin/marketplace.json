@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "blacksmith",
+  "description": "The Blacksmith factory, distributed as one plugin: the /bs operator console and the role contracts it dispatches.",
+  "owner": {
+    "name": "juzser",
+    "url": "https://github.com/juzser"
+  },
+  "plugins": [
+    {
+      "name": "blacksmith",
+      "description": "The Blacksmith operator console: /bs plans an epic, drives a wave of agents through TDD, review and a merge queue, and audits a project on four axes. Needs the smith CLI from npm (@juzser/blacksmith).",
+      "author": {
+        "name": "juzser"
+      },
+      "category": "workflow",
+      "source": "./.claude",
+      "homepage": "https://github.com/juzser/blacksmith"
+    }
+  ]
+}
