@@ -228,10 +228,22 @@ export function inspectSession(
   const staleHours = opts.staleHours ?? DEFAULT_STALE_HOURS;
   const findings: DaemonFinding[] = [];
 
+  // A closed epic's bill is final. `checkBudgetAlarm` still prices it, and
+  // `smith budget alarm` still prints it, but "at-risk" or "unverifiable"
+  // there warns about spend that cannot happen, and the daemon would raise
+  // the same line every tick until the log is archived.
+  const closedEpics = new Set<string>();
+  for (const { record } of events) {
+    if (record.event_type !== 'epic-closed') continue;
+    const epicId = (record.payload as { epic_id?: unknown }).epic_id;
+    if (typeof epicId === 'string') closedEpics.add(epicId);
+  }
+
   const budget = checkBudgetAlarm(events, budgetPolicy, { sessionId });
   for (const epic of budget.epics) {
     // `under` is the only status that is an answer rather than a question.
     if (epic.status === 'under') continue;
+    if (closedEpics.has(epic.epicId)) continue;
     findings.push({
       kind: 'budget',
       severity: epic.status === 'unverifiable' ? 'info' : 'attention',
