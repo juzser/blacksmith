@@ -211,11 +211,11 @@ append events, read stats — yes; `/bs plan` and `/bs run` — from a clone.
 Closing that gap is its own milestone, scoped and not yet cut:
 [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
 
-> **The registry is one version behind.** The published version is
-> `0.1.0`, and it predates all of the above: no `smith init`, no shipped
-> roadmap for `smith new` to read, and it keeps state inside its own install
-> directory, which the next `npm i` replaces. This section describes `0.1.1`,
-> which is in this repo and not on npm yet. Until it is, take the clone.
+> **Take `latest`.** `0.1.1` is the first release that knows it is a package:
+> `smith init`, a work root beside your project, a shipped roadmap for
+> `smith new` to read. `0.1.0`, the release before it, has none of that — it
+> derives every path from a repo root and keeps state inside its own install
+> directory, which the next `npm i` replaces. Nothing above describes `0.1.0`.
 
 ## Using it
 
@@ -390,12 +390,10 @@ runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
 what you accept.
 
-The CLI is on npm as `@juzser/blacksmith`, with the caveat
-[Install](#the-package--smith-inside-a-project-you-already-have) states: the
-registry carries `0.1.0`, the version that runs out of a clone-shaped install,
-and `0.1.1` — the one that runs beside you and knows it is a package — is in
-this repo and not published yet. Either way the package is the binary and what
-it reads. The dashboard, the docs, the test suite and `/bs` itself come from a
+The CLI is on npm as `@juzser/blacksmith`, at `0.1.1` — the first version
+that runs beside you and knows it is a package, rather than out of the
+clone-shaped install `0.1.0` was. The package is the binary and what it
+reads. The dashboard, the docs, the test suite and `/bs` itself come from a
 clone; a plugin is what would move `/bs`, and it is
 [scoped, not cut](docs/specs/plugin-port-scope.md).
 

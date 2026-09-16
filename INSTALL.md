@@ -89,12 +89,11 @@ difference the next section spells out.
 
 ### A — into a project you already have
 
-> **Read this first: the registry is one version behind.** The published
-> version is `0.1.0`, and it predates this whole section — it has no `smith
-> init`, ships no roadmap for `smith new` to read, and keeps state inside its
-> own install directory, which the next `npm install` replaces. What follows
-> describes `0.1.1`, which is in the repo and not yet on npm. Until it is
-> published, take **B**.
+> **Read this first: take `latest`.** What follows describes `0.1.1`, the
+> first release that knows it is a package. `0.1.0`, the release before it,
+> has no `smith init`, ships no roadmap for `smith new` to read, and keeps
+> state inside its own install directory, which the next `npm install`
+> replaces. Pin `@juzser/blacksmith@^0.1.1` if anything resolves an older one.
 
 ```bash
 cd /path/to/your-project
