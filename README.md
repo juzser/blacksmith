@@ -211,7 +211,8 @@ a **plugin**. The tarball's copy lands under `node_modules/@juzser/blacksmith/`,
 which is none of the three.
 
 So this repository is also a plugin marketplace, and the plugin it lists is the
-same `.claude/` directory the clone uses — one source, no second copy to drift:
+same `.claude/` directory the clone uses — one source in the repository,
+nothing exported and nothing to keep in step:
 
 ```bash
 # inside Claude Code
@@ -225,6 +226,17 @@ prints the current split). Install it *alongside* the package, not instead of
 it — the plugin is the playbooks and the role contracts, the package is the
 deterministic CLI every playbook calls, and a `/bs` with no `smith` on PATH can
 run nothing.
+
+**A clone does not need it.** A checkout already loads `/bs` from its own
+`.claude/`, so installing the plugin on top gives that session two of
+everything — `bs` and `blacksmith:bs`, `auditor` and `blacksmith:auditor`, once
+for each of the fourteen roles — and pays the always-on cost twice. The two are
+also free to disagree: the plugin's copy is a clone of `main` pinned at the
+moment you installed it, the project's copy is whatever branch you have checked
+out, so a working branch gives you two `/bs` whose text differs. Keep one.
+`claude plugin disable blacksmith` settles it inside a checkout; where the
+plugin is the only copy, `claude plugin marketplace update blacksmith`
+re-fetches it and a reinstall moves you onto a newer release.
 
 Two things stay clone-only on purpose. The dashboard is one: `ui/` is in
 neither the tarball nor the plugin, so `smith ui serve` answers `ui.not-built`

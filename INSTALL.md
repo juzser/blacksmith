@@ -144,13 +144,14 @@ From then on every command in the docs that reads `smith …` is
 `npx @juzser/blacksmith …` for you, and every one that reads `/bs …` is a clone
 session's.
 
-### The plugin — `/bs`, with or without a clone
+### The plugin — `/bs` without a clone
 
 `/bs` is a Claude Code skill, not a `smith` verb, and Claude Code loads skills
 from three places: a project's `.claude/`, your `~/.claude/`, and a plugin. The
 tarball's copy is under `node_modules/`, which is none of them. So this
 repository is also a plugin marketplace, and the plugin it lists is the same
-`.claude/` directory a clone uses — one source, no second copy to drift.
+`.claude/` directory a clone uses — one source in the repository, nothing
+exported and nothing to keep in step.
 
 ```bash
 # inside Claude Code
@@ -164,9 +165,19 @@ details blacksmith` prints the inventory and the current per-component split.
 
 Install it **alongside A**, not instead of it. The plugin is the playbooks and
 the role contracts; the package is the deterministic `smith` CLI that every
-playbook calls, and a `/bs` with no `smith` on PATH can run nothing. In a clone
-you already have both, from the checkout — installing the plugin there is
-harmless but redundant.
+playbook calls, and a `/bs` with no `smith` on PATH can run nothing.
+
+**A clone does not need it.** A checkout already has both, and adding the
+plugin there is not free: the session then lists two of everything — `bs` and
+`blacksmith:bs`, `auditor` and `blacksmith:auditor`, once for each of the
+fourteen roles — and pays the always-on cost twice. The two can also disagree.
+The plugin's copy is a clone of `main` pinned at the moment you installed it;
+the project's copy is whatever branch you have checked out, so on a feature
+branch you get two `/bs` whose text differs. Keep one: `claude plugin disable
+blacksmith` inside a checkout, or no clone at all. Where the plugin is the only
+copy, `claude plugin marketplace update blacksmith` re-fetches it from GitHub —
+run that before reinstalling when a new version lands, because the installed
+payload stays pinned at the version you installed.
 
 What the plugin deliberately does **not** activate is this repo's enforcement:
 the twelve `permissions.deny` rules in `.claude/settings.json` and the policy
