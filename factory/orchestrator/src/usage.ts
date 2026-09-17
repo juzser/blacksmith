@@ -248,6 +248,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>...] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]`,
     summary:
       'Watch the event log in the foreground: budgets, stale agents, work that is due. ' +
+      'Prints one report per tick, one JSON line each; --once prints one document and exits. ' +
       'Never dispatches.',
   },
   {
@@ -357,8 +358,10 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'event tail',
     positionals: '<session-id>',
-    flags: '[--n <count>] [--task <task-id>] [--lineage] [--state-dir <dir>]',
-    summary: 'Print the last n records of a session that exists. Exit 1 if it does not.',
+    flags: '[--n <count>] [--task <task-id>] [--lineage] [--follow] [--state-dir <dir>]',
+    summary:
+      'Print the last n records of a session that exists. Exit 1 if it does not. ' +
+      '--follow keeps printing as the log grows, one JSON record per line, until ^C.',
   },
   {
     command: 'event lineage',

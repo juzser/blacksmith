@@ -64,6 +64,7 @@ import {
   appendEvent,
   type EventOpts,
   filterEvents,
+  followEvents,
   listSessionIds,
   mergeSessionLogs,
   readEvents,
@@ -1835,11 +1836,23 @@ async function main(): Promise<number> {
     process.once('SIGTERM', requestStop);
     process.once('SIGINT', requestStop);
 
-    const reports = await runDaemon({
+    // The loop prints as it goes and `--once` prints as it ends, and the two
+    // are different shapes on purpose. A loop that only answered when it
+    // ended answered nothing -- the foreground form was silent for as long as
+    // it ran, and the detached one wrote a `daemon.log` with nothing in it.
+    // One record per tick is what a log is; one record per run is what cron
+    // wants to parse, and `--once` keeps the shape it has always had.
+    const once = flags.once === 'true';
+    // `smith daemon run | head -1` closes the pipe under the second tick.
+    // That is the reader saying "enough", not a failure worth an error line
+    // -- and not one worth an uncaught exception that skips the lock release.
+    process.stdout.on('error', requestStop);
+
+    const run = await runDaemon({
       dir,
       intervalSeconds: interval,
       ...tickOpts,
-      ...(flags.once === 'true' ? { once: true } : {}),
+      ...(once ? { once: true } : { onTick: printJson }),
       shouldContinue: () => !stopping,
       sleep: (ms: number) =>
         new Promise<void>((resolve) => {
@@ -1854,8 +1867,7 @@ async function main(): Promise<number> {
           };
         }),
     });
-    const last = reports[reports.length - 1];
-    printJson({ ticks: reports.length, dir, ...(last === undefined ? {} : { last }) });
+    printJson({ ticks: run.ticks, dir, ...(once && run.last !== null ? { last: run.last } : {}) });
     return 0;
   }
 
@@ -2286,9 +2298,61 @@ async function main(): Promise<number> {
     // last n events of a concatenation are the last n of the LAST session, so
     // an operator resuming an epic saw its newest events padded with nothing
     // from before the split. Now `--lineage` tails the epic in time order.
-    let events = flags.lineage
-      ? (await readLineageEvents(sessionId, opts)).slice(-n)
-      : await tailEvents(sessionId, n, opts);
+    const scope = async (): Promise<StoredEvent[]> =>
+      flags.lineage ? readLineageEvents(sessionId, opts) : readEvents(sessionId, opts);
+
+    if (flags.follow === 'true') {
+      // A stream is not an array, so `--follow` prints one event per line --
+      // the backlog included. A reader can pipe that into `jq -c` or `grep`
+      // from the first event, rather than waiting on a closing bracket that
+      // by definition never comes.
+      const start = await scope();
+      let backlog = start.slice(-n);
+      if (flags.task) backlog = filterEvents(backlog, { taskId: flags.task });
+      for (const event of backlog) printJson(event);
+
+      // The interrupt has to reach the sleep, not just the flag -- `daemon
+      // run` below wires the same pair for the same reason. An operator who
+      // hits ^C and then waits out an interval reaches for `kill -9`.
+      let stopping = false;
+      let wake: (() => void) | null = null;
+      const requestStop = (): void => {
+        stopping = true;
+        wake?.();
+      };
+      process.once('SIGINT', requestStop);
+      process.once('SIGTERM', requestStop);
+      // `smith event tail --follow | head -5` closes the pipe under us. That
+      // is the reader saying "enough", not a failure worth an error line. We
+      // only hear it on the next write, the way `tail -f` does: a quiet log
+      // keeps an orphaned follower polling until something lands in it.
+      process.stdout.on('error', requestStop);
+
+      await followEvents({
+        seen: start.map((event) => event.event_id),
+        read: async () => {
+          const fresh = await scope();
+          return flags.task ? filterEvents(fresh, { taskId: flags.task }) : fresh;
+        },
+        emit: printJson,
+        shouldContinue: () => !stopping,
+        sleep: (ms: number) =>
+          new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              wake = null;
+              resolve();
+            }, ms);
+            wake = () => {
+              clearTimeout(timer);
+              wake = null;
+              resolve();
+            };
+          }),
+      });
+      return 0;
+    }
+
+    let events = flags.lineage ? (await scope()).slice(-n) : await tailEvents(sessionId, n, opts);
     if (flags.task) events = filterEvents(events, { taskId: flags.task });
     printJson(events);
     return 0;

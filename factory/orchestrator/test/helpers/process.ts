@@ -6,7 +6,7 @@
 // value, so every assertion downstream describes the wrong failure. Here the
 // signal is carried through and `assertExited` turns it into a sentence. The
 // same reasoning covers a child that never spawned (`spawnError` below).
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export interface ProcessRun {
   stdout: string;
@@ -119,4 +119,101 @@ export function assertExited(run: ProcessRun, label: string): void {
   if (said !== '') trailer = `\n${said}`;
   else if (!run.spawnError) trailer = ' The process produced no output before dying.';
   throw new Error(`${label} was ${describeExit(run)} — ${diagnosis}${trailer}`);
+}
+
+export interface StreamingRun {
+  /** Whole lines stdout has written so far, in order, newline stripped. */
+  lines: () => string[];
+  /** Everything stderr has written so far. */
+  stderr: () => string;
+  /**
+   * Resolve once stdout has written at least `count` whole lines. Throws
+   * naming what it did get -- a bare timeout tells the reader that something
+   * was slow, not that the command printed one line where two were due.
+   */
+  waitForLines: (count: number, timeoutMs?: number) => Promise<string[]>;
+  /** Signal the child and wait for it to end. SIGKILL after `timeoutMs`. */
+  stop: (signal?: NodeJS.Signals, timeoutMs?: number) => Promise<ProcessRun>;
+}
+
+/**
+ * A child that is still running, for a command whose output IS the subject
+ * while it runs -- `event tail --follow`, `daemon run` in loop mode.
+ *
+ * `runProcess` above cannot see one: spawnSync hands back the streams only
+ * once the child has exited, and a follower does not exit until something
+ * signals it. So the assertions a stream deserves -- that the backlog lands
+ * before the first append, that a re-read does not re-print -- are not
+ * expressible against it at all.
+ */
+export function startProcess(file: string, args: string[], opts: RunOpts = {}): StreamingRun {
+  const child = spawn(file, args, {
+    cwd: opts.cwd,
+    ...(opts.env ? { env: opts.env } : {}),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let out = '';
+  let err = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => {
+    out += chunk;
+  });
+  child.stderr.on('data', (chunk: string) => {
+    err += chunk;
+  });
+
+  const ended = new Promise<ProcessRun>((resolve) => {
+    child.once('error', (error) =>
+      resolve({
+        stdout: out,
+        stderr: err,
+        status: null,
+        signal: null,
+        spawnError: (error as NodeJS.ErrnoException).code ?? error.message,
+      }),
+    );
+    child.once('close', (status, signal) =>
+      resolve({ stdout: out, stderr: err, status, signal, spawnError: null }),
+    );
+  });
+
+  // Whole lines only: a chunk boundary can land mid-record, and a reader that
+  // parses half a record reports a bug in the writer that is not there.
+  const lines = (): string[] => {
+    const whole = out.split('\n');
+    whole.pop();
+    return whole;
+  };
+
+  const label = `${file} ${args.join(' ')}`;
+
+  return {
+    lines,
+    stderr: () => err,
+    waitForLines: async (count: number, timeoutMs = 15_000): Promise<string[]> => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const seen = lines();
+        if (seen.length >= count) return seen;
+        if (Date.now() >= deadline) {
+          const said = err.trim() === '' ? '' : `:\n${err}`;
+          throw new Error(
+            `${label} printed ${seen.length} line(s), not ${count}, in ${timeoutMs}ms${said}`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    },
+    stop: async (signal: NodeJS.Signals = 'SIGINT', timeoutMs = 10_000): Promise<ProcessRun> => {
+      child.kill(signal);
+      // A follower that ignores ^C would hang the suite instead of failing it.
+      const hard = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+      try {
+        return await ended;
+      } finally {
+        clearTimeout(hard);
+      }
+    },
+  };
 }
