@@ -455,4 +455,32 @@ describe('foldErrorEvents', () => {
       expect(report.timestamp).toBe('2026-01-03T00:00:00.000Z');
     }
   });
+
+  it("a tied ts hands the report the winner's plan_version and session_id, not the lexical winner's", () => {
+    const events: StoredEvent[] = [
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#10',
+        plan_version: 2,
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#2',
+        plan_version: 1,
+        ts: '2026-01-01T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#9',
+        plan_version: 1,
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+    ];
+
+    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    for (const report of result.reports) {
+      expect(report.latest_event_id).toBe('sess-1#10');
+      expect(report.plan_version).toBe(2);
+      expect(report.session_id).toBe('session-1');
+    }
+  });
 });
