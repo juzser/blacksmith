@@ -207,7 +207,7 @@ one thing this playbook never asks you to.
    this is the timeline, not optional bookkeeping.
 9. Gate outcome `blocked` → bounce to the coder on the **same branch**.
    After 2 failed rounds on the same task, escalate model tier
-   automatically (sonnet → opus, logged — `budgets.yml`
+   automatically (mid → frontier, logged — `budgets.yml`
    `escalation_ladder`); after 3, escalate to the operator. Never skip a
    rung, never loop past one. Count the rounds from this task's
    `dispatch_decision` events, not from the agent's own account of itself

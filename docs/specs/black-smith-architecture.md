@@ -186,16 +186,16 @@ new plan version → operator — never unbounded replanning loops (§12).
 
 ## 4. Model tiering
 
-| Tier | Agents | Model | Rationale |
+| Tier | Agents | Model (Claude Code; `model_tier` in parentheses) | Rationale |
 |---|---|---|---|
-| Plan/verdict | planner | fable / opus | deepest reasoning; writes the contracts |
-| Build | coder, tester, researcher, uiux, merger | sonnet | code-capable, cheap enough to fan out |
-| Judge | reviewer, verifier, grader, spec-reviewer, security-reviewer | sonnet (effort high) + cross-provider (§6) | independence matters more than size; spec-reviewer never runs on the planner's model; security-reviewer dispatches conditionally (§11) |
-| Mechanical | scribe, log summarizer | haiku | format/extract/summarize only |
+| Plan/verdict | planner | fable / opus (frontier) | deepest reasoning; writes the contracts |
+| Build | coder, tester, researcher, uiux, merger | sonnet (mid) | code-capable, cheap enough to fan out |
+| Judge | reviewer, verifier, grader, spec-reviewer, security-reviewer | sonnet (effort high) + cross-provider (§6) (mid) | independence matters more than size; spec-reviewer never runs on the planner's model; security-reviewer dispatches conditionally (§11) |
+| Mechanical | scribe, log summarizer | haiku (small) | format/extract/summarize only |
 
 Model is set in template frontmatter; the factory may override per-dispatch
-(e.g. escalate a coder to opus after two failed rounds on the same task —
-"escalation ladder" policy in `budgets.yml`).
+(e.g. escalate a coder from mid to frontier after two failed rounds on the
+same task — "escalation ladder" policy in `budgets.yml`).
 
 ## 5. Worktree partitioning (no overlap, no conflicts)
 

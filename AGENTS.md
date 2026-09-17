@@ -21,7 +21,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Per-agent constraints (compiled from interview) | `docs/standards/agent-constraints.md` |
 | Guardrails: secrets/env, git, deploy (S1 on violation) | `docs/standards/guardrails.md` |
 | Policies: taxonomy, budgets, severity, worktree, crosscheck | `factory/policies/` |
-| Agent templates | `.claude/agents/` |
+| Agent templates — one per role, for every harness: Claude Code reads them in place, `smith harness plan` hands the same file to a cli harness | `.claude/agents/` |
 | Approved lessons (injected into agents) | `factory/policies/lessons.md` |
 | Loop runner + worktree engine (taxonomy/schemas/events/plan/claims/worktree/queue/cli, TS strict + Vitest) | `factory/orchestrator/` |
 | Operator console (`/bs new\|mcp\|plan\|run\|audit\|status\|ui\|waivers\|lessons\|report`) — the router; one playbook per verb beside it | `.claude/skills/bs/SKILL.md` |

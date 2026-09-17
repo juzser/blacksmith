@@ -37,8 +37,8 @@ there means "not looked at", not "looked at and clean".
    guessed (architecture §5) — dispatch `researcher`
    (`.claude/agents/researcher.md`) for an unfamiliar repo, or do it
    directly with Grep/Read for a small one.
-2. Dispatch a **`planner`** session (`.claude/agents/planner.md`, opus/
-   fable) with the goal + the claims analysis. It drafts the epic spec and
+2. Dispatch a **`planner`** session (`.claude/agents/planner.md`, frontier
+   tier) with the goal + the claims analysis. It drafts the epic spec and
    task specs (`factory/specs/schema/task-spec.schema.json` shape).
 3. Dispatch a **`spec-reviewer`** session (`.claude/agents/spec-reviewer.md`)
    — a *different model* than the planner's, per its own frontmatter — to
