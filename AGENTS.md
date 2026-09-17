@@ -33,6 +33,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Lessons pipeline (novelty gate, compile, `smith dream`) | `factory/orchestrator/src/lessons.ts` |
 | Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge preflight`, `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
 | Who may dispatch, and what they owe for it (`smith delegation check`) | `factory/policies/delegation.yml`, `factory/orchestrator/src/delegation.ts` |
+| Which program holds a worker turn — in-process Agent tool or a `cli` harness such as Codex (`smith harness list\|plan` renders, `smith-run` starts) | `factory/policies/harness.yml`, `factory/orchestrator/src/harness.ts`, `src/runner.ts`, `docs/runbooks/harness.md` |
 | Background watcher (`smith daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
 | Which spec is a contract, a scope, or a record of the past — the records (`D-nnn`, `P9-n`, `FD-n`) are cited by id and never loaded whole | `docs/specs/README.md` |
 | Everything else under `docs/` and `factory/policies/` — one line per file, with who it is for | `docs/README.md` |

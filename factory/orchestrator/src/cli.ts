@@ -91,7 +91,12 @@ import {
   transition as transitionFinding,
 } from './findings.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
-import { loadHarnessPolicy, planWorkerTurn, summarizeHarnesses } from './harness.js';
+import {
+  loadHarnessPolicy,
+  type ModelTier,
+  planWorkerTurn,
+  summarizeHarnesses,
+} from './harness.js';
 import { decideHookPayload } from './hookDecision.js';
 import {
   checkWorktreeImmutable,
@@ -2646,16 +2651,17 @@ async function main(): Promise<number> {
   // dispatch would end up reading its own output back as evidence that a turn
   // happened. The caller starts the process this prints.
   //
-  // No `--policy` means the built-in policy, which is the single in-process
-  // harness this factory actually runs. There is no harness.yml to default to,
-  // on purpose: shipping one is the operator's call, not a side effect of
-  // adding the seam.
+  // No `--policy` means factory/policies/harness.yml, the shipped policy
+  // (paths.ts's HARNESS_POLICY_PATH) — three harnesses as of this writing,
+  // `claude-code` still the default. `--policy <file>` overrides it, same
+  // shape `stack show` uses.
   if (namespace === 'harness' && action === 'list') {
     printJson(summarizeHarnesses({ policy: loadHarnessPolicy(flags.policy) }));
     return 0;
   }
 
   if (namespace === 'harness' && action === 'plan') {
+    const tier = flags.tier as ModelTier | undefined;
     const invocation = planWorkerTurn(
       {
         harness: flags.harness,
@@ -2663,6 +2669,8 @@ async function main(): Promise<number> {
         taskId: requireFlag(flags, 'task'),
         promptFile: requireFlag(flags, 'prompt-file'),
         worktree: flags.worktree ?? null,
+        ...(tier !== undefined ? { tier } : {}),
+        ...(flags.schema !== undefined ? { schema: flags.schema } : {}),
       },
       { policy: loadHarnessPolicy(flags.policy) },
     );

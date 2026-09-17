@@ -1298,23 +1298,54 @@ that a turn happened.
 providers judge and never gain write access; `providers/types.ts` enforces it
 by handing a transport nothing but `prompt`. A `cli` harness is the same far
 side one step over, so the port refuses to render a cli invocation that would
-put a worktree path in a judge role's hands (`harness.judge-worktree`). An
-in-process judge does read the worktree — under a `smith sandbox open` lease,
-which the invocation states as `sandboxRequired` rather than leaving to the
-playbook to remember. Which roles are judges is read from `guardrails.yml`
-through `policy.ts`, never copied: a second list would drift, and the
-direction it drifts in is a judge quietly reclassified as a worker.
+put a worktree path in a judge role's hands (`harness.judge-worktree`) —
+*unless* the harness itself declares `judge_args`: arguments that put the
+program into a mode where it cannot write, enforced by the OS or the tool
+itself rather than by this factory (codex's `-s read-only`, claude's
+`--disallowedTools Write,Edit,MultiEdit,NotebookEdit`). A harness with an
+empty `judge_args` makes no such promise, and the refusal stands as before.
+This is not a weaker rule than the in-process path's sandbox lease — it is a
+differently-shaped one: an in-process judge runs under `guard.sh` with a Bash
+tool in hand, and the lease is what stops it from writing; a cli judge with
+`judge_args` set never has the ability to write at all, which a lease
+revocation cannot improve on. Rule 6's fingerprint-before-and-after still runs
+either way, because a read-only flag is what the harness promises, not what
+this factory has watched happen. An in-process judge does read the worktree —
+under a `smith sandbox open` lease, which the invocation states as
+`sandboxRequired` rather than leaving to the playbook to remember. Which
+roles are judges is read from `guardrails.yml` through `policy.ts`, never
+copied: a second list would drift, and the direction it drifts in is a judge
+quietly reclassified as a worker.
 
-**There is no `harness.yml`.** The built-in policy — one in-process harness,
-serving every role that ships a `.claude/agents/<role>.md` — is this factory
-written down, and shipping a policy file is an operator's decision rather than
-a side effect of adding a seam. An operator who wants a second harness writes
-one anywhere and names it: `smith harness list --policy <file>`, the shape
-`smith stack show` already uses.
+**`harness.yml` ships as the default policy.** `factory/policies/harness.yml`
+is this factory written down — one in-process harness (`claude-code`,
+`default:`) serving every role that ships a `.claude/agents/<role>.md`, plus
+`codex-cli` and `claude-cli` as the two `cli` harnesses that make the
+provider/harness distinction load-bearing rather than aspirational.
+`HARNESS_POLICY_PATH` (`paths.ts`) names the file `planWorkerTurn()` reads
+when `--policy` is not given, and `source: 'default'` on the rendered result
+says which one that was; `paths.test.ts` holds the constant and the file to
+each other so neither can go stale alone. An operator who wants a third
+harness, or a different default, writes a policy file anywhere and names it —
+`smith harness list --policy <file>`, the shape `smith stack show` already
+uses — rather than editing this one's prose.
+
+**`smith-run` starts what `smith` only ever describes.** `planWorkerTurn()`
+renders a `WorkerInvocation` and stops there (§18 rule 3, "nothing that
+observes may dispatch") — `smith` never becomes the thing whose own output it
+would later read back as evidence a turn happened. `smith-run` is a separate
+executable, not a `smith` verb, for exactly that reason: it takes one
+already-rendered invocation, spawns it, and prints what happened as JSON. It
+opens no event log, no `state/`, no DB — `runInvocation()`, the one function
+in `src/runner.ts` it calls, imports nothing under `src/db/`, `src/events.ts`
+or `src/projector.ts`, and a source-level test holds it to that. A `cli`
+invocation is what it starts; an `in-process` one it refuses, because that
+shape is an `Agent`-tool subagent turn with no separate binary to spawn.
 
 ```
 smith harness list
 smith harness plan --role coder --task epic-1/task-3 --prompt-file state/prompts/p.md --worktree ../wt/task-3
+smith-run invocation.json
 ```
 
 Env is an allowlist of variable **names**. A rendered invocation is printed as

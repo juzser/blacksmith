@@ -1,0 +1,82 @@
+# Blacksmith — worker harness policy
+#
+# architecture §19 "Worker harness port". A *provider* is the model vendor a
+# judge's verdict comes from (crosscheck.yml); a *harness* is the program
+# that holds a worker turn — gives the agent its tools, its working directory,
+# its turn limit. HOST: `smith harness list` / `smith harness plan`
+# (factory/orchestrator/src/harness.ts), which read this file when `--policy`
+# names no other. `smith` renders an invocation from it and never starts one
+# (§18 rule 3); `smith-run` (src/run-cli.ts) is the separate binary that does.
+#
+# Shape, per harness:
+#   kind          `in-process` — the Claude Code Agent tool, no program started
+#                 (`command`/`args` unused); `cli` — a program `smith-run` spawns
+#                 with the rendered prompt on stdin.
+#   roles         taxonomy roles this harness serves; empty = every role that
+#                 ships a `.claude/agents/<role>.md`.
+#   args          argv for every turn. Placeholders, closed set:
+#                 {prompt_file} {worktree} {role} {task} {model} {schema_file}.
+#   worker_args   appended for a worker or write-scoped role (guardrails.yml
+#                 `role_write_scopes`).
+#   judge_args    appended for a judge role (guardrails.yml `judge_sandbox.roles`).
+#                 Non-empty means the program itself enforces read-only, and
+#                 only then may a judge on this harness be handed a worktree
+#                 (§18 rule 5 — the refusal `harness.judge-worktree` stands
+#                 when this is empty). Rule 6's fingerprint runs regardless.
+#   schema_args   appended only when the turn names a schema (`--schema`), so a
+#                 turn that validates nothing renders without one.
+#   output        how smith-run reads the program's output: `text` (default),
+#                 `codex-json` (the `codex exec --json` JSONL stream),
+#                 `claude-json` (the `claude -p --output-format json` object).
+#   models        tier → model id for `{model}`; tiers are taxonomy.yml
+#                 `model_tier` (frontier | mid | small). Optional.
+#   env           variable NAMES the child may read. Never values.
+#   timeout_ms    wall-clock cap per turn; max_output_bytes defaults to 2 MiB.
+#
+# A cli harness runs in the worktree it is handed (`cwd` on the rendered
+# invocation), so no `-C`/`--add-dir` is needed to point it there, and a turn
+# with no worktree still renders.
+
+version: 2
+default: claude-code
+harnesses:
+  # The Claude Code Agent tool: in-process, starts no program. Serves every
+  # role with a template. Still the default (§19: switching harnesses is a
+  # `--harness` flag on `plan`, not an edit here).
+  - name: claude-code
+    kind: in-process
+
+  # OpenAI Codex CLI. `-s workspace-write` / `-s read-only` are Codex's own
+  # sandbox modes, which is what lets a judge role hold a worktree here. They
+  # land after the `-` (read the prompt from stdin) positional, which Codex's
+  # parser accepts: `codex exec - -s bogus` is refused as an invalid --sandbox
+  # value, not taken as a second prompt.
+  # No `-m {model}` and no `models:` are shipped: Codex runs whatever model its
+  # own config names, and this file does not guess which of its models is
+  # frontier, mid or small. An operator who wants tier routing adds
+  # `models: { frontier: <id>, mid: <id>, small: <id> }` and `-m`, `{model}`
+  # to `args`; the templates' move to `tier:` frontmatter (PR 2) fills it in.
+  - name: codex-cli
+    kind: cli
+    command: codex
+    args: ["exec", "--json", "--color", "never", "--skip-git-repo-check", "-"]
+    worker_args: ["-s", "workspace-write"]
+    judge_args: ["-s", "read-only"]
+    schema_args: ["--output-schema", "{schema_file}"]
+    output: codex-json
+    env: [HOME, PATH, CODEX_HOME]
+    timeout_ms: 1800000
+
+  # Claude Code as a separate process, for a runner that is not itself a Claude
+  # Code session. A judge gets no write tools at all (`--disallowedTools`),
+  # which is the read-only promise `judge_args` requires.
+  - name: claude-cli
+    kind: cli
+    command: claude
+    args: ["-p", "--output-format", "json", "--model", "{model}"]
+    worker_args: []
+    judge_args: ["--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit"]
+    output: claude-json
+    models: { frontier: opus, mid: sonnet, small: haiku }
+    env: [HOME, PATH, ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR]
+    timeout_ms: 1800000
