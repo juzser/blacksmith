@@ -405,7 +405,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<task-id>...',
     flags: '--plan <file> [--repo <dir>]',
     summary:
-      'Pre-run: refuse a wave whose tasks sit on either end of an import edge. Exit 1 when coupled.',
+      'Pre-run: refuse a wave whose tasks sit on either end of an import edge the producer did not promise in keeps_exports. Exit 1 when coupled.',
   },
   {
     command: 'claims impact',
@@ -413,7 +413,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<worktree-dir> <spec.json>',
     flags: '',
     summary:
-      'Post-run: an export this task removed, still imported outside its claims. Exit 1 on a proven break.',
+      "Post-run: an export this task removed, still imported outside its claims, and verifies the spec's keeps_exports promises. Exit 1 on a proven break or a broken promise.",
   },
   {
     command: 'dispatch check',

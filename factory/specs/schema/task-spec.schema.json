@@ -128,6 +128,11 @@
     "project": {
       "type": "string",
       "description": "Optional plain-string project identifier (Phase 6b, architecture §8) — NOT a closed taxonomy.yml vocabulary value (projects open/close far more often than any §8 dimension). Absent tasks default to 'black-smith' in the projection layer."
+    },
+    "keeps_exports": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Repo-relative file paths, each inside one of this task's own claims, whose existing exports this task keeps: no export removed, no export's declaration changed; adding exports is allowed. A symbol crossing whose producer promised the exporting file does not serialize the wave (impact.ts waveImpact); the promise is verified post-run by `smith claims impact <worktree> <spec.json>` against the diff."
     }
   },
   "additionalProperties": false

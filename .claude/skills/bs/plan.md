@@ -117,9 +117,26 @@ there means "not looked at", not "looked at and clean".
    can pay it cheaply; a `widest: 1` plan serializes the whole epic while
    every gate downstream reports a healthy wave of one. Deferrals for
    `dependency-pending` never appear there, because a chain of real
-   dependencies is the shape of the work and not a defect. Exit 2 is
-   information, not a stop — decide whether to re-slice, and say which you
-   chose when you present the plan.
+   dependencies is the shape of the work and not a defect. Exit 2 whose
+   `constraints` name `symbol-coupled` is a **re-plan round**, not
+   information: hand the planner the constraint list — the file pairs from
+   the deferral detail — and ask, per pair, for a dependency edge, a
+   `keeps_exports` promise on the producer, or a re-slice.
+   `claim-overlap` / `serialize-hotspot` constraints are the re-slice case
+   above. Exit 2 with no such constraint remains information, not a stop —
+   decide whether to re-slice, and say which you chose when you present the
+   plan.
+
+   Beside the schedule, the read that names what it only counts:
+
+   ```bash
+   smith claims impact --plan factory/specs/active/<epic>/plan-v1.json \
+     <task-id>... --repo <project-dir>
+   ```
+
+   Its `crossings` are the file pairs a `symbol-coupled` constraint points
+   at; `promised` holds the ones a producer's `keeps_exports` already
+   answers, which the schedule admits and the diff is later checked against.
 7. Log the sign-off itself as a decision checkpoint (this is exactly what
    `smith dream`'s "plan sign-off" extraction looks for, `lessons.ts`):
    `smith event append '{"session_id":"...","actor":"operator",

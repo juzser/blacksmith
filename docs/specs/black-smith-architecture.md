@@ -212,7 +212,10 @@ merge time.**
    never split across concurrent tasks — they become serialization points
    (single owner or merge-queue-regenerated). The factory validates that
    concurrently scheduled tasks have **disjoint claim sets**; overlapping
-   tasks get a dependency edge and run serially instead. Claims are enforced
+   tasks get a dependency edge and run serially instead. A task that only
+   adds to a file another concurrent task imports from may instead declare
+   the file in `keeps_exports`, a promise the wave gate admits pre-run and
+   `claims impact` verifies against the diff post-run. Claims are enforced
    at runtime: a post-run check diffs the worktree against its claims;
    out-of-claim edits fail the gate (error `contract.claim-violation`) and
    bounce back to the coder.

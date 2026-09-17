@@ -117,6 +117,88 @@ describe('what the wave gate sees', () => {
   });
 });
 
+describe('what a keeps_exports promise lets the wave gate admit', () => {
+  const VALUE_GRAPH = {
+    'src/a.ts': 'export function parse(input: string): number { return 1; }',
+    'src/b.ts': "import { parse } from './a.js';\nexport const n = parse('x');",
+  };
+
+  it('moves a crossing whose producer promised the exporting file out of the blocking set', () => {
+    const report = waveImpact(graphOf(VALUE_GRAPH), [
+      { task_id: 't-a', claims: ['src/a.ts'], keeps_exports: ['src/a.ts'] },
+      { task_id: 't-b', claims: ['src/b.ts'] },
+    ]);
+
+    expect(report.status).toBe('clean');
+    expect(report.ok).toBe(true);
+    expect(report.crossings).toEqual([]);
+    expect(report.promised).toEqual([
+      {
+        producer: 't-a',
+        consumer: 't-b',
+        exportedBy: 'src/a.ts',
+        importedBy: 'src/b.ts',
+        symbols: ['parse'],
+        typeOnly: false,
+        dynamic: false,
+      },
+    ]);
+    expect(report.detail).toBe(
+      'No task in this wave imports a symbol another task in this wave exports. ' +
+        '1 crossing(s) run on a keeps_exports promise, verified post-run.',
+    );
+  });
+
+  it('changes nothing when the promise names a file the crossing does not export from', () => {
+    const report = waveImpact(graphOf({ ...VALUE_GRAPH, 'src/other.ts': 'export const o = 1;' }), [
+      { task_id: 't-a', claims: ['src/a.ts', 'src/other.ts'], keeps_exports: ['src/other.ts'] },
+      { task_id: 't-b', claims: ['src/b.ts'] },
+    ]);
+
+    expect(report.status).toBe('coupled');
+    expect(report.ok).toBe(false);
+    expect(report.crossings).toHaveLength(1);
+    expect(report.promised).toEqual([]);
+  });
+
+  it('does not relax a type-only crossing by itself: only a promise does', () => {
+    // A type-only edge is still a crossing (a signature change is what breaks
+    // it), and the default stays strict; the promise is the only relaxation.
+    const graph = graphOf({
+      'src/a.ts': 'export interface Spec { id: string; }',
+      'src/b.ts': "import type { Spec } from './a.js';\nexport const s: Spec = { id: 'x' };",
+    });
+    const producer = { task_id: 't-a', claims: ['src/a.ts'] };
+    const consumer = { task_id: 't-b', claims: ['src/b.ts'] };
+
+    expect(waveImpact(graph, [producer, consumer]).status).toBe('coupled');
+    const promised = waveImpact(graph, [{ ...producer, keeps_exports: ['src/a.ts'] }, consumer]);
+    expect(promised.status).toBe('clean');
+    expect(promised.promised[0]?.typeOnly).toBe(true);
+  });
+
+  it('keeps the unpromised direction blocking when two tasks import from each other', () => {
+    const graph = graphOf({
+      'src/a.ts': "import { b } from './b.js';\nexport const a = b;",
+      'src/b.ts': "import type { A } from './a.js';\nexport const b = 1;\nexport type A = number;",
+    });
+
+    const report = waveImpact(graph, [
+      { task_id: 't-a', claims: ['src/a.ts'], keeps_exports: ['src/a.ts'] },
+      { task_id: 't-b', claims: ['src/b.ts'] },
+    ]);
+
+    expect(report.status).toBe('coupled');
+    expect(report.ok).toBe(false);
+    expect(report.crossings.map((c) => `${c.producer}->${c.consumer}`)).toEqual(['t-b->t-a']);
+    expect(report.promised.map((c) => `${c.producer}->${c.consumer}`)).toEqual(['t-a->t-b']);
+    expect(report.detail).toBe(
+      '1 symbol crossing(s) across 1 task pair(s): run them in order, not in parallel. ' +
+        '1 crossing(s) run on a keeps_exports promise, verified post-run.',
+    );
+  });
+});
+
 describe('what the wave gate reports without failing', () => {
   it('names an importer outside the wave as exposure, not a violation', () => {
     const graph = graphOf({
@@ -370,6 +452,125 @@ describe('what the post-run export impact proves', () => {
 
     expect(report.breaks).toEqual([]);
     expect(report.detail).toContain('src/a.ts');
+  });
+
+  it('reports no promises when the caller made none, so older callers read the same report', () => {
+    const report = exportImpact(graph, [], ['src/a.ts']);
+    expect(report.promises).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+});
+
+describe('what the post-run export impact holds a keeps_exports promise to', () => {
+  // The wave ran a crossing on this promise: src/mine.ts (another task) kept
+  // importing from src/a.ts because the acting task said src/a.ts's exports
+  // would survive. The diff is where that claim is checked.
+  const graph = graphOf({
+    'src/a.ts': 'export const kept = 1;\nexport const gone = 2;',
+    'src/mine.ts': "import { gone } from './a.js';\nexport const m = gone;",
+  });
+  const diffOf = (patch: Partial<Parameters<typeof exportImpact>[1][number]>) => ({
+    file: 'src/a.ts',
+    removed: [],
+    added: [],
+    signatureChanged: [],
+    unverifiable: false,
+    ...patch,
+  });
+
+  it('calls a promise kept when the file only gained exports', () => {
+    const report = exportImpact(graph, [diffOf({ added: ['extra'] })], ['src/**'], ['src/a.ts']);
+    expect(report.promises).toEqual([
+      {
+        file: 'src/a.ts',
+        status: 'kept',
+        removed: [],
+        signatureChanged: [],
+        added: ['extra'],
+      },
+    ]);
+    expect(report.ok).toBe(true);
+  });
+
+  it('calls a promise broken by a removal, even when every importer is inside the claims', () => {
+    // `breaks` would say nothing here: src/mine.ts is inside the claims. The
+    // promise is a different question — the wave gate already let another
+    // task run on it, and that task's file is the one this diff cannot see.
+    const report = exportImpact(graph, [diffOf({ removed: ['gone'] })], ['src/**'], ['src/a.ts']);
+    expect(report.breaks).toEqual([]);
+    expect(report.promises).toEqual([
+      {
+        file: 'src/a.ts',
+        status: 'broken',
+        reason: 'removed',
+        removed: ['gone'],
+        signatureChanged: [],
+        added: [],
+      },
+    ]);
+    expect(report.ok).toBe(false);
+    expect(report.detail).toContain('Promise broken: src/a.ts removed [gone]');
+  });
+
+  it('calls a promise broken by a changed signature, which `breaks` alone would only call possible', () => {
+    // Stricter than `breaks` on purpose: a promise is "no declaration
+    // changed", not "nothing provably broke".
+    const report = exportImpact(
+      graph,
+      [diffOf({ signatureChanged: ['kept'] })],
+      ['src/**'],
+      ['src/a.ts'],
+    );
+    expect(report.promises[0]).toMatchObject({
+      status: 'broken',
+      reason: 'signature-changed',
+      signatureChanged: ['kept'],
+    });
+    expect(report.ok).toBe(false);
+    expect(report.detail).toContain('Promise broken: src/a.ts changed the declaration of [kept]');
+  });
+
+  it('names removal as the reason when both happened, and keeps every list', () => {
+    const report = exportImpact(
+      graph,
+      [diffOf({ removed: ['gone'], signatureChanged: ['kept'], added: ['extra'] })],
+      ['src/**'],
+      ['src/a.ts'],
+    );
+    expect(report.promises).toEqual([
+      {
+        file: 'src/a.ts',
+        status: 'broken',
+        reason: 'removed',
+        removed: ['gone'],
+        signatureChanged: ['kept'],
+        added: ['extra'],
+      },
+    ]);
+  });
+
+  it('calls a promise on a file the diff never touched kept, in the order promised', () => {
+    const report = exportImpact(graph, [], ['src/**'], ['src/mine.ts', 'src/a.ts']);
+    expect(report.promises.map((p) => `${p.file}:${p.status}`)).toEqual([
+      'src/mine.ts:kept',
+      'src/a.ts:kept',
+    ]);
+    expect(report.ok).toBe(true);
+  });
+
+  it('calls a promise unverified, not broken, when the file is unreadable on either side', () => {
+    const report = exportImpact(graph, [diffOf({ unverifiable: true })], ['src/**'], ['src/a.ts']);
+    expect(report.promises).toEqual([
+      {
+        file: 'src/a.ts',
+        status: 'unverified',
+        removed: [],
+        signatureChanged: [],
+        added: [],
+      },
+    ]);
+    expect(report.ok).toBe(true);
+    expect(report.detail).toContain('Promise unverified: src/a.ts');
   });
 });
 

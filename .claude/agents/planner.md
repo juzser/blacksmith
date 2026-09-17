@@ -58,6 +58,27 @@ types, config, shared fixtures) are never split across concurrent tasks —
 mark them `serialize-always` and give overlapping tasks a dependency edge
 instead of concurrent claims.
 
+Before signing, read the slicing back from the project, not from the plan:
+`smith claims impact --plan <plan.json> <every task id> --repo <project-dir>`
+names each import edge that crosses between tasks the plan gave no
+dependency, and `smith wave schedule <plan.json> --repo <project-dir>` says
+how wide the plan can ever run. Every crossing the first reports is one of
+three things, and the plan says which:
+
+- a **dependency edge** — the consumer needs the producer's *new* export, so
+  the producer runs first;
+- a **`keeps_exports` promise** on the producer — it only *adds* to that file
+  or leaves its exports alone, so both run now and the diff is checked
+  against the promise post-run;
+- a **re-slice**.
+
+Two shapes cross by construction, so do not draw them: a module's tests split
+from the module (a `src/x.ts` task and a `test/x.test.ts` task always cross),
+and a doc hub (runbook, README) claimed by one task and edited by many —
+each task edits its own section inside its own claims, or one docs task takes
+edges from the others. Target `widest >= 2` when the plan has two or more
+tasks, or say in `planner_notes` why the work is a chain.
+
 ## Living spec doc (architecture §11)
 
 You own the epic's living spec markdown: every worker reads it before

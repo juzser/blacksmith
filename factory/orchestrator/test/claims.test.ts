@@ -12,6 +12,7 @@ import {
   globsOverlap,
   loadWorktreePolicy,
   postRunCheck,
+  readClaimList,
   resolveFindingOwner,
   validateWave,
   type WaveTask,
@@ -247,6 +248,34 @@ describe('validateWave', () => {
     expect(err.message).toContain('a');
     expect(err.message).toContain('string');
     expect(err.message).not.toContain('src/secret-path/**');
+  });
+
+  describe('keeps_exports rides through the same door', () => {
+    // The promise is read where the claims are read, so a caller downstream
+    // (waveImpact) sees a `string[]` or nothing, never whatever JSON held.
+    it('passes a promise list through, and adds no field when there is none', () => {
+      expect(
+        readClaimList({ task_id: 'a', claims: ['src/a/**'], keeps_exports: ['src/a/api.ts'] }),
+      ).toEqual({ task_id: 'a', claims: ['src/a/**'], keeps_exports: ['src/a/api.ts'] });
+      expect(readClaimList({ task_id: 'a', claims: ['src/a/**'] })).toEqual({
+        task_id: 'a',
+        claims: ['src/a/**'],
+      });
+    });
+
+    it.each([
+      ['a bare string', 'src/a/api.ts'],
+      ['an object', { file: 'src/a/api.ts' }],
+      ['a list holding a number', ['src/a/api.ts', 7]],
+      ['a list holding the empty string', ['']],
+    ])('refuses a promise list that is %s, naming the shape and not the value', (_label, keeps) => {
+      const err = refusal(() =>
+        readClaimList({ task_id: 'a', claims: ['src/a/**'], keeps_exports: keeps }),
+      );
+      expect(err.code).toBe('claims.unreadable-promises');
+      expect(err.message).toContain('"a"');
+      expect(err.message).not.toContain('api.ts');
+    });
   });
 
   /**

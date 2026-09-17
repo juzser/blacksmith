@@ -53,10 +53,12 @@ file asked for would be running it below the floor.
    - The same verdict carries `symbolImpact`. `valid: true` with
      `symbolImpact.status: "coupled"` means the claims really are disjoint
      and that is not enough: the two tasks sit on either end of an import
-     edge the plan declared no dependency for. Split the wave and run the
-     producer first — there is no override for a crossing, because the
-     declared-edge case is already refused above it
-     (operator-guide/wave.md §2).
+     edge the plan declared no dependency for. A crossing is not
+     overridable. The pair runs in the same wave only when the producer's
+     spec lists the exporting file in `keeps_exports` — then the crossing
+     sits in `symbolImpact.promised`, not `crossings`, and the promise is
+     verified against the diff at wave.md step 10. Otherwise split the wave
+     and run the producer first (operator-guide/wave.md §2).
    - `wave check` is also where the wave is priced and where
      `max_in_flight_tasks` is enforced (`budgets.yml`, `over-fan-out`).
      `wave next` deliberately asks neither question: a proposer that also

@@ -8287,6 +8287,40 @@ describe('cli.ts (built binary)', () => {
       ]);
     });
 
+    it('exits 0 and lists the crossing as promised when the producer keeps the file in keeps_exports', async () => {
+      const promised = {
+        ...IMPACT_PLAN,
+        tasks: IMPACT_PLAN.tasks.map((task, index) =>
+          index === 0 ? { ...task, keeps_exports: ['src/a.ts'] } : task,
+        ),
+      };
+      const promisedPath = path.join(repoDir, 'plan-promised.json');
+      await writeFile(promisedPath, JSON.stringify(promised));
+
+      const { stdout, status } = runCli([
+        'claims',
+        'impact',
+        '--plan',
+        promisedPath,
+        '--repo',
+        repoDir,
+        'epic-1/task-a',
+        'epic-1/task-b',
+      ]);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.status).toBe('clean');
+      expect(parsed.crossings).toEqual([]);
+      expect(parsed.promised).toHaveLength(1);
+      expect(parsed.promised[0]).toMatchObject({
+        producer: 'epic-1/task-a',
+        consumer: 'epic-1/task-b',
+        exportedBy: 'src/a.ts',
+        importedBy: 'src/b.ts',
+        symbols: ['parse'],
+      });
+    });
+
     it('refuses a wave with no task ids rather than pronouncing the empty set clean', () => {
       const { stdout, status } = runCli([
         'claims',

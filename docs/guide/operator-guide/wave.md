@@ -96,7 +96,7 @@ smith wave next factory/specs/active/epic-1/plan-v1.json \
 {"epicId":"epic-1","wave":["task-3","task-4","task-6"],
  "deferred":[
    {"taskId":"task-1","reason":"symbol-coupled","blockedBy":["task-3"],
-    "detail":"Imports symbols from task-3, which has not merged: the producer runs first."},
+    "detail":"Imports parse, Options from src/parse.ts (task-3) into src/cli.ts: the producer runs first, or task-3 promises the file in keeps_exports and both run now."},
    {"taskId":"task-2","reason":"claim-overlap","blockedBy":["task-5"],
     "detail":"Claims overlap task-5 (src/db/** vs src/db/schema.ts)."}],
  "done":["task-7"],"occupied":["task-5"],"remaining":3}
@@ -300,12 +300,15 @@ So the verdict carries a `symbolImpact` beside the claim result:
    "crossings":[{"producer":"epic-1/task-a","consumer":"epic-1/task-b",
                  "exportedBy":"src/a.ts","importedBy":"src/b.ts",
                  "symbols":["parse"],"typeOnly":false,"dynamic":false}],
+   "promised":[],
    "detail":"1 symbol crossing(s) across 1 task pair(s): run them in order, not in parallel."}}
 ```
 
 `valid: true` and exit 1: read it as *"these claims really are disjoint, and
 that is not enough"*. The remedy is the same one the other violations hand
-you — split the wave and run the producer first.
+you — split the wave and run the producer first. A crossing whose
+`exportedBy` file the producer's spec lists in `keeps_exports` moves from
+`crossings` to `promised`, and only `crossings` decides `status` and `ok`.
 
 There is no override for a crossing, and that is deliberate rather than an
 oversight. The dependency check above already refuses a wave holding both ends
@@ -315,6 +318,16 @@ dependency the planner missed. Refusing costs one extra wave; admitting costs
 an integration conflict plus the round trip to find it. Only the budget verdict
 is overridable (`--override-rationale`), because a cost ceiling is a judgement
 call and a compile-time edge is not.
+
+A `keeps_exports` promise is not an override either: it is the one
+declaration that changes what the fact costs, and it does so only because the
+diff is held to it afterwards. The producer's spec names the file and
+promises that the task removes no existing export from it and changes no
+export's declaration; adding is fine.
+Pre-run the gate takes the word and admits the pair; post-run `claims impact`
+reads the diff and a broken promise bounces the task. Nothing is relaxed by
+default: a type-only crossing blocks exactly as a value crossing does unless
+it is promised, because a changed signature is what breaks a type importer.
 
 `--repo <dir>` names the checkout the graph is read from; it defaults to the
 repository root. The claims say which files a task *may* write, and only the
@@ -341,9 +354,11 @@ answers.
 smith claims impact --plan factory/specs/active/epic-1/plan-v1.json task-a task-b
 ```
 
-Identical to what `wave check` folds in — exit 1 on `coupled`. Useful while
-cutting a plan, when you want the coupling answer without a session, a state
-directory, or a budget policy.
+Identical to what `wave check` folds in — exit 1 on `coupled`, and the same
+`promised` list beside `crossings`: a crossing whose producer promised the
+file is reported there and never raises `coupled`. Useful while cutting a
+plan, when you want the coupling answer without a session, a state directory,
+or a budget policy.
 
 **After the work, over a diff:**
 
@@ -355,7 +370,11 @@ smith claims impact "$WORKTREE" factory/specs/active/epic-1/task-1.json
 {"ok":false,
  "breaks":[{"severity":"proven","reason":"removed",
             "exportedBy":"src/a.ts","importedBy":"src/theirs.ts","symbols":["gone"]}],
- "detail":"1 importer(s) outside the claims lost a symbol they use."}
+ "promises":[{"file":"src/parse.ts","status":"kept",
+              "removed":[],"signatureChanged":[],"added":["parseLoose"]},
+             {"file":"src/types.ts","status":"broken","reason":"signature-changed",
+              "removed":[],"signatureChanged":["Options"],"added":[]}],
+ "detail":"1 importer(s) outside the claims lost a symbol they use. Promise broken: src/types.ts changed the declaration of [Options]."}
 ```
 
 Here the finding is not a risk but a fact. The task removed an export, and a
@@ -369,6 +388,21 @@ carries the proof. `severity` is the whole contract of this form:
   compares each export's clause up to the first `;` or `{`, so a widened
   parameter type and a changed constant both read the same way. It says
   `possible` and means it.
+
+`promises` is the spec's `keeps_exports` read back against the same diff, one
+entry per promised file. `kept` means every export the file had still has its
+name and its declaration — a promised file the diff never touched is `kept`
+too; `broken` means one was removed or its declaration changed; `unverified`
+means the file could not be read, a scanner limit that is reported and not
+fatal. Exit 1 now means a `proven` break **or** a `broken` promise, and `ok`
+is false on either. Note the asymmetry: a changed declaration is only
+`possible` as a break and `broken` as a promise. A break is the scanner's
+guess about an importer it cannot type; a promise was made to one — a type
+importer is exactly whom a signature change breaks — so the same text-level
+comparison is held to the stricter reading. The promise is read from the
+spec file: `keeps_exports` takes literal repo-relative paths inside the
+task's own claims, and `smith plan validate` refuses a glob or a path outside
+them.
 
 A worktree is a full checkout, so it is both halves of the question at once —
 the diff this task committed against its integration branch, and every importer
