@@ -27,6 +27,7 @@
  */
 import {
   claimsOverlap,
+  type ProposedWaveTask,
   readClaimList,
   readEdgeList,
   touchesSerializeAlways,
@@ -34,7 +35,7 @@ import {
   type WorktreePolicy,
 } from './claims.js';
 import { type DependencyEdge, topoSort } from './graph.js';
-import { livePlanTasks, type PlanFile } from './plan.js';
+import { livePlanTasks, type PlanFile, type TaskSpecRecord } from './plan.js';
 
 /**
  * A task is *done* only at the two statuses epic.ts already calls terminal —
@@ -50,12 +51,18 @@ const TERMINAL_TASK_STATUSES = new Set(['completed', 'waived']);
 const CANDIDATE_TASK_STATUSES = new Set(['todo', 'ready']);
 
 /**
- * One import-graph crossing, reduced to the two fields this computation
- * reads. `SymbolCrossing` from impact.ts is assignable as-is.
+ * One import-graph crossing, reduced to what this computation reads: the two
+ * task ids to order by, and the two files and symbols the deferral names so
+ * the operator knows which file a `keeps_exports` promise would have to
+ * cover. `SymbolCrossing` from impact.ts is assignable as-is.
  */
 export interface SymbolCouplingEdge {
   producer: string;
   consumer: string;
+  exportedBy: string;
+  importedBy: string;
+  symbols: readonly string[];
+  typeOnly: boolean;
 }
 
 export type DeferralReason =
@@ -149,12 +156,45 @@ function admissionOrder(
  * until `computeNextWave` has partitioned them by status.
  */
 export function liveWaveTasks(plan: PlanFile): WaveTask[] {
-  return livePlanTasks(plan).map((record) =>
-    readClaimList({
-      task_id: record.task_id,
-      claims: (record as { claims?: unknown }).claims,
-    }),
-  );
+  return livePlanTasks(plan).map((record) => readClaimList(proposedFrom(record)));
+}
+
+/**
+ * The plan record as `readClaimList` wants it: claims always, the
+ * `keeps_exports` promise only when the record has one, so a task that
+ * promised nothing reads back without the key rather than with `undefined`.
+ */
+function proposedFrom(record: TaskSpecRecord): ProposedWaveTask {
+  const { claims, keeps_exports } = record as { claims?: unknown; keeps_exports?: unknown };
+  return keeps_exports === undefined
+    ? { task_id: record.task_id, claims }
+    : { task_id: record.task_id, claims, keeps_exports };
+}
+
+interface Coupling {
+  /** The deferred task's side of the crossing. */
+  role: 'consumes' | 'produces';
+  crossing: SymbolCouplingEdge;
+}
+
+const NAMED_SYMBOLS = 3;
+
+/**
+ * The deferral names both files and both remedies, because the operator's
+ * choice is between them: order the tasks, or have the producer promise the
+ * exporting file in `keeps_exports` (impact.ts verifies it post-run). Only
+ * the producer can promise, so the sentence names the producer either way.
+ */
+function describeCoupling(taskId: string, blocker: string, coupling: Coupling): string {
+  const { crossing, role } = coupling;
+  const shown = crossing.symbols.slice(0, NAMED_SYMBOLS);
+  const symbols = [...shown, ...(crossing.symbols.length > NAMED_SYMBOLS ? ['…'] : [])].join(', ');
+  const typeOnly = crossing.typeOnly ? ', type-only' : '';
+  return role === 'consumes'
+    ? `Imports ${symbols} from ${crossing.exportedBy} (${blocker}) into ${crossing.importedBy}${typeOnly}: ` +
+        `the producer runs first, or ${blocker} promises the file in keeps_exports and both run now.`
+    : `${blocker} imports ${symbols} from ${crossing.exportedBy} into ${crossing.importedBy}${typeOnly}${typeOnly ? ',' : ''} ` +
+        `and is already scheduled, so this one follows, or ${taskId} promises the file in keeps_exports and both run now.`;
 }
 
 export function computeNextWave(input: NextWaveInput): NextWaveResult {
@@ -176,7 +216,7 @@ export function computeNextWave(input: NextWaveInput): NextWaveResult {
     }
     // Past this door claims are a real string[], for a candidate and for a
     // task merely holding ground — the wave is unanswerable either way.
-    const task = readClaimList({ task_id: id, claims: (record as { claims?: unknown }).claims });
+    const task = readClaimList(proposedFrom(record));
     if (CANDIDATE_TASK_STATUSES.has(status)) {
       candidates.push(task);
     } else {
@@ -195,15 +235,18 @@ export function computeNextWave(input: NextWaveInput): NextWaveResult {
     dependsByTask.set(edge.task, list);
   }
 
-  const coupledWith = new Map<string, Map<string, 'consumes' | 'produces'>>();
-  const link = (a: string, b: string, role: 'consumes' | 'produces'): void => {
-    const map = coupledWith.get(a) ?? new Map<string, 'consumes' | 'produces'>();
-    map.set(b, role);
+  // task -> (other task -> the first crossing between them, and this task's
+  // side of it). First wins: the caller hands crossings in a stable order,
+  // and one named crossing is what the deferral renders.
+  const coupledWith = new Map<string, Map<string, Coupling>>();
+  const link = (a: string, b: string, coupling: Coupling): void => {
+    const map = coupledWith.get(a) ?? new Map<string, Coupling>();
+    if (!map.has(b)) map.set(b, coupling);
     coupledWith.set(a, map);
   };
   for (const crossing of crossings) {
-    link(crossing.consumer, crossing.producer, 'consumes');
-    link(crossing.producer, crossing.consumer, 'produces');
+    link(crossing.consumer, crossing.producer, { role: 'consumes', crossing });
+    link(crossing.producer, crossing.consumer, { role: 'produces', crossing });
   }
 
   const admitted: WaveTask[] = [];
@@ -269,16 +312,13 @@ export function computeNextWave(input: NextWaveInput): NextWaveResult {
     const couplings = coupledWith.get(id);
     const coupled = couplings ? holders.filter((h) => couplings.has(h.task_id)) : [];
     const blocker = coupled[0];
-    if (couplings !== undefined && blocker !== undefined) {
-      const detail =
-        couplings.get(blocker.task_id) === 'consumes'
-          ? `Imports symbols from ${blocker.task_id}, which has not merged: the producer runs first.`
-          : `${blocker.task_id} imports symbols from it and is already scheduled, so this one follows.`;
+    const coupling = couplings?.get(blocker?.task_id ?? '');
+    if (blocker !== undefined && coupling !== undefined) {
       defer(
         id,
         'symbol-coupled',
         coupled.map((h) => h.task_id),
-        detail,
+        describeCoupling(id, blocker.task_id, coupling),
       );
       continue;
     }

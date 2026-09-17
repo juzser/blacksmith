@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { type TaskBudget, unreadTaskBudgetFields } from './budgets.js';
+import { claimCoversPath } from './claims.js';
 import { SmithError } from './errors.js';
 import { topoSort } from './graph.js';
 import { SPECS_ACTIVE_DIR } from './paths.js';
@@ -280,6 +281,65 @@ function describeAllowed(err: TaxonomyError): string {
  * validateRequiredDimensions directly rather than acquiring a second register
  * of what an edge must carry, which could then drift from taxonomy.yml's.
  */
+const GLOB_CHARS = /[*?[{]/;
+
+/**
+ * A `keeps_exports` promise is a file the task swears to keep the exports of,
+ * and the post-run verifier reads it back against the task's diff. Three
+ * things make a promise unverifiable, and each is caught here, at plan time:
+ * a pattern (the verifier diffs one file, not a glob), a file outside the
+ * task's claims (the task cannot edit it, so its diff never shows it), and a
+ * file listed twice (which entry did the verifier report?). Shape is the
+ * schema's business; when the schema already rejected the field, this reads
+ * nothing and reports nothing, so the operator sees one error, not two.
+ */
+function unkeptPromises(
+  t: TaskSpecRecord,
+  schemaIssues: readonly ValidationIssue[],
+): ValidationIssue[] {
+  const promises = t.keeps_exports;
+  if (promises === undefined) return [];
+  if (schemaIssues.some((issue) => issue.path.startsWith('/keeps_exports'))) return [];
+  if (!Array.isArray(promises) || !promises.every((p): p is string => typeof p === 'string')) {
+    return [{ path: '/keeps_exports', message: 'keeps_exports is not a list of file paths.' }];
+  }
+  const claims = Array.isArray(t.claims)
+    ? t.claims.filter((c): c is string => typeof c === 'string')
+    : [];
+  const issues: ValidationIssue[] = [];
+  const seen = new Set<string>();
+  promises.forEach((promise, index) => {
+    const at = `/keeps_exports/${index}`;
+    if (promise === '') {
+      issues.push({
+        path: at,
+        message: `keeps_exports entry ${index} is an empty string, not a file path.`,
+      });
+      return;
+    }
+    if (GLOB_CHARS.test(promise)) {
+      issues.push({
+        path: at,
+        message: `keeps_exports entry "${promise}" is a pattern: a promise names one file, not a pattern.`,
+      });
+      return;
+    }
+    if (!claims.some((claim) => claimCoversPath(claim, promise))) {
+      issues.push({
+        path: at,
+        message: `keeps_exports entry "${promise}" lies outside the task's claims: a task can only keep the exports of a file it may edit.`,
+      });
+      return;
+    }
+    if (seen.has(promise)) {
+      issues.push({ path: at, message: `keeps_exports entry "${promise}" is listed twice.` });
+      return;
+    }
+    seen.add(promise);
+  });
+  return issues;
+}
+
 export function validatePlan(plan: PlanFile, opts: PlanOpts = {}): PlanValidationResult {
   const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
   const errors: ValidationIssue[] = [];
@@ -304,6 +364,9 @@ export function validatePlan(plan: PlanFile, opts: PlanOpts = {}): PlanValidatio
       for (const issue of result.errors) {
         errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
       }
+    }
+    for (const issue of unkeptPromises(t, result.valid ? [] : result.errors)) {
+      errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
     }
     if (t.plan_version !== plan.version) {
       errors.push({

@@ -121,11 +121,29 @@ describe('scheduleWaves — how wide this plan can ever run', () => {
         { id: 't2', claims: ['src/b/**'] },
       ]),
       policy: POLICY,
-      crossings: [{ producer: 't1', consumer: 't2' }],
+      crossings: [
+        {
+          producer: 't1',
+          consumer: 't2',
+          exportedBy: 'src/a/x.ts',
+          importedBy: 'src/b/y.ts',
+          symbols: ['x'],
+          typeOnly: false,
+        },
+      ],
     });
     expect(schedule.rounds.map((r) => r.tasks)).toEqual([['t1'], ['t2']]);
     expect(schedule.constraints.map((c) => c.reason)).toEqual(['symbol-coupled']);
     expect(schedule.exitCode).toBe(2);
+    // The hint names the one remedy that is not a re-slice: the producer's
+    // keeps_exports promise, which the post-run check then holds it to.
+    expect(schedule.hint).toBe(
+      'This plan runs in 2 rounds, and some of that depth is claim geometry rather than ' +
+        'dependencies (symbol-coupled). Re-slicing the claims may widen it; whether it does ' +
+        'depends on the dependency graph, which this command does not speculate about. ' +
+        'A symbol-coupled task widens when its producer lists the exporting file in ' +
+        'keeps_exports (verified post-run).',
+    );
   });
 
   // A round that loses width is worth naming even when the plan still ends in

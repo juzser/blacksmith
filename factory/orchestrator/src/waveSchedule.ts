@@ -139,11 +139,17 @@ function buildHint(
   }
   if (constraints.length > 0) {
     const reasons = constraints.map((c) => c.reason);
+    // A crossing has a remedy that is not a re-slice, and the hint is where
+    // the operator learns it exists: the producer promises the exporting file
+    // in `keeps_exports`, and `claims impact` verifies the promise post-run.
+    const promise = reasons.includes('symbol-coupled')
+      ? ' A symbol-coupled task widens when its producer lists the exporting file in keeps_exports (verified post-run).'
+      : '';
     return (
       `This plan runs in ${depth} ${depth === 1 ? 'round' : 'rounds'}, and some of that ` +
       `depth is claim geometry rather than dependencies (${nameList(reasons)}). ` +
       'Re-slicing the claims may widen it; whether it does depends on the dependency graph, ' +
-      'which this command does not speculate about.'
+      `which this command does not speculate about.${promise}`
     );
   }
   return '';

@@ -9,6 +9,7 @@ interface TaskSeed {
   id: string;
   claims?: unknown;
   status?: string;
+  keeps?: string[];
 }
 
 function planOf(seeds: readonly TaskSeed[], edges: PlanDependencyEdge[] = []): PlanFile {
@@ -21,6 +22,7 @@ function planOf(seeds: readonly TaskSeed[], edges: PlanDependencyEdge[] = []): P
       task_status: s.status ?? 'todo',
       plan_version: 1,
       claims: s.claims ?? [],
+      ...(s.keeps === undefined ? {} : { keeps_exports: s.keeps }),
     })),
     edges,
   };
@@ -158,14 +160,55 @@ describe('computeNextWave — the widest wave the graph allows', () => {
     const result = computeNextWave({
       plan,
       policy: POLICY,
-      crossings: [{ producer: 't9', consumer: 't2' }],
+      crossings: [
+        {
+          producer: 't9',
+          consumer: 't2',
+          exportedBy: 'src/producer/lex.ts',
+          importedBy: 'src/consumer/main.ts',
+          symbols: ['parse', 'tokenize'],
+          typeOnly: false,
+        },
+      ],
     });
     expect(result.wave).toEqual(['t9']);
-    expect(result.deferred[0]).toMatchObject({
+    expect(result.deferred[0]).toEqual({
       taskId: 't2',
       reason: 'symbol-coupled',
       blockedBy: ['t9'],
+      detail:
+        'Imports parse, tokenize from src/producer/lex.ts (t9) into src/consumer/main.ts: ' +
+        'the producer runs first, or t9 promises the file in keeps_exports and both run now.',
     });
+  });
+
+  it('names the files on both ends, and says which remedy is the operator’s to take', () => {
+    // The deferral is the operator's whole view of the crossing: which file
+    // to promise, and in which task. Four symbols cap at three plus an
+    // ellipsis; a type-only crossing says so, because the remedy is the same
+    // but the risk is a signature, not a value.
+    const plan = planOf([
+      { id: 't2', claims: ['src/consumer/**'] },
+      { id: 't9', claims: ['src/producer/**'] },
+    ]);
+    const result = computeNextWave({
+      plan,
+      policy: POLICY,
+      crossings: [
+        {
+          producer: 't9',
+          consumer: 't2',
+          exportedBy: 'src/producer/types.ts',
+          importedBy: 'src/consumer/main.ts',
+          symbols: ['A', 'B', 'C', 'D'],
+          typeOnly: true,
+        },
+      ],
+    });
+    expect(result.deferred[0]?.detail).toBe(
+      'Imports A, B, C, … from src/producer/types.ts (t9) into src/consumer/main.ts, type-only: ' +
+        'the producer runs first, or t9 promises the file in keeps_exports and both run now.',
+    );
   });
 
   it('falls back to lexicographic order when the crossings are themselves cyclic', () => {
@@ -177,12 +220,65 @@ describe('computeNextWave — the widest wave the graph allows', () => {
       plan,
       policy: POLICY,
       crossings: [
-        { producer: 't1', consumer: 't2' },
-        { producer: 't2', consumer: 't1' },
+        {
+          producer: 't1',
+          consumer: 't2',
+          exportedBy: 'src/a/x.ts',
+          importedBy: 'src/b/y.ts',
+          symbols: ['x'],
+          typeOnly: false,
+        },
+        {
+          producer: 't2',
+          consumer: 't1',
+          exportedBy: 'src/b/y.ts',
+          importedBy: 'src/a/x.ts',
+          symbols: ['y'],
+          typeOnly: false,
+        },
       ],
     });
     expect(result.wave).toEqual(['t1']);
-    expect(result.deferred[0]).toMatchObject({ taskId: 't2', reason: 'symbol-coupled' });
+    expect(result.deferred[0]).toEqual({
+      taskId: 't2',
+      reason: 'symbol-coupled',
+      blockedBy: ['t1'],
+      detail:
+        'Imports x from src/a/x.ts (t1) into src/b/y.ts: ' +
+        'the producer runs first, or t1 promises the file in keeps_exports and both run now.',
+    });
+  });
+
+  it('tells a producer that its scheduled consumer holds it, and which file to promise', () => {
+    // t1 is in flight and imports from t2: t2 cannot start until t1 merges,
+    // unless t2 promises to keep the exports t1 reads.
+    const plan = planOf([
+      { id: 't1', claims: ['src/a/**'], status: 'in-progress' },
+      { id: 't2', claims: ['src/b/**'] },
+    ]);
+    const result = computeNextWave({
+      plan,
+      policy: POLICY,
+      crossings: [
+        {
+          producer: 't2',
+          consumer: 't1',
+          exportedBy: 'src/b/y.ts',
+          importedBy: 'src/a/x.ts',
+          symbols: ['y'],
+          typeOnly: false,
+        },
+      ],
+    });
+    expect(result.wave).toEqual([]);
+    expect(result.deferred[0]).toEqual({
+      taskId: 't2',
+      reason: 'symbol-coupled',
+      blockedBy: ['t1'],
+      detail:
+        't1 imports y from src/b/y.ts into src/a/x.ts and is already scheduled, so this one ' +
+        'follows, or t2 promises the file in keeps_exports and both run now.',
+    });
   });
 
   it('prefers the live status map over the plan file record', () => {
@@ -286,5 +382,18 @@ describe('liveWaveTasks — one door for the claim sets a caller needs before th
   it('refuses a claim set no comparison can read, at the same door as the wave', () => {
     const plan = planOf([{ id: 't1', claims: 'src/a/**' }]);
     expect(() => liveWaveTasks(plan)).toThrow(ClaimsError);
+  });
+
+  it('carries a keeps_exports promise to the wave gate, and adds nothing where there is none', () => {
+    // waveImpact reads the promise off the task it is handed; a task read
+    // here without it would serialize a crossing the plan said may run.
+    const plan = planOf([
+      { id: 't1', claims: ['src/a/**'], keeps: ['src/a/api.ts'] },
+      { id: 't2', claims: ['src/b/**'] },
+    ]);
+    expect(liveWaveTasks(plan)).toEqual([
+      { task_id: 't1', claims: ['src/a/**'], keeps_exports: ['src/a/api.ts'] },
+      { task_id: 't2', claims: ['src/b/**'] },
+    ]);
   });
 });

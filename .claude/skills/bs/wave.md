@@ -122,7 +122,10 @@ one thing this playbook never asks you to.
 4. Dispatch **`coder`** (`.claude/agents/coder.md`) in that worktree.
    Token/diff caps (`budgets.yml`: 150k tokens, 400 diff lines) and YAGNI
    are the coder's own constraints — don't restate them here, the template
-   does.
+   does. What the template does not read is the schema, so when the spec
+   carries `keeps_exports`, restate the promise in the dispatch in one line:
+   the file list, and "keep every existing export's name and declaration;
+   adding is fine".
 5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
    coverage and epic-level e2e/screenshots.
    - Then the **uiux visual pass**, but only when all three hold: the task
@@ -215,13 +218,16 @@ one thing this playbook never asks you to.
    you: `smith escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
 10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting,
-    ask what the diff did to everyone outside the claims:
+    ask what the diff did to everyone outside the claims, and whether it
+    kept what the spec promised:
     `smith claims impact <worktree-dir> <spec.json>`. Exit 1 means a
     `proven` break — this task removed an export a file outside its claims
-    still imports — and that is a bounce to the coder, not a merge. A
-    `possible` / `signature-changed` entry exits 0 and is a note: the
-    scanner reads text, not types (operator-guide/wave.md §2). Then admit
-    into the
+    still imports — **or a broken promise**: a file the spec's
+    `keeps_exports` names lost an export or changed one's declaration.
+    Either is a bounce to the coder, not a merge; quote the `promises`
+    entries in the bounce. A `possible` / `signature-changed` entry in
+    `breaks` exits 0 and is a note: the scanner reads text, not types
+    (operator-guide/wave.md §2). Then admit into the
     merge queue: `smith queue run <epic> --project <project-dir>
     --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
     `rebase-conflict` outcome, dispatch **`merger`**

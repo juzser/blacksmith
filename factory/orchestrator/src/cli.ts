@@ -39,6 +39,7 @@ import {
   loadWorktreePolicy,
   type ProposedWaveTask,
   postRunCheck,
+  readClaimList,
   validateWave,
   type WaveTask,
   writeRootCheck,
@@ -1456,13 +1457,18 @@ async function main(): Promise<number> {
     // as "disjoint from everyone" — the answer that admits the wave. The shape
     // is that function's to judge, once, where the comparison happens.
     const claimsById = new Map<string, unknown>(logged.map((t) => [t.taskId, t.claims]));
+    // A keeps_exports promise lives on the plan record alone: the log carries
+    // claims, and a promise the plan never made is not one this verb honours.
+    const promisesById = new Map<string, unknown>();
     for (const t of plan.tasks) {
       claimsById.set(t.task_id, t.claims);
+      if (t.keeps_exports !== undefined) promisesById.set(t.task_id, t.keeps_exports);
     }
-    const tasks: ProposedWaveTask[] = taskIds.map((id) => ({
-      task_id: id,
-      claims: claimsById.get(id),
-    }));
+    const tasks: ProposedWaveTask[] = taskIds.map((id) =>
+      promisesById.has(id)
+        ? { task_id: id, claims: claimsById.get(id), keeps_exports: promisesById.get(id) }
+        : { task_id: id, claims: claimsById.get(id) },
+    );
     const policy = loadWorktreePolicy();
     // D-212: the plan has been in hand since the top of this verb, and it is
     // the register that says which of these tasks may not run beside which.
@@ -2521,18 +2527,20 @@ async function main(): Promise<number> {
           { plan: plan.epic_id },
         );
       }
-      const claimsById = new Map(plan.tasks.map((task) => [task.task_id, task.claims]));
+      const recordsById = new Map(plan.tasks.map((task) => [task.task_id, task]));
+      // Claims and keeps_exports are read through the one door validateWave
+      // uses (claims.ts readClaimList), so a promise that is not a list of file
+      // paths is refused here with the same code it would earn at admission.
       const tasks: WaveTask[] = positional.map((typed) => {
         const id = resolveTaskId(plan, typed);
-        const claims = claimsById.get(id);
-        if (!Array.isArray(claims) || claims.some((claim) => typeof claim !== 'string')) {
-          throw new SmithError(
-            'claims.unreadable-claims',
-            `Task "${id}" does not declare its claims as a list of globs.`,
-            { task_id: id, received: claims === undefined ? 'undefined' : typeof claims },
-          );
-        }
-        return { task_id: id, claims };
+        const record = recordsById.get(id);
+        const claims = record?.claims;
+        const keeps = record?.keeps_exports;
+        return readClaimList(
+          keeps === undefined
+            ? { task_id: id, claims }
+            : { task_id: id, claims, keeps_exports: keeps },
+        );
       });
       // The declarations are read off the checkout, not off the plan: a claim
       // says which files a task may write, and only the tree says what those
@@ -2552,7 +2560,7 @@ async function main(): Promise<number> {
     // the diff this task committed, and everyone in the repo who imports it.
     const diffs = collectExportDiffs(worktreeDir, collectCommittedChanges(worktreeDir));
     const graph = buildSymbolGraph(collectSources(worktreeDir));
-    const report = exportImpact(graph, diffs, spec.claims);
+    const report = exportImpact(graph, diffs, spec.claims, spec.keeps_exports ?? []);
     printJson(report);
     return report.ok ? 0 : 1;
   }
