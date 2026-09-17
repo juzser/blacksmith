@@ -222,6 +222,9 @@ export const SENSITIVE_PATHS_POLICY_PATH = path.join(
 /** The guard hook's rule data — read by `smith policy check`/`smith policy hook` (policy.ts). */
 export const GUARDRAILS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'guardrails.yml');
 
+/** Which programs may hold a worker turn, and how to start each one (harness.ts). */
+export const HARNESS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'harness.yml');
+
 /**
  * The S1-S4 ladder and which levels block a merge (severity.ts).
  *

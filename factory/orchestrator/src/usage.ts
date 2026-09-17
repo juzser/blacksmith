@@ -462,13 +462,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: '[--policy <file>]',
     summary:
-      'The harnesses that may run a worker turn, and which roles each one serves. Built-in unless --policy names a file.',
+      'The harnesses that may run a worker turn, and which roles each one serves. Shipped policy unless --policy names a file.',
   },
   {
     command: 'harness plan',
     positionals: '',
     flags:
-      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>]',
+      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>] [--tier <frontier|mid|small>] [--schema <name>]',
     summary:
       'Render the invocation that would run one worker turn, as JSON. Prints it; never starts it.',
   },

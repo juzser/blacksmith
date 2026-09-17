@@ -33,7 +33,8 @@
   },
   "packageManager": "pnpm@9.3.0",
   "bin": {
-    "smith": "factory/orchestrator/dist/cli.js"
+    "smith": "factory/orchestrator/dist/cli.js",
+    "smith-run": "factory/orchestrator/dist/run-cli.js"
   },
   "files": [
     "factory/orchestrator/dist",

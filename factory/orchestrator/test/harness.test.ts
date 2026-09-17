@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { loadBudgetPolicy } from '../src/budgets.js';
 import {
-  BUILT_IN_HARNESS_POLICY,
+  HARNESS_DEFAULT_MAX_OUTPUT_BYTES,
+  HARNESS_POLICY_VERSION,
   HarnessError,
   type HarnessPolicy,
   loadHarnessPolicy,
@@ -13,7 +15,7 @@ import {
   roleAccess,
   summarizeHarnesses,
 } from '../src/harness.js';
-import { AGENTS_DIR } from '../src/paths.js';
+import { AGENTS_DIR, HARNESS_POLICY_PATH, REPO_ROOT } from '../src/paths.js';
 import { loadGuardrailPolicy } from '../src/policy.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 
@@ -22,22 +24,25 @@ import { loadTaxonomy } from '../src/taxonomy.js';
 //
 // Two things are being held in place here, and they fail differently:
 //
-//   - the built-in policy has to keep describing the factory that exists. It
+//   - the shipped policy has to keep describing the factory that exists. It
 //     is the first written statement that every worker turn runs in-process
-//     under Claude Code, and a policy that quietly grew a second harness
-//     would be a claim about deployment that no deployment backs.
+//     under Claude Code by default, and a policy that quietly grew a second
+//     harness without a test noticing would be a claim about deployment that
+//     no deployment backs.
 //   - the judge boundary has to survive the new axis. providers/types.ts
 //     already hands an external judge transport nothing but a prompt; a `cli`
 //     harness is the same kind of far side, so the same refusal has to hold
-//     there, and it has to hold for the roles guardrails.yml calls judges
-//     rather than for a list this test or harness.ts keeps of its own.
+//     there unless the harness itself declares `judge_args` that make the
+//     program read-only — and it has to hold for the roles guardrails.yml
+//     calls judges rather than for a list this test or harness.ts keeps of
+//     its own.
 // ---------------------------------------------------------------------------
 
 const taxonomy = loadTaxonomy();
 const guardrails = loadGuardrailPolicy();
 const AGENT_ROLES = taxonomy.dimensions.agent ?? [];
 
-/** Every role with a template on disk — the ones an in-process harness can start. */
+/** Every role with a template on disk — the ones any harness can start. */
 const TEMPLATED_ROLES = readdirSync(AGENTS_DIR)
   .filter((entry) => entry.endsWith('.md'))
   .map((entry) => entry.slice(0, -'.md'.length))
@@ -67,6 +72,26 @@ harnesses:
     env: ["CODEX_API_KEY"]
 `);
 
+/** Declares judge_args, so a judge role may be handed a worktree (§18 rule 5's escape valve). */
+const JUDGE_CAPABLE_POLICY: HarnessPolicy = parseHarnessPolicy(`
+version: 2
+default: claude-code
+harnesses:
+  - name: claude-code
+    kind: in-process
+  - name: codex-cli
+    kind: cli
+    command: codex
+    args: ["exec", "-C", "{worktree}", "-m", "{model}", "-"]
+    worker_args: ["-s", "workspace-write"]
+    judge_args: ["-s", "read-only"]
+    schema_args: ["--output-schema", "{schema_file}"]
+    output: codex-json
+    models: { frontier: gpt-5-high, mid: gpt-5-codex, small: gpt-5-mini }
+    env: [HOME, PATH]
+    timeout_ms: 900000
+`);
+
 function request(overrides: Record<string, unknown> = {}) {
   return {
     role: 'coder',
@@ -77,23 +102,30 @@ function request(overrides: Record<string, unknown> = {}) {
   } as Parameters<typeof planWorkerTurn>[0];
 }
 
-describe('the built-in policy is this factory, written down', () => {
-  it('names exactly one harness, and it starts no program', () => {
-    expect(BUILT_IN_HARNESS_POLICY.harnesses).toHaveLength(1);
-    const only = BUILT_IN_HARNESS_POLICY.harnesses[0];
-    expect(only?.name).toBe('claude-code');
-    expect(only?.kind).toBe('in-process');
-    expect(only?.command).toBeNull();
-    expect(BUILT_IN_HARNESS_POLICY.defaultHarness).toBe('claude-code');
-    expect(BUILT_IN_HARNESS_POLICY.source).toBe('built-in');
+describe('the shipped policy is this factory, written down', () => {
+  it('names three harnesses, default claude-code, in-process, starting no program', () => {
+    const policy = loadHarnessPolicy();
+    expect(policy.version).toBe(2);
+    expect(policy.defaultHarness).toBe('claude-code');
+    expect(policy.source).toBe('default');
+    expect([...policy.harnesses.map((h) => h.name)].sort()).toEqual([
+      'claude-cli',
+      'claude-code',
+      'codex-cli',
+    ]);
+    const claudeCode = policy.harnesses.find((h) => h.name === 'claude-code');
+    expect(claudeCode?.kind).toBe('in-process');
+    expect(claudeCode?.command).toBeNull();
   });
 
-  it('answers when no --policy names a file, because no policy file ships', () => {
-    expect(loadHarnessPolicy()).toBe(BUILT_IN_HARNESS_POLICY);
+  it('reads from HARNESS_POLICY_PATH (paths.ts), not a second copy in code', () => {
+    const onDisk = readFileSync(HARNESS_POLICY_PATH, 'utf8');
+    expect(parseHarnessPolicy(onDisk).harnesses).toHaveLength(3);
+    expect(HARNESS_POLICY_VERSION).toBe(2);
   });
 
   it('refuses a --policy path that is not there, rather than silently defaulting', () => {
-    // A typo'd path that fell back to the built-in policy would run the turn
+    // A typo'd path that fell back to the shipped policy would run the turn
     // under a harness the operator did not choose, and print a plan that
     // looks like the one they asked for.
     expect(() => loadHarnessPolicy('/nonexistent/harness.yml')).toThrow(HarnessError);
@@ -106,11 +138,25 @@ describe('the built-in policy is this factory, written down', () => {
 
   it('serves every role that ships a template, and no role that does not', () => {
     const listing = summarizeHarnesses();
-    expect(listing.harnesses).toHaveLength(1);
-    const served = [...(listing.harnesses[0]?.roles ?? [])].sort();
+    const claudeCode = listing.harnesses.find((h) => h.name === 'claude-code');
+    const served = [...(claudeCode?.roles ?? [])].sort();
     expect(served).toEqual(AGENT_ROLES.filter((r) => TEMPLATED_ROLES.includes(r)).sort());
     expect(served).toContain('coder');
     expect(served).not.toContain('operator');
+  });
+
+  it('a --policy override still loads through the same loader', () => {
+    const file = policyFile(`
+default: codex-cli
+harnesses:
+  - name: codex-cli
+    kind: cli
+    command: codex
+    args: ["{prompt_file}"]
+`);
+    const policy = loadHarnessPolicy(file);
+    expect(policy.source).toBe('file');
+    expect(policy.defaultHarness).toBe('codex-cli');
   });
 });
 
@@ -156,7 +202,7 @@ describe('an in-process turn', () => {
 });
 
 describe('a cli turn is outside the trust boundary', () => {
-  it('refuses to hand a judge role a worktree path (§18 rule 5)', () => {
+  it('refuses to hand a judge role a worktree path when judge_args is empty (§18 rule 5)', () => {
     for (const role of guardrails.judgeSandbox.roles) {
       try {
         planWorkerTurn(request({ harness: 'codex-cli', role }), { policy: CLI_POLICY });
@@ -164,6 +210,7 @@ describe('a cli turn is outside the trust boundary', () => {
       } catch (error) {
         expect(error).toBeInstanceOf(HarnessError);
         expect((error as HarnessError).code).toBe('harness.judge-worktree');
+        expect((error as HarnessError).message).toContain('judge_args');
       }
     }
   });
@@ -198,7 +245,7 @@ harnesses:
     expect(invocation.sandboxRequired).toBe(false);
   });
 
-  it('renders the argv exactly, substituting every placeholder', () => {
+  it('renders the argv exactly, substituting every placeholder, worker_args appended', () => {
     const invocation = planWorkerTurn(request({ harness: 'codex-cli' }), { policy: CLI_POLICY });
     if (invocation.kind !== 'cli') throw new Error('unreachable');
     expect(invocation.command).toBe('codex');
@@ -212,6 +259,8 @@ harnesses:
       'coder',
     ]);
     expect(invocation.cwd).toBe('/tmp/wt');
+    expect(invocation.stdin).toBe('prompt');
+    expect(invocation.template).toBe('.claude/agents/coder.md');
   });
 
   it('carries env variable names and never their values', () => {
@@ -236,12 +285,210 @@ harnesses:
     }
   });
 
-  it('lists a cli harness as serving no judge role', () => {
+  it('lists a cli harness as serving no judge role, when it declares no judge_args', () => {
     const listing = summarizeHarnesses({ policy: CLI_POLICY });
     const codex = listing.harnesses.find((h) => h.name === 'codex-cli');
     expect(codex?.roles ?? []).toContain('coder');
     for (const role of guardrails.judgeSandbox.roles) {
       expect(codex?.roles ?? []).not.toContain(role);
+    }
+  });
+});
+
+describe('judge_args is the escape valve: OS/tool-enforced read-only, declared by the harness', () => {
+  it('renders a judge invocation with cwd = worktree and sandboxRequired: true when judge_args is non-empty', () => {
+    const invocation = planWorkerTurn(
+      request({ harness: 'codex-cli', role: 'reviewer', schema: 'judge-verdict' }),
+      { policy: JUDGE_CAPABLE_POLICY },
+    );
+    expect(invocation.kind).toBe('cli');
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.worktree).toBe('/tmp/wt');
+    expect(invocation.cwd).toBe('/tmp/wt');
+    expect(invocation.sandboxRequired).toBe(true);
+    expect(invocation.args).toContain('read-only');
+    expect(invocation.args).not.toContain('workspace-write');
+  });
+
+  it('renders -C <worktree> -m <model> - -s workspace-write --output-schema <abs path> for a worker role, tier from template', () => {
+    const invocation = planWorkerTurn(
+      request({ harness: 'codex-cli', role: 'coder', schema: 'result' }),
+      { policy: JUDGE_CAPABLE_POLICY },
+    );
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    // coder.md declares `model: sonnet`, which maps to the mid tier.
+    expect(invocation.tier).toBe('mid');
+    expect(invocation.model).toBe('gpt-5-codex');
+    expect(invocation.args).toEqual([
+      'exec',
+      '-C',
+      '/tmp/wt',
+      '-m',
+      'gpt-5-codex',
+      '-',
+      '-s',
+      'workspace-write',
+      '--output-schema',
+      path.join(REPO_ROOT, 'factory', 'specs', 'schema', 'result.schema.json'),
+    ]);
+  });
+
+  it('renders -s read-only for the reviewer, still under the mid tier its template names', () => {
+    const invocation = planWorkerTurn(
+      request({ harness: 'codex-cli', role: 'reviewer', schema: 'judge-verdict' }),
+      { policy: JUDGE_CAPABLE_POLICY },
+    );
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.tier).toBe('mid');
+    expect(invocation.args).toContain('read-only');
+    expect(invocation.args.slice(-2)).toEqual([
+      '--output-schema',
+      path.join(REPO_ROOT, 'factory', 'specs', 'schema', 'judge-verdict.schema.json'),
+    ]);
+  });
+
+  it('accepts an explicit --tier that overrides the template mapping', () => {
+    const invocation = planWorkerTurn(
+      request({ harness: 'codex-cli', role: 'coder', schema: 'result', tier: 'small' }),
+      { policy: JUDGE_CAPABLE_POLICY },
+    );
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.tier).toBe('small');
+    expect(invocation.model).toBe('gpt-5-mini');
+  });
+
+  it('refuses an unknown schema name, listing the ones that exist', () => {
+    try {
+      planWorkerTurn(request({ harness: 'codex-cli', role: 'coder', schema: 'not-a-schema' }), {
+        policy: JUDGE_CAPABLE_POLICY,
+      });
+      throw new Error('expected a refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HarnessError);
+      expect((error as HarnessError).code).toBe('harness.unknown-schema');
+      expect((error as HarnessError).message).toContain('result');
+    }
+  });
+
+  it('carries the per-harness timeout, a default max_output_bytes, and the role cap_tokens', () => {
+    const budgets = loadBudgetPolicy();
+    const invocation = planWorkerTurn(
+      request({ harness: 'codex-cli', role: 'coder', schema: 'result' }),
+      { policy: JUDGE_CAPABLE_POLICY },
+    );
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.budget).toEqual({
+      timeout_ms: 900000,
+      max_output_bytes: HARNESS_DEFAULT_MAX_OUTPUT_BYTES,
+      cap_tokens: budgets.task.coder.capTokens,
+    });
+  });
+
+  it('lists a judge_args-capable cli harness as serving judge roles too', () => {
+    const listing = summarizeHarnesses({ policy: JUDGE_CAPABLE_POLICY });
+    const codex = listing.harnesses.find((h) => h.name === 'codex-cli');
+    expect(codex?.roles ?? []).toContain('reviewer');
+    expect(codex?.output).toBe('codex-json');
+    expect(codex?.models).toEqual({
+      frontier: 'gpt-5-high',
+      mid: 'gpt-5-codex',
+      small: 'gpt-5-mini',
+    });
+  });
+});
+
+describe('schema_args: appended only when the turn names a schema (F1)', () => {
+  it('(a) shipped policy, codex-cli, coder, no schema: renders, argv ends "-" "-s" "workspace-write", no --output-schema', () => {
+    const invocation = planWorkerTurn(request({ harness: 'codex-cli', role: 'coder' }));
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.args.slice(-3)).toEqual(['-', '-s', 'workspace-write']);
+    expect(invocation.args).not.toContain('--output-schema');
+    expect(invocation.schema).toBeNull();
+  });
+
+  it('(b) shipped policy, codex-cli, coder, schema: result: --output-schema <abs path> appended last', () => {
+    const invocation = planWorkerTurn(
+      request({ harness: 'codex-cli', role: 'coder', schema: 'result' }),
+    );
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.args.slice(-5)).toEqual([
+      '-',
+      '-s',
+      'workspace-write',
+      '--output-schema',
+      path.join(REPO_ROOT, 'factory', 'specs', 'schema', 'result.schema.json'),
+    ]);
+  });
+
+  it('(c) shipped policy, codex-cli, reviewer, worktree given, no schema: -s read-only, cwd = worktree, sandboxRequired true', () => {
+    const invocation = planWorkerTurn(request({ harness: 'codex-cli', role: 'reviewer' }));
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.args).toContain('read-only');
+    expect(invocation.args).not.toContain('--output-schema');
+    expect(invocation.cwd).toBe('/tmp/wt');
+    expect(invocation.sandboxRequired).toBe(true);
+  });
+
+  it('(d) shipped policy, claude-cli, planner, no worktree: renders, cwd null, model from the template’s own tier', () => {
+    const templateModelLine = readFileSync(path.join(AGENTS_DIR, 'planner.md'), 'utf8')
+      .split('\n')
+      .find((l) => l.startsWith('model:'));
+    const templateModel = templateModelLine?.slice('model:'.length).trim();
+    expect(templateModel).toBeTruthy();
+
+    const invocation = planWorkerTurn(
+      request({ harness: 'claude-cli', role: 'planner', worktree: null }),
+    );
+    if (invocation.kind !== 'cli') throw new Error('unreachable');
+    expect(invocation.worktree).toBeNull();
+    expect(invocation.cwd).toBeNull();
+    expect(invocation.model).toBe(templateModel);
+  });
+
+  it('(e) parseHarnessPolicy rejects schema_args naming an unknown placeholder', () => {
+    try {
+      parseHarnessPolicy(
+        'harnesses: [{name: a, kind: cli, command: x, args: ["{prompt_file}"], schema_args: ["{worktre}"]}]',
+      );
+      throw new Error('expected a refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HarnessError);
+      expect((error as HarnessError).code).toBe('harness.invalid-policy');
+    }
+  });
+
+  it('a harness whose plain args interpolate {schema_file} still refuses with no schema named, telling the operator to pass --schema', () => {
+    const policy = parseHarnessPolicy(`
+harnesses:
+  - name: a
+    kind: cli
+    command: x
+    args: ["{prompt_file}", "--output-schema", "{schema_file}"]
+`);
+    try {
+      planWorkerTurn(request({ harness: 'a' }), { policy });
+      throw new Error('expected a refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HarnessError);
+      expect((error as HarnessError).code).toBe('harness.missing-substitution');
+      expect((error as HarnessError).message).toContain('--schema <name>');
+    }
+  });
+});
+
+describe('an unknown --tier is refused (F2)', () => {
+  it('refuses a tier the taxonomy does not know, naming the ones that exist', () => {
+    try {
+      planWorkerTurn(
+        request({ tier: 'bogus' as unknown as Parameters<typeof planWorkerTurn>[0]['tier'] }),
+      );
+      throw new Error('expected a refusal');
+    } catch (error) {
+      expect(error).toBeInstanceOf(HarnessError);
+      expect((error as HarnessError).code).toBe('harness.unknown-tier');
+      expect((error as HarnessError).message).toContain('frontier');
+      expect((error as HarnessError).message).toContain('mid');
+      expect((error as HarnessError).message).toContain('small');
     }
   });
 });
@@ -258,7 +505,7 @@ describe('what the port refuses before anything runs', () => {
 
   it('a harness the policy does not declare, naming the ones it does', () => {
     try {
-      planWorkerTurn(request({ harness: 'codex-cli' }));
+      planWorkerTurn(request({ harness: 'ghostwriter-cli' }));
       throw new Error('expected a refusal');
     } catch (error) {
       expect((error as HarnessError).code).toBe('harness.unknown');
@@ -321,6 +568,24 @@ harnesses:
     expect(parseHarnessPolicy('harnesses: [{name: a, kind: in-process}]').defaultHarness).toBe('a');
   });
 
+  it('still parses a version-1 file with no output, models, worker_args, or judge_args', () => {
+    const policy = parseHarnessPolicy(`
+version: 1
+harnesses:
+  - name: a
+    kind: cli
+    command: x
+    args: ["{prompt_file}"]
+`);
+    expect(policy.version).toBe(1);
+    const only = policy.harnesses[0];
+    expect(only?.output).toBe('text');
+    expect(only?.models).toEqual({});
+    expect(only?.judgeArgs).toEqual([]);
+    expect(only?.timeoutMs).toBeNull();
+    expect(only?.maxOutputBytes).toBeNull();
+  });
+
   const rejects: Array<[string, string]> = [
     ['no harnesses at all', 'harnesses: []'],
     ['a harness with no name', 'harnesses: [{kind: in-process}]'],
@@ -339,7 +604,19 @@ harnesses:
       'a placeholder nothing substitutes',
       'harnesses: [{name: a, kind: cli, command: x, args: ["{worktre}"]}]',
     ],
+    [
+      'a placeholder in judge_args nothing substitutes',
+      'harnesses: [{name: a, kind: cli, command: x, args: ["{prompt_file}"], judge_args: ["{worktre}"]}]',
+    ],
     ['roles that are not strings', 'harnesses: [{name: a, kind: in-process, roles: [1]}]'],
+    [
+      'an output mode that is not one of the three',
+      'harnesses: [{name: a, kind: cli, command: x, output: xml}]',
+    ],
+    [
+      'a models tier that is not one of the three',
+      'harnesses: [{name: a, kind: cli, command: x, models: {huge: x}}]',
+    ],
   ];
   for (const [what, yamlText] of rejects) {
     it(`refuses ${what}`, () => {
@@ -360,6 +637,8 @@ harnesses:
     } catch (error) {
       expect((error as HarnessError).message).toContain('{worktree}');
       expect((error as HarnessError).message).toContain('{prompt_file}');
+      expect((error as HarnessError).message).toContain('{model}');
+      expect((error as HarnessError).message).toContain('{schema_file}');
     }
   });
 });

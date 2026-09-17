@@ -28,6 +28,7 @@ records of the past that are cited by id and never opened whole.
 | [`guide/extending.md`](guide/extending.md) | Contributor guide: add an agent template, change the taxonomy, add a policy, docs-mirror invariants, event-log vs projections, test conventions | contributor |
 | [`runbooks/ops.md`](runbooks/ops.md) | Phase 10 background watcher: what `smith daemon` does and refuses to do, the four verbs, finding kinds, its lock/status/log files, launchd + systemd + cron recipes, the exit-1 health check, state backup | operator |
 | [`runbooks/providers.md`](runbooks/providers.md) | Phase 8 cross-provider judges: Codex/DeepSeek key + auth setup, enabling, shadow-mode calibration procedure, promotion, rollback, cost, security | operator |
+| [`runbooks/harness.md`](runbooks/harness.md) | The worker harness port: provider vs. harness, `factory/policies/harness.yml`, `smith harness list`/`plan`, the `judge_args` escape valve for a judge role holding a worktree, `smith-run` spawning a rendered invocation and its exit codes, writing a custom policy file | operator |
 
 ## `factory/policies/` (machine-read at runtime)
 
@@ -42,6 +43,7 @@ records of the past that are cited by id and never opened whole.
 | [`../factory/policies/scheduler.yml`](../factory/policies/scheduler.yml) | Phase 7: recheck thresholds, maintenance-pass confidence, growth-review cadence, lessons novelty-gate threshold | operator, contributor |
 | [`../factory/policies/effort.yml`](../factory/policies/effort.yml) | Effort tiers (`small`/`medium`/`huge`) per epic: how many judgment steps an epic buys, and the invariants a tier may never scale away | operator, contributor |
 | [`../factory/policies/sensitive-paths.yml`](../factory/policies/sensitive-paths.yml) | The claim globs that trigger a security-reviewer dispatch, so the decision is declared once rather than made fresh per task | contributor, agent |
+| [`../factory/policies/harness.yml`](../factory/policies/harness.yml) | Worker harness policy (architecture §19): which program holds a worker turn — the in-process Claude Code Agent tool by default, or a `cli` harness (`codex-cli`, `claude-cli`) that `smith-run` spawns from a rendered invocation; per-harness `args`/`worker_args`/`judge_args`/`schema_args`, output parser, env allowlist, tier→model map (`docs/runbooks/harness.md`) | operator, contributor |
 
 ## Repository-level docs (outside `docs/`)
 
