@@ -44,7 +44,8 @@ deliberately does not carry is the dashboard and this repo's own enforcement;
 [`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) is the
 record. Installed, `smith`
 writes under `.blacksmith/` in the directory you run it from, or wherever
-`SMITH_HOME` points — true of `0.1.1`, which is what the registry carries.
+`SMITH_HOME` points — true of every release since `0.1.1`; the registry
+carries `0.2.0`.
 `0.1.0`, the release before it, predates `smith init`, ships no roadmap for
 `smith new` to read, and keeps state inside its own install directory.
 
