@@ -32,7 +32,10 @@ Added 2026-09-16. Everything here was run, not recalled.
   is a shape the official marketplace already uses for most of its own
   plugins. PP-4's fork was "which copy is canonical"; the answer is that
   there is no second copy, and `test/pluginManifest.test.ts` is what keeps it
-  that way.
+  that way. Not in the repository, at least: installing the plugin *into* a
+  clone does make one on that machine, a pinned checkout of `main` in the
+  plugin cache alongside the working tree, which is why README and INSTALL
+  now tell a clone to keep one or the other.
 - **Fork 4, still open, and shipped closed for now.** The plugin activates no
   enforcement: a plugin's component set has no permissions in it, and hooks
   load only from a `hooks/hooks.json` that is deliberately absent, so the

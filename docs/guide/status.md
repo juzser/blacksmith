@@ -31,13 +31,18 @@ the findings are ranked, the operator decides at a hard stop, and one epic is
 cut — [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md)
 is the contract. And the **CLI is on npm** as `@juzser/blacksmith`: the
 `smith` binary and everything it reads at runtime — policies, schemas,
-scaffold templates, agent role files, migrations. Not the dashboard, not the
-docs, and **not `/bs`**: that is a Claude Code skill, and a session finds
-`.claude/skills/bs/` in a clone, not under `node_modules`. The tarball carries
-the playbook files, but nothing puts them where Claude Code looks, so a package
-install gives you the `smith` verbs and the loop stays a clone's job —
-[`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) scopes the
-plugin that would change that, and it is `planned`, not cut. Installed, `smith`
+scaffold templates, agent role files, migrations. Not the dashboard and not
+the docs. **`/bs` ships beside it, as a plugin**, because it is a Claude Code
+skill and a session looks for one in a project's `.claude/`, in `~/.claude/`
+or in a plugin — never under `node_modules`, so the tarball's copy of the
+playbooks is in the wrong place by construction. This repository is its own
+marketplace: `claude plugin marketplace add juzser/blacksmith`, then
+`claude plugin install blacksmith@blacksmith`, and what it installs is the
+same `.claude/` a clone uses. Install both halves — the package is the
+deterministic verbs, the plugin is the loop that drives them. What the plugin
+deliberately does not carry is the dashboard and this repo's own enforcement;
+[`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) is the
+record. Installed, `smith`
 writes under `.blacksmith/` in the directory you run it from, or wherever
 `SMITH_HOME` points — true of `0.1.1`, which is what the registry carries.
 `0.1.0`, the release before it, predates `smith init`, ships no roadmap for
