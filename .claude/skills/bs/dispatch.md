@@ -140,11 +140,11 @@ memory of its previous attempt and will happily report round 1 forever.
   evidence that the model was too small; it is usually evidence the spec was
   unclear, and a bigger model will implement the same misreading more
   convincingly.
-- **Escalate to opus only after two failed rounds**, and log the escalation in
-  the `dispatch_decision` (`model_tier`, `model`, plus the reason). An unlogged
-  escalation is a cost you cannot attribute later — and `model_tier` alone
-  cannot even tell you *which* frontier model you escalated to, since opus and
-  fable share the tier.
+- **Escalate to the frontier tier only after two failed rounds**, and log the
+  escalation in the `dispatch_decision` (`model_tier`, `model`, plus the
+  reason). An unlogged escalation is a cost you cannot attribute later — and
+  `model_tier` alone cannot even tell you *which* frontier model you escalated
+  to, since opus and fable share the tier.
 - **The grader's 2-round cap is a hard stop, not a ladder rung.** At a round-2
   `fail` the task goes back to the planner for re-scoping. Do not re-dispatch
   the grader, and do not escalate the *grader* — the gates decide pass/fail,

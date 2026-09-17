@@ -142,22 +142,26 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
 
 ## model & effort assignment (factory-wide, 2026-08-05)
 
-Set in the frontmatter of every `.claude/agents/*.md`. Recorded from the
-roster verification interview (`agent-interviews.md` M-1 → M-3).
+Set in the frontmatter of every `.claude/agents/*.md`. `model:` names the
+Claude Code model; the *tier* is what the escalation ladder, `harness.yml`
+and `smith harness plan` speak (taxonomy.yml `model_tier`: opus → frontier,
+sonnet → mid, haiku → small, derived from `model:` — never a second key).
+Recorded from the roster verification interview (`agent-interviews.md` M-1 →
+M-3).
 
-| effort | model | roles |
-|---|---|---|
-| `xhigh` | opus | planner, verifier |
-| `high` | sonnet | spec-reviewer, security-reviewer |
-| `medium` | sonnet | coder, tester, reviewer, merger, researcher, uiux |
-| `low` | sonnet | grader |
-| `low` | haiku | scribe |
+| effort | tier | model (Claude Code) | roles |
+|---|---|---|---|
+| `xhigh` | frontier | opus | planner, verifier |
+| `high` | mid | sonnet | spec-reviewer, security-reviewer |
+| `medium` | mid | sonnet | coder, tester, reviewer, merger, researcher, uiux |
+| `low` | mid | sonnet | grader |
+| `low` | small | haiku | scribe |
 
 - **Judge asymmetry is bought where it decides truth, not everywhere.**
-  `verifier` is the only judge on opus: it is the one role whose verdict can
-  kill a finding outright, so it must not share a model with the reviewer
-  that raised it (finder != critic, §6). `grader` stays sonnet/`low` — it
-  runs a bounded rubric loop and never decides pass/fail.
+  `verifier` is the only judge on the frontier tier: it is the one role
+  whose verdict can kill a finding outright, so it must not share a model
+  with the reviewer that raised it (finder != critic, §6). `grader` stays
+  mid/`low` — it runs a bounded rubric loop and never decides pass/fail.
 - `spec-reviewer` and `security-reviewer` sit at `high`, not `xhigh`: both
   are bounded scans against a written artifact, not open-ended judgment.
 - `researcher` and `uiux` are `medium` rather than `low` because both make
@@ -234,7 +238,7 @@ roster verification interview (`agent-interviews.md` M-1 → M-3).
   own — a provider's concurrent-request limit, a laptop's CPU count — and is
   `null` unless they set one. It is not the mechanism that bounds spend.
 - Escalation ladder: after 2 failed rounds on a task, escalate coder
-  sonnet → opus **automatically** (logged); after 3, escalate to operator.
+  mid → frontier **automatically** (logged); after 3, escalate to operator.
 
 ## context window (factory-wide, added 2026-08-05)
 

@@ -97,7 +97,7 @@ pending proposals lets them sit invisible instead of surfacing them.
    check before reporting it as a stall. A `partial` verdict is **not** a
    finding; put `widest` in the digest as the one number that says how wide
    this factory has ever actually run.
-6. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
+6. Dispatch **`scribe`** (`.claude/agents/scribe.md`, small tier) with that
    JSON plus step 2's admissions as input: shipped / in-flight / blocked /
    budget burn / next milestone / **N rechecks pending, M maintenance
    bumps auto-schedulable** (never silently dropped), ≤300 words, linking

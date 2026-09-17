@@ -235,7 +235,7 @@ escalation_ladder:
       trigger: 2 failed rounds on the same task
       failed_rounds: 2
       enforce: model-tier
-      action: escalate model tier automatically (sonnet -> opus), logged
+      action: escalate model tier automatically (mid -> frontier, taxonomy.yml model_tier), logged
     - rung: 3
       trigger: 3 failed rounds on the same task
       failed_rounds: 3
