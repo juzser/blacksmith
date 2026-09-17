@@ -412,13 +412,17 @@ come back, is a recheck due. Asking them means being at the terminal.
 smith daemon start                  # detached, logs to state/daemon/daemon.log
 smith daemon status                 # exit 1 unless one is watching and current
 smith daemon stop
+smith daemon run                    # the same loop in the foreground: one report line per tick
 smith daemon run --once             # one tick in the foreground, for cron
 ```
 
 A tick reads the event log, runs the same folds `smith budget alarm` (§9a) and
 `smith scheduler run --dry` run plus the live-agent fold behind `/bs status`,
-refreshes the SQLite read-model the dashboard serves, and writes the result to
-`state/daemon/status.json`:
+refreshes the SQLite read-model the dashboard serves, writes the result to
+`state/daemon/status.json`, and prints it — one line per tick, on the stdout
+that `start` redirects into `daemon.log`, so `tail -f` on that file shows
+each tick as it happens rather than a process that has said nothing for as
+long as it has run:
 
 ```json
 {

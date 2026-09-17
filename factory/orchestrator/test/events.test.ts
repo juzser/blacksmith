@@ -10,12 +10,15 @@ import {
   type EventRecord,
   eventTaskId,
   filterEvents,
+  followEvents,
   parseEventId,
   readEvents,
   requireSession,
+  type StoredEvent,
   sessionLineage,
   startSession,
   tailEvents,
+  unseenEvents,
 } from '../src/events.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 
@@ -1790,6 +1793,129 @@ describe('events.ts', () => {
       await expect(startSession('../escape', { stateDir })).rejects.toMatchObject({
         code: 'events.malformed-session-id',
       });
+    });
+  });
+
+  // `--follow`'s half that is not argv: what turns a repeated read of a
+  // growing log into a stream that prints nothing twice. The loop lives here
+  // rather than in cli.ts for the same reason ui/src/lib/eventStream.ts holds
+  // the browser's half -- a loop with no seams is a loop only an operator can
+  // test.
+  describe('following a log', () => {
+    /** One stored event, carrying only the fields the follow fold reads. */
+    const stored = (eventId: string, ts: string): StoredEvent => ({
+      event_id: eventId,
+      record: {
+        session_id: eventId.split('#')[0] as string,
+        ts,
+        event_type: 'note',
+        actor: 'system',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+    });
+
+    it('holds back what the caller has already printed', () => {
+      const log = [
+        stored('s#0', '2026-09-01T00:00:00.000Z'),
+        stored('s#1', '2026-09-01T00:00:01.000Z'),
+      ];
+      expect(unseenEvents(log, new Set(['s#0'])).map((e) => e.event_id)).toEqual(['s#1']);
+      expect(unseenEvents(log, new Set(['s#0', 's#1']))).toEqual([]);
+    });
+
+    // The reason the cursor is a set of ids and not a count. `--lineage`
+    // merges several logs by `ts`, so an event appended now can sort BEHIND
+    // one already printed; a stream cannot un-print, and a length cursor
+    // would either re-emit the tail or skip the new event entirely.
+    it('emits an event the merge slots in behind one already printed', () => {
+      const printed = [stored('a#0', '2026-09-01T00:00:02.000Z')];
+      const merged = [stored('b#0', '2026-09-01T00:00:01.000Z'), ...printed];
+      const seen = new Set(printed.map((e) => e.event_id));
+      expect(unseenEvents(merged, seen).map((e) => e.event_id)).toEqual(['b#0']);
+    });
+
+    it('prints each new event once, however often it re-reads', async () => {
+      const log = [stored('s#0', '2026-09-01T00:00:00.000Z')];
+      const emitted: string[] = [];
+      let reads = 0;
+      const count = await followEvents({
+        seen: ['s#0'],
+        read: async () => {
+          reads += 1;
+          return log;
+        },
+        emit: (event) => emitted.push(event.event_id),
+        sleep: async () => {
+          // One append, between the second poll and the third.
+          if (reads === 2) log.push(stored('s#1', '2026-09-01T00:00:01.000Z'));
+        },
+        shouldContinue: (() => {
+          let polls = 0;
+          return (): boolean => polls++ < 4;
+        })(),
+      });
+
+      expect(emitted).toEqual(['s#1']);
+      expect(count).toBe(1);
+    });
+
+    it('does not read again once it has been told to stop', async () => {
+      let reads = 0;
+      let stopping = false;
+      await followEvents({
+        read: async () => {
+          reads += 1;
+          return [];
+        },
+        emit: () => undefined,
+        sleep: async () => {
+          stopping = true;
+        },
+        shouldContinue: () => !stopping,
+      });
+      expect(reads).toBe(1);
+    });
+
+    it('follows a real log as it grows', async () => {
+      await appendEvent(
+        {
+          session_id: 'sess-follow',
+          actor: 'operator',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+      const start = await readEvents('sess-follow', { stateDir });
+      const emitted: string[] = [];
+      let polls = 0;
+      await followEvents({
+        seen: start.map((e) => e.event_id),
+        read: () => readEvents('sess-follow', { stateDir }),
+        emit: (event) => emitted.push(event.event_id),
+        sleep: async () => {
+          await appendEvent(
+            {
+              session_id: 'sess-follow',
+              actor: 'system',
+              event_type: 'note',
+              plan_version: 1,
+              causal_parent: 'sess-follow#0',
+              payload: { i: polls },
+            },
+            { stateDir },
+          );
+        },
+        shouldContinue: (): boolean => polls++ < 3,
+      });
+
+      // The session-start was already on screen when the follow began; the
+      // two notes appended under it were not.
+      expect(emitted).toEqual(['sess-follow#1', 'sess-follow#2']);
     });
   });
 });

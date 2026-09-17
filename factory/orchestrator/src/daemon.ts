@@ -946,6 +946,19 @@ export interface RunDaemonOptions extends TickOptions {
   shouldContinue?: () => boolean;
   /** Injection seam: the loop's contract is what it does AROUND a tick. */
   tick?: (opts: TickOptions) => Promise<TickReport>;
+  /**
+   * Called with each report as soon as it exists, before the sleep. This is
+   * where a foreground `daemon run` prints and a detached one writes its log:
+   * a loop that only answers when it ends answers nothing, because the point
+   * of it is that it does not end.
+   */
+  onTick?: (report: TickReport) => void;
+}
+
+/** What is left of a run once it is over: how long it ran, and what it last saw. */
+export interface DaemonRun {
+  ticks: number;
+  last: TickReport | null;
 }
 
 /**
@@ -965,8 +978,13 @@ function defaultSleep(ms: number): Promise<void> {
  * The `finally` is the point of the whole function: a loop that exits still
  * holding its lock — because a tick threw, because the operator hit ^C — is a
  * loop nothing can restart without a human deleting a file.
+ *
+ * It hands each report to `onTick` and keeps only the last. A process meant
+ * to run for weeks cannot hold every tick it ever ran — at the default
+ * interval that array is ~290 reports a day, forever — and nothing that
+ * outlives the loop wants more than a count and the newest one.
  */
-export async function runDaemon(opts: RunDaemonOptions): Promise<TickReport[]> {
+export async function runDaemon(opts: RunDaemonOptions): Promise<DaemonRun> {
   const pid = opts.pid ?? process.pid;
   const intervalSeconds = opts.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS;
   const startedAt = (opts.now ?? new Date()).toISOString();
@@ -1003,17 +1021,24 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<TickReport[]> {
     return report;
   };
 
-  const reports: TickReport[] = [];
+  const run: DaemonRun = { ticks: 0, last: null };
+  const tickAndTell = async (): Promise<void> => {
+    const report = await tickWithMemory();
+    run.ticks += 1;
+    run.last = report;
+    opts.onTick?.(report);
+  };
+
   try {
     if (opts.once === true) {
-      reports.push(await tickWithMemory());
-      return reports;
+      await tickAndTell();
+      return run;
     }
     while (shouldContinue()) {
-      reports.push(await tickWithMemory());
+      await tickAndTell();
       await sleep(intervalSeconds * 1000);
     }
-    return reports;
+    return run;
   } finally {
     releaseLock(opts.dir, pid);
   }

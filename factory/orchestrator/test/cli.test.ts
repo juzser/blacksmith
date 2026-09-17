@@ -3,12 +3,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-// The one src import in a file that otherwise drives only the built binary,
-// and it is a policy READER rather than anything under test: an assertion
-// about the coder cap that reads budgets.yml through the same loader the
-// binary uses cannot drift away from the file when the cap is retuned.
+// The two src imports in a file that otherwise drives only the built binary,
+// and neither is anything under test. `loadBudgetPolicy` is a policy READER:
+// an assertion about the coder cap that reads budgets.yml through the same
+// loader the binary uses cannot drift away from the file when the cap is
+// retuned. FOLLOW_TICK_MS is the same move for a clock: a test that waits out
+// two polls has to wait out the poll the binary actually uses.
 import { loadBudgetPolicy } from '../src/budgets.js';
-import { assertExited, runOrThrow, runProcess } from './helpers/process.js';
+import { FOLLOW_TICK_MS } from '../src/events.js';
+import { assertExited, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
 // UI glue per stack.md); it is verified end-to-end here as a built binary,
@@ -8943,6 +8946,142 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  // A stream is not an array. Every other read verb prints one JSON document
+  // and exits; `--follow` prints one record per line and keeps the file open,
+  // so the two things worth an end-to-end test are the ones no unit test of
+  // followEvents can see: that the built binary ACCEPTS the flag (the usage
+  // table is the allow-list), and that the bytes reaching a pipe are line-
+  // delimited from the first record rather than at the end.
+  describe('event tail --follow (P9-7 follow-up)', () => {
+    const eventsDir = () => path.join(scratchDir, 'follow-events');
+
+    function append(
+      sessionId: string,
+      note: string,
+      parent: string | null,
+      taskId?: string,
+    ): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'operator-note',
+          plan_version: 1,
+          causal_parent: parent,
+          payload: { note, ...(taskId === undefined ? {} : { task_id: taskId }) },
+        }),
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    /** A log has to be opened before it can be followed; only a root may be parentless. */
+    function start(sessionId: string): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'operator',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    it('prints the backlog a line at a time, then each new record, each one once', async () => {
+      const sessionId = `cli-follow-${Date.now()}`;
+      const root = start(sessionId);
+      const first = append(sessionId, 'one', root);
+
+      const follow = startProcess('node', [
+        CLI_PATH,
+        'event',
+        'tail',
+        sessionId,
+        '--state-dir',
+        eventsDir(),
+        '--follow',
+      ]);
+      try {
+        // The backlog lands before anything appends. A follower that printed
+        // nothing until the next event would show an operator a blank screen
+        // over a log that already holds the answer they came for.
+        const backlog = await follow.waitForLines(2);
+        expect(backlog.map((line) => JSON.parse(line).event_id)).toEqual([root, first]);
+
+        const second = append(sessionId, 'two', first);
+        const all = await follow.waitForLines(3);
+        expect(all.map((line) => JSON.parse(line).event_id)).toEqual([root, first, second]);
+
+        // Re-reading is not re-printing. The poll is a second, so waiting out
+        // two of them is the only way to tell a cursor that holds from one
+        // that re-emits the tail on every read.
+        await new Promise((resolve) => setTimeout(resolve, 2 * FOLLOW_TICK_MS + 500));
+        expect(follow.lines()).toHaveLength(3);
+
+        // ^C is how this command is meant to end, so it ENDS on one -- an
+        // operator who hits it and then waits reaches for `kill -9`.
+        const ended = await follow.stop('SIGINT');
+        expect(ended.signal).toBeNull();
+        expect(ended.status).toBe(0);
+        expect(ended.stderr).toBe('');
+      } finally {
+        await follow.stop('SIGKILL');
+      }
+    });
+
+    it('bounds the backlog with --n and scopes the stream with --task', async () => {
+      const sessionId = `cli-follow-scope-${Date.now()}`;
+      const mine = append(sessionId, 'mine-1', start(sessionId), 'T-follow');
+      const theirs = append(sessionId, 'theirs-1', mine, 'T-other');
+      const recent = append(sessionId, 'mine-2', theirs, 'T-follow');
+
+      const follow = startProcess('node', [
+        CLI_PATH,
+        'event',
+        'tail',
+        sessionId,
+        '--state-dir',
+        eventsDir(),
+        '--n',
+        '2',
+        '--task',
+        'T-follow',
+        '--follow',
+      ]);
+      try {
+        // Slice first, then filter -- the order the one-shot form already
+        // uses. The last two records are theirs-1 and mine-2; only mine-2
+        // survives the scope, and mine-1 is older than the window regardless.
+        const backlog = await follow.waitForLines(1);
+        expect(backlog.map((line) => JSON.parse(line).event_id)).toEqual([recent]);
+
+        // A record outside the scope is not a record this stream skipped over
+        // silently: it never enters it, and the one after it still arrives.
+        const alsoTheirs = append(sessionId, 'theirs-2', recent, 'T-other');
+        const mineAgain = append(sessionId, 'mine-3', alsoTheirs, 'T-follow');
+        const seen = await follow.waitForLines(2);
+        expect(seen.map((line) => JSON.parse(line).event_id)).toEqual([recent, mineAgain]);
+
+        const ended = await follow.stop('SIGINT');
+        expect(ended.status).toBe(0);
+      } finally {
+        await follow.stop('SIGKILL');
+      }
+    });
+  });
+
   // P9-16(b)/D-24. The factory speaks JSON on stdout and nothing anywhere
   // else. A project with no remote — which is every project `smith new`
   // creates — used to make the default-branch probe print `fatal: ref
@@ -9867,6 +10006,46 @@ describe('cli.ts (built binary)', () => {
       // The invariant a --once run shares with a killed loop: the lock is the
       // daemon's, and a daemon that has exited does not have one.
       expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+    });
+
+    // The loop used to answer only when it ended: one document, at exit, for a
+    // process whose point is that it does not exit. So `daemon run` in the
+    // foreground was blank for as long as it ran, and `daemon.log` -- which is
+    // that same stdout, detached -- held nothing a `tail -f` could show.
+    it('prints one report per tick as it runs, and a count with no report at the end', async () => {
+      const { dir, stateDir } = fixture();
+      const run = startProcess('node', [
+        CLI_PATH,
+        'daemon',
+        'run',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+        '--interval',
+        '1',
+      ]);
+      try {
+        // Two lines means two ticks, each one a whole TickReport: the first
+        // lands before the first sleep, not after it.
+        const ticks = await run.waitForLines(2);
+        for (const line of ticks) expect(JSON.parse(line).sessions).toEqual(['sess-cli']);
+
+        // `smith daemon stop` is SIGTERM. The lock goes with the process.
+        const ended = await run.stop('SIGTERM');
+        expect(ended.status).toBe(0);
+        expect(ended.stderr).toBe('');
+        expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+
+        // The closing line counts what was printed and repeats none of it:
+        // `last` is the --once shape, where nothing else carried the report.
+        const lines = run.lines();
+        const closing = JSON.parse(lines[lines.length - 1] as string);
+        expect(closing).toEqual({ ticks: lines.length - 1, dir });
+      } finally {
+        await run.stop('SIGKILL');
+      }
     });
 
     // The behaviour the union rule ships: an operator who typed no --project

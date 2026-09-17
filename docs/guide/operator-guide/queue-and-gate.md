@@ -471,6 +471,44 @@ if the type is one this factory should keep writing, add it to
 `FREE_TIMELINE_EVENT_TYPES` in `factory/orchestrator/src/db/queries.ts` — with a
 matching entry in the event-type lint, which will demand a reason.
 
+### Following a log as it grows — `--follow`
+
+`smith event tail` answers and exits, which is the right shape for a question
+and the wrong one for a wave you are watching. `--follow` prints the backlog
+and then keeps printing, a record at a time, until you interrupt it:
+
+```bash
+# The last 20 records, then every record after them, as they land.
+smith event tail epic-7-session-2 --follow
+
+# Scoped exactly like the one-shot form: the epic, one task, a wider window.
+smith event tail epic-7-session-2 --lineage --task task-4 --n 50 --follow
+
+# One record per line is one record per reader.
+smith event tail epic-7-session-2 --follow |
+  jq -c 'select(.record.event_type == "gate_result")'
+```
+
+**The output shape changes with the flag, on purpose.** Without `--follow` the
+command prints one JSON array, because an answer that has finished is an
+array. With it, every record is its own line from the first one — a stream has
+no closing bracket, and a reader piping into `jq` or `grep` should not have to
+wait for one that never comes.
+
+It re-reads the log once a second rather than watching the filesystem, which
+is what makes it behave the same on a Mac, on Linux and over a network mount,
+and it remembers the record *ids* it has printed rather than a count:
+`--lineage` merges several logs by timestamp, so a record appended now can
+sort **behind** one already on your screen, and a stream cannot un-print. ^C
+ends it. So does the reader going away, the way it ends `tail -f`:
+`smith event tail … --follow | head -5` finds the closed pipe on the next
+record it would have printed, and exits 0 then rather than writing an error
+line.
+
+The daemon is the other half of this: `--follow` watches one log as it is
+written, and `smith daemon run` watches every log for the things that only a
+fold can see (§11 of [lessons and the daemon](lessons-and-daemon.md)).
+
 ## 5c. `smith coverage check` — evidence that names the file the criterion names
 
 A coverage check that exits 0 is not, by itself, evidence about any particular
