@@ -7,6 +7,7 @@ import { runGit } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
+import { projectCommandEnv } from './testgate.js';
 import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
 import { integrationBranchName } from './worktree.js';
 
@@ -405,7 +406,13 @@ function planTestRun(
 
 function runTestCmd(testCmd: string, cwd: string): { passed: boolean; output: string } {
   try {
-    const output = execFileSync(testCmd, { cwd, shell: true, encoding: 'utf8', stdio: 'pipe' });
+    const output = execFileSync(testCmd, {
+      cwd,
+      shell: true,
+      encoding: 'utf8',
+      stdio: 'pipe',
+      env: projectCommandEnv(process.env),
+    });
     return { passed: true, output };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; message: string };
