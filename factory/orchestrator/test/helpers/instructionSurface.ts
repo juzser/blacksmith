@@ -11,6 +11,7 @@
 import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from '../../src/paths.js';
+import { runProcess } from './process.js';
 
 /** Directories that hold no instructions at any depth. */
 export const SKIP_DIRS = new Set([
@@ -59,10 +60,53 @@ export function recordOfThePast(rel: string): boolean {
   );
 }
 
-/** Why a markdown file is not read, or undefined when it is. */
-export function excludedBecause(rel: string): string | undefined {
+/**
+ * What the repository contains, repo-relative, or undefined when git cannot
+ * say -- an export without a `.git`, a tarball, a sandbox with no git binary.
+ * Undefined there rather than empty, so a git that cannot answer leaves the
+ * surface exactly as wide as it was instead of silently emptying it.
+ *
+ * `git ls-files` reads the index, not `HEAD`, which is the line these guards
+ * want. A document becomes part of the repo when someone stages it, so a new
+ * doc and the code it describes are still checked against each other in the
+ * one change that introduces both -- the guard does not wait for a commit,
+ * and it does not read a draft nobody has offered to the repo at all.
+ *
+ * Cached for the process: the guards that use it walk the surface repeatedly
+ * and the answer cannot change mid-run.
+ */
+let trackedCache: ReadonlySet<string> | null | undefined;
+export function trackedFiles(): ReadonlySet<string> | undefined {
+  if (trackedCache === undefined) {
+    // `runProcess` rather than `execFileSync` for D-47's reason, and because a
+    // non-zero status here is an answer -- not a repo -- rather than a throw.
+    const run = runProcess('git', ['-C', REPO_ROOT, 'ls-files', '-z']);
+    const names = run.status === 0 ? run.stdout.split('\0').filter((name) => name !== '') : [];
+    trackedCache = names.length > 0 ? new Set(names) : null;
+  }
+  return trackedCache ?? undefined;
+}
+
+/**
+ * Why a markdown file is not read, or undefined when it is.
+ *
+ * Order is load-bearing. Runtime state and the records of the past keep their
+ * own reasons whether or not they are tracked, because *why* a file is
+ * excluded is what a reader of a failure needs; "not in the repository" is the
+ * last answer, not the first.
+ */
+export function excludedBecause(
+  rel: string,
+  tracked: ReadonlySet<string> | undefined = trackedFiles(),
+): string | undefined {
   if (RUNTIME_PATHS.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) return 'runtime state';
   if (recordOfThePast(rel)) return 'record of the past';
+  // An uncommitted draft on one machine is not a document this repo governs.
+  // Without this the surface was the working tree, and a spec being written
+  // for a future epic failed the doc guards for its author alone, pointing at
+  // a path absent from every commit -- and the excuse lists could not cover
+  // it, since each requires its excused token to appear in a live document.
+  if (tracked !== undefined && !tracked.has(rel)) return 'not in the repository';
   return undefined;
 }
 
