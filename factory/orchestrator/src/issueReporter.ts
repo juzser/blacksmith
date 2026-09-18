@@ -72,6 +72,7 @@ const ISSUE_REPORTED_EVENT_TYPE = 'issue-reported';
  * Sorted, and this is the literal the test asserts against.
  */
 export const ISSUE_REPORT_PAYLOAD_KEYS = [
+  'detail',
   'error_class',
   'fingerprint',
   'issue_url',
@@ -100,6 +101,8 @@ export interface IssueReportRecord {
   issue_url?: string;
   /** Present on every outcome except `opened`/`commented`. */
   reason?: string;
+  /** Present exactly on `skipped-no-remote` -- the refusal's own detail. */
+  detail?: string;
 }
 
 interface GhIssue {
@@ -191,6 +194,7 @@ function toPayload(record: IssueReportRecord): Record<string, unknown> {
   if (record.repo_slug !== undefined) payload.repo_slug = record.repo_slug;
   if (record.issue_url !== undefined) payload.issue_url = record.issue_url;
   if (record.reason !== undefined) payload.reason = record.reason;
+  if (record.detail !== undefined) payload.detail = record.detail;
   return payload;
 }
 
@@ -270,7 +274,7 @@ async function decideOutcome(
   // Step 2: which repository.
   const repo = resolveProjectRepo(report.project, register);
   if (!('slug' in repo)) {
-    return { ...base, outcome: 'skipped-no-remote', reason: repo.reason };
+    return { ...base, outcome: 'skipped-no-remote', reason: repo.reason, detail: repo.detail };
   }
   const repoSlug = repo.slug;
 
@@ -370,6 +374,7 @@ export interface IssuePreviewRecord {
   settled_at_step?: 1 | 2 | 4;
   outcome?: Extract<IssueReportOutcome, 'skipped-disabled' | 'skipped-no-remote' | 'deduped-open'>;
   reason?: string;
+  detail?: string;
   repo_slug?: string;
   search_argv?: string[];
   create_argv?: string[];
@@ -417,7 +422,12 @@ export async function previewOutcomes(
     // Step 2: which repository -- git-only, and the source of the slug.
     const repo = resolveProjectRepo(project, register);
     if (!('slug' in repo)) {
-      settle({ settled_at_step: 2, outcome: 'skipped-no-remote', reason: repo.reason });
+      settle({
+        settled_at_step: 2,
+        outcome: 'skipped-no-remote',
+        reason: repo.reason,
+        detail: repo.detail,
+      });
       continue;
     }
     const repoSlug = repo.slug;

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import type { CommandResult, CommandRunner } from '../src/gh.js';
 import { runGit } from '../src/git.js';
 import {
   ISSUE_REPORT_OUTCOMES,
+  ISSUE_REPORT_PAYLOAD_KEYS,
   type IssueReportOutcome,
   previewOutcomes,
   reportErrors,
@@ -778,6 +779,20 @@ describe('issueReporter.ts', () => {
       ],
     } as const;
 
+    // The allowlist itself: the sorted ten-key literal AC6 asserts against.
+    expect([...ISSUE_REPORT_PAYLOAD_KEYS]).toEqual([
+      'detail',
+      'error_class',
+      'fingerprint',
+      'issue_url',
+      'latest_event_id',
+      'outcome',
+      'reason',
+      'repo_slug',
+      'source',
+      'task_ref',
+    ]);
+
     for (const [label, payload] of [
       ['opened', openedPayload],
       ['deduped-open', dedupPayload],
@@ -785,9 +800,11 @@ describe('issueReporter.ts', () => {
     ] as const) {
       expect(payload, label).toBeDefined();
       // Exact sorted key set, per representative row (AC7): a tenth key of
-      // any name, or a missing required one, fails here.
+      // any name, or a missing required one, fails here. `detail` is
+      // present exactly on `skipped-no-remote`, not on any of these three.
       expect(Object.keys(payload as object).sort()).toEqual([...expectedKeys[label]].sort());
       expect((payload as Record<string, unknown>).latest_event_id).toBeTruthy();
+      expect((payload as Record<string, unknown>).detail).toBeUndefined();
     }
     expect((openedPayload as Record<string, unknown>).issue_url).toBeTruthy();
     expect((openedPayload as Record<string, unknown>).reason).toBeUndefined();
@@ -1065,5 +1082,91 @@ describe('issueReporter.ts', () => {
     });
     expect(noRemoteRecord?.search_argv).toBeUndefined();
     expect(noRemoteRecord?.repo_slug).toBeUndefined();
+  });
+
+  // --- task 10 AC5: git-failed's detail reaches both reporter paths.
+  it('carries git-failed and its detail on both reportErrors and previewOutcomes', async () => {
+    const dir = await makeRepo('https://github.com/o/r.git');
+    const configPath = path.join(dir, '.git', 'config');
+    writeFileSync(configPath, `this is not a config line\n${readFileSync(configPath, 'utf8')}`);
+    const register: ProjectRef[] = [{ name: 'corrupt-project', dir, self: false }];
+
+    const events = [
+      await seed({
+        sessionId: 'session-git-failed',
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: 'epic-1/task-git-failed',
+        project: 'corrupt-project',
+      }),
+    ];
+    const { runner, calls } = makeStub();
+
+    const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+
+    expect(record).toMatchObject({ outcome: 'skipped-no-remote', reason: 'git-failed' });
+    expect(record?.detail).toMatch(/bad config line 1/);
+    expect(record?.repo_slug).toBeUndefined();
+    expect(record?.issue_url).toBeUndefined();
+    expect(calls).toHaveLength(0);
+
+    const { readEvents } = await import('../src/events.js');
+    const log = await readEvents('session-git-failed', { stateDir });
+    const payload = log.find((e) => e.record.event_type === 'issue-reported')?.record.payload as
+      | Record<string, unknown>
+      | undefined;
+    expect(payload?.detail).toBe(record?.detail);
+
+    const previewRunner = makeStub().runner;
+    const [preview] = await previewOutcomes(events, ENABLED, register, previewRunner, CLOCK);
+
+    expect(preview).toMatchObject({
+      settled_at_step: 2,
+      outcome: 'skipped-no-remote',
+      reason: 'git-failed',
+    });
+    expect(preview?.detail).toBe(record?.detail);
+    expect(preview?.search_argv).toBeUndefined();
+    expect(preview?.create_argv).toBeUndefined();
+    expect(preview?.comment_argv).toBeUndefined();
+  });
+
+  // --- task 10: detail travels on every skipped-no-remote arm, not only
+  // git-failed -- no-checkout carries it too.
+  it('carries the refusal detail on every skipped-no-remote, not only git-failed (no-checkout)', async () => {
+    const register: ProjectRef[] = [];
+    const events = [
+      await seed({
+        sessionId: 'session-no-checkout-detail',
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: 'epic-1/task-no-checkout-detail',
+        project: 'unregistered-project',
+      }),
+    ];
+    const { runner, calls } = makeStub();
+
+    const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+
+    expect(record).toMatchObject({ outcome: 'skipped-no-remote', reason: 'no-checkout' });
+    expect(record?.detail).toBe('no checkout registered for project "unregistered-project"');
+    expect(calls).toHaveLength(0);
+
+    const { readEvents } = await import('../src/events.js');
+    const log = await readEvents('session-no-checkout-detail', { stateDir });
+    const payload = log.find((e) => e.record.event_type === 'issue-reported')?.record.payload as
+      | Record<string, unknown>
+      | undefined;
+    expect(payload?.detail).toBe('no checkout registered for project "unregistered-project"');
+
+    const previewRunner = makeStub().runner;
+    const [preview] = await previewOutcomes(events, ENABLED, register, previewRunner, CLOCK);
+
+    expect(preview).toMatchObject({
+      settled_at_step: 2,
+      outcome: 'skipped-no-remote',
+      reason: 'no-checkout',
+    });
+    expect(preview?.detail).toBe('no checkout registered for project "unregistered-project"');
   });
 });

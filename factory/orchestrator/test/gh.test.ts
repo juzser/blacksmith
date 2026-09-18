@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -101,6 +101,119 @@ describe('gh.ts', () => {
         expect(() => resolveRepoAtDir(dir)).toThrow(TypeError);
       } finally {
         spy.mockRestore();
+      }
+    });
+
+    it('names git-failed, not no-origin, for a corrupt .git/config', async () => {
+      const dir = await makeRepo();
+      dirs = [dir];
+      runGit(dir, ['remote', 'add', 'origin', 'https://github.com/o/r.git']);
+      const configPath = path.join(dir, '.git', 'config');
+      writeFileSync(configPath, `this is not a config line\n${readFileSync(configPath, 'utf8')}`);
+
+      const a = resolveRepoAtDir(dir);
+
+      expect('reason' in a ? String(a.reason) : a.slug).toBe('git-failed');
+      expect('reason' in a && a.detail).toMatch(/bad config line 1/);
+    });
+
+    it('names git-failed for a spawn failure (ENOENT), never no-origin', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'smith-gh-spawn-'));
+      dirs = [dir];
+      const spy = vi.spyOn(git, 'readOriginUrl').mockImplementationOnce(() => {
+        throw new git.GitCommandError(
+          dir,
+          ['remote', 'get-url', 'origin'],
+          null,
+          'git could not be run (ENOENT)',
+        );
+      });
+      try {
+        const a = resolveRepoAtDir(dir);
+        expect('reason' in a ? String(a.reason) : a.slug).toBe('git-failed');
+        expect('reason' in a && a.detail).toContain('ENOENT');
+        expect('reason' in a && a.detail).toContain(dir);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('names git-failed for a real missing cwd (ENOENT)', async () => {
+      const parent = await mkdtemp(path.join(tmpdir(), 'smith-gh-gone-'));
+      dirs = [parent];
+      const missing = path.join(parent, 'gone');
+
+      const a = resolveRepoAtDir(missing);
+
+      expect('reason' in a ? String(a.reason) : a.slug).toBe('git-failed');
+      expect('reason' in a && a.detail).toMatch(/ENOENT/);
+    });
+
+    it('names git-failed for a real plain file (ENOTDIR)', async () => {
+      const parent = await mkdtemp(path.join(tmpdir(), 'smith-gh-file-'));
+      dirs = [parent];
+      const file = path.join(parent, 'plain-file');
+      writeFileSync(file, 'not a directory');
+
+      const a = resolveRepoAtDir(path.join(file, 'nested'));
+
+      expect('reason' in a ? String(a.reason) : a.slug).toBe('git-failed');
+      expect('reason' in a && a.detail).toMatch(/ENOTDIR/);
+    });
+
+    it('reserves no-origin for git actually saying the remote is absent, not other failures', async () => {
+      const dir = await mkdtemp(path.join(tmpdir(), 'smith-gh-other-'));
+      dirs = [dir];
+      const spy = vi.spyOn(git, 'readOriginUrl').mockImplementationOnce(() => {
+        throw new git.GitCommandError(
+          dir,
+          ['remote', 'get-url', 'origin'],
+          128,
+          'fatal: something else entirely',
+        );
+      });
+      try {
+        const a = resolveRepoAtDir(dir);
+        expect('reason' in a ? String(a.reason) : a.slug).toBe('git-failed');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('produces six distinct refusals, each with a non-empty, unredacted-token-free detail', async () => {
+      const noCheckout = resolveProjectRepo('ghost', []);
+
+      const notARepo = await mkdtemp(path.join(tmpdir(), 'smith-gh-set-plain-'));
+      dirs.push(notARepo);
+
+      const noOrigin = await makeRepo();
+      dirs.push(noOrigin);
+
+      const gitFailedDir = await makeRepo();
+      dirs.push(gitFailedDir);
+      runGit(gitFailedDir, [
+        'remote',
+        'add',
+        'origin',
+        'https://user:ghp_FAKETOKEN123@github.com/o/r.git',
+      ]);
+      const configPath = path.join(gitFailedDir, '.git', 'config');
+      writeFileSync(configPath, `this is not a config line\n${readFileSync(configPath, 'utf8')}`);
+
+      const results = {
+        'no-checkout': noCheckout,
+        'not-a-repo': resolveRepoAtDir(notARepo),
+        'no-origin': resolveRepoAtDir(noOrigin),
+        'git-failed': resolveRepoAtDir(gitFailedDir),
+        'unparseable-remote': slugFromRemoteUrl('not-a-url'),
+        'non-github-host': slugFromRemoteUrl('https://gitlab.com/o/r.git'),
+      };
+
+      const reasons = Object.values(results).map((r) => ('reason' in r ? r.reason : r.slug));
+      expect(new Set(reasons).size).toBe(6);
+      for (const r of Object.values(results)) {
+        expect('reason' in r && r.detail.length > 0).toBe(true);
+        expect(JSON.stringify(r)).not.toContain('ghp_FAKETOKEN123');
       }
     });
   });
