@@ -47,14 +47,27 @@ not cosmetic — it is the edge an audit walks:
   anything else and the check reports you as `unverifiable` — not as a
   pass — however well the wave ran. Open it **before** your first dispatch,
   for the same reason: a grant is earned by owning the log first.
+- **You are taking over a wave whose runner died or capped**: continue from
+  that runner's last event, in a session of your own. Do not write into its
+  log. One session has one author, and `smith delegation check` reads exactly
+  that: dispatches appended to a dead delegate's log by whoever picked the
+  wave up are reported as violations, correctly, because from the log's side
+  they cannot be told apart from an agent narrating its own work. Open your
+  own instead:
+  `smith session start <wave-id>-takeover --continues <dead-session>#<n>`.
+  That keeps the chain whole — the epic's folded reads still see every
+  dispatch on both sides of the handover — and it makes the takeover a fact
+  in the log rather than something a reader has to infer from two agents and
+  one timeline.
 
-Either way, one rule holds: **the log you write is the log the epic reads**,
-and `--continues` is the whole of what makes that true. Every deciding read
-at the epic tier folds the lineage rather than one session — `wave audit`,
-`budget alarm`, `tester check`, `judge outstanding`, `escalation check`,
-`dispatch check`, `delegation check` — so a dispatch recorded in a wave
-session is visible from the epic session that admitted it, and is *not*
-visible from a sibling wave's. Open a wave session without `--continues` and
+Whatever the case, one rule holds: **the log you write is the log the
+epic reads**, and `--continues` is the whole of what makes that true.
+Every deciding read at the epic tier folds the lineage rather than one
+session — `wave audit`, `budget alarm`, `tester check`,
+`judge outstanding`, `escalation check`, `dispatch check`,
+`delegation check` — so a dispatch recorded in a wave session is visible
+from the epic session that admitted it, and is *not* visible from a
+sibling wave's. Open a wave session without `--continues` and
 none of those verbs can see your work: they will not error, they will answer
 about a wave that appears never to have run.
 
