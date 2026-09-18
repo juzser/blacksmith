@@ -56,8 +56,24 @@ autonomy:
   #
   # The operator's standing decision, 2026-09-02: auto-dispatch with a
   # whitelist. Rechecks and maintenance may run themselves; growth review
-  # and anything touching a security surface always wait; PRs are still
-  # merged by a person, which is the backstop that makes this safe to widen.
+  # and anything touching a security surface always wait.
+  #
+  # Amended 2026-09-18: PRs are no longer merged by a person. That sentence
+  # used to stand here as the backstop that made auto-dispatch safe to widen,
+  # and deleting it without a replacement would leave this block resting on
+  # nothing. What replaces it is the six conjunctive conditions in
+  # docs/specs/continuous-loop-scope.md 3.5 — green gate with no pending
+  # waiver, no open S1/S2, green CI on the merge head, no protected
+  # declaration touched, no security keyword matched, and a merge through the
+  # PR rather than a push to main. The third of those is the load-bearing
+  # one: an epic that would change THIS FILE, autonomy.ts, budgets.yml,
+  # delegation.yml, .claude/settings.json, an agent template, a spec schema
+  # or the enable marker classifies operator and never reaches the merge at
+  # all. The loop may merge what it builds; it may not merge what bounds it.
+  #
+  # None of those six is enforced by code yet, because `smith loop` does not
+  # exist yet. Until it does, this block's `enabled: true` still only governs
+  # dispatch, and the merge is performed by whoever is driving the session.
   enabled: true
 
   # Nothing outside this list is ever auto-dispatched, and listing

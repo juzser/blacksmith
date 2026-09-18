@@ -157,22 +157,67 @@ running total. The operator asked not to be stopped, not to be blinded.
 
 ### 3.5 Where the loop stops
 
-At the merge queue. The headless session runs the wave, passes the gates,
-and opens the PR. **A person merges it.** The operator waived the budget
-ceiling and said nothing about this one, and `scheduler.yml` records it as
-the reason auto-dispatch was safe to switch on in the first place:
+Not at the merge queue any more. The operator widened this on 2026-09-18,
+having widened `self-improve` itself on 2026-09-07 (§3.6): a headless session
+that runs the wave, passes the gates and opens the PR may also merge it. The
+question put to the operator named this section and `scheduler.yml` by path,
+and the answer was that the authorisation reaches the unattended loop and not
+only an attended session.
 
-> PRs are still merged by a person, which is the backstop that makes this
-> safe to widen.
+That deletes a checkpoint, so it has to install one in its place. What is
+being replaced is a *person reading a diff*, and the replacement is not a
+smaller person but a set of conditions something can refuse on. The loop may
+merge its own PR only when all of these hold. The check is conjunctive, and a
+single unmet condition parks that PR for the operator while the loop moves on
+to the next epic rather than waiting on it:
 
-Also unchanged: `growth-review-due` is denied ahead of the whitelist
-(architecture §12 keeps scope with the operator, unconditionally), and any
-proposal whose claims or package names match a `crosscheck.yml` security
-keyword waits for a person whatever its confidence.
+- **The gate outcome is `pass`** — not `pass-with-waivers-pending`. A waiver
+  is an operator decision, and a loop that could merge across its own pending
+  waiver would have converted "ask a person" into "record that no person was
+  asked".
+- **No S1 or S2 finding is open** against any task in the epic, whatever the
+  gate concluded about the run as a whole.
+- **CI is green on the merge head**, not merely on some earlier push. The
+  local gate answers about the tree the loop built; CI answers about the tree
+  the forge will merge, and the two are the same tree only by coincidence.
+- **The PR touches no protected declaration.** The third bound of §3.6 is what
+  makes this section safe rather than merely smaller, and it is unchanged: an
+  epic whose claims reach `factory/policies/**`, `autonomy.ts`, `budgets.yml`,
+  `delegation.yml`, `.claude/settings.json`, `.claude/agents/**`,
+  `factory/specs/schema/**` or the `state/loop/enabled` marker classifies
+  `operator`, never `auto`, and so never arrives at this check at all. **The
+  loop may merge what it builds. It may not merge what bounds it.**
+- **No `crosscheck.yml` security keyword** matches the epic's claims or its
+  package names. Unchanged by the widening, as it was unchanged by the
+  narrow reading.
+- **The merge is a merge.** Through the PR, against `main`, with the branch
+  deleted after. Never a direct push to `main` and never a force-push, at any
+  point and for any reason.
 
-The honest description of mechanism A is therefore not "a factory that never
-stops". It is: **the operator's tick is removed from everything between "this
-is due" and "here is a PR", and kept for the PR.**
+A ceiling on the batch belongs beside the six: a bound on how many PRs one run
+may merge before it stops and reports. That number is not a safety property —
+the six conditions are — but a run that merged forty PRs overnight would
+produce a morning nobody can read, and an unread checkpoint fails quietly
+rather than loudly. `smith loop status` should list what was merged, by epic
+and by PR, so that morning read is one command.
+
+None of this is written into `scheduler.yml` yet, and deliberately so. The six
+conditions and the ceiling are requirements on the epic that builds `smith
+loop`, which is what they will become acceptance criteria for. A key sitting
+in a policy file that no code reads is not a limit; it is a sentence with a
+colon in it, and it reads as compliance from every angle except the one that
+matters. The declarations arrive with the code that can refuse on them, in the
+same change, or they do not arrive.
+
+Also unchanged: `growth-review-due` is denied ahead of the whitelist, because
+architecture §12 keeps scope with the operator unconditionally.
+
+The honest description of mechanism A is therefore no longer "the operator's
+tick is kept for the PR". It is: **the operator's tick is removed from the
+whole path between "this is due" and "this is on `main`" — for work that stays
+inside the bounds. The bounds themselves still cannot move without a person.**
+What ends a run is the queue emptying, the next epic classifying `operator`, a
+condition above going unmet, or the infrastructure failing.
 
 ### 3.6 How wide "self-improve" reaches
 
@@ -182,9 +227,11 @@ itself, turn findings into epics, and run them — it is not limited to epics a
 person planned.
 
 That decision makes the remaining constraints load-bearing rather than
-decorative, because the merge is now the *only* human checkpoint between "the
-factory noticed something" and "the factory changed itself". Four bounds, and
-they are the price of the wide reading rather than a hedge against it:
+decorative. When it was taken, the merge was still the only human checkpoint
+between "the factory noticed something" and "the factory changed itself"; since
+2026-09-18 (§3.5) even that one is conditional, which promotes the other three
+bounds from supporting argument to the whole of it. Four bounds, and they are
+the price of the wide reading rather than a hedge against it:
 
 - **A severity floor on what may be cut automatically.** Only S1 and S2
   findings, or a finding two axes reached independently, may become an
@@ -192,9 +239,13 @@ they are the price of the wide reading rather than a hedge against it:
   nit-level trigger is how a loop spends a night on cosmetics, and the
   manual audit of 2026-09-07 produced 29 S3 and 7 S4 against 9 S2 — the ratio
   is the argument.
-- **One epic, one PR, one human merge.** §3.5 stands and is not batchable
-  here. A loop that cut ten epics overnight and asked for one merge would have
-  moved the checkpoint rather than kept it.
+- **One epic, one PR, one merge decision.** §3.5 stands and is not batchable
+  here. What the widening gave up was the person at the merge; what it did not
+  give up is that the merge is decided per epic, against that epic's own gate,
+  its own open findings and its own claims. A run that folded ten epics into
+  one decision would have moved the checkpoint rather than kept it — and so
+  would a run that merged ten PRs without `auto_merge_max_per_run` ever
+  stopping it to report.
 - **Protected declarations.** The loop may *propose* a change to the files
   that bound it — `factory/policies/scheduler.yml`, `autonomy.ts`,
   `budgets.yml`, `delegation.yml`, `.claude/settings.json`, and the
@@ -255,7 +306,8 @@ Then, and this is the part that is not a fan-out:
 
 The audit itself writes nothing to the audited project. It reads, it reports,
 and every change after that arrives through the normal loop: worktree,
-claims, gates, PR, human merge.
+claims, gates, PR, and a human merge — §3.5's conditions belong to mechanism
+A, and do not travel to a project this factory did not build.
 
 A calibration note worth keeping, because the manual run proved it matters:
 the audited project's own `CLAUDE.md` is ground truth for what is *not* a
@@ -280,7 +332,9 @@ why both are one epic rather than two.
   second sentence. If it is ever wanted, it is a separate decision with its
   own risk argument.
 - **No dispatch inside `smith daemon`.** §3.1.
-- **No auto-merge.** §3.5.
+- **No merge outside §3.5's conditions.** The loop may merge its own PR when
+  all six hold and in no other case, and a protected-declaration epic is
+  outside them by classification rather than by check (§3.6).
 - **No promotion path in `autonomy.ts`.** Its module header promises that
   every rule can only deny and that the whitelist in `scheduler.yml` bounds
   the blast radius. A loop that could widen it would retire that promise, and
@@ -307,8 +361,8 @@ forty minutes is an hour in which the queue it just measured goes stale.
 What ends the loop is §3.5, not a clock: the queue is empty, the next epic
 classifies `operator`, or the infrastructure failed. **A loop paced by its own
 stop conditions cannot run away in a way an interval would have caught** —
-the ceiling is the whitelist in `scheduler.yml` and the human merge, both of
-which bind identically at any cadence.
+the ceiling is the whitelist in `scheduler.yml` and §3.5's merge conditions,
+both of which bind identically at any cadence.
 
 ### 6.2 A failed child reuses the escalation ladder
 
