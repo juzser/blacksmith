@@ -112,6 +112,18 @@ nothing.
 - agent_role: grader
 - statement: A judge's output contract fixes where the verdict sits as strictly as what it says: a correct verdict at the wrong key is read as no verdict at all.
 
+### lesson-raised-75658b0d107b: Write the declared artifact as a parseable skeleton before your secon...
+
+- lesson_id: lesson-raised-75658b0d107b
+- agent_role: spec-reviewer
+- statement: Write the declared artifact as a parseable skeleton before your second turn ends and refine it in place; a turn cap that lands on an unwritten artifact discards the whole review, and 15 turns of reading is the usual way to reach it.
+
+### lesson-raised-dd1d1b5bcf68: An acceptance criterion that probes a script running under 'set -e' m...
+
+- lesson_id: lesson-raised-dd1d1b5bcf68
+- agent_role: planner
+- statement: An acceptance criterion that probes a script running under 'set -e' must name the outer exit status it expects, never an echo the script prints afterwards: errexit ends the script at the first failing command, so a line printed after it is unreachable and the grader can only mark the wording, not the property.
+
 ## claim-path
 
 ### lesson-raised-3b5746704cfc: A function that computes a filesystem path and hands it to a child pr...
@@ -271,6 +283,117 @@ _(none yet)_
 - lesson_id: lesson-raised-b8db8efe922d
 - statement: An agent that owes a file should write it before refining it: the declared-artifact check catches an agent that ended on an intention only after the tokens are spent, and if that agent could write to shared state, only after the damage has spread.
 
+### lesson-raised-1da73f3f36ee: A dispatched agent's turn budget is set by the runtime, not by the di...
+
+- lesson_id: lesson-raised-1da73f3f36ee
+- agent_role: planner
+- statement: A dispatched agent's turn budget is set by the runtime, not by the dispatch prompt: stating a larger number in the prompt does not raise it, so an agent that researches before it writes can spend an entire stint and return no artifact at all.
+
+### lesson-raised-2fb53a40b114: Register an obligation only from the dispatches whose artifact the di...
+
+- lesson_id: lesson-raised-2fb53a40b114
+- finding_category: maintainability
+- statement: Register an obligation only from the dispatches whose artifact the discharging reader can actually accept; a ledger that registers on any declared artifact but discharges on one artifact shape mints obligations the system can never close.
+
+### lesson-raised-6a0d232d948d: An agent cut off by the turn cap after writing its placeholder artifa...
+
+- lesson_id: lesson-raised-6a0d232d948d
+- statement: An agent cut off by the turn cap after writing its placeholder artifact returns a file that is schema-valid and materially unchanged, so a diff of the artifact reports the round as wasted at precisely the moment the round's work exists but is unspliced; the recoverable signal is the agent's own tool trace, and the recovery is to resume that agent, because re-dispatching discards work the diff could not see.
+
+### lesson-raised-c941f4645adb: A rule asserted over text its author has not read will over-reject in...
+
+- lesson_id: lesson-raised-c941f4645adb
+- finding_category: correctness
+- agent_role: planner
+- statement: A rule asserted over text its author has not read will over-reject inside that text; if a criterion binds every construct in its task, the sweep of every construct is part of writing it, not a later check.
+
+### lesson-raised-33474964213a: Once a document begins to discuss its own markers, counting a marker ...
+
+- lesson_id: lesson-raised-33474964213a
+- finding_category: correctness
+- statement: Once a document begins to discuss its own markers, counting a marker by its text stops measuring what the marker marks: prose quoting the marker is indistinguishable from the marker itself, so count by position — a real truncation marker terminates its string — and state which test the count used.
+
+### lesson-raised-7670023e5f79: A document that measures itself must take the measurement after the e...
+
+- lesson_id: lesson-raised-7670023e5f79
+- finding_category: correctness
+- statement: A document that measures itself must take the measurement after the edit that measurement is part of: a figure computed from the draft being read and written into the draft being produced describes the version it replaced, while reading as a present-tense fact about the version that carries it.
+
+### lesson-raised-3b009dfb0e81: A turn-cap notification is evidence about the return channel only: it...
+
+- lesson_id: lesson-raised-3b009dfb0e81
+- statement: A turn-cap notification is evidence about the return channel only: it says the agent stopped mid-turn, never that the agent wrote nothing. Stat and parse the declared artifact before recording that a dispatch produced no result.
+
+### lesson-raised-1931b084725f: A negative claim built on a substring search is a claim about spellin...
+
+- lesson_id: lesson-raised-1931b084725f
+- statement: A negative claim built on a substring search is a claim about spelling, not about content, unless the search is robust to hyphenation, case and whitespace; the reviewer will report a count of zero and the document will say the thing in the next spelling over.
+
+### lesson-raised-e89a7a73adbb: A scope sentence placed after the sentence it qualifies will be read ...
+
+- lesson_id: lesson-raised-e89a7a73adbb
+- statement: A scope sentence placed after the sentence it qualifies will be read as scoping the sentence before it; a reader who quotes the pair back will attach the scope to the wrong clause and the citation will look sourced.
+
+### lesson-raised-e543bb1a5d0b: A claim-confinement check built on `git diff --name-only` must pass `...
+
+- lesson_id: lesson-raised-e543bb1a5d0b
+- finding_category: correctness
+- statement: A claim-confinement check built on `git diff --name-only` must pass `--no-renames`: with rename detection on, a committed rename lists only its destination, so moving a file OUT of an unclaimed path INTO a claimed one reports nothing deleted and passes.
+
+### lesson-raised-6ea1eb68b2bf: A revision that fixes a defect in one instrument must sweep every sib...
+
+- lesson_id: lesson-raised-6ea1eb68b2bf
+- finding_category: correctness
+- statement: A revision that fixes a defect in one instrument must sweep every sibling instrument doing the same job: a plan that names the disease in one task and leaves the other task carrying it reads as a deliberate distinction rather than an oversight, and the second site never gets reviewed again.
+
+### lesson-raised-9e3e3f16efec: A common-prefix plus common-suffix comparison can only ever detect ON...
+
+- lesson_id: lesson-raised-9e3e3f16efec
+- finding_category: correctness
+- statement: A common-prefix plus common-suffix comparison can only ever detect ONE insertion point, so it reports a legitimate multi-site append as a deletion or rewrite; the exact test for insert-only is whether the old string is a subsequence of the new one.
+
+### lesson-raised-e24e9fb2785f: A confinement claim -- 'all of them are here', 'nothing else referenc...
+
+- lesson_id: lesson-raised-e24e9fb2785f
+- finding_category: correctness
+- statement: A confinement claim -- 'all of them are here', 'nothing else references this' -- is the one kind of review evidence a reader cannot falsify from the quoted text, so it must be measured independently before it is repeated to the next tier.
+
+### lesson-raised-80aae5ddff34: A draft that has survived N rounds of text review has still never bee...
+
+- lesson_id: lesson-raised-80aae5ddff34
+- finding_category: correctness
+- statement: A draft that has survived N rounds of text review has still never been mechanically validated unless someone actually ran the validator: reviewers grade prose and validators grade shape, and neither notices that the other never ran.
+
+### lesson-raised-6fa07c6529b9: A correction that declares its reach as "wherever this document spell...
+
+- lesson_id: lesson-raised-6fa07c6529b9
+- finding_category: correctness
+- statement: A correction that declares its reach as "wherever this document spells X" and then enumerates the sites has created a count it must prove; enumerate by mechanical occurrence search, or the correction silently exempts the site it forgot.
+
+### lesson-raised-c90b1840a097: Telling an agent to write early is not enough: the artifact contract ...
+
+- lesson_id: lesson-raised-c90b1840a097
+- finding_category: correctness
+- statement: Telling an agent to write early is not enough: the artifact contract must mandate a minimum object count with explicit clean and not-reached sentinels, one write per question, so that a budget death leaves a readable partial instead of a file that cannot be told apart from a completed clean review.
+
+### lesson-raised-1aabef29e2e1: A priority order stated in a resume prompt is as unenforceable as a t...
+
+- lesson_id: lesson-raised-1aabef29e2e1
+- finding_category: correctness
+- statement: A priority order stated in a resume prompt is as unenforceable as a turn budget: the agent will spend its whole stint on the first item it finds tractable. If the order matters, dispatch one question per resume, or measure the remaining questions yourself.
+
+### lesson-raised-eb10cdf5761b: A claim about how many leaves a revision changed must be measured ove...
+
+- lesson_id: lesson-raised-eb10cdf5761b
+- finding_category: correctness
+- statement: A claim about how many leaves a revision changed must be measured over every leaf including scalars: a strings-only walker undercounts by exactly the version-number bumps, which is the one change every revision makes.
+
+### lesson-raised-18c6a8c89228: A zero-occurrence sweep is evidence only after the coordinate is conf...
+
+- lesson_id: lesson-raised-18c6a8c89228
+- finding_category: correctness
+- statement: A zero-occurrence sweep is evidence only after the coordinate is confirmed against the finding own location field: searching the wrong criterion returns a null that is indistinguishable from a real defect, and it will manufacture a false finding against correct text.
+
 ### lesson-raised-66bfd37ce01a: Never override the commit author with `git -c user.email=...`; the re...
 
 - lesson_id: lesson-raised-66bfd37ce01a
@@ -355,6 +478,181 @@ _(none yet)_
 
 - lesson_id: lesson-raised-bc8c041f3a8c
 - statement: A hand-maintained list inside a guard is the hole the guard was built to close; derive the list from the source it checks (a `roots` array in `packaging.test.ts` did not name `ROADMAP_PATH`, so the guard passed the very gap it existed to catch).
+
+### lesson-raised-04cd391ca791: A 404 from a scoped npm registry on a PUT is an authentication failur...
+
+- lesson_id: lesson-raised-04cd391ca791
+- statement: A 404 from a scoped npm registry on a PUT is an authentication failure, not a missing package: the registry hides an existing scope from an unauthorised token instead of returning 401.
+
+### lesson-raised-1804a19612db: npm two-factor authentication makes publishing an operator-run step: ...
+
+- lesson_id: lesson-raised-1804a19612db
+- statement: npm two-factor authentication makes publishing an operator-run step: the OTP prompt cannot be satisfied by an agent, so a release runbook must hand the publish command to the operator rather than run it.
+
+### lesson-raised-f39c1a53b31b: An npm packument carries `gitHead` for every published version, so th...
+
+- lesson_id: lesson-raised-f39c1a53b31b
+- statement: An npm packument carries `gitHead` for every published version, so the commit a release was cut from can be read back from the registry without relying on a tag.
+
+### lesson-raised-bac9a3bd3b81: The auto-mode classifier denies `smith plan ingest`, an `mv` of a pla...
+
+- lesson_id: lesson-raised-bac9a3bd3b81
+- statement: The auto-mode classifier denies `smith plan ingest`, an `mv` of a plan file, and Bash reads of the skill playbooks under `.claude/skills/`; those steps need the operator or a different tool.
+
+### lesson-raised-2528cf4e5f25: `smith wave check` requires the full event envelope and prints no eve...
+
+- lesson_id: lesson-raised-2528cf4e5f25
+- statement: `smith wave check` requires the full event envelope and prints no event id, so the id of the event it wrote has to be read back from the session log.
+
+### lesson-raised-ccacd8f42e4e: Cut a worktree from the current base: a worktree cut before N merges ...
+
+- lesson_id: lesson-raised-ccacd8f42e4e
+- statement: Cut a worktree from the current base: a worktree cut before N merges tests a tree nobody will ship, and a green suite on it says nothing about the tree that lands.
+
+### lesson-raised-3a856caf80ac: An effort-floor scan is not a security-reviewer dispatch; the two ans...
+
+- lesson_id: lesson-raised-3a856caf80ac
+- statement: An effort-floor scan is not a security-reviewer dispatch; the two answer different questions, and passing one does not discharge the other.
+
+### lesson-raised-31b13840f6c5: An `error-logged` event requires `task_ref` in its payload; without i...
+
+- lesson_id: lesson-raised-31b13840f6c5
+- statement: An `error-logged` event requires `task_ref` in its payload; without it the append is refused.
+
+### lesson-raised-612b4017e024: zsh expands an unquoted `--include` glob before grep ever sees it, so...
+
+- lesson_id: lesson-raised-612b4017e024
+- statement: zsh expands an unquoted `--include` glob before grep ever sees it, so the pattern must be quoted.
+
+### lesson-raised-bf090949f8e9: The live plan is the `plan-v<n>.json` inside the epic worktree, not t...
+
+- lesson_id: lesson-raised-bf090949f8e9
+- statement: The live plan is the `plan-v<n>.json` inside the epic worktree, not the copy of it in the clone.
+
+### lesson-raised-5b592f5d0052: `smith queue run --project <dir>` checks out the integration branch i...
+
+- lesson_id: lesson-raised-5b592f5d0052
+- statement: `smith queue run --project <dir>` checks out the integration branch in that directory, so it must never be pointed at the main clone.
+
+### lesson-raised-9101d200fc02: The visible way to correct a false record in the event log is an oper...
+
+- lesson_id: lesson-raised-9101d200fc02
+- statement: The visible way to correct a false record in the event log is an operator-note carrying a non-operator actor, never a rewrite of the event that was wrong.
+
+### lesson-raised-612b6c33c722: A `subprocess.run` environment must inherit `PATH`; a wholly replaced...
+
+- lesson_id: lesson-raised-612b6c33c722
+- statement: A `subprocess.run` environment must inherit `PATH`; a wholly replaced env silently loses every tool the command needs.
+
+### lesson-raised-babd51405588: The factory leaked `SMITH_*` environment variables into project comma...
+
+- lesson_id: lesson-raised-babd51405588
+- statement: The factory leaked `SMITH_*` environment variables into project commands on two separate call paths, so one fix at one call site did not close the leak.
+
+### lesson-raised-2ab8ba0c5201: `smith event append` takes one inline JSON envelope and no envelope f...
+
+- lesson_id: lesson-raised-2ab8ba0c5201
+- statement: `smith event append` takes one inline JSON envelope and no envelope flags, while `smith delegation check` takes its argument as a positional.
+
+### lesson-raised-2b2a1e81e546: An orchestrator taking over a dead wave-runner's session must open it...
+
+- lesson_id: lesson-raised-2b2a1e81e546
+- statement: An orchestrator taking over a dead wave-runner's session must open its own session with `--continues`, rather than writing into the dead one.
+
+### lesson-raised-f6787a2c84c7: Every markdown file in the repo is scanned by the doc tests unless it...
+
+- lesson_id: lesson-raised-f6787a2c84c7
+- statement: Every markdown file in the repo is scanned by the doc tests unless it matches the record-of-the-past shape.
+
+### lesson-raised-b5d795d4b6d3: Verify a research finding against the code before writing it into the...
+
+- lesson_id: lesson-raised-b5d795d4b6d3
+- statement: Verify a research finding against the code before writing it into the roadmap.
+
+### lesson-raised-27e836565b55: A reviewer finding can be right about the fact and wrong about the fi...
+
+- lesson_id: lesson-raised-27e836565b55
+- statement: A reviewer finding can be right about the fact and wrong about the fix, so the remedy has to be verified separately from the observation.
+
+### lesson-raised-37f438433dfa: Prove a regression test discriminates by reverting the fix and watchi...
+
+- lesson_id: lesson-raised-37f438433dfa
+- statement: Prove a regression test discriminates by reverting the fix and watching the test fail; a green run on the already-fixed tree proves nothing.
+
+### lesson-raised-80a2f7a7a5d5: Biome rejects `${VAR+set}` inside a JavaScript string.
+
+- lesson_id: lesson-raised-80a2f7a7a5d5
+- statement: Biome rejects `${VAR+set}` inside a JavaScript string.
+
+### lesson-raised-378453209c3b: A red check in a stored background output may predate the fix; compar...
+
+- lesson_id: lesson-raised-378453209c3b
+- statement: A red check in a stored background output may predate the fix; compare timestamps before believing it.
+
+### lesson-raised-46dd036c0dd9: `gh pr merge --delete-branch` fails to delete the local branch while ...
+
+- lesson_id: lesson-raised-46dd036c0dd9
+- statement: `gh pr merge --delete-branch` fails to delete the local branch while a worktree holds it, even though the merge and the remote branch deletion both succeeded; that error is not a failed merge.
+
+### lesson-raised-e1d2d89d388f: A backticked dotted token in any instruction file is read as an error...
+
+- lesson_id: lesson-raised-e1d2d89d388f
+- statement: A backticked dotted token in any instruction file is read as an error code by the doc test.
+
+### lesson-raised-3b940e498974: The event log's key is `event_type`, not `type`.
+
+- lesson_id: lesson-raised-3b940e498974
+- statement: The event log's key is `event_type`, not `type`.
+
+### lesson-raised-02785579f29c: A node script that imports a repo dependency must live inside that re...
+
+- lesson_id: lesson-raised-02785579f29c
+- statement: A node script that imports a repo dependency must live inside that repo, unless it uses `createRequire` rooted at the target's own manifest.
+
+### lesson-raised-ead91bf35c28: Before proposing that the factory call a library, check whether it is...
+
+- lesson_id: lesson-raised-ead91bf35c28
+- statement: Before proposing that the factory call a library, check whether it is a devDependency: the published package ships `dist` plus its runtime dependencies only.
+
+### lesson-raised-d54fac4e1d74: The auto-mode classifier denies `gh pr merge` when it is chained with...
+
+- lesson_id: lesson-raised-d54fac4e1d74
+- statement: The auto-mode classifier denies `gh pr merge` when it is chained with another command; the bare form passes.
+
+### lesson-raised-2c7a4d56b146: `gh pr checks --json state` returns `IN_PROGRESS` or `QUEUED`, never ...
+
+- lesson_id: lesson-raised-2c7a4d56b146
+- statement: `gh pr checks --json state` returns `IN_PROGRESS` or `QUEUED`, never `PENDING`.
+
+### lesson-raised-d62b53f459bf: About twenty test files read `factory/specs/roadmap.md`, not only the...
+
+- lesson_id: lesson-raised-d62b53f459bf
+- statement: About twenty test files read `factory/specs/roadmap.md`, not only the six doc tests, so a wording change there needs the full suite.
+
+### lesson-raised-19254ec2a441: Do not publish a gate claim before the gate finishes: state what was ...
+
+- lesson_id: lesson-raised-19254ec2a441
+- statement: Do not publish a gate claim before the gate finishes: state what was actually observed and name CI as the authority.
+
+### lesson-raised-f2920a320b64: Never edit a file while a suite is running against it: the result the...
+
+- lesson_id: lesson-raised-f2920a320b64
+- statement: Never edit a file while a suite is running against it: the result then describes no single tree. Kill the run and restart it on the committed tree.
+
+### lesson-raised-7eeb398fef59: Right after a push, `gh pr checks` reports that no checks were report...
+
+- lesson_id: lesson-raised-7eeb398fef59
+- statement: Right after a push, `gh pr checks` reports that no checks were reported; a waiter must treat that as still-pending, not as finished.
+
+### lesson-raised-5a731cdab38f: A verification command and the commit that depends on it must be one ...
+
+- lesson_id: lesson-raised-5a731cdab38f
+- statement: A verification command and the commit that depends on it must be one `&&` chain, and its output must not be piped past the pass/fail line.
+
+### lesson-raised-3a400ca69b5e: When two verbs are compared for cost, check when each one runs before...
+
+- lesson_id: lesson-raised-3a400ca69b5e
+- statement: When two verbs are compared for cost, check when each one runs before concluding: the cheaper one may run after the very gate it was meant to save.
 
 ## security
 
