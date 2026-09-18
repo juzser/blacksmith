@@ -96,6 +96,55 @@ describe('step', () => {
     expect(log).not.toContain('edit a');
   });
 
+  it("runs the test command without the factory's own SMITH_ variables", async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+
+    const before = process.env.SMITH_HOME;
+    process.env.SMITH_HOME = projectDir;
+    try {
+      const result = await step(
+        { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+        { projectDir, epic: 'epic-1', testCmd: 'test -z "$SMITH_HOME"' },
+      );
+      expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+    } finally {
+      if (before === undefined) delete process.env.SMITH_HOME;
+      else process.env.SMITH_HOME = before;
+    }
+  });
+
+  it('still lets the test command set a SMITH_ variable for itself', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      {
+        projectDir,
+        epic: 'epic-1',
+        testCmd: 'export SMITH_HOME=/declared; test "$SMITH_HOME" = /declared',
+      },
+    );
+
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+  });
+
+  it('leaves the rest of the environment alone, so the command can find its tools', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'test -n "$PATH" && command -v node >/dev/null' },
+    );
+
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+  });
+
   it('reports rebase-conflict and leaves the task branch untouched (never auto-resolves)', async () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'from-task\n');

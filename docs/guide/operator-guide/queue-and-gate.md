@@ -24,6 +24,16 @@ this epic") → merge on green, bounce on red. The command stops at the
 first non-`merged` outcome and exits `1`; prints the full outcome array
 either way.
 
+`--test-cmd` runs in the task's worktree with this process's environment
+minus every `SMITH_*` variable. The command belongs to the project under
+test; those variables are the factory configuring itself, and `SMITH_HOME`
+in particular would move the project's work root onto the factory's own
+clone — a suite that asserts its own layout then fails on how the queue was
+invoked rather than on the branch, and anything it writes to state lands in
+the factory's live `state/`. A command that wants one exports it itself
+(`export SMITH_HOME=...; pnpm test`), which the shell applies after the
+strip.
+
 With `--plan`, *the merge order is the plan's, not the file's*: the ids are
 resolved against the plan and the set is then sorted topologically by the
 plan's dependency edges, tie-broken by task id, so a task never merges
