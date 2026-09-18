@@ -7,6 +7,7 @@ import { runGit } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
+import { projectCommandEnv } from './testgate.js';
 import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
 import { integrationBranchName } from './worktree.js';
 
@@ -403,24 +404,6 @@ function planTestRun(
   }
 }
 
-/**
- * The environment a project's test command runs in: this process's, minus the
- * factory's own namespace.
- *
- * A test command belongs to the project under test, not to the factory that
- * dispatches it, and every `SMITH_*` variable is the factory configuring
- * itself. `SMITH_HOME` is the one that bites: it moves `WORK_ROOT` off the
- * worktree, so a suite that asserts its own layout fails on the queue's
- * environment alone, and anything the suite writes to state lands in the
- * factory's live `state/` instead of the worktree's. The verdict then depends
- * on how the queue happened to be invoked, which is not a verdict about the
- * branch. A command that genuinely wants one exports it itself, which the
- * shell applies after this strip.
- */
-function testCmdEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith('SMITH_')));
-}
-
 function runTestCmd(testCmd: string, cwd: string): { passed: boolean; output: string } {
   try {
     const output = execFileSync(testCmd, {
@@ -428,7 +411,7 @@ function runTestCmd(testCmd: string, cwd: string): { passed: boolean; output: st
       shell: true,
       encoding: 'utf8',
       stdio: 'pipe',
-      env: testCmdEnv(process.env),
+      env: projectCommandEnv(process.env),
     });
     return { passed: true, output };
   } catch (err) {

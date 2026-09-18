@@ -25,14 +25,21 @@ first non-`merged` outcome and exits `1`; prints the full outcome array
 either way.
 
 `--test-cmd` runs in the task's worktree with this process's environment
-minus every `SMITH_*` variable. The command belongs to the project under
-test; those variables are the factory configuring itself, and `SMITH_HOME`
-in particular would move the project's work root onto the factory's own
-clone — a suite that asserts its own layout then fails on how the queue was
-invoked rather than on the branch, and anything it writes to state lands in
-the factory's live `state/`. A command that wants one exports it itself
-(`export SMITH_HOME=...; pnpm test`), which the shell applies after the
-strip.
+minus every `SMITH_*` variable, and the gate's own check commands run the
+same way. A command the factory launches on a project's behalf belongs to
+the project: every `SMITH_*` variable in the factory's process was set for
+that process, and `SMITH_HOME` in particular would move the project's work
+root onto the factory's own clone — a suite that asserts its own layout then
+fails on how it was invoked rather than on the branch, and anything it
+writes to state lands in the factory's live `state/`.
+
+The strip is a rule rather than a list of names, so it does not go stale
+when a `SMITH_*` variable is added. It applies to the operator switches too:
+if you mean `SMITH_CROSSCHECK_OFFLINE=1` for the command being run rather
+than for the factory running it, state it in the command
+(`--test-cmd 'SMITH_CROSSCHECK_OFFLINE=1 pnpm test'`), which is what
+`docs/runbooks/providers.md` means by passing it per command. The shell
+applies anything the command string sets after this strip.
 
 With `--plan`, *the merge order is the plan's, not the file's*: the ids are
 resolved against the plan and the set is then sorted topologically by the

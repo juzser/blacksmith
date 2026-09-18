@@ -106,7 +106,7 @@ describe('step', () => {
     try {
       const result = await step(
         { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
-        { projectDir, epic: 'epic-1', testCmd: 'test -z "$SMITH_HOME"' },
+        { projectDir, epic: 'epic-1', testCmd: '! env | grep -q "^SMITH_"' },
       );
       expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
     } finally {

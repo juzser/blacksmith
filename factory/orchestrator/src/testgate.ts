@@ -100,6 +100,34 @@ function signalNote(code: number | null, signal: NodeJS.Signals | null): string 
 }
 
 /**
+ * The environment a project's command runs in: this process's, minus the
+ * factory's own namespace.
+ *
+ * A command the factory launches on a project's behalf belongs to the
+ * project, not to the factory that launched it. Every `SMITH_*` variable in
+ * this process was set for *this* process, and letting one through silently
+ * makes the factory's own invocation part of the project's verdict.
+ * `SMITH_HOME` is the one that bites: it moves `WORK_ROOT` off the worktree,
+ * so a suite that asserts its own layout fails on the launcher's environment
+ * alone, and anything the suite writes to state lands in the factory's live
+ * `state/` instead of the worktree's. The verdict then depends on how the
+ * factory happened to be invoked, which is not a verdict about the branch.
+ *
+ * The strip is a rule rather than a roster, deliberately: a roster is a list
+ * that goes stale the next time a `SMITH_*` variable is added, and it goes
+ * stale silently. Not every one of them is the factory configuring itself —
+ * `SMITH_CROSSCHECK_OFFLINE` is an operator switch — but the runbook already
+ * says of that one "pass it per command"
+ * (`docs/runbooks/providers.md`, and it names an ambient copy of that switch
+ * as its own hazard). The command the operator means is the one running
+ * here, not the factory that spawned it, and stating it inside the command
+ * string works: the shell applies it after this strip.
+ */
+export function projectCommandEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith('SMITH_')));
+}
+
+/**
  * Run one check command in its own process group (POSIX `setsid`, via
  * `detached: true`) so a timeout can kill the WHOLE group — `process.kill`
  * with a negative pid signals every process in that group, not just the
@@ -115,6 +143,7 @@ function runOne(check: CheckCommand, cwd: string, timeoutMs: number): Promise<Ch
       shell: true,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: projectCommandEnv(process.env),
     });
 
     let output = '';
