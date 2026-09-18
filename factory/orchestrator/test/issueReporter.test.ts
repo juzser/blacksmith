@@ -1130,4 +1130,43 @@ describe('issueReporter.ts', () => {
     expect(preview?.create_argv).toBeUndefined();
     expect(preview?.comment_argv).toBeUndefined();
   });
+
+  // --- task 10: detail travels on every skipped-no-remote arm, not only
+  // git-failed -- no-checkout carries it too.
+  it('carries the refusal detail on every skipped-no-remote, not only git-failed (no-checkout)', async () => {
+    const register: ProjectRef[] = [];
+    const events = [
+      await seed({
+        sessionId: 'session-no-checkout-detail',
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: 'epic-1/task-no-checkout-detail',
+        project: 'unregistered-project',
+      }),
+    ];
+    const { runner, calls } = makeStub();
+
+    const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+
+    expect(record).toMatchObject({ outcome: 'skipped-no-remote', reason: 'no-checkout' });
+    expect(record?.detail).toBe('no checkout registered for project "unregistered-project"');
+    expect(calls).toHaveLength(0);
+
+    const { readEvents } = await import('../src/events.js');
+    const log = await readEvents('session-no-checkout-detail', { stateDir });
+    const payload = log.find((e) => e.record.event_type === 'issue-reported')?.record.payload as
+      | Record<string, unknown>
+      | undefined;
+    expect(payload?.detail).toBe('no checkout registered for project "unregistered-project"');
+
+    const previewRunner = makeStub().runner;
+    const [preview] = await previewOutcomes(events, ENABLED, register, previewRunner, CLOCK);
+
+    expect(preview).toMatchObject({
+      settled_at_step: 2,
+      outcome: 'skipped-no-remote',
+      reason: 'no-checkout',
+    });
+    expect(preview?.detail).toBe('no checkout registered for project "unregistered-project"');
+  });
 });
