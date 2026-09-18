@@ -119,7 +119,8 @@ loads skills from a project's `.claude/`, from `~/.claude/`, or from a plugin,
 never from `node_modules`, which is where an install puts the tarball's copy.
 And a `/bs` with no `smith` on PATH can run nothing.
 
-**Take `latest`.** `0.1.1` is the first release that knows it is a package.
+**Take `latest`** — `0.2.0`. `0.1.1` was the first release that knew it is a
+package.
 `0.1.0` has no `smith init`, ships no roadmap for `smith new` to read, and
 keeps state inside its own install directory, which the next `npm install`
 replaces.

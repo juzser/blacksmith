@@ -27,6 +27,68 @@ than appearing in it.
 
 ### Added
 
+- **0.2.0 — the console installs, the CLI streams, a turn can run on Codex.**
+  Six changes since 0.1.1, in the order they landed.
+
+  *The plugin (#129).* A package install gave an operator `smith` but never
+  `/bs`: Claude Code discovers skills in a project's `.claude/`, in
+  `~/.claude/` or in a plugin, never in `node_modules`. This repo is now its
+  own marketplace and its own plugin, with `.claude/` itself as the plugin
+  root — `.claude-plugin/marketplace.json` and
+  `.claude/.claude-plugin/plugin.json`, whose version tracks `package.json`
+  (`pluginManifest.test.ts` holds the two equal). `/plugin marketplace add
+  juzser/blacksmith` then `/plugin install blacksmith@blacksmith` lands the
+  playbooks and the fourteen role contracts; the package remains the CLI
+  every playbook calls. `SKILL.md` says where an installed reader's
+  files live, and `ui.md` says plainly that `ui/` does not ship.
+
+  *The docs (#130).* `INSTALL.md` and the README lead with the three
+  commands that are the install — the global package, the two plugin lines,
+  `smith init` — and fold the clone runbook behind them. Installing the
+  plugin into a clone loads every skill and role twice, from two revisions;
+  a clone keeps one (`claude plugin disable blacksmith`).
+
+  *`smith event tail --follow`, and a daemon that prints its ticks (#131).*
+  The terminal had no live view: every read verb printed one document and
+  exited, and `smith daemon run` was silent for as long as it ran.
+  `event tail <session> --follow` re-reads once a second through the same
+  fold the one-shot form uses, backlog included, `--lineage` merged by `ts`,
+  and ends cleanly when the reader closes the pipe. `daemon run` prints each
+  `TickReport` as it happens; `--once` keeps its single-line shape.
+
+  *`smith harness plan` and `smith-run` (#132).* Step 1 of running
+  Blacksmith on OpenAI Codex as well as Claude Code. `harness plan` renders a
+  worker invocation from `factory/policies/harness.yml` and never spawns
+  (architecture §18 rule 3); `smith-run`, a second bin, is what starts a
+  `cli` invocation — prompt on stdin, env from the allowlist only, a capped
+  spawn, the codex-json / claude-json / text parser, schema validation — and
+  exits 0 ok, 1 spawn failure or harness-reported error, 2 validation
+  failed, 3 timeout or size cap, never opening the event log, the DB or
+  `state/`. `harness.yml` ships `claude-code` (in-process, the default),
+  `codex-cli` and `claude-cli`; a judge holds a worktree on a `cli` harness
+  only when its `judge_args` make the program itself read-only.
+
+  *The ladder speaks tiers (#133).* `budgets.yml` rung 2 and `severity.yml`
+  S2 read "mid → frontier" rather than "sonnet → opus". The code was already
+  tier-keyed — `escalation.ts` orders taxonomy `model_tier`, and
+  `tierFromTemplate` derives a template's tier from its `model:` — so the
+  words now say what the check checks. Wording only; the rungs and counts
+  are untouched.
+
+  *`keeps_exports` (#134).* The wave gate treated every HEAD import edge
+  between two tasks' claims as a reason to serialize them; on `vam-audit-1`
+  that turned a planned 1×3 wave into 3×1 — nine crossings, five type-only.
+  A task may now list in `keeps_exports` (task-spec schema, optional,
+  literal paths inside its own claims) the files whose existing exports it
+  keeps. A crossing whose producer promised the file moves out of
+  `crossings` into `symbolImpact.promised` and no longer serializes the
+  wave; after the run `smith claims impact <worktree> <spec>` verifies the
+  promise against the diff and exits 1 on a broken one — assert pre-run,
+  observe post-run. `plan validate` refuses a glob, a path outside the
+  claims, a duplicate and an empty entry; `wave next` and `wave schedule`
+  name the way out. The planner's contract (§5) now asks for `widest >= 2`
+  or a reason in `planner_notes` why not.
+
 - **The turn cap the harness does read.** M-4 (2026-08-05) called the
   templates' `maxTurns` inert and moved the turn budget into the dispatch
   prompt. Dogfooding `csb-audit-1` measured the opposite eight times — Claude
