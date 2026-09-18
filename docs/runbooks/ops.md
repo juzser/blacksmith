@@ -596,3 +596,64 @@ look; the data is already current.
 
 Back up `state/events/` and `state/artifacts/`. Everything else in `state/` is
 reproducible from them.
+
+## 10. Reporting errors to a tracker
+
+The daemon never opens an issue itself — section 3's `error-report-proposed`
+finding is a nudge, not an action (Files the daemon owns, §4, ignores it same
+as any other finding). The run is what acts: right after it writes an
+`error-logged` event, after a `gate-outcome` that `smith gate run` records
+as `blocked`, or after a `task-added` whose payload sets `task_status:
+failed`, it calls the reporting verb, and that verb does not stop at the
+one candidate the run just reacted to — it re-reads the whole
+session lineage log and folds three source event types into reportable
+errors: every `error-logged` event (source `error-logged`), a `gate-outcome`
+the gate recorded as blocked (source `gate-outcome`), and a `task-added`
+event whose `task_status` is `failed` (source `task-failed`,
+`error_class: task.failed`, severity S2-major) — a failed task is folded
+in even though nothing ever wrote an `error-logged` event for it. This
+session's own preview run (below) shows two of the three sources,
+`error-logged` and `gate-outcome`, already queued for one tracker.
+
+**The command.** `smith issues report --session <id> [--epic <id>]
+[--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]` is the only
+command that runs `gh`. It records an `issue-reported` event per candidate —
+`opened`, `commented`, or a skip/failure below — and a repeated call over the
+same error finds that record and moves on: it is safe to run twice.
+`smith issues preview` takes the same flags, prints the argv `gh` would run
+and the rendered body, and calls `gh` zero times — use it to see what a run
+would do before it does it.
+
+**The issue body carries metadata only**, never the raw event `detail`: task
+reference, error class, severity, session, epic, plan version, project,
+source, fingerprint, and a pointer to read the rest locally with
+`smith event tail <session> --lineage`. Nothing else — no stack trace, no
+log line, no environment value — crosses into the body or the follow-up
+comment, because both renderers build the text from a fixed field list
+rather than copying the source event's payload (see D-299 for why this
+holds even though nothing scrubs `detail` on the way into the log).
+
+**The per-project switch.** A roadmap milestone may carry a bullet
+`- error_issues: on` or `- error_issues: off`, matched case-insensitively.
+Every milestone naming the same project must agree, or the roadmap fails to
+load; a project with no bullet anywhere defaults to `on`. Set it to `off` on
+one of the project's milestones to stop the run from ever calling the
+reporting verb for that project's errors — the daemon may still propose the
+finding, but the run's call to `issues report` resolves it as
+`skipped-disabled` before it touches `gh` at all.
+
+**The eight outcomes.** Exactly one is recorded per candidate:
+
+| Outcome | When it happens | What to do |
+| --- | --- | --- |
+| `opened` | No open issue matched the fingerprint; a new one was created. | Nothing — the tracker has it. |
+| `commented` | An open issue already matched the fingerprint; a new occurrence was added to it. | Nothing — the thread has it. |
+| `deduped-open` | Reason `already-reported`: this run's own history already reported the same candidate and it is still open. | Nothing — already reported. |
+| `skipped-disabled` | Reason `switch-off`: the project's `- error_issues:` bullet resolves to `off`. | Turn the bullet `on` if the project should be tracked, or leave it — this is the intended off ramp. |
+| `skipped-no-remote` | One of six reasons: `no-checkout` (no worktree), `not-a-repo`, `no-origin`, `unparseable-remote`, `non-github-host`, or `git-failed` (git could not be run at the checkout, or ran and failed for a reason other than the two above; the record's `detail` carries git's own words). | Fix the checkout's remote if tracking is wanted; otherwise expected for a project with no GitHub remote; for `git-failed`, read `detail`. |
+| `skipped-gh-missing` | Reason `gh-not-on-path`: `gh` is not on `PATH` for the process running the reporter. | Install `gh` on that box if this project should be tracked. |
+| `skipped-unauthenticated` | Reason `gh-unauthenticated`: `gh` is on `PATH` but not logged in. | Run `gh auth login` on that box (an operator action, never scripted here). |
+| `failed` | One of four `gh`-step reasons: `gh-unknown` (the availability check couldn't classify `gh`), `search-failed` (the dedup search), `comment-failed`, or `create-failed`. | Re-run `issues report` for the same session — it is idempotent — after checking `gh`'s own error output for that step; a transient network or rate-limit failure usually clears on retry. |
+
+Preview every run you are unsure of first: it is free, writes nothing, and
+shows the exact `gh` argv and body the report would use.

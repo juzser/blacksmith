@@ -27,6 +27,15 @@ than appearing in it.
 
 ### Added
 
+- **The run reports the error it just logged.** `.claude/skills/bs/dispatch.md`
+  now calls `smith issues report` right after any dispatch writes
+  `error-logged`, records a `gate-outcome` as `blocked`, or writes a
+  `task-added` with `task_status: failed`, and `wave.md` names it as the
+  wave-tier owner of that rule. `docs/runbooks/ops.md` documents the
+  mechanism end to end — what folds in, the metadata-only issue body, the
+  per-project `error_issues` switch, the eight outcomes and their reasons,
+  and `issues preview` as the dry run (D-299).
+
 - **0.2.0 — the console installs, the CLI streams, a turn can run on Codex.**
   Six changes since 0.1.1, in the order they landed.
 

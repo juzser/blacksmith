@@ -282,6 +282,25 @@ describe('flagSpecFor', () => {
     // turn an unknown command into a pile of unknown-flag errors.
     expect(flagSpecFor('plan', 'teleport')).toBeUndefined();
   });
+
+  // Task 5 AC3: every flag `issues report` and `issues preview` parse is
+  // declared here, so docCommands.test.ts can resolve a runbook's mention.
+  it('declares every flag issues report and issues preview parse (AC3)', () => {
+    const expected: [string, boolean][] = [
+      ['session', true],
+      ['epic', true],
+      ['since', true],
+      ['state-dir', true],
+      ['roadmap-path', true],
+    ];
+    for (const action of ['report', 'preview']) {
+      const spec = flagSpecFor('issues', action);
+      expect(spec).toBeDefined();
+      for (const [name, takesValue] of expected) {
+        expect(spec?.get(name), `issues ${action} --${name}`).toBe(takesValue);
+      }
+    }
+  });
 });
 
 describe('usageLine', () => {

@@ -395,26 +395,27 @@ describe('foldErrorEvents', () => {
     expect(result.reports[0]?.project).toBe('enabled-proj');
   });
 
-  it('the latest-occurrence reduce picks the newest ts, and breaks ties on event id', () => {
+  it('the latest-occurrence reduce picks the newest ts, and breaks ties on log order', () => {
     // Same fingerprint group (same project/source/error_class/task_ref),
     // fed out of chronological order so the reduce must reject an earlier
-    // `b` (accumulator stays `a`), then break a tied timestamp on event id
-    // both ways: `b` wins when its id sorts later, `a` stays when it does not.
+    // `b` (accumulator stays `a`), then break a tied timestamp on log order
+    // (session id, then numeric index) both ways: `b` wins when it is later
+    // in log order, `a` stays when it is not.
     const events: StoredEvent[] = [
       gateBlocked('epic-1/task-a', 'tests-failed', {
-        eventId: 'e-2',
+        eventId: 'sess-1#9',
         ts: '2026-01-03T00:00:00.000Z',
       }),
       gateBlocked('epic-1/task-a', 'tests-failed', {
-        eventId: 'e-1',
+        eventId: 'sess-1#3',
         ts: '2026-01-01T00:00:00.000Z',
       }),
       gateBlocked('epic-1/task-a', 'tests-failed', {
-        eventId: 'e-3',
+        eventId: 'sess-1#11',
         ts: '2026-01-03T00:00:00.000Z',
       }),
       gateBlocked('epic-1/task-a', 'tests-failed', {
-        eventId: 'a-0',
+        eventId: 'sess-1#10',
         ts: '2026-01-03T00:00:00.000Z',
       }),
     ];
@@ -422,8 +423,64 @@ describe('foldErrorEvents', () => {
     const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
 
     expect(result.reports).toHaveLength(4);
-    // Newest ts is 2026-01-03; among the three sharing it, 'e-3' sorts
-    // after both 'e-2' and 'a-0' lexicographically.
-    expect(result.reports.every((r) => r.latest_event_id === 'e-3')).toBe(true);
+    // Newest ts is 2026-01-03; among the three sharing it, 'sess-1#11' is
+    // the highest log index, not the lexically largest string.
+    expect(result.reports.every((r) => r.latest_event_id === 'sess-1#11')).toBe(true);
+  });
+
+  it('same-millisecond ties resolve by log index, not by lexical event id', () => {
+    // f-factory-error-log/task-2-fold-the-log-not-the-call-sites-6f6c27aa:
+    // a lexical compare of event ids picks 'sess-1#9' over 'sess-1#10' on a
+    // tied ts, because 'sess-1#9' > 'sess-1#10' as strings even though #10
+    // is the later event in log order.
+    const events: StoredEvent[] = [
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#10',
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#2',
+        ts: '2026-01-01T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#9',
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+    ];
+
+    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    for (const report of result.reports) {
+      expect(report.latest_event_id).toBe('sess-1#10');
+      expect(report.timestamp).toBe('2026-01-03T00:00:00.000Z');
+    }
+  });
+
+  it("a tied ts hands the report the winner's plan_version and session_id, not the lexical winner's", () => {
+    const events: StoredEvent[] = [
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#10',
+        plan_version: 2,
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#2',
+        plan_version: 1,
+        ts: '2026-01-01T00:00:00.000Z',
+      }),
+      gateBlocked('epic-1/task-a', 'tests-failed', {
+        eventId: 'sess-1#9',
+        plan_version: 1,
+        ts: '2026-01-03T00:00:00.000Z',
+      }),
+    ];
+
+    const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+    for (const report of result.reports) {
+      expect(report.latest_event_id).toBe('sess-1#10');
+      expect(report.plan_version).toBe(2);
+      expect(report.session_id).toBe('session-1');
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isLaterEvent } from './eventOrder.js';
 import type { StoredEvent } from './events.js';
 
 /**
@@ -248,9 +249,7 @@ export function foldErrorEvents(
 
   const reports: ErrorReport[] = [];
   for (const [fingerprint, group] of groups) {
-    const latest = group.reduce((a, b) =>
-      b.ts > a.ts || (b.ts === a.ts && b.eventId > a.eventId) ? b : a,
-    );
+    const latest = group.reduce((a, b) => (isLaterEvent(b, a) ? b : a));
     for (const candidate of group) {
       reports.push({
         fingerprint,

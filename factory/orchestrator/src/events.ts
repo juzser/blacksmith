@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from 'node:fs';
 import { appendFile, mkdir, open, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { SmithError } from './errors.js';
+import { type ParsedEventId, tryParseEventId } from './eventOrder.js';
 import { STATE_EVENTS_DIR } from './paths.js';
 import { type CompiledSchemaSet, compileSchemas, validateRecord } from './schemas.js';
 import { taskIdsMatch } from './taskId.js';
@@ -66,10 +67,11 @@ export interface EventOpts {
  */
 export const ROOT_EVENT_TYPE = 'session-start';
 
-export interface ParsedEventId {
-  sessionId: string;
-  index: number;
-}
+// `compareLogOrder`, `isLaterEvent` and `ParsedEventId` now live in
+// `eventOrder.ts`, a leaf with no import statement, so a pure reader (the
+// error fold in errorIssues.ts) can order events without importing this
+// fs hub.
+export { compareLogOrder, isLaterEvent, type ParsedEventId } from './eventOrder.js';
 
 /**
  * Split an event id into the session that owns it and its line index.
@@ -79,6 +81,10 @@ export interface ParsedEventId {
  * reader knows which log file to open. Splitting on the LAST `#` keeps a
  * session id that happens to contain one from silently resolving to the wrong
  * session.
+ *
+ * The parse itself lives in `eventOrder.ts` (`tryParseEventId`, which never
+ * throws); this wrapper is the one place that turns a malformed id into the
+ * `events.malformed-event-id` error every caller of `parseEventId` expects.
  */
 export function parseEventId(eventId: string): ParsedEventId {
   // Typed as a string and reached with whatever the writer sent. `smith event
@@ -95,97 +101,15 @@ export function parseEventId(eventId: string): ParsedEventId {
       { event_id: eventId },
     );
   }
-  const cut = eventId.lastIndexOf('#');
-  const sessionId = cut === -1 ? '' : eventId.slice(0, cut);
-  const rawIndex = eventId.slice(cut + 1);
-  // Number.parseInt would accept "3abc"; an event id is exact or it is a typo.
-  const index = /^\d+$/.test(rawIndex) ? Number(rawIndex) : Number.NaN;
-  if (cut === -1 || sessionId.length === 0 || Number.isNaN(index)) {
+  const parsed = tryParseEventId(eventId);
+  if (parsed === null) {
     throw new EventError(
       'events.malformed-event-id',
       `"${eventId}" is not an event id. The form is <session-id>#<index>, e.g. dogfood-envkit-1#42.`,
       { event_id: eventId },
     );
   }
-  return { sessionId, index };
-}
-
-/**
- * Where an event sits in the order the log actually wrote it.
- *
- * An event id is `<session-id>#<index>` and the index is the event's line in
- * its session's log, so within a session this *is* the order rather than a
- * proxy for it. Across sessions the logs are separate files that nothing
- * interleaves, so the session id is here to make the answer the same on every
- * call, not because one session precedes another.
- *
- * Total where parseEventId throws, and the fallback is unreachable by
- * construction — every id this sees came out of readEvents() or a projection
- * of it, and readEvents builds each one as `<session>#<index>`. It is here
- * because the readers on top of this are a dashboard `/api/pulse` polls every
- * 5s and two audits the operator runs on a whole log, and an id that somehow
- * would not parse should sort somewhere rather than take the caller down with
- * it. Where it lands is deliberately modest: an event whose place in the log
- * is unreadable does not get to win a tie on it.
- */
-function logOrderOf(eventId: string): { sessionId: string; index: number } {
-  try {
-    return parseEventId(eventId);
-  } catch {
-    return { sessionId: eventId, index: -1 };
-  }
-}
-
-/**
- * The order the log wrote two events in: negative when `a` came first,
- * positive when `b` did, zero only for the same event.
- *
- * `ts` is stamped at millisecond resolution (appendEvent, just below), so a
- * burst of appends routinely shares one: the test fixture's own last two
- * events tie in roughly one build in three, and a gate outcome and the retry
- * dispatched in answer to it are written back to back. Nothing else in the
- * record carries the sequence — `events_raw` has no such column and the JSONL
- * line has no such field — so on a tie `ts` has nothing left to say, and
- * nothing downstream of it does either. A `>` between two tied rows is not a
- * decision, it is whichever the scan reached first; `ORDER BY ts` is the same
- * non-answer spelled in SQL, since SQLite promises nothing about tied rows and
- * hands them back in physical order, which changes the moment a row is
- * rewritten; and a JS `.sort()` whose comparator returns 0 throughout is
- * stable, so it keeps that same scan order and passes it off as chronology.
- *
- * The log index behind the event id is what actually decides, and it has to be
- * read as a number: ordered as text — which is what `ORDER BY ts, event_id`
- * does — `#9` sorts after `#10`, so the tiebreaker inverts as soon as a
- * session's log passes ten events.
- *
- * It lives beside parseEventId rather than in any one reader because more than
- * one of them asks this question: the dashboard queries fold and sort rows,
- * escalation.ts walks a task's rounds looking for the dispatch on either side
- * of one. Every ordering a reader would call chronological routes through
- * here, so that no two of them can answer the same question about the same two
- * events differently — which is exactly what happened when the callers spelled
- * the comparison themselves, with opposite operators.
- */
-export function compareLogOrder(
-  a: { ts: string; eventId: string },
-  b: { ts: string; eventId: string },
-): number {
-  if (a.ts !== b.ts) return a.ts < b.ts ? -1 : 1;
-  const left = logOrderOf(a.eventId);
-  const right = logOrderOf(b.eventId);
-  if (left.sessionId !== right.sessionId) return left.sessionId < right.sessionId ? -1 : 1;
-  return left.index - right.index;
-}
-
-/**
- * Whether `a` is the later of two events — the one a reader means by "what
- * just happened".
- */
-export function isLaterEvent(
-  a: { ts: string; eventId: string },
-  b: { ts: string; eventId: string },
-): boolean {
-  return compareLogOrder(a, b) > 0;
+  return parsed;
 }
 
 /**

@@ -33,6 +33,14 @@ both:
   its waves, and a window spent on this wave's dispatches is a window the
   epic does not have for the wave after next (D13).
 
+After any `error-logged` this wave writes — a worker that died, a judge turn
+that failed, a gate refusal recorded as an error — or a `smith gate run`
+that came back `blocked` (its `gate-outcome` event with outcome `blocked`),
+or a task the wave marks `failed` (its `task-added` event with payload
+`task_status: failed`), the wave runs the reporting verb once, per
+[`dispatch.md`](dispatch.md)'s paragraph of this same heading, which owns
+the rule.
+
 Which `<event-id>` depends on how you were started, and the difference is
 not cosmetic — it is the edge an audit walks:
 

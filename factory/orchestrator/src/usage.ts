@@ -57,6 +57,9 @@ const EVENTS_DIR = `${EVENTS} [--state-dir <dir>]`;
  * asked about.
  */
 const STATS = '[--db <file>] [--session <id>] [--lineage]';
+/** The scope both `issues` actions accept: a session's lineage, narrowed by epic and ISO since. */
+const ISSUES =
+  '--session <id> [--epic <id>] [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]';
 
 export const COMMANDS: readonly CommandDoc[] = [
   {
@@ -456,6 +459,25 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: '--task <task.json> [--policy <file>] [--case <case>] [--epic-tag <tag>...] [--recheck]',
     summary:
       'Compute whether the security reviewer must be dispatched. A fired trigger is not a red.',
+  },
+  // `issues`: the run's write path to a project's tracker. Preview is its
+  // own action, never a flag, so a typo cannot promote it into a write. Exit
+  // status for both: 0 when every candidate resolved to a recorded outcome
+  // (a skip is a recorded answer); non-zero only when the run could not be
+  // performed at all, e.g. the session log is unreadable.
+  {
+    command: 'issues report',
+    positionals: '',
+    flags: ISSUES,
+    summary:
+      'Report each candidate error to its project tracker through gh and record an issue-reported event per candidate. The only command that runs gh.',
+  },
+  {
+    command: 'issues preview',
+    positionals: '',
+    flags: ISSUES,
+    summary:
+      'Dry run of issues report: prints the argv that would run, spawns no gh and appends no event. The action an unattended agent uses.',
   },
   {
     command: 'harness list',

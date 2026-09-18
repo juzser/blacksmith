@@ -112,7 +112,10 @@ export interface MilestoneDef {
    * one bullet settles every milestone naming that project. Defaults to
    * `true` when the bullet is absent (or empty), so every roadmap.md written
    * before the bullet existed still parses to the same answer it would have
-   * given.
+   * given. Only `factory/orchestrator/src/db/` may read this raw field
+   * directly -- it persists the already-resolved value onto a row and back,
+   * never re-derives it -- and every other consumer must instead ask
+   * `isErrorTrackerWritable`.
    */
   errorIssuesEnabled: boolean;
 }

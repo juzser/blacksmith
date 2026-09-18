@@ -226,6 +226,7 @@ export const KIND_OPTIONS: readonly KindOption[] = [
       'waiver-granted',
       'waiver-denied',
       'gate-outcome',
+      'issue-reported',
     ],
   },
   // The scheduler's whole output. `smith scheduler run` appends one event per
@@ -239,7 +240,12 @@ export const KIND_OPTIONS: readonly KindOption[] = [
   {
     value: 'scheduler',
     label: 'Scheduler',
-    types: ['recheck-proposed', 'maintenance-proposed', 'growth-review-due'],
+    types: [
+      'recheck-proposed',
+      'maintenance-proposed',
+      'growth-review-due',
+      'error-report-proposed',
+    ],
   },
   // The plan graph — the whole `graph_event` dimension in taxonomy order, on
   // the same rule the gate chip learned the hard way (D-162): the chip is a
@@ -326,7 +332,7 @@ export function iconFor(entry: TimelineEntry): string {
     case 'lesson-edited':
     case 'lesson-status-changed':
       return 'graduation-cap';
-    // The scheduler's three proposals. Each gets the icon of the thing it is
+    // The scheduler's four proposals. Each gets the icon of the thing it is
     // proposing rather than one shared "proposal" glyph, because the operator
     // decides them one at a time and the icon is the first thing that says
     // which decision this is.
@@ -336,6 +342,8 @@ export function iconFor(entry: TimelineEntry): string {
       return 'refresh-cw';
     case 'growth-review-due':
       return 'map';
+    case 'error-report-proposed':
+      return 'triangle-alert';
     // The plan graph. Shape over source: a row here says what happened to the
     // plan, and the glyph says which shape of change it was — added, removed,
     // linked, admitted, merged — because that is what an operator scanning a
@@ -601,6 +609,10 @@ export function titleFor(entry: TimelineEntry): string {
     case 'growth-review-due': {
       const since = p.lastReviewAt ? `, last ${String(p.lastReviewAt).slice(0, 10)}` : '';
       return `Growth review due — every ${String(p.cadenceDays ?? '?')} days${since}`;
+    }
+    case 'error-report-proposed': {
+      const count = Number(p.occurrences ?? 0);
+      return `Error report proposed — ${String(p.errorClass ?? '')} in ${String(p.taskRef ?? '')} (${count} occurrence${count === 1 ? '' : 's'})`;
     }
     // The plan graph, the dimension the Plan chip selects. `task-added` was
     // already here; the rest reached the timeline and rendered as their own

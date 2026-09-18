@@ -26,14 +26,16 @@ export interface RepoSuccess {
 /**
  * The closed, named refusal set for "which repository" -- never `null`,
  * never a shared error (D-133): a caller must be able to tell "no remote"
- * from "not a repo" rather than report one as the other.
+ * from "not a repo" from "git could not answer here" rather than report
+ * one as another.
  */
 export type RepoRefusalReason =
   | 'no-checkout'
   | 'not-a-repo'
   | 'no-origin'
   | 'unparseable-remote'
-  | 'non-github-host';
+  | 'non-github-host'
+  | 'git-failed';
 
 export interface RepoRefusal {
   readonly reason: RepoRefusalReason;
@@ -77,9 +79,12 @@ export function slugFromRemoteUrl(url: string): RepoResolution {
 
 /**
  * Which repository the git checkout at `dir` belongs to. Classifies a
- * `GitCommandError` from `readOriginUrl` into `not-a-repo` or `no-origin`
- * before handing a resolved URL to `slugFromRemoteUrl`; any other error is
- * a programming or environment fault and is rethrown, not mis-filed.
+ * `GitCommandError` from `readOriginUrl` by POSITIVE match only:
+ * `not a git repository` is `not-a-repo`; `No such remote` is `no-origin`;
+ * every other git failure -- never spawned, or spawned and failed for a
+ * different reason -- is `git-failed`, with `detail` carrying git's own
+ * words. Any other error is a programming or environment fault and is
+ * rethrown, not mis-filed.
  */
 export function resolveRepoAtDir(dir: string): RepoResolution {
   let url: string;
@@ -90,7 +95,10 @@ export function resolveRepoAtDir(dir: string): RepoResolution {
       if (/not a git repository/i.test(err.stderr)) {
         return { reason: 'not-a-repo', detail: `${dir} is not a git repository` };
       }
-      return { reason: 'no-origin', detail: `${dir} has no "origin" remote` };
+      if (/No such remote/i.test(err.stderr)) {
+        return { reason: 'no-origin', detail: `${dir} has no "origin" remote` };
+      }
+      return { reason: 'git-failed', detail: err.message };
     }
     throw err;
   }

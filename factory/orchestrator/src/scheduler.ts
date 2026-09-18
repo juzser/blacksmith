@@ -12,6 +12,7 @@ import { parse as parseYaml } from 'yaml';
 import type { AutonomyPolicy } from './autonomy.js';
 import { globsOverlap } from './claims.js';
 import { foldTasks, type TaskFoldRow, taskIdCanonicalizer } from './db/projector.js';
+import { type ErrorSource, foldErrorEvents } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
 import { SCHEDULER_POLICY_PATH } from './paths.js';
@@ -579,10 +580,85 @@ export function proposeGrowthReview(
 }
 
 // ---------------------------------------------------------------------------
+// (d) Errors the log holds that nobody has reported
+// ---------------------------------------------------------------------------
+
+export interface ErrorReportProposal {
+  kind: 'error-report';
+  fingerprint: string;
+  project: string;
+  source: ErrorSource;
+  errorClass: string;
+  taskRef: string;
+  /** The session the error lives in — the one `smith issues report --session` takes. */
+  sessionId: string;
+  latestEventId: string;
+  /** How many events fold to this fingerprint. */
+  occurrences: number;
+  /** Always 1: the fold is exact. Present so autonomy.ts's floor has a number to read. */
+  confidence: number;
+}
+
+const ISSUE_REPORTED_EVENT_TYPE = 'issue-reported';
+
+/**
+ * One proposal per fingerprint whose LATEST occurrence has no `issue-reported`
+ * event. The key is `fingerprint` + `latest_event_id`, the pair task 5's own
+ * dedup reads, so a recurrence after a report is proposed again and ANY
+ * recorded outcome — a skip is an answer too — clears it. The fold is
+ * errorIssues.ts's, imported and never restated, so the fingerprint the
+ * daemon names is the one the report will carry.
+ */
+export function proposeErrorReports(
+  events: readonly StoredEvent[],
+  now: Date,
+  isProjectEnabled: (project: string) => boolean,
+): ErrorReportProposal[] {
+  const answered = new Set<string>();
+  for (const { record } of events) {
+    if (record.event_type !== ISSUE_REPORTED_EVENT_TYPE) continue;
+    const payload = record.payload ?? {};
+    const fingerprint = payload.fingerprint;
+    const latestEventId = payload.latest_event_id;
+    // A malformed record is not an answer, and not a crash either.
+    if (typeof fingerprint !== 'string' || typeof latestEventId !== 'string') continue;
+    answered.add(`${fingerprint}\0${latestEventId}`);
+  }
+
+  const { reports } = foldErrorEvents(events, now.toISOString(), isProjectEnabled);
+  const byFingerprint = new Map<string, ErrorReportProposal>();
+  for (const report of reports) {
+    if (answered.has(`${report.fingerprint}\0${report.latest_event_id}`)) continue;
+    const seen = byFingerprint.get(report.fingerprint);
+    if (seen) {
+      seen.occurrences += 1;
+      continue;
+    }
+    byFingerprint.set(report.fingerprint, {
+      kind: 'error-report',
+      fingerprint: report.fingerprint,
+      project: report.project,
+      source: report.source,
+      errorClass: report.error_class,
+      taskRef: report.task_ref,
+      sessionId: report.session_id,
+      latestEventId: report.latest_event_id,
+      occurrences: 1,
+      confidence: 1,
+    });
+  }
+  return [...byFingerprint.values()];
+}
+
+// ---------------------------------------------------------------------------
 // Full pass + event emission
 // ---------------------------------------------------------------------------
 
-export type SchedulerProposal = RecheckProposal | MaintenanceProposal | GrowthReviewProposal;
+export type SchedulerProposal =
+  | RecheckProposal
+  | MaintenanceProposal
+  | GrowthReviewProposal
+  | ErrorReportProposal;
 
 export interface SchedulerRunInput {
   events: readonly StoredEvent[];
@@ -606,6 +682,13 @@ export interface SchedulerRunInput {
    * test that fails when the network does.
    */
   readOutdated?: (projectDir: string) => OutdatedPackage[] | null;
+  /**
+   * Which projects' errors to propose reports for. Defaults to every project:
+   * this pass is pure and reads no roadmap, and the discharge command reads
+   * the real switch itself, recording `skipped-disabled` — which clears the
+   * proposal — when the tracker is off.
+   */
+  isErrorTrackerEnabled?: (project: string) => boolean;
 }
 
 /** Pure: computes every proposal this pass would make, without touching the event log. */
@@ -630,6 +713,10 @@ export function computeProposals(input: SchedulerRunInput): SchedulerProposal[] 
   const growth = proposeGrowthReview(input.events, now, policy.growth);
   if (growth) proposals.push(growth);
 
+  proposals.push(
+    ...proposeErrorReports(input.events, now, input.isErrorTrackerEnabled ?? (() => true)),
+  );
+
   return proposals;
 }
 
@@ -644,6 +731,7 @@ export interface SchedulerEventContext {
 function eventTypeFor(proposal: SchedulerProposal): string {
   if (proposal.kind === 'recheck') return 'recheck-proposed';
   if (proposal.kind === 'maintenance') return 'maintenance-proposed';
+  if (proposal.kind === 'error-report') return 'error-report-proposed';
   return 'growth-review-due';
 }
 

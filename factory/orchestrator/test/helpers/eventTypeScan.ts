@@ -188,6 +188,12 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
       'A scheduler proposal to bump outdated dependencies, from scheduler.ts eventTypeFor(). Undeclared for the same reason as recheck-proposed: architecture \u00a712 makes proposals wait for an operator tick, so the event records an offer rather than a change. Its payload carries the package list, which is what the timeline row names.',
   },
   {
+    eventType: 'error-report-proposed',
+    writtenBy: 'src',
+    reason:
+      "A scheduler proposal that an error nobody has reported be filed with the tracker, from scheduler.ts eventTypeFor(). Undeclared for the same reason as the other proposals: architecture \u00a712 has the scheduler propose and the operator dispose, and this one never leaves the operator's hands \u2014 autonomy.ts refuses it as tracker-write-never-auto even when a policy lists the kind. Its payload is the proposal itself (fingerprint, project, source, errorClass, taskRef, sessionId, latestEventId, occurrences, confidence); the timeline row names the errorClass, the taskRef and the occurrence count.",
+  },
+  {
     eventType: 'growth-review-due',
     writtenBy: 'src',
     reason:
@@ -257,9 +263,12 @@ export interface OffTimelineEventType {
  * screen drops.
  *
  * So every FREE_EVENT_TYPES entry must reach the timeline or be listed here
- * with a reason it should not. The list is empty today on purpose: of the
+ * with a reason it should not. The list was empty when it was written: of the
  * seven that were missing, none had an argument for staying hidden — they were
- * missing because the list was hand-kept, which is the whole complaint.
+ * missing because the list was hand-kept, which is the whole complaint. An
+ * entry may stand while a type's registration and its timeline row land in
+ * separate tasks of one plan; the outlived-gap guard in eventTypes.test.ts
+ * prunes it the moment the row is there.
  */
 export const OFF_TIMELINE_EVENT_TYPES: OffTimelineEventType[] = [];
 
