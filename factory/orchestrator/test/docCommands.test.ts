@@ -3,7 +3,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REPO_ROOT } from '../src/paths.js';
 import { COMMANDS, flagSpecFor } from '../src/usage.js';
-import { codeSpans, excludedBecause, instructionFiles } from './helpers/instructionSurface.js';
+import {
+  codeSpans,
+  excludedBecause,
+  instructionFiles,
+  trackedFiles,
+} from './helpers/instructionSurface.js';
 
 // ---------------------------------------------------------------------------
 // D-191 says a verb that exists in code but is named in no governing document
@@ -512,5 +517,41 @@ describe('the documented smith commands are the shipped smith commands', () => {
     const read = new Set(surface().map((file) => file.rel));
     for (const rel of ['AGENTS.md', 'docs/specs/black-smith-architecture.md'])
       expect(read.has(rel), `${rel} was not read`).toBe(true);
+  });
+
+  it('reads the documents the repository contains, not whatever is on disk', () => {
+    // The surface was the working tree, so an uncommitted draft joined it: a
+    // spec being written for a future epic failed `docErrorCodes.test.ts` for
+    // whoever had it on disk, naming a path absent from every commit. The
+    // excuse lists are no way out of that. `NOT_ERROR_CODES` and its kind
+    // require an excused token to still appear in a live document, so an entry
+    // covering an untracked file fails on every machine where that file does
+    // not exist -- the guard reports a defect locally or lies globally.
+    //
+    // The index is the line, not `HEAD`: `git add` is what makes a document
+    // part of the repo, and the guard starts holding it to these rules there
+    // rather than a commit later, so a doc and the code it describes are still
+    // checked together in the change that introduces both.
+    const tracked = new Set(['AGENTS.md']);
+    expect(excludedBecause('docs/guide/draft-nobody-committed.md', tracked)).toBe(
+      'not in the repository',
+    );
+    expect(excludedBecause('AGENTS.md', tracked)).toBeUndefined();
+    // The older answers keep their wording. Both paths below are absent from
+    // `tracked`, so an exclusion order that put the new rule first would
+    // relabel runtime state and the records of the past as untracked files and
+    // lose the reason each was excluded for.
+    expect(excludedBecause('state/events/x.md', tracked)).toBe('runtime state');
+    expect(excludedBecause('docs/specs/dogfood-4-findings.md', tracked)).toBe('record of the past');
+
+    // And the rule is live rather than a dormant parameter: git answered, and
+    // nothing on the real surface is a file git does not name.
+    const real = trackedFiles();
+    expect(real?.size ?? 0, 'git ls-files answered with nothing').toBeGreaterThan(400);
+    expect(real?.has('AGENTS.md')).toBe(true);
+    expect(
+      instructionFiles().filter((rel) => !real?.has(rel)),
+      'the instruction surface named a file git does not track',
+    ).toEqual([]);
   });
 });
