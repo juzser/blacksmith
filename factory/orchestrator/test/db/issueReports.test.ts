@@ -4,9 +4,9 @@
 // projected into a queryable `issue_reports` table, and that the roadmap's
 // `error_issues` switch reaches roadmapPage(). AC1 is a regression pin (the
 // type is already on the timeline via the taxonomy's gate_event dimension);
-// AC2-AC6 are fail-first against the null at f97486a.
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+// AC2-AC6 were written fail-first against the migration set that predates
+// this task.
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,6 +16,10 @@ import * as schema from '../../src/db/schema.js';
 import { appendEvent, type EventOpts } from '../../src/events.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
+// The journal index of the migration that creates issue_reports. The
+// pre-change set below is every entry before it, so this stays a
+// discriminating check once later migrations land.
+const ISSUE_REPORTS_MIGRATION_IDX = 12;
 const SESSION_ID = 'sess-issue-reports';
 const EPIC_ID = 'epic-x';
 const TASK_ID = `${EPIC_ID}/task-1`;
@@ -129,8 +133,8 @@ describe('issue-reported / error-report-proposed reach the timeline and the read
 
   // AC3: the storage. Against the shipped migrations (opts.migrationsDir
   // unset — DB_MIGRATIONS_DIR), issue_reports is queryable. Against the
-  // pre-change migrations (a copy of drizzle/ at f97486a, before this task's
-  // migration), the same query fails with SQLite's "no such table".
+  // pre-change migrations (the shipped drizzle/ with this task's migration
+  // withheld), the same query fails with SQLite's "no such table".
   it('is queryable against the shipped migrations, and fails "no such table" against the pre-change set', async () => {
     const dbPath = path.join(dbDir, 'smith.db');
     await rebuild(dbPath, 'all', { stateDir });
@@ -139,16 +143,32 @@ describe('issue-reported / error-report-proposed reach the timeline and the read
     handle.sqlite.close();
     expect(rows).toEqual([]);
 
+    // Build the pre-change set from the working tree, never from a git
+    // revision: the commit this task branched from is not an ancestor of main,
+    // and CI clones one commit deep, so `git archive <sha>` there dies with
+    // "not a valid object name" and takes the whole gate with it.
     const preChangeDir = await mkdtemp(path.join(tmpdir(), 'smith-issue-reports-premigrations-'));
     try {
-      // git archive writes a tar stream; unpack it directly into preChangeDir.
-      const tar = execFileSync('git', ['archive', 'f97486a', 'factory/orchestrator/drizzle'], {
-        cwd: REPO_ROOT,
-      });
-      execFileSync('tar', ['-x', '-C', preChangeDir], { input: tar });
+      const shippedDir = path.join(REPO_ROOT, 'factory/orchestrator/drizzle');
+      const preMigrationsDir = path.join(preChangeDir, 'drizzle');
+      await mkdir(path.join(preMigrationsDir, 'meta'), { recursive: true });
+      const shipped = JSON.parse(
+        await readFile(path.join(shippedDir, 'meta/_journal.json'), 'utf8'),
+      ) as { entries: Array<{ idx: number; tag: string }> };
+      const kept = shipped.entries.filter((e) => e.idx < ISSUE_REPORTS_MIGRATION_IDX);
+      expect(kept).toHaveLength(ISSUE_REPORTS_MIGRATION_IDX);
+      await writeFile(
+        path.join(preMigrationsDir, 'meta/_journal.json'),
+        JSON.stringify({ ...shipped, entries: kept }),
+      );
+      for (const entry of kept) {
+        await copyFile(
+          path.join(shippedDir, `${entry.tag}.sql`),
+          path.join(preMigrationsDir, `${entry.tag}.sql`),
+        );
+      }
 
       const preDbPath = path.join(dbDir, 'pre-change.db');
-      const preMigrationsDir = path.join(preChangeDir, 'factory/orchestrator/drizzle');
       const preHandle = openDb(preDbPath, { migrationsDir: preMigrationsDir });
       let thrown: unknown;
       try {
