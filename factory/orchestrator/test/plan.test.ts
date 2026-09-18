@@ -127,6 +127,100 @@ describe('plan.ts', () => {
       expect(validatePlan(plan).valid).toBe(true);
     });
 
+    describe('keeps_exports', () => {
+      function planWith(overrides: Record<string, unknown>): PlanFile {
+        return {
+          epic_id: 'epic-1',
+          version: 1,
+          status: 'active',
+          tasks: [task(overrides)],
+          edges: [],
+        };
+      }
+
+      it('accepts a promise on a file one of the task’s claims covers', () => {
+        const result = validatePlan(
+          planWith({ claims: ['src/foo/**'], keeps_exports: ['src/foo/api.ts'] }),
+        );
+        expect(result).toEqual({ valid: true });
+      });
+
+      it('rejects a promise written as a pattern: a promise names one file', () => {
+        const result = validatePlan(
+          planWith({ claims: ['src/foo/**'], keeps_exports: ['src/foo/*.ts'] }),
+        );
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toContainEqual({
+            path: '/tasks/epic-1/task-1/keeps_exports/0',
+            message: expect.stringContaining('names one file, not a pattern'),
+          });
+        }
+      });
+
+      it('rejects a promise on a file outside the task’s claims, at the entry’s own path', () => {
+        // A task can only keep the exports of a file it is allowed to edit;
+        // a promise on someone else's file is a promise nobody can verify
+        // against this task's diff.
+        const result = validatePlan(
+          planWith({
+            claims: ['src/foo/**'],
+            keeps_exports: ['src/foo/api.ts', 'src/bar/api.ts'],
+          }),
+        );
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toContainEqual({
+            path: '/tasks/epic-1/task-1/keeps_exports/1',
+            message: expect.stringMatching(/src\/bar\/api\.ts.*lies outside the task's claims/),
+          });
+          expect(result.errors.map((e) => e.path)).not.toContain(
+            '/tasks/epic-1/task-1/keeps_exports/0',
+          );
+        }
+      });
+
+      it('rejects a file listed twice', () => {
+        const result = validatePlan(
+          planWith({ claims: ['src/foo/**'], keeps_exports: ['src/foo/api.ts', 'src/foo/api.ts'] }),
+        );
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toContainEqual({
+            path: '/tasks/epic-1/task-1/keeps_exports/1',
+            message: expect.stringContaining('listed twice'),
+          });
+        }
+      });
+
+      it('names an empty string as the defect, not as a file outside the claims', () => {
+        const result = validatePlan(planWith({ claims: ['src/foo/**'], keeps_exports: [''] }));
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toContainEqual({
+            path: '/tasks/epic-1/task-1/keeps_exports/0',
+            message: expect.stringContaining('an empty string'),
+          });
+          expect(result.errors.some((e) => e.message.includes('outside'))).toBe(false);
+        }
+      });
+
+      it('reports a promise list that is not a list of strings once, at the field', () => {
+        const result = validatePlan(planWith({ keeps_exports: 'src/foo/api.ts' }));
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          const atField = result.errors.filter(
+            (e) => e.path === '/tasks/epic-1/task-1/keeps_exports',
+          );
+          expect(atField).toHaveLength(1);
+        }
+      });
+
+      it('accepts a plan without the field, which is every plan written before it', () => {
+        expect(validatePlan(planWith({}))).toEqual({ valid: true });
+      });
+    });
+
     it('reports schema-invalid tasks without throwing', () => {
       const plan: PlanFile = {
         epic_id: 'epic-1',

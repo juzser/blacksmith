@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "eba463c8-16d6-4650-a93e-bee1742b2062",
+  "id": "3079904c-8fd8-4999-a4b1-e3d07a48f496",
   "prevId": "0017549b-a633-403a-a618-f5990bae4317",
   "tables": {
     "agents": {
@@ -910,6 +910,28 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "finding_scope": {
+          "name": "finding_scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'diff'"
+        },
+        "spec_plan_version": {
+          "name": "spec_plan_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "criterion_ref": {
+          "name": "criterion_ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -952,129 +974,6 @@
           "name": "findings_project_idx",
           "columns": [
             "project"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "issue_reports": {
-      "name": "issue_reports",
-      "columns": {
-        "event_id": {
-          "name": "event_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "ts": {
-          "name": "ts",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "task_ref": {
-          "name": "task_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "error_class": {
-          "name": "error_class",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "fingerprint": {
-          "name": "fingerprint",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "issue_url": {
-          "name": "issue_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "latest_event_id": {
-          "name": "latest_event_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "outcome": {
-          "name": "outcome",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "repo_slug": {
-          "name": "repo_slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "project": {
-          "name": "project",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "issue_reports_session_idx": {
-          "name": "issue_reports_session_idx",
-          "columns": [
-            "session_id"
-          ],
-          "isUnique": false
-        },
-        "issue_reports_fingerprint_idx": {
-          "name": "issue_reports_fingerprint_idx",
-          "columns": [
-            "fingerprint"
-          ],
-          "isUnique": false
-        },
-        "issue_reports_outcome_idx": {
-          "name": "issue_reports_outcome_idx",
-          "columns": [
-            "outcome"
           ],
           "isUnique": false
         }
@@ -1289,14 +1188,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'factory'"
-        },
-        "error_issues": {
-          "name": "error_issues",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
         }
       },
       "indexes": {

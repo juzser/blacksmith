@@ -39,6 +39,7 @@ import {
   loadWorktreePolicy,
   type ProposedWaveTask,
   postRunCheck,
+  readClaimList,
   validateWave,
   type WaveTask,
   writeRootCheck,
@@ -64,6 +65,7 @@ import {
   appendEvent,
   type EventOpts,
   filterEvents,
+  followEvents,
   listSessionIds,
   mergeSessionLogs,
   readEvents,
@@ -91,6 +93,12 @@ import {
 } from './findings.js';
 import type { CommandResult } from './gh.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
+import {
+  loadHarnessPolicy,
+  type ModelTier,
+  planWorkerTurn,
+  summarizeHarnesses,
+} from './harness.js';
 import { decideHookPayload } from './hookDecision.js';
 import {
   checkWorktreeImmutable,
@@ -111,6 +119,7 @@ import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import {
   DOTENV_PATH,
   LESSONS_MD_PATH,
+  lessonsReadPath,
   REPO_ROOT,
   SANDBOX_LEASE_DIR,
   STATE_DB_PATH,
@@ -197,6 +206,7 @@ import {
   type WaveBudgetCheck,
 } from './waveBudget.js';
 import { computeNextWave, liveWaveTasks, type NextWaveInput } from './waveNext.js';
+import { initWorkRoot } from './workroot.js';
 import {
   createTaskWorktree,
   listStale,
@@ -367,11 +377,16 @@ const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_byte
  * reachable by typo.
  */
 function judgeBudgetFromFlags(flags: Record<string, string>): JudgeBudget {
+  // No default for max_output_tokens: the ceiling is per model, and an unset
+  // field lets the provider's policy entry (crosscheck.yml max_tokens) or the
+  // model's own default apply.
+  const maxOutputTokens = boundedIntFlag(flags, 'max-output-tokens', { min: 1 });
   return {
     timeout_ms: boundedIntFlag(flags, 'timeout-ms', { min: 1 }) ?? DEFAULT_JUDGE_BUDGET.timeout_ms,
     max_output_bytes:
       boundedIntFlag(flags, 'max-output-bytes', { min: 1 }) ??
       DEFAULT_JUDGE_BUDGET.max_output_bytes,
+    ...(maxOutputTokens === undefined ? {} : { max_output_tokens: maxOutputTokens }),
   };
 }
 
@@ -1196,7 +1211,15 @@ async function main(): Promise<number> {
     // Critique-only (planQuorum.ts module header): exit 0 means nothing
     // needs the operator (no trigger fired, or endorsed); exit 1 means the
     // operator must look (critiqued or escalated) before approving the plan.
-    const epicId = requireFlag(flags, 'epic');
+    //
+    // FD-45: the plan may arrive by path. plan.md critiques at step 4 and
+    // files plan-v<n>.json at step 6, so at the moment this verb runs the plan
+    // is a draft with no versioned file to read; `--plan` hands over the
+    // draft itself and `--epic` then defaults to the draft's own epic_id (an
+    // explicit `--epic` must agree -- runPlanQuorum refuses one that does
+    // not). Without `--plan` the verb reads the filed version as before.
+    const draft = flags.plan ? readJsonFile<PlanFile>(flags.plan) : undefined;
+    const epicId = draft && flags.epic === undefined ? draft.epic_id : requireFlag(flags, 'epic');
     // Required for this verb, unlike the shared envelope where it defaults to
     // 1: a quorum is a critique of one specific plan version.
     requireFlag(flags, 'plan-version');
@@ -1236,11 +1259,24 @@ async function main(): Promise<number> {
     // back, neither number can be trusted. One read, one number.
     const version = ctx.planVersion;
     const outcome = await runPlanQuorum(
-      { epicId, version, ...(plannerConfidence !== undefined ? { plannerConfidence } : {}) },
+      {
+        epicId,
+        version,
+        ...(draft ? { plan: draft } : {}),
+        ...(plannerConfidence !== undefined ? { plannerConfidence } : {}),
+        planOpts: planOptsFromFlags(flags),
+      },
       ctx,
       eventOptsFromFlags(flags),
     );
     printJson(outcome);
+    // FD-49: the outcome is a few rationales of several kB each, and the
+    // playbook reads it back more often than a terminal does. Same idiom as
+    // `lessons compile --out`: write it where told, still print it.
+    if (flags.out) {
+      mkdirSync(path.dirname(flags.out), { recursive: true });
+      writeFileSync(flags.out, `${JSON.stringify(outcome, null, 2)}\n`, 'utf8');
+    }
     return outcome.outcome === 'endorsed' ? 0 : 1;
   }
 
@@ -1467,13 +1503,18 @@ async function main(): Promise<number> {
     // as "disjoint from everyone" — the answer that admits the wave. The shape
     // is that function's to judge, once, where the comparison happens.
     const claimsById = new Map<string, unknown>(logged.map((t) => [t.taskId, t.claims]));
+    // A keeps_exports promise lives on the plan record alone: the log carries
+    // claims, and a promise the plan never made is not one this verb honours.
+    const promisesById = new Map<string, unknown>();
     for (const t of plan.tasks) {
       claimsById.set(t.task_id, t.claims);
+      if (t.keeps_exports !== undefined) promisesById.set(t.task_id, t.keeps_exports);
     }
-    const tasks: ProposedWaveTask[] = taskIds.map((id) => ({
-      task_id: id,
-      claims: claimsById.get(id),
-    }));
+    const tasks: ProposedWaveTask[] = taskIds.map((id) =>
+      promisesById.has(id)
+        ? { task_id: id, claims: claimsById.get(id), keeps_exports: promisesById.get(id) }
+        : { task_id: id, claims: claimsById.get(id) },
+    );
     const policy = loadWorktreePolicy();
     // D-212: the plan has been in hand since the top of this verb, and it is
     // the register that says which of these tasks may not run beside which.
@@ -1616,6 +1657,24 @@ async function main(): Promise<number> {
     );
     printJson(summary);
     return summary.exitCode;
+  }
+
+  if (namespace === 'init') {
+    // The first command an operator who installed the package runs, and the
+    // only one that exists because installing is not cloning.
+    //
+    // A clone already IS the work root, so this does nothing there and says
+    // so. An install splits in two: the package under node_modules, which the
+    // next `npm i` replaces wholesale, and `.blacksmith/` in the operator's
+    // own repository, which it must not. This creates the second and copies
+    // the files meant to be edited into it — because an answer typed into a
+    // file inside node_modules survives exactly until the first upgrade.
+    const report = initWorkRoot(flags['work-root'] ? { workRoot: flags['work-root'] } : {});
+    printJson(report);
+    // A default that did not ship is a packaging defect, not an operator
+    // error: report it as red rather than leaving them to notice later that
+    // the questionnaire they were told to answer is not there.
+    return report.files.some((file) => file.status === 'missing-default') ? 1 : 0;
   }
 
   if (namespace === 'new') {
@@ -1834,11 +1893,23 @@ async function main(): Promise<number> {
     process.once('SIGTERM', requestStop);
     process.once('SIGINT', requestStop);
 
-    const reports = await runDaemon({
+    // The loop prints as it goes and `--once` prints as it ends, and the two
+    // are different shapes on purpose. A loop that only answered when it
+    // ended answered nothing -- the foreground form was silent for as long as
+    // it ran, and the detached one wrote a `daemon.log` with nothing in it.
+    // One record per tick is what a log is; one record per run is what cron
+    // wants to parse, and `--once` keeps the shape it has always had.
+    const once = flags.once === 'true';
+    // `smith daemon run | head -1` closes the pipe under the second tick.
+    // That is the reader saying "enough", not a failure worth an error line
+    // -- and not one worth an uncaught exception that skips the lock release.
+    process.stdout.on('error', requestStop);
+
+    const run = await runDaemon({
       dir,
       intervalSeconds: interval,
       ...tickOpts,
-      ...(flags.once === 'true' ? { once: true } : {}),
+      ...(once ? { once: true } : { onTick: printJson }),
       shouldContinue: () => !stopping,
       sleep: (ms: number) =>
         new Promise<void>((resolve) => {
@@ -1853,8 +1924,7 @@ async function main(): Promise<number> {
           };
         }),
     });
-    const last = reports[reports.length - 1];
-    printJson({ ticks: reports.length, dir, ...(last === undefined ? {} : { last }) });
+    printJson({ ticks: run.ticks, dir, ...(once && run.last !== null ? { last: run.last } : {}) });
     return 0;
   }
 
@@ -2285,9 +2355,61 @@ async function main(): Promise<number> {
     // last n events of a concatenation are the last n of the LAST session, so
     // an operator resuming an epic saw its newest events padded with nothing
     // from before the split. Now `--lineage` tails the epic in time order.
-    let events = flags.lineage
-      ? (await readLineageEvents(sessionId, opts)).slice(-n)
-      : await tailEvents(sessionId, n, opts);
+    const scope = async (): Promise<StoredEvent[]> =>
+      flags.lineage ? readLineageEvents(sessionId, opts) : readEvents(sessionId, opts);
+
+    if (flags.follow === 'true') {
+      // A stream is not an array, so `--follow` prints one event per line --
+      // the backlog included. A reader can pipe that into `jq -c` or `grep`
+      // from the first event, rather than waiting on a closing bracket that
+      // by definition never comes.
+      const start = await scope();
+      let backlog = start.slice(-n);
+      if (flags.task) backlog = filterEvents(backlog, { taskId: flags.task });
+      for (const event of backlog) printJson(event);
+
+      // The interrupt has to reach the sleep, not just the flag -- `daemon
+      // run` below wires the same pair for the same reason. An operator who
+      // hits ^C and then waits out an interval reaches for `kill -9`.
+      let stopping = false;
+      let wake: (() => void) | null = null;
+      const requestStop = (): void => {
+        stopping = true;
+        wake?.();
+      };
+      process.once('SIGINT', requestStop);
+      process.once('SIGTERM', requestStop);
+      // `smith event tail --follow | head -5` closes the pipe under us. That
+      // is the reader saying "enough", not a failure worth an error line. We
+      // only hear it on the next write, the way `tail -f` does: a quiet log
+      // keeps an orphaned follower polling until something lands in it.
+      process.stdout.on('error', requestStop);
+
+      await followEvents({
+        seen: start.map((event) => event.event_id),
+        read: async () => {
+          const fresh = await scope();
+          return flags.task ? filterEvents(fresh, { taskId: flags.task }) : fresh;
+        },
+        emit: printJson,
+        shouldContinue: () => !stopping,
+        sleep: (ms: number) =>
+          new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              wake = null;
+              resolve();
+            }, ms);
+            wake = () => {
+              clearTimeout(timer);
+              wake = null;
+              resolve();
+            };
+          }),
+      });
+      return 0;
+    }
+
+    let events = flags.lineage ? (await scope()).slice(-n) : await tailEvents(sessionId, n, opts);
     if (flags.task) events = filterEvents(events, { taskId: flags.task });
     printJson(events);
     return 0;
@@ -2451,18 +2573,20 @@ async function main(): Promise<number> {
           { plan: plan.epic_id },
         );
       }
-      const claimsById = new Map(plan.tasks.map((task) => [task.task_id, task.claims]));
+      const recordsById = new Map(plan.tasks.map((task) => [task.task_id, task]));
+      // Claims and keeps_exports are read through the one door validateWave
+      // uses (claims.ts readClaimList), so a promise that is not a list of file
+      // paths is refused here with the same code it would earn at admission.
       const tasks: WaveTask[] = positional.map((typed) => {
         const id = resolveTaskId(plan, typed);
-        const claims = claimsById.get(id);
-        if (!Array.isArray(claims) || claims.some((claim) => typeof claim !== 'string')) {
-          throw new SmithError(
-            'claims.unreadable-claims',
-            `Task "${id}" does not declare its claims as a list of globs.`,
-            { task_id: id, received: claims === undefined ? 'undefined' : typeof claims },
-          );
-        }
-        return { task_id: id, claims };
+        const record = recordsById.get(id);
+        const claims = record?.claims;
+        const keeps = record?.keeps_exports;
+        return readClaimList(
+          keeps === undefined
+            ? { task_id: id, claims }
+            : { task_id: id, claims, keeps_exports: keeps },
+        );
       });
       // The declarations are read off the checkout, not off the plan: a claim
       // says which files a task may write, and only the tree says what those
@@ -2482,7 +2606,7 @@ async function main(): Promise<number> {
     // the diff this task committed, and everyone in the repo who imports it.
     const diffs = collectExportDiffs(worktreeDir, collectCommittedChanges(worktreeDir));
     const graph = buildSymbolGraph(collectSources(worktreeDir));
-    const report = exportImpact(graph, diffs, spec.claims);
+    const report = exportImpact(graph, diffs, spec.claims, spec.keeps_exports ?? []);
     printJson(report);
     return report.ok ? 0 : 1;
   }
@@ -2589,6 +2713,44 @@ async function main(): Promise<number> {
       return 0;
     }
     printJson({ sandboxes: listSandboxes(leaseDir) });
+    return 0;
+  }
+
+  // The worker-harness port. `sandbox` above governs what a judge may do once
+  // a turn is running; these two answer the question one step earlier — what
+  // runs the turn at all. Until now the answer was implicit in deployment: the
+  // orchestrator is a Claude Code session, so the only thing it could start
+  // was another one, and no dispatch anywhere recorded that.
+  //
+  // `plan` renders an invocation and returns it. It does not start it —
+  // architecture §18 rule 3: `smith` observes, and an observer that could
+  // dispatch would end up reading its own output back as evidence that a turn
+  // happened. The caller starts the process this prints.
+  //
+  // No `--policy` means factory/policies/harness.yml, the shipped policy
+  // (paths.ts's HARNESS_POLICY_PATH) — three harnesses as of this writing,
+  // `claude-code` still the default. `--policy <file>` overrides it, same
+  // shape `stack show` uses.
+  if (namespace === 'harness' && action === 'list') {
+    printJson(summarizeHarnesses({ policy: loadHarnessPolicy(flags.policy) }));
+    return 0;
+  }
+
+  if (namespace === 'harness' && action === 'plan') {
+    const tier = flags.tier as ModelTier | undefined;
+    const invocation = planWorkerTurn(
+      {
+        harness: flags.harness,
+        role: requireFlag(flags, 'role'),
+        taskId: requireFlag(flags, 'task'),
+        promptFile: requireFlag(flags, 'prompt-file'),
+        worktree: flags.worktree ?? null,
+        ...(tier !== undefined ? { tier } : {}),
+        ...(flags.schema !== undefined ? { schema: flags.schema } : {}),
+      },
+      { policy: loadHarnessPolicy(flags.policy) },
+    );
+    printJson(invocation);
     return 0;
   }
 
@@ -2736,11 +2898,18 @@ async function main(): Promise<number> {
     // blocking the gate on a judge that had just handed in its evidence. One
     // close per role: a judge that splits its findings across two files still
     // owes one turn, and a second report against it would be a duplicate.
+    //
+    // FD-1 (csb-audit-1): `--grader` is the same hand-over for the grader. Its
+    // verdict document is not a findings list, so until `judge report` learned
+    // the shape the grader's turn stayed open with its verdict on the command
+    // line, and the gate blocked on the judge it was about to read.
     const evidenceGiven = evidenceSources(args);
-    if (evidenceGiven.length > 0) {
+    const graderGiven = flags.grader ? [{ foundBy: 'grader', file: flags.grader }] : [];
+    const handedIn = [...evidenceGiven, ...graderGiven];
+    if (handedIn.length > 0) {
       const turns = await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags));
       const closed = new Set<string>();
-      for (const { foundBy, file } of evidenceGiven) {
+      for (const { foundBy, file } of handedIn) {
         if (closed.has(foundBy)) continue;
         if (!turns.some((t) => t.role === foundBy && !t.reported)) continue;
         closed.add(foundBy);
@@ -2874,7 +3043,7 @@ async function main(): Promise<number> {
     // a different number, and the half it drops is the earlier one — the half
     // that holds the first occurrence every repeat is counted against.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
-    const lessons = parseLessons(readFileSync(flags.lessons ?? LESSONS_MD_PATH, 'utf8'));
+    const lessons = parseLessons(readFileSync(flags.lessons ?? lessonsReadPath(), 'utf8'));
     const report = checkSameMistakeKpi(events, lessons, { sessionId });
     printJson(report);
     return report.ok ? 0 : 1;
@@ -3454,7 +3623,13 @@ async function main(): Promise<number> {
     const { lessonsPage } = await import('./db/queries.js');
     const { compileLessons } = await import('./lessons.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
+    // The operator's copy, not the package's: under an install the shipped one
+    // lives in node_modules, which the next `npm i` replaces wholesale. mkdir
+    // because nothing has necessarily written under factory/ in the work root
+    // before -- `smith init` seeds the two files the operator edits by hand,
+    // and this one is not among them.
     const outPath = flags.out ?? LESSONS_MD_PATH;
+    mkdirSync(path.dirname(outPath), { recursive: true });
     const handle = openDb(dbPath);
     try {
       const scope = flags.session ? { sessionId: flags.session } : {};
@@ -3511,7 +3686,7 @@ async function main(): Promise<number> {
     // question is whether an entry has EVER fired, and a session-scoped read
     // answers "not in this half of the epic" while printing `retire`.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
-    const lessons = parseLessons(readFileSync(flags.lessons ?? LESSONS_MD_PATH, 'utf8'));
+    const lessons = parseLessons(readFileSync(flags.lessons ?? lessonsReadPath(), 'utf8'));
     const report = auditLessons(events, lessons, { sessionId });
     printJson(report);
     return report.ok ? 0 : 1;

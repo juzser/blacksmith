@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { SmithError } from './errors.js';
-import { STATE_ARTIFACTS_DIR } from './paths.js';
+import { STATE_ARTIFACTS_DIR, WORK_ROOT } from './paths.js';
 
 /**
  * One entry of `result.artifacts`, as `result.schema.json` types it. The schema
@@ -50,6 +50,12 @@ export interface ArtifactCheckOpts {
   taskId: string;
   /** Injection seam for tests; production is `state/artifacts`. */
   artifactsDir?: string;
+  /**
+   * The directory `state/artifacts/<task-id>/` is spelled from — what a
+   * declaration that names its own home is relative to. Injection seam for
+   * tests; production is the work root.
+   */
+  workRoot?: string;
 }
 
 /**
@@ -98,6 +104,32 @@ function realOf(p: string): string {
   }
 }
 
+/**
+ * How the home is spelled from the work root — `state/artifacts/<task-id>` in
+ * production — or null when it does not sit under that root at all, in which
+ * case no relative declaration can be naming it.
+ */
+function spellingFromWorkRoot(home: string, workRoot: string): string | null {
+  const rel = path.relative(path.resolve(workRoot), home);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return rel;
+}
+
+/**
+ * The declared path with the home's own spelling stripped off, when it starts
+ * with one: `state/artifacts/<task-id>/round2.txt` becomes `round2.txt`, and
+ * the bare spelling becomes `''`, which is the home itself and reports as
+ * `no-path`. Anything else — an absolute path, a plain filename, another
+ * task's home — is handed back as written.
+ */
+function withinHome(declared: string, homeSpelling: string | null): string {
+  if (homeSpelling === null || path.isAbsolute(declared)) return declared;
+  const normalized = path.normalize(declared);
+  if (normalized === homeSpelling) return '';
+  const prefix = homeSpelling + path.sep;
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : declared;
+}
+
 /** True when `child` is `root` itself or lives beneath it. */
 function contains(root: string, child: string): boolean {
   if (child === root) return true;
@@ -108,7 +140,11 @@ function contains(root: string, child: string): boolean {
 /**
  * Check every path a result declares as evidence. Relative paths resolve
  * against the task's home, so `coverage.txt` means the obvious thing and the
- * short spelling is also the correct one.
+ * short spelling is also the correct one. A path that already begins with the
+ * home's own spelling from the work root — `state/artifacts/<task-id>/x` — is
+ * read as that spelling, not as a subtree of the home: the template says
+ * "under `state/artifacts/<task-id>/`", a coder wrote exactly that, and the
+ * doubled path came back `missing` for a file that existed (FD-5).
  *
  * Two properties, in this order. Inside the home first: a path in the wrong
  * place is wrong whether or not the file happens to be there today, and saying
@@ -143,9 +179,10 @@ export function checkArtifacts(
   const realHome = existsSync(home) ? realOf(home) : home;
   const expectedHome = existsSync(home) ? homeUnder(realOf(root), opts.taskId) : home;
   const homeEscaped = realHome !== expectedHome;
+  const homeSpelling = spellingFromWorkRoot(home, opts.workRoot ?? WORK_ROOT);
 
   for (const decl of artifacts) {
-    const resolved = path.resolve(home, decl.path);
+    const resolved = path.resolve(home, withinHome(decl.path, homeSpelling));
     if (resolved === home) {
       issues.push({ declared: decl.path, resolved, problem: 'no-path' });
       continue;
@@ -155,7 +192,7 @@ export function checkArtifacts(
       continue;
     }
     if (homeEscaped) {
-      const real = path.resolve(realHome, decl.path);
+      const real = path.resolve(realHome, withinHome(decl.path, homeSpelling));
       issues.push({ declared: decl.path, resolved: real, problem: 'outside-home' });
       continue;
     }

@@ -171,12 +171,12 @@ describe('issue-reported / error-report-proposed reach the timeline and the read
     const journal = JSON.parse(await readFile(journalPath, 'utf8')) as {
       entries: Array<{ idx: number; tag: string }>;
     };
-    expect(journal.entries.length).toBe(12);
+    expect(journal.entries.length).toBe(13);
     const last = journal.entries[journal.entries.length - 1];
-    expect(last?.idx).toBe(11);
+    expect(last?.idx).toBe(12);
 
     const files = await readdir(path.join(REPO_ROOT, 'factory/orchestrator/drizzle'));
-    const newSql = files.find((f) => f.startsWith('0011_') && f.endsWith('.sql'));
+    const newSql = files.find((f) => f.startsWith('0012_') && f.endsWith('.sql'));
     expect(newSql).toBeDefined();
     expect(last?.tag).toBe(newSql?.replace(/\.sql$/, ''));
   });

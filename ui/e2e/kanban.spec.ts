@@ -80,6 +80,7 @@ test.describe('Kanban', () => {
       title: taskId,
       agentRole: null,
       agentModelTier: null,
+      agentActivity: null,
       milestoneId: null,
       tags: { case: null, origin: null, severity: null },
     });
@@ -116,6 +117,7 @@ test.describe('Kanban', () => {
                 title: 'replaced',
                 agentRole: null,
                 agentModelTier: null,
+                agentActivity: null,
                 milestoneId: null,
                 tags: { case: null, origin: null, severity: null },
               },
@@ -148,16 +150,27 @@ test.describe('Kanban', () => {
 
   // The one capture whose subject is a failure, so it cannot wait on a data
   // marker the way the rest do (see helpers.ts / D-150): in the state it
-  // documents, no data is coming. `networkidle` is the equivalent gate here —
-  // every fetch has settled, the aborted one included — so the PNG shows the
-  // page's decision rather than a race with it.
+  // documents, no data is coming. The gate is therefore the aborted request
+  // itself — armed before goto(), awaited after — so the PNG shows the page's
+  // decision rather than a race with it.
+  //
+  // This used to be `waitForLoadState('networkidle')`, and the change stream
+  // (design-spec.md's 2026-09-15 addendum to §8) ended that: `/api/stream` is
+  // a response that never completes, so the network is never idle and the
+  // wait could only ever time out. Waiting on the specific request whose
+  // failure this screenshot is about is strictly more precise than waiting
+  // for every request on the page to settle — it was always the one that
+  // mattered, and networkidle was the loose approximation of it.
   test('screenshot epic list unavailable', async ({ page }) => {
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.desktop);
     await page.route('**/api/overview*', (route) => route.abort('failed'));
+    const aborted = page.waitForEvent('requestfailed', (req) =>
+      req.url().includes('/api/overview'),
+    );
     await page.goto('/kanban');
     await expect(page.locator('h1')).toHaveText('Kanban');
-    await page.waitForLoadState('networkidle');
+    await aborted;
     await page.waitForTimeout(150);
     await shoot(page, 'kanban-epics-unavailable-desktop-light');
   });

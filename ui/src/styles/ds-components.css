@@ -1336,6 +1336,25 @@ a.live-agent-entry:focus-visible {
   max-width: 26ch;
   text-overflow: ellipsis;
 }
+/* The projection-incomplete notice (lib/projectionIssues.ts). A Banner with
+   the topbar's side padding and no radius on the top edge, so it reads as
+   part of the frame rather than a card that floats over the page. Each line
+   is a server message that names a log path or an event id: monospace, and
+   allowed to wrap, because the path is the part the operator needs to read. */
+.app-projection {
+  flex-shrink: 0;
+  margin: 0 var(--ds-space-4);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.app-projection__lines {
+  margin: var(--ds-space-1) 0 0;
+  padding-left: var(--ds-space-4);
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading-xs);
+  overflow-wrap: anywhere;
+}
 .app-scroll {
   flex: 1;
   min-height: 0;
@@ -1537,6 +1556,13 @@ a.live-agent-entry:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ds-space-1);
+}
+
+/* Cross-provider UI check of 2026-09-14, fix (n): the agent chip on a task
+   nobody is on any more names who did the work, and sits back so it cannot
+   be read as someone still there. Same value as a disabled side item. */
+.kanban-card__agent--gone {
+  opacity: 0.55;
 }
 
 /* --- Raw form elements (disclosed simplification, DESIGN.md's primitive

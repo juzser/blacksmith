@@ -89,12 +89,33 @@ describe('foldTasks — task id normalisation', () => {
     const events = [
       event({
         event_id: 'e1',
-        event_type: 'dispatch_decision',
+        event_type: 'task-added',
         task_id: 'epic-4/task-7',
         ts: '2026-08-01T00:00:00.000Z',
       }),
+      event({
+        event_id: 'e2',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-4/task-7',
+        ts: '2026-08-01T00:01:00.000Z',
+      }),
     ];
     expect(foldTasks(events)[0]).toMatchObject({ taskId: 'epic-4/task-7', epicId: 'epic-4' });
+  });
+
+  it('never mints a row from a dispatch alone', () => {
+    // A dispatch says where an agent was pointed; a task is what some other
+    // event asserts. The hand-run planning rounds that stamped `plan-r12` on
+    // their dispatches made twenty-two cards out of nothing this way.
+    const events = [
+      event({
+        event_id: 'e1',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-4/plan-r12',
+        ts: '2026-08-01T00:00:00.000Z',
+      }),
+    ];
+    expect(foldTasks(events)).toEqual([]);
   });
 
   it('leaves a bare id alone when two epics both claim it', () => {

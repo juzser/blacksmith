@@ -186,16 +186,16 @@ new plan version → operator — never unbounded replanning loops (§12).
 
 ## 4. Model tiering
 
-| Tier | Agents | Model | Rationale |
+| Tier | Agents | Model (Claude Code; `model_tier` in parentheses) | Rationale |
 |---|---|---|---|
-| Plan/verdict | planner | fable / opus | deepest reasoning; writes the contracts |
-| Build | coder, tester, researcher, uiux, merger | sonnet | code-capable, cheap enough to fan out |
-| Judge | reviewer, verifier, grader, spec-reviewer, security-reviewer | sonnet (effort high) + cross-provider (§6) | independence matters more than size; spec-reviewer never runs on the planner's model; security-reviewer dispatches conditionally (§11) |
-| Mechanical | scribe, log summarizer | haiku | format/extract/summarize only |
+| Plan/verdict | planner | fable / opus (frontier) | deepest reasoning; writes the contracts |
+| Build | coder, tester, researcher, uiux, merger | sonnet (mid) | code-capable, cheap enough to fan out |
+| Judge | reviewer, verifier, grader, spec-reviewer, security-reviewer | sonnet (effort high) + cross-provider (§6) (mid) | independence matters more than size; spec-reviewer never runs on the planner's model; security-reviewer dispatches conditionally (§11) |
+| Mechanical | scribe, log summarizer | haiku (small) | format/extract/summarize only |
 
 Model is set in template frontmatter; the factory may override per-dispatch
-(e.g. escalate a coder to opus after two failed rounds on the same task —
-"escalation ladder" policy in `budgets.yml`).
+(e.g. escalate a coder from mid to frontier after two failed rounds on the
+same task — "escalation ladder" policy in `budgets.yml`).
 
 ## 5. Worktree partitioning (no overlap, no conflicts)
 
@@ -212,7 +212,10 @@ merge time.**
    never split across concurrent tasks — they become serialization points
    (single owner or merge-queue-regenerated). The factory validates that
    concurrently scheduled tasks have **disjoint claim sets**; overlapping
-   tasks get a dependency edge and run serially instead. Claims are enforced
+   tasks get a dependency edge and run serially instead. A task that only
+   adds to a file another concurrent task imports from may instead declare
+   the file in `keeps_exports`, a promise the wave gate admits pre-run and
+   `claims impact` verifies against the diff post-run. Claims are enforced
    at runtime: a post-run check diffs the worktree against its claims;
    out-of-claim edits fail the gate (error `contract.claim-violation`) and
    bounce back to the coder.
@@ -299,7 +302,9 @@ JSON per schema), so any model that can honor the contract can serve.
   to the reviewer — cross-*session* diversity). The provider seam exists from
   day one so adding Codex/DeepSeek is config + adapter, not a redesign.
 - **Trust boundary.** External providers judge; they never gain write access
-  to worktrees or the factory. Their findings are data, not commands.
+  to worktrees or the factory. Their findings are data, not commands. The
+  same boundary is what §19's worker-harness port refuses to cross: a harness
+  that runs a separate program gets a judge's prompt and no worktree path.
 - **Phase 8 (built): transport + shadow mode.** `factory/orchestrator/src/
   providers/` implements the adapter layer — Codex over a CLI transport
   (`codex exec` headless, ChatGPT-subscription auth) and DeepSeek over an
@@ -1184,3 +1189,175 @@ they justify.
   (successor to Overstory); GitHub native stacked PRs (public preview
   2026-07-30); Cloudflare Workflows V2 + Dynamic Workflows (runtime-defined
   durable graphs).
+
+---
+
+## 18. Load-bearing rules
+
+Every rule below is already true of the code. What this section adds is the
+consequence: each one is **load-bearing**, meaning a change that violates it
+does not degrade the factory, it invalidates a claim the factory makes about
+itself. Each rule names the file that breaks and what it starts lying about.
+
+A reader deciding whether a change is safe reads this list first. A reviewer
+who finds a diff that crosses one of these lines treats it as
+`S1-stop-the-line` regardless of how small the diff is, because the damage is
+not in the diff — it is in every verdict the factory issued afterwards.
+
+1. **Events are the source of truth; projections are caches.**
+   `db/projector.ts` is the only writer of the tables in `db/schema.ts`, and
+   `rebuild()` replays every log from scratch to the same rows. *Breaks:* any
+   state that is written to the projection and not derivable from
+   `state/events/*.jsonl` is a fact with no provenance — `smith stats`,
+   the dashboard and the gate would each be entitled to a different answer,
+   and no replay could settle which was right.
+
+2. **Status is derived at read time, never stored as status.**
+   A projection may cache a *fold*, never a *judgement*. `agents-registry.ts`
+   folds `(task_id, agent_role)` into live/abandoned at read; `daemon.ts`
+   re-uses that fold rather than keeping its own. *Breaks:* a stored verdict
+   outlives the facts that produced it, so a task fixed at 10:00 still reads
+   `blocked` at 11:00 and an operator schedules work against a corpse.
+
+3. **Nothing that observes may dispatch.**
+   `scheduler.ts` ("never dispatches an agent itself") and `daemon.ts`
+   ("never dispatches an agent, never merges, never writes to a worktree")
+   emit `*-proposed` events for a human or a planner session to act on.
+   *Breaks:* an observer that can act closes its own loop — it proposes work,
+   performs it, then observes its own output as evidence that the work was
+   needed.
+
+4. **A dispatch is written by the node that owns the log it writes into.**
+   `delegation.ts` states the reading every "did two different turns happen?"
+   check depends on: two `dispatch_decision` events mean two turns only while
+   an agent cannot write a dispatch about itself. A grantee opens its own
+   session first. *Breaks:* `smith tester check` reports a tester's turn that
+   was really the coder's, and the gate stays green on evidence the graded
+   party produced.
+
+5. **Judges read; they never gain write access.**
+   `providers/types.ts` hands a transport nothing but `prompt` — no worktree
+   path, no credential beyond its own key, nothing callable. A judge's
+   findings are data, not commands. *Breaks:* the trust boundary that lets an
+   external provider score our work without being able to change it.
+
+6. **A judged worktree is fingerprinted before and verified after; a moved
+   tree discards the verdict.** `immutability.ts` raises
+   `contract.judge-mutation` for exactly this. *Breaks:* the verdict stops
+   being about the commit under review. Note the standing limit — a verifier
+   comparing two endpoints cannot see an edit that was reverted in between,
+   so a clean verdict is evidence about the endpoints only.
+
+7. **A plan file is written once; a change is a new version, never an edit.**
+   `plan.ts` raises `plan.version-exists` — "Refusing to overwrite existing
+   plan file … plans are immutable" — and nothing in this codebase deletes a
+   plan file, which is why `draftNextVersion` exists at all: an amendment has
+   to be judged legal (D-127: one that adds and supersedes nothing obligates
+   nothing) *before* a file exists to judge it against. *Breaks:* a criterion
+   that was already graded turns into a record of something nobody checked,
+   and every verdict cut against the old text silently re-scopes.
+
+8. **Every write carries the envelope, and an event id is read, never
+   computed.** `--session`, `--causal-parent`, `--plan-version` on every
+   write command; the id comes back in that command's own output. *Breaks:*
+   under fan-out the events between yours belong to sibling tasks, so a
+   guessed parent names a real event that is not the parent — it validates,
+   and the lineage is quietly wrong.
+
+9. **Verification is observed, not asserted.** No surface reports a check it
+   did not run; `scripts/check.sh` prints `SKIP` rather than a false `OK`.
+   *Breaks:* the one property that makes any of the above worth storing.
+
+10. **Destructive removal is hook-blocked outside `workspaces/` and
+    `state/`.** A worktree goes away through `git worktree remove --force`,
+    a file through a targeted delete. *Breaks:* the operator's own checkouts,
+    which live beside the factory and are not the factory's to clean up.
+
+---
+
+## 19. The worker harness port
+
+§6 gives the *judge* tier a seam: a provider is a `crosscheck.yml` entry, a
+transport reads it, and adding DeepSeek is config. The *worker* tier never got
+one. Every turn this factory has dispatched ran inside a Claude Code session,
+because the orchestrator is a Claude Code session and the `Agent` tool is the
+only thing it can start. That was true by deployment and written down nowhere.
+
+Two axes were folded into one as a result:
+
+| Axis | Question it answers | Where it lives |
+|---|---|---|
+| **provider** | which vendor's model produced the words | `taxonomy.yml` `provider:`, `crosscheck.yml` |
+| **harness** | which program held the session — tools, cwd, turn limit | `src/harness.ts` |
+
+`dispatch_decision` records the role, the provider, the tier and the model
+(§8). It records who answered and with what weight, never what ran the turn.
+`claude-code` + `claude` is the only pair that exists today; `codex-cli` +
+`codex` is the pair that makes the distinction load-bearing, and the point of
+naming the axis before that pair exists is that the second harness should be a
+config entry, not a rewrite of dispatch.
+
+**The port renders an invocation; it never starts one.** `planWorkerTurn()`
+returns a `WorkerInvocation` — in-process (a `subagent_type` and the template
+it comes from) or cli (argv, cwd, and an env allowlist) — and the caller
+spawns it. This is §18 rule 3 applied to the CLI itself: `smith` observes, and
+an observer that could dispatch would read its own output back as evidence
+that a turn happened.
+
+**The judge boundary extends across it.** §6's trust boundary says external
+providers judge and never gain write access; `providers/types.ts` enforces it
+by handing a transport nothing but `prompt`. A `cli` harness is the same far
+side one step over, so the port refuses to render a cli invocation that would
+put a worktree path in a judge role's hands (`harness.judge-worktree`) —
+*unless* the harness itself declares `judge_args`: arguments that put the
+program into a mode where it cannot write, enforced by the OS or the tool
+itself rather than by this factory (codex's `-s read-only`, claude's
+`--disallowedTools Write,Edit,MultiEdit,NotebookEdit`). A harness with an
+empty `judge_args` makes no such promise, and the refusal stands as before.
+This is not a weaker rule than the in-process path's sandbox lease — it is a
+differently-shaped one: an in-process judge runs under `guard.sh` with a Bash
+tool in hand, and the lease is what stops it from writing; a cli judge with
+`judge_args` set never has the ability to write at all, which a lease
+revocation cannot improve on. Rule 6's fingerprint-before-and-after still runs
+either way, because a read-only flag is what the harness promises, not what
+this factory has watched happen. An in-process judge does read the worktree —
+under a `smith sandbox open` lease, which the invocation states as
+`sandboxRequired` rather than leaving to the playbook to remember. Which
+roles are judges is read from `guardrails.yml` through `policy.ts`, never
+copied: a second list would drift, and the direction it drifts in is a judge
+quietly reclassified as a worker.
+
+**`harness.yml` ships as the default policy.** `factory/policies/harness.yml`
+is this factory written down — one in-process harness (`claude-code`,
+`default:`) serving every role that ships a `.claude/agents/<role>.md`, plus
+`codex-cli` and `claude-cli` as the two `cli` harnesses that make the
+provider/harness distinction load-bearing rather than aspirational.
+`HARNESS_POLICY_PATH` (`paths.ts`) names the file `planWorkerTurn()` reads
+when `--policy` is not given, and `source: 'default'` on the rendered result
+says which one that was; `paths.test.ts` holds the constant and the file to
+each other so neither can go stale alone. An operator who wants a third
+harness, or a different default, writes a policy file anywhere and names it —
+`smith harness list --policy <file>`, the shape `smith stack show` already
+uses — rather than editing this one's prose.
+
+**`smith-run` starts what `smith` only ever describes.** `planWorkerTurn()`
+renders a `WorkerInvocation` and stops there (§18 rule 3, "nothing that
+observes may dispatch") — `smith` never becomes the thing whose own output it
+would later read back as evidence a turn happened. `smith-run` is a separate
+executable, not a `smith` verb, for exactly that reason: it takes one
+already-rendered invocation, spawns it, and prints what happened as JSON. It
+opens no event log, no `state/`, no DB — `runInvocation()`, the one function
+in `src/runner.ts` it calls, imports nothing under `src/db/`, `src/events.ts`
+or `src/projector.ts`, and a source-level test holds it to that. A `cli`
+invocation is what it starts; an `in-process` one it refuses, because that
+shape is an `Agent`-tool subagent turn with no separate binary to spawn.
+
+```
+smith harness list
+smith harness plan --role coder --task epic-1/task-3 --prompt-file state/prompts/p.md --worktree ../wt/task-3
+smith-run invocation.json
+```
+
+Env is an allowlist of variable **names**. A rendered invocation is printed as
+JSON, to a terminal and into logs; the runner resolves the values against its
+own environment, and nothing that passes through this port carries a secret.

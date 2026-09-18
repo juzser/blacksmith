@@ -184,7 +184,7 @@ dispatches — separately, so neither number claims coverage the other supplied.
 rounds on a task escalate the model tier and three escalate to the operator,
 and that rungs are "never skipped and never looped past their bound".
 `budgets.ts` said in its own header that nothing parsed it. So a task could
-fail four rounds on sonnet with the operator never told, and the log would look
+fail four rounds on the mid tier with the operator never told, and the log would look
 identical to a task that climbed the ladder correctly (P9-32).
 
 The rungs now carry a machine-readable half — `failed_rounds` and a closed

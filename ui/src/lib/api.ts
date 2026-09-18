@@ -214,6 +214,12 @@ export interface KanbanTask {
   title: string | null;
   agentRole: string | null;
   agentModelTier: string | null;
+  /**
+   * Whether the agent the chip names is still on the task — read off the
+   * agents rows, not the dispatch (fix n of the 2026-09-14 cross-provider
+   * UI check: `agentRole` alone says who was *sent*). `null` is nobody.
+   */
+  agentActivity: 'working' | 'stalled' | null;
   milestoneId: string | null;
   tags: KanbanTag;
 }
@@ -260,6 +266,9 @@ export interface TaskDetail {
     findingStatus: string;
     summary: string;
     waiverId: string | null;
+    findingScope: string;
+    specPlanVersion: number | null;
+    criterionRef: string | null;
   }>;
   artifacts: Array<{ id: string; type: string; path: string; description: string | null }>;
   branch: string | null;
@@ -422,6 +431,24 @@ export interface PulseResult {
   lastEventType: string | null;
   counts: { events: number; errors: number };
   lessonsPending: number;
+  /**
+   * What the server's projection could not land — a session log it could not
+   * read, or an event whose payload it had to hold back (D-249). Every count
+   * and status the dashboard shows is computed without those events, so the
+   * shell says so above the page rather than letting a blank canvas read as an
+   * idle factory. Mirrors ProjectionIssue in ui/server/src/app.ts. Optional
+   * because a server built before the field omits it, and "the server did not
+   * say" must render as nothing to report.
+   */
+  projectionIssues?: ProjectionIssue[];
+}
+
+export interface ProjectionIssue {
+  sessionId: string;
+  kind: 'session-not-projected' | 'artifacts-skipped';
+  eventId?: string;
+  /** Already worded for an operator: names the log, the line or the event. */
+  message: string;
 }
 
 export function fetchPulse(session?: SessionScope, project?: string): Promise<PulseResult> {

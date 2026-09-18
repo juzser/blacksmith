@@ -136,6 +136,12 @@ export function globsOverlap(globA: string, globB: string): boolean {
 export interface ClaimedTask {
   claims: string[];
   task_id?: string;
+  /**
+   * Files (inside the claims, literal paths) whose existing exports this task
+   * keeps. Declared in the task spec; trusted by the pre-run wave gate and
+   * verified by the post-run export check (impact.ts).
+   */
+  keeps_exports?: string[];
 }
 
 export interface GlobPair {
@@ -269,6 +275,7 @@ export type WaveValidationResult =
 export interface ProposedWaveTask {
   task_id: string;
   claims: unknown;
+  keeps_exports?: unknown;
 }
 
 /** A closed vocabulary, so it can be named in an error without quoting a value. */
@@ -332,7 +339,42 @@ export function readClaimList(task: ProposedWaveTask): WaveTask {
       { task_id: task.task_id },
     );
   }
-  return { task_id: task.task_id, claims: claims as string[] };
+  const promises = readPromiseList(task);
+  return promises === undefined
+    ? { task_id: task.task_id, claims: claims as string[] }
+    : { task_id: task.task_id, claims: claims as string[], keeps_exports: promises };
+}
+
+/**
+ * The `keeps_exports` half of the same door. A promise the wave gate cannot
+ * read must not read as "no promise": that direction is safe for the gate
+ * (the crossing serializes), but it also hides the plan error until a
+ * `plan validate` nobody re-ran. The field is optional; absent stays absent.
+ */
+function readPromiseList(task: ProposedWaveTask): string[] | undefined {
+  const promises = task.keeps_exports;
+  if (promises === undefined) return undefined;
+  if (!Array.isArray(promises)) {
+    throw new ClaimsError(
+      'claims.unreadable-promises',
+      `Task "${task.task_id}" declares keeps_exports as ${describeType(promises)}, not a list ` +
+        'of file paths, so the wave gate cannot tell which crossings it promised to keep. ' +
+        'keeps_exports is a list of repo-relative file paths (task-spec.schema.json).',
+      { task_id: task.task_id, received: describeType(promises) },
+    );
+  }
+  const badIndex = promises.findIndex((file) => typeof file !== 'string' || file === '');
+  if (badIndex !== -1) {
+    const received =
+      promises[badIndex] === '' ? 'an empty string' : describeType(promises[badIndex]);
+    throw new ClaimsError(
+      'claims.unreadable-promises',
+      `Task "${task.task_id}" declares keeps_exports entry ${badIndex} as ${received}, not a ` +
+        'file path, so the wave gate cannot tell which crossings it promised to keep.',
+      { task_id: task.task_id, index: badIndex, received },
+    );
+  }
+  return promises as string[];
 }
 
 /**

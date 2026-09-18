@@ -1,33 +1,49 @@
 ---
 name: bs
-description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from a Claude Code session inside this repo.
+description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from any Claude Code session that has Blacksmith installed — a clone of the repo, or the plugin plus the `smith` CLI from npm.
 ---
 
 # /bs — Blacksmith operator console
 
 You (the orchestrator session running this skill) are the human's one interface
 to the factory. Every subcommand below is a **playbook**, not a script: the
-deterministic mechanics run through the real `smith` CLI
-(`node factory/orchestrator/dist/cli.js <ns> <action> ...`, or `smith ...` once
-linked — `pnpm build` first if `dist/` is stale); the judgment steps —
-planning, spec review, coding, testing, reviewing — are separate Claude Code
-sessions you dispatch from the matching `.claude/agents/<role>.md`. **This
-skill never calls an LLM directly and never embeds a role prompt** — the
-templates own that; duplicating them here would let this file drift out of
-sync with the real contracts. Cite policy files (`factory/policies/*.yml`)
-rather than restating their numbers.
+deterministic mechanics run through the real `smith` CLI, spelled `smith` in
+every command below — on PATH from `npm i -g @juzser/blacksmith`, or inside a
+clone `node factory/orchestrator/dist/cli.js` instead, `pnpm build` first if
+`dist/` is stale. The judgment steps — planning, spec review, coding, testing,
+reviewing — are separate Claude Code sessions you dispatch by role, each under
+the contract in its own agent template beside this skill
+(`.claude/agents/<role>.md`). **This skill never calls an LLM directly and
+never embeds a role prompt** — the templates own that; duplicating them here
+would let this file drift out of sync with the real contracts. Cite policy
+files (`factory/policies/*.yml`) rather than restating their numbers.
 
 **The project directory is an answer you ask for, not a path this file
 knows.** A project this factory builds is not part of it: `smith new` puts one
-*beside* this clone when no `--target-dir` says otherwise, and nothing
-downstream reads that location — `workspaces/` inside the repo is still a legal
-answer, just no longer the assumed one. Every verb that touches the project's
-git takes the directory itself: `<project-dir>` as a positional on the
-`worktree` family, `--project <dir>` on everything else. A task's worktrees
-are placed beside whatever directory it was handed, so a project outside this
-repo keeps its worktrees outside it too (`AGENTS.md` "Worktrees"). Ask for it
-once, at the top of a run, and carry that one answer through every command
-below — `<project-dir>` here means that answer, never a fixed path.
+*outside* the factory when no `--target-dir` says otherwise (beside the clone
+if you run one, in the directory you ran an installed `smith` from), and
+nothing downstream reads that location — `workspaces/` inside the repo is
+still a legal answer, just no longer the assumed one. Every verb that touches
+the project's git takes the directory itself: `<project-dir>` as a positional
+on the `worktree` family, `--project <dir>` on everything else. A task's
+worktrees are placed beside whatever directory it was handed, so a project
+outside this repo keeps its worktrees outside it too (`AGENTS.md` "Worktrees",
+a clone-only file — see "Where the files below live"). Ask for it once, at the
+top of a run, and carry that one answer through every command below —
+`<project-dir>` here means that answer, never a fixed path.
+
+**Where the files below live.** This skill cites three kinds of path and they
+do not all resolve the same way. Playbooks and agent templates are beside this
+file and always resolve. `factory/policies/*.yml`, the JSON Schemas and the
+scaffold are **read-only assets the CLI ships**: in a clone they are in the
+checkout, and in an install they are inside the package — ask `smith` rather
+than guessing, since `smith init` prints `repoRoot` (where they are) and
+`workRoot` (where everything written goes) and is safe to re-run, keeping any
+file it already seeded. `docs/` and `AGENTS.md` are **clone-only**: they are in
+the repository and in no install, so a citation to one is a pointer for an
+operator who has the repo, never a file to assume you can open. Read, do not
+assume — and when a cited file is not there, say so instead of substituting a
+remembered number.
 
 Every write command needs an event-log envelope: `--session <id>
 --plan-version <n> --causal-parent <event-id> [--actor operator]`. Open a

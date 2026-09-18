@@ -113,14 +113,16 @@ providers:
     #
     # Funded for THIS box, 2026-09-04, by the operator who owns the key.
     enabled: auto
-    # `shadow`, deliberately, and the difference from codex above is the point:
-    # this box declined shadow for codex and chose it here. A shadow provider
-    # is still called and still recorded as a participant -- it forfeits only
-    # gating power -- so what the mode buys is a run of recorded disagreement
-    # to read before a second vendor gets a vote (docs/runbooks/providers.md
-    # §3). Promote by editing this to `active`; that is the calibration pass,
-    # and it is an operator decision, not a default.
-    mode: shadow
+    # Promoted shadow -> active by the operator on 2026-09-14, after the
+    # csb-signing-policy-1 epic-final verdict held on `insufficient-providers`
+    # with all three participants at `confirm`: with claude excluded as the
+    # finder and deepseek in shadow, the gating pool was codex alone (1 <
+    # `quorum_rule.min_providers` 2), so no mechanically-ready epic could ever
+    # reach quorum on this box (epic.ts, "exactly 1 active external"). The
+    # calibration run it replaced is the recorded shadow verdicts from
+    # csb-audit-1 and csb-signing-policy-1 (docs/runbooks/providers.md §3).
+    # Rollback is `mode: shadow` here; nothing else remembers the promotion.
+    mode: active
 
 quorum_triggers:
   # architecture §6, agent-constraints.md "cross-check (phase 8)" — all four,

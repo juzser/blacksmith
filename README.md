@@ -15,12 +15,15 @@ and hands you exactly one pull request.
 ![TypeScript](https://img.shields.io/badge/TypeScript-1f1f1f)
 
 **[Features](#features) · [Install](#install) · [Using it](#using-it) ·
-[How it works](#how-it-works) · [Safety](#safety) · [Status](#status) ·
-[Docs](#docs)**
+[How it works](#how-it-works) · [Safety](#safety) ·
+[Dashboard](#the-dashboard) · [Status](#status) · [Docs](#docs)**
 
-<img src="ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="900" alt="Blacksmith Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" />
+<pre>
+goal → contracts you sign → one worktree per contract, run in parallel
+     → schema · tests · reviewer · verifier → one pull request you merge
+</pre>
 
-<sub>The one screen that asks something of you. The rest is the factory reporting in.</sub>
+<sub>Two touchpoints. Everything between them runs unattended.</sub>
 
 </div>
 
@@ -55,12 +58,7 @@ the moment you sign it and versioned in the event log, so a worker cannot
 quietly reinterpret the job. No contract, no dispatch.
 
 </td>
-<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for epic-9/task-3 showing a Spec contract card with case, origin, epic, plan version and claims, and an Attempts list naming each agent, provider and outcome" /></td>
-</tr>
-
-<tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/flow-desktop-dark.png" width="100%" alt="Flow page: task cards arranged in three columns labelled Wave 0 (6 tasks), Wave 1 (2 tasks) and Wave 2 (1 task), joined by dashed dependency edges" /></td>
-<td>
+<td width="50%">
 
 **Workers that cannot collide**
 
@@ -75,21 +73,6 @@ instead. An edit outside a claim fails the gate rather than reaching the queue.
 <tr valign="top">
 <td>
 
-**A frontier planner, cheap workers**
-
-Planning and judgment go to a frontier model; the bulk of the work goes to
-small, fast tiers, many at once. Every session and every live agent is visible
-with the tier that drew it, and analytics breaks cost down per task, per tier
-and per provider.
-
-</td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/sessions-desktop-dark.png" width="100%" alt="Sessions page: two session cards, sess-fixture and sess-multiproject-fixture, joined by dashed edges to six live agent cards labelled coder - small, coder - mid and planner - frontier, each marked working" /></td>
-</tr>
-
-<tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns; cards carry severity chips such as S2-major and agent chips such as coder - mid" /></td>
-<td>
-
 **Gates decide what merges, not confidence**
 
 Schema check → tests → coverage evidence → a fresh-context reviewer that never
@@ -98,41 +81,46 @@ the reviewer. S1 stops the line, S2 bounces back to the same branch, S3 batches
 into one waiver question per epic. Only S3 and S4 are ever waivable.
 
 </td>
-</tr>
-
-<tr valign="top">
 <td>
 
 **A second opinion from another vendor**
 
 The factory grades its own judgment calls against models from a different
 vendor — Codex over its CLI, DeepSeek over its API, beside the native Claude
-judge. They ship switched off — which of them a machine can actually
-call is a fact about that machine, not about this repo — and the one you
-switch on arrives in **shadow mode**: every verdict recorded, none of them
-gating anything, until you have read the numbers and promoted it
-deliberately.
+judge. Both external judges ship `enabled: auto`: they join the quorum on a
+machine that holds the credentials and are skipped on one that does not, so
+which of them you get is a fact about your machine, not about this repo. A
+judge earns its vote in **shadow mode** first — every verdict recorded, none
+of them gating anything — and is promoted only once you have read the numbers.
 
 </td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Analytics page with throughput, cost-per-task, same-mistake-rate and recheck-pass-rate cards, bar charts of cost by model tier and by provider, and a cross-check quorum panel" /></td>
 </tr>
 
 <tr valign="top">
-<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-desktop-dark.png" width="100%" alt="Lessons page listing lesson candidates with scope and status chips, each with approve and reject actions" /></td>
 <td>
 
 **It learns from its own errors**
 
 Errors are classified against a taxonomy, and a scribe distills them into
 lesson candidates you approve or reject. Approved lessons splice into later
-prompts — and the same-mistake rate on the analytics page tells you whether
-that is actually working. A loop you can audit, not a memory you have to trust.
+prompts — and the same-mistake rate tells you whether that is actually
+working. A loop you can audit, not a memory you have to trust.
+
+</td>
+<td>
+
+**A frontier planner, cheap workers**
+
+Planning and judgment go to a frontier model; the bulk of the work goes to
+small, fast tiers, many at once. Every session and every live agent is visible
+with the tier that drew it, and cost breaks down per task, per tier and per
+provider.
 
 </td>
 </tr>
 
 <tr valign="top">
-<td>
+<td colspan="2">
 
 **The log is the source of truth**
 
@@ -142,71 +130,93 @@ the entire database from the log alone. Nothing the factory did exists only in
 a chat transcript.
 
 </td>
-<td><img src="ui/e2e/__screenshots__/phase-6b/timeline-desktop-dark.png" width="100%" alt="Timeline page: an event list filtered by Prompts, Dispatches, Gate events, Scheduler and Errors chips, showing task-added, user_prompt and session-start entries with timestamps and task ids" /></td>
 </tr>
 </table>
 
 **Also in the box**
 
-- **Eleven dashboard pages**, dark and light, desktop and mobile: errors by
-  taxonomy category, roadmap progress joined to real task and token counts, and
-  per-project scoping. It binds to `127.0.0.1` and is read-only — clicking
-  nothing there dispatches an agent.
 - **Project scaffolding.** `/bs new <project>` generates a target project from
   the stack you answered for at install time; `/bs mcp` layers an MCP surface
   onto it.
+- **An audit that ends in an epic.** `/bs audit <project-dir>` reads a project
+  that already exists on four axes, ranks what it finds, and cuts one epic from
+  what you accept.
 - **A factory that extends itself.** New agent roles, policies and taxonomy
   values are data files, not code — see
   [extending](docs/guide/extending.md).
 - **One integration branch per epic**, one pull request at the end, merged by
   you.
+- **A local dashboard**, eleven read-only pages over the same event log —
+  optional, and [further down](#the-dashboard).
 
 ## Install
+
+Say **"install Blacksmith"** to a Claude Code session and it does the whole
+thing: [`INSTALL.md`](INSTALL.md) is an executable runbook, and it stops to ask
+before anything that touches your machine.
+
+By hand it is one command in a shell:
+
+```bash
+npm i -g @juzser/blacksmith
+```
+
+and two inside Claude Code:
+
+```
+/plugin marketplace add juzser/blacksmith
+/plugin install blacksmith@blacksmith
+```
+
+Then `smith init` in the project you want it to work on. That creates
+`.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
+a `stack.yml` to answer — and writes nothing anywhere else; `SMITH_HOME` moves
+that root if you want one home for several projects. You now have `/bs`.
+
+**Both halves are required.** The package
+([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the
+deterministic `smith` CLI; the plugin is `/bs` and the fourteen agent roles it
+dispatches. `smith` alone never gives you `/bs`, because Claude Code loads
+skills from a project's `.claude/`, your `~/.claude/`, or a plugin — never from
+`node_modules` — and a `/bs` with no `smith` on PATH can run nothing. Take
+`latest`: `0.1.0` predates `smith init` and keeps state inside its own install
+directory, which the next `npm i` replaces.
+
+<details>
+<summary><b>A clone instead — the whole factory</b></summary>
+
+A clone is for hacking on Blacksmith itself, and for the two things an install
+does not carry: the dashboard and this repo's own enforcement.
 
 ```bash
 git clone https://github.com/juzser/blacksmith.git && cd blacksmith
 pnpm install --frozen-lockfile
 pnpm run build                          # tsc -> factory/orchestrator/dist/
-node factory/orchestrator/dist/cli.js --help
+bash scripts/check.sh                   # the gate CI runs; ends in `== PASS ==`
 ```
 
-Verify it with the same gate CI runs (this one also needs `python3` + PyYAML):
+Open a Claude Code session in the clone and you have `/bs` already, from the
+checkout's own `.claude/` — **do not also install the plugin there.** You would
+get two of everything (`bs` and `blacksmith:bs`, `auditor` and
+`blacksmith:auditor`, once per role), pay the always-on cost twice, and the two
+copies are free to disagree: the plugin's is a pinned checkout of `main`, the
+project's is whatever branch you have out. `claude plugin disable blacksmith`
+settles it.
 
-```bash
-bash scripts/check.sh                   # ends in `== PASS ==` on a good install
-```
+The dashboard is clone-only because `ui/` is in neither the tarball nor the
+plugin, so `smith ui serve` answers `ui.not-built` in an install and means it.
+Enforcement is clone-only because this repo's `.claude/settings.json` deny
+rules and its policy hook resolve paths against a checkout; the plugin ships no
+`hooks/hooks.json` and loads neither (`Hooks (0)`), since a `/bs` that asked
+you about every Bash command would be worse than one that asks about none. The
+rest of that port is scoped in
+[`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md).
 
-Driving a real epic additionally needs the **Claude Code CLI** — the planner and
-every worker run as Claude Code sessions.
-
-**Rather not do this by hand?** Open a Claude Code session in the clone and say
-*"install Blacksmith"*. [`INSTALL.md`](INSTALL.md) is an executable runbook: it
-asks before touching anything outside the clone, and it doubles as the human
-version — per-platform setup (macOS, Debian/Ubuntu, Fedora, Alpine, WSL2),
+`INSTALL.md` Part 2 is the long form of the clone above: per-platform
+setup (macOS, Debian/Ubuntu, Fedora, Alpine, WSL2), the stack interview,
 troubleshooting, and the known platform gaps stated rather than papered over.
 
-### From npm
-
-The CLI alone is also on the registry as
-[`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith):
-
-```bash
-npx @juzser/blacksmith --help          # one-off
-npm i -g @juzser/blacksmith && smith --help
-```
-
-That package is the `smith` binary plus everything it reads at runtime — the
-policies, the JSON Schemas, the scaffold templates, the roadmap, the agent role
-files, the `/bs` playbooks, the database migrations. It is **not** the whole
-factory: the dashboard, the docs and the test suite stay in the clone.
-
-Installed, `smith` writes beside **you**, not beside itself: state, epic plans
-and your `.env` go under `.blacksmith/` in the directory you run it from, and
-`smith new` creates a project there too. (In a clone it still writes into the
-clone, as it always has — the layout under the root is identical either way.)
-`SMITH_HOME` overrides the root if you want one fixed home for several
-projects. Take the package when you want `smith` on a machine without a clone;
-take the clone for everything else.
+</details>
 
 ## Using it
 
@@ -290,15 +300,16 @@ Day to day, from a Claude Code session opened in this repo:
 | `/bs lessons` | Review pending lesson candidates |
 | `/bs report` | Render the scribe's progress digest |
 
-Underneath, every one of those is a `smith` command you can run yourself —
-`smith --help` lists them all.
+Each of those is a playbook, not a script: the deterministic half is a `smith`
+command you can run yourself — `smith --help` lists all of them — and the
+judgment half is a Claude Code session the playbook dispatches. That is also
+the line between the two installs: the `smith` half travels in the package, the
+playbooks are read from a clone.
 
 → **[The operator loop](docs/guide/operator-loop.md)** — the six steps, in the
 order you meet them.<br />
 → **[Operator guide](docs/guide/operator-guide.md)** — the same ground with real
-commands and real output.<br />
-→ **[The dashboard](docs/guide/dashboard.md)** — what each of the eleven pages
-shows you.
+commands and real output.
 
 ## How it works
 
@@ -338,6 +349,39 @@ runs, plus branch protection — not by trust. Full rules:
 Found a vulnerability? [`SECURITY.md`](SECURITY.md) — report privately, not in
 a public issue.
 
+## The dashboard
+
+Optional, and deliberately small: `/bs ui` (or `smith ui serve`) binds eleven
+read-only pages to `127.0.0.1`. They are a projection of the event log and
+nothing else — `smith db rebuild` reconstructs them from it, `smith stats`
+prints the same facts in a terminal, and nothing you click there dispatches an
+agent. The factory runs without ever opening it.
+
+<table>
+<tr valign="top">
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="100%" alt="Blacksmith Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" /><br /><sub><b>Overview</b> — the one screen that asks something of you.</sub></td>
+<td width="50%"><img src="ui/e2e/__screenshots__/phase-6b/task-detail-desktop-dark.png" width="100%" alt="Task detail page for epic-9/task-3 showing a Spec contract card with case, origin, epic, plan version and claims, and an Attempts list naming each agent, provider and outcome" /><br /><sub><b>Task detail</b> — the contract, and every attempt against it.</sub></td>
+</tr>
+<tr valign="top">
+<td><img src="ui/e2e/__screenshots__/phase-6b/flow-desktop-dark.png" width="100%" alt="Flow page: task cards arranged in three columns labelled Wave 0 (6 tasks), Wave 1 (2 tasks) and Wave 2 (1 task), joined by dashed dependency edges" /><br /><sub><b>Flow</b> — waves and the dependency edges that shaped them.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/kanban-desktop-dark.png" width="100%" alt="Kanban board with Todo, In progress, Reviewing and Blocked columns; cards carry severity chips such as S2-major and agent chips such as coder - mid" /><br /><sub><b>Kanban</b> — what is moving, and what is stuck and why.</sub></td>
+</tr>
+<tr valign="top">
+<td><img src="ui/e2e/__screenshots__/phase-6b/sessions-desktop-dark.png" width="100%" alt="Sessions page: two session cards, sess-fixture and sess-multiproject-fixture, joined by dashed edges to six live agent cards labelled coder - small, coder - mid and planner - frontier, each marked working" /><br /><sub><b>Sessions</b> — every live agent and the tier that drew it.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/analytics-desktop-dark.png" width="100%" alt="Analytics page with throughput, cost-per-task, same-mistake-rate and recheck-pass-rate cards, bar charts of cost by model tier and by provider, and a cross-check quorum panel" /><br /><sub><b>Analytics</b> — cost per task, per tier, per provider, and the same-mistake rate.</sub></td>
+</tr>
+<tr valign="top">
+<td><img src="ui/e2e/__screenshots__/phase-6b/lessons-desktop-dark.png" width="100%" alt="Lessons page listing lesson candidates with scope and status chips, each with approve and reject actions" /><br /><sub><b>Lessons</b> — candidates waiting on your approve or reject.</sub></td>
+<td><img src="ui/e2e/__screenshots__/phase-6b/timeline-desktop-dark.png" width="100%" alt="Timeline page: an event list filtered by Prompts, Dispatches, Gate events, Scheduler and Errors chips, showing task-added, user_prompt and session-start entries with timestamps and task ids" /><br /><sub><b>Timeline</b> — the append-only log itself, filtered.</sub></td>
+</tr>
+</table>
+
+Dark and light, desktop and mobile; errors by taxonomy category, roadmap
+progress joined to real task and token counts, and per-project scoping.
+
+→ **[The dashboard](docs/guide/dashboard.md)** — what each of the eleven pages
+shows you. It is part of the clone, not of the package.
+
 ## Status
 
 Phases 1–9 are built and merged: loop runner, worktree engine, gates, state and
@@ -345,9 +389,16 @@ analytics, dashboard, self-extension, cross-provider judges, hardening. Phase 10
 is half in: `smith daemon` watches the factory in the background and its ops
 runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
-what you accept. And the CLI is on npm as `@juzser/blacksmith` — the binary,
-what it reads and the `/bs` playbooks, not the dashboard or the docs, which
-still come from a clone.
+what you accept.
+
+The CLI is on npm as `@juzser/blacksmith`, at `0.2.0` — two binaries now,
+`smith` and `smith-run`, the second being what runs a rendered turn on a
+`cli` harness such as Codex. `0.1.1` was the first version that ran beside
+you and knew it was a package, rather than out of the clone-shaped install
+`0.1.0` was. The package is the binaries and what they
+read. The dashboard, the docs, the test suite and `/bs` itself come from a
+clone; a plugin is what would move `/bs`, and it is
+[scoped, not cut](docs/specs/plugin-port-scope.md).
 
 The one thing to know up front: **the daemon watches, it does not drive.** It
 tells you what the factory needs — budget alarms, agents that never came back,
@@ -366,11 +417,12 @@ version in
 | [`INSTALL.md`](INSTALL.md) | Getting it running, per platform |
 | [`docs/guide/operator-loop.md`](docs/guide/operator-loop.md) | The six steps you actually do |
 | [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) | Every command, end to end, with output |
-| [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The dashboard tour |
 | [`docs/guide/status.md`](docs/guide/status.md) | What is real today |
 | [`docs/guide/extending.md`](docs/guide/extending.md) | Adding agents, policies, taxonomy values |
 | [`docs/specs/black-smith-architecture.md`](docs/specs/black-smith-architecture.md) | Why it is shaped this way |
 | [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) | What `/bs audit` promises an audited project, and why |
+| [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) | How `/bs` runs without a clone, and what the plugin leaves behind |
+| [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The dashboard tour |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
 | [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `smith daemon` unattended |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |

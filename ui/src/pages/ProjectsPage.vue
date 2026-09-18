@@ -13,6 +13,7 @@ import PageHeader from '../components/ds/PageHeader.vue';
 import Skeleton from '../components/ds/Skeleton.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
 import { fetchOverview, type OverviewResult, type ProjectOverviewSummary } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { pluralize } from '../lib/format.js';
@@ -40,6 +41,13 @@ async function load() {
   }
 }
 onMounted(load);
+// D-243: this hub neither polled nor answered the shared topbar Refresh
+// (usePoll.ts's triggerGlobalRefresh(), wired to LiveStatus.vue's "Refresh
+// now" button) — every other scoped page already does. 15s matches
+// Kanban/Timeline's cadence (design-spec.md §8). `load()` above never
+// re-raises `loading` on its own, so a poll tick or a Refresh click here
+// re-fetches quietly, same as it always has for a manual Retry.
+usePoll(load, 15000);
 
 const projects = computed<ProjectOverviewSummary[]>(() => overview.value?.projects ?? []);
 /** The fetch's own verdict. `!loading` is not it: loading goes false on failure too. */

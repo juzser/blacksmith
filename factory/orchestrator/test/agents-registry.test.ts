@@ -663,4 +663,158 @@ describe('agents-registry.ts', () => {
       expect(stale).toHaveLength(1);
     });
   });
+  // F2 (the cross-provider UI check, 2026-09-14). A planner, a spec-reviewer
+  // or a scribe is dispatched for the epic with no task id, and its Result is
+  // recorded the same way -- `task-result-recorded` with no task id and the
+  // role under `agent_role`. Every terminal branch above was guarded on the
+  // task id, so nothing but `epic-closed` could ever close one: ten such
+  // results across the real logs closed nothing, and the Sessions and
+  // Overview pages counted a planner that returned in four minutes as live
+  // for the rest of the epic. A terminal event with no task id and a role
+  // speaks for the latest still-open epic-level dispatch of that role in the
+  // same session -- latest, because a result belongs to the dispatch that
+  // caused it, and that is the most recent one.
+  describe("an epic-level agent closes on its own role's terminal event (F2)", () => {
+    function epicDispatch(
+      eventId: string,
+      ts: string,
+      role: string,
+      overrides: Record<string, unknown> = {},
+    ) {
+      return event({
+        event_id: eventId,
+        event_type: 'dispatch_decision',
+        ts,
+        payload: {
+          agent_role: role,
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+          ...overrides,
+        },
+      });
+    }
+    function epicResult(
+      eventId: string,
+      ts: string,
+      role: string,
+      overrides: Record<string, unknown> = {},
+    ) {
+      return event({
+        event_id: eventId,
+        event_type: 'task-result-recorded',
+        ts,
+        payload: { agent_role: role, run_status: 'done', ...overrides },
+      });
+    }
+
+    it("closes the planner on the planner's own result", () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'planner'),
+        epicResult('e2', '2026-08-01T00:04:00.000Z', 'planner'),
+      ]);
+      expect(agents).toHaveLength(1);
+      expect(agents[0]).toMatchObject({
+        taskId: null,
+        status: 'done',
+        terminalType: 'result',
+        terminalEventId: 'e2',
+        terminalAt: '2026-08-01T00:04:00.000Z',
+      });
+      expect(liveAgents(agents)).toEqual([]);
+    });
+
+    it("leaves the planner live on another role's result", () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'planner'),
+        epicDispatch('e2', '2026-08-01T00:01:00.000Z', 'spec-reviewer'),
+        epicResult('e3', '2026-08-01T00:04:00.000Z', 'spec-reviewer'),
+      ]);
+      expect(agents.map((a) => [a.agentRole, a.status])).toEqual([
+        ['planner', 'live'],
+        ['spec-reviewer', 'done'],
+      ]);
+    });
+
+    it('closes the latest open dispatch of the role, not the first', () => {
+      // Round 1 never reported; round 2 was dispatched and did. The result is
+      // round 2's, and round 1 stays open for `epic-closed` to abandon.
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'planner', { round: 1 }),
+        epicDispatch('e2', '2026-08-01T00:10:00.000Z', 'planner', { round: 2 }),
+        epicResult('e3', '2026-08-01T00:14:00.000Z', 'planner'),
+      ]);
+      expect(agents.map((a) => [a.round, a.status, a.terminalEventId])).toEqual([
+        [1, 'live', null],
+        [2, 'done', 'e3'],
+      ]);
+    });
+
+    it("does not let one epic's result close another epic's agent", () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'planner', { epic_id: 'epic-1' }),
+        epicResult('e2', '2026-08-01T00:04:00.000Z', 'planner', { epic_id: 'epic-2' }),
+      ]);
+      expect(agents[0]).toMatchObject({ status: 'live', terminalEventId: null });
+    });
+
+    it('accepts the role under `agent`, the key a Result file uses', () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'scribe'),
+        event({
+          event_id: 'e2',
+          event_type: 'task-result-recorded',
+          ts: '2026-08-01T00:04:00.000Z',
+          payload: { agent: 'scribe', run_status: 'done' },
+        }),
+      ]);
+      expect(agents[0]).toMatchObject({ status: 'done', terminalEventId: 'e2' });
+    });
+
+    it('closes on a judge-reported naming the role, and as an error on an error-logged naming it', () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'spec-reviewer'),
+        epicDispatch('e2', '2026-08-01T00:00:30.000Z', 'planner'),
+        event({
+          event_id: 'e3',
+          event_type: 'judge-reported',
+          ts: '2026-08-01T00:04:00.000Z',
+          payload: { agent_role: 'spec-reviewer', round: 1 },
+        }),
+        event({
+          event_id: 'e4',
+          event_type: 'error-logged',
+          ts: '2026-08-01T00:05:00.000Z',
+          payload: { error: 'execution.env-failure', severity: 'S2-major', agent_role: 'planner' },
+        }),
+      ]);
+      expect(agents.map((a) => [a.agentRole, a.status, a.terminalType])).toEqual([
+        ['spec-reviewer', 'done', 'result'],
+        ['planner', 'error', 'error'],
+      ]);
+    });
+
+    it('leaves every epic-level agent alone on an error that names no role', () => {
+      // A session-level error names nobody; guessing which agent it was
+      // about would be the D-244 mistake one level up.
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'planner'),
+        event({
+          event_id: 'e2',
+          event_type: 'error-logged',
+          ts: '2026-08-01T00:05:00.000Z',
+          payload: { error: 'execution.env-failure', severity: 'S2-major' },
+        }),
+      ]);
+      expect(agents[0]).toMatchObject({ status: 'live' });
+    });
+
+    it('is still abandoned by epic-closed when no result ever came', () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'planner', { epic_id: 'epic-1' }),
+        epicClosed('e2', 'epic-1', '2026-08-01T01:00:00.000Z'),
+      ]);
+      expect(agents[0]).toMatchObject({ status: 'abandoned', terminalEventId: 'e2' });
+    });
+  });
 });

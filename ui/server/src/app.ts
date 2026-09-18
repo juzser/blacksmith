@@ -25,6 +25,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { eq } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { AnalyticsResult, Scope } from '../../../factory/orchestrator/dist/db/queries.js';
@@ -57,6 +58,24 @@ import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/schedule
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 
+/**
+ * How often the change stream re-scans `state/events/` while at least one
+ * client is connected. One second, not sub-second: the scan is a readdir plus
+ * one stat per session, and a page that learns about an event 900ms late is
+ * indistinguishable to a person from one that learns about it instantly. The
+ * number that mattered was the old 5000/15000, which is long enough to watch.
+ */
+const STREAM_TICK_MS = 1000;
+
+/**
+ * A `:` comment on an idle stream, so the connection is not reaped as dead by
+ * something between the browser and this process. Local-direct there is
+ * nothing in between, but §10's Cloudflare port puts a proxy there, and a
+ * keepalive written now costs one line per client per 25s and saves debugging
+ * a stream that dies only in production.
+ */
+const STREAM_KEEPALIVE_MS = 25_000;
+
 export interface AppOpts {
   dbPath: string;
   stateDir?: string;
@@ -81,9 +100,74 @@ export interface AppOpts {
   nowIso?: string;
 }
 
+/**
+ * One fact the change stream carries: a session's log advanced, and to how
+ * many events. Deliberately not a status, a count of "new" anything, or a
+ * rendered label — architecture §18 rules 1 and 2. The server knows which log
+ * file changed and how many events that log now holds; everything a page
+ * shows about those events is derived by the page's own query, after it
+ * refetches. A stream that carried a judgement would be a second writer of
+ * state with no event behind it.
+ */
+export interface SessionAdvance {
+  session: string;
+  events: number;
+}
+
+/**
+ * One thing the projection could not land, as `/api/pulse` reports it. The
+ * refresher below keeps these because it is the only reader that ever learns
+ * of them: `apply()` returns the report, and the operator is looking at the
+ * dashboard, not at the terminal that launched it (D-249).
+ */
+export interface ProjectionIssue {
+  sessionId: string;
+  /**
+   * `session-not-projected`: the session's own log could not be folded, so
+   * none of its rows exist -- a line that is not JSON, usually. Cleared the
+   * moment the log projects again.
+   * `artifacts-skipped`: one task-result-recorded of the session carried an
+   * `artifacts` that is not a list, so its artifact rows are missing while the
+   * rest of the session stands. Cleared when the session re-projects without
+   * it.
+   */
+  kind: 'session-not-projected' | 'artifacts-skipped';
+  /** The event whose payload was held back; only for `artifacts-skipped`. */
+  eventId?: string;
+  message: string;
+}
+
+/**
+ * The read path's change source, shared by the freshness gate (every `/api/*`
+ * request), the change stream (`/api/stream`) and the issue report
+ * (`/api/pulse`). See createRefresher().
+ */
+interface Refresher {
+  /** Fold anything newly appended into the projection. Concurrent calls share one scan. */
+  refresh(): Promise<void>;
+  /** Every issue still standing after the latest scan, one per session or event. */
+  issues(): ProjectionIssue[];
+  /** Called after any scan that advanced at least one session. Returns its own unsubscribe. */
+  subscribe(listener: (advances: SessionAdvance[]) => void): () => void;
+  /**
+   * Keeps the background scan ticking while at least one caller holds it.
+   * Returns the release; the ticker stops when the last hold is released, so
+   * a dashboard nobody has open costs nothing.
+   */
+  hold(): () => void;
+  /** Drops every listener and stops the ticker outright. closeApp()'s half. */
+  stop(): void;
+}
+
 export interface AppHandle {
   app: Hono;
   handle: DbHandle;
+  /**
+   * Stops the change stream's background scan. A Hono app is a value, not a
+   * process, so nothing else would ever clear the interval — a test that
+   * created an app and never called this would hold the event loop open.
+   */
+  closeStream: () => void;
 }
 
 function dbOptsFrom(opts: AppOpts): DbOpts {
@@ -209,17 +293,41 @@ function lessonSession(db: SmithDb, lessonId: string): string {
  *    API calls at once; without this they would each re-project the same
  *    session, and since projectSession() clears and re-folds inside a
  *    transaction, they would serialise behind each other for no gain.
+ *  - The scan runs on a request OR on the stream's ticker, and the same one
+ *    either way. `/api/stream` does not get a second scanner: it holds this
+ *    one open on an interval and listens to what it already reports. Two
+ *    scanners against one projection would mean two fingerprint maps, and
+ *    whichever ran second would find nothing changed and tell its listeners
+ *    nothing had.
+ *
+ * What the stream adds is only the reporting: scan() already knows which
+ * sessions it re-projected, and apply() already returns how many events each
+ * one now holds. Until now both were discarded.
  */
-function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): () => Promise<void> {
+function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Refresher {
   const projected = new Map<string, string>();
   const warned = new Map<string, string>();
+  const listeners = new Set<(advances: SessionAdvance[]) => void>();
+  let holds = 0;
+  let ticker: NodeJS.Timeout | null = null;
   // Keyed by finding id and not by session, because apply() folds EVERY
   // session's log at once (D-200): the same quarantine comes back on every
   // poll of every session, and only a finding not named yet is news.
   const namedFindings = new Set<string>();
+  // Same rule for the artifact events, keyed by event id: apply() re-folds the
+  // session on every change to its log, and the same event is skipped again
+  // each time.
+  const namedArtifacts = new Set<string>();
+  // What the latest apply() of each session left unlanded. A session is
+  // rewritten whole on every apply, so its entry is too: set on success from
+  // the report, set on failure to the one issue there is, deleted when the
+  // report is empty. That is what lets an issue clear itself once the log
+  // behind it is repaired -- the next poll re-projects and finds nothing.
+  const issues = new Map<string, ProjectionIssue[]>();
   let inFlight: Promise<void> | null = null;
 
   async function scan(): Promise<void> {
+    const advances: SessionAdvance[] = [];
     if (!existsSync(eventsDir)) return;
     for (const entry of readdirSync(eventsDir)) {
       if (!entry.endsWith('.jsonl')) continue;
@@ -233,8 +341,26 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): () 
       }
       if (projected.get(sessionId) === fingerprint) continue;
       try {
-        const { skippedFindings } = await applyDb(dbPath, sessionId, dbOpts);
+        const { eventsApplied, skippedFindings, skippedArtifacts } = await applyDb(
+          dbPath,
+          sessionId,
+          dbOpts,
+        );
         projected.set(sessionId, fingerprint);
+        advances.push({ session: sessionId, events: eventsApplied });
+        const landed: ProjectionIssue[] = skippedArtifacts.map((skipped) => ({
+          sessionId,
+          kind: 'artifacts-skipped',
+          eventId: skipped.event_id,
+          message: `artifacts of '${skipped.task_id}' (${skipped.event_id}) are missing from the projection: ${skipped.reason}`,
+        }));
+        if (landed.length > 0) issues.set(sessionId, landed);
+        else issues.delete(sessionId);
+        for (const issue of landed) {
+          if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
+          namedArtifacts.add(issue.eventId);
+          process.stderr.write(`smith ui: ${issue.message}\n`);
+        }
         // D-141 turned "a finding that cannot fill a notNull column" from a
         // crash into a returned report, on the rule that a loud undercount
         // beats a crash and both beat a quiet one. That made the catch below
@@ -262,23 +388,86 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): () 
         // the life of the process — and the warning is printed once per
         // distinct fingerprint, so a genuinely broken log does not spam the
         // console at the poll interval.
+        const message = `could not project session '${sessionId}': ${err instanceof Error ? err.message : String(err)}`;
+        issues.set(sessionId, [{ sessionId, kind: 'session-not-projected', message }]);
         if (warned.get(sessionId) !== fingerprint) {
           warned.set(sessionId, fingerprint);
-          process.stderr.write(
-            `smith ui: could not project session '${sessionId}': ${err instanceof Error ? err.message : String(err)}\n`,
-          );
+          process.stderr.write(`smith ui: ${message}\n`);
         }
+      }
+    }
+    // Once per scan, not once per session: a page that hears "three sessions
+    // advanced" refetches once. Listeners are notified after every session in
+    // this pass has been folded, so a refetch triggered by the frame reads a
+    // projection that already holds all of it.
+    if (advances.length === 0) return;
+    for (const listener of [...listeners]) {
+      try {
+        listener(advances);
+      } catch {
+        // A listener is a client's open connection. One that throws loses its
+        // own frame; it does not get to fail the scan for the others, and it
+        // does not get to leave `projected` half-stamped for the next pass.
       }
     }
   }
 
-  return function refresh(): Promise<void> {
+  function refresh(): Promise<void> {
     if (inFlight) return inFlight;
     const run = scan().finally(() => {
       inFlight = null;
     });
     inFlight = run;
     return run;
+  }
+
+  function subscribe(listener: (advances: SessionAdvance[]) => void): () => void {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+
+  function hold(): () => void {
+    holds += 1;
+    if (ticker === null) {
+      ticker = setInterval(() => void refresh(), STREAM_TICK_MS);
+      // A dashboard nobody is watching must not keep `smith ui serve` — or a
+      // test's node process — alive. unref() makes the ticker a passenger on
+      // an event loop something else is holding open, which on a server is
+      // the listening socket.
+      ticker.unref();
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      holds -= 1;
+      if (holds === 0 && ticker !== null) {
+        clearInterval(ticker);
+        ticker = null;
+      }
+    };
+  }
+
+  function stop(): void {
+    listeners.clear();
+    holds = 0;
+    if (ticker !== null) {
+      clearInterval(ticker);
+      ticker = null;
+    }
+  }
+
+  return {
+    refresh,
+    subscribe,
+    hold,
+    stop,
+    // An arrow rather than a declaration beside the others, because `issues`
+    // is already the map above: a function of that name in this scope would
+    // not shadow it, it would redeclare it.
+    issues: () => [...issues.keys()].sort().flatMap((sessionId) => issues.get(sessionId) ?? []),
   };
 }
 
@@ -459,11 +648,69 @@ export function createApp(opts: AppOpts): AppHandle {
   // Fold any newly-appended events into the projection before ANY api route
   // answers — see createRefresher(). /api/health is deliberately registered
   // above this so a liveness probe stays a constant-time no-op.
-  const refresh = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
+  const refresher = createRefresher(opts.dbPath, opts.stateDir ?? STATE_EVENTS_DIR, dbOpts);
   app.use('/api/*', async (_c, next) => {
-    await refresh();
+    await refresher.refresh();
     await next();
   });
+
+  /**
+   * The change stream: "these sessions' logs advanced, and to how many
+   * events". It carries facts, never a rendered status (architecture §18
+   * rules 1 and 2) — a page that hears a session advanced refetches the query
+   * it already has and derives its own display, exactly as it does on a poll
+   * tick today. So this endpoint replaces the *timing* of the refetch and
+   * nothing else, which is why every page's query, every derived status and
+   * the no-optimistic-UI rule are untouched by it.
+   *
+   * Server-Sent Events rather than a WebSocket, and design-spec.md's "No
+   * WebSockets" §8 is answered in that file's 2026-09-15 addendum rather than
+   * here: the short of it is that a text/event-stream response is an HTTP
+   * response, so §8's real objection — that a socket needs a Durable Object
+   * at the eventual Workers port — does not apply to it, while the poll stays
+   * in place as the documented fallback.
+   *
+   * Registered AFTER the freshness middleware on purpose: the first scan a
+   * connecting client causes is the middleware's, so the `ready` frame is
+   * written against a projection that is already current.
+   */
+  app.get('/api/stream', (c) =>
+    streamSSE(c, async (stream) => {
+      // Two ways a client goes away and both must fire the same cleanup: the
+      // server aborting the stream (stream.onAbort) and the request itself
+      // being aborted (the fetch signal, which is what app.request() in a
+      // test and a closed tab in a browser both raise).
+      let done: () => void = () => {};
+      const closed = new Promise<void>((resolve) => {
+        done = resolve;
+      });
+      const release = refresher.hold();
+      const unsubscribe = refresher.subscribe((advances) => {
+        // Fire-and-forget on purpose: writeSSE resolves when the chunk is
+        // handed to the socket, and a scan must not wait on a slow client to
+        // finish reporting to the others.
+        void stream
+          .writeSSE({ event: 'advanced', data: JSON.stringify({ sessions: advances }) })
+          .catch(done);
+      });
+      const keepalive = setInterval(() => {
+        void stream.writeSSE({ data: '', event: 'keepalive' }).catch(done);
+      }, STREAM_KEEPALIVE_MS);
+      keepalive.unref();
+      stream.onAbort(done);
+      c.req.raw.signal.addEventListener('abort', done, { once: true });
+
+      // Named rather than anonymous so a client can tell "the stream is open"
+      // from "the stream has simply said nothing yet" — the difference
+      // decides whether the page keeps its polling fallback running.
+      await stream.writeSSE({ event: 'ready', data: JSON.stringify({ tickMs: STREAM_TICK_MS }) });
+      await closed;
+
+      unsubscribe();
+      release();
+      clearInterval(keepalive);
+    }),
+  );
 
   // --- Reads: one route per §10 page query -----------------------------
   app.get('/api/overview', (c) => {
@@ -496,16 +743,26 @@ export function createApp(opts: AppOpts): AppHandle {
   app.get('/api/kanban', (c) => {
     const epic = c.req.query('epic');
     const project = c.req.query('project');
-    return c.json(kanban(handle.db, epic, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json(
+      kanban(handle.db, epic, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+    );
   });
 
   // The app shell's own poll — "is the factory still moving, and what has
   // arrived since I looked?". It sits under the refresh middleware like every
   // other read, so the frame's liveness reading and the page's data are folded
   // from the same event log at the same moment.
+  //
+  // `projectionIssues` rides on it for the same reason: what the refresher
+  // could not fold is a fact about THIS server's projection, not about the
+  // events, so it is answered here rather than by queries.ts, and on the one
+  // read every page makes rather than on a page nobody opens (D-249).
   app.get('/api/pulse', (c) => {
     const project = c.req.query('project');
-    return c.json(pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json({
+      ...pulse(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }),
+      projectionIssues: refresher.issues(),
+    });
   });
 
   // The topbar session picker's feed -- the same thin-projection shape as
@@ -674,9 +931,13 @@ export function createApp(opts: AppOpts): AppHandle {
     });
   }
 
-  return { app, handle };
+  return { app, handle, closeStream: () => refresher.stop() };
 }
 
 export function closeApp(handle: AppHandle): void {
+  // Before the db, not after: stop() clears the ticker, and a scan that fired
+  // between the close and the clear would call apply() against a closed
+  // connection.
+  handle.closeStream();
   handle.handle.sqlite.close();
 }

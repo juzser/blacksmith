@@ -463,7 +463,8 @@ Everything else (TaskCard, screenshot tile grid, monospace error-payload block) 
 - **No WebSockets — poll, stated per surface:**
   - **The app shell** (`/api/pulse`, added by §A.6): poll every **5s** on every page. This is the only poll that is not a page's own — it carries the freshness indicator and the nav arrival badges, both of which have to be true on pages that do not poll at all.
   - **Overview** (stat row + live-agents feed): poll every **5s** — this is explicitly the "what's running right now" page (§7 of the architecture doc), the one place sub-10s freshness matters.
-  - **Timeline, Kanban**: poll every **15s**, paused via the Page Visibility API when the tab is hidden, plus a manual `Button` "Refresh" in the Toolbar (`Toolbar.prompt.md`'s documented `end` slot pattern) for on-demand freshness.
+  - **Timeline, Kanban, Flow**: poll every **15s**, paused via the Page Visibility API when the tab is hidden, plus a manual `Button` "Refresh" in the Toolbar (`Toolbar.prompt.md`'s documented `end` slot pattern) for on-demand freshness. Flow's poll retains view state across a tick — `retainFlowView()` (`ui/src/lib/flowView.ts`) keeps an expanded wave or edge-type filter that still exists in the freshly fetched graph, instead of resetting either on every success (D-243).
+  - **Projects**: poll every **15s**, same as Timeline/Kanban/Flow, paused with the tab — this hub has no Toolbar of its own, so the topbar's shared Refresh (below) is its only manual control (D-243).
   - **Task detail, Lessons, Errors, Analytics**: **manual refresh only**, no auto-poll — these are pages the operator is actively reading/deciding on; a table or findings list re-sorting under their cursor mid-read is a worse UX than a slightly stale view with an explicit Refresh button.
   - **Why poll, not WebSockets:** the projections are read-only SQLite queries behind a small local API with no auth; a single local operator doesn't need sub-second push. §10's own "Cloudflare later" plan is explicitly a data-layer port (SQLite → D1) "not a rewrite" — plain HTTP polling carries over unchanged, while a WebSocket layer would need Durable Objects at the eventual Workers port, extra migration surface with no demonstrated UX need at v1.
   - **Mutation-race interaction with polling:** no optimistic UI anywhere — Waive/Deny/Approve/Edit/Reject disable their control and guard `if (saving) return` (per `ux-conventions.md` §3) until the server responds; the next poll tick (or the mutation's own response) is what updates the UI. This avoids a poll racing an in-flight write.
@@ -756,10 +757,126 @@ Verbatim intent again; `ui/docs/DESIGN.md` records what shipped.
      have reloaded the shell's pulse and left the page under it untouched.
      Rather than teach the shell what each page fetches, `usePoll` gained a
      module-level refresh signal that every mounted poller watches, so all
-     four polling pages answer it with no per-page wiring. The watcher is
+     polling pages answer it with no per-page wiring. The watcher is
      registered inside `usePoll`'s setup call, so Vue's effect scope disposes
      it with the component and an unmounted page cannot be woken by it.
+     Projects and Flow joined this list under D-243 — until then, the
+     topbar's Refresh silently did nothing on either. Roadmap is the one
+     scoped page that still does not answer it.
    - **Supersedes §2's "Right: theme toggle only."** The topbar's right side
      now carries the pulse readout, `LiveStatus`, the project `Select` (§A.1)
      and the theme toggle. Still no user menu and no masking toggle — the
      reasoning there is unchanged.
+
+---
+
+## Addendum — §8 revisited: a stream is not a socket (2026-09-15)
+
+§8 refuses WebSockets and says why. This addendum does not overturn that
+refusal; it answers the reasoning under it, which turns out to be about
+sockets specifically and not about push, and adds one endpoint that is
+neither a socket nor a poll. §8 stays as written — it is the record of what
+was decided at v1 and on what grounds — and this section states what changed
+about the grounds.
+
+### A.1 What §8 actually argued
+
+Two claims, quoted:
+
+> the projections are read-only SQLite queries behind a small local API with
+> no auth; a single local operator doesn't need sub-second push
+
+> a WebSocket layer would need Durable Objects at the eventual Workers port,
+> extra migration surface with no demonstrated UX need at v1
+
+The second claim is correct and is the reason this addendum does not add a
+WebSocket. On Cloudflare Workers a Durable Object is what *accepts* a socket:
+`WebSocketPair` plus a hibernating DO is the documented shape, and a fan-out
+across isolates has nowhere else to live. §10's "data-layer port, not a
+rewrite" would stop being true the moment the UI needed one.
+
+It does not transfer to Server-Sent Events. A `text/event-stream` response is
+an HTTP response: a Worker returns a `ReadableStream` body from an ordinary
+fetch handler, and no Durable Object is involved unless the *source* of the
+events is shared across isolates. Here it is not. The source is this server's
+own per-session fingerprint scan of `state/events/*.jsonl` — per connection,
+already written, and at the Workers port it becomes a D1 read on the same
+interval. That is the same data-layer substitution §10 already plans for every
+other read, not a second thing to migrate.
+
+The first claim is the one that changed, and it changed by decision rather
+than by discovery: the factory is no longer being built for one operator who
+also happens to be running the CLI that produces the events. A person who
+opens the dashboard and did not type the command that feeds it has no other
+signal that anything is happening. "A single local operator doesn't need
+sub-second push" was true of the reader §8 had; it is not true of the reader
+this is now for.
+
+### A.2 What was added
+
+One endpoint, `GET /api/stream`, and nothing else on the wire.
+
+- **Frames carry facts, never a status.** An `advanced` frame is
+  `{"sessions":[{"session":"<id>","events":<n>}]}` — which logs grew and how
+  many events each now holds. Architecture §18 rules 1 and 2 are the reason:
+  a frame that carried "task X is blocked" would be a status computed
+  somewhere other than the read query that owns it, and two places would then
+  be entitled to different answers. A page that hears a session advanced
+  refetches the query it already has and derives its display exactly as it
+  does on a poll tick.
+- **The stream reuses the freshness gate, it does not add a second one.**
+  `createRefresher()` in `ui/server/src/app.ts` already re-projects a session
+  whose log fingerprint changed, on every `/api/*` request. It now also
+  reports which sessions it advanced, and holds itself open on a 1s ticker
+  while at least one client is connected. There is one scanner, one
+  fingerprint map, one in-flight scan — a second scanner would race the first
+  and the loser would find nothing changed and say so.
+- **The ticker is ref-counted and `unref()`ed.** No connected client, no
+  ticker; and a ticker never keeps the process alive by itself.
+- **A `ready` frame on connect, a `keepalive` comment every 25s.** `ready`
+  lets a client distinguish "open and quiet" from "not open", which is what
+  decides whether the fallback below keeps running. The keepalive costs one
+  line per client per 25s locally and is what stops a proxy at the §10 port
+  from reaping an idle stream.
+
+### A.3 What §8 keeps
+
+- **Polling is not removed. It is the fallback, and it is still the whole
+  story when the stream is not open.** `usePoll` now has three triggers —
+  the stream, the manual Refresh, and its own interval — and the interval is
+  what runs when `EventSource` is unavailable, has not connected, or has
+  dropped. The intervals in §8's table are unchanged, so a client with no
+  stream behaves exactly as specified there.
+- **§A.6's liveness pulse is exempt, and keeps its 5s interval always.** The
+  stream may stand a *data* poll down, because an open stream that reports
+  nothing is a reliable answer to "has the data changed". It is not an answer
+  to "is the server answering" — a frozen server and a quiet factory send the
+  same nothing, and a half-open socket reads as `open` until a keepalive write
+  fails. §A.6 hoisted that probe into the app shell so that no page could sit
+  frozen while looking calm; a transport that silenced it would hand the
+  freeze back. `usePoll`'s `heartbeat` option is that exemption, and
+  `usePulse` is its only caller.
+- **The Page Visibility pause is unchanged**, and now covers the stream's
+  trigger too: a hidden tab neither ticks nor refetches on an `advanced`
+  frame, and the one refetch on return collapses everything it missed. The
+  connection itself stays open while hidden — it costs a keepalive line every
+  25s, and reopening on every tab switch would cost more.
+- **The manual-refresh-only pages stay manual.** Task detail, Lessons, Errors
+  and Analytics do not subscribe. §8's reasoning for those — the operator is
+  reading a fixed thing and a surprise re-render loses their place — is not a
+  transport argument and is untouched by having a transport.
+- **No optimistic UI, still.** §8's mutation-race rule is unchanged: a
+  mutation disables its control and waits for the server. The stream is
+  another thing that can prompt a refetch; it is not a second writer.
+- **No auth, still.** The stream is bound to 127.0.0.1 with everything else.
+  An end-user-facing deployment needs auth for every route, and `/api/stream`
+  is not a special case of that — it is the same open question §8 defers to
+  §10/§14, with one more route in it.
+
+### A.4 What this does not do
+
+It does not make the dashboard interactive. Every write surface §8 knew about
+is still the same four POST routes, and starting an epic, dispatching, or
+answering an escalation still requires the CLI. A faster read of a read-only
+page is a smaller change than it looks; it is a prerequisite for an
+end-user-facing UI, not the thing itself.

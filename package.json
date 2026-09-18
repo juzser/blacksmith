@@ -1,6 +1,6 @@
 {
   "name": "@juzser/blacksmith",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
   "description": "Autonomous agent factory — loop runner and worktree engine.",
   "keywords": [
@@ -33,7 +33,8 @@
   },
   "packageManager": "pnpm@9.3.0",
   "bin": {
-    "smith": "factory/orchestrator/dist/cli.js"
+    "smith": "factory/orchestrator/dist/cli.js",
+    "smith-run": "factory/orchestrator/dist/run-cli.js"
   },
   "files": [
     "factory/orchestrator/dist",
@@ -76,15 +77,15 @@
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.2",
     "picomatch": "4.0.7",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.12",
+    "@biomejs/biome": "2.5.13",
     "@hono/node-server": "2.1.1",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",
-    "@types/node": "26.4.1",
+    "@types/node": "26.5.1",
     "@vitejs/plugin-vue": "6.0.8",
     "@vitest/coverage-v8": "5.0.0",
     "@vue-flow/core": "1.48.2",
@@ -92,7 +93,7 @@
     "hono": "4.13.7",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.2.2",
+    "vite": "8.3.0",
     "vitest": "5.0.0",
     "vue": "3.5.42",
     "vue-router": "5.3.1"

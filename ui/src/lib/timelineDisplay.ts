@@ -2,6 +2,7 @@
 // grouping by EVENT KIND only, never status — actual outcome renders as a
 // Lozenge (taxonomy.ts) alongside it, never via tint alone.
 import type { TimelineEntry } from './api.js';
+import { specRefLabel } from './specRef.js';
 
 export type RowTint = 'blue' | 'slate' | 'lilac';
 
@@ -371,6 +372,10 @@ export function iconFor(entry: TimelineEntry): string {
       return 'file-text';
     case 'spec-change-decided':
       return 'scale';
+    // The PR lives on GitHub, not in this dashboard: the row is a pointer out,
+    // and the glyph says so before the operator reads the number.
+    case 'integration-pr-opened':
+      return 'external-link';
     default:
       return 'history';
   }
@@ -489,8 +494,21 @@ export function titleFor(entry: TimelineEntry): string {
       if (verdict === 'unrecorded') return 'Gate outcome — no outcome recorded';
       return `Gate outcome — ${String(p.outcome)}`;
     }
-    case 'finding-raised':
-      return `Finding raised — ${String(p.summary ?? p.finding_id ?? '')}`;
+    case 'finding-raised': {
+      // The payload is the finding itself (findings.ts raiseFinding), so a
+      // spec finding carries `finding_scope` and `spec_ref` flat in it.
+      const ref =
+        typeof p.spec_ref === 'object' && p.spec_ref !== null
+          ? (p.spec_ref as { plan_version?: unknown; criterion_ref?: unknown })
+          : {};
+      const label = specRefLabel({
+        findingScope: typeof p.finding_scope === 'string' ? p.finding_scope : null,
+        specPlanVersion: typeof ref.plan_version === 'number' ? ref.plan_version : null,
+        criterionRef: typeof ref.criterion_ref === 'string' ? ref.criterion_ref : null,
+      });
+      const summary = String(p.summary ?? p.finding_id ?? '');
+      return label ? `Finding raised — ${summary} (${label})` : `Finding raised — ${summary}`;
+    }
     case 'finding-transitioned':
       return `Finding transitioned — ${String(p.to_status ?? '')}`;
     case 'severity-decisions':
@@ -544,6 +562,20 @@ export function titleFor(entry: TimelineEntry): string {
       return `${String(p.agent_role ?? 'Judge')} reported — ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
     case 'epic-closed':
       return `Epic closed — ${String(p.epic_id ?? '')}: ${String(p.machine_verdict ?? '')}, ${String(p.tasks_merged ?? 0)} tasks merged`;
+    // run.md step 17. `repo#number` is the form GitHub itself resolves, and
+    // the refs matter because a stacked PR (an epic cut from another epic's
+    // integration branch) does not target `main` — the operator merging in
+    // the wrong order is exactly what the row is there to prevent. A
+    // hand-appended payload can be thin, so every field is optional and the
+    // title degrades to the bare fact rather than to `#undefined`.
+    case 'integration-pr-opened': {
+      const ref = p.pr_number === undefined ? '' : `${String(p.repo ?? '')}#${String(p.pr_number)}`;
+      const refs =
+        p.head_ref !== undefined && p.base_ref !== undefined
+          ? ` (${String(p.head_ref)} → ${String(p.base_ref)})`
+          : '';
+      return ref === '' ? 'Integration PR opened' : `Integration PR opened — ${ref}${refs}`;
+    }
     case 'lesson-candidate-raised':
       return `Lesson candidate — ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-edited':

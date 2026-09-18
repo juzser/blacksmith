@@ -18,7 +18,7 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { SmithError } from './errors.js';
-import { PROJECTS_DIR, ROADMAP_PATH, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
+import { PROJECTS_DIR, roadmapReadPath, SCAFFOLD_DIR, WORKSPACES_DIR } from './paths.js';
 import {
   loadRoadmap,
   type MilestoneDef,
@@ -32,6 +32,7 @@ import {
   PACKAGE_FRAGMENT_NAME,
   validateProjectName,
 } from './scaffold.js';
+import { ensureWritableRoadmap } from './workroot.js';
 
 export class McpError extends SmithError {}
 
@@ -391,7 +392,7 @@ export function addMcpSurface(opts: McpSurfaceOptions): McpSurfaceResult {
  */
 export function registerMcpMilestone(
   projectName: string,
-  roadmapPath: string = ROADMAP_PATH,
+  roadmapPath: string = ensureWritableRoadmap(),
 ): string {
   const id = `${projectName}-${MCP_MILESTONE_SUFFIX}`;
   const text = readRoadmapText(roadmapPath);
@@ -608,7 +609,7 @@ export function runMcpCheck(opts: McpCheckOptions): McpCheckReport {
   validateProjectName(opts.projectName);
   const { targetDir, source } = resolveMcpTarget(opts);
   const manifestPath = path.join(targetDir, MANIFEST_NAME);
-  const roadmapPath = opts.roadmapPath ?? ROADMAP_PATH;
+  const roadmapPath = opts.roadmapPath ?? roadmapReadPath();
 
   if (!existsSync(manifestPath)) {
     throw new McpError(

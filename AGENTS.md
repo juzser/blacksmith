@@ -12,7 +12,8 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Need | Read |
 |---|---|
 | Install / bootstrap / verify this repo (executable runbook) | `INSTALL.md` |
-| Architecture — 17 numbered sections, 78 kB: read only the `§` a cite names (`grep -n '^## ' docs/specs/black-smith-architecture.md` is the map), never the whole file | `docs/specs/black-smith-architecture.md` |
+| The ten rules a change may not break, and what each one makes the factory stop being able to claim — read before changing anything under `factory/orchestrator/src/` | `docs/specs/black-smith-architecture.md` §18 |
+| Architecture — 18 numbered sections, 82 kB: read only the `§` a cite names (`grep -n '^## ' docs/specs/black-smith-architecture.md` is the map), never the whole file | `docs/specs/black-smith-architecture.md` |
 | Operator interview (Phase 1) | `docs/specs/black-smith-interview.md` |
 | Per-agent interviews (constraints per role) — cited by id (`N-9`, `M-6`); the ids are bold leads, not headings, so start from the index, which maps each id to its lines and heading: read the id's paragraph, not the file | `docs/specs/agent-interviews-index.md`, then `docs/specs/agent-interviews.md` |
 | This operator's stack answers (install interview) | `factory/policies/stack.yml` |
@@ -20,7 +21,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Per-agent constraints (compiled from interview) | `docs/standards/agent-constraints.md` |
 | Guardrails: secrets/env, git, deploy (S1 on violation) | `docs/standards/guardrails.md` |
 | Policies: taxonomy, budgets, severity, worktree, crosscheck | `factory/policies/` |
-| Agent templates | `.claude/agents/` |
+| Agent templates — one per role, for every harness: Claude Code reads them in place, `smith harness plan` hands the same file to a cli harness | `.claude/agents/` |
 | Approved lessons (injected into agents) | `factory/policies/lessons.md` |
 | Loop runner + worktree engine (taxonomy/schemas/events/plan/claims/worktree/queue/cli, TS strict + Vitest) | `factory/orchestrator/` |
 | Operator console (`/bs new\|mcp\|plan\|run\|audit\|status\|ui\|waivers\|lessons\|report`) — the router; one playbook per verb beside it | `.claude/skills/bs/SKILL.md` |
@@ -32,6 +33,7 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Lessons pipeline (novelty gate, compile, `smith dream`) | `factory/orchestrator/src/lessons.ts` |
 | Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge preflight`, `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
 | Who may dispatch, and what they owe for it (`smith delegation check`) | `factory/policies/delegation.yml`, `factory/orchestrator/src/delegation.ts` |
+| Which program holds a worker turn — in-process Agent tool or a `cli` harness such as Codex (`smith harness list\|plan` renders, `smith-run` starts) | `factory/policies/harness.yml`, `factory/orchestrator/src/harness.ts`, `src/runner.ts`, `docs/runbooks/harness.md` |
 | Background watcher (`smith daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
 | Which spec is a contract, a scope, or a record of the past — the records (`D-nnn`, `P9-n`, `FD-n`) are cited by id and never loaded whole | `docs/specs/README.md` |
 | Everything else under `docs/` and `factory/policies/` — one line per file, with who it is for | `docs/README.md` |
@@ -50,6 +52,12 @@ This repo is self-governing: its rules live here, not in any other repo.
   (D-42), so it follows the project wherever that directory is: the shape is
   always `<project-parent>/.wt/<project>/<task-id>`, which for a project
   beside this repo — where `smith new` puts one — is outside this repo too.
+- **Load-bearing rules.** Ten invariants in `docs/specs/black-smith-architecture.md`
+  §18 are the ones a change may not break. They are not style: each names the
+  module that breaks and the claim the factory stops being able to make. A diff
+  that crosses one is `S1-stop-the-line` however small it is, because the damage
+  is not in the diff but in every verdict issued after it. Changing a rule itself
+  is an operator decision.
 - **Specs are contracts.** No dispatch without objective, output schema,
   acceptance criteria, tool allowlist, and budget.
 - **Declarations vs state.** Committed files are declarations. `state/`,

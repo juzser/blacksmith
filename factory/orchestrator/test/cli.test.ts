@@ -3,14 +3,17 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-// The one src import in a file that otherwise drives only the built binary,
-// and it is a policy READER rather than anything under test: an assertion
-// about the coder cap that reads budgets.yml through the same loader the
-// binary uses cannot drift away from the file when the cap is retuned.
+// The two src imports in a file that otherwise drives only the built binary,
+// and neither is anything under test. `loadBudgetPolicy` is a policy READER:
+// an assertion about the coder cap that reads budgets.yml through the same
+// loader the binary uses cannot drift away from the file when the cap is
+// retuned. FOLLOW_TICK_MS is the same move for a clock: a test that waits out
+// two polls has to wait out the poll the binary actually uses.
 import { loadBudgetPolicy } from '../src/budgets.js';
+import { FOLLOW_TICK_MS } from '../src/events.js';
 import { resolveRepoAtDir } from '../src/gh.js';
 import { factoryProjects } from '../src/projects.js';
-import { assertExited, runOrThrow, runProcess } from './helpers/process.js';
+import { assertExited, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
 // UI glue per stack.md); it is verified end-to-end here as a built binary,
@@ -236,6 +239,129 @@ describe('cli.ts (built binary)', () => {
     expect(err.code).toBe('plan.not-found');
     expect(err.details.version).toBe(100);
     expect(err.message).toContain('plan-v100.json');
+  });
+
+  // FD-45 / FD-49 (csb-signing-policy-1). plan.md step 4 critiques the plan
+  // before step 6 files it as plan-v1.json, so the verb has to take the draft
+  // by path; and its output -- three rationales of several kB each -- is read
+  // back from a file more often than from a terminal.
+  describe('plan quorum: a draft by path, an outcome to a file (FD-45, FD-49)', () => {
+    function draftPlan(epicId: string, version = 1) {
+      return {
+        epic_id: epicId,
+        version,
+        status: 'draft',
+        tasks: [
+          {
+            task_id: `${epicId}/task-1`,
+            epic_id: epicId,
+            plan_version: version,
+            objective: 'Do the thing.',
+            output_schema_ref: 'result.schema.json',
+            acceptance_criteria: ['it works'],
+            claims: ['src/foo/**'],
+            budget: { tokens: 100, diff_lines: 10, max_turns: 5 },
+            contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+          },
+        ],
+        edges: [],
+      };
+    }
+
+    async function quorumFixture(name: string) {
+      const dir = path.join(scratchDir, `plan-quorum-${name}`);
+      const eventsDir = path.join(dir, 'events');
+      const specsDir = path.join(dir, 'specs');
+      await mkdir(specsDir, { recursive: true });
+      const draft = path.join(dir, 'draft.json');
+      await writeFile(draft, JSON.stringify(draftPlan('epic-fd45'), null, 2));
+      const sessionId = `cli-plan-quorum-${name}`;
+      expect(runCli(['session', 'start', sessionId, '--state-dir', eventsDir]).status).toBe(0);
+      const envelope = [
+        '--plan-version',
+        '1',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
+        '--specs-dir',
+        specsDir,
+      ];
+      return { dir, eventsDir, specsDir, draft, sessionId, envelope };
+    }
+
+    it('--plan <path> critiques the named draft when no plan-v<n>.json exists, and files nothing', async () => {
+      const f = await quorumFixture('draft');
+      const { stdout, status } = runCli(['plan', 'quorum', '--plan', f.draft, ...f.envelope]);
+      expect(status).toBe(0);
+      const outcome = JSON.parse(stdout);
+      expect(outcome).toMatchObject({ outcome: 'endorsed', epicId: 'epic-fd45', version: 1 });
+      // The record names the draft's epic, read from the file, not from a flag
+      // the operator had to repeat.
+      const tail = runCli(['event', 'tail', f.sessionId, '--state-dir', f.eventsDir, '--n', '10']);
+      const decisions = (
+        JSON.parse(tail.stdout) as Array<{
+          record: { event_type: string; payload: { task_id?: string } };
+        }>
+      )
+        .map((e) => e.record)
+        .filter((r) => r.event_type === 'quorum-decision');
+      expect(decisions.map((r) => r.payload.task_id)).toEqual(['epic-fd45/plan-v1']);
+      expect(existsSync(path.join(f.specsDir, 'epic-fd45'))).toBe(false);
+    });
+
+    it('--plan <path> refuses a draft whose epic_id or version is not the one the envelope names', async () => {
+      const f = await quorumFixture('mismatch');
+      const wrongEpic = runCli([
+        'plan',
+        'quorum',
+        '--plan',
+        f.draft,
+        '--epic',
+        'epic-other',
+        ...f.envelope,
+      ]);
+      expect(wrongEpic.status).toBe(1);
+      expect(JSON.parse(wrongEpic.stdout).error.code).toBe('plan.identity-mismatch');
+
+      const v2 = path.join(f.dir, 'draft-v2.json');
+      await writeFile(v2, JSON.stringify(draftPlan('epic-fd45', 2), null, 2));
+      const wrongVersion = runCli(['plan', 'quorum', '--plan', v2, ...f.envelope]);
+      expect(wrongVersion.status).toBe(1);
+      const err = JSON.parse(wrongVersion.stdout).error;
+      expect(err.code).toBe('plan.identity-mismatch');
+      expect(err.message).toContain('version 2');
+      expect(err.message).toContain('--plan-version 1');
+    });
+
+    it('--out <file> writes the outcome it prints, creating the directory, and still prints it', async () => {
+      const f = await quorumFixture('out');
+      const out = path.join(f.dir, 'nested', 'quorum-1.json');
+      const { stdout, status } = runCli([
+        'plan',
+        'quorum',
+        '--plan',
+        f.draft,
+        '--out',
+        out,
+        ...f.envelope,
+      ]);
+      expect(status).toBe(0);
+      const printed = JSON.parse(stdout);
+      expect(printed.outcome).toBe('endorsed');
+      expect(JSON.parse(await readFile(out, 'utf8'))).toEqual(printed);
+    });
+
+    it('without --plan, --epic is still required', () => {
+      const { stdout, status } = runCli(['plan', 'quorum', '--plan-version', '1']);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('cli.missing-flag');
+    });
   });
 
   // P9-28: `cli.ts` validated flags with requireFlag and positionals not at
@@ -1680,6 +1806,27 @@ describe('cli.ts (built binary)', () => {
     expect(append1.status).toBe(0);
     const rootId = JSON.parse(append1.stdout).event_id as string;
 
+    // The plan declares the task before anything is scheduled against it: a
+    // dispatch moves a task, it never mints one, so a log that dispatched a
+    // task nothing declared projects no row for it (see projector.test.ts).
+    const appendAdded = runCli([
+      'event',
+      'append',
+      JSON.stringify({
+        session_id: sessionId,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-9/task-1',
+        plan_version: 1,
+        causal_parent: rootId,
+        payload: { task_id: 'epic-9/task-1', epic_id: 'epic-9' },
+      }),
+      '--state-dir',
+      eventsDir,
+    ]);
+    expect(appendAdded.status).toBe(0);
+    const addedId = JSON.parse(appendAdded.stdout).event_id as string;
+
     const append2 = runCli([
       'event',
       'append',
@@ -1689,7 +1836,7 @@ describe('cli.ts (built binary)', () => {
         event_type: 'dispatch_decision',
         task_id: 'epic-9/task-1',
         plan_version: 1,
-        causal_parent: rootId,
+        causal_parent: addedId,
         payload: {
           agent_role: 'coder',
           provider: 'claude',
@@ -1715,8 +1862,10 @@ describe('cli.ts (built binary)', () => {
     expect(rebuildResult.status).toBe(0);
     expect(JSON.parse(rebuildResult.stdout)).toEqual({
       sessionsProcessed: 1,
-      eventsApplied: 2,
+      eventsApplied: 3,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
 
     const overviewResult = runCli(['stats', 'overview', '--db', dbPath, '--session', sessionId]);
@@ -1729,14 +1878,14 @@ describe('cli.ts (built binary)', () => {
 
     const timelineResult = runCli(['stats', 'timeline', '--db', dbPath, '--session', sessionId]);
     expect(timelineResult.status).toBe(0);
-    // Both appended events, and no task-added — this session never had one.
-    // The old assertion here was `toHaveLength(1)`: session-start was written
-    // as the root of the log and then dropped by timeline()'s eventType
-    // filter, so the CLI's own smoke test recorded the log's first event as
-    // invisible. Asserting the types rather than the count says which two.
+    // All three appended events. The old assertion here was `toHaveLength(1)`:
+    // session-start was written as the root of the log and then dropped by
+    // timeline()'s eventType filter, so the CLI's own smoke test recorded the
+    // log's first event as invisible. Asserting the types rather than the
+    // count says which three.
     expect(
       (JSON.parse(timelineResult.stdout) as { eventType: string }[]).map((e) => e.eventType),
-    ).toEqual(['session-start', 'dispatch_decision']);
+    ).toEqual(['session-start', 'task-added', 'dispatch_decision']);
 
     const kanbanResult = runCli([
       'stats',
@@ -1749,10 +1898,10 @@ describe('cli.ts (built binary)', () => {
       'epic-9',
     ]);
     expect(kanbanResult.status).toBe(0);
-    // The task id carries its epic, so `--epic epic-9` finds this task even
-    // though no `task-added` ever named the epic in a payload (D-49/P9-10).
-    // Before that, a dispatched task showed up in `stats overview` as a live
-    // agent and in `stats kanban --epic` as nothing at all.
+    // The task id carries its epic, so `--epic epic-9` finds this task from
+    // the id alone (D-49/P9-10). Before that, a dispatched task showed up in
+    // `stats overview` as a live agent and in `stats kanban --epic` as
+    // nothing at all.
     const kanban = JSON.parse(kanbanResult.stdout) as Array<{
       taskStatus: string;
       tasks: Array<{ taskId: string }>;
@@ -1761,8 +1910,8 @@ describe('cli.ts (built binary)', () => {
     expect(kanban[0]?.taskStatus).toBe('in-progress');
     expect(kanban[0]?.tasks.map((t) => t.taskId)).toEqual(['epic-9/task-1']);
 
-    // dispatch_decision alone (no task-added) still touches a minimal task
-    // row (task_status "in-progress"), just without case/origin/claims.
+    // The dispatch moved the declared task to "in-progress"; the row carries
+    // no case/origin/claims because this `task-added` named none.
     const taskResult = runCli(['stats', 'task', '--db', dbPath, '--task', 'epic-9/task-1']);
     expect(taskResult.status).toBe(0);
     const taskDetailJson = JSON.parse(taskResult.stdout);
@@ -1813,8 +1962,10 @@ describe('cli.ts (built binary)', () => {
     expect(applyResult.status).toBe(0);
     expect(JSON.parse(applyResult.stdout)).toEqual({
       sessionsProcessed: 1,
-      eventsApplied: 2,
+      eventsApplied: 3,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
   });
 
@@ -5543,6 +5694,43 @@ describe('cli.ts (built binary)', () => {
         );
       });
 
+      // Item (j) of the csb-signing-policy-1 dogfood: the one refusal a
+      // spec-reviewer actually hit in csb-audit-1 was this one, and it was
+      // reported back as "error object with exit 0". The exit code was the
+      // pipe's, not the CLI's - but nothing here had ever pinned it either.
+      it('refuses spec evidence that names no criterion_ref, with exit 1 and no event', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const { criterion_ref: _dropped, ...noCriterion } =
+          SPEC_EVIDENCE[0] as (typeof SPEC_EVIDENCE)[0];
+
+        const result = runCli([
+          'findings',
+          'raise',
+          '--scope',
+          'spec',
+          '--evidence',
+          await specEvidenceFile('spec-nocriterion', [noCriterion]),
+          '--found-by',
+          'spec-reviewer',
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error).toMatchObject({
+          code: 'findings.spec-evidence-needs-criterion',
+          details: { index: 0 },
+        });
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised')).toEqual(
+          [],
+        );
+      });
+
       it('rejects a --scope it does not know rather than defaulting it to diff', async () => {
         const { sessionId, eventsDir, planPath } = await session();
 
@@ -7785,6 +7973,47 @@ describe('cli.ts (built binary)', () => {
       ]);
     });
 
+    // FD-1 (csb-audit-1). `--grader` hands the gate the grader's verdict the
+    // way `--evidence` hands it a judge's findings, but only the evidence path
+    // closed the judge's turn. A grader dispatched by `judge dispatch` then
+    // blocked its own gate as `judges-outstanding` with its verdict sitting
+    // in the same command line.
+    it('gate run --grader closes the dispatched grader whose verdict it is', async () => {
+      const { sessionId, eventsDir } = await judgeSession();
+      const files = await gateFiles(sessionId);
+      const grader = path.join(scratchDir, `${sessionId}-grader.json`);
+      dispatchJudge(sessionId, eventsDir, 'grader', grader);
+      await writeFile(
+        grader,
+        JSON.stringify({
+          run_status: 'done',
+          structured_output: {
+            round: 1,
+            criteria: [{ criterion: 'it builds', status: 'pass', evidence: 'build log' }],
+            overall: 'pass',
+          },
+        }),
+      );
+
+      const gated = gateRun(sessionId, eventsDir, files, ['--grader', grader]);
+      expect(gated.status).toBe(0);
+      expect(JSON.parse(gated.stdout).outcome).not.toBe('blocked');
+      expect(
+        judgeCli('outstanding', sessionId, eventsDir, ['--task', 'epic-1/task-1']).status,
+      ).toBe(0);
+
+      const events = runCli(['event', 'tail', sessionId, '--n', '100', '--state-dir', eventsDir]);
+      const reported = JSON.parse(events.stdout)
+        .map((e: { record: { event_type: string; payload: Record<string, unknown> } }) => e.record)
+        .filter((r: { event_type: string }) => r.event_type === 'judge-reported')
+        .map((r: { payload: Record<string, unknown> }) => [
+          r.payload.agent_role,
+          r.payload.artifact_path,
+          r.payload.finding_count,
+        ]);
+      expect(reported).toEqual([['grader', grader, 0]]);
+    });
+
     it('gate run --evidence for a role nobody dispatched behaves exactly as it did before', async () => {
       const { sessionId, eventsDir, artifact } = await judgeSession();
       const files = await gateFiles(sessionId);
@@ -8058,6 +8287,40 @@ describe('cli.ts (built binary)', () => {
           symbols: ['parse'],
         },
       ]);
+    });
+
+    it('exits 0 and lists the crossing as promised when the producer keeps the file in keeps_exports', async () => {
+      const promised = {
+        ...IMPACT_PLAN,
+        tasks: IMPACT_PLAN.tasks.map((task, index) =>
+          index === 0 ? { ...task, keeps_exports: ['src/a.ts'] } : task,
+        ),
+      };
+      const promisedPath = path.join(repoDir, 'plan-promised.json');
+      await writeFile(promisedPath, JSON.stringify(promised));
+
+      const { stdout, status } = runCli([
+        'claims',
+        'impact',
+        '--plan',
+        promisedPath,
+        '--repo',
+        repoDir,
+        'epic-1/task-a',
+        'epic-1/task-b',
+      ]);
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed.status).toBe('clean');
+      expect(parsed.crossings).toEqual([]);
+      expect(parsed.promised).toHaveLength(1);
+      expect(parsed.promised[0]).toMatchObject({
+        producer: 'epic-1/task-a',
+        consumer: 'epic-1/task-b',
+        exportedBy: 'src/a.ts',
+        importedBy: 'src/b.ts',
+        symbols: ['parse'],
+      });
     });
 
     it('refuses a wave with no task ids rather than pronouncing the empty set clean', () => {
@@ -8851,6 +9114,142 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('events.unknown-causal-session');
       expect(parsed.error.message).toContain('lin-typo');
+    });
+  });
+
+  // A stream is not an array. Every other read verb prints one JSON document
+  // and exits; `--follow` prints one record per line and keeps the file open,
+  // so the two things worth an end-to-end test are the ones no unit test of
+  // followEvents can see: that the built binary ACCEPTS the flag (the usage
+  // table is the allow-list), and that the bytes reaching a pipe are line-
+  // delimited from the first record rather than at the end.
+  describe('event tail --follow (P9-7 follow-up)', () => {
+    const eventsDir = () => path.join(scratchDir, 'follow-events');
+
+    function append(
+      sessionId: string,
+      note: string,
+      parent: string | null,
+      taskId?: string,
+    ): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'operator-note',
+          plan_version: 1,
+          causal_parent: parent,
+          payload: { note, ...(taskId === undefined ? {} : { task_id: taskId }) },
+        }),
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    /** A log has to be opened before it can be followed; only a root may be parentless. */
+    function start(sessionId: string): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'operator',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    it('prints the backlog a line at a time, then each new record, each one once', async () => {
+      const sessionId = `cli-follow-${Date.now()}`;
+      const root = start(sessionId);
+      const first = append(sessionId, 'one', root);
+
+      const follow = startProcess('node', [
+        CLI_PATH,
+        'event',
+        'tail',
+        sessionId,
+        '--state-dir',
+        eventsDir(),
+        '--follow',
+      ]);
+      try {
+        // The backlog lands before anything appends. A follower that printed
+        // nothing until the next event would show an operator a blank screen
+        // over a log that already holds the answer they came for.
+        const backlog = await follow.waitForLines(2);
+        expect(backlog.map((line) => JSON.parse(line).event_id)).toEqual([root, first]);
+
+        const second = append(sessionId, 'two', first);
+        const all = await follow.waitForLines(3);
+        expect(all.map((line) => JSON.parse(line).event_id)).toEqual([root, first, second]);
+
+        // Re-reading is not re-printing. The poll is a second, so waiting out
+        // two of them is the only way to tell a cursor that holds from one
+        // that re-emits the tail on every read.
+        await new Promise((resolve) => setTimeout(resolve, 2 * FOLLOW_TICK_MS + 500));
+        expect(follow.lines()).toHaveLength(3);
+
+        // ^C is how this command is meant to end, so it ENDS on one -- an
+        // operator who hits it and then waits reaches for `kill -9`.
+        const ended = await follow.stop('SIGINT');
+        expect(ended.signal).toBeNull();
+        expect(ended.status).toBe(0);
+        expect(ended.stderr).toBe('');
+      } finally {
+        await follow.stop('SIGKILL');
+      }
+    });
+
+    it('bounds the backlog with --n and scopes the stream with --task', async () => {
+      const sessionId = `cli-follow-scope-${Date.now()}`;
+      const mine = append(sessionId, 'mine-1', start(sessionId), 'T-follow');
+      const theirs = append(sessionId, 'theirs-1', mine, 'T-other');
+      const recent = append(sessionId, 'mine-2', theirs, 'T-follow');
+
+      const follow = startProcess('node', [
+        CLI_PATH,
+        'event',
+        'tail',
+        sessionId,
+        '--state-dir',
+        eventsDir(),
+        '--n',
+        '2',
+        '--task',
+        'T-follow',
+        '--follow',
+      ]);
+      try {
+        // Slice first, then filter -- the order the one-shot form already
+        // uses. The last two records are theirs-1 and mine-2; only mine-2
+        // survives the scope, and mine-1 is older than the window regardless.
+        const backlog = await follow.waitForLines(1);
+        expect(backlog.map((line) => JSON.parse(line).event_id)).toEqual([recent]);
+
+        // A record outside the scope is not a record this stream skipped over
+        // silently: it never enters it, and the one after it still arrives.
+        const alsoTheirs = append(sessionId, 'theirs-2', recent, 'T-other');
+        const mineAgain = append(sessionId, 'mine-3', alsoTheirs, 'T-follow');
+        const seen = await follow.waitForLines(2);
+        expect(seen.map((line) => JSON.parse(line).event_id)).toEqual([recent, mineAgain]);
+
+        const ended = await follow.stop('SIGINT');
+        expect(ended.status).toBe(0);
+      } finally {
+        await follow.stop('SIGKILL');
+      }
     });
   });
 
@@ -9780,6 +10179,46 @@ describe('cli.ts (built binary)', () => {
       expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
     });
 
+    // The loop used to answer only when it ended: one document, at exit, for a
+    // process whose point is that it does not exit. So `daemon run` in the
+    // foreground was blank for as long as it ran, and `daemon.log` -- which is
+    // that same stdout, detached -- held nothing a `tail -f` could show.
+    it('prints one report per tick as it runs, and a count with no report at the end', async () => {
+      const { dir, stateDir } = fixture();
+      const run = startProcess('node', [
+        CLI_PATH,
+        'daemon',
+        'run',
+        '--dir',
+        dir,
+        '--state-dir',
+        stateDir,
+        '--no-db',
+        '--interval',
+        '1',
+      ]);
+      try {
+        // Two lines means two ticks, each one a whole TickReport: the first
+        // lands before the first sleep, not after it.
+        const ticks = await run.waitForLines(2);
+        for (const line of ticks) expect(JSON.parse(line).sessions).toEqual(['sess-cli']);
+
+        // `smith daemon stop` is SIGTERM. The lock goes with the process.
+        const ended = await run.stop('SIGTERM');
+        expect(ended.status).toBe(0);
+        expect(ended.stderr).toBe('');
+        expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+
+        // The closing line counts what was printed and repeats none of it:
+        // `last` is the --once shape, where nothing else carried the report.
+        const lines = run.lines();
+        const closing = JSON.parse(lines[lines.length - 1] as string);
+        expect(closing).toEqual({ ticks: lines.length - 1, dir });
+      } finally {
+        await run.stop('SIGKILL');
+      }
+    });
+
     // The behaviour the union rule ships: an operator who typed no --project
     // at all used to get an `unwatched-project` finding naming this clone
     // (the whole point of the fix); now they get none, restating nothing the
@@ -9974,5 +10413,84 @@ describe('cli.ts (built binary)', () => {
       expect(status).toBe(1);
       expect(JSON.parse(stdout).error.code).toBe('cli.invalid-flag');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `smith init` -- the one verb that exists because installing is not cloning.
+//
+// It is the first command an operator who ran `npx @juzser/blacksmith` types,
+// so a parse failure in it is the whole product failing on contact. Two things
+// are worth an end-to-end test rather than a unit one: that a namespace with
+// no action word reaches its arm at all, and that `--work-root` is a flag the
+// argv splitter knows takes a value. Both are derived rather than declared --
+// from `splitNamespaceAction` and from the usage table's flag string -- and
+// neither is visible to a test of `initWorkRoot`, which never sees argv.
+// ---------------------------------------------------------------------------
+
+describe('smith init (built binary)', () => {
+  let root: string;
+
+  beforeAll(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'smith-init-'));
+  });
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('prepares a work root, and says what it did to every file', () => {
+    const workRoot = path.join(root, 'first');
+    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    expect(status).toBe(0);
+
+    const report = JSON.parse(stdout);
+    expect(report.workRoot).toBe(workRoot);
+    expect(report.inPlace).toBe(false);
+    expect(report.gitignore).toBe('written');
+
+    for (const rel of report.directories as string[]) {
+      expect(existsSync(path.join(workRoot, rel)), `${rel} was reported and not created`).toBe(
+        true,
+      );
+    }
+    expect((report.files as { status: string }[]).length).toBeGreaterThan(1);
+    for (const file of report.files as { personal: string; status: string }[]) {
+      expect(file.status).toBe('seeded');
+      expect(existsSync(file.personal)).toBe(true);
+    }
+  });
+
+  it('is idempotent, and keeps an answer the operator already typed', () => {
+    const workRoot = path.join(root, 'second');
+    expect(runCli(['init', '--work-root', workRoot]).status).toBe(0);
+
+    const answered = (
+      JSON.parse(runCli(['init', '--work-root', workRoot]).stdout).files as {
+        personal: string;
+      }[]
+    ).find((file) => file.personal.endsWith('stack.yml'));
+    expect(answered).toBeDefined();
+    writeFileSync((answered as { personal: string }).personal, 'language: rust\n', 'utf8');
+
+    const { stdout, status } = runCli(['init', '--work-root', workRoot]);
+    expect(status).toBe(0);
+    const report = JSON.parse(stdout);
+    expect(report.gitignore).toBe('kept');
+    for (const file of report.files as { status: string }[]) {
+      expect(file.status).toBe('kept');
+    }
+    expect(readFileSync((answered as { personal: string }).personal, 'utf8')).toBe(
+      'language: rust\n',
+    );
+  });
+
+  it('is listed in the usage table it is dispatched from', () => {
+    // Not just `init` -- `mcp init` would satisfy that. The flag is named
+    // because a value-taking flag the splitter does not know about is how
+    // `--work-root /tmp/x` silently becomes a work root of `--work-root`.
+    const { stdout, status } = runCli(['--help']);
+    expect(status).toBe(0);
+    expect(stdout).toContain('smith init [--work-root');
   });
 });

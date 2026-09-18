@@ -74,7 +74,66 @@ export function resolveProjectsDir(repoRoot: string, cwd: string, isClone: boole
   return isClone ? path.dirname(repoRoot) : cwd;
 }
 
+/**
+ * The third kind of path: a file the factory *ships a default of* and the
+ * operator then edits.
+ *
+ * Most constants below are one thing or the other -- an asset the CLI only
+ * reads, which ships and hangs off REPO_ROOT, or state the CLI writes, which
+ * must not ship and hangs off WORK_ROOT. `factory/specs/roadmap.md` and
+ * `factory/policies/stack.yml` are both: each ships as a starting point and is
+ * then written, the roadmap by `smith new` and stack.yml by the operator
+ * answering INSTALL.md Step 5 "in place".
+ *
+ * Anchored on REPO_ROOT, as both were, those writes land inside the installed
+ * package, which the next `npm i` replaces wholesale -- so the answers an
+ * operator typed survive until their first upgrade and then silently do not.
+ *
+ * So each is declared twice: `X_DEFAULT_PATH` under REPO_ROOT, which ships and
+ * is only ever read, and `X_PATH` under WORK_ROOT, which is written. This
+ * function is the read side -- the operator's copy when it exists, the shipped
+ * default before anyone has answered. `exists` is a parameter because the
+ * install case is only statable by a test that supplies its own.
+ *
+ * In a clone the two roots are one directory, so both halves name the same
+ * file and every read and write goes where it always went.
+ */
+export function resolveOverlayRead(
+  personal: string,
+  shipped: string,
+  exists: (candidate: string) => boolean = existsSync,
+): string {
+  return exists(personal) ? personal : shipped;
+}
+
+/**
+ * Which root the *written* half of an overlay hangs off -- and the one place
+ * the work root is deliberately not it.
+ *
+ * `SMITH_HOME` beats `isClone` in `resolveWorkRoot`, on purpose: it is how an
+ * operator says "keep one fixed home for several projects", and state is
+ * exactly the thing that should follow them there. The two overlay files are
+ * not state. `factory/specs/roadmap.md` and `factory/policies/stack.yml` are
+ * tracked files in this repo -- declarations about *this* checkout, committed
+ * beside the code they describe -- and a clone that redirected them to
+ * `$SMITH_HOME` would leave its own tracked copies still sitting in the editor
+ * looking authoritative while every reader had quietly moved on. Split brain,
+ * no error.
+ *
+ * So a clone keeps its declarations, whatever `SMITH_HOME` says about its
+ * state, and only an install -- which has no tracked copy to orphan, and whose
+ * REPO_ROOT is a directory `npm i` replaces -- moves them to the work root.
+ * This is what makes "an existing checkout changes nothing" true without a
+ * condition attached to it.
+ */
+export function resolveOverlayRoot(repoRoot: string, workRoot: string, isClone: boolean): string {
+  return isClone ? repoRoot : workRoot;
+}
+
 export const WORK_ROOT = resolveWorkRoot(REPO_ROOT, process.cwd(), process.env, IS_CLONE);
+
+/** Where the operator's copy of a shipped-then-edited file lives. */
+export const OVERLAY_ROOT = resolveOverlayRoot(REPO_ROOT, WORK_ROOT, IS_CLONE);
 
 /**
  * The operator's own `.env`, read at CLI start by `loadDotEnv`. Gitignored, and
@@ -96,7 +155,18 @@ export const STATE_DB_PATH = path.join(WORK_ROOT, 'state', 'smith.db');
 /** The background watcher's lock and last tick: `state/daemon/{daemon.pid,status.json}`. */
 export const STATE_DAEMON_DIR = path.join(WORK_ROOT, 'state', 'daemon');
 export const DB_MIGRATIONS_DIR = path.join(REPO_ROOT, 'factory', 'orchestrator', 'drizzle');
-export const ROADMAP_PATH = path.join(REPO_ROOT, 'factory', 'specs', 'roadmap.md');
+/**
+ * The roadmap as it ships: one heading per milestone, and the file `smith new`
+ * appends to. Read-only under this name; see ROADMAP_PATH for the copy that is
+ * written and `resolveOverlayRead` for why there are two.
+ */
+export const ROADMAP_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'specs', 'roadmap.md');
+/** The operator's roadmap -- the one `registerProjectInRoadmap` writes into. */
+export const ROADMAP_PATH = path.join(OVERLAY_ROOT, 'factory', 'specs', 'roadmap.md');
+/** The roadmap to read: the operator's if they have one, the shipped one if not. */
+export function roadmapReadPath(): string {
+  return resolveOverlayRead(ROADMAP_PATH, ROADMAP_DEFAULT_PATH);
+}
 export const SCAFFOLD_DIR = path.join(REPO_ROOT, 'factory', 'scaffold');
 /**
  * `workspaces/` inside this clone. Still a legal place to keep a project, and
@@ -116,7 +186,23 @@ export const WORKSPACES_DIR = path.join(WORK_ROOT, 'workspaces');
  */
 export const PROJECTS_DIR = resolveProjectsDir(REPO_ROOT, process.cwd(), IS_CLONE);
 export const SCHEDULER_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'scheduler.yml');
-export const LESSONS_MD_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'lessons.md');
+/**
+ * The compiled lessons as they ship. Read-only under this name; see
+ * LESSONS_MD_PATH for the copy `smith lessons compile` writes.
+ */
+export const LESSONS_MD_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'lessons.md');
+/**
+ * The operator's compiled lessons -- the third file that is both shipped and
+ * written. Nobody types it, so it is not an answer in the sense the other two
+ * are; it is this factory's accumulated memory, compiled from the operator's
+ * own event log by `smith lessons compile`, and an upgrade that resets it
+ * loses exactly as much.
+ */
+export const LESSONS_MD_PATH = path.join(OVERLAY_ROOT, 'factory', 'policies', 'lessons.md');
+/** The lessons to read: the operator's if they have compiled any, the shipped set if not. */
+export function lessonsReadPath(): string {
+  return resolveOverlayRead(LESSONS_MD_PATH, LESSONS_MD_DEFAULT_PATH);
+}
 /** The shipped role templates — read at dispatch for their `<!-- LESSONS:<scope> -->` markers (P9-2). */
 export const AGENTS_DIR = path.join(REPO_ROOT, '.claude', 'agents');
 export const CROSSCHECK_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'crosscheck.yml');
@@ -136,6 +222,9 @@ export const SENSITIVE_PATHS_POLICY_PATH = path.join(
 /** The guard hook's rule data — read by `smith policy check`/`smith policy hook` (policy.ts). */
 export const GUARDRAILS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'guardrails.yml');
 
+/** Which programs may hold a worker turn, and how to start each one (harness.ts). */
+export const HARNESS_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'harness.yml');
+
 /**
  * The S1-S4 ladder and which levels block a merge (severity.ts).
  *
@@ -153,7 +242,17 @@ export const SEVERITY_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 
  * and the scaffolder reads it instead of the prose in docs/standards/stack.md
  * — which described one operator's stack as if it were everyone's.
  */
-export const STACK_POLICY_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'stack.yml');
+export const STACK_POLICY_DEFAULT_PATH = path.join(REPO_ROOT, 'factory', 'policies', 'stack.yml');
+/**
+ * The operator's own answers. INSTALL.md Step 5 has them change the values in
+ * place, so this is the copy that gets edited -- under the work root, where an
+ * upgrade cannot reach it.
+ */
+export const STACK_POLICY_PATH = path.join(OVERLAY_ROOT, 'factory', 'policies', 'stack.yml');
+/** The stack answers to read: the operator's if they have any, the shipped questionnaire if not. */
+export function stackPolicyReadPath(): string {
+  return resolveOverlayRead(STACK_POLICY_PATH, STACK_POLICY_DEFAULT_PATH);
+}
 
 /**
  * Open judge sandbox leases, one file per worktree (sandbox.ts).

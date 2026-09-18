@@ -1,8 +1,10 @@
 # `/bs new <project> [--ui]` — scaffold a target project
 
 1. Ask where the project should live, then run `smith new <project> [--ui]
-   [--target-dir <dir>]`. Without `--target-dir` it lands beside this repo, in
-   `<repo-parent>/<project>`, which is a default rather than a requirement —
+   [--target-dir <dir>]`. Without `--target-dir` it lands beside the clone, in
+   `<repo-parent>/<project>` — or, when `smith` is an installed package rather
+   than a clone, in the directory you run it from, never inside the package.
+   Either way that is a default rather than a requirement —
    the answer becomes the `<project-dir>` every later command takes, so take
    it here rather than assuming it six steps in. The call
    copies `factory/scaffold/` (TS strict, Biome, Vitest, CI) and layers

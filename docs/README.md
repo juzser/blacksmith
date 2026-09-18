@@ -15,6 +15,7 @@ records of the past that are cited by id and never opened whole.
 | [`specs/agent-interviews-index.md`](specs/agent-interviews-index.md) | One row per interview id (`P-1`..`N-12`): the lines it spans, the heading it sits under, one clause on what it decided, and the two ids both called `M-1` | operator, contributor, agent |
 | [`specs/phase-10-scope.md`](specs/phase-10-scope.md) | Phase 10 as measured rather than as declared: the six defects (P10-1..P10-6) found by pointing the factory at itself, the four forks and their answers, and the close-out of the epic that fixed them | operator, contributor |
 | [`specs/audit-command-scope.md`](specs/audit-command-scope.md) | The `/bs audit` contract: four fixed read-only axes, what "writes nothing to the project" means when `.blacksmith/` is state, why consolidation clusters rather than merges, the hard stop, the append-only findings store with 90-day declines, and the seven `smith audit` verbs | operator, contributor, agent |
+| [`specs/plugin-port-scope.md`](specs/plugin-port-scope.md) | How `/bs` runs without a clone: why a package install gives you the `smith` verbs and not the playbooks, the five work packages the plugin needed, what stays clone-only, and which of the five forks shipping answered | operator, contributor |
 | [`specs/README.md`](specs/README.md) | Every file under `specs/` by kind — contract, scope, or record of the past — with the cite-by-id recipe for the records, so nobody opens a 782 kB file to check one finding | operator, contributor, agent |
 | [`standards/stack.md`](standards/stack.md) | What the install interview's stack answers mean, who reads each one, and which the shipped templates honour, record, or refuse — the answers themselves live in `factory/policies/stack.yml` | operator, contributor |
 | [`standards/agent-constraints.md`](standards/agent-constraints.md) | Per-agent constraint blocks (TDD strictness, coverage floor, severity calibration, budgets, context-window compaction) — source of truth until fully baked into templates | contributor, agent |
@@ -27,6 +28,7 @@ records of the past that are cited by id and never opened whole.
 | [`guide/extending.md`](guide/extending.md) | Contributor guide: add an agent template, change the taxonomy, add a policy, docs-mirror invariants, event-log vs projections, test conventions | contributor |
 | [`runbooks/ops.md`](runbooks/ops.md) | Phase 10 background watcher: what `smith daemon` does and refuses to do, the four verbs, finding kinds, its lock/status/log files, launchd + systemd + cron recipes, the exit-1 health check, state backup | operator |
 | [`runbooks/providers.md`](runbooks/providers.md) | Phase 8 cross-provider judges: Codex/DeepSeek key + auth setup, enabling, shadow-mode calibration procedure, promotion, rollback, cost, security | operator |
+| [`runbooks/harness.md`](runbooks/harness.md) | The worker harness port: provider vs. harness, `factory/policies/harness.yml`, `smith harness list`/`plan`, the `judge_args` escape valve for a judge role holding a worktree, `smith-run` spawning a rendered invocation and its exit codes, writing a custom policy file | operator |
 
 ## `factory/policies/` (machine-read at runtime)
 
@@ -41,12 +43,13 @@ records of the past that are cited by id and never opened whole.
 | [`../factory/policies/scheduler.yml`](../factory/policies/scheduler.yml) | Phase 7: recheck thresholds, maintenance-pass confidence, growth-review cadence, lessons novelty-gate threshold | operator, contributor |
 | [`../factory/policies/effort.yml`](../factory/policies/effort.yml) | Effort tiers (`small`/`medium`/`huge`) per epic: how many judgment steps an epic buys, and the invariants a tier may never scale away | operator, contributor |
 | [`../factory/policies/sensitive-paths.yml`](../factory/policies/sensitive-paths.yml) | The claim globs that trigger a security-reviewer dispatch, so the decision is declared once rather than made fresh per task | contributor, agent |
+| [`../factory/policies/harness.yml`](../factory/policies/harness.yml) | Worker harness policy (architecture §19): which program holds a worker turn — the in-process Claude Code Agent tool by default, or a `cli` harness (`codex-cli`, `claude-cli`) that `smith-run` spawns from a rendered invocation; per-harness `args`/`worker_args`/`judge_args`/`schema_args`, output parser, env allowlist, tier→model map (`docs/runbooks/harness.md`) | operator, contributor |
 
 ## Repository-level docs (outside `docs/`)
 
 | File | Description | Audience |
 |---|---|---|
-| [`../README.md`](../README.md) | The landing page: why it exists, the features with screenshots, install (clone or npm), and the `/bs` commands — everything past that is a link, because details that live in two files drift | everyone |
+| [`../README.md`](../README.md) | The landing page: why it exists, the factory's features first and the dashboard low, the two installs and what each one actually gives you, and the `/bs` commands — everything past that is a link, because details that live in two files drift | everyone |
 | [`../INSTALL.md`](../INSTALL.md) | Executable install runbook: requirements, per-platform setup, verification, optional extras, troubleshooting, known platform gaps — written so a Claude Code session can run it end to end | operator, contributor, agent |
 | [`../AGENTS.md`](../AGENTS.md) | The router and operating rules agents read first | agent |
 | [`../CLAUDE.md`](../CLAUDE.md) | Claude Code entry point: routes to `AGENTS.md` for rules and to `INSTALL.md` for the self-install runbook — declares nothing of its own | agent |

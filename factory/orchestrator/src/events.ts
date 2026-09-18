@@ -203,10 +203,23 @@ async function readEventsAtPath(filePath: string, sessionId: string): Promise<St
     .trimEnd()
     .split('\n')
     .filter((line) => line.length > 0);
-  return lines.map((line, index) => ({
-    event_id: `${sessionId}#${index}`,
-    record: JSON.parse(line) as EventRecord,
-  }));
+  return lines.map((line, index) => {
+    let record: EventRecord;
+    try {
+      record = JSON.parse(line) as EventRecord;
+    } catch (err) {
+      // A bare SyntaxError says "Unexpected token" and nothing else: not which
+      // log, not which line. The dashboard prints this for every session it
+      // then fails to fold (the global folds read every log), so the message
+      // has to carry the path the operator needs to open.
+      throw new EventError(
+        'events.unreadable-session-log',
+        `Line ${index + 1} of ${filePath} is not JSON, so session "${sessionId}" cannot be read: ${errorText(err)}.`,
+        { session_id: sessionId, path: filePath, line: index + 1 },
+      );
+    }
+    return { event_id: `${sessionId}#${index}`, record };
+  });
 }
 
 /**
@@ -545,11 +558,38 @@ const TYPED_PAYLOAD_SCHEMAS: Record<string, string> = {
   'finding-raised': 'finding',
 };
 
+/**
+ * The one field of a `task-result-recorded` payload a reader iterates. The
+ * projector writes `artifacts[]` into rows inside the session's transaction,
+ * so an object here (csb-audit-1#100 carried `{ claude_half, external_half,
+ * repair_brief }`) rolled back the whole session and the dashboard drew
+ * nothing for it. Pinning only this field is deliberate: the full result
+ * schema is not enforced on the event, because real logs carry many
+ * hand-written result payloads that no reader rehydrates -- refusing them
+ * would refuse history for a shape nothing reads.
+ */
+function validateResultArtifactsShape(record: EventRecord): void {
+  if (record.event_type !== 'task-result-recorded') return;
+  const payload = record.payload as { artifacts?: unknown } | null | undefined;
+  const artifacts = payload?.artifacts;
+  if (artifacts === undefined || Array.isArray(artifacts)) return;
+  throw new EventError(
+    'events.invalid-typed-payload',
+    'Event payload for "task-result-recorded" carries an `artifacts` that is not an array. The projector iterates this list to write artifact rows, so any other shape becomes a crash that rolls back the whole session rather than an error here.',
+    {
+      event_type: record.event_type,
+      schema: 'result',
+      errors: [{ path: '/artifacts', message: `must be an array, got ${typeof artifacts}` }],
+    },
+  );
+}
+
 function validateTypedPayload(
   schemas: CompiledSchemaSet,
   taxonomy: Taxonomy,
   record: EventRecord,
 ): void {
+  validateResultArtifactsShape(record);
   const schemaName = TYPED_PAYLOAD_SCHEMAS[record.event_type];
   if (schemaName === undefined) return;
 
@@ -1203,4 +1243,74 @@ export function filterEvents(events: StoredEvent[], filter: EventFilter): Stored
       return false;
     return true;
   });
+}
+
+/**
+ * How often `--follow` re-reads a log it is following.
+ *
+ * A second is well under the interval an operator perceives as lag, and a
+ * re-read costs what one `smith event tail` costs -- the poll is not what
+ * makes a busy factory expensive. There is no flag for it on purpose: a
+ * knob no answer depends on is a knob every reader of `--help` pays for.
+ */
+export const FOLLOW_TICK_MS = 1000;
+
+/**
+ * The events in `events` that `seen` does not already hold, in `events`'
+ * order.
+ *
+ * The cursor is a set of ids rather than a count because `--lineage` merges
+ * several logs by `ts` (mergeSessionLogs above): an event appended now can
+ * sort BEHIND one already printed, and a stream cannot un-print. A length
+ * cursor would either re-emit the tail or skip the new event outright, and
+ * both are worse than holding the ids -- which cost what the read they came
+ * from already cost.
+ */
+export function unseenEvents(
+  events: readonly StoredEvent[],
+  seen: ReadonlySet<string>,
+): StoredEvent[] {
+  return events.filter((event) => !seen.has(event.event_id));
+}
+
+export interface FollowOptions {
+  /** Re-read the log. Whatever scope and filter the caller wants is in here. */
+  read: () => Promise<readonly StoredEvent[]>;
+  /** Called once per event, in log order, the first time it is read. */
+  emit: (event: StoredEvent) => void;
+  /** Ids the caller has already printed: the first poll emits none of them. */
+  seen?: Iterable<string>;
+  intervalMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  shouldContinue?: () => boolean;
+}
+
+/**
+ * Read, emit what is new, sleep, repeat -- until `shouldContinue` says stop.
+ *
+ * The seams are runDaemon's, for the same reason: the contract of a loop is
+ * what it does AROUND the read, and a loop that owns its own clock can only
+ * be tested by waiting. `sleep` is where an interrupt lands, so the caller
+ * that wires SIGINT resolves the sleep rather than waiting out the interval.
+ *
+ * Returns how many events it emitted, which is the only thing about a stream
+ * worth having after it ends.
+ */
+export async function followEvents(opts: FollowOptions): Promise<number> {
+  const intervalMs = opts.intervalMs ?? FOLLOW_TICK_MS;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const shouldContinue = opts.shouldContinue ?? ((): boolean => true);
+  const seen = new Set<string>(opts.seen ?? []);
+  let emitted = 0;
+
+  while (shouldContinue()) {
+    for (const event of unseenEvents(await opts.read(), seen)) {
+      seen.add(event.event_id);
+      opts.emit(event);
+      emitted += 1;
+    }
+    await sleep(intervalMs);
+  }
+
+  return emitted;
 }

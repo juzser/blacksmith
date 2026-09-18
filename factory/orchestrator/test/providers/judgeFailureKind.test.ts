@@ -69,6 +69,9 @@ describe('providers/types.ts judgeFailureKind()', () => {
     // The provider answered; the answer was too big to accept. Still an
     // answer-shape problem, and still fixed at the prompt, not the transport.
     expect(judgeFailureKind('provider.output-too-large')).toBe('schema');
+    // The provider answered and stopped at its output cap mid-answer (FD-37):
+    // still an answer-shape problem, fixed by a cap or a shorter prompt.
+    expect(judgeFailureKind('provider.output-truncated')).toBe('schema');
   });
 
   it('reads an unsent or unanswered request as a transport failure', () => {

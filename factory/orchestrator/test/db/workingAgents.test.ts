@@ -14,11 +14,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_STALE_HOURS, isWorkingAt } from '../../src/agents-registry.js';
-import { openDb, projectSession } from '../../src/db/projector.js';
+import { type DbHandle, openDb, projectSession, projectTasks } from '../../src/db/projector.js';
 import { flowGraph, overview, runningSessions } from '../../src/db/queries.js';
 import type { StoredEvent } from '../../src/events.js';
 
 const SESSION_ID = 'sess-working-agents-fixture';
+
+/**
+ * The tasks table is a global fold over every session's log (projectTasks()),
+ * called explicitly here for a hand-built single session -- rebuild()/apply()
+ * do this pairing for real logs.
+ */
+function project(handle: DbHandle, sessionId: string, events: StoredEvent[]): void {
+  projectSession(handle, sessionId, events);
+  projectTasks(handle, events);
+}
 const NOW = '2026-08-04T12:00:00.000Z';
 const NOW_MS = Date.parse(NOW);
 const HOUR_MS = 60 * 60 * 1000;
@@ -113,7 +123,7 @@ describe('working vs stalled agents in the projection queries', () => {
   });
 
   it('overview(): a dispatch at exactly 4h is working, one at 4h + 1ms is stalled, and the two counts add up to liveAgentCount', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: JUST_PAST_STALE_AGO }),
       taskAdded('epic-1/task-1', JUST_PAST_STALE_AGO),
       taskAdded('epic-1/task-2', JUST_PAST_STALE_AGO),
@@ -127,7 +137,7 @@ describe('working vs stalled agents in the projection queries', () => {
   });
 
   it('overview(): an unparseable dispatchedAt is live but never working', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: ONE_MIN_AGO }),
       taskAdded('epic-1/task-1', ONE_MIN_AGO),
       dispatched('epic-1/task-1', 'garbage-timestamp'),
@@ -142,7 +152,7 @@ describe('working vs stalled agents in the projection queries', () => {
     // Dispatched 4h05m ago: at the 5-minute cutoff it was 4h old, so working
     // *then*; now it is 4h05m old, so stalled. No new dispatch since. The
     // live delta is 0 (live at both ends); the working delta must read -1.
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: FOUR_H_FIVE_MIN_AGO }),
       taskAdded('epic-1/task-1', FOUR_H_FIVE_MIN_AGO),
       dispatched('epic-1/task-1', FOUR_H_FIVE_MIN_AGO),
@@ -154,7 +164,7 @@ describe('working vs stalled agents in the projection queries', () => {
   });
 
   it('overview(): a dispatch after the cutoff raises workingAgentCountDelta5m by one', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: FIVE_MIN_AGO }),
       taskAdded('epic-1/task-1', FIVE_MIN_AGO),
       dispatched('epic-1/task-1', ONE_MIN_AGO),
@@ -168,7 +178,7 @@ describe('working vs stalled agents in the projection queries', () => {
     // Two projects, one stalled-since-the-cutoff agent each. Scoped to
     // envkit the delta must be -1, not -2: the cutoff population is scoped
     // through the owning task the same way the live one is.
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: FOUR_H_FIVE_MIN_AGO }),
       taskAdded('epic-1/task-1', FOUR_H_FIVE_MIN_AGO, 'envkit'),
       taskAdded('epic-2/task-2', FOUR_H_FIVE_MIN_AGO, 'other'),
@@ -182,7 +192,7 @@ describe('working vs stalled agents in the projection queries', () => {
   });
 
   it('runningSessions() and overview().runningSessions carry workingAgentCount beside liveAgentCount', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: JUST_PAST_STALE_AGO }),
       taskAdded('epic-1/task-1', JUST_PAST_STALE_AGO),
       taskAdded('epic-1/task-2', JUST_PAST_STALE_AGO),
@@ -201,7 +211,7 @@ describe('working vs stalled agents in the projection queries', () => {
   });
 
   it('overview().projects[] carries workingAgentCount per project, read at the same instant', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: JUST_PAST_STALE_AGO }),
       taskAdded('epic-1/task-1', JUST_PAST_STALE_AGO, 'envkit'),
       taskAdded('epic-1/task-2', JUST_PAST_STALE_AGO, 'envkit'),
@@ -217,7 +227,7 @@ describe('working vs stalled agents in the projection queries', () => {
   });
 
   it('flowGraph(): workingAgentRole is absent for a stalled agent while liveAgentRole still names it', () => {
-    projectSession({ sqlite, db }, SESSION_ID, [
+    project({ sqlite, db }, SESSION_ID, [
       event({ event_type: 'session-start', causal_parent: null, ts: JUST_PAST_STALE_AGO }),
       taskAdded('epic-1/task-1', JUST_PAST_STALE_AGO),
       taskAdded('epic-1/task-2', JUST_PAST_STALE_AGO),

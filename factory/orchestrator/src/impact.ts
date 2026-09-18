@@ -20,6 +20,12 @@
  *   it is a break, and it is provable. A changed signature is weaker: this
  *   module reads text, not types, so it says `possible` and means it.
  *
+ * A `keeps_exports` promise (task-spec.schema.json) is the declaration that
+ * joins the two halves: the pre-run half trusts it and lets a crossing whose
+ * producer promised the exporting file run in the same wave, and the post-run
+ * half verifies it against the diff, where a removed or re-declared export
+ * under a promise is a broken promise and fails the check.
+ *
  * Holes are reported, never fatal. The scanner has blind spots (a `.vue` file,
  * an unterminated literal), and failing a wave for the scanner's limits would
  * teach operators to reach for the override — which costs more than the check
@@ -69,7 +75,14 @@ export interface WaveImpactReport {
   status: 'clean' | 'coupled' | 'unverifiable';
   /** False only for `coupled`: a hole is the scanner's limit, not the wave's fault. */
   ok: boolean;
+  /** Crossings that serialize the wave. */
   crossings: SymbolCrossing[];
+  /**
+   * Crossings whose producer promised the exporting file in `keeps_exports`.
+   * They do not serialize the wave; the promise is verified post-run by
+   * `exportImpact` against the producer's diff.
+   */
+  promised: SymbolCrossing[];
   exposure: UnclaimedExposure[];
   /** Tasks whose claims match no file the graph knows — a new file, or a typo. */
   claimsWithoutFiles: string[];
@@ -110,6 +123,18 @@ function ownersOf(files: readonly string[], tasks: readonly WaveTask[]): Map<str
     }
   }
   return owner;
+}
+
+/**
+ * Did the crossing's producer promise to keep the exports of the file the
+ * crossing imports from? A promise is a literal path (plan.ts refuses a
+ * pattern), matched the way `ownersOf` matches a claim to a file so the two
+ * agree on what "this file" means.
+ */
+function promisedBy(crossing: CrossingAccumulator, tasks: readonly WaveTask[]): boolean {
+  const producer = tasks.find((task) => task.task_id === crossing.producer);
+  const promises = producer?.keeps_exports ?? [];
+  return promises.some((promise) => claimCoversPath(promise, crossing.exportedBy));
 }
 
 export function waveImpact(graph: SymbolGraph, tasks: readonly WaveTask[]): WaveImpactReport {
@@ -164,23 +189,33 @@ export function waveImpact(graph: SymbolGraph, tasks: readonly WaveTask[]): Wave
     }
   }
 
-  const orderedCrossings: SymbolCrossing[] = [...crossings.values()]
-    .map((c) => ({
-      producer: c.producer,
-      consumer: c.consumer,
-      exportedBy: c.exportedBy,
-      importedBy: c.importedBy,
-      symbols: [...c.symbols].sort(),
-      typeOnly: c.typeOnly,
-      dynamic: c.dynamic,
-    }))
-    .sort(
-      (a, b) =>
-        a.producer.localeCompare(b.producer) ||
-        a.consumer.localeCompare(b.consumer) ||
-        a.exportedBy.localeCompare(b.exportedBy) ||
-        a.importedBy.localeCompare(b.importedBy),
-    );
+  const orderCrossings = (found: readonly CrossingAccumulator[]): SymbolCrossing[] =>
+    found
+      .map((c) => ({
+        producer: c.producer,
+        consumer: c.consumer,
+        exportedBy: c.exportedBy,
+        importedBy: c.importedBy,
+        symbols: [...c.symbols].sort(),
+        typeOnly: c.typeOnly,
+        dynamic: c.dynamic,
+      }))
+      .sort(
+        (a, b) =>
+          a.producer.localeCompare(b.producer) ||
+          a.consumer.localeCompare(b.consumer) ||
+          a.exportedBy.localeCompare(b.exportedBy) ||
+          a.importedBy.localeCompare(b.importedBy),
+      );
+  // A promise moves the crossing from the blocking set to the promised one;
+  // it does not erase it, because the post-run verifier and the operator both
+  // want to see which crossings the wave is running on trust.
+  const orderedCrossings = orderCrossings(
+    [...crossings.values()].filter((c) => !promisedBy(c, tasks)),
+  );
+  const orderedPromised = orderCrossings(
+    [...crossings.values()].filter((c) => promisedBy(c, tasks)),
+  );
 
   const orderedExposure: UnclaimedExposure[] = [...exposure.values()]
     .map((e) => ({
@@ -210,6 +245,7 @@ export function waveImpact(graph: SymbolGraph, tasks: readonly WaveTask[]): Wave
     status,
     ok: status !== 'coupled',
     crossings: orderedCrossings,
+    promised: orderedPromised,
     exposure: orderedExposure,
     claimsWithoutFiles,
     unanalyzed,
@@ -217,6 +253,7 @@ export function waveImpact(graph: SymbolGraph, tasks: readonly WaveTask[]): Wave
     detail: describeWave(
       status,
       orderedCrossings,
+      orderedPromised.length,
       orderedExposure,
       unanalyzed.length + unresolved.length,
     ),
@@ -226,6 +263,7 @@ export function waveImpact(graph: SymbolGraph, tasks: readonly WaveTask[]): Wave
 function describeWave(
   status: WaveImpactReport['status'],
   crossings: readonly SymbolCrossing[],
+  promised: number,
   exposure: readonly UnclaimedExposure[],
   holes: number,
 ): string {
@@ -241,6 +279,9 @@ function describeWave(
     );
   } else {
     parts.push('No task in this wave imports a symbol another task in this wave exports.');
+  }
+  if (promised > 0) {
+    parts.push(`${promised} crossing(s) run on a keeps_exports promise, verified post-run.`);
   }
   if (exposure.length > 0) {
     parts.push(`${exposure.length} file(s) outside the wave import from claimed files.`);
@@ -298,10 +339,30 @@ export interface ExportBreak {
   symbols: string[];
 }
 
+/**
+ * One `keeps_exports` promise, held against the diff. `kept` is the promise
+ * as made: nothing removed, no declaration changed (adding is allowed).
+ * `broken` is stricter than `breaks` on purpose — a changed declaration is
+ * only a `possible` break for an importer, but it is a plain breach of a
+ * promise that said "no export's declaration changed". `unverified` is the
+ * scanner's limit on that file, reported and not counted against `ok`.
+ */
+export interface PromiseVerdict {
+  file: string;
+  status: 'kept' | 'broken' | 'unverified';
+  /** Only on `broken`; `removed` outranks `signature-changed`. */
+  reason?: 'removed' | 'signature-changed';
+  removed: string[];
+  signatureChanged: string[];
+  added: string[];
+}
+
 export interface ExportImpactReport {
-  /** False when anything is proven broken. A `possible` break is a warning. */
+  /** False when anything is proven broken or a promise is broken. A `possible` break is a warning. */
   ok: boolean;
   breaks: ExportBreak[];
+  /** One entry per promised file, in the order promised; empty when none was made. */
+  promises: PromiseVerdict[];
   detail: string;
 }
 
@@ -311,17 +372,55 @@ function consumes(names: readonly string[], symbol: string): boolean {
 }
 
 /**
+ * A promise against the diff of the file it names. A file the diff does not
+ * hold was not touched, so its exports are as they were: kept.
+ */
+function verdictOn(file: string, diffs: readonly ExportDiff[]): PromiseVerdict {
+  const diff = diffs.find((entry) => entry.file === file);
+  if (diff === undefined) {
+    return { file, status: 'kept', removed: [], signatureChanged: [], added: [] };
+  }
+  const lists = {
+    removed: [...diff.removed],
+    signatureChanged: [...diff.signatureChanged],
+    added: [...diff.added],
+  };
+  if (diff.unverifiable) return { file, status: 'unverified', ...lists };
+  if (diff.removed.length > 0) return { file, status: 'broken', reason: 'removed', ...lists };
+  if (diff.signatureChanged.length > 0) {
+    return { file, status: 'broken', reason: 'signature-changed', ...lists };
+  }
+  return { file, status: 'kept', ...lists };
+}
+
+function describePromise(verdict: PromiseVerdict): string {
+  const changes: string[] = [];
+  if (verdict.removed.length > 0) changes.push(`removed [${verdict.removed.join(', ')}]`);
+  if (verdict.signatureChanged.length > 0) {
+    changes.push(`changed the declaration of [${verdict.signatureChanged.join(', ')}]`);
+  }
+  return `Promise broken: ${verdict.file} ${changes.join(' and ')}.`;
+}
+
+/**
  * Whose files broke. `claims` is the acting task's own claim list: an importer
  * the task already owns is not a break, because the same task is free to fix
  * it in the same diff — and usually has.
+ *
+ * `keepsExports` is the task's own `keeps_exports` promise, the one the wave
+ * gate ran a crossing on. It is held against the diff regardless of who
+ * imports the file: the importer the promise covered belongs to another task,
+ * whose file this diff cannot see, so "inside the claims" excuses nothing here.
  */
 export function exportImpact(
   graph: SymbolGraph,
   diffs: readonly ExportDiff[],
   claims: readonly string[],
+  keepsExports: readonly string[] = [],
 ): ExportImpactReport {
   const breaks: ExportBreak[] = [];
   const unverifiable: string[] = [];
+  const promises = keepsExports.map((file) => verdictOn(file, diffs));
 
   for (const diff of diffs) {
     if (diff.unverifiable) {
@@ -372,8 +471,14 @@ export function exportImpact(
     parts.push('No importer outside the claims depends on what moved.');
   }
   if (unverifiable.length > 0) parts.push(`Unreadable, so unchecked: ${unverifiable.join(', ')}.`);
+  const broken = promises.filter((verdict) => verdict.status === 'broken');
+  for (const verdict of broken) parts.push(describePromise(verdict));
+  const unverified = promises.filter((verdict) => verdict.status === 'unverified');
+  if (unverified.length > 0) {
+    parts.push(`Promise unverified: ${unverified.map((verdict) => verdict.file).join(', ')}.`);
+  }
 
-  return { ok: proven === 0, breaks, detail: parts.join(' ') };
+  return { ok: proven === 0 && broken.length === 0, breaks, promises, detail: parts.join(' ') };
 }
 
 /**

@@ -9,7 +9,7 @@ does wherever else this repo cites it.
 | Severity | Blocks merge | What you see |
 |---|---|---|
 | **S1** stop-the-line | yes, no bounded retry | Synchronous notification — repo corruption, secret leak, guardrail breach. Stop and look now. |
-| **S2** major | yes | Bounces to coder automatically; after 2 failed rounds the coder escalates model tier (sonnet → opus, logged); after 3, escalates to you |
+| **S2** major | yes | Bounces to coder automatically; after 2 failed rounds the coder escalates model tier (mid → frontier, logged); after 3, escalates to you |
 | **S3** minor | no | Batched into **one** waiver question per epic — "ignore these?" |
 | **S4** nit | no | Logged only, never surfaces to you |
 
@@ -75,7 +75,7 @@ quality KPI: same-mistake rate should trend to zero.
   laptop's CPU count); it is `null` — off — unless you set it.
 - **Escalation ladder** (never skipped, never looped past its bound):
   1. Bounded retry on the same contract.
-  2. 2 failed rounds → escalate model tier automatically (sonnet → opus),
+  2. 2 failed rounds → escalate model tier automatically (mid → frontier),
      logged.
   3. 3 failed rounds → escalate to you.
 

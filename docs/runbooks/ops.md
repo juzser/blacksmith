@@ -52,10 +52,15 @@ smith projects list [--roadmap <file>] [--json]
 
 - **`run`** is the loop itself, in the foreground. This is what a service
   manager should execute — launchd and systemd want a process that stays in
-  the foreground and dies when told to, which is exactly this.
+  the foreground and dies when told to, which is exactly this. It prints one
+  `TickReport` per tick, one JSON line each, as the tick lands — so
+  `smith daemon run | jq -c .attention` reads live, and so does a `tail -f`
+  on the `daemon.log` that `start` redirects the same stdout into. On
+  `SIGTERM`/`^C` it closes with `{"ticks": <n>, "dir": ...}` and exits 0.
 - **`run --once`** ticks once and exits 0. This is the cron shape, and the
   shape to reach for when you want a report now without leaving anything
-  behind.
+  behind. Its one line is `{"ticks": 1, "dir": ..., "last": <TickReport>}` —
+  a document, not a stream, because cron wants to parse the whole run.
 - **`start`** is the convenience: it spawns `run` detached, appends stdout and
   stderr to `daemon.log`, and prints the child's pid. Use it when there is no
   service manager. It refuses (`daemon.already-running`, exit 1) while a live

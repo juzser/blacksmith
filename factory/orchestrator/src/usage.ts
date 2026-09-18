@@ -127,8 +127,9 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'plan quorum',
     positionals: '',
     flags:
-      '--epic <id> --plan-version <n> --session <id> --causal-parent <event-id> [--confidence <0-1>] [--actor <name>] [--state-dir <dir>]',
-    summary: 'Critique-only review of a drafted plan. Exit 1 means the operator must look first.',
+      '--plan-version <n> --session <id> --causal-parent <event-id> [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
+    summary:
+      'Critique-only review of a drafted plan: --plan <draft.json> before it is filed, or --epic for the filed version. Exit 1 means the operator must look first.',
   },
   {
     command: 'plan amend',
@@ -212,6 +213,14 @@ export const COMMANDS: readonly CommandDoc[] = [
       'ran strictly serially, 2 when a wave was admitted and the log shows no work for it.',
   },
   {
+    command: 'init',
+    positionals: '',
+    flags: '[--work-root <dir>]',
+    summary:
+      'Prepare a work root in the current directory: the state directories, and a copy of every ' +
+      'file the factory ships a default of for you to edit. Idempotent; a clone needs none of it.',
+  },
+  {
     command: 'new',
     positionals: '<project>',
     flags: '[--ui] [--skip-toolchain] [--target-dir <dir>] [--roadmap-path <file>]',
@@ -242,6 +251,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>...] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]`,
     summary:
       'Watch the event log in the foreground: budgets, stale agents, work that is due. ' +
+      'Prints one report per tick, one JSON line each; --once prints one document and exits. ' +
       'Never dispatches.',
   },
   {
@@ -351,8 +361,10 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'event tail',
     positionals: '<session-id>',
-    flags: '[--n <count>] [--task <task-id>] [--lineage] [--state-dir <dir>]',
-    summary: 'Print the last n records of a session that exists. Exit 1 if it does not.',
+    flags: '[--n <count>] [--task <task-id>] [--lineage] [--follow] [--state-dir <dir>]',
+    summary:
+      'Print the last n records of a session that exists. Exit 1 if it does not. ' +
+      '--follow keeps printing as the log grows, one JSON record per line, until ^C.',
   },
   {
     command: 'event lineage',
@@ -396,7 +408,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<task-id>...',
     flags: '--plan <file> [--repo <dir>]',
     summary:
-      'Pre-run: refuse a wave whose tasks sit on either end of an import edge. Exit 1 when coupled.',
+      'Pre-run: refuse a wave whose tasks sit on either end of an import edge the producer did not promise in keeps_exports. Exit 1 when coupled.',
   },
   {
     command: 'claims impact',
@@ -404,7 +416,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<worktree-dir> <spec.json>',
     flags: '',
     summary:
-      'Post-run: an export this task removed, still imported outside its claims. Exit 1 on a proven break.',
+      "Post-run: an export this task removed, still imported outside its claims, and verifies the spec's keeps_exports promises. Exit 1 on a proven break or a broken promise.",
   },
   {
     command: 'dispatch check',
@@ -466,6 +478,21 @@ export const COMMANDS: readonly CommandDoc[] = [
     flags: ISSUES,
     summary:
       'Dry run of issues report: prints the argv that would run, spawns no gh and appends no event. The action an unattended agent uses.',
+  },
+  {
+    command: 'harness list',
+    positionals: '',
+    flags: '[--policy <file>]',
+    summary:
+      'The harnesses that may run a worker turn, and which roles each one serves. Shipped policy unless --policy names a file.',
+  },
+  {
+    command: 'harness plan',
+    positionals: '',
+    flags:
+      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>] [--tier <frontier|mid|small>] [--schema <name>]',
+    summary:
+      'Render the invocation that would run one worker turn, as JSON. Prints it; never starts it.',
   },
   {
     command: 'sandbox open',
@@ -747,7 +774,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'crossfind request',
     positionals: '',
     flags:
-      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>]',
+      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>]',
     summary:
       'Print the finder request without sending it — exactly what would leave the machine. Refuses when send_diff is false.',
   },
@@ -761,7 +788,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'crossfind run',
     positionals: '',
-    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--policy <file>] ${EVENTS_DIR}`,
+    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] ${EVENTS_DIR}`,
     summary:
       'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
   },

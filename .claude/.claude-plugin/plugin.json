@@ -1,0 +1,13 @@
+{
+  "name": "blacksmith",
+  "version": "0.2.0",
+  "description": "The Blacksmith operator console: /bs plans an epic, drives a wave of agents through TDD, review and a merge queue, and audits a project on four axes. The deterministic half is the smith CLI from npm; this plugin is the playbooks and the role contracts that drive it.",
+  "author": {
+    "name": "juzser",
+    "url": "https://github.com/juzser"
+  },
+  "homepage": "https://github.com/juzser/blacksmith",
+  "repository": "https://github.com/juzser/blacksmith",
+  "license": "MIT",
+  "keywords": ["orchestration", "agents", "tdd", "code-review", "worktrees"]
+}

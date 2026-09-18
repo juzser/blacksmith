@@ -8,10 +8,12 @@ import { kanban, lessonsPage } from '../../src/db/queries.js';
 import * as schema from '../../src/db/schema.js';
 import { appendEvent, readEvents } from '../../src/events.js';
 import {
+  type EventContext,
   foldFindingsDetailed,
   listFindings,
   REQUIRED_FOLD_FIELDS,
   REQUIRED_PROJECTION_FIELDS,
+  raiseFinding,
 } from '../../src/findings.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
 
@@ -57,6 +59,8 @@ describe('db/projector.ts', () => {
       sessionsProcessed: 1,
       eventsApplied: events.length,
       skippedFindings: [],
+      skippedArtifacts: [],
+      unreadableSessions: [],
     });
 
     const handle = openDb(dbPath);
@@ -108,6 +112,12 @@ describe('db/projector.ts', () => {
     expect(findingById['finding-4']).toMatchObject({
       findingStatus: 'confirmed',
       severity: 'S2-major',
+      // A diff finding: the scope column is filled in (absent means `diff`,
+      // findings.ts findingScope()), and the spec_ref columns stay null
+      // because there is no criterion to name.
+      findingScope: 'diff',
+      specPlanVersion: null,
+      criterionRef: null,
     });
 
     const agentByTask = Object.fromEntries(rows.agents.map((a) => [a.taskId, a]));
@@ -219,6 +229,59 @@ describe('db/projector.ts', () => {
 
     const taskIds = rows.tasks.map((t) => t.taskId);
     expect(taskIds).not.toContain(`${EPIC_ID}/plan-v2`);
+    expect(taskIds).toContain(TASK_1);
+  });
+
+  it('never materialises a task row for an id nothing but a dispatch ever named', async () => {
+    const { appendEvent, readEvents } = await import('../../src/events.js');
+    // The csb-audit-1 session ran its planning rounds by hand, before
+    // planRefTaskId() existed, and stamped each round's dispatch with an id it
+    // made up on the spot: `<epic>/plan-r12`, `<epic>/spec-review-r15`, ...
+    // Twenty-two of them sat in the board's "In progress" column for a week,
+    // one card each, no objective, nothing ever moving them — the column was
+    // nothing BUT them. A dispatch is a fact about an agent; a task is a fact
+    // some other event (or the plan roster on disk) asserts. An id only ever
+    // named by dispatches and results is a round ref, whatever it is spelled.
+    const parent = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.event_id ?? null;
+    const dispatched = await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'dispatch_decision',
+        task_id: `${EPIC_ID}/plan-r12`,
+        plan_version: 1,
+        causal_parent: parent,
+        payload: {
+          agent_role: 'planner',
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+          reason: 'plan round 12',
+        },
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'task-result-recorded',
+        task_id: `${EPIC_ID}/plan-r12`,
+        plan_version: 1,
+        causal_parent: dispatched.event_id,
+        payload: { agent: 'planner', run_status: 'done' },
+      },
+      { stateDir },
+    );
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    const taskIds = rows.tasks.map((t) => t.taskId);
+    expect(taskIds).not.toContain(`${EPIC_ID}/plan-r12`);
     expect(taskIds).toContain(TASK_1);
   });
 
@@ -367,8 +430,9 @@ describe('db/projector.ts — a legacy finding that cannot fill a notNull column
 
 describe('findings table notNull columns vs REQUIRED_PROJECTION_FIELDS', () => {
   // Filled by the projector itself, never read off the payload, so they can
-  // never be the reason a record is unprojectable.
-  const PROJECTOR_SUPPLIED = ['session_id', 'raised_at', 'updated_at'];
+  // never be the reason a record is unprojectable. `finding_scope` is derived
+  // through findingScope(), which reads absence as `diff`.
+  const PROJECTOR_SUPPLIED = ['session_id', 'raised_at', 'updated_at', 'finding_scope'];
 
   it('every notNull column is either projector-supplied or a required payload field', () => {
     const notNullColumns = Object.values(getTableColumns(schema.findings))
@@ -738,5 +802,567 @@ describe('D-200: a finding transitioned from a continuation session', () => {
     expect(projected.map((f) => [f.findingId, f.findingStatus])).toEqual(
       listed.map((f) => [f.finding_id, f.finding_status]),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A task-result-recorded whose `artifacts` is an object instead of a list.
+// csb-audit-1#100 carried `{ claude_half, external_half, repair_brief }`;
+// the projector's `.forEach` threw on it inside the session transaction, so
+// the *whole session* rolled back and the dashboard drew nothing for an epic
+// that was three waves deep. The fix shape is D-141's: land everything that
+// can land, hold back only the rows that cannot, and name what was held.
+// ---------------------------------------------------------------------------
+describe('db/projector.ts — a task-result-recorded whose artifacts is not a list', () => {
+  let stateDir: string;
+  let dbDir: string;
+  let badEventId: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-artifacts-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-artifacts-db-'));
+    await buildFixture({ stateDir });
+    // Straight to the log, bypassing appendEvent: the write-time guard now
+    // refuses this shape (events.test.ts), so the only way it reaches a
+    // projection is from a log written before the guard existed.
+    const priorEvents = await readEvents(SESSION_ID, { stateDir });
+    const index = priorEvents.length;
+    badEventId = `${SESSION_ID}#${index}`;
+    const record = {
+      session_id: SESSION_ID,
+      actor: 'orchestrator',
+      event_type: 'task-result-recorded',
+      task_id: TASK_2,
+      plan_version: 1,
+      causal_parent: priorEvents.at(-1)?.event_id ?? null,
+      ts: '2026-08-15T00:00:00.000Z',
+      payload: {
+        task_id: TASK_2,
+        run_status: 'done',
+        structured_output: {},
+        artifacts: {
+          claude_half: 'state/results/task-2.claude.json',
+          external_half: 'state/results/task-2.external.json',
+        },
+        token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+        agent: 'spec-reviewer',
+        provider: 'claude',
+        model_tier: 'mid',
+      },
+    };
+    await appendFile(path.join(stateDir, `${SESSION_ID}.jsonl`), `${JSON.stringify(record)}\n`);
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('rebuild() still lands every task of the session instead of rolling it back', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await rebuild(dbPath, 'all', { stateDir });
+
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    expect(result.sessionsProcessed).toBe(1);
+    expect(rows.sessions.map((s) => s.sessionId)).toEqual([SESSION_ID]);
+    expect(rows.tasks.map((t) => t.taskId).sort()).toEqual([TASK_1, TASK_2, TASK_3, TASK_4].sort());
+    // The fixture's one well-formed artifact still lands; the object-shaped
+    // list contributes no rows rather than no session.
+    expect(rows.artifacts).toHaveLength(1);
+    // The task row itself is untouched by the held-back list: its status is
+    // what the fixture's gate-outcome left it at, same as a clean rebuild.
+    const task2 = rows.tasks.find((t) => t.taskId === TASK_2);
+    expect(task2?.taskStatus).toBe('reviewing');
+  });
+
+  it('names the event whose artifacts were held back, on rebuild() and on apply()', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await rebuild(dbPath, 'all', { stateDir });
+    expect(result.skippedArtifacts).toEqual([
+      expect.objectContaining({
+        event_id: badEventId,
+        session_id: SESSION_ID,
+        task_id: TASK_2,
+        reason: expect.stringContaining('array'),
+      }),
+    ]);
+
+    const applied = await apply(dbPath, SESSION_ID, { stateDir });
+    expect(applied.skippedArtifacts.map((s) => s.event_id)).toEqual([badEventId]);
+  });
+
+  it('a session with nothing held back reports an empty list, not a missing one', async () => {
+    // A second, clean session: the field is always present (D-141 — "ran and
+    // found nothing" must not look like "never ran").
+    await appendEvent(
+      {
+        session_id: 'sess-clean',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const dbPath = path.join(dbDir, 'smith.db');
+    const applied = await apply(dbPath, 'sess-clean', { stateDir });
+    expect(applied.skippedArtifacts).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The global folds read every log, so before D-249 one log that was not JSON
+// failed apply() for EVERY session -- and the dashboard, which applies each
+// session in turn, then reported every one of them as unprojectable, naming
+// none of them as the cause. The broken session is the one that cannot be
+// written; the others lose nothing but that session's findings and lessons,
+// which the result now says.
+// ---------------------------------------------------------------------------
+describe('db/projector.ts — a session whose log is not JSON', () => {
+  let stateDir: string;
+  let dbDir: string;
+  const BROKEN = 'sess-broken';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-broken-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-broken-db-'));
+    await buildFixture({ stateDir });
+    await appendEvent(
+      {
+        session_id: BROKEN,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await appendFile(path.join(stateDir, `${BROKEN}.jsonl`), 'this line is not an event\n');
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('apply() of another session still lands that session and names the one it could not read', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await apply(dbPath, SESSION_ID, { stateDir });
+    expect(result.sessionsProcessed).toBe(1);
+    expect(result.unreadableSessions).toEqual([
+      expect.objectContaining({ session_id: BROKEN, reason: expect.stringContaining('Line 2') }),
+    ]);
+    const handle = openDb(dbPath);
+    try {
+      expect(allRows(handle.db).tasks).toHaveLength(4);
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('apply() of the broken session itself refuses, naming the log and the line', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await expect(apply(dbPath, BROKEN, { stateDir })).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+      details: { session_id: BROKEN, line: 2 },
+    });
+  });
+
+  it('rebuild() refuses rather than write a projection short of a session it cannot read', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await expect(rebuild(dbPath, 'all', { stateDir })).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+    });
+  });
+});
+
+describe('db/projector.ts — a merged task is done, whatever the log says about it afterwards', () => {
+  let stateDir: string;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-terminal-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-terminal-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  async function statusOf(taskId: string): Promise<string> {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const row = allRows(handle.db).tasks.find((t) => t.taskId === taskId);
+      return row?.taskStatus ?? '(no row)';
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  it('a later wave-admitted that lists the task again does not put it back to ready', async () => {
+    // A re-planned wave admits the tasks of the new plan version; when one of
+    // them is an id that already merged under the previous version, the
+    // admission is a fact about the wave, not a reopening of the task. The
+    // fixture merges TASK_1; this is the wave after it.
+    const events = await readEvents(SESSION_ID, { stateDir });
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'wave-admitted',
+        plan_version: 2,
+        causal_parent: events[events.length - 1]?.event_id ?? null,
+        payload: { epic_id: EPIC_ID, task_ids: [TASK_1, TASK_2] },
+      },
+      { stateDir },
+    );
+    expect(await statusOf(TASK_1)).toBe('completed');
+    expect(await statusOf(TASK_2)).toBe('ready');
+  });
+
+  it('a gate-outcome recorded after the merge does not move the task back to merging or blocked', async () => {
+    // A judge whose evidence lands late is gated after wave-merged; the gate's
+    // verdict is recorded, but the task it grades already shipped. The same
+    // guard dispatch_decision and error-logged apply.
+    for (const outcome of ['pass', 'blocked', 'pass-with-waivers-pending']) {
+      const events = await readEvents(SESSION_ID, { stateDir });
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'gate-outcome',
+          task_id: TASK_1,
+          plan_version: 1,
+          causal_parent: events[events.length - 1]?.event_id ?? null,
+          payload: { outcome, reason: 'late judge' },
+        },
+        { stateDir },
+      );
+      expect(await statusOf(TASK_1)).toBe('completed');
+    }
+  });
+});
+
+describe('db/projector.ts — an error-logged moves a task only when its severity says so', () => {
+  let stateDir: string;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-error-severity-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-error-severity-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  async function logError(taskId: string, error: string, severity: string): Promise<void> {
+    const events = await readEvents(SESSION_ID, { stateDir });
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'error-logged',
+        task_id: taskId,
+        plan_version: 1,
+        causal_parent: events[events.length - 1]?.event_id ?? null,
+        payload: { error, severity, task_ref: taskId, detail: 'fixture' },
+      },
+      { stateDir },
+    );
+  }
+
+  async function statusOf(taskId: string): Promise<string> {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const row = allRows(handle.db).tasks.find((t) => t.taskId === taskId);
+      return row?.taskStatus ?? '(no row)';
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  it('an S3-minor or S4-nit error leaves the task where it was', async () => {
+    // taxonomy.yml: S3 is "real but waivable; batched to operator at epic
+    // end", S4 is "logged, never asked". Neither stops the task, so neither
+    // may show it as blocked. The fixture leaves TASK_4 in-progress.
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+    await logError(TASK_4, 'economy.budget-exceeded', 'S3-minor');
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+    await logError(TASK_4, 'execution.tool-failure', 'S4-nit');
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+  });
+
+  it('a minor coordination error is a note too, not an escalation', async () => {
+    await logError(TASK_4, 'coordination.starvation', 'S3-minor');
+    expect(await statusOf(TASK_4)).toBe('in-progress');
+  });
+
+  it('an S2-major error blocks the task and an S1 coordination error escalates it', async () => {
+    await logError(TASK_4, 'contract.schema-violation', 'S2-major');
+    expect(await statusOf(TASK_4)).toBe('blocked');
+    await logError(TASK_4, 'coordination.deadlock', 'S1-stop-the-line');
+    expect(await statusOf(TASK_4)).toBe('escalated');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item (k) of the csb-signing-policy-1 dogfood. A spec finding is minted with
+// `finding_scope: 'spec'` and a `spec_ref` naming the plan version and the
+// criterion it failed (findings.ts, D-33/P9-9) — and neither ever reached the
+// projection. The findings table carried scope-less rows, so the dashboard
+// showed a spec-reviewer's finding as one more correctness row with no way
+// to tell which acceptance criterion it was about.
+// ---------------------------------------------------------------------------
+
+describe('spec findings carry their criterion into the findings table', () => {
+  let stateDir: string;
+  let dbDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-spec-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-spec-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('projects finding_scope, spec_plan_version and criterion_ref', async () => {
+    const events = await readEvents(SESSION_ID, { stateDir });
+    const last = events[events.length - 1];
+    if (!last) throw new Error('fixture wrote no events');
+    const ctx: EventContext = {
+      sessionId: SESSION_ID,
+      planVersion: 1,
+      causalParent: last.event_id,
+    };
+    const raised = await raiseFinding(
+      {
+        finding: {
+          finding_id: 'finding-spec',
+          task_id: TASK_2,
+          finding_category: 'correctness',
+          finding_scope: 'spec',
+          spec_ref: { plan_version: 1, criterion_ref: `${TASK_2}:criterion-1` },
+          severity: 'S2-major',
+          finding_status: 'raised',
+          summary: 'the plan never says what the refactor must preserve',
+          failure_scenario: {
+            inputs: 'read criterion-1 against the diff',
+            expected: 'a behaviour the test can pin',
+            actual: 'the criterion names none',
+          },
+          found_by: 'spec-reviewer',
+        },
+        filePath: 'src/widget.ts',
+      },
+      ctx,
+      { stateDir },
+    );
+    if (raised.suppressed) throw new Error('finding-spec unexpectedly suppressed');
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const rows = handle.db.select().from(schema.findings).all();
+      const byId = Object.fromEntries(rows.map((f) => [f.findingId, f]));
+      expect(byId['finding-spec']).toMatchObject({
+        taskId: TASK_2,
+        findingScope: 'spec',
+        specPlanVersion: 1,
+        criterionRef: `${TASK_2}:criterion-1`,
+      });
+      // The fixture's own findings are all diff findings and say so.
+      for (const id of ['finding-1', 'finding-2', 'finding-4']) {
+        expect(byId[id]).toMatchObject({
+          findingScope: 'diff',
+          specPlanVersion: null,
+          criterionRef: null,
+        });
+      }
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+});
+
+describe('db/projector.ts — a task continued in a second session keeps one row', () => {
+  let stateDir: string;
+  let dbDir: string;
+  const PARENT = 'sess-cont-a';
+  const CHILD = 'sess-cont-b';
+  const TASK = 'epic-c/task-1';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-continued-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-continued-db-'));
+    await buildContinuedTask();
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  /**
+   * The P9-7 shape: the epic's plan lands the task in session A; a second
+   * session opens with `--continues A#n` and does the work. `tasks.task_id`
+   * is the table's whole primary key, so the two logs describe one row.
+   */
+  async function buildContinuedTask(): Promise<void> {
+    const opts = { stateDir };
+    const rootA = await appendEvent(
+      {
+        session_id: PARENT,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      opts,
+    );
+    await appendEvent(
+      {
+        session_id: PARENT,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: rootA.event_id,
+        payload: {
+          epic_id: 'epic-c',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          plan_version: 1,
+          objective: 'Land the widget in the continuation.',
+          claims: ['src/widget.ts'],
+          budget_tokens: 2000,
+        },
+      },
+      opts,
+    );
+    const rootB = await appendEvent(
+      {
+        session_id: CHILD,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: rootA.event_id,
+        payload: {},
+      },
+      opts,
+    );
+    const dispatched = await appendEvent(
+      {
+        session_id: CHILD,
+        actor: 'orchestrator',
+        event_type: 'dispatch_decision',
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: rootB.event_id,
+        payload: {
+          agent_role: 'coder',
+          provider: 'claude',
+          model_tier: 'mid',
+          model: 'claude-sonnet-5',
+          spec_ref: 'factory/specs/active/epic-c/task-1.json',
+          reason: 'first round in the continuation',
+        },
+      },
+      opts,
+    );
+    await appendEvent(
+      {
+        session_id: CHILD,
+        actor: 'system',
+        event_type: 'gate-outcome',
+        task_id: TASK,
+        plan_version: 1,
+        causal_parent: dispatched.event_id,
+        payload: { outcome: 'blocked', reason: 'tests failed in the continuation' },
+      },
+      opts,
+    );
+  }
+
+  function taskRows(dbPath: string) {
+    const handle = openDb(dbPath);
+    try {
+      return allRows(handle.db).tasks.filter((t) => t.taskId === TASK);
+    } finally {
+      handle.sqlite.close();
+    }
+  }
+
+  it('rebuild over both logs lands one row carrying the continuation session progress', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await expect(rebuild(dbPath, 'all', { stateDir })).resolves.toMatchObject({
+      sessionsProcessed: 2,
+    });
+    const rows = taskRows(dbPath);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      taskId: TASK,
+      // The row belongs to the session that planned it: kanban({ sessionId })
+      // keeps meaning "tasks born here", and the lineage width shows the rest.
+      sessionId: PARENT,
+      taskStatus: 'blocked',
+      objective: 'Land the widget in the continuation.',
+      budgetTokens: 2000,
+    });
+  });
+
+  it('apply for the continuation session does not collide with the row its parent landed', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, [PARENT], { stateDir });
+    expect(taskRows(dbPath)[0]?.taskStatus).toBe('todo');
+
+    await expect(apply(dbPath, CHILD, { stateDir })).resolves.toMatchObject({
+      unreadableSessions: [],
+    });
+    const rows = taskRows(dbPath);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ sessionId: PARENT, taskStatus: 'blocked' });
+  });
+
+  it('re-applying the parent session does not wipe the progress the continuation made', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    await apply(dbPath, PARENT, { stateDir });
+    const rows = taskRows(dbPath);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.taskStatus).toBe('blocked');
+  });
+
+  it('the lineage-wide board shows the task once, in the column the continuation put it in', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    try {
+      const columns = kanban(handle.db, 'epic-c', { sessionIds: [PARENT, CHILD] });
+      const placed = columns.flatMap((c) => c.tasks.map((t) => [c.taskStatus, t.taskId] as const));
+      expect(placed).toEqual([['blocked', TASK]]);
+    } finally {
+      handle.sqlite.close();
+    }
   });
 });

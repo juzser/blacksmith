@@ -24,8 +24,10 @@
 // and off by default — every other chip on the dashboard (an epic id, a
 // case, a model tier) labels a *thing*, not an activity, and a chip that
 // pulsed everywhere would say nothing. The caller decides, and the only
-// caller that passes it is the one that can answer the question from data
-// (LiveAgentGroupRow, via lib/liveness.ts's agentActivity()).
+// callers that pass it are the ones that can answer the question from data:
+// LiveAgentGroupRow (via lib/liveness.ts's agentActivity()) and, since the
+// 2026-09-14 cross-provider UI check, the Kanban TaskCard (via
+// lib/kanban.ts's agentChip(), off kanban()'s `agentActivity`).
 import { computed } from 'vue';
 import { identityColorVar } from '../lib/identityColor.js';
 

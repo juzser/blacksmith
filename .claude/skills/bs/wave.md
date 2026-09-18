@@ -55,14 +55,27 @@ not cosmetic — it is the edge an audit walks:
   anything else and the check reports you as `unverifiable` — not as a
   pass — however well the wave ran. Open it **before** your first dispatch,
   for the same reason: a grant is earned by owning the log first.
+- **You are taking over a wave whose runner died or capped**: continue from
+  that runner's last event, in a session of your own. Do not write into its
+  log. One session has one author, and `smith delegation check` reads exactly
+  that: dispatches appended to a dead delegate's log by whoever picked the
+  wave up are reported as violations, correctly, because from the log's side
+  they cannot be told apart from an agent narrating its own work. Open your
+  own instead:
+  `smith session start <wave-id>-takeover --continues <dead-session>#<n>`.
+  That keeps the chain whole — the epic's folded reads still see every
+  dispatch on both sides of the handover — and it makes the takeover a fact
+  in the log rather than something a reader has to infer from two agents and
+  one timeline.
 
-Either way, one rule holds: **the log you write is the log the epic reads**,
-and `--continues` is the whole of what makes that true. Every deciding read
-at the epic tier folds the lineage rather than one session — `wave audit`,
-`budget alarm`, `tester check`, `judge outstanding`, `escalation check`,
-`dispatch check`, `delegation check` — so a dispatch recorded in a wave
-session is visible from the epic session that admitted it, and is *not*
-visible from a sibling wave's. Open a wave session without `--continues` and
+Whatever the case, one rule holds: **the log you write is the log the
+epic reads**, and `--continues` is the whole of what makes that true.
+Every deciding read at the epic tier folds the lineage rather than one
+session — `wave audit`, `budget alarm`, `tester check`,
+`judge outstanding`, `escalation check`, `dispatch check`,
+`delegation check` — so a dispatch recorded in a wave session is visible
+from the epic session that admitted it, and is *not* visible from a
+sibling wave's. Open a wave session without `--continues` and
 none of those verbs can see your work: they will not error, they will answer
 about a wave that appears never to have run.
 
@@ -130,7 +143,10 @@ one thing this playbook never asks you to.
 4. Dispatch **`coder`** (`.claude/agents/coder.md`) in that worktree.
    Token/diff caps (`budgets.yml`: 150k tokens, 400 diff lines) and YAGNI
    are the coder's own constraints — don't restate them here, the template
-   does.
+   does. What the template does not read is the schema, so when the spec
+   carries `keeps_exports`, restate the promise in the dispatch in one line:
+   the file list, and "keep every existing export's name and declaration;
+   adding is fine".
 5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
    coverage and epic-level e2e/screenshots.
    - Then the **uiux visual pass**, but only when all three hold: the task
@@ -215,7 +231,7 @@ one thing this playbook never asks you to.
    this is the timeline, not optional bookkeeping.
 9. Gate outcome `blocked` → bounce to the coder on the **same branch**.
    After 2 failed rounds on the same task, escalate model tier
-   automatically (sonnet → opus, logged — `budgets.yml`
+   automatically (mid → frontier, logged — `budgets.yml`
    `escalation_ladder`); after 3, escalate to the operator. Never skip a
    rung, never loop past one. Count the rounds from this task's
    `dispatch_decision` events, not from the agent's own account of itself
@@ -223,13 +239,16 @@ one thing this playbook never asks you to.
    you: `smith escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
 10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting,
-    ask what the diff did to everyone outside the claims:
+    ask what the diff did to everyone outside the claims, and whether it
+    kept what the spec promised:
     `smith claims impact <worktree-dir> <spec.json>`. Exit 1 means a
     `proven` break — this task removed an export a file outside its claims
-    still imports — and that is a bounce to the coder, not a merge. A
-    `possible` / `signature-changed` entry exits 0 and is a note: the
-    scanner reads text, not types (operator-guide/wave.md §2). Then admit
-    into the
+    still imports — **or a broken promise**: a file the spec's
+    `keeps_exports` names lost an export or changed one's declaration.
+    Either is a bounce to the coder, not a merge; quote the `promises`
+    entries in the bounce. A `possible` / `signature-changed` entry in
+    `breaks` exits 0 and is a note: the scanner reads text, not types
+    (operator-guide/wave.md §2). Then admit into the
     merge queue: `smith queue run <epic> --project <project-dir>
     --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
     `rebase-conflict` outcome, dispatch **`merger`**

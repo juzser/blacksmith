@@ -33,7 +33,7 @@ levels:
       - behavioral-drift touching a core flow
     on_trigger: >
       bounce to coder on the same branch; after 2 failed rounds, escalate
-      model tier (sonnet -> opus, budgets.yml); after 3, escalate to
+      model tier (mid -> frontier, budgets.yml); after 3, escalate to
       operator.
 
   S3-minor:

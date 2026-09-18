@@ -31,11 +31,25 @@ function baseRequest(overrides: Partial<JudgeRequest> = {}): JudgeRequest {
 function chatCompletion(
   content: string,
   usage?: { prompt_tokens?: number; completion_tokens?: number },
+  finishReason?: string,
 ): Response {
   return new Response(
-    JSON.stringify({ choices: [{ message: { content } }], ...(usage ? { usage } : {}) }),
+    JSON.stringify({
+      choices: [
+        {
+          message: { content },
+          ...(finishReason === undefined ? {} : { finish_reason: finishReason }),
+        },
+      ],
+      ...(usage ? { usage } : {}),
+    }),
     { status: 200 },
   );
+}
+
+function requestBody(fetchMock: ReturnType<typeof vi.fn>, call: number): Record<string, unknown> {
+  const [, init] = fetchMock.mock.calls[call] as [string, RequestInit];
+  return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
 
 describe('providers/api-transport.ts', () => {
@@ -192,6 +206,138 @@ describe('providers/api-transport.ts', () => {
       },
     );
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  // FD-37: deepseek-reasoner ran to its 64K completion cap on a plan
+  // critique because the request carried no max_tokens. The cap is a bound
+  // on what one verdict may cost; it comes from the budget when the caller
+  // set one, else from the provider's policy entry, else it stays absent.
+  describe('max_tokens', () => {
+    it("sends the budget's max_output_tokens as max_tokens", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(chatCompletion(JSON.stringify({ verdict: 'confirm', rationale: 'r' })));
+
+      await runApiJudge(
+        'fake',
+        baseConfig({ maxTokens: 8000 }),
+        baseRequest({
+          budget: { timeout_ms: 5000, max_output_bytes: 100_000, max_output_tokens: 2048 },
+        }),
+        fetchMock,
+      );
+
+      expect(requestBody(fetchMock, 0).max_tokens).toBe(2048);
+    });
+
+    it("falls back to the provider config's maxTokens when the budget has none", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(chatCompletion(JSON.stringify({ verdict: 'confirm', rationale: 'r' })));
+
+      await runApiJudge('fake', baseConfig({ maxTokens: 8000 }), baseRequest(), fetchMock);
+
+      expect(requestBody(fetchMock, 0).max_tokens).toBe(8000);
+    });
+
+    it('omits max_tokens entirely when neither the budget nor the config sets one', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(chatCompletion(JSON.stringify({ verdict: 'confirm', rationale: 'r' })));
+
+      await runApiJudge('fake', baseConfig(), baseRequest(), fetchMock);
+
+      expect('max_tokens' in requestBody(fetchMock, 0)).toBe(false);
+    });
+  });
+
+  // FD-38/FD-39: an answer that stopped at the output cap is not a judge that
+  // ignored the schema — nudging it re-runs the same truncation at the same
+  // price. Report it as truncated, once, with enough of the raw content to
+  // see where it stopped.
+  describe('finish_reason', () => {
+    it('does not nudge a length-truncated answer and reports it as provider.output-truncated', async () => {
+      const truncated = `${JSON.stringify({ verdict: 'confirm', rationale: 'x'.repeat(900) }).slice(0, 600)}`;
+      const fetchMock = vi
+        .fn()
+        .mockImplementation(async () =>
+          chatCompletion(truncated, { prompt_tokens: 10, completion_tokens: 64_000 }, 'length'),
+        );
+
+      let caught: unknown;
+      try {
+        await runApiJudge('fake', baseConfig(), baseRequest(), fetchMock);
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(caught).toBeInstanceOf(ProviderError);
+      const err = caught as ProviderError;
+      expect(err.code).toBe('provider.output-truncated');
+      expect(err.details).toMatchObject({
+        provider: 'fake',
+        finish_reason: 'length',
+        content_length: truncated.length,
+        retried: false,
+      });
+      expect(err.message).toContain('max_tokens');
+      const snippet = String(err.details?.content_snippet);
+      expect(snippet.length).toBeLessThanOrEqual(520);
+      expect(snippet.startsWith('{"verdict":"confirm"')).toBe(true);
+      expect(snippet.endsWith(truncated.slice(-40))).toBe(true);
+    });
+
+    it('still nudges once when the answer finished normally but was not valid', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(chatCompletion('prose, not json', undefined, 'stop'))
+        .mockResolvedValueOnce(
+          chatCompletion(
+            JSON.stringify({ verdict: 'refute', rationale: 'clean' }),
+            undefined,
+            'stop',
+          ),
+        );
+
+      const result = await runApiJudge('fake', baseConfig(), baseRequest(), fetchMock);
+
+      expect(result.output).toEqual({ verdict: 'refute', rationale: 'clean' });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the raw answer (key-scrubbed, bounded) on provider.invalid-output', async () => {
+      const key = 'sk-super-secret-value-do-not-leak';
+      const prose = `I cannot decide. My key is ${key}. ${'lorem ipsum '.repeat(200)} THE-END`;
+      const fetchMock = vi
+        .fn()
+        .mockImplementation(async () => chatCompletion(prose, undefined, 'stop'));
+
+      let caught: unknown;
+      try {
+        await runApiJudge('fake', baseConfig(), baseRequest(), fetchMock);
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(caught).toBeInstanceOf(ProviderError);
+      const err = caught as ProviderError;
+      expect(err.code).toBe('provider.invalid-output');
+      expect(err.details).toMatchObject({
+        provider: 'fake',
+        reason: 'no-json-found',
+        finish_reason: 'stop',
+        content_length: prose.length,
+        retried: true,
+      });
+      const snippet = String(err.details?.content_snippet);
+      expect(snippet).not.toContain(key);
+      expect(snippet).toContain('[REDACTED]');
+      expect(snippet.length).toBeLessThanOrEqual(520);
+      expect(snippet.endsWith('THE-END')).toBe(true);
+      expect(JSON.stringify(err)).not.toContain(key);
+    });
   });
 
   it('throws provider.network-error when fetch itself rejects (not an abort)', async () => {

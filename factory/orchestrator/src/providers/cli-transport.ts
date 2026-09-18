@@ -3,7 +3,7 @@
 // providers.md). Prompt delivery: STDIN, not a temp file — no filesystem
 // cleanup/race to manage, and a CLI judge that reads a prompt off stdin
 // (same as an interactive paste) needs no extra flag wiring per provider.
-import { spawn } from 'node:child_process';
+import { type SpawnOutcome, spawnCapped } from '../spawn.js';
 import { extractAndValidate } from './schema-validate.js';
 import type { JudgeRequest, JudgeResult } from './types.js';
 import { ProviderError } from './types.js';
@@ -16,26 +16,6 @@ export interface CliTransportConfig {
 const NUDGE = '\n\nReturn only valid JSON per schema.';
 
 const DIAGNOSTIC_TAIL_BYTES = 400;
-
-interface SpawnOutcome {
-  /**
-   * stdout+stderr interleaved, as the schema extractor has always seen it.
-   * Named for what it is: a judge's verdict has never been required to arrive
-   * on stdout, and calling this field `stdout` is what made the diagnostic bug
-   * below easy to write.
-   */
-  combined: string;
-  /** stderr alone — kept apart so a refusal reason can be quoted without the payload. */
-  stderr: string;
-  /** Process exit code, or null if the child was signalled or never started. */
-  exitCode: number | null;
-  /** Signal that killed the child, if any. */
-  signal: NodeJS.Signals | null;
-  /** Set when the child could not be spawned at all (ENOENT, EACCES, …). */
-  spawnError: Error | undefined;
-  timedOut: boolean;
-  sizeExceeded: boolean;
-}
 
 /** Last few hundred bytes of a stream, collapsed to one line, for an error message. */
 function tail(text: string): string {
@@ -71,90 +51,18 @@ function diagnosticFor(outcome: SpawnOutcome): string {
 }
 
 /**
- * One CLI judge invocation: detached process group (POSIX `setsid` via
- * `detached: true`) + group-kill on timeout or size-cap breach — mirrors
- * testgate.ts's runOne() exactly (a judge CLI can spawn its own child
- * processes; a plain per-child kill would orphan them the same way
- * testgate's own regression note describes).
+ * One CLI judge invocation via the shared capped spawn (src/spawn.ts). No
+ * `cwd` in the call: a CLI judge transport is handed a prompt and nothing
+ * else — architecture §18 rule 5, "judges never gain write access" — and a
+ * process started with no working directory of its own has no worktree to
+ * write into even if its command line wanted one.
  */
 function spawnOnce(
   config: CliTransportConfig,
   prompt: string,
   budget: { timeout_ms: number; max_output_bytes: number },
 ): Promise<SpawnOutcome> {
-  return new Promise((resolve) => {
-    const child = spawn(config.command, config.args, {
-      detached: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let combined = '';
-    let stderr = '';
-    let totalBytes = 0;
-    let timedOut = false;
-    let sizeExceeded = false;
-    let settled = false;
-    let spawnError: Error | undefined;
-
-    const killGroup = (): void => {
-      if (child.pid !== undefined) {
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {
-          // Group already gone — fine.
-        }
-      }
-    };
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killGroup();
-    }, budget.timeout_ms);
-
-    const onChunk = (chunk: Buffer): void => {
-      totalBytes += chunk.length;
-      if (totalBytes > budget.max_output_bytes) {
-        if (!sizeExceeded) {
-          sizeExceeded = true;
-          killGroup();
-        }
-        return;
-      }
-      combined += chunk.toString('utf8');
-    };
-
-    child.stdout?.on('data', onChunk);
-    child.stderr?.on('data', (chunk: Buffer) => {
-      // Still folded into `combined` for extraction — a judge that writes its
-      // verdict to stderr has always worked and must keep working. The second
-      // copy exists only so a refusal reason can be reported on its own.
-      stderr += chunk.toString('utf8');
-      onChunk(chunk);
-    });
-
-    child.stdin?.on('error', () => {
-      // Judge exited before consuming stdin (e.g. a fixture that errors
-      // immediately) — writing to a closed pipe would otherwise raise an
-      // unhandled EPIPE; the close handler below still resolves correctly.
-    });
-    child.stdin?.write(prompt);
-    child.stdin?.end();
-
-    const finish = (exitCode: number | null, signal: NodeJS.Signals | null): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ combined, stderr, exitCode, signal, spawnError, timedOut, sizeExceeded });
-    };
-
-    child.on('error', (err: Error) => {
-      // The child never ran (ENOENT, EACCES, …). Distinct from a child that
-      // ran and failed: 'close' carries no code in this case.
-      spawnError = err;
-      finish(null, null);
-    });
-    child.on('close', finish);
-  });
+  return spawnCapped({ command: config.command, args: config.args }, prompt, budget);
 }
 
 interface AttemptOutcome {

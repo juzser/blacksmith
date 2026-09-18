@@ -110,10 +110,21 @@ providers:
     model: some-model-name
     api_key_env: MY_JUDGE_API_KEY       # the NAME of an env var, never a key
     response_format_json_object: true   # false if the endpoint rejects the response_format param
+    max_tokens: 16384                   # optional; sent as `max_tokens`. Unset = the vendor's own default
     model_tier: mid
     enabled: true
     mode: shadow
 ```
+
+`max_tokens` is the output ceiling the transport asks the vendor for. Leave it
+out and the vendor picks, and for a reasoning model the reasoning counts
+against that ceiling too — the first two `plan quorum` calls against
+`deepseek-reasoner` ended `length`-truncated before the JSON was finished
+(dogfood csb-signing-policy-1, FD-37). A `judge run --max-output-tokens <n>`
+overrides the policy value for one call. When the vendor stops
+the answer at the ceiling (`finish_reason: "length"`) the transport reports
+`provider.output-truncated` and does **not** nudge: the prompt was fine, the
+cap was not (`docs/runbooks/providers.md` "Truncated and invalid answers").
 
 **`transport: cli` — anything that reads a prompt and writes a verdict to
 stdout.** A vendor CLI, a local binary, or your own wrapper script.

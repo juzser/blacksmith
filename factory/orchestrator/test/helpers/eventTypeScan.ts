@@ -199,6 +199,12 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
     reason:
       'The scheduler noting that the growth-review cadence has elapsed, from scheduler.ts eventTypeFor(). Not a gate outcome and not an error \u2014 a clock reached a number \u2014 so no dimension declares it, and per architecture \u00a712 it waits for the operator like the other two proposals.',
   },
+  {
+    eventType: 'integration-pr-opened',
+    writtenBy: 'cli',
+    reason:
+      "The integration PR the orchestrator opens at run.md step 17, appended through `smith event append` under `<epic>/integration` with the PR number, repo, refs and shas in the payload. No src path opens a PR \u2014 `gh` runs in the operator's session, never in the factory \u2014 so no dimension declares it, and like operator-note it can only be named here by hand. It is the last event of a finished epic and the one the timeline must not lose: it names the deliverable the whole run was for.",
+  },
 ];
 
 export interface UnemittedEventType {

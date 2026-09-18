@@ -166,6 +166,9 @@ describe('ui/server app.ts', () => {
    * project rows and the Flow DAG alike, because one pinned instant that
    * reached only some routes would be worse than none (the screenshot
    * harness pins the browser to the same instant; ui/e2e/global-setup.ts).
+   * The Kanban card's chip joined the list on 2026-09-14 (fix n of the
+   * cross-provider UI check): it was the one route left reading the wall
+   * clock, so a pinned screenshot drew a pulsing chip beside a stalled DAG.
    */
   it('AppOpts.nowIso pins the working/stalled clock on every route that reports it', async () => {
     const live = app();
@@ -220,6 +223,13 @@ describe('ui/server app.ts', () => {
     const liveNodes = flow.nodes.filter((n) => n.liveAgentRole !== null);
     expect(liveNodes).toHaveLength(2);
     expect(liveNodes.every((n) => n.workingAgentRole === null)).toBe(true);
+
+    const kanbanBody = await json<Array<{ tasks: Array<{ agentActivity: string | null }> }>>(
+      await pinned.app.request('/api/kanban'),
+    );
+    const activities = kanbanBody.flatMap((c) => c.tasks.map((t) => t.agentActivity));
+    expect(activities.filter((a) => a === 'stalled')).toHaveLength(2);
+    expect(activities).not.toContain('working');
     closeApp(pinned);
   });
 
@@ -292,9 +302,11 @@ describe('ui/server app.ts', () => {
   });
 
   /**
-   * Appends a dispatch straight to the event log and re-projects NOTHING —
-   * exactly what the orchestrator does. The DB is downstream of the log, so
-   * a dashboard that never re-projects never sees this.
+   * Declares a task and dispatches it straight to the event log, re-projecting
+   * NOTHING — exactly what the orchestrator does: the plan is ingested (a
+   * `task-added` per task) before anything is scheduled against it, and a
+   * dispatch moves that task rather than minting one. The DB is downstream of
+   * the log, so a dashboard that never re-projects never sees either event.
    */
   async function appendDispatch(sessionId: string, taskId: string): Promise<void> {
     const existing = await readEvents(sessionId, { stateDir });
@@ -313,6 +325,18 @@ describe('ui/server app.ts', () => {
       );
       tip = root.event_id;
     }
+    const added = await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: taskId,
+        plan_version: 1,
+        causal_parent: tip,
+        payload: { task_id: taskId, epic_id: EPIC_ID },
+      },
+      { stateDir },
+    );
     await appendEvent(
       {
         session_id: sessionId,
@@ -320,7 +344,7 @@ describe('ui/server app.ts', () => {
         event_type: 'dispatch_decision',
         task_id: taskId,
         plan_version: 1,
-        causal_parent: tip,
+        causal_parent: added.event_id,
         payload: {
           agent_role: 'coder',
           provider: 'claude',
@@ -386,6 +410,133 @@ describe('ui/server app.ts', () => {
     );
     expect(inProgress(after)).toContain(lateTask);
     closeApp(handle);
+  });
+
+  /**
+   * GET /api/stream — the change stream (design-spec.md's 2026-09-15 addendum
+   * to §8). The two tests below are the two claims the addendum makes: the
+   * frame carries facts and not a status, and the scan that produces it is
+   * the same one the read path already runs, held open on a ticker rather
+   * than duplicated.
+   *
+   * Read through a reader with an AbortController rather than res.text(): the
+   * body never ends, so anything that waits for the end waits forever.
+   */
+  describe('the change stream', () => {
+    interface Frame {
+      event: string;
+      data: string;
+    }
+
+    /** Reads SSE blocks off a live body until `want(frames)` is satisfied. */
+    async function framesUntil(
+      res: Response,
+      want: (frames: Frame[]) => boolean,
+      budgetMs = 8000,
+    ): Promise<Frame[]> {
+      const body = res.body;
+      if (body === null) throw new Error('stream had no body');
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+      const frames: Frame[] = [];
+      let buffer = '';
+      const deadline = Date.now() + budgetMs;
+      try {
+        while (!want(frames)) {
+          if (Date.now() > deadline) {
+            throw new Error(`stream never satisfied the wait; saw ${JSON.stringify(frames)}`);
+          }
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let cut = buffer.indexOf('\n\n');
+          while (cut !== -1) {
+            const block = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            const event = /^event:\s*(.*)$/m.exec(block)?.[1];
+            const data = /^data:\s*(.*)$/m.exec(block)?.[1];
+            if (event !== undefined) frames.push({ event, data: data ?? '' });
+            cut = buffer.indexOf('\n\n');
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+      }
+      return frames;
+    }
+
+    it('opens as an event stream and says so before it says anything else', async () => {
+      const handle = app();
+      const controller = new AbortController();
+      const res = await handle.app.request('/api/stream', { signal: controller.signal });
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+
+      // `ready` and not merely an open socket: a client cannot tell a stream
+      // that is connected from one a proxy has buffered, and that difference
+      // is what decides whether it keeps its polling fallback running.
+      const frames = await framesUntil(res, (f) => f.some((x) => x.event === 'ready'));
+      const ready = frames.find((f) => f.event === 'ready');
+      expect(ready).toBeDefined();
+      expect(JSON.parse(ready?.data ?? 'null')).toEqual({ tickMs: expect.any(Number) });
+
+      controller.abort();
+      closeApp(handle);
+    });
+
+    it('reports a session that advanced, as a count of events and nothing else', async () => {
+      const handle = app();
+      const controller = new AbortController();
+      const res = await handle.app.request('/api/stream', { signal: controller.signal });
+
+      const streamed = framesUntil(res, (f) => f.some((x) => x.event === 'advanced'));
+      // Appended after the subscription is live, and delivered by the
+      // refresher's own ticker: no request is made between the append and
+      // the frame, which is the whole difference from the poll.
+      await appendDispatch(SESSION_ID, `${EPIC_ID}/task-streamed`);
+
+      const frames = await streamed;
+      const advanced = frames.find((f) => f.event === 'advanced');
+      expect(advanced).toBeDefined();
+      const payload = JSON.parse(advanced?.data ?? 'null') as {
+        sessions: Array<Record<string, unknown>>;
+      };
+      const entry = payload.sessions.find((sess) => sess.session === SESSION_ID);
+      expect(entry).toBeDefined();
+      expect(typeof entry?.events).toBe('number');
+      expect(entry?.events).toBeGreaterThan(0);
+      // Architecture §18 rules 1 and 2: the wire carries durable facts. A
+      // status on this frame would be a verdict with no event behind it, and
+      // the page's own query would be entitled to a different one.
+      expect(Object.keys(entry ?? {}).sort()).toEqual(['events', 'session']);
+
+      controller.abort();
+      closeApp(handle);
+    });
+
+    it('holds one scanner: a read request still sees what the stream projected', async () => {
+      const handle = app();
+      const controller = new AbortController();
+      const res = await handle.app.request('/api/stream', { signal: controller.signal });
+
+      const streamed = framesUntil(res, (f) => f.some((x) => x.event === 'advanced'));
+      const lateTask = `${EPIC_ID}/task-11`;
+      await appendDispatch(SESSION_ID, lateTask);
+      await streamed;
+
+      // The ticker's scan is the read path's scan. If the stream had a
+      // scanner of its own, this request's middleware would find the
+      // fingerprint unchanged, project nothing, and the row would be missing
+      // from a projection the stream had already announced.
+      const after = await json<Array<{ taskStatus: string; tasks: Array<{ taskId: string }> }>>(
+        await handle.app.request('/api/kanban'),
+      );
+      expect(inProgress(after)).toContain(lateTask);
+
+      controller.abort();
+      closeApp(handle);
+    });
   });
 
   it('GET /api/projects returns the per-project overview breakdown', async () => {
@@ -1175,5 +1326,163 @@ describe('ui/server app.ts — a finding the projection cannot store', () => {
     expect(seededSkips).toBeGreaterThan(1);
     const occurrences = written.join('').split(LEGACY_ID).length - 1;
     expect(occurrences).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The other quiet undercount. createRefresher() names a session it could not
+// project on stderr and moves on -- which is the right thing for the read,
+// and the wrong thing for the operator, who is looking at the dashboard and
+// not at the terminal that launched it. csb-audit-1 drew as nothing for
+// three waves because one hand-written result payload carried `artifacts`
+// as an object: the session rolled back, stderr said so, no page did. The
+// pulse is the one read every page makes, so that is where the projection
+// admits what it could not land.
+// ---------------------------------------------------------------------------
+describe('ui/server app.ts — what the projection could not land reaches the pulse', () => {
+  let stateDir: string;
+  let dbDir: string;
+  let dbPath: string;
+  let badEventId: string;
+
+  const BROKEN_SESSION = 'sess-broken';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-app-issues-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-app-issues-db-'));
+    await buildFixture({ stateDir });
+    // Straight to the log, bypassing appendEvent: the write-time guard
+    // refuses this shape now, so only a log written before it can carry it.
+    const priorEvents = await readEvents(SESSION_ID, { stateDir });
+    badEventId = `${SESSION_ID}#${priorEvents.length}`;
+    const objectArtifacts = {
+      session_id: SESSION_ID,
+      actor: 'orchestrator',
+      event_type: 'task-result-recorded',
+      task_id: TASK_2,
+      plan_version: 1,
+      causal_parent: priorEvents.at(-1)?.event_id ?? null,
+      ts: '2026-08-15T00:00:00.000Z',
+      payload: {
+        task_id: TASK_2,
+        run_status: 'done',
+        structured_output: {},
+        artifacts: { claude_half: 'a.json', external_half: 'b.json' },
+      },
+    };
+    await appendFile(
+      path.join(stateDir, `${SESSION_ID}.jsonl`),
+      `${JSON.stringify(objectArtifacts)}\n`,
+    );
+    // A second log that cannot be read at all: a line that is not JSON.
+    await appendEvent(
+      {
+        session_id: BROKEN_SESSION,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await appendFile(path.join(stateDir, `${BROKEN_SESSION}.jsonl`), 'this line is not an event\n');
+    dbPath = path.join(dbDir, 'smith.db');
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  function muteStderr(): { written: string[]; restore: () => void } {
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    return { written, restore: () => spy.mockRestore() };
+  }
+
+  it('lists the unprojectable session and the held-back artifacts, and still serves the rest', async () => {
+    const { written, restore } = muteStderr();
+    const handle = createApp({ dbPath, stateDir });
+    try {
+      const res = await handle.app.request('/api/pulse');
+      expect(res.status).toBe(200);
+      const body = await json<{
+        projectionIssues: { sessionId: string; kind: string; message: string }[];
+      }>(res);
+      expect(body.projectionIssues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ sessionId: BROKEN_SESSION, kind: 'session-not-projected' }),
+          expect.objectContaining({
+            sessionId: SESSION_ID,
+            kind: 'artifacts-skipped',
+            message: expect.stringContaining(badEventId),
+          }),
+        ]),
+      );
+      expect(body.projectionIssues).toHaveLength(2);
+
+      // The fixture session is still on the board: the held-back list cost
+      // its rows, not the session.
+      const kanban = await json<{ tasks: { taskId: string }[] }[]>(
+        await handle.app.request(`/api/kanban?epic=${EPIC_ID}`),
+      );
+      expect(kanban.flatMap((c) => c.tasks).map((t) => t.taskId)).toContain(TASK_2);
+    } finally {
+      closeApp(handle);
+      restore();
+    }
+    // stderr still names both, once each, for the operator at the terminal.
+    const warnings = written.join('');
+    expect(warnings).toContain(`could not project session '${BROKEN_SESSION}'`);
+    expect(warnings.split(badEventId).length - 1).toBe(1);
+  });
+
+  it('reports an empty list when nothing was held back, not a missing field', async () => {
+    // Repair both logs: drop the object-shaped record and the garbage line.
+    await rm(path.join(stateDir, `${BROKEN_SESSION}.jsonl`));
+    const kept = (await readEvents(SESSION_ID, { stateDir })).filter(
+      (e) => e.event_id !== badEventId,
+    );
+    await writeFile(
+      path.join(stateDir, `${SESSION_ID}.jsonl`),
+      `${kept.map((e) => JSON.stringify(e.record)).join('\n')}\n`,
+    );
+    const { restore } = muteStderr();
+    const handle = createApp({ dbPath, stateDir });
+    try {
+      const body = await json<{ projectionIssues: unknown[] }>(
+        await handle.app.request('/api/pulse'),
+      );
+      expect(body.projectionIssues).toEqual([]);
+    } finally {
+      closeApp(handle);
+      restore();
+    }
+  });
+
+  it('forgets an issue once the log behind it projects cleanly', async () => {
+    const { restore } = muteStderr();
+    const handle = createApp({ dbPath, stateDir });
+    try {
+      const before = await json<{ projectionIssues: { sessionId: string }[] }>(
+        await handle.app.request('/api/pulse'),
+      );
+      expect(before.projectionIssues.map((i) => i.sessionId)).toContain(BROKEN_SESSION);
+      // The operator fixes the log in place; the next poll re-projects it.
+      const events = await readEvents(SESSION_ID, { stateDir });
+      const rootOnly = `${JSON.stringify({ ...events[0]?.record, session_id: BROKEN_SESSION })}\n`;
+      await writeFile(path.join(stateDir, `${BROKEN_SESSION}.jsonl`), rootOnly);
+      const after = await json<{ projectionIssues: { sessionId: string }[] }>(
+        await handle.app.request('/api/pulse'),
+      );
+      expect(after.projectionIssues.map((i) => i.sessionId)).not.toContain(BROKEN_SESSION);
+    } finally {
+      closeApp(handle);
+      restore();
+    }
   });
 });

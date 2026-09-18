@@ -23,6 +23,26 @@ async function waitUntil(check: () => Promise<boolean>, timeoutMs: number): Prom
 }
 
 describe('testgate.ts', () => {
+  it("runs a check without the factory's own SMITH_ variables", async () => {
+    // Same rule as the merge queue: a check command is the project's, so the
+    // factory's own namespace must not decide its verdict. Without the strip
+    // `SMITH_HOME` reaches the child and moves WORK_ROOT off the worktree.
+    const before = process.env.SMITH_HOME;
+    process.env.SMITH_HOME = tmpdir();
+    try {
+      const result = await run(
+        [{ name: 'env', cmd: '! env | grep -q "^SMITH_" && test -n "$PATH"' }],
+        {
+          cwd: process.cwd(),
+        },
+      );
+      expect(result.pass).toBe(true);
+    } finally {
+      if (before === undefined) delete process.env.SMITH_HOME;
+      else process.env.SMITH_HOME = before;
+    }
+  });
+
   let cwd: string;
 
   beforeEach(async () => {

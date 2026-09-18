@@ -37,8 +37,8 @@ there means "not looked at", not "looked at and clean".
    guessed (architecture §5) — dispatch `researcher`
    (`.claude/agents/researcher.md`) for an unfamiliar repo, or do it
    directly with Grep/Read for a small one.
-2. Dispatch a **`planner`** session (`.claude/agents/planner.md`, opus/
-   fable) with the goal + the claims analysis. It drafts the epic spec and
+2. Dispatch a **`planner`** session (`.claude/agents/planner.md`, frontier
+   tier) with the goal + the claims analysis. It drafts the epic spec and
    task specs (`factory/specs/schema/task-spec.schema.json` shape).
 3. Dispatch a **`spec-reviewer`** session (`.claude/agents/spec-reviewer.md`)
    — a *different model* than the planner's, per its own frontmatter — to
@@ -55,10 +55,21 @@ there means "not looked at", not "looked at and clean".
    confidence) for you:
 
    ```bash
-   smith plan quorum --epic <epic> --plan-version <n> \
+   smith plan quorum --plan <the draft's plan.json> --plan-version <n> \
      --session <session-id> --causal-parent <event-id> \
-     --confidence <your own 0–1 confidence in this plan>
+     --confidence <your own 0–1 confidence in this plan> \
+     --out <scratch>/quorum-v<n>.json
    ```
+
+   `--plan` hands over the draft itself: at this step nothing has been
+   written to `factory/specs/active/<epic>/` yet — that is step 6, on
+   approval — so the verb cannot read a `plan-v<n>.json` that does not
+   exist. (`--epic <epic>` instead of `--plan` critiques a version already
+   filed.) The draft's own `epic_id`/`version` must be the ones the command
+   names, or it refuses (`plan.identity-mismatch`) rather than record one
+   plan's identity with another plan's triggers. `--out` keeps the outcome
+   — three rationales of several kB each — where step 5 can hand it to the
+   operator whole instead of quoting a terminal.
 
    **Nothing runs this for you — you run it here** when
    `profile.planQuorum` is `always` (`huge`). At `when-triggered` (`medium`,
@@ -106,15 +117,52 @@ there means "not looked at", not "looked at and clean".
    can pay it cheaply; a `widest: 1` plan serializes the whole epic while
    every gate downstream reports a healthy wave of one. Deferrals for
    `dependency-pending` never appear there, because a chain of real
-   dependencies is the shape of the work and not a defect. Exit 2 is
-   information, not a stop — decide whether to re-slice, and say which you
-   chose when you present the plan.
+   dependencies is the shape of the work and not a defect. Exit 2 whose
+   `constraints` name `symbol-coupled` is a **re-plan round**, not
+   information: hand the planner the constraint list — the file pairs from
+   the deferral detail — and ask, per pair, for a dependency edge, a
+   `keeps_exports` promise on the producer, or a re-slice.
+   `claim-overlap` / `serialize-hotspot` constraints are the re-slice case
+   above. Exit 2 with no such constraint remains information, not a stop —
+   decide whether to re-slice, and say which you chose when you present the
+   plan.
+
+   Beside the schedule, the read that names what it only counts:
+
+   ```bash
+   smith claims impact --plan factory/specs/active/<epic>/plan-v1.json \
+     <task-id>... --repo <project-dir>
+   ```
+
+   Its `crossings` are the file pairs a `symbol-coupled` constraint points
+   at; `promised` holds the ones a producer's `keeps_exports` already
+   answers, which the schedule admits and the diff is later checked against.
 7. Log the sign-off itself as a decision checkpoint (this is exactly what
    `smith dream`'s "plan sign-off" extraction looks for, `lessons.ts`):
    `smith event append '{"session_id":"...","actor":"operator",
    "event_type":"plan-version-created","plan_version":1,
    "causal_parent":"...","payload":{"epic_id":"<epic>","version":1,
    "note":"<operator's own words>"}}'`.
+
+   Then write the backlog that signature approved into the log, hung off
+   the sign-off event:
+
+   ```bash
+   smith plan ingest factory/specs/active/<epic>/plan-v1.json \
+     --session <session-id> --plan-version 1 --causal-parent <sign-off event id>
+   ```
+
+   This is where a task starts existing as far as the log — and so the DB,
+   the Kanban, the Flow graph and every dashboard number — is concerned
+   (D-46, D-254): one `task-added` per task, one `edges-recorded` for the
+   DAG. Nothing downstream runs it for you, and nothing refuses to run
+   without it: `wave next` reads the plan file, so an un-ingested plan still
+   runs, and its task rows then spring into being as a side effect of the
+   first wave or gate event to name an id — with no epic, no claims, no
+   budget and no edges, which is the flat, half-empty board the 2026-09-14
+   UI check found behind two epics. It is idempotent, so run it again on a
+   resumed session; read `added` and `edges` back, and say so when either is
+   0 on a plan that has tasks or edges.
 8. If this epic opens a new roadmap milestone, add it to
    `factory/specs/roadmap.md` (planner-maintained, architecture §12) — a
    roadmap change is itself a scope change and needs the same operator nod.

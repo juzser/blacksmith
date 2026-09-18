@@ -7,25 +7,31 @@ does wherever else this repo cites it.
 ## 7. `smith plan quorum` + `smith epic verdict`
 
 The gate raises its own quorum cases; these two are the ones you invoke.
-Both rest on a quorum that ships one *voting* vendor short.
+Both rest on a quorum whose reach is a fact about your box.
 `crosscheck.yml` ships `codex: enabled: auto, mode: active` and
-`deepseek: enabled: auto, mode: shadow`, so a box holding the `codex` binary
-and a DeepSeek key runs two external judges and counts one, and a box with
-neither runs none. Either way `min_providers: 2` is out of reach — no
-quorum, no gating `judge-verdict` row from a second vendor, and the outcome
-rests on the native verdict alone (`docs/runbooks/providers.md`). A shadow
-provider is still invoked and still recorded; it forfeits its vote and
-nothing else, so promoting deepseek after a calibration pass is the edit
-that closes the gap. `smith judge preflight` says beforehand whether a
+`deepseek: enabled: auto, mode: active`, so a box holding the `codex` binary
+and a DeepSeek key runs two external judges and counts both — and that is
+the only configuration that reaches `min_providers: 2`. Hold one of the two
+and the gating pool is a pool of one once the finder is excluded: no
+quorum, no second gating `judge-verdict` row, and the outcome rests on the
+native verdict alone (`docs/runbooks/providers.md`). Hold neither and no
+external runs at all. `smith judge preflight` says beforehand whether a
 provider you switched on can be called at all, and
 `SMITH_CROSSCHECK_OFFLINE=1` forces every external off for one command.
 
 ```bash
-smith plan quorum --epic epic-1 --plan-version 1 \
-  --session <session-id> --causal-parent <event-id> [--confidence 0.7]
+smith plan quorum --plan <draft.json> --plan-version 1 \
+  --session <session-id> --causal-parent <event-id> [--confidence 0.7] \
+  [--out <file>]
 ```
 
-Run it after the spec-reviewer round, before you sign a plan off. It first
+Run it after the spec-reviewer round, before you sign a plan off — which
+is why it takes the draft by path: `plan-v1.json` is written on approval,
+after this critique, so there is no filed version to name yet. `--epic
+<id>` in place of `--plan` critiques a version that is already filed. The
+draft's `epic_id` and `version` must match the envelope
+(`plan.identity-mismatch` otherwise: one record, one plan). `--out` writes
+the printed outcome to a file as well. It first
 evaluates `crosscheck.yml`'s three `plan_quorum` triggers deterministically
 (`mechanical_oracles_first`) — epic budget at or above `budget_ratio` of
 the `budgets.yml` per-epic cap, an infra case or a security-sensitive
@@ -70,11 +76,15 @@ quorum, because `finder_ne_critic` excludes the native claimant.
 
 ```bash
 smith epic verdict --epic epic-1 --project ../my-project \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 Run it after the last task in the plan lands and before you open the
-integration PR. Mechanical oracles run first here too, and their verdict is
+integration PR. Pass the live plan version here and on every record in
+§7a-§7e: the envelope leaves `--plan-version` optional and an omitted one
+stamps `plan_version: 1` (`eventContextFromFlags` in `cli.ts`), so an epic
+that amended to v3 closes with its check and its review claiming to have
+verified a plan that no longer exists. Mechanical oracles run first here too, and their verdict is
 final — an epic with non-terminal tasks or open blocking findings is
 `hold`ed without spending a judge call:
 
@@ -106,7 +116,7 @@ This is that run, made a logged fact:
 git -C ../my-project checkout smith/epic-1/integration
 smith integration check --epic epic-1 --project ../my-project \
   --checks checks.json \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 `checks.json` is the same `[{"name":..., "cmd":...}]` shape `smith gate run
@@ -141,7 +151,7 @@ fact.
 
 ```bash
 smith epic close --epic epic-1 --project ../my-project \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 It runs the same verdict first, then acts on it:
@@ -242,7 +252,7 @@ smith epic spec-review --epic epic-1 --project ../my-project \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --reviewed-by spec-reviewer [--reviewed-by-provider anthropic:claude-opus-5] \
   [--evidence spec-findings.json] \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 It reads the head of `smith/<epic>/integration` itself and pins the record to
@@ -296,7 +306,7 @@ then reconciled.
 ```bash
 smith crossfind run --task epic-1/task-1 \
   --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
-  --session <id> --causal-parent <event-id>
+  --session <id> --plan-version <n> --causal-parent <event-id>
 ```
 
 Every reconciled pair lands in one of four outcomes, and only one of them can
@@ -401,7 +411,7 @@ smith epic goal-check --epic epic-1 \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --coverage /tmp/coverage.json \
   --checked-by spec-reviewer [--checked-by-provider google:gemini-2.5-pro] \
-  --session <session-id> --causal-parent <event-id>
+  --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 `--coverage` is a JSON array, one entry per clause:

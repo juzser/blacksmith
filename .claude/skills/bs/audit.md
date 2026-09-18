@@ -19,8 +19,10 @@ the `audit_id` the way you keep a session id.
 nothing reads a cwd and nothing keeps a "current audit" on the side, so two
 audits on two projects cannot be confused. The project must be a git
 checkout; a directory this factory did not build is as auditable as one it
-did. Then `mkdir -p state/audit` in this clone: the judges' artifacts live
-there, under runtime state, never under the project.
+did. Then `mkdir -p state/audit` in the factory's **work root** — the clone
+itself, or the `.blacksmith/` that `smith init` made beside your code; `smith
+init` prints it as `workRoot`. The judges' artifacts live there, under runtime
+state, never under the project.
 
 ## 2. Open the audit
 
@@ -136,7 +138,8 @@ ended on a plan and wrote nothing: re-poke it, and
 `smith judge outstanding --session <session-id> --task <audit-id>.<axis>`
 exits 1 while the file is still owed, so it is the loop condition),
 `judges.artifact-unparseable` (it narrated), `judges.artifact-not-a-list`
-(some other shape). `audit record` then refuses the evidence itself —
+(some other shape; only `--role grader` may hand in a verdict document
+instead of a list). `audit record` then refuses the evidence itself —
 `audit.evidence-carries-identity` (the judge set `fingerprint`,
 `status`, `axis`, `audit_id`, `ts`, `epic` or `same_as`, which are the
 store's to mint), `audit.evidence-incomplete` (a `failure_scenario` leg

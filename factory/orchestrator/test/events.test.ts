@@ -10,12 +10,15 @@ import {
   type EventRecord,
   eventTaskId,
   filterEvents,
+  followEvents,
   parseEventId,
   readEvents,
   requireSession,
+  type StoredEvent,
   sessionLineage,
   startSession,
   tailEvents,
+  unseenEvents,
 } from '../src/events.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 
@@ -28,6 +31,27 @@ describe('events.ts', () => {
 
   afterEach(async () => {
     await rm(stateDir, { recursive: true, force: true });
+  });
+
+  // A bare SyntaxError names neither the log nor the line, and the dashboard
+  // printed it once per session it then failed to fold (D-249).
+  it('names the log and the line when a line of it is not JSON', async () => {
+    await appendEvent(
+      {
+        session_id: 'sess-torn',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await appendFile(path.join(stateDir, 'sess-torn.jsonl'), '{"half": tru\n');
+    await expect(readEvents('sess-torn', { stateDir })).rejects.toMatchObject({
+      code: 'events.unreadable-session-log',
+      details: { session_id: 'sess-torn', path: path.join(stateDir, 'sess-torn.jsonl'), line: 2 },
+    });
   });
 
   it('stamps ts and returns a stable event_id for the first (session-root) event', async () => {
@@ -1448,6 +1472,94 @@ describe('events.ts', () => {
     ).resolves.toMatchObject({ event_id: 'sess-19#1' });
   });
 
+  // -------------------------------------------------------------------------
+  // The same fuse, on `task-result-recorded`. Its payload is the Result
+  // envelope, and the projector turns `artifacts[]` into rows inside the
+  // session's transaction -- so an `artifacts` that is an object (csb-audit-1
+  // #100 carried `{ claude_half, external_half, repair_brief }`) rolled the
+  // whole session back. The check is deliberately narrow: only the one field
+  // a reader iterates is pinned to its shape. The full result schema is not
+  // enforced here because real logs carry many hand-written result payloads
+  // that no reader rehydrates.
+  // -------------------------------------------------------------------------
+  describe('a task-result-recorded payload whose artifacts is not a list', () => {
+    async function root(sessionId: string): Promise<void> {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+    }
+
+    function result(artifacts: unknown): Record<string, unknown> {
+      const payload: Record<string, unknown> = {
+        task_id: 'epic-1/task-1',
+        run_status: 'done',
+        structured_output: {},
+      };
+      if (artifacts !== undefined) payload.artifacts = artifacts;
+      return payload;
+    }
+
+    it('rejects an object-shaped artifacts and writes nothing', async () => {
+      await root('sess-trr-1');
+      await expect(
+        appendEvent(
+          {
+            session_id: 'sess-trr-1',
+            actor: 'orchestrator',
+            event_type: 'task-result-recorded',
+            task_id: 'epic-1/task-1',
+            plan_version: 1,
+            causal_parent: 'sess-trr-1#0',
+            payload: result({ claude_half: 'a.json', external_half: 'b.json' }),
+          },
+          { stateDir },
+        ),
+      ).rejects.toMatchObject({ code: 'events.invalid-typed-payload' });
+      const events = await readEvents('sess-trr-1', { stateDir });
+      expect(events).toHaveLength(1);
+    });
+
+    it('accepts a list, and accepts a payload with no artifacts at all', async () => {
+      await root('sess-trr-2');
+      await expect(
+        appendEvent(
+          {
+            session_id: 'sess-trr-2',
+            actor: 'orchestrator',
+            event_type: 'task-result-recorded',
+            task_id: 'epic-1/task-1',
+            plan_version: 1,
+            causal_parent: 'sess-trr-2#0',
+            payload: result([{ type: 'diff', path: 'artifacts/task-1.diff' }]),
+          },
+          { stateDir },
+        ),
+      ).resolves.toMatchObject({ event_id: 'sess-trr-2#1' });
+      await expect(
+        appendEvent(
+          {
+            session_id: 'sess-trr-2',
+            actor: 'orchestrator',
+            event_type: 'task-result-recorded',
+            task_id: 'epic-1/task-1',
+            plan_version: 1,
+            causal_parent: 'sess-trr-2#1',
+            payload: result(undefined),
+          },
+          { stateDir },
+        ),
+      ).resolves.toMatchObject({ event_id: 'sess-trr-2#2' });
+    });
+  });
+
   // D-215. `task-added` is the only event whose payload becomes a task row's
   // `task_status` (db/projector.ts's `row.taskStatus = p.task_status`); every
   // other assignment there is a literal from the closed vocabulary. Until
@@ -1681,6 +1793,129 @@ describe('events.ts', () => {
       await expect(startSession('../escape', { stateDir })).rejects.toMatchObject({
         code: 'events.malformed-session-id',
       });
+    });
+  });
+
+  // `--follow`'s half that is not argv: what turns a repeated read of a
+  // growing log into a stream that prints nothing twice. The loop lives here
+  // rather than in cli.ts for the same reason ui/src/lib/eventStream.ts holds
+  // the browser's half -- a loop with no seams is a loop only an operator can
+  // test.
+  describe('following a log', () => {
+    /** One stored event, carrying only the fields the follow fold reads. */
+    const stored = (eventId: string, ts: string): StoredEvent => ({
+      event_id: eventId,
+      record: {
+        session_id: eventId.split('#')[0] as string,
+        ts,
+        event_type: 'note',
+        actor: 'system',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+    });
+
+    it('holds back what the caller has already printed', () => {
+      const log = [
+        stored('s#0', '2026-09-01T00:00:00.000Z'),
+        stored('s#1', '2026-09-01T00:00:01.000Z'),
+      ];
+      expect(unseenEvents(log, new Set(['s#0'])).map((e) => e.event_id)).toEqual(['s#1']);
+      expect(unseenEvents(log, new Set(['s#0', 's#1']))).toEqual([]);
+    });
+
+    // The reason the cursor is a set of ids and not a count. `--lineage`
+    // merges several logs by `ts`, so an event appended now can sort BEHIND
+    // one already printed; a stream cannot un-print, and a length cursor
+    // would either re-emit the tail or skip the new event entirely.
+    it('emits an event the merge slots in behind one already printed', () => {
+      const printed = [stored('a#0', '2026-09-01T00:00:02.000Z')];
+      const merged = [stored('b#0', '2026-09-01T00:00:01.000Z'), ...printed];
+      const seen = new Set(printed.map((e) => e.event_id));
+      expect(unseenEvents(merged, seen).map((e) => e.event_id)).toEqual(['b#0']);
+    });
+
+    it('prints each new event once, however often it re-reads', async () => {
+      const log = [stored('s#0', '2026-09-01T00:00:00.000Z')];
+      const emitted: string[] = [];
+      let reads = 0;
+      const count = await followEvents({
+        seen: ['s#0'],
+        read: async () => {
+          reads += 1;
+          return log;
+        },
+        emit: (event) => emitted.push(event.event_id),
+        sleep: async () => {
+          // One append, between the second poll and the third.
+          if (reads === 2) log.push(stored('s#1', '2026-09-01T00:00:01.000Z'));
+        },
+        shouldContinue: (() => {
+          let polls = 0;
+          return (): boolean => polls++ < 4;
+        })(),
+      });
+
+      expect(emitted).toEqual(['s#1']);
+      expect(count).toBe(1);
+    });
+
+    it('does not read again once it has been told to stop', async () => {
+      let reads = 0;
+      let stopping = false;
+      await followEvents({
+        read: async () => {
+          reads += 1;
+          return [];
+        },
+        emit: () => undefined,
+        sleep: async () => {
+          stopping = true;
+        },
+        shouldContinue: () => !stopping,
+      });
+      expect(reads).toBe(1);
+    });
+
+    it('follows a real log as it grows', async () => {
+      await appendEvent(
+        {
+          session_id: 'sess-follow',
+          actor: 'operator',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir },
+      );
+      const start = await readEvents('sess-follow', { stateDir });
+      const emitted: string[] = [];
+      let polls = 0;
+      await followEvents({
+        seen: start.map((e) => e.event_id),
+        read: () => readEvents('sess-follow', { stateDir }),
+        emit: (event) => emitted.push(event.event_id),
+        sleep: async () => {
+          await appendEvent(
+            {
+              session_id: 'sess-follow',
+              actor: 'system',
+              event_type: 'note',
+              plan_version: 1,
+              causal_parent: 'sess-follow#0',
+              payload: { i: polls },
+            },
+            { stateDir },
+          );
+        },
+        shouldContinue: (): boolean => polls++ < 3,
+      });
+
+      // The session-start was already on screen when the follow began; the
+      // two notes appended under it were not.
+      expect(emitted).toEqual(['sess-follow#1', 'sess-follow#2']);
     });
   });
 });

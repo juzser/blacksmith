@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BudgetPolicy } from '../src/budgets.js';
-import type { AdmissionLens, DaemonFinding } from '../src/daemon.js';
+import type { AdmissionLens, DaemonFinding, TickReport } from '../src/daemon.js';
 import {
   acquireLock,
   DaemonError,
@@ -254,6 +254,47 @@ describe('what one tick notices', () => {
     expect(budget[0]?.severity).toBe('attention');
     expect(budget[0]?.subject).toBe('epic-1');
     expect(budget[0]?.detail).toMatch(/^alarm:/);
+  });
+
+  // A closed epic's bill is final: nothing will be dispatched to it again, so
+  // "the projected ceiling has crossed the alarm" is a warning about spend
+  // that cannot happen. The two verdicts the daemon used to raise on every
+  // tick were csb-audit-1 (closed 2026-09-10) and phase-10 (closed 2026-09-05),
+  // both standing as `attention` for days with nobody able to act on them.
+  // `smith budget alarm` still reports the closed epic; the daemon does not.
+  it('says nothing about the budget of an epic the log has already closed', () => {
+    const events = [
+      ...overspentEpic('sess-1'),
+      stored('sess-1', 'epic-closed', {
+        epic_id: 'epic-1',
+        closed_by: 'machine',
+        machine_verdict: 'go',
+        machine_reason: 'go',
+      }),
+    ];
+    const findings = inspectSession('sess-1', events, OPTS);
+    expect(findings.filter((f) => f.kind === 'budget')).toEqual([]);
+  });
+
+  it('still raises the budget of an epic that is open beside a closed one', () => {
+    const events = [
+      ...overspentEpic('sess-1'),
+      stored('sess-1', 'wave-admitted', { epic_id: 'epic-2', wave: 1, task_ids: ['task-9'] }),
+      stored(
+        'sess-1',
+        'task-result-recorded',
+        { token_usage: { total_tokens: 90_000 } },
+        { task_id: 'task-9' },
+      ),
+      stored('sess-1', 'epic-closed', {
+        epic_id: 'epic-1',
+        closed_by: 'machine',
+        machine_verdict: 'go',
+        machine_reason: 'go',
+      }),
+    ];
+    const budget = inspectSession('sess-1', events, OPTS).filter((f) => f.kind === 'budget');
+    expect(budget.map((f) => f.subject)).toEqual(['epic-2']);
   });
 
   it('raises an agent that has been live longer than the stale threshold', () => {
@@ -680,7 +721,8 @@ describe('how long a finding has been standing', () => {
     // returns dated findings, and nothing else joins the two across an
     // interval.
     const events = brokenLog();
-    const reports = await runDaemon({
+    const reports: TickReport[] = [];
+    await runDaemon({
       dir,
       stateDir: events,
       intervalSeconds: 0,
@@ -695,6 +737,7 @@ describe('how long a finding has been standing', () => {
         let ticks = 0;
         return () => ++ticks <= 2;
       })(),
+      onTick: (report) => reports.push(report),
     });
 
     expect(reports).toHaveLength(2);
@@ -769,7 +812,7 @@ describe('starting, reporting and stopping', () => {
   it('ticks until it is told to stop, then lets go of the lock', async () => {
     const stateDir = stateDirOf(dir);
     let ticks = 0;
-    const reports = await runDaemon({
+    const run = await runDaemon({
       dir,
       stateDir,
       intervalSeconds: 60,
@@ -782,9 +825,93 @@ describe('starting, reporting and stopping', () => {
       sleep: async () => undefined,
       shouldContinue: () => ++ticks <= 3,
     });
-    expect(reports).toHaveLength(3);
+    expect(run.ticks).toBe(3);
     // The lock is the daemon's promise that exactly one of it is running. A
     // loop that exits still holding one is a loop nothing can restart.
+    expect(readLock(dir)).toBeNull();
+  });
+
+  // A loop that answers only when it ends answers nothing, because the whole
+  // point of it is that it does not end. `smith daemon run` said it would
+  // "watch the event log in the foreground" and then printed one document at
+  // exit -- so the foreground form was silent for as long as it ran, and the
+  // detached one wrote a `daemon.log` with nothing in it.
+  it('hands each report to onTick before the sleep, and keeps none of them', async () => {
+    const stateDir = stateDirOf(dir);
+    const order: string[] = [];
+    const seen: TickReport[] = [];
+    let ticks = 0;
+    const summary = await runDaemon({
+      dir,
+      stateDir,
+      intervalSeconds: 60,
+      pid: 4242,
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+      projectDb: false,
+      isAlive: () => false,
+      sleep: async () => {
+        order.push('sleep');
+      },
+      shouldContinue: () => ++ticks <= 3,
+      onTick: (report) => {
+        order.push('tick');
+        seen.push(report);
+      },
+    });
+
+    // Before the sleep, not after it: a watcher whose news arrives one
+    // interval late is a watcher reporting a factory that has moved on.
+    expect(order).toEqual(['tick', 'sleep', 'tick', 'sleep', 'tick', 'sleep']);
+    expect(seen).toHaveLength(3);
+    // And what comes back is a count and the last report, not the three. A
+    // process meant to run for weeks cannot hold every tick it ever ran: at
+    // the default interval that array is ~290 reports a day, forever.
+    expect(summary).toEqual({ ticks: 3, last: seen[2] });
+  });
+
+  it('reports a --once run through the same seam, so one reader reads both', async () => {
+    const stateDir = stateDirOf(dir);
+    const seen: TickReport[] = [];
+    const summary = await runDaemon({
+      dir,
+      stateDir,
+      once: true,
+      pid: 4242,
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+      projectDb: false,
+      isAlive: () => false,
+      onTick: (report) => seen.push(report),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(summary).toEqual({ ticks: 1, last: seen[0] });
+  });
+
+  it('lets go of the lock when onTick itself throws', async () => {
+    // The seam is the caller's code running inside the daemon's `try`. A
+    // printer that dies on a closed pipe must not be able to leave the lock
+    // behind -- that is a file a human has to delete before the factory can
+    // watch itself again.
+    await expect(
+      runDaemon({
+        dir,
+        stateDir: stateDirOf(dir),
+        once: true,
+        pid: 4242,
+        now: NOW,
+        budgetPolicy: BUDGET,
+        schedulerPolicy: SCHEDULER,
+        projectDb: false,
+        isAlive: () => false,
+        onTick: () => {
+          throw new Error('EPIPE');
+        },
+      }),
+    ).rejects.toThrow('EPIPE');
     expect(readLock(dir)).toBeNull();
   });
 
@@ -1573,17 +1700,20 @@ describe('a tick carries the register down to the fold', () => {
   // the register would report nothing, and "nothing" is what the cleared case
   // asserts on its own.
   it('reports it from the loop too, and stops once the repo is named', async () => {
-    const [silent] = await runDaemon({ dir, intervalSeconds: 1, once: true, ...OPTS, stateDir });
+    const silent = (await runDaemon({ dir, intervalSeconds: 1, once: true, ...OPTS, stateDir }))
+      .last;
     expect(silent?.findings.filter((f) => f.kind === 'unwatched-project')).toHaveLength(1);
 
-    const [watched] = await runDaemon({
-      dir,
-      intervalSeconds: 1,
-      once: true,
-      ...OPTS,
-      stateDir,
-      projectDirs: ['/repo/envkit'],
-    });
+    const watched = (
+      await runDaemon({
+        dir,
+        intervalSeconds: 1,
+        once: true,
+        ...OPTS,
+        stateDir,
+        projectDirs: ['/repo/envkit'],
+      })
+    ).last;
     expect(watched?.findings.filter((f) => f.kind === 'unwatched-project')).toEqual([]);
   });
 });

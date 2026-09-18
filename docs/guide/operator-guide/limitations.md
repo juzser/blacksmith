@@ -66,19 +66,22 @@ does wherever else this repo cites it.
   events tagged `needs_distillation: true`; turning one into a checkable,
   principle-level statement means dispatching a `scribe` session by hand
   today (`/bs lessons`'s playbook), not an automatic pass.
-- **Cross-provider judges run two and count one, and two of the four
-  triggers only fire when you run a command.** Phase 8 ships both
-  transports (Codex via `codex exec`, DeepSeek via its
+- **Cross-provider judges gate only on a box where both vendors resolve, and
+  two of the four triggers only fire when you run a command.** Phase 8 ships
+  both transports (Codex via `codex exec`, DeepSeek via its
   OpenAI-compatible API), the quorum engine, `smith judge run`, and `smith
   stats providers`. `crosscheck.yml` ships
   `codex: enabled: auto, mode: active` and
-  `deepseek: enabled: auto, mode: shadow`, so a box holding the binary and
-  the key calls both judges and only codex gates; `auto` on both means a box
-  with neither has no external judge and nothing to edit. A shadow provider
-  forfeits its vote and nothing else, so one active external cannot satisfy
-  `min_providers: 2` and a finding claude raised still falls to the native
-  verdict — promoting deepseek after a calibration pass, or changing the
-  quorum policy, is an operator decision, not a default
+  `deepseek: enabled: auto, mode: active`, so a box holding the binary and
+  the key calls both judges and both of them gate; `auto` on both means a box
+  with neither has no external judge and nothing to edit. That is also the
+  only configuration that reaches `min_providers: 2`, because
+  `finder_ne_critic` excludes whoever raised the claim — the native reviewer,
+  on nearly every finding. Resolve one external and the gating pool is a pool
+  of one: the case escalates with that vendor's rationale attached instead of
+  being decided, which is what `accept_non_gating_actives` buys and all it
+  buys. Widening past that — the quorum rule itself, or the independent
+  finder — is an operator decision, not a default
   (`docs/runbooks/providers.md`). `smith judge preflight` checks, without
   spending a call, that a provider you switched on can be reached at all.
   All four `quorum_triggers` now have a
@@ -87,10 +90,7 @@ does wherever else this repo cites it.
   two are operator-invoked — `smith epic verdict` (`epic.ts`) before an
   integration PR opens, and `smith plan quorum` (`planQuorum.ts`) on a
   plan — and **nothing runs them for you**; skip the command and that epic
-  or plan simply was not cross-checked. And even after promotion, one
-  `mode: active` provider changes no outcomes — `finder_ne_critic` excludes
-  the claim's finder (the native reviewer today), leaving a below-quorum
-  pool that escalates instead of deciding; you need two.
+  or plan simply was not cross-checked.
 - **The independent finder stays off even after you enable a provider.**
   Switching one on in `crosscheck.yml` buys a judge in `mode: shadow` — it
   runs on quorum triggers, it is recorded, and it gates nothing. It does not

@@ -24,6 +24,23 @@ this epic") → merge on green, bounce on red. The command stops at the
 first non-`merged` outcome and exits `1`; prints the full outcome array
 either way.
 
+`--test-cmd` runs in the task's worktree with this process's environment
+minus every `SMITH_*` variable, and the gate's own check commands run the
+same way. A command the factory launches on a project's behalf belongs to
+the project: every `SMITH_*` variable in the factory's process was set for
+that process, and `SMITH_HOME` in particular would move the project's work
+root onto the factory's own clone — a suite that asserts its own layout then
+fails on how it was invoked rather than on the branch, and anything it
+writes to state lands in the factory's live `state/`.
+
+The strip is a rule rather than a list of names, so it does not go stale
+when a `SMITH_*` variable is added. It applies to the operator switches too:
+if you mean `SMITH_CROSSCHECK_OFFLINE=1` for the command being run rather
+than for the factory running it, state it in the command
+(`--test-cmd 'SMITH_CROSSCHECK_OFFLINE=1 pnpm test'`), which is what
+`docs/runbooks/providers.md` means by passing it per command. The shell
+applies anything the command string sets after this strip.
+
 With `--plan`, *the merge order is the plan's, not the file's*: the ids are
 resolved against the plan and the set is then sorted topologically by the
 plan's dependency edges, tie-broken by task id, so a task never merges
@@ -180,10 +197,13 @@ smith gate run epic-1/task-1 \
   hands over.
 - Every `artifacts[].path` must resolve inside the task's artifact home,
   `state/artifacts/<task-id>/`, and exist there — relative paths resolve
-  against that home, directories are fine, and anything else blocks the task
-  with `reason: "artifacts-missing"` before the tests are ever run. `/tmp`, a
-  session scratchpad and a worktree all look durable at the moment the worker
-  writes the result and are gone by the time anyone opens the verdict (D-19).
+  against that home (a path that already begins with the home's own spelling
+  from the work root, `state/artifacts/<task-id>/x`, is read as that spelling
+  rather than doubled — FD-5), directories are fine, and anything else blocks
+  the task with `reason: "artifacts-missing"` before the tests are ever run.
+  `/tmp`, a session scratchpad and a worktree all look durable at the moment
+  the worker writes the result and are gone by the time anyone opens the
+  verdict (D-19).
   `--artifacts-dir <dir>` moves the root, which is for tests and replays; the
   default is the repo's `state/artifacts`.
 - `checks.json` — `Array<{ name, cmd }>`, run sequentially in the worktree
@@ -467,6 +487,44 @@ on any screen. Either reach for a taxonomy `gate_event`/`graph_event` value, or
 if the type is one this factory should keep writing, add it to
 `FREE_TIMELINE_EVENT_TYPES` in `factory/orchestrator/src/db/queries.ts` — with a
 matching entry in the event-type lint, which will demand a reason.
+
+### Following a log as it grows — `--follow`
+
+`smith event tail` answers and exits, which is the right shape for a question
+and the wrong one for a wave you are watching. `--follow` prints the backlog
+and then keeps printing, a record at a time, until you interrupt it:
+
+```bash
+# The last 20 records, then every record after them, as they land.
+smith event tail epic-7-session-2 --follow
+
+# Scoped exactly like the one-shot form: the epic, one task, a wider window.
+smith event tail epic-7-session-2 --lineage --task task-4 --n 50 --follow
+
+# One record per line is one record per reader.
+smith event tail epic-7-session-2 --follow |
+  jq -c 'select(.record.event_type == "gate_result")'
+```
+
+**The output shape changes with the flag, on purpose.** Without `--follow` the
+command prints one JSON array, because an answer that has finished is an
+array. With it, every record is its own line from the first one — a stream has
+no closing bracket, and a reader piping into `jq` or `grep` should not have to
+wait for one that never comes.
+
+It re-reads the log once a second rather than watching the filesystem, which
+is what makes it behave the same on a Mac, on Linux and over a network mount,
+and it remembers the record *ids* it has printed rather than a count:
+`--lineage` merges several logs by timestamp, so a record appended now can
+sort **behind** one already on your screen, and a stream cannot un-print. ^C
+ends it. So does the reader going away, the way it ends `tail -f`:
+`smith event tail … --follow | head -5` finds the closed pipe on the next
+record it would have printed, and exits 0 then rather than writing an error
+line.
+
+The daemon is the other half of this: `--follow` watches one log as it is
+written, and `smith daemon run` watches every log for the things that only a
+fold can see (§11 of [lessons and the daemon](lessons-and-daemon.md)).
 
 ## 5c. `smith coverage check` — evidence that names the file the criterion names
 

@@ -134,4 +134,65 @@ describe('providers/schema-validate.ts extractAndValidate', () => {
       });
     });
   });
+
+  // FD-41: an API judge asked for response_format json_object cannot answer
+  // with a bare array — it wraps the list in one object. Accept the wrapper
+  // whose single key holds the array; refuse a bare record and a wrapper
+  // with more than one key, because those are not "the list, wrapped" but
+  // some other shape the judge invented.
+  describe('array-valued schema wrapper tolerance', () => {
+    it('unwraps an object whose single key holds the findings array', () => {
+      const findings = [validFinding()];
+      const result = extractAndValidate(JSON.stringify({ findings }), 'finding');
+      expect(result).toEqual({ valid: true, value: findings });
+    });
+
+    it('unwraps an empty list under a single key', () => {
+      expect(extractAndValidate('{"results":[]}', 'finding')).toEqual({ valid: true, value: [] });
+    });
+
+    it('validates the unwrapped elements, reporting their paths', () => {
+      const result = extractAndValidate(
+        JSON.stringify({ findings: [validFinding({ severity: 'critical' })] }),
+        'finding',
+      );
+      expect(result.valid).toBe(false);
+      if (!result.valid && result.reason === 'schema-invalid') {
+        expect(result.errors.some((e) => e.path.startsWith('/0'))).toBe(true);
+      } else {
+        throw new Error('expected schema-invalid');
+      }
+    });
+
+    it('refuses a bare finding record for an array-valued schema', () => {
+      const result = extractAndValidate(JSON.stringify(validFinding()), 'finding');
+      expect(result.valid).toBe(false);
+      if (!result.valid && result.reason === 'schema-invalid') {
+        expect(result.errors.some((e) => e.message.includes('array'))).toBe(true);
+      } else {
+        throw new Error('expected schema-invalid');
+      }
+    });
+
+    it('refuses a wrapper with more than one key', () => {
+      const result = extractAndValidate(
+        JSON.stringify({ findings: [validFinding()], summary: 'two keys' }),
+        'finding',
+      );
+      expect(result.valid).toBe(false);
+      if (!result.valid && result.reason === 'schema-invalid') {
+        expect(result.errors.some((e) => e.message.includes('array'))).toBe(true);
+      } else {
+        throw new Error('expected schema-invalid');
+      }
+    });
+
+    it('does not unwrap for an object-valued schema', () => {
+      const result = extractAndValidate(
+        JSON.stringify({ verdict: [{ verdict: 'confirm', rationale: 'r' }] }),
+        'judge-verdict',
+      );
+      expect(result.valid).toBe(false);
+    });
+  });
 });

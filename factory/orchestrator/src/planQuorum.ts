@@ -9,6 +9,7 @@ import type { EventContext } from './findings.js';
 import {
   livePlanTasks,
   loadPlan,
+  PlanError,
   type PlanFile,
   type PlanOpts,
   planRefTaskId,
@@ -132,6 +133,11 @@ function taskNonfunctionalClauses(t: TaskSpecRecord): string[] {
   if (typeof contract !== 'object' || contract === null) return [];
   const clauses = (contract as Record<string, unknown>).nonfunctional_clauses;
   return Array.isArray(clauses) ? clauses.filter((c): c is string => typeof c === 'string') : [];
+}
+
+function taskAcceptanceCriteria(t: TaskSpecRecord): string[] {
+  const criteria = t.acceptance_criteria;
+  return Array.isArray(criteria) ? criteria.filter((c): c is string => typeof c === 'string') : [];
 }
 
 function taskConfidence(t: TaskSpecRecord): number | undefined {
@@ -320,11 +326,16 @@ const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_byte
  * Pure prompt builder, mirrors quorum.ts's findingJudgeRequest() and
  * epic.ts's epicVerdictJudgeRequest() style and trust boundary: the prompt
  * carries the CLAIM ONLY (epic id, plan version, task ids/objectives/
- * case/token budgets, edge count, fired triggers with their evidence) —
- * never file contents, never a diff. The tasks it lists are `livePlanTasks`,
- * not `plan.tasks`: this prompt is the whole of what the critic sees, so a
- * superseded record listed here is an objective the plan withdrew, offered to
- * a judge as the plan's current ask (D-185). Carries
+ * case/token budgets, each task's acceptance criteria and nonfunctional
+ * clauses, edge count, fired triggers with their evidence) — never file
+ * contents, never a diff. The criteria are part of the claim, not evidence
+ * for it: FD-46 (csb-signing-policy-1) had both external critics refute
+ * plan-v1 for missing a case its task already listed as a criterion, because
+ * the prompt showed them the objective and nothing under it. The tasks it
+ * lists are `livePlanTasks`, not `plan.tasks`: this prompt is the whole of
+ * what the critic sees, so a superseded record listed here is an objective
+ * the plan withdrew, offered to a judge as the plan's current ask (D-185).
+ * Carries
  * asymmetric_roles.critic_mandate ("refute, not confirm"): the judge's
  * mandate is to REFUTE the plan's soundness; it critiques the plan, it does
  * not authorize any change to it.
@@ -341,7 +352,18 @@ export function planQuorumJudgeRequest(
           .map((t) => {
             const caseValue = taskCase(t) ?? '(no case)';
             const objective = typeof t.objective === 'string' ? t.objective : '(no objective)';
-            return `  ${t.task_id} [${caseValue}, ${taskTokens(t)} tokens]: ${objective}`;
+            const criteria = taskAcceptanceCriteria(t);
+            const clauses = taskNonfunctionalClauses(t);
+            return [
+              `  ${t.task_id} [${caseValue}, ${taskTokens(t)} tokens]: ${objective}`,
+              '    acceptance criteria:',
+              ...(criteria.length > 0
+                ? criteria.map((c) => `      - ${c}`)
+                : ['      (no acceptance criteria)']),
+              ...(clauses.length > 0
+                ? ['    nonfunctional clauses:', ...clauses.map((c) => `      - ${c}`)]
+                : []),
+            ].join('\n');
           })
           .join('\n')
       : '  (no tasks)';
@@ -393,6 +415,17 @@ export interface PlanQuorumCrosscheckOptions {
 export interface PlanQuorumInput {
   epicId: string;
   version: number;
+  /**
+   * The plan itself, when it is not on disk yet. plan.md runs the quorum at
+   * step 4 and files plan-v<n>.json at step 6 -- the critique comes BEFORE
+   * the signature, so the thing being critiqued is a draft (FD-45). Without
+   * this the playbook could only be followed by writing an unsigned v1 first.
+   * When absent, the plan is read from `planOpts` as before. Either way the
+   * plan's own `epic_id`/`version` must be the ones this input names, or the
+   * record would carry one plan's identity and another plan's triggers
+   * (`plan.identity-mismatch`; D-211's one-record-one-plan rule).
+   */
+  plan?: PlanFile;
   /** Planner's self-reported confidence for the plan as a whole (trigger 3's second arm). */
   plannerConfidence?: number;
   planOpts?: PlanOpts;
@@ -518,7 +551,19 @@ export async function runPlanQuorum(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<PlanQuorumOutcome> {
-  const plan = loadPlan(input.epicId, input.version, input.planOpts);
+  const plan = input.plan ?? loadPlan(input.epicId, input.version, input.planOpts);
+  if (plan.epic_id !== input.epicId || plan.version !== input.version) {
+    throw new PlanError(
+      'plan.identity-mismatch',
+      `The plan handed to the quorum is ${plan.epic_id} version ${plan.version}, but the command names --epic ${input.epicId} --plan-version ${input.version}. One quorum record describes one plan; say which.`,
+      {
+        epic_id: plan.epic_id,
+        version: plan.version,
+        expected_epic_id: input.epicId,
+        expected_version: input.version,
+      },
+    );
+  }
   const policy = input.crosscheck?.policy ?? loadCrosscheckPolicy();
   const epicCapTokens = input.epicCapTokens ?? loadBudgetPolicy().epic.capTokens;
   const triggers = evaluatePlanQuorumTriggers(plan, policy.planQuorum, epicCapTokens, {

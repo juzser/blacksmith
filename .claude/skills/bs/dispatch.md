@@ -140,11 +140,11 @@ memory of its previous attempt and will happily report round 1 forever.
   evidence that the model was too small; it is usually evidence the spec was
   unclear, and a bigger model will implement the same misreading more
   convincingly.
-- **Escalate to opus only after two failed rounds**, and log the escalation in
-  the `dispatch_decision` (`model_tier`, `model`, plus the reason). An unlogged
-  escalation is a cost you cannot attribute later — and `model_tier` alone
-  cannot even tell you *which* frontier model you escalated to, since opus and
-  fable share the tier.
+- **Escalate to the frontier tier only after two failed rounds**, and log the
+  escalation in the `dispatch_decision` (`model_tier`, `model`, plus the
+  reason). An unlogged escalation is a cost you cannot attribute later — and
+  `model_tier` alone cannot even tell you *which* frontier model you escalated
+  to, since opus and fable share the tier.
 - **The grader's 2-round cap is a hard stop, not a ladder rung.** At a round-2
   `fail` the task goes back to the planner for re-scoping. Do not re-dispatch
   the grader, and do not escalate the *grader* — the gates decide pass/fail,
@@ -198,6 +198,27 @@ and untracked paths.
 Look at the paths, do not just read the exit code: a planner that edited a
 policy file or a scribe that edited a role template is a config change nobody
 reviewed, and it will read as yours in the diff.
+
+## Dispatch a role with no claims against the reserved ref (FD-27)
+
+Every `dispatch_decision` carries a `task_id`, and the projector folds a
+task row for whatever that id names — so a role with no task of its own
+still needs a ref, and the ref you pick decides whether the dashboard grows
+a card. Two shapes are reserved and never become one: `<epic>/integration`
+(the epic's integration branch, the ref `epic verdict` and `epic close`
+stamp) and `<epic>/plan-v<n>` (a plan version, the ref `plan quorum`
+stamps). Anything else — `<epic>/plan-draft`, `<epic>/spec-review-r27` —
+folds a real row that nothing can ever move on, because no planner or
+spec-reviewer dispatch produces the `wave-merged` or `gate-outcome` that
+would: twenty-one of csb-audit-1's twenty-four non-terminal rows were these
+(`docs/specs/dogfood-csb-audit-1-findings.md` FD-27).
+
+So: the closing spec-reviewer, the goal-check spec-reviewer, the planner
+rendering a verdict and the scribe are dispatched against
+`<epic>/integration`; a plan critic against `<epic>/plan-v<n>`. Same for
+`smith judge dispatch --task` when the judge is epic-level. The lessons and
+findings splices above still take no `--task` for these roles — the ref is
+for the log, not for claim filtering.
 
 ## Fingerprint the worktree around every judge (agent-interviews.md N-10, P9-5)
 
@@ -265,8 +286,9 @@ something":
 
 ```bash
 smith judge dispatch --task <task-id> --role reviewer --round 1 \
-  --artifact /abs/path/<task-id>.reviewer.json --model <model-id> \
-  --session ... --causal-parent ...
+  --artifact /abs/path/<task-id>.reviewer.json \
+  --model <model-id> --model-tier <frontier|mid|small> \
+  --session ... --plan-version <n> --causal-parent ...
 # ... dispatch the judge, telling it to write exactly that path ...
 smith judge report --task <task-id> --role reviewer --session ... --causal-parent ...
 smith judge outstanding --task <task-id> --session ...
@@ -279,10 +301,20 @@ smith judge outstanding --task <task-id> --session ...
 prints what is still owed and **exits 1 while anything is**, so it is the loop
 condition for a re-poke, not just a report. Passing the file to
 `gate run --evidence <path> --found-by <role>` reports for you, so the normal
-path is dispatch → judge writes → gate. `--model` is required and has no
+path is dispatch → judge writes → gate. The grader is the one judge whose
+declared shape is not a list: for `--role grader` the artifact is its result
+document (`state/results/<task-id>.grader-r<round>.json`), `finding_count` is
+its non-`pass` criteria, and `gate run --grader <file>` closes its turn the
+way `--evidence` closes the others (FD-1). `--model` is required and has no
 default: this is an ordinary dispatch record, and `smith dispatch check` (P9-23)
 compares reviewer and verifier by model id, so a placeholder here would make
-that audit answer for a session nobody ran. `--no-findings` records an operator
+that audit answer for a session nobody ran. `--model-tier` is optional and
+that is the trap: an omitted tier is recorded as `frontier`, so a judge you
+ran on a mid-tier model reads as the top tier everywhere the record is read
+back — the kanban chip, the dashboard's live-agent groups, the overview's
+recent dispatches, the dispatch audit. The tiers are taxonomy.yml's three —
+`frontier`, `mid`, `small` — and the flag is the only thing that puts the
+true one on the record. `--no-findings` records an operator
 *attestation* rather than a review — use it only for a judge that ran outside
 the factory; a judge that genuinely found nothing writes `[]` and reports.
 

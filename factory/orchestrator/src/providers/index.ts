@@ -75,6 +75,7 @@ export async function runJudge(
       model: config.model,
       apiKeyEnv: config.apiKeyEnv,
       responseFormatJsonObject: config.responseFormatJsonObject,
+      ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
     },
     request,
     opts.fetchImpl,

@@ -9,13 +9,13 @@ pending proposals lets them sit invisible instead of surfacing them.
 
 1. **Ask what the factory is answerable for, then run the scheduler.**
    `smith projects list` reads the roadmap's `- project:` bullets — the
-   register `smith new` writes to — and prints this clone plus every
+   register `smith new` writes to — and prints the factory itself plus every
    project it built that has a checkout, ending in the `--project` line to
    pass on. Do not assemble that list from memory: the maintenance pass
    reads one lockfile per flag and reports one proposal per repo, so a repo
    left off the line is not reported as missing, it is simply never
    mentioned. (The daemon raises `unwatched-project` for a child project with
-   a checkout that is left off the line — not for this clone, which is in
+   a checkout that is left off the line — not for the factory itself, which is in
    the pass by default, and not for a declared project with no checkout at
    all, which `smith projects list` marks with `?` instead of leaving it
    off the printed list. The two surfaces no longer answer the same
@@ -97,7 +97,7 @@ pending proposals lets them sit invisible instead of surfacing them.
    check before reporting it as a stall. A `partial` verdict is **not** a
    finding; put `widest` in the digest as the one number that says how wide
    this factory has ever actually run.
-6. Dispatch **`scribe`** (`.claude/agents/scribe.md`, haiku) with that
+6. Dispatch **`scribe`** (`.claude/agents/scribe.md`, small tier) with that
    JSON plus step 2's admissions as input: shipped / in-flight / blocked /
    budget burn / next milestone / **N rechecks pending, M maintenance
    bumps auto-schedulable** (never silently dropped), ≤300 words, linking
