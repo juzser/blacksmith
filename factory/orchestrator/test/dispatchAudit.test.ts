@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { AsymmetricRolePair } from '../src/crosscheck.js';
 import { checkDispatchAsymmetry, readDispatchRecords } from '../src/dispatchAudit.js';
 import type { StoredEvent } from '../src/events.js';
+import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
+import { SPEC_REVIEW_EVENT } from '../src/spec.js';
 
 // ---------------------------------------------------------------------------
 // P9-23, second half. crosscheck.yml's asymmetric_roles.finder_ne_critic was
@@ -65,7 +67,7 @@ function specReview(
     record: {
       session_id: 'sess-1',
       actor: 'operator-skill',
-      event_type: 'spec-review-recorded',
+      event_type: SPEC_REVIEW_EVENT,
       task_id: overrides.taskId ?? `${epicId}/__epic__`,
       plan_version: 1,
       causal_parent: 'sess-1#0',
@@ -93,7 +95,7 @@ function goalCheck(
     record: {
       session_id: 'sess-1',
       actor: 'operator-skill',
-      event_type: 'goal-check-recorded',
+      event_type: GOAL_CHECK_EVENT,
       task_id: overrides.taskId ?? `${epicId}/integration`,
       plan_version: 1,
       causal_parent: 'sess-1#0',

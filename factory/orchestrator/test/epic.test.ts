@@ -38,10 +38,15 @@ import {
   repairObligation,
   transition,
 } from '../src/findings.js';
-import { type EpicGoalStatus, type GoalCheckStatus, goalDigest } from '../src/goalCheck.js';
+import {
+  type EpicGoalStatus,
+  GOAL_CHECK_EVENT,
+  type GoalCheckStatus,
+  goalDigest,
+} from '../src/goalCheck.js';
 import type { IntegrationCheckRecord } from '../src/integration.js';
 import { MCP_SURFACE_NOT_REQUIRED, type McpSurfaceStatus } from '../src/mcp.js';
-import type { SpecReviewStatus } from '../src/spec.js';
+import { SPEC_REVIEW_EVENT, type SpecReviewStatus } from '../src/spec.js';
 import type { WaveConcurrency } from '../src/waveConcurrency.js';
 import { crosscheckDefaults } from './helpers/crosscheckPolicy.js';
 
@@ -1062,7 +1067,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         session_id: sessionId,
         actor: 'spec-reviewer',
-        event_type: 'spec-review-recorded',
+        event_type: SPEC_REVIEW_EVENT,
         task_id: `${epicId}/integration`,
         plan_version: 1,
         causal_parent: `${sessionId}#0`,
@@ -1091,7 +1096,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         session_id: sessionId,
         actor: 'spec-reviewer',
-        event_type: 'goal-check-recorded',
+        event_type: GOAL_CHECK_EVENT,
         task_id: `${epicId}/integration`,
         plan_version: 1,
         causal_parent: `${sessionId}#0`,
@@ -1603,7 +1608,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         session_id: sessionId,
         actor: 'spec-reviewer',
-        event_type: 'spec-review-recorded',
+        event_type: SPEC_REVIEW_EVENT,
         task_id: `${epicId}/integration`,
         plan_version: 1,
         causal_parent: `${sessionId}#0`,
@@ -1632,7 +1637,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         session_id: sessionId,
         actor: 'spec-reviewer',
-        event_type: 'goal-check-recorded',
+        event_type: GOAL_CHECK_EVENT,
         task_id: `${epicId}/integration`,
         plan_version: 1,
         causal_parent: `${sessionId}#0`,
