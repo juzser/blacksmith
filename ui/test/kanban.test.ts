@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   agentChip,
@@ -260,5 +263,64 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
         gone: true,
       });
     }
+  });
+});
+
+describe('lib/kanban.ts — every status the taxonomy declares reaches a column', () => {
+  it('folds each declared task_status into some column of the "All" board', () => {
+    // The declaration this board answers to is factory/policies/taxonomy.yml,
+    // not the ten values copied into COLUMN_FOR_STATUS: events.ts validates a
+    // `task-added` payload against that file, so a thirteenth status is on the
+    // wire the day it is added there. `foldIntoColumns` drops a task whose
+    // status no column claims — it does not render oddly, it leaves the board
+    // — and the "All" toggle does not bring it back, which is the one place
+    // an operator would go looking.
+    //
+    // This is the guard ui/test/taxonomy.test.ts runs over TASK_STATUS_OUTCOME
+    // and AGENT_STATUSES. A browser cannot read the yml (timelineDisplay.ts
+    // §201), so it belongs in a test rather than in a runtime read.
+    //
+    // Asked of `foldIntoColumns` rather than `columnForStatus`, because
+    // `columnForStatus` is not the whole answer: `failed` and `superseded`
+    // have no entry in COLUMN_FOR_STATUS and are routed to their own two
+    // columns by `foldIntoColumns` itself.
+    const yml = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        '..',
+        'factory',
+        'policies',
+        'taxonomy.yml',
+      ),
+      'utf8',
+    );
+    const declared = yml.match(/\ntask_status:\s*\[([^\]]+)\]/);
+    if (!declared) throw new Error('taxonomy.yml declares no task_status list');
+    const statuses = (declared[1] as string)
+      .split(',')
+      .map((v) => v.replace(/#.*$/, '').trim())
+      .filter(Boolean);
+    // Anti-vacuity: an empty parse would satisfy the assertion below.
+    expect(statuses).toContain('in-progress');
+    expect(statuses).toContain('superseded');
+
+    // `showAll`, because hiding `failed`/`superseded` from the default board
+    // is a decision someone made (§5.3). Falling off the "All" board is the
+    // other thing — nobody decided it.
+    const dropped = statuses.filter((status) =>
+      foldIntoColumns([{ taskId: `t-${status}`, taskStatus: status }], true).every(
+        (column) => column.tasks.length === 0,
+      ),
+    );
+    expect(dropped).toEqual([]);
+  });
+
+  it('can see a drop: a status nothing classifies leaves the "All" board too', () => {
+    // Not a taxonomy value — the shape of the loss, so the guard above reads
+    // as a guard rather than as an assertion that cannot fail.
+    expect(
+      foldIntoColumns([{ taskId: 't1', taskStatus: 'queued' }], true).flatMap((c) => c.tasks),
+    ).toEqual([]);
   });
 });

@@ -324,7 +324,16 @@ export interface TaskFoldRow {
   project: string | null;
 }
 
-const TERMINAL_TASK_STATUSES = new Set([
+/**
+ * The five `task_status` values that mean the work is over — the ones this
+ * module refuses to overwrite once a row reaches them, and the only closed
+ * reading of the dimension anywhere in `src/`. Exported so a reader asking
+ * "is this task still open?" asks it here (db/queries.ts's `inFlightEpics`)
+ * rather than keeping the complement by hand: taxonomy.yml can declare a
+ * thirteenth status tomorrow, and the answer `!has()` gives for one nobody
+ * has classified — still open — is the answer that loses nothing.
+ */
+export const TERMINAL_TASK_STATUSES = new Set([
   'completed',
   'superseded',
   'failed',

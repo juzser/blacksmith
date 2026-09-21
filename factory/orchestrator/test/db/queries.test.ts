@@ -1,6 +1,7 @@
 import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
@@ -16,7 +17,7 @@ import {
   taskDetail,
   timeline,
 } from '../../src/db/queries.js';
-import { eventsRaw } from '../../src/db/schema.js';
+import { eventsRaw, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
 import { raiseFinding, transition } from '../../src/findings.js';
@@ -1152,6 +1153,83 @@ describe('overview() — closed epics (D-43/P9-27)', () => {
       machineVerdict: 'hold',
       overrideRationale: 'Remaining blockers are carry-forward defects.',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same field, read the other way round. `epicsInFlight` was computed by
+// naming the *open* statuses and asking `includes()`, so a status this build
+// does not recognise answered "not open": the epic left `epicsInFlight`, no
+// close put it in `closedEpics`, and ui/src/lib/api.ts's `selectableEpics()`
+// — in-flight ∪ closed — stopped offering it on Kanban or Flow at all.
+//
+// That is reachable without touching this file: factory/policies/taxonomy.yml
+// declares the `task_status` vocabulary and events.ts validates `task-added`
+// against the declaration, so a thirteenth status is accepted on the wire the
+// day it is added there. Five other rosters over this dimension name the
+// closed side and ask `!has()`, which defaults an unknown status to "still
+// open" — the direction that loses nothing.
+// ---------------------------------------------------------------------------
+describe('overview() — a task_status this build does not recognise', () => {
+  let stateDir: string;
+  let dbDir: string;
+  let handle: DbHandle;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-unknown-status-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-unknown-status-db-'));
+    await buildFixture({ stateDir });
+  });
+
+  afterEach(async () => {
+    handle.sqlite.close();
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  /**
+   * Statuses are set on the projected rows rather than appended to the log:
+   * the wire path for an unrecognised status runs through taxonomy.yml, and a
+   * test may not edit a policy file. The row state is identical either way,
+   * and the subject here is the reader — db/soleWriter.test.ts sets
+   * `taskStatus` by hand for the same reason. Nothing is rebuilt afterwards,
+   * because a rebuild replacing these values is soleWriter's subject, not
+   * this one.
+   */
+  async function projectWithStatuses(statuses: Record<string, string>): Promise<DbHandle> {
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const projected = openDb(dbPath);
+    for (const [taskId, taskStatus] of Object.entries(statuses)) {
+      projected.db.update(tasks).set({ taskStatus }).where(eq(tasks.taskId, taskId)).run();
+    }
+    return projected;
+  }
+
+  it('still reports the epic in flight: unrecognised is not finished', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'queued',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    // And so it stays reachable: an epic in neither list is one no operator
+    // can pick a board for.
+    expect(result.closedEpics).toEqual([]);
+  });
+
+  it('cannot pass vacuously: the same four tasks all terminal are not in flight', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'completed',
+    });
+
+    expect(overview(handle.db).epicsInFlight).toEqual([]);
   });
 });
 
