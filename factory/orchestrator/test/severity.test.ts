@@ -8,6 +8,8 @@ import {
   loadSeverityPolicy,
   parseLessons,
   parseSeverityPolicy,
+  SEVERITY_ORDER,
+  type SeverityAction,
   type SeverityPolicy,
 } from '../src/severity.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
@@ -28,39 +30,81 @@ const policy: SeverityPolicy = parseSeverityPolicy(MINI_POLICY_YAML);
 
 const noLessons: readonly LessonRule[] = [];
 
+/**
+ * Every severity taxonomy.yml declares, and what the gate does with each one.
+ *
+ * severity.yml names its own owner in its header: "Severity values themselves
+ * are taxonomy-owned (factory/policies/taxonomy.yml: severity) — this file
+ * defines what each value *does* at the gate, not the vocabulary." That
+ * vocabulary is already well guarded. taxonomy.test.ts pins architecture §8
+ * to it value-for-value and makes the three judge briefs spell every value
+ * out; waivers.test.ts pins SEVERITY_ORDER to severity.yml's `levels` keys in
+ * both directions. What none of them asks is what the GATE DOES with a value.
+ *
+ * Measured, not assumed. Declare a fifth severity in taxonomy.yml,
+ * severity.yml, architecture §8, SEVERITY_ORDER, WAIVABLE_SEVERITIES and the
+ * three briefs — every file the guards above read — and the suite stays
+ * green. decide() then returns `log-only` for it, because actionFor() falls
+ * through to `severity.startsWith('S3')`. `log-only` is severity.yml's own S4
+ * semantics: "logged, never asked". A finding the repo has just declared
+ * waivable is never put into the batch that asks the operator, and nothing
+ * fails.
+ *
+ * This table is the ruling that was missing, and the two tests below keep it
+ * total: its keys must be SEVERITY_ORDER exactly, so a severity cannot be
+ * added without someone writing down what the gate does with it.
+ *
+ * The ruling itself stays hand-written. Whether a severity blocks a merge is
+ * an operator decision, not something to derive — reading it back out of
+ * severity.yml would make this file agree with the gate by construction and
+ * assert nothing. Only its COMPLETENESS stops being hand-kept.
+ *
+ * MINI_POLICY_YAML above stays a literal on purpose: it is the input to a
+ * parser test, not a claim about the world, and a fixture that generates
+ * itself from the thing under test stops being a fixture.
+ */
+const GATE_RULING: Readonly<Record<string, { blocksMerge: boolean; action: SeverityAction }>> =
+  Object.freeze({
+    'S1-stop-the-line': { blocksMerge: true, action: 'block' },
+    'S2-major': { blocksMerge: true, action: 'block' },
+    'S3-minor': { blocksMerge: false, action: 'waiver-batch' },
+    'S4-nit': { blocksMerge: false, action: 'log-only' },
+  });
+
 describe('parseSeverityPolicy', () => {
   it('parses blocks_merge per level from severity.yml-shaped YAML', () => {
     expect(policy.levels['S1-stop-the-line']?.blocksMerge).toBe(true);
     expect(policy.levels['S3-minor']?.blocksMerge).toBe(false);
   });
 
-  it("the real repo severity.yml matches the operator-defined policy (S1/S2 block, S3/S4 don't)", async () => {
-    const { loadSeverityPolicy } = await import('../src/severity.js');
+  it('the real repo severity.yml blocks exactly what GATE_RULING says it blocks', () => {
     const real = loadSeverityPolicy();
-    expect(real.levels['S1-stop-the-line']?.blocksMerge).toBe(true);
-    expect(real.levels['S2-major']?.blocksMerge).toBe(true);
-    expect(real.levels['S3-minor']?.blocksMerge).toBe(false);
-    expect(real.levels['S4-nit']?.blocksMerge).toBe(false);
+    for (const [severity, ruling] of Object.entries(GATE_RULING)) {
+      expect(real.levels[severity]?.blocksMerge).toBe(ruling.blocksMerge);
+    }
+    // Completeness is deliberately not restated here. waivers.test.ts already
+    // compares severity.yml's keys against SEVERITY_ORDER both ways, and the
+    // test below pins GATE_RULING's keys to SEVERITY_ORDER, so a level
+    // declared in severity.yml and ruled on nowhere already fails. A third
+    // copy of one check is a third thing to keep in step.
   });
 });
 
 describe('decide (severity x context table)', () => {
-  it.each([
-    ['S1-stop-the-line', 'block'],
-    ['S2-major', 'block'],
-    ['S3-minor', 'waiver-batch'],
-    ['S4-nit', 'log-only'],
-  ])('%s with no matching lesson -> action=%s, no escalation', (severity, action) => {
-    const decision = decide(
-      { finding_category: 'correctness', severity },
-      { filePath: 'src/foo.ts', lessons: noLessons },
-      policy,
-    );
-    expect(decision.severity).toBe(severity);
-    expect(decision.action).toBe(action);
-    expect(decision.sameMistake).toBe(false);
-    expect(decision.blocks).toBe(severity === 'S1-stop-the-line' || severity === 'S2-major');
-  });
+  it.each(Object.entries(GATE_RULING))(
+    '%s with no matching lesson -> the ruled action, no escalation',
+    (severity, ruling) => {
+      const decision = decide(
+        { finding_category: 'correctness', severity },
+        { filePath: 'src/foo.ts', lessons: noLessons },
+        policy,
+      );
+      expect(decision.severity).toBe(severity);
+      expect(decision.action).toBe(ruling.action);
+      expect(decision.sameMistake).toBe(false);
+      expect(decision.blocks).toBe(ruling.blocksMerge);
+    },
+  );
 
   const matchingLesson: LessonRule = {
     lessonId: 'lesson-1',
@@ -206,6 +250,29 @@ describe('decide (severity x context table)', () => {
       policy,
     );
     expect(decision.sameMistake).toBe(false);
+  });
+});
+
+describe('SEVERITY_ORDER', () => {
+  // SEVERITY_ORDER's doc comment says it is in "the same order
+  // severity.yml/taxonomy.yml document values in" — a claim about two files,
+  // checked against neither. waivers.test.ts compares it to severity.yml's
+  // keys sorted, which is set equality and says nothing about order.
+  //
+  // Order is not uncovered: escalate() walks it one index at a time, so
+  // swapping two entries does fail three escalation tests in this file,
+  // crossFinding.test.ts and waivers.test.ts. It fails them sideways — the
+  // message is "expected S2-major, got S3-minor", and the reader works back
+  // from an escalation to a list. This test says the cause instead.
+  it('matches taxonomy.yml severity exactly, in order', () => {
+    const tx = loadTaxonomy();
+    expect([...SEVERITY_ORDER]).toEqual(tx.dimensions.severity);
+  });
+
+  // The perturbation nothing else catches: a severity declared in every file
+  // the other guards read, and ruled on by no one. See GATE_RULING above.
+  it('is exactly the list GATE_RULING rules on, in the same order', () => {
+    expect(Object.keys(GATE_RULING)).toEqual([...SEVERITY_ORDER]);
   });
 });
 
