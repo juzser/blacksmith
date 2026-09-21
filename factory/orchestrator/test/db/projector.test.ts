@@ -16,6 +16,7 @@ import {
   REQUIRED_PROJECTION_FIELDS,
   raiseFinding,
 } from '../../src/findings.js';
+import { loadSeverityPolicy } from '../../src/severity.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
 
 type SchemaTables = {
@@ -1212,25 +1213,37 @@ describe('db/projector.ts — an error-logged moves a task only when its severit
     }
   }
 
-  it('an S3-minor or S4-nit error leaves the task where it was', async () => {
-    // taxonomy.yml: S3 is "real but waivable; batched to operator at epic
-    // end", S4 is "logged, never asked". Neither stops the task, so neither
-    // may show it as blocked. The fixture leaves TASK_4 in-progress.
-    expect(await statusOf(TASK_4)).toBe('in-progress');
-    await logError(TASK_4, 'economy.budget-exceeded', 'S3-minor');
-    expect(await statusOf(TASK_4)).toBe('in-progress');
-    await logError(TASK_4, 'execution.tool-failure', 'S4-nit');
-    expect(await statusOf(TASK_4)).toBe('in-progress');
-  });
+  /**
+   * Which severities stop a task is a ruling severity.yml already makes, per
+   * value and machine-readably, as `blocks_merge` — and projector.ts keeps a
+   * second copy of the `false` half of it, hand-written, as
+   * NOTE_ONLY_SEVERITIES. The two agree today because someone typed the same
+   * two strings twice, not because anything holds them together: declare a
+   * fifth severity with `blocks_merge: false` and every guard in this repo
+   * stays green while the board shows its tasks as blocked. Measured, not
+   * assumed — a probe that declared one in taxonomy.yml, severity.yml, §8,
+   * SEVERITY_ORDER, WAIVABLE_SEVERITIES, GATE_RULING, MINI_POLICY_YAML and
+   * the four judge briefs drove all 128 files of this suite green.
+   *
+   * So the cases come from the policy rather than from this file. The ruling
+   * stays where the operator writes it — this only stops the projector's
+   * agreement with it from being hand-kept, which is the half that drifts.
+   */
+  it.each(Object.entries(loadSeverityPolicy().levels))(
+    'an error-logged at %s moves the task exactly as severity.yml rules',
+    async (severity, level) => {
+      // The fixture leaves TASK_4 in-progress, and beforeEach rebuilds it.
+      expect(await statusOf(TASK_4)).toBe('in-progress');
+      await logError(TASK_4, 'contract.schema-violation', severity);
+      expect(await statusOf(TASK_4)).toBe(level.blocksMerge ? 'blocked' : 'in-progress');
+    },
+  );
 
-  it('a minor coordination error is a note too, not an escalation', async () => {
+  it('severity decides whether the task moves; the error class decides where', async () => {
+    // A coordination error escalates instead of blocking — but only once the
+    // severity has already said the task stops. A minor one is still a note.
     await logError(TASK_4, 'coordination.starvation', 'S3-minor');
     expect(await statusOf(TASK_4)).toBe('in-progress');
-  });
-
-  it('an S2-major error blocks the task and an S1 coordination error escalates it', async () => {
-    await logError(TASK_4, 'contract.schema-violation', 'S2-major');
-    expect(await statusOf(TASK_4)).toBe('blocked');
     await logError(TASK_4, 'coordination.deadlock', 'S1-stop-the-line');
     expect(await statusOf(TASK_4)).toBe('escalated');
   });
