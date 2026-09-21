@@ -20,7 +20,7 @@ import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
-import type { SmithDb } from './projector.js';
+import { type SmithDb, TERMINAL_TASK_STATUSES } from './projector.js';
 import {
   agents,
   artifacts,
@@ -516,16 +516,6 @@ interface TaskResultPayload {
   token_usage?: { total_tokens?: number };
 }
 
-const NON_TERMINAL_TASK_STATUSES = [
-  'todo',
-  'ready',
-  'in-progress',
-  'grading',
-  'reviewing',
-  'merging',
-  'blocked',
-];
-
 /** Every `tasks` row for `scope`, session-filtered in SQL and project-filtered in JS. */
 function allTasksForScope(db: SmithDb, scope: Scope): (typeof tasks.$inferSelect)[] {
   const sessionCond = scopedToSessions(tasks.sessionId, scope);
@@ -994,6 +984,14 @@ function closedEpicsForScope(db: SmithDb, scope: Scope): ClosedEpic[] {
  * so an epic closed by an operator overriding a hold (exactly the case where a
  * task stays non-terminal) read as in flight forever. A close on the log ends
  * the flight, whatever the task rows still say.
+ *
+ * The open side is asked as the complement of db/projector.ts's terminal set
+ * rather than listed here. Listing it inverts the default: a `task_status`
+ * taxonomy.yml declares and this list has not caught up with would answer
+ * "not in flight", and with no close on the log the epic falls out of
+ * `epicsInFlight` and `closedEpics` both — ui/src/lib/api.ts's
+ * `selectableEpics()` is their union, so the epic stops being pickable on
+ * either board, silently.
  */
 function inFlightEpics(
   taskRows: readonly { epicId: string | null; taskStatus: string }[],
@@ -1004,10 +1002,7 @@ function inFlightEpics(
     ...new Set(
       taskRows
         .filter(
-          (t) =>
-            t.epicId &&
-            NON_TERMINAL_TASK_STATUSES.includes(t.taskStatus) &&
-            !closedIds.has(t.epicId),
+          (t) => t.epicId && !TERMINAL_TASK_STATUSES.has(t.taskStatus) && !closedIds.has(t.epicId),
         )
         .map((t) => t.epicId as string),
     ),
