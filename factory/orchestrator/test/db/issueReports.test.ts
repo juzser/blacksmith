@@ -6,7 +6,7 @@
 // type is already on the timeline via the taxonomy's gate_event dimension);
 // AC2-AC6 were written fail-first against the migration set that predates
 // this task.
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,10 +16,33 @@ import * as schema from '../../src/db/schema.js';
 import { appendEvent, type EventOpts } from '../../src/events.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
-// The journal index of the migration that creates issue_reports. The
-// pre-change set below is every entry before it, so this stays a
-// discriminating check once later migrations land.
-const ISSUE_REPORTS_MIGRATION_IDX = 12;
+const DRIZZLE_DIR = path.join(REPO_ROOT, 'factory/orchestrator/drizzle');
+
+interface JournalEntry {
+  idx: number;
+  tag: string;
+}
+
+async function journalEntries(): Promise<JournalEntry[]> {
+  const raw = await readFile(path.join(DRIZZLE_DIR, 'meta/_journal.json'), 'utf8');
+  return (JSON.parse(raw) as { entries: JournalEntry[] }).entries;
+}
+
+// Which migration creates issue_reports is a fact the shipped SQL already
+// states, so read it rather than remember it. A remembered index is correct
+// only until the next migration lands, and then it is wrong in the quiet
+// direction: the count it anchors goes red saying `expected 14 to be 13`,
+// which names neither this table nor the migration that actually arrived,
+// and the cheapest way back to green re-points the check at whatever landed
+// last -- leaving a test about nothing under a name about issue_reports.
+async function migrationsCreatingIssueReports(entries: JournalEntry[]): Promise<JournalEntry[]> {
+  const creators: JournalEntry[] = [];
+  for (const entry of entries) {
+    const sql = await readFile(path.join(DRIZZLE_DIR, `${entry.tag}.sql`), 'utf8');
+    if (/create table\s+`issue_reports`/i.test(sql)) creators.push(entry);
+  }
+  return creators;
+}
 const SESSION_ID = 'sess-issue-reports';
 const EPIC_ID = 'epic-x';
 const TASK_ID = `${EPIC_ID}/task-1`;
@@ -149,14 +172,16 @@ describe('issue-reported / error-report-proposed reach the timeline and the read
     // "not a valid object name" and takes the whole gate with it.
     const preChangeDir = await mkdtemp(path.join(tmpdir(), 'smith-issue-reports-premigrations-'));
     try {
-      const shippedDir = path.join(REPO_ROOT, 'factory/orchestrator/drizzle');
+      const shippedDir = DRIZZLE_DIR;
       const preMigrationsDir = path.join(preChangeDir, 'drizzle');
       await mkdir(path.join(preMigrationsDir, 'meta'), { recursive: true });
       const shipped = JSON.parse(
         await readFile(path.join(shippedDir, 'meta/_journal.json'), 'utf8'),
-      ) as { entries: Array<{ idx: number; tag: string }> };
-      const kept = shipped.entries.filter((e) => e.idx < ISSUE_REPORTS_MIGRATION_IDX);
-      expect(kept).toHaveLength(ISSUE_REPORTS_MIGRATION_IDX);
+      ) as { entries: JournalEntry[] };
+      const [creator] = await migrationsCreatingIssueReports(shipped.entries);
+      if (!creator) throw new Error('no shipped migration creates issue_reports');
+      const kept = shipped.entries.filter((e) => e.idx < creator.idx);
+      expect(kept).toHaveLength(creator.idx);
       await writeFile(
         path.join(preMigrationsDir, 'meta/_journal.json'),
         JSON.stringify({ ...shipped, entries: kept }),
@@ -185,20 +210,34 @@ describe('issue-reported / error-report-proposed reach the timeline and the read
     }
   });
 
-  it('records exactly one new journal entry, tagged with the new migration file', async () => {
-    const journalPath = path.join(REPO_ROOT, 'factory/orchestrator/drizzle/meta/_journal.json');
-    const { readFile, readdir } = await import('node:fs/promises');
-    const journal = JSON.parse(await readFile(journalPath, 'utf8')) as {
-      entries: Array<{ idx: number; tag: string }>;
-    };
-    expect(journal.entries.length).toBe(13);
-    const last = journal.entries[journal.entries.length - 1];
-    expect(last?.idx).toBe(12);
+  // AC5: the journal and the directory agree, and exactly one migration
+  // created this table. Both halves are asserted over the whole shipped set
+  // and never over its last entry, so a later migration belonging to some
+  // other task neither turns this red nor quietly becomes its subject.
+  it('the journal matches the directory, and exactly one migration creates issue_reports', async () => {
+    const entries = await journalEntries();
 
-    const files = await readdir(path.join(REPO_ROOT, 'factory/orchestrator/drizzle'));
-    const newSql = files.find((f) => f.startsWith('0012_') && f.endsWith('.sql'));
-    expect(newSql).toBeDefined();
-    expect(last?.tag).toBe(newSql?.replace(/\.sql$/, ''));
+    // First, because it is the cheap structural fact the rest stands on:
+    // reading a .sql the journal names is only safe once the journal is known
+    // to name real files. drizzle-kit writes the two together and nothing else
+    // in the repo reads the journal at all, so a hand-edited entry or a
+    // dropped file has no way to surface here -- it waits to be found by a
+    // migration that fails on someone else's machine.
+    const files = (await readdir(DRIZZLE_DIR)).filter((f) => f.endsWith('.sql'));
+    expect(files.sort()).toEqual(entries.map((e) => `${e.tag}.sql`).sort());
+
+    // Listed rather than counted: `toHaveLength(1)` prints `[ ...(2) ]` and
+    // leaves the reader to go find which two.
+    const creators = (await migrationsCreatingIssueReports(entries)).map((e) => e.tag);
+    expect(
+      creators.length === 1
+        ? []
+        : [`migrations creating issue_reports: ${creators.join(', ') || '(none)'}`],
+    ).toEqual([]);
+
+    // The pre-change set above keeps every entry below the creator's idx and
+    // expects exactly that many, which is only true while idx is the position.
+    expect(entries.map((e) => e.idx)).toEqual(entries.map((_, i) => i));
   });
 
   // AC4: the projected row carries outcome and fingerprint, not nulls.
