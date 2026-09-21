@@ -1,7 +1,8 @@
 import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { getTableColumns } from 'drizzle-orm';
+import { getTableColumns, is } from 'drizzle-orm';
+import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { apply, openDb, rebuild } from '../../src/db/projector.js';
 import { kanban, lessonsPage } from '../../src/db/queries.js';
@@ -17,21 +18,34 @@ import {
 } from '../../src/findings.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
 
-function allRows(db: ReturnType<typeof openDb>['db']) {
-  return {
-    events: db.select().from(schema.eventsRaw).all(),
-    sessions: db.select().from(schema.sessions).all(),
-    prompts: db.select().from(schema.prompts).all(),
-    dispatches: db.select().from(schema.dispatches).all(),
-    agents: db.select().from(schema.agents).all(),
-    tasks: db.select().from(schema.tasks).all(),
-    edges: db.select().from(schema.edges).all(),
-    errors: db.select().from(schema.errors).all(),
-    findings: db.select().from(schema.findings).all(),
-    waivers: db.select().from(schema.waivers).all(),
-    lessons: db.select().from(schema.lessons).all(),
-    artifacts: db.select().from(schema.artifacts).all(),
-  };
+type SchemaTables = {
+  [K in keyof typeof schema as (typeof schema)[K] extends SQLiteTable
+    ? K
+    : never]: (typeof schema)[K];
+};
+
+type AllRows = {
+  [K in keyof SchemaTables]: SchemaTables[K] extends SQLiteTable
+    ? SchemaTables[K]['$inferSelect'][]
+    : never;
+};
+
+/**
+ * Every table `db/schema.ts` declares, discovered from the module rather than
+ * listed here. The convergence assertions below are only as wide as this
+ * roster, so a hand-written one stops covering the tables added after it was
+ * written and says nothing while it happens: this list had drifted to twelve
+ * of fifteen, leaving `epics`, `milestones` and `issue_reports` outside both
+ * "rebuilding twice is identical" and "apply() equals rebuild()". Deriving it
+ * means the next table is covered by existing, not by remembering.
+ */
+function allRows(db: ReturnType<typeof openDb>['db']): AllRows {
+  const rows = {} as Record<string, unknown[]>;
+  for (const [name, table] of Object.entries(schema)) {
+    if (!is(table, SQLiteTable)) continue;
+    rows[name] = db.select().from(table).all();
+  }
+  return rows as AllRows;
 }
 
 describe('db/projector.ts', () => {
@@ -67,7 +81,7 @@ describe('db/projector.ts', () => {
     const rows = allRows(handle.db);
     handle.sqlite.close();
 
-    expect(rows.events).toHaveLength(events.length);
+    expect(rows.eventsRaw).toHaveLength(events.length);
     expect(rows.sessions).toEqual([
       {
         sessionId: SESSION_ID,
@@ -161,6 +175,109 @@ describe('db/projector.ts', () => {
     const appliedRows = allRows(appliedHandle.db);
     appliedHandle.sqlite.close();
 
+    expect(appliedRows).toEqual(rebuiltRows);
+  });
+
+  /**
+   * The two epic-level events `buildFixture` deliberately leaves out. It models
+   * a session mid-flight, and `epic-closed` is the one event that sweeps every
+   * live agent to done (`agents-registry.ts:104`) — putting it in the shared
+   * fixture would rewrite the agent statuses the tests above assert. So the
+   * completeness and convergence checks below extend the log themselves.
+   */
+  async function appendEpicLevelTail(stateDirectory: string): Promise<void> {
+    const opts = { stateDir: stateDirectory };
+    const parentOf = async () => {
+      const log = await readEvents(SESSION_ID, opts);
+      const last = log[log.length - 1];
+      if (!last) throw new Error('expected a non-empty fixture log');
+      return last.event_id;
+    };
+
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'system',
+        event_type: 'issue-reported',
+        task_id: TASK_3,
+        plan_version: 1,
+        causal_parent: await parentOf(),
+        payload: {
+          task_ref: TASK_3,
+          error_class: 'execution.flaky-test',
+          fingerprint: 'fp-issue-1',
+          outcome: 'created',
+          issue_url: 'https://example.invalid/issues/1',
+          latest_event_id: `${SESSION_ID}#1`,
+          repo_slug: 'example/repo',
+          source: 'gate',
+        },
+      },
+      opts,
+    );
+
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'operator',
+        event_type: 'epic-closed',
+        plan_version: 1,
+        causal_parent: await parentOf(),
+        payload: {
+          epic_id: EPIC_ID,
+          closed_by: 'operator',
+          machine_verdict: 'pass',
+          blockers: [],
+        },
+      },
+      opts,
+    );
+  }
+
+  it('leaves no table in db/schema.ts unexercised: every one of them has a row', async () => {
+    // The assertions above are only worth as much as the rows they compare, and
+    // `[] === []` is a passing comparison that checks nothing. Two tables sat
+    // that way — `epics` and `issue_reports` — while the roster they were
+    // missing from was hand-written, so neither gap had anywhere to show up.
+    // Naming the empty ones makes the next table added to the schema arrive
+    // with fixture coverage or arrive red.
+    await appendEpicLevelTail(stateDir);
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    const empty = Object.entries(rows)
+      .filter(([, table]) => table.length === 0)
+      .map(([name]) => name);
+    expect(empty).toEqual([]);
+  });
+
+  it('rebuild() and apply() still converge once the log carries the epic-level tail', async () => {
+    // Same two convergence properties as above, over the log that actually
+    // touches every table. `apply()` clears one session but re-folds `tasks`,
+    // `findings`, `lessons` and `milestones` globally, so the tail is where a
+    // difference between the incremental and full paths would surface.
+    await appendEpicLevelTail(stateDir);
+
+    const rebuiltPath = path.join(dbDir, 'tail-rebuilt.db');
+    await rebuild(rebuiltPath, 'all', { stateDir });
+    const rebuiltHandle = openDb(rebuiltPath);
+    const rebuiltRows = allRows(rebuiltHandle.db);
+    rebuiltHandle.sqlite.close();
+
+    await rebuild(rebuiltPath, 'all', { stateDir });
+    const twiceHandle = openDb(rebuiltPath);
+    const twiceRows = allRows(twiceHandle.db);
+    twiceHandle.sqlite.close();
+    expect(twiceRows).toEqual(rebuiltRows);
+
+    const appliedPath = path.join(dbDir, 'tail-applied.db');
+    await apply(appliedPath, SESSION_ID, { stateDir });
+    const appliedHandle = openDb(appliedPath);
+    const appliedRows = allRows(appliedHandle.db);
+    appliedHandle.sqlite.close();
     expect(appliedRows).toEqual(rebuiltRows);
   });
 
