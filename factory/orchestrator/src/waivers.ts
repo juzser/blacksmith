@@ -1,7 +1,13 @@
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext, Finding, StaleEvidence } from './findings.js';
-import { listFindings, preWaiverStatus, staleFindings, transition } from './findings.js';
+import {
+  listFindings,
+  preWaiverStatus,
+  staleFindings,
+  transition,
+  WAIVABLE_STATUSES,
+} from './findings.js';
 
 export class WaiverError extends SmithError {}
 
@@ -12,8 +18,6 @@ export class WaiverError extends SmithError {}
  * call or via a waiver grant).
  */
 export const WAIVABLE_SEVERITIES: readonly string[] = ['S3-minor', 'S4-nit'];
-/** finding_status values transition() allows a "waived" edge from (findings.ts LEGAL_TRANSITIONS). */
-const WAIVABLE_STATUSES: readonly string[] = ['raised', 'confirmed'];
 
 export interface SessionRef {
   sessionId: string;
