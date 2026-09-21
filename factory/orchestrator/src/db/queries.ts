@@ -15,7 +15,7 @@ import {
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
-import { WAIVABLE_STATUSES } from '../findings.js';
+import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
@@ -1734,19 +1734,6 @@ export interface KanbanColumn {
   tasks: KanbanTask[];
 }
 
-// D-127: `amend-pending` is open. The amendment has been written but the tasks
-// it obligates have not landed, so nothing is discharged yet. This query has no
-// obligation data — that lives in epic.ts's summary, which checks each named
-// task id — so it treats the status as unconditionally open: correct for a
-// per-task severity chip, and it fails closed.
-const OPEN_FINDING_STATUSES = new Set([
-  'raised',
-  'confirmed',
-  'fix-pending',
-  'fix-landed',
-  'amend-pending',
-]);
-
 function worstSeverity(severities: string[]): string | null {
   let worst: string | null = null;
   let worstIndex = Number.POSITIVE_INFINITY;
@@ -1802,6 +1789,12 @@ export function kanban(
   const openSeverityByTask = new Map<string, string[]>();
   for (const f of findingRows) {
     if (f.epicId !== null && !epicIdsInScope.has(f.epicId)) continue;
+    // D-127: `amend-pending` is one of these. The amendment has been written
+    // but the tasks it obligates have not landed, so nothing is discharged
+    // yet. This query has no obligation data — that lives in epic.ts's
+    // summary, which checks each named task id — so it treats the status as
+    // unconditionally open: correct for a per-task severity chip, and it fails
+    // closed.
     if (!OPEN_FINDING_STATUSES.has(f.findingStatus)) continue;
     const list = openSeverityByTask.get(f.taskId) ?? [];
     list.push(f.severity);
