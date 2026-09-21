@@ -183,11 +183,32 @@ export const AMENDED_STATUS = 'amended';
 const AMENDMENT_STATUSES: readonly string[] = [AMEND_PENDING_STATUS, AMENDED_STATUS];
 
 /**
- * A finding still awaiting something. Derived from LEGAL_TRANSITIONS above by
- * reading, not by code: these are exactly the statuses with a non-empty
- * outgoing edge set that are not themselves a decision. `waived` has outgoing
- * edges too (a denial can reopen it) but is closed until one arrives, so it
- * belongs with `refuted`/`expired`/`fix-verified`/`amended` on the other side.
+ * The one status the table gives outgoing edges to that is closed anyway.
+ * D-180 gave `waived` a way back so a revoked grant can reopen it, but it is a
+ * decision until that denial arrives, and until then it belongs with
+ * `refuted`/`expired`/`fix-verified`/`amended` on the closed side.
+ *
+ * Declared rather than read off the table because "this status is a decision"
+ * is a judgement about what the status MEANS. The table knows an edge exists;
+ * it cannot tell a way back from a way onward.
+ */
+const CLOSED_DESPITE_A_WAY_BACK: readonly string[] = ['waived'];
+
+/**
+ * A finding still awaiting something: read off LEGAL_TRANSITIONS rather than
+ * restated beside it, exactly as WAIVABLE_STATUSES above is. A finding is
+ * awaiting something precisely while the table still has somewhere to take it,
+ * so this is the statuses with a non-empty outgoing edge set, less the
+ * decision above.
+ *
+ * It was a hand-written list until a probe showed what that costs. Nothing
+ * held the list to the table, and the drift ran in the dangerous direction: a
+ * status the list had not caught up with was absent from it, and absent reads
+ * as CLOSED, so the epic gate closes over a finding still in flight and nobody
+ * ever sees a blocker for it. That is not hypothetical -- it is D-127, which
+ * happened exactly this way when `amend-pending` reached the table and not the
+ * list. Derived, the default inverts: a status nobody has classified yet is
+ * open, which blocks a close rather than waving one through.
  *
  * `amend-pending` is in it for D-127 Part B: that finding is open the same way
  * `fix-pending` is, carrying an assigned discharge condition (amends_task_ids
@@ -204,13 +225,11 @@ const AMENDMENT_STATUSES: readonly string[] = [AMEND_PENDING_STATUS, AMENDED_STA
  * corroborate"). A second copy would drift the moment taxonomy.yml grows a
  * status.
  */
-export const OPEN_FINDING_STATUSES: ReadonlySet<string> = new Set([
-  'raised',
-  'confirmed',
-  'fix-pending',
-  'fix-landed',
-  AMEND_PENDING_STATUS,
-]);
+export const OPEN_FINDING_STATUSES: ReadonlySet<string> = new Set(
+  Object.entries(LEGAL_TRANSITIONS)
+    .filter(([status, next]) => next.length > 0 && !CLOSED_DESPITE_A_WAY_BACK.includes(status))
+    .map(([status]) => status),
+);
 
 /**
  * D-21 Part 4. Appended by `repairObligation` to correct a malformed

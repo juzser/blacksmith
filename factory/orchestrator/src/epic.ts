@@ -428,12 +428,13 @@ function integrationBlockers(epicId: string, integration: IntegrationStatus): st
  * integration PR. "Terminal-OK" mirrors db/queries.ts's
  * MILESTONE_COMPLETE_TASK_STATUSES precedent (completed, waived) — a
  * superseded/failed/escalated/blocked/in-progress/etc. task is not one of
- * those, so it blocks. "Open" finding mirrors db/queries.ts's
- * OPEN_FINDING_STATUSES precedent (raised, confirmed, fix-pending,
- * fix-landed, amend-pending) — a finding only stops being open at
- * fix-verified, waived, or amended. `amend-pending` is the D-127 case: the
- * amendment is written but the tasks it names have not landed, so it is open
- * here until they do, and only then does closeEpic take it to `amended`.
+ * those, so it blocks. "Open" finding is findings.ts's
+ * OPEN_FINDING_STATUSES, which reads the statuses LEGAL_TRANSITIONS still has
+ * a move out of rather than listing them — a finding stops being open when
+ * the table has nowhere left to take it, or at `waived`, which is a decision.
+ * `amend-pending` is the D-127 case: the amendment is written but the tasks it
+ * names have not landed, so it is open here until they do, and only then does
+ * closeEpic take it to `amended`.
  *
  * `integration` is REQUIRED, deliberately. An optional parameter defaulting
  * to "no check needed" would recreate the exact hole D-42/P9-26 closes: the

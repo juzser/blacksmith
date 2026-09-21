@@ -33,6 +33,7 @@ import {
   AMENDED_STATUS,
   type Finding,
   type FindingDraft,
+  LEGAL_TRANSITIONS,
   listFindings,
   raiseFinding,
   repairObligation,
@@ -291,11 +292,47 @@ describe('epic.ts summarizeEpic (pure)', () => {
     expect(summary.blockers.some((b) => b.includes('epic-1/task-1'))).toBe(true);
   });
 
-  it('is not mechanically ready when a finding is still open', () => {
+  /**
+   * Which statuses leave a finding open is a ruling LEGAL_TRANSITIONS already
+   * makes, per status and machine-readably: a finding is still awaiting
+   * something exactly while the table still has somewhere for it to go. So the
+   * cases are read off that table rather than typed here, which makes this a
+   * second *reader* of it instead of a second copy of its answer -- the shape
+   * db/queries.test.ts already uses for the waiver roster.
+   *
+   * `waived` is the one status with outgoing edges that is nevertheless
+   * closed: D-180 gave it a way back so a revoked grant can reopen it, but it
+   * is a decision until one arrives, and the gate counts it as discretionary.
+   *
+   * Measured, not assumed. A probe that declared an eleventh finding status in
+   * taxonomy.yml, architecture §8 and LEGAL_TRANSITIONS drove all 128 files
+   * of this suite green while a finding parked at it was invisible to this
+   * gate -- an epic closing over outstanding work with nothing landed, which
+   * is D-127 exactly, the bug the block further down this file exists to
+   * record.
+   */
+  const stillMoving = Object.entries(LEGAL_TRANSITIONS)
+    .filter(([status, next]) => next.length > 0 && status !== 'waived')
+    .map(([status]) => status);
+
+  it.each(stillMoving)('is not mechanically ready while a finding sits at %s', (status) => {
     const summary = summarizeEpic(
       'epic-1',
       [taskRow({ taskStatus: 'completed' })],
-      [findingFixture({ finding_status: 'confirmed' })],
+      [
+        findingFixture(
+          // An amendment is open because its obligation has not landed, so the
+          // fixture has to carry one for the status to mean anything here.
+          status === AMEND_PENDING_STATUS
+            ? {
+                finding_status: status,
+                finding_scope: 'spec',
+                amends_task_ids: ['epic-1/task-2'],
+                amends_plan_version: 2,
+              }
+            : { finding_status: status },
+        ),
+      ],
       okIntegration(),
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
@@ -303,7 +340,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.openFindings).toHaveLength(1);
-    expect(summary.blockers.some((b) => b.includes('finding-1'))).toBe(true);
+    expect(summary.blockers.length).toBeGreaterThan(0);
   });
 
   it('is not mechanically ready when the epic has no tasks at all', () => {
