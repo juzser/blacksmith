@@ -21,8 +21,9 @@ import {
   sessionLineage,
 } from '../src/events.js';
 import { type FindingDraft, listFindings, raiseFinding, transition } from '../src/findings.js';
-import { type EpicGoalStatus, goalDigest } from '../src/goalCheck.js';
+import { type EpicGoalStatus, GOAL_CHECK_EVENT, goalDigest } from '../src/goalCheck.js';
 import { MCP_SURFACE_NOT_REQUIRED } from '../src/mcp.js';
+import { SPEC_REVIEW_EVENT } from '../src/spec.js';
 import { readAddedTasks } from '../src/taskEvents.js';
 import { grantWaiver, isWaived } from '../src/waivers.js';
 
@@ -584,7 +585,7 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
     );
     await emit(
       child,
-      'spec-review-recorded',
+      SPEC_REVIEW_EVENT,
       {
         epic_id: epicId,
         plan_version: 1,
@@ -597,7 +598,7 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
     );
     await emit(
       child,
-      'goal-check-recorded',
+      GOAL_CHECK_EVENT,
       {
         epic_id: epicId,
         milestone_id: 'milestone-1',

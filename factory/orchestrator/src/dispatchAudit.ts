@@ -36,6 +36,8 @@
 // documentation for a fail-closed check; it is the check.
 import type { AsymmetricRolePair } from './crosscheck.js';
 import { eventTaskId, type StoredEvent } from './events.js';
+import { GOAL_CHECK_EVENT } from './goalCheck.js';
+import { SPEC_REVIEW_EVENT } from './spec.js';
 import { taskIdsMatch } from './taskId.js';
 
 /** One `dispatch_decision` event, flattened to the fields the audit needs. */
@@ -65,14 +67,20 @@ export interface DispatchRecord {
  * is how the operator hears it in a detail line. Adding an entry widens the
  * audit's domain; leaving one off is how D-124 happened, so a new event type
  * that records a critic's output belongs here at the moment it is written.
+ *
+ * The keys are the producers' own exported constants, not copies of their
+ * values. `readCriticWorkRecords` skips any event type this map does not
+ * hold, so a key that had drifted from its producer would empty the domain
+ * rather than fail: the pair would fall to `not-applicable`, which `ok`
+ * counts as fine, and D-124 would go unchecked with nothing red to say so.
  */
 const CRITIC_WORK_EVENTS: Record<string, { key: string; label: string }> = {
-  'spec-review-recorded': { key: 'reviewed_by', label: 'spec review' },
+  [SPEC_REVIEW_EVENT]: { key: 'reviewed_by', label: 'spec review' },
   // `smith epic goal-check` reaches the log the same way `epic spec-review`
   // does — a judge's verdict on the planner's output, written by a command
   // rather than by a dispatch — so it is in the domain for the same reason,
   // and listed here at the moment it was written rather than after a D-124.
-  'goal-check-recorded': { key: 'checked_by', label: 'spec-vs-goal check' },
+  [GOAL_CHECK_EVENT]: { key: 'checked_by', label: 'spec-vs-goal check' },
 };
 
 /** One critic-work event, flattened the way DispatchRecord flattens a dispatch. */
