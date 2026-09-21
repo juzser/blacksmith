@@ -150,6 +150,24 @@ export const LEGAL_TRANSITIONS: Readonly<Record<string, readonly string[]>> = Ob
   amended: [],
 });
 
+/**
+ * The `finding_status` values a waiver can actually be granted from — read off
+ * the table above rather than restated beside it. `transition()` enforces
+ * LEGAL_TRANSITIONS, so a hand-kept roster of the same fact can only agree
+ * with it or be wrong about it, and being wrong is silent: a status the roster
+ * has not caught up with is never reconciled to `waived` and never counted as
+ * awaiting the operator.
+ *
+ * It lives here, not in waivers.ts, because this module owns the table — and
+ * because waivers.ts is already in an import cycle with this one, where a
+ * top-level read of `LEGAL_TRANSITIONS` from over there would be a temporal
+ * dead zone away from throwing, depending only on which module node reaches
+ * first.
+ */
+export const WAIVABLE_STATUSES: readonly string[] = Object.entries(LEGAL_TRANSITIONS)
+  .filter(([, next]) => next.includes('waived'))
+  .map(([status]) => status);
+
 /** The status an amendment puts a cited spec finding into; `amended` is what discharges it. */
 export const AMEND_PENDING_STATUS = 'amend-pending';
 /** Terminal: the amendment's task ids landed. Reachable only from AMEND_PENDING_STATUS. */

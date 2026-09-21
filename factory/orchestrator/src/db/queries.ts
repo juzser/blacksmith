@@ -15,11 +15,13 @@ import {
   REGISTRY_EVENT_TYPES,
 } from '../agents-registry.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
+import { WAIVABLE_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
+import { WAIVABLE_SEVERITIES } from '../waivers.js';
 import { type SmithDb, TERMINAL_TASK_STATUSES } from './projector.js';
 import {
   agents,
@@ -1010,6 +1012,20 @@ function inFlightEpics(
 }
 
 /**
+ * A finding the operator's pending-waiver count is about: one the waiver
+ * machinery would actually act on. Both rosters are imported from the modules
+ * that own them — the severities from waivers.ts, the statuses from findings.ts,
+ * where they are read off LEGAL_TRANSITIONS — rather than spelled out here.
+ * This count is a second *reader* of what can be waived and must not become a
+ * second opinion about it: a count that disagrees with the batch does not
+ * error, it just tells the operator a different number than `/bs waivers`
+ * will offer them.
+ */
+function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): boolean {
+  return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
+}
+
+/**
  * One project's overview slice, computed by the same logic overview() itself
  * uses (no drift). `nowIso` is the caller's single instant, not a fresh
  * read: overview() hands every per-project summary the same "now" it used
@@ -1031,11 +1047,7 @@ function projectSummary(
   const tokensBudget =
     budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
-  const findingRows = allFindingsForScope(db, scope).filter(
-    (f) =>
-      (f.severity === 'S3-minor' || f.severity === 'S4-nit') &&
-      (f.findingStatus === 'raised' || f.findingStatus === 'confirmed'),
-  );
+  const findingRows = allFindingsForScope(db, scope).filter(awaitsWaiverDecision);
   const pendingWaivers = findingRows.filter((f) => f.waiverId === null).length;
 
   return {
@@ -1253,11 +1265,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
 
-  const pendingWaiverFindings = allFindingsForScope(db, scope).filter(
-    (f) =>
-      (f.severity === 'S3-minor' || f.severity === 'S4-nit') &&
-      (f.findingStatus === 'raised' || f.findingStatus === 'confirmed'),
-  );
+  const pendingWaiverFindings = allFindingsForScope(db, scope).filter(awaitsWaiverDecision);
   const pendingWaivers = pendingWaiverFindings.filter((f) => f.waiverId === null).length;
 
   const dispatchSessionCond = scopedToSessions(dispatches.sessionId, scope);

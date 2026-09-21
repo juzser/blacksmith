@@ -17,11 +17,12 @@ import {
   taskDetail,
   timeline,
 } from '../../src/db/queries.js';
-import { eventsRaw, tasks } from '../../src/db/schema.js';
+import { eventsRaw, findings, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
-import { raiseFinding, transition } from '../../src/findings.js';
+import { LEGAL_TRANSITIONS, raiseFinding, transition } from '../../src/findings.js';
 import { loadTaxonomy } from '../../src/taxonomy.js';
+import { WAIVABLE_SEVERITIES } from '../../src/waivers.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
 
 /** raiseFinding()/transition() return the Finding, not the event id — read the
@@ -297,6 +298,136 @@ describe('db/queries.ts', () => {
         );
       } finally {
         wave.sqlite.close();
+      }
+    });
+  });
+
+  describe('the pending-waiver count and the roster it is about', () => {
+    /**
+     * The statuses LEGAL_TRANSITIONS lets a waiver be granted from, read off
+     * the table here rather than imported from findings.ts's derivation of
+     * it. That makes this test a second *reader* of the table instead of a
+     * second copy of its answer: the count under test has to move when the
+     * table moves, and the moment that count is spelled out beside the table
+     * rather than read from it, these two stop agreeing.
+     */
+    const waivableByTable = Object.entries(LEGAL_TRANSITIONS)
+      .filter(([, next]) => next.includes('waived'))
+      .map(([status]) => status);
+
+    /** Raise one finding into the fixture's own log and walk it along `steps`. */
+    async function raiseInto(
+      findingId: string,
+      severity: string,
+      summary: string,
+      steps: readonly string[],
+      scope?: 'spec',
+    ): Promise<void> {
+      const ctx: EventContext = {
+        sessionId: SESSION_ID,
+        planVersion: 1,
+        causalParent: await lastEventId({ stateDir }),
+      };
+      const raised = await raiseFinding(
+        {
+          finding: {
+            finding_id: findingId,
+            task_id: TASK_1,
+            finding_category: 'correctness',
+            severity,
+            finding_status: 'raised',
+            summary,
+            failure_scenario: { inputs: 'n=5', expected: '5 items', actual: '4 items' },
+            found_by: 'reviewer',
+            ...(scope === 'spec'
+              ? { finding_scope: 'spec', spec_ref: { plan_version: 1, criterion_ref: summary } }
+              : {}),
+          },
+          filePath: `src/${findingId}.ts`,
+        },
+        ctx,
+        { stateDir },
+      );
+      if (raised.suppressed) throw new Error(`${findingId} unexpectedly suppressed`);
+      for (const step of steps) {
+        await transition(
+          findingId,
+          step,
+          { ...ctx, causalParent: await lastEventId({ stateDir }) },
+          { stateDir },
+          step === 'amend-pending' ? { amendsTaskIds: [TASK_3], amendsPlanVersion: 2 } : {},
+        );
+      }
+    }
+
+    it('counts exactly the findings the waiver machinery would act on', async () => {
+      // Two the count is about, and three it must leave out: one held out by
+      // its status, one by its severity, and one -- the spec finding parked at
+      // `amend-pending` -- that is held out today and would be counted the
+      // moment LEGAL_TRANSITIONS grew that status a `waived` edge. That last
+      // one is what this test is for. A roster restated beside the table
+      // instead of read from it would not move with the table, and the
+      // disagreement is silent: the operator's card says one number and the
+      // batch `/bs waivers` offers holds another.
+      await raiseInto('pw-raised', 'S3-minor', 'a stray console.log in the loader', []);
+      await raiseInto('pw-confirmed', 'S3-minor', 'the retry count is off by one', ['confirmed']);
+      await raiseInto(
+        'pw-amend',
+        'S3-minor',
+        'the spec never says which of two tied claims wins',
+        ['amend-pending'],
+        'spec',
+      );
+      await raiseInto('pw-fixing', 'S3-minor', 'the error message names the wrong file', [
+        'confirmed',
+        'fix-pending',
+      ]);
+      await raiseInto('pw-major', 'S1-stop-the-line', 'the claim lock is never released', []);
+
+      const dbPath = path.join(dbDir, 'pending-waivers.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const pw = openDb(dbPath);
+      try {
+        const rows = pw.db.select().from(findings).all();
+        const expected = rows.filter(
+          (f) =>
+            WAIVABLE_SEVERITIES.includes(f.severity) &&
+            waivableByTable.includes(f.findingStatus) &&
+            f.waiverId === null,
+        ).length;
+
+        // Anti-vacuity, three ways: the filter has something to count, and
+        // something of each kind to leave out. Without these a roster that
+        // matched nothing at all would read here as agreement.
+        expect(expected).toBeGreaterThan(0);
+        expect(
+          rows.filter(
+            (f) =>
+              WAIVABLE_SEVERITIES.includes(f.severity) &&
+              !waivableByTable.includes(f.findingStatus),
+          ).length,
+        ).toBeGreaterThan(0);
+        expect(
+          rows.filter(
+            (f) =>
+              !WAIVABLE_SEVERITIES.includes(f.severity) &&
+              waivableByTable.includes(f.findingStatus),
+          ).length,
+        ).toBeGreaterThan(0);
+
+        const result = overview(pw.db);
+        expect(result.alerts.pendingWaivers).toBe(expected);
+        // The per-project rows are a second counter over the same findings,
+        // and the operator sees both -- the project card's number and the
+        // global one. Summed rather than indexed, so this does not also
+        // assert how many projects the fixture happens to declare.
+        const perProject = (result.projects ?? []).reduce(
+          (sum, p) => sum + p.alerts.pendingWaivers,
+          0,
+        );
+        expect(perProject).toBe(expected);
+      } finally {
+        pw.sqlite.close();
       }
     });
   });
