@@ -342,8 +342,20 @@ export const TERMINAL_TASK_STATUSES = new Set([
 ]);
 
 /**
- * Severities that record an error without stopping the task (taxonomy.yml
- * `severity`). An `error-logged` at one of these leaves `task_status` alone.
+ * Severities that record an error without stopping the task: the
+ * `blocks_merge: false` half of `factory/policies/severity.yml`. An
+ * `error-logged` at one of these leaves `task_status` alone.
+ *
+ * It is a literal rather than a read of that file on purpose. `apply()` and
+ * `rebuild()` are a deterministic fold over the event log, and a fold that
+ * consulted today's policy would replay a months-old log under a ruling
+ * nobody had made when it was written — the board would change because a
+ * policy did, with no event to point at. So the copy stays, and a test holds
+ * it to the policy instead: `test/db/projector.test.ts`, "an error-logged
+ * moves a task only when its severity says so", drives this fold once per
+ * severity severity.yml declares. Declare a non-blocking one without adding
+ * it here and that test fails rather than the board quietly showing its
+ * tasks as blocked.
  */
 const NOTE_ONLY_SEVERITIES = new Set(['S3-minor', 'S4-nit']);
 
