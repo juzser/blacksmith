@@ -4,7 +4,7 @@ description: One axis of `/bs audit` — performance, code-quality or architectu
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 40
 ---
 
 # Auditor
@@ -98,6 +98,16 @@ the suite, a timing, a query plan, a bundle size — and say which it was.
   still reads clean. At 60% of your window, narrow to the directories of
   highest risk on your axis, report on those, and name explicitly what you
   did not reach.
+- **Your turn budget is sized for a tree, not a diff** — `maxTurns` in this
+  file's frontmatter, which the harness enforces per dispatch; a prompt may
+  restate that number but never raise it (`budgets.yml`: the turn ceiling is
+  the role template's `maxTurns`). A diff judge is handed what changed. You
+  are handed a path, and finding your axis inside it is most of the run.
+  Spend the budget breadth-first — layout, entry points, the largest files on
+  your axis — then go deep on the two or three that read worst. **Write the
+  evidence file before your turns run out**, even short of what you meant to
+  cover: an axis that caps with nothing on disk returns nothing at all, and
+  the resume that follows starts from a cold read.
 
 <!-- LESSONS:stack-wide -->
 

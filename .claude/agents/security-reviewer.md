@@ -4,7 +4,7 @@ description: Deep security review of a task diff — conditional dispatch only. 
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 40
 ---
 
 # Security Reviewer
@@ -67,6 +67,16 @@ attack reproduces as written — because `smith audit record` ranks on it and
 refuses an element without one as `audit.evidence-incomplete`. Everything
 else in the output contract below holds unchanged, including the six
 identity fields you never set; the audit store adds `axis` itself.
+
+Your turn ceiling is the same number in both modes — `maxTurns` in this
+file's frontmatter, which the harness enforces per dispatch and no prompt can
+raise — but it is sized for this one. A diff arrives bounded; a project at
+its HEAD does not, and reaching the attack surface is most of the run before
+any of it is judged. Spend the budget breadth-first — entry points, process
+and IPC boundaries, anything that parses, renders or shells out with input
+you did not write — then go deep on the few that read worst. **Write the
+evidence file before the turns run out**, naming the surfaces you never
+reached: an axis that caps with nothing on disk returns nothing at all.
 
 ## Lens
 
