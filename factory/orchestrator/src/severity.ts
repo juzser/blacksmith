@@ -230,14 +230,52 @@ export function parseLessons(markdown: string): LessonRule[] {
 }
 
 /**
- * Scopes whose claim_path is meaningful for the per-file same-mistake match
- * (lessons.md convention). `security` is here because a security lesson is
- * written against the paths it guards ("src/auth/**") — a repeat security
- * finding on one of those paths is exactly what escalation is for. Left out, a
- * security lesson would compile and be read by agents but never escalate
- * anything (interview N-8).
+ * Whether each lesson scope's claim_path is meaningful for the per-file
+ * same-mistake match (lessons.md convention). `security` is true because a
+ * security lesson is written against the paths it guards ("src/auth/**") — a
+ * repeat security finding on one of those paths is exactly what escalation is
+ * for. Left out, a security lesson would compile and be read by agents but
+ * never escalate anything (interview N-8).
+ *
+ * The ruling stays hand-written: which scopes have a file to match against is
+ * a design decision, not something to derive. Only its COMPLETENESS stops
+ * being hand-kept. Keyed on LESSON_SCOPES, a sixth scope added to taxonomy.yml
+ * is a type error here until someone rules on it, instead of defaulting to
+ * `false` — which is silence, and silence is what interview N-8 was about.
+ *
+ * It is also the only copy. `lessons.ts` kept a second set of the same three
+ * strings under a comment saying it was "kept in sync"; nothing kept it. That
+ * is the N-8 failure the LESSON_SCOPES const above already fixed for the
+ * vocabulary, repeated one level down on its partition.
  */
-const FILE_SCOPED = new Set(['claim-path', 'stack-wide', 'security']);
+const SCOPE_MATCHES_A_FILE: Readonly<Record<(typeof LESSON_SCOPES)[number], boolean>> =
+  Object.freeze({
+    'agent-role': false,
+    'claim-path': true,
+    'case-type': false,
+    'stack-wide': true,
+    security: true,
+  });
+
+/**
+ * The scopes it says yes to, in the order LESSON_SCOPES declares them.
+ * Exported because `lessons.ts` names them in a warning it shows the operator,
+ * and a sentence that lists them by hand is the same drift written in prose.
+ */
+export const FILE_SCOPED_SCOPES: readonly string[] = Object.freeze(
+  LESSON_SCOPES.filter((scope) => SCOPE_MATCHES_A_FILE[scope]),
+);
+
+const FILE_SCOPED: ReadonlySet<string> = new Set(FILE_SCOPED_SCOPES);
+
+/**
+ * Whether a scope makes a `claim_path` mean anything, asked by name — the same
+ * question as `isFileScoped`, for callers judging an entry that does not exist
+ * yet and so have no `LessonRule` to hand.
+ */
+export function isFileScopedScope(scope: string): boolean {
+  return FILE_SCOPED.has(scope);
+}
 
 /**
  * Whether this lesson's scope makes its `claim_path` mean anything. An
@@ -245,7 +283,7 @@ const FILE_SCOPED = new Set(['claim-path', 'stack-wide', 'security']);
  * never participates in the per-file match however it is written.
  */
 export function isFileScoped(lesson: LessonRule): boolean {
-  return FILE_SCOPED.has(lesson.scope);
+  return isFileScopedScope(lesson.scope);
 }
 
 /**

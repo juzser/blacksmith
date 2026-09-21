@@ -1722,6 +1722,40 @@ describe('transitionLesson', () => {
     expect(row.warnings.join('\n')).toContain('can never escalate');
   });
 
+  // The seam between this file and severity.ts. These warnings are advice about
+  // what the same-mistake gate will do with an entry, and the gate lives in
+  // severity.ts — so every one of them is this file reporting a decision it
+  // does not own. It used to report it from a copy: a second
+  // `new Set(['claim-path', 'stack-wide', 'security'])` here, under a comment
+  // saying it was "kept in sync", and a sentence in the warning naming the same
+  // three scopes a third time. Nothing compared any of them.
+  //
+  // Measured on main before the copies were removed: drop `security` from this
+  // file's set alone and the whole suite still passes — because the three
+  // warning tests around this one use claim-path, stack-wide and agent-role,
+  // and `security` is the one value where the two sets can disagree. The
+  // operator is then told their correct entry is inert, which is worse than
+  // silence: severity.ts does match a security lesson against its claim_path
+  // (interview N-8, and the test for it in severity.test.ts).
+  //
+  // `security` is deliberately the scope under test here for that reason.
+  it('stays quiet about a security-scoped rule carrying the claim_path it guards', async () => {
+    const { sessionId, tip } = await seedSelectorless('security', {
+      claim_path: 'src/auth/**',
+      finding_category: 'security',
+    });
+
+    const row = await transitionLesson(
+      'lesson-1',
+      'approved',
+      { sessionId, planVersion: 1, causalParent: tip, actor: 'operator' },
+      { stateDir },
+    );
+
+    expect(row.lessonStatus).toBe('approved');
+    expect(row.warnings).toEqual([]);
+  });
+
   it('stays quiet when the approval re-scopes the entry properly (D-205)', async () => {
     const { sessionId, tip } = await seedSelectorless('agent-role');
 

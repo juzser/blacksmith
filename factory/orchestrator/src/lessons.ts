@@ -35,7 +35,13 @@ import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext } from './findings.js';
 import { AGENTS_DIR, lessonsReadPath } from './paths.js';
-import { LESSON_SCOPES, type LessonRule, parseLessons } from './severity.js';
+import {
+  FILE_SCOPED_SCOPES,
+  isFileScopedScope,
+  LESSON_SCOPES,
+  type LessonRule,
+  parseLessons,
+} from './severity.js';
 import { loadTaxonomy, validateTag } from './taxonomy.js';
 
 export class LessonsError extends SmithError {}
@@ -1146,11 +1152,17 @@ export async function dream(
 // ---------------------------------------------------------------------------
 
 /**
- * Scopes whose compiled entry is matched against a file path by the
- * same-mistake gate (severity.ts's own FILE_SCOPED set — kept in sync by the
- * warnings below, which are the only thing that reads this).
+ * "claim-path, stack-wide and security" — severity.ts's ruling, read out for
+ * the warning below. The warning tells the operator what the same-mistake gate
+ * will do with their entry, so it has to name the scopes that gate actually
+ * matches; typing them into the sentence made this file's third-hand copy of a
+ * decision it does not own.
  */
-const FILE_SCOPED_SCOPES: ReadonlySet<string> = new Set(['claim-path', 'stack-wide', 'security']);
+function fileScopedScopeList(): string {
+  const scopes = [...FILE_SCOPED_SCOPES];
+  if (scopes.length <= 1) return scopes.join('');
+  return `${scopes.slice(0, -1).join(', ')} and ${scopes[scopes.length - 1]}`;
+}
 
 /** The shape both doors judge: the entry as it will exist once the write lands. */
 interface ScopeShape {
@@ -1179,16 +1191,16 @@ function scopeMismatchWarnings(shape: ScopeShape): string[] {
   const warnings: string[] = [];
   if (
     shape.lessonType === 'rule' &&
-    FILE_SCOPED_SCOPES.has(shape.lessonScope) &&
+    isFileScopedScope(shape.lessonScope) &&
     !shape.findingCategory
   ) {
     warnings.push(
       'A file-scoped `rule` with no finding_category is injected at dispatch but can never escalate: severity.ts skips a category-less lesson.',
     );
   }
-  if (shape.claimPath && !FILE_SCOPED_SCOPES.has(shape.lessonScope)) {
+  if (shape.claimPath && !isFileScopedScope(shape.lessonScope)) {
     warnings.push(
-      `claim_path is ignored for a ${shape.lessonScope}-scoped lesson — severity.ts only matches claim-path, stack-wide and security entries against a file.`,
+      `claim_path is ignored for a ${shape.lessonScope}-scoped lesson — severity.ts only matches ${fileScopedScopeList()} entries against a file.`,
     );
   }
   // A selector on the wrong scope is never read back: lessonsForScope consults
