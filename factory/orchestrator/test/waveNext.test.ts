@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ClaimsError, validateWave, type WorktreePolicy } from '../src/claims.js';
 import type { PlanDependencyEdge, PlanFile } from '../src/plan.js';
+import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../src/taskStatus.js';
 import { computeNextWave, liveWaveTasks } from '../src/waveNext.js';
 
 const POLICY: WorktreePolicy = { serializeAlwaysGlobs: ['**/pnpm-lock.yaml'] };
@@ -395,5 +396,59 @@ describe('liveWaveTasks — one door for the claim sets a caller needs before th
       { task_id: 't1', claims: ['src/a/**'], keeps_exports: ['src/a/api.ts'] },
       { task_id: 't2', claims: ['src/b/**'] },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// waveNext.ts kept its own set of "done" statuses under the name taskStatus.ts
+// now carries for a different one, and the difference between the two is a
+// worktree's uncommitted work. The five are terminal for *writing* --
+// db/projector.ts overwrites no row that reached them -- while a task at
+// `failed` or `escalated` is terminal only in that it is waiting on a person,
+// and its claims are still spoken for until that person arrives.
+//
+// Nothing held the two apart. Adding `failed` to the set waveNext reads drove
+// the whole suite green: the single test that noticed the distinction
+// (waveSchedule.test.ts, "separates a task waiting on a person from a task
+// the plan cannot start") is about how the two are *reported*, and it happens
+// to use `escalated`. So the cases come from the sets rather than from a
+// literal here, and every status on the terminal-but-not-OK side is checked
+// instead of whichever one somebody reached for.
+// ---------------------------------------------------------------------------
+describe('a task the log is done writing to is not a task the wave is done with', () => {
+  /**
+   * `superseded` is terminal and not OK, and it is still not in these cases:
+   * it never reaches the status check at all. plan.ts's `livePlanTasks` drops
+   * an id whose every record is superseded, so the wave never sees one. The
+   * two tests above -- "never re-proposes a superseded record" and "drops a
+   * superseded record rather than reporting a task twice" -- are the standing
+   * record of that path.
+   */
+  const SUPERSEDED_NEVER_REACHES_THE_CHECK = 'superseded';
+  const stillHoldingClaims = [...TERMINAL_TASK_STATUSES].filter(
+    (status) =>
+      !TERMINAL_OK_TASK_STATUSES.has(status) && status !== SUPERSEDED_NEVER_REACHES_THE_CHECK,
+  );
+
+  it('has cases to run: the two sets do differ', () => {
+    // Without this, making TERMINAL_OK_TASK_STATUSES equal to its neighbour
+    // would empty the table and pass every assertion below by having none.
+    expect(stillHoldingClaims.length).toBeGreaterThan(0);
+  });
+
+  it.each(stillHoldingClaims)('keeps the claims of a task waiting at %s', (status) => {
+    const result = computeNextWave({
+      plan: planOf([
+        { id: 't1', claims: ['src/api/**'], status },
+        { id: 't2', claims: ['src/api/deep/**'] },
+      ]),
+      policy: POLICY,
+    });
+
+    expect(result.done).toEqual([]);
+    expect(result.occupied).toEqual(['t1']);
+    // The overlap is what makes it matter: t2 claims paths inside t1's, so a
+    // wave that called t1 done would dispatch a second agent into them.
+    expect(result.wave).toEqual([]);
   });
 });

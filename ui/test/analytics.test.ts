@@ -47,9 +47,8 @@ describe('lib/analytics.ts — latestSameMistakeRate', () => {
 
 describe('lib/analytics.ts — recheckPassRate', () => {
   it('counts a waived recheck as a pass, not only a completed one', () => {
-    // queries.ts's MILESTONE_COMPLETE_TASK_STATUSES and epic.ts's
-    // TERMINAL_OK_TASK_STATUSES both declare {completed, waived} as the pair
-    // that means the work landed.
+    // taskStatus.ts's TERMINAL_OK_TASK_STATUSES declares {completed, waived}
+    // as the pair that means the work landed.
     const r = recheckPassRate([
       { taskStatus: 'completed', count: 2 },
       { taskStatus: 'waived', count: 1 },

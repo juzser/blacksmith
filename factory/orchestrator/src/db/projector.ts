@@ -70,6 +70,7 @@ import {
   qualifyTaskId,
   taskIdsMatch,
 } from '../taskId.js';
+import { TERMINAL_TASK_STATUSES } from '../taskStatus.js';
 import { RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
 import * as schema from './schema.js';
 
@@ -323,23 +324,6 @@ export interface TaskFoldRow {
   /** Phase 6b — plain-string project identifier, see schema.ts's project comment. */
   project: string | null;
 }
-
-/**
- * The five `task_status` values that mean the work is over — the ones this
- * module refuses to overwrite once a row reaches them, and the only closed
- * reading of the dimension anywhere in `src/`. Exported so a reader asking
- * "is this task still open?" asks it here (db/queries.ts's `inFlightEpics`)
- * rather than keeping the complement by hand: taxonomy.yml can declare a
- * thirteenth status tomorrow, and the answer `!has()` gives for one nobody
- * has classified — still open — is the answer that loses nothing.
- */
-export const TERMINAL_TASK_STATUSES = new Set([
-  'completed',
-  'superseded',
-  'failed',
-  'escalated',
-  'waived',
-]);
 
 /**
  * Severities that record an error without stopping the task: the

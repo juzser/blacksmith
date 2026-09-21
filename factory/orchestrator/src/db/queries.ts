@@ -20,9 +20,10 @@ import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
+import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../taskStatus.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
 import { WAIVABLE_SEVERITIES } from '../waivers.js';
-import { type SmithDb, TERMINAL_TASK_STATUSES } from './projector.js';
+import type { SmithDb } from './projector.js';
 import {
   agents,
   artifacts,
@@ -664,8 +665,21 @@ function epicTokenMaps(
   return { budgetByEpic, spentByEpic };
 }
 
-const MILESTONE_COMPLETE_TASK_STATUSES = new Set(['completed', 'waived']);
-const MILESTONE_NEXT_EXCLUDED_STATUSES = new Set(['completed', 'waived', 'failed', 'superseded']);
+/**
+ * NEXT hides the statuses the plan has nothing left to ask of — every
+ * terminal one except `escalated`, which is terminal and still waiting on a
+ * person: an escalated task is precisely the next thing the operator has to
+ * act on, so the Roadmap keeps showing it.
+ *
+ * Derived from the write-protection roster rather than retyped, because the
+ * two answers move together: a status somebody declares terminal there is one
+ * NEXT has nothing to say about, and a status nobody has classified keeps
+ * appearing here — visible, rather than dropped off the Roadmap silently.
+ */
+const MILESTONE_NEXT_STILL_WANTS_A_PERSON = 'escalated';
+const MILESTONE_NEXT_EXCLUDED_STATUSES = new Set(
+  [...TERMINAL_TASK_STATUSES].filter((s) => s !== MILESTONE_NEXT_STILL_WANTS_A_PERSON),
+);
 const MINI_TIMELINE_LIMIT = 3;
 
 /**
@@ -690,11 +704,11 @@ function milestoneTaskRefs(
   const dependencyReady = (taskId: string): boolean =>
     (dependsOnByTask.get(taskId) ?? []).every((dep) => {
       const status = statusById.get(dep);
-      return status !== undefined && MILESTONE_COMPLETE_TASK_STATUSES.has(status);
+      return status !== undefined && TERMINAL_OK_TASK_STATUSES.has(status);
     });
 
   const recentDone = milestoneTasks
-    .filter((t) => MILESTONE_COMPLETE_TASK_STATUSES.has(t.taskStatus))
+    .filter((t) => TERMINAL_OK_TASK_STATUSES.has(t.taskStatus))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, MINI_TIMELINE_LIMIT)
     .map((t) => ({
@@ -763,7 +777,7 @@ function milestoneProgressRows(
     const epicSet = new Set(epicIds);
     const milestoneTasks = taskRows.filter((t) => t.epicId !== null && epicSet.has(t.epicId));
     const tasksCompleted = milestoneTasks.filter((t) =>
-      MILESTONE_COMPLETE_TASK_STATUSES.has(t.taskStatus),
+      TERMINAL_OK_TASK_STATUSES.has(t.taskStatus),
     ).length;
 
     let tokensSpent = 0;
