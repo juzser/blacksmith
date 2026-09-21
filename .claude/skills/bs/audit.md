@@ -218,10 +218,19 @@ smith audit cut <project-dir> --epic <epic-id> --title "<milestone title>" \
 ```
 
 It stamps the epic id onto every accepted finding, emits `audit-cut`,
-and prints two strings; **it edits no file**. Paste `milestone` into
-`factory/specs/roadmap.md` as the next milestone block — it already
-carries `- project: <basename>` and `- kind: product` — and write `spec`
-to `factory/specs/active/<epic-id>/epic-spec.md`. `audit.nothing-accepted`
+and prints two strings; **it edits no file**. Both belong to the audited
+project, so both are written under the **work root** of step 1 and never
+into the factory's own checkout: paste `milestone` into
+`<work-root>/factory/specs/roadmap.md` as the next milestone block — it
+already carries `- project: <basename>` and `- kind: product` — and write
+`spec` to `<work-root>/factory/specs/active/<epic-id>/epic-spec.md`. If
+that roadmap does not exist yet, create it: the parser
+(`factory/orchestrator/src/roadmap.ts`) asks only that milestones be `##`
+blocks, so a title line above the first one is a whole file. A milestone
+for someone else's project is a declaration *they* made, and a factory
+that keeps those in its own repository ships them to everyone who clones
+it — which is also what step 7's `.gitignore` question is about, since
+the work root is where these two files now live. `audit.nothing-accepted`
 means step 7 accepted nothing: there is no epic to cut, and closing is
 the right next move. One audit cuts one epic; findings accepted after a
 cut belong to the next audit's cut, not to a second cut from this one.

@@ -12,7 +12,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadBudgetPolicy } from '../src/budgets.js';
 import { FOLLOW_TICK_MS } from '../src/events.js';
 import { resolveRepoAtDir } from '../src/gh.js';
+import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
 import { factoryProjects } from '../src/projects.js';
+import { SPEC_REVIEW_EVENT } from '../src/spec.js';
 import { assertExited, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
@@ -5985,7 +5987,7 @@ describe('cli.ts (built binary)', () => {
         expect(result.status).toBe(1);
         expect(JSON.parse(result.stdout).error.code).toBe('cli.no-integration-branch');
         expect(
-          tail(sessionId, eventsDir).filter((r) => r.event_type === 'spec-review-recorded'),
+          tail(sessionId, eventsDir).filter((r) => r.event_type === SPEC_REVIEW_EVENT),
         ).toEqual([]);
       });
     });
@@ -6413,7 +6415,7 @@ describe('cli.ts (built binary)', () => {
       }
 
       function checks(sessionId: string, eventsDir: string) {
-        return tail(sessionId, eventsDir).filter((r) => r.event_type === 'goal-check-recorded');
+        return tail(sessionId, eventsDir).filter((r) => r.event_type === GOAL_CHECK_EVENT);
       }
 
       it('prints the clause list a coverage map has to answer', async () => {
