@@ -19,6 +19,7 @@ import {
   type WaveValidationResult,
   writeRootCheck,
 } from '../src/claims.js';
+import { TERMINAL_TASK_STATUSES } from '../src/taskStatus.js';
 import { git as runGitFixture } from './helpers/process.js';
 
 /**
@@ -770,5 +771,37 @@ describe('decideFindingAttribution', () => {
     expect(decideFindingAttribution(owner, 'epic-1/task-1', () => 'completed')).toMatchObject({
       attribution: 'follow-up',
     });
+  });
+
+  // The table walks TERMINAL_TASK_STATUSES itself, so a thirteenth terminal
+  // status added to taxonomy.yml arrives here as a case nobody wrote — which
+  // is the whole point: the set claims.ts reads is now that roster minus a
+  // declared exception, and a status left out of the exception has to be
+  // routed somewhere on purpose rather than by whichever list was typed last.
+  //
+  // The exception is spelled out again HERE, by hand, on purpose: reading
+  // HELD_OPEN_BY_AN_OPERATOR would make this agree with whatever that set
+  // says, including a wrong one. Two independent statements of the same
+  // judgement is what makes a disagreement between them visible.
+  const heldOpenByAnOperator = new Set(['failed', 'escalated']);
+  const soleOwner = () =>
+    resolveFindingOwner('src/parse.ts', [
+      { task_id: 'epic-1/task-2-parse', claims: ['src/parse.ts'] },
+    ]);
+
+  it.each([...TERMINAL_TASK_STATUSES])('routes a finding whose owner is %s', (status) => {
+    const decided = decideFindingAttribution(soleOwner(), 'epic-1/task-1', () => status);
+    // A task an operator still holds keeps its own findings; every other
+    // terminal status has nobody left to fix one, so it escalates.
+    expect(decided.attribution).toBe(heldOpenByAnOperator.has(status) ? 'reassigned' : 'follow-up');
+  });
+
+  it('reassigns to an owner at a status the terminal roster has never heard of', () => {
+    // taskStatus.ts's declared direction (#159): what is not terminal is still
+    // open. A status nobody classified reads as workable, and the finding goes
+    // to the task that owns the file rather than minting a follow-up.
+    expect(
+      decideFindingAttribution(soleOwner(), 'epic-1/task-1', () => 'invented-tomorrow'),
+    ).toMatchObject({ attribution: 'reassigned', taskId: 'epic-1/task-2-parse' });
   });
 });

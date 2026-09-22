@@ -149,6 +149,22 @@ export const TASK_STATUS_OUTCOME: Record<string, TaskOutcome> = {
 export function taskOutcome(status: string): TaskOutcome {
   return TASK_STATUS_OUTCOME[status] ?? 'open';
 }
+
+/**
+ * Whether the task is over — it reached some outcome, whichever one. The
+ * board asks this to decide whether an agent can still be on a task, and the
+ * flow canvas asks it before folding finished work away; both used to keep
+ * their own list of the statuses that qualify, which is the same four or five
+ * strings typed twice and answerable from the classification above.
+ *
+ * Unknown statuses are not over, because `taskOutcome` reads them as `open`.
+ * That is the direction that costs nothing: a status nobody has classified
+ * keeps its card's agent chip and keeps its node on the canvas, where an
+ * operator can see it, instead of being quietly folded away as finished.
+ */
+export function isTaskOver(status: string): boolean {
+  return taskOutcome(status) !== 'open';
+}
 export function planStatusTone(status: string): Tone {
   return PLAN_STATUS_TONE[status] ?? 'neutral';
 }

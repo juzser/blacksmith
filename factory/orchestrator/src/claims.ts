@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import { SmithError } from './errors.js';
 import { runGit, runGitRaw } from './git.js';
 import { WORKTREE_POLICY_PATH } from './paths.js';
+import { HELD_OPEN_BY_AN_OPERATOR, TERMINAL_TASK_STATUSES } from './taskStatus.js';
 
 export class ClaimsError extends SmithError {}
 
@@ -642,11 +643,16 @@ export type FindingAttribution =
  * landed (`completed`), the team already accepted the gap (`waived`), or a
  * later plan version replaced the task outright (`superseded`).
  *
- * `failed` and `escalated` are deliberately NOT here: those tasks are still
- * open work an operator is holding, and a finding about their files belongs
- * on them rather than on a new task competing for the same claims.
+ * That is every terminal status except the ones an operator is still holding:
+ * a finding about a `failed` or `escalated` task's files belongs on that task
+ * rather than on a new one competing for the same claims. The exception is
+ * declared in taskStatus.ts as HELD_OPEN_BY_AN_OPERATOR and subtracted here,
+ * so the three strings this used to name by hand come from the roster the
+ * dimension already keeps rather than from a fourth copy of it.
  */
-const CLOSED_TO_FURTHER_WORK: ReadonlySet<string> = new Set(['completed', 'waived', 'superseded']);
+const CLOSED_TO_FURTHER_WORK: ReadonlySet<string> = new Set(
+  [...TERMINAL_TASK_STATUSES].filter((status) => !HELD_OPEN_BY_AN_OPERATOR.has(status)),
+);
 
 /**
  * Where a finding should land, given who owns its file (D-41/P9-24).

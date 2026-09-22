@@ -20,6 +20,7 @@ import {
   wrapWaveColumn,
   zoomTier,
 } from '../src/lib/flowLayout.js';
+import { TASK_STATUS_OUTCOME, taskOutcome } from '../src/lib/taxonomy.js';
 
 // Operator directive (Phase 6b round 11): "flow nodes need to be spaced apart
 // and shown more clearly". "Spaced apart" is a geometric claim, and no browser
@@ -344,13 +345,21 @@ describe('collapseTerminalTasks', () => {
     expect(collapsedCount).toBe(2);
   });
 
-  it('folds waived and superseded work too, since neither is still being worked', () => {
-    const column = [
-      task('a', 0, { taskStatus: 'waived' }),
-      task('b', 0, { taskStatus: 'superseded' }),
-      task('c', 0),
-    ];
-    expect(collapseTerminalTasks(column, false).visible.map((n) => n.taskId)).toEqual(['c']);
+  // Every status the taxonomy declares, decided by what it MEANS rather than
+  // by a list this module keeps: work that reached an outcome folds away,
+  // work still running stays, and `failed` is the one exception (below).
+  // A thirteenth status classified in TASK_STATUS_OUTCOME arrives here as a
+  // case nobody had to write — and ui/test/taxonomy.test.ts already refuses
+  // to let one land in taxonomy.yml without being classified there.
+  it.each(Object.keys(TASK_STATUS_OUTCOME))('decides %s by its outcome', (taskStatus) => {
+    const { collapsedCount } = collapseTerminalTasks([task('a', 0, { taskStatus })], false);
+    const outcome = taskOutcome(taskStatus);
+    expect(collapsedCount).toBe(outcome === 'open' || outcome === 'failed' ? 0 : 1);
+  });
+
+  it('keeps a status nobody has classified on the canvas', () => {
+    const column = [task('a', 0, { taskStatus: 'invented-tomorrow' })];
+    expect(collapseTerminalTasks(column, false).collapsedCount).toBe(0);
   });
 
   it('keeps a failed task on the canvas -- that is the one being looked for', () => {

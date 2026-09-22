@@ -53,3 +53,25 @@ export const TERMINAL_TASK_STATUSES = new Set([
  * reader fails closed, and the drift is visible instead of silent.
  */
 export const TERMINAL_OK_TASK_STATUSES = new Set(['completed', 'waived']);
+
+/**
+ * The two terminal statuses a person is still holding. `failed` and
+ * `escalated` are over in the projector's sense — it will not overwrite them —
+ * but somebody is expected to come back to them, so a reader asking "can work
+ * still land on this task?" answers yes for these two and no for every other
+ * terminal status.
+ *
+ * Declared as the exception rather than as a roster of the remainder, because
+ * the remainder is derivable and the exception is the judgement. claims.ts
+ * asked exactly this question and typed the answer out — `completed`,
+ * `waived`, `superseded` — with its docblock explaining in prose that "`failed`
+ * and `escalated` are deliberately NOT here". That is the subtraction, written
+ * where only a reader could find it; this is the same sentence written where
+ * the code reads it.
+ *
+ * Which way the default falls: a thirteenth terminal status nobody classified
+ * falls OUT of this exception, so it reads as closed to further work, and a
+ * finding about its files mints a follow-up task somebody can see rather than
+ * parking silently on a task nobody is working.
+ */
+export const HELD_OPEN_BY_AN_OPERATOR = new Set(['failed', 'escalated']);

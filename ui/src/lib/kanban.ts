@@ -1,6 +1,8 @@
 // Kanban §5.3 status-column folding: reconciles taxonomy.yml's 12-value
 // task_status against §10's 5-column board. `failed`/`superseded` are
 // terminal/replaced, hidden from the default board (design-spec.md §5.3).
+import { isTaskOver } from './taxonomy.js';
+
 export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'Completed'] as const;
 export type KanbanColumnName = (typeof KANBAN_COLUMNS)[number];
 
@@ -158,12 +160,6 @@ export function visibleTaskCount(
   return foldIntoColumns(tasks, showAll).reduce((total, column) => total + column.tasks.length, 0);
 }
 
-// Statuses under which nobody can be working on the task, whatever the
-// agents registry says: it is swept at epic close, so a live row can outlast
-// the task it was dispatched for (D-187). The task's own status is the
-// stronger claim.
-const SETTLED_STATUSES = new Set(['completed', 'waived', 'failed', 'superseded']);
-
 export interface AgentChipLike {
   taskStatus: string;
   agentRole: string | null;
@@ -193,7 +189,13 @@ export interface AgentChip {
  */
 export function agentChip(task: AgentChipLike): AgentChip | null {
   if (!task.agentRole) return null;
-  const settled = SETTLED_STATUSES.has(task.taskStatus);
+  // Nobody can be working on a task that is over, whatever the agents
+  // registry says: it is swept at epic close, so a live row can outlast the
+  // task it was dispatched for (D-187). The task's own status is the stronger
+  // claim, and which statuses those are is taxonomy.ts's answer, not a list
+  // kept here — an unclassified status reads as still running, so the chip
+  // stays rather than being muted on a guess.
+  const settled = isTaskOver(task.taskStatus);
   return {
     label: `${task.agentRole}${task.agentModelTier ? ` · ${task.agentModelTier}` : ''}`,
     live: task.agentActivity === 'working' && !settled,

@@ -11,6 +11,7 @@ import {
   subStatusSummary,
   visibleTaskCount,
 } from '../src/lib/kanban.js';
+import { TASK_STATUS_OUTCOME } from '../src/lib/taxonomy.js';
 
 describe('lib/kanban.ts — §5.3 status-column folding', () => {
   it('folds all 10 non-terminal statuses into the 5 default columns, in order', () => {
@@ -252,17 +253,37 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
     });
   });
 
-  it('never pulses on a task that is over', () => {
+  it('never pulses on a task that is over, whichever way it ended', () => {
     // A live agents row on a completed task is a registry gap (the sweep
     // runs at epic close), not work in progress. The task's own status is
-    // the stronger claim: nobody works on a completed task.
-    for (const taskStatus of ['completed', 'waived', 'failed', 'superseded']) {
+    // the stronger claim: nobody works on a task that is over.
+    //
+    // The list is the taxonomy's, not this file's: every status whose outcome
+    // is something other than `open`. A thirteenth status classified there
+    // lands here as a case nobody wrote, which is the point — the chip used
+    // to consult four strings typed into kanban.ts.
+    const over = Object.entries(TASK_STATUS_OUTCOME)
+      .filter(([, outcome]) => outcome !== 'open')
+      .map(([taskStatus]) => taskStatus);
+    expect(over.length).toBeGreaterThan(0);
+    for (const taskStatus of over) {
       expect(agentChip(task({ taskStatus, agentActivity: 'working' }))).toEqual({
         label: 'coder · mid',
         live: false,
         gone: true,
       });
     }
+  });
+
+  it('keeps pulsing on a status nobody has classified yet', () => {
+    // An unclassified status is not a verdict, so the chip is left alone: the
+    // operator sees the agent the registry says is there, rather than a card
+    // muted on the strength of a status this build has never heard of.
+    expect(agentChip(task({ taskStatus: 'invented-tomorrow', agentActivity: 'working' }))).toEqual({
+      label: 'coder · mid',
+      live: true,
+      gone: false,
+    });
   });
 });
 

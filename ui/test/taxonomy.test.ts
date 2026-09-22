@@ -9,6 +9,7 @@ import {
   agentStatusTone,
   errorGroupIcon,
   findingStatusTone,
+  isTaskOver,
   lessonStatusTone,
   MILESTONE_STATUS_TONE,
   milestoneStatusTone,
@@ -71,6 +72,21 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(taskOutcome('waived')).toBe('passed');
     expect(taskOutcome('failed')).toBe('failed');
     expect(taskOutcome('superseded')).toBe('void');
+  });
+
+  it('reads "is it over" off the outcome, for every declared status', () => {
+    // The board and the flow canvas each kept their own list of the statuses
+    // that mean nobody is working any more. There is one answer, and it is a
+    // question about the outcome: anything that is not still open is over.
+    for (const [status, outcome] of Object.entries(TASK_STATUS_OUTCOME)) {
+      expect(isTaskOver(status)).toBe(outcome !== 'open');
+    }
+  });
+
+  it('treats an unclassified status as still running, not as finished', () => {
+    // The direction that costs nothing: a status nobody has ruled on keeps its
+    // card's agent chip and its node on the canvas, where it can be seen.
+    expect(isTaskOver('not-a-real-status')).toBe(false);
   });
 
   it('maps plan_status per §3.2', () => {
