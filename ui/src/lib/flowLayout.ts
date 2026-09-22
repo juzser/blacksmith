@@ -47,6 +47,7 @@
 //     which is every session the factory has actually run (D-166) — that step
 //     is the identity, so it can never scramble a plan's own ordering.
 import type { FlowEdge, FlowGraph, FlowNode } from './api.js';
+import { isTaskOver, taskOutcome } from './taxonomy.js';
 
 /** The node box. Mirrored by `.flow-node { width; min-height }`. */
 export const NODE_WIDTH = 232;
@@ -182,12 +183,19 @@ export function waveWidth(subcolumns: number): number {
 }
 
 /**
- * Statuses that mean the task is not going to change again. `failed` is
- * pointedly absent: it is terminal in the plan's sense but it is the single
+ * Whether a task is finished enough to fold away. `failed` is pointedly
+ * excepted: it is over in every other reader's sense, but it is the single
  * most interesting node on the canvas, and folding it away would hide the one
  * thing the operator came here to see.
+ *
+ * Asked of the outcome rather than of a list of statuses, so the canvas cannot
+ * disagree with the rest of the UI about which work is over — and so the one
+ * status this page treats differently from every other page is the only one
+ * named here.
  */
-const TERMINAL_STATUSES: ReadonlySet<string> = new Set(['completed', 'waived', 'superseded']);
+function foldsAway(status: string): boolean {
+  return isTaskOver(status) && taskOutcome(status) !== 'failed';
+}
 
 export interface TerminalCollapse {
   visible: FlowNode[];
@@ -203,7 +211,7 @@ export function collapseTerminalTasks(
   expanded: boolean,
 ): TerminalCollapse {
   if (expanded) return { visible: [...column], collapsedCount: 0 };
-  const visible = column.filter((n) => !TERMINAL_STATUSES.has(n.taskStatus));
+  const visible = column.filter((n) => !foldsAway(n.taskStatus));
   return { visible, collapsedCount: column.length - visible.length };
 }
 
