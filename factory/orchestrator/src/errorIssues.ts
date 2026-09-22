@@ -115,20 +115,31 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-/**
- * One event to a `Candidate`, `'ignore'` when it is not one of the three
- * sources at all, or `null` when it matches a source's shape but is missing
- * a required field (malformed, counted by the caller as `skipped`).
- */
-function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
-  const { record } = event;
-  const payload = record.payload ?? {};
-  const project = asString(record.project) ?? DEFAULT_PROJECT;
-  const sessionId = asString(record.session_id);
-  const planVersion = asNumber(record.plan_version) ?? null;
-  const ts = asString(record.ts);
+/** The fields every reader takes off the envelope rather than the payload — read once, identical across the sources. */
+interface Envelope {
+  payload: Record<string, unknown>;
+  project: string;
+  sessionId: string | undefined;
+  planVersion: number | null;
+  ts: string | undefined;
+}
 
-  if (record.event_type === GATE_OUTCOME_EVENT_TYPE) {
+/**
+ * One source's reader: a `Candidate`, `'ignore'` when the event carries the
+ * type but is not a candidate after all, or `null` when it is one and a
+ * required field is missing -- malformed, counted by the caller as `skipped`.
+ */
+type CandidateReader = (event: StoredEvent, envelope: Envelope) => Candidate | 'ignore' | null;
+
+/**
+ * The sources, keyed by the event type each one reads. A table rather than a
+ * chain of `if`s so that ISSUE_CANDIDATE_EVENT_TYPES below can be read off
+ * it: a fourth source cannot be folded without appearing here, and appearing
+ * here is what puts it in the roster.
+ */
+const CANDIDATE_READERS: Readonly<Record<string, CandidateReader>> = Object.freeze({
+  [GATE_OUTCOME_EVENT_TYPE]: (event, { payload, project, sessionId, planVersion, ts }) => {
+    const { record } = event;
     if (payload.outcome !== 'blocked') return 'ignore';
     const reasonRaw = asString((payload as { reason?: unknown }).reason);
     const taskRef = asString(record.task_id);
@@ -147,9 +158,9 @@ function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
       epicId: null,
       planVersion,
     };
-  }
-
-  if (record.event_type === ERROR_LOGGED_EVENT_TYPE) {
+  },
+  [ERROR_LOGGED_EVENT_TYPE]: (event, { payload, project, sessionId, planVersion, ts }) => {
+    const { record } = event;
     const errorClass = asString((payload as { error?: unknown }).error);
     const severity = asString((payload as { severity?: unknown }).severity);
     const taskRef =
@@ -167,9 +178,9 @@ function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
       epicId: null,
       planVersion,
     };
-  }
-
-  if (record.event_type === TASK_ADDED_EVENT_TYPE) {
+  },
+  [TASK_ADDED_EVENT_TYPE]: (event, { payload, project, sessionId, planVersion, ts }) => {
+    const { record } = event;
     if ((payload as { task_status?: unknown }).task_status !== 'failed') return 'ignore';
     const taskRef = asString(record.task_id);
     if (!sessionId || !ts || !taskRef) return null;
@@ -186,9 +197,32 @@ function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
       epicId,
       planVersion,
     };
-  }
+  },
+});
 
-  return 'ignore';
+/**
+ * The event types this fold reads candidates from — read off the table above
+ * rather than hand-copied a second time, the way GATE_BLOCKED_REASONS is.
+ * cli.ts scopes `--epic`/`--since` with it and passes everything else
+ * through as history; typed there instead, a source added here and not there
+ * would be reported outside the window the operator asked about.
+ */
+export const ISSUE_CANDIDATE_EVENT_TYPES: ReadonlySet<string> = new Set(
+  Object.keys(CANDIDATE_READERS),
+);
+
+/** One event to a `Candidate`, or `'ignore'` when no source claims its event type at all. */
+function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
+  const { record } = event;
+  const read = CANDIDATE_READERS[record.event_type];
+  if (!read) return 'ignore';
+  return read(event, {
+    payload: record.payload ?? {},
+    project: asString(record.project) ?? DEFAULT_PROJECT,
+    sessionId: asString(record.session_id),
+    planVersion: asNumber(record.plan_version) ?? null,
+    ts: asString(record.ts),
+  });
 }
 
 /**

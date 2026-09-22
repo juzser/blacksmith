@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // retuned. FOLLOW_TICK_MS is the same move for a clock: a test that waits out
 // two polls has to wait out the poll the binary actually uses.
 import { loadBudgetPolicy } from '../src/budgets.js';
+import { ISSUE_CANDIDATE_EVENT_TYPES } from '../src/errorIssues.js';
 import { FOLLOW_TICK_MS } from '../src/events.js';
 import { resolveRepoAtDir } from '../src/gh.js';
 import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
@@ -8504,8 +8505,22 @@ describe('cli.ts (built binary)', () => {
       return { binDir, marker };
     }
 
-    /** One session with a blocked `gate-outcome` candidate per task id. */
-    function seedCandidates(label: string, taskIds: string[]): [string, string] {
+    // One candidate payload per event type errorIssues.ts folds from, written
+    // out by hand rather than derived: the point of the two cases below is to
+    // hold this side against the fold's own roster, and a map computed from
+    // that roster would agree with it no matter what either one said.
+    const CANDIDATE_PAYLOADS: Record<string, (taskId: string) => Record<string, unknown>> = {
+      'gate-outcome': () => ({ outcome: 'blocked', reason: 'tests-failed' }),
+      'error-logged': (taskId) => ({
+        error: 'execution.flaky-test',
+        severity: 'S3-minor',
+        task_ref: taskId,
+      }),
+      'task-added': () => ({ task_status: 'failed' }),
+    };
+
+    /** One session with a candidate of `eventType` per task id. */
+    function seedTyped(label: string, eventType: string, taskIds: string[]): [string, string] {
       const sessionId = `cli-issues-${label}-${Date.now()}`;
       const eventsDir = path.join(scratchDir, `${sessionId}-events`);
       const append = (event: Record<string, unknown>) => {
@@ -8520,11 +8535,18 @@ describe('cli.ts (built binary)', () => {
         causal_parent: null,
         payload: {},
       });
+      const payloadFor = CANDIDATE_PAYLOADS[eventType];
+      if (!payloadFor) throw new Error(`no seed payload for ${eventType}`);
       for (const task_id of taskIds) {
-        const payload = { outcome: 'blocked', reason: 'tests-failed' };
-        append({ ...base, event_type: 'gate-outcome', task_id, causal_parent: rootId, payload });
+        const payload = payloadFor(task_id);
+        append({ ...base, event_type: eventType, task_id, causal_parent: rootId, payload });
       }
       return [sessionId, eventsDir];
+    }
+
+    /** One session with a blocked `gate-outcome` candidate per task id. */
+    function seedCandidates(label: string, taskIds: string[]): [string, string] {
+      return seedTyped(label, 'gate-outcome', taskIds);
     }
 
     function eventCount(sessionId: string, eventsDir: string): number {
@@ -8590,6 +8612,37 @@ describe('cli.ts (built binary)', () => {
       const refs = JSON.parse(stdout).map((r: { task_ref: string }) => r.task_ref);
       expect(refs).toEqual(['epic-2/task-d']);
     });
+
+    // ...and clause 2 holds for every source the fold reads, not just the one
+    // the case above happens to seed. `scopeIssueCandidates` narrows by event
+    // type and passes everything else through as history, so a source the
+    // scoping roster has not heard of is not left unnarrowed-and-noisy: it is
+    // reported under an `--epic` that was supposed to exclude it. The cases
+    // below are two halves of one guard -- this one says the hand-written map
+    // above still covers the roster, the next says each covered type is
+    // actually narrowed. Either alone would pass a fourth source that the
+    // roster gained but nobody scoped.
+    it('the seed map above covers every event type the fold reads candidates from', () => {
+      expect(Object.keys(CANDIDATE_PAYLOADS).sort()).toEqual(
+        [...ISSUE_CANDIDATE_EVENT_TYPES].sort(),
+      );
+    });
+
+    it.each([...ISSUE_CANDIDATE_EVENT_TYPES])(
+      'issues preview --epic narrows %s candidates too',
+      (eventType) => {
+        const label = `scope-${eventType}`;
+        const [sessionId, eventsDir] = seedTyped(label, eventType, [
+          'epic-1/task-out',
+          'epic-2/task-in',
+        ]);
+        const flags = ['--session', sessionId, '--epic', 'epic-2', '--state-dir', eventsDir];
+        const { stdout, status } = runCli(['issues', 'preview', ...flags]);
+        expect(status).toBe(0);
+        const refs = JSON.parse(stdout).map((r: { task_ref: string }) => r.task_ref);
+        expect(refs).toEqual(['epic-2/task-in']);
+      },
+    );
 
     // AC4: every candidate settled `skipped-disabled` at step 1 is a
     // recorded answer, so the run exits 0 and prints no argv for it.

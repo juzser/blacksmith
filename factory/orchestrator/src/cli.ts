@@ -59,6 +59,7 @@ import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from 
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { loadDotEnv } from './dotenv.js';
 import { loadEffortPolicy, resolveEffort } from './effort.js';
+import { ISSUE_CANDIDATE_EVENT_TYPES } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
 import {
@@ -486,16 +487,13 @@ function issueCommandRunner(cmd: string, args: string[]): CommandResult {
   }
 }
 
-/** The event types errorIssues.ts folds candidates from; everything else is history and passes. */
-const ISSUE_CANDIDATE_TYPES = new Set(['gate-outcome', 'error-logged', 'task-added']);
-
 /** `--epic`/`--since` narrow the CANDIDATES, never the `issue-reported` history dedup reads. */
 function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, string>): StoredEvent[] {
   const epic = flags.epic;
   const since = flags.since;
   if (epic === undefined && since === undefined) return events;
   return events.filter(({ record }) => {
-    if (!ISSUE_CANDIDATE_TYPES.has(record.event_type)) return true;
+    if (!ISSUE_CANDIDATE_EVENT_TYPES.has(record.event_type)) return true;
     if (epic !== undefined && !(record.task_id ?? '').startsWith(`${epic}/`)) return false;
     return since === undefined || record.ts >= since;
   });
