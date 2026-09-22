@@ -1,6 +1,6 @@
 import { claimCoversPath } from './claims.js';
 import type { EventOpts } from './events.js';
-import { type Finding, listFindings } from './findings.js';
+import { type Finding, listFindings, OPEN_FOR_DISPATCH } from './findings.js';
 
 /**
  * The spliced block's delimiters, exported for the same two reasons
@@ -10,19 +10,6 @@ import { type Finding, listFindings } from './findings.js';
  */
 export const FINDING_BLOCK_BEGIN = '<!-- BEGIN OPEN FINDINGS -->';
 export const FINDING_BLOCK_END = '<!-- END OPEN FINDINGS -->';
-
-/**
- * Which statuses are "open" for the purpose of dispatch context.
- *
- * `raised` and `confirmed` only. `refuted`, `waived`, `fix-verified`,
- * `amended` and `expired` are closed. `fix-pending`/`fix-landed` are *already
- * someone's assignment* — surfacing one to a second coder is how two diffs end
- * up fixing one finding, and the second one lands as an unrequested change.
- * `amend-pending` (D-127) is open elsewhere but not here for that same reason:
- * it already names the tasks that discharge it, and the fix belongs in those
- * tasks' diffs, not in whatever task is being dispatched now.
- */
-export const OPEN_FOR_DISPATCH: readonly string[] = ['raised', 'confirmed'];
 
 export interface DispatchFindingsInput {
   sessionId: string;

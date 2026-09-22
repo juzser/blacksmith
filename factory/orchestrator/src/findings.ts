@@ -232,6 +232,47 @@ export const OPEN_FINDING_STATUSES: ReadonlySet<string> = new Set(
 );
 
 /**
+ * Open, but already somebody's assignment: the statuses whose finding is
+ * waiting on work that has a named owner and a named discharge condition.
+ *
+ * Declared rather than read off the table, for the same reason
+ * CLOSED_DESPITE_A_WAY_BACK above is: "somebody already owns this" is a
+ * judgement about what a status MEANS, and the table cannot tell an
+ * assignment from a plain next step.
+ *
+ * Which way the default falls is the whole design. Declared, a status nobody
+ * has classified yet is dispatchable, and the cost of being wrong is a coder
+ * told about work someone else is doing -- which the injected block itself
+ * labels context, never scope, and which a reviewer catches as an unrequested
+ * change. Subtracted from a declared dispatchable side, the cost of being
+ * wrong is a finding open against the files a coder is about to edit that
+ * never reaches them, and no gate, review or transcript says a word about it.
+ */
+export const OPEN_BUT_ALREADY_ASSIGNED: readonly string[] = [
+  'fix-pending',
+  'fix-landed',
+  AMEND_PENDING_STATUS,
+];
+
+/**
+ * The open statuses a dispatch may hand a coder as context (P9-15): open, and
+ * not already on somebody's plate.
+ *
+ * Derived from OPEN_FINDING_STATUSES rather than typed beside it, for the
+ * reason that constant is derived from the table -- and this one was typed,
+ * in findingContext.ts, as `['raised', 'confirmed']` with nothing anywhere
+ * holding it to anything. A probe that added an eleventh finding status to
+ * taxonomy.yml, architecture §8 and LEGAL_TRANSITIONS drove the findings
+ * suite green while a finding parked at it was invisible to every dispatch.
+ *
+ * Lives here rather than beside its one reader, because it is the same
+ * lifecycle question about the same vocabulary the two constants above ask.
+ */
+export const OPEN_FOR_DISPATCH: readonly string[] = [...OPEN_FINDING_STATUSES].filter(
+  (status) => !OPEN_BUT_ALREADY_ASSIGNED.includes(status),
+);
+
+/**
  * D-21 Part 4. Appended by `repairObligation` to correct a malformed
  * `amends_task_ids` entry on a finding parked at `amend-pending` — never a
  * `finding-transitioned` event, because a repair changes no status. Folded

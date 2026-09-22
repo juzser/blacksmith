@@ -10,7 +10,18 @@ import {
   findingsForDispatch,
   renderFindingBlock,
 } from '../src/findingContext.js';
-import { type Finding, raiseFinding, transition } from '../src/findings.js';
+import {
+  AMEND_PENDING_STATUS,
+  AMENDED_STATUS,
+  type Finding,
+  LEGAL_TRANSITIONS,
+  OPEN_BUT_ALREADY_ASSIGNED,
+  OPEN_FINDING_STATUSES,
+  raiseFinding,
+  SPEC_FINDING_SCOPE,
+  type TransitionExtra,
+  transition,
+} from '../src/findings.js';
 import { REPO_ROOT } from '../src/paths.js';
 
 let stateDir: string;
@@ -23,6 +34,8 @@ interface RaiseSpec {
   filePath: string;
   severity?: string;
   summary?: string;
+  /** SPEC_FINDING_SCOPE for a fixture whose route runs through the amendment path. */
+  scope?: string;
 }
 
 async function raise(spec: RaiseSpec): Promise<Finding> {
@@ -37,6 +50,14 @@ async function raise(spec: RaiseSpec): Promise<Finding> {
         summary: spec.summary ?? `${spec.filePath} off-by-one in loop bound`,
         failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
         found_by: 'reviewer',
+        // A spec finding without a spec_ref is rejected by raiseFinding
+        // itself, so the two travel together or not at all.
+        ...(spec.scope === SPEC_FINDING_SCOPE
+          ? {
+              finding_scope: SPEC_FINDING_SCOPE,
+              spec_ref: { plan_version: 1, criterion_ref: 'epic-1/task-a:criterion-1' },
+            }
+          : {}),
       },
       filePath: spec.filePath,
     },
@@ -45,6 +66,62 @@ async function raise(spec: RaiseSpec): Promise<Finding> {
   );
   if (result.suppressed) throw new Error('unreachable');
   return result.finding;
+}
+
+/**
+ * A shortest legal route from `raised` to `status`, read off LEGAL_TRANSITIONS
+ * so a status added to the table gets a route without anybody writing one.
+ */
+function routeTo(status: string): string[] {
+  if (status === 'raised') return [];
+  const seen = new Set(['raised']);
+  let frontier: { at: string; route: string[] }[] = [{ at: 'raised', route: [] }];
+  while (frontier.length > 0) {
+    const nextFrontier: { at: string; route: string[] }[] = [];
+    for (const { at, route } of frontier) {
+      for (const step of LEGAL_TRANSITIONS[at] ?? []) {
+        if (seen.has(step)) continue;
+        seen.add(step);
+        if (step === status) return [...route, step];
+        // `waived` is never an intermediate hop. D-180 gave it a way back, but
+        // only by revoking the grant, which wants a fixture of its own --- and
+        // nothing is lost, since both statuses it returns to are one hop from
+        // `raised` anyway.
+        if (step === 'waived') continue;
+        nextFrontier.push({ at: step, route: [...route, step] });
+      }
+    }
+    frontier = nextFrontier;
+  }
+  throw new Error(`LEGAL_TRANSITIONS has no route from "raised" to "${status}".`);
+}
+
+/** The task an amendment fixture owes, so `amend-pending` means something. */
+const AMENDS_TASK = 'epic-1/task-c';
+const AMENDS_PLAN_VERSION = 2;
+
+/** What each hop of a route has to carry for transition() to allow it. */
+function extraFor(step: string): TransitionExtra {
+  if (step === AMEND_PENDING_STATUS) {
+    return { amendsTaskIds: [AMENDS_TASK], amendsPlanVersion: AMENDS_PLAN_VERSION };
+  }
+  if (step === AMENDED_STATUS) {
+    return { amendsSatisfiedBy: [{ taskId: AMENDS_TASK, planVersion: AMENDS_PLAN_VERSION }] };
+  }
+  return {};
+}
+
+/** Raise a finding and walk it to `status` along routeTo()'s route. */
+async function park(status: string, spec: RaiseSpec): Promise<void> {
+  const route = routeTo(status);
+  // Only a spec finding may take the amendment path (P9-9), so the route
+  // decides the fixture rather than each caller having to know which statuses
+  // sit behind it.
+  const amending = route.includes(AMEND_PENDING_STATUS);
+  await raise(amending ? { ...spec, scope: SPEC_FINDING_SCOPE } : spec);
+  for (const step of route) {
+    await transition(spec.id, step, ctx, { stateDir }, extraFor(step));
+  }
 }
 
 beforeEach(async () => {
@@ -139,9 +216,39 @@ describe('findingsForDispatch', () => {
     expect(result.findings.map((f) => f.finding_id)).toEqual(['f-other']);
   });
 
-  it('carries a confirmed finding, which is open and unassigned', async () => {
-    await raise({ id: 'f-1', taskId: 'epic-1/task-a', filePath: 'src/parse.ts' });
-    await transition('f-1', 'confirmed', ctx, { stateDir });
+  /**
+   * Which open statuses a dispatch may mention is a ruling LEGAL_TRANSITIONS
+   * and OPEN_BUT_ALREADY_ASSIGNED already make between them, per status and
+   * machine-readably. So the cases are read off those two rather than typed
+   * here: a second *reader* of the vocabulary instead of a second copy of its
+   * answer, the shape epic.test.ts and db/queries.test.ts already use. Note
+   * what is deliberately absent --- OPEN_FOR_DISPATCH itself, the constant
+   * under test, which would make every case below agree with itself.
+   *
+   * Measured, not assumed. This block replaces a hand-written table of five
+   * statuses, and while that table was the only coverage, a probe declaring an
+   * eleventh finding status in taxonomy.yml, architecture section 8 and
+   * LEGAL_TRANSITIONS drove the whole orchestrator suite green --- 128 files,
+   * 3988 tests --- while a finding parked at that status reached no coder at
+   * all. Nothing was even asking.
+   */
+  const dispatchable = [...OPEN_FINDING_STATUSES].filter(
+    (status) => !OPEN_BUT_ALREADY_ASSIGNED.includes(status),
+  );
+  const closed = Object.keys(LEGAL_TRANSITIONS).filter(
+    (status) => !OPEN_FINDING_STATUSES.has(status),
+  );
+
+  // Two of the three tables are subtractions, and a subtraction that comes out
+  // empty runs no cases while still reporting green.
+  it('has a case of each of the three kinds to run', () => {
+    expect(dispatchable.length).toBeGreaterThan(0);
+    expect(OPEN_BUT_ALREADY_ASSIGNED.length).toBeGreaterThan(0);
+    expect(closed.length).toBeGreaterThan(0);
+  });
+
+  it.each(dispatchable)('surfaces a finding open at %s', async (status) => {
+    await park(status, { id: 'f-1', taskId: 'epic-1/task-a', filePath: 'src/parse.ts' });
 
     const result = await findingsForDispatch(
       { sessionId: SESSION, taskId: 'epic-1/task-b', claims: ['src/**'] },
@@ -151,19 +258,22 @@ describe('findingsForDispatch', () => {
     expect(result.findings.map((f) => f.finding_id)).toEqual(['f-1']);
   });
 
-  // Closed is closed; `fix-pending` is already someone's assignment, and
-  // handing it to a second coder as context is how two diffs fix one finding.
-  it.each([
-    ['refuted', ['refuted']],
-    ['waived', ['waived']],
-    ['expired', ['expired']],
-    ['fix-pending', ['confirmed', 'fix-pending']],
-    ['fix-verified', ['confirmed', 'fix-pending', 'fix-landed', 'fix-verified']],
-  ])('leaves out a %s finding', async (_status, chain) => {
-    await raise({ id: 'f-1', taskId: 'epic-1/task-a', filePath: 'src/parse.ts' });
-    for (const step of chain as string[]) {
-      await transition('f-1', step, ctx, { stateDir });
-    }
+  // Already someone's assignment: handing it to a second coder as context is
+  // how two diffs end up fixing one finding, and the second lands as an
+  // unrequested change.
+  it.each(OPEN_BUT_ALREADY_ASSIGNED)('leaves out a finding assigned at %s', async (status) => {
+    await park(status, { id: 'f-1', taskId: 'epic-1/task-a', filePath: 'src/parse.ts' });
+
+    const result = await findingsForDispatch(
+      { sessionId: SESSION, taskId: 'epic-1/task-b', claims: ['src/**'] },
+      { stateDir },
+    );
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it.each(closed)('leaves out a closed %s finding', async (status) => {
+    await park(status, { id: 'f-1', taskId: 'epic-1/task-a', filePath: 'src/parse.ts' });
 
     const result = await findingsForDispatch(
       { sessionId: SESSION, taskId: 'epic-1/task-b', claims: ['src/**'] },
