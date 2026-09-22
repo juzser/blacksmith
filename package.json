@@ -90,7 +90,7 @@
     "@vitest/coverage-v8": "5.0.1",
     "@vue-flow/core": "1.48.2",
     "drizzle-kit": "0.31.10",
-    "hono": "4.13.7",
+    "hono": "4.13.8",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.0",
