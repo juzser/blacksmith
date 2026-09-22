@@ -286,12 +286,16 @@ const GLOB_CHARS = /[*?[{]/;
 /**
  * A `keeps_exports` promise is a file the task swears to keep the exports of,
  * and the post-run verifier reads it back against the task's diff. Three
- * things make a promise unverifiable, and each is caught here, at plan time:
+ * things make a promise unverifiable at plan time, and each is caught here:
  * a pattern (the verifier diffs one file, not a glob), a file outside the
  * task's claims (the task cannot edit it, so its diff never shows it), and a
- * file listed twice (which entry did the verifier report?). Shape is the
- * schema's business; when the schema already rejected the field, this reads
- * nothing and reports nothing, so the operator sees one error, not two.
+ * file listed twice (which entry did the verifier report?). A fourth is not
+ * knowable here and is answered where it is knowable: a promise on a file the
+ * symbol scanner does not speak for reads back `unverified`, not `kept`
+ * (impact.ts collectExportDiffs) — because whether this repo's scanner can
+ * parse that file is a fact about the checkout, not about the plan. Shape is
+ * the schema's business; when the schema already rejected the field, this
+ * reads nothing and reports nothing, so the operator sees one error, not two.
  */
 function unkeptPromises(
   t: TaskSpecRecord,

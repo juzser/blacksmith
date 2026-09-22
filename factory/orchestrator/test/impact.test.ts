@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { collectExportDiffs, diffExports, exportImpact, waveImpact } from '../src/impact.js';
-import { buildSymbolGraph } from '../src/symbols.js';
+import { buildSymbolGraph, DEFAULT_SOURCE_EXTENSIONS } from '../src/symbols.js';
 
 function graphOf(files: Record<string, string>) {
   return buildSymbolGraph(new Map(Object.entries(files)));
@@ -641,5 +641,69 @@ describe('collecting export diffs from a worktree', () => {
     git(['commit', '-q', '-m', 'docs']);
 
     expect(collectExportDiffs(repoDir, ['README.md'])).toEqual([]);
+  });
+
+  // ...but skipping is only right for a file nobody named. A promise on a
+  // file this collector drops reaches verdictOn as an absence, and verdictOn
+  // reads an absence as "not touched, so kept" -- the strongest verdict in
+  // the module, minted over a file that was never opened.
+  //
+  // The extensions below are written out by hand rather than derived: the
+  // point of the cases under them is that a file OUTSIDE the scanner's
+  // roster still gets an answer, and a list computed from that roster would
+  // follow it into any future widening without ever going red. The first
+  // case is what holds the two sides together -- widen
+  // DEFAULT_SOURCE_EXTENSIONS to cover one of these and it fails, which is
+  // correct: a file the scanner can now read is one a promise can be held to
+  // properly, and it does not belong in this list any more.
+  const UNREADABLE_PROMISE_EXTENSIONS = ['.vue', '.svelte', '.astro', '.py'];
+
+  it('promises nothing about an extension the scanner already speaks for', () => {
+    expect(
+      UNREADABLE_PROMISE_EXTENSIONS.filter((ext) => DEFAULT_SOURCE_EXTENSIONS.includes(ext)),
+    ).toEqual([]);
+  });
+
+  it.each(UNREADABLE_PROMISE_EXTENSIONS)(
+    'answers a promise on a %s file unverifiable rather than dropping it',
+    async (ext) => {
+      const file = `src/App${ext}`;
+      await writeFile(path.join(repoDir, file), 'export const kept = 1;\nexport const gone = 2;\n');
+      git(['add', '.']);
+      git(['commit', '-q', '-m', `add ${file}`]);
+      await writeFile(path.join(repoDir, file), 'export const kept = 1;\n');
+      git(['commit', '-q', '-am', 'drop gone']);
+
+      expect(collectExportDiffs(repoDir, [file], [file])).toEqual([
+        { file, removed: [], added: [], signatureChanged: [], unverifiable: true },
+      ]);
+      // Unpromised, the same file is still noise, and still left out.
+      expect(collectExportDiffs(repoDir, [file])).toEqual([]);
+    },
+  );
+
+  it('calls a promise on an unreadable extension unverified, not kept', async () => {
+    await writeFile(
+      path.join(repoDir, 'src', 'App.vue'),
+      '<script setup lang="ts">\nexport const kept = 1;\nexport const gone = 2;\n</script>\n',
+    );
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'add App.vue']);
+    await writeFile(
+      path.join(repoDir, 'src', 'App.vue'),
+      '<script setup lang="ts">\nexport const kept = 1;\n</script>\n',
+    );
+    git(['commit', '-q', '-am', 'drop gone']);
+
+    const diffs = collectExportDiffs(repoDir, ['src/App.vue'], ['src/App.vue']);
+    const report = exportImpact(graphOf({}), diffs, ['src/**'], ['src/App.vue']);
+
+    expect(report.promises).toEqual([
+      { file: 'src/App.vue', status: 'unverified', removed: [], signatureChanged: [], added: [] },
+    ]);
+    // A hole is the scanner's limit, not the task's fault: said out loud, and
+    // still not fatal. The header's rule, applied to the promise half.
+    expect(report.ok).toBe(true);
+    expect(report.detail).toContain('Promise unverified: src/App.vue.');
   });
 });
