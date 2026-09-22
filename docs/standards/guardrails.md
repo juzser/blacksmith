@@ -18,6 +18,17 @@
 > YAML because the bash predecessor silently allowed everything on macOS for
 > eight phases and no test noticed.
 >
+> Because the rules are split that way, **a rule is a row in the YAML *and* a
+> branch in the TypeScript, and neither half counts on its own.** The loader
+> holds the two together in both directions: a rule the evaluator consults but
+> the file omits refuses to load, and so does a rule the file declares that
+> nothing consults — the second would otherwise parse, count and print like
+> any other while enforcing nothing, which reads to an operator as a door
+> that is shut. The same check refuses one id declared in two blocks, since
+> the blocks fold into one map and the later copy would silently take the
+> earlier one's place. So adding a rule here means adding both halves, and
+> retiring one means retiring both.
+>
 > A tool call is one shell command only by accident, so the rules judge it a
 > *segment* at a time. A segment ends at anything that ends a command: `;`,
 > `&`, `|`, a newline, a `#` comment, a redirection (`<`, `>`), and the
