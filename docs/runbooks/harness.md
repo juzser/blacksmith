@@ -110,7 +110,7 @@ A judge role handed a worktree path by an external process has, in effect,
 write access a sandbox lease can't revoke — architecture §18 rule 5, "judges
 never gain write access". So `planWorkerTurn()` refuses to render a `cli`
 invocation for a judge role with a worktree unless the harness's policy entry
-declares a non-empty `judge_args`:
+declares `judge_args` this factory can read as read-only:
 
 ```bash
 smith harness plan --harness some-cli-harness-with-no-judge-args \
@@ -118,18 +118,41 @@ smith harness plan --harness some-cli-harness-with-no-judge-args \
 ```
 
 ```json
-{"error":{"code":"harness.judge-worktree","message":"Harness \"some-cli-harness-with-no-judge-args\" runs a separate program, and reviewer is a judge role. A judge outside this process gets the prompt and nothing else — a worktree path it holds is write access no sandbox lease can revoke (architecture §18 rule 5). some-cli-harness-with-no-judge-args could still serve reviewer a worktree if its policy entry were to declare judge_args that make the program read-only.", ...}}
+{"error":{"code":"harness.judge-worktree","message":"Harness \"some-cli-harness-with-no-judge-args\" runs a separate program, and reviewer is a judge role. A judge outside this process gets the prompt and nothing else — a worktree path it holds is write access no sandbox lease can revoke (architecture §18 rule 5). some-cli-harness-with-no-judge-args could still serve reviewer a worktree if its policy entry declared judge_args that make the program read-only, but it declares no judge_args at all.", ...}}
 ```
 
 `judge_args` is the escape valve, and it is enforced by the OS or the tool
 itself, not by this factory: codex's `-s read-only`, claude's
 `--disallowedTools Write,Edit,MultiEdit,NotebookEdit`. Both shipped `cli`
-harnesses declare it, which is why `smith harness list` (§2) lists judge
-roles like `reviewer` under `codex-cli`/`claude-cli` even though they are
-refused a worktree under a harness with empty `judge_args`. A harness that
-declares `judge_args` still gets rule 6's fingerprint-before-and-after — a
-read-only flag is what the harness *promises*, not what this factory has
-*watched happen*.
+harnesses declare one of those, which is why `smith harness list` (§2) lists
+judge roles like `reviewer` under `codex-cli`/`claude-cli`.
+
+**The flags are read, not counted.** A non-empty `judge_args` is not on its
+own a read-only promise — `judge_args: ["-m", "gpt-5-high"]` names a model
+and leaves codex in its default, writable sandbox. `planWorkerTurn()` looks
+for the flag that actually makes the program read-only, per program, and the
+refusal names what it found instead:
+
+| `judge_args` | judge + worktree |
+|---|---|
+| `["-s", "read-only"]` (codex) | served |
+| `["--sandbox=read-only"]` (codex) | served |
+| `["-m", "gpt-5-high"]` (codex) | refused — *name no `-s read-only`* |
+| `["-s", "workspace-write"]` (codex) | refused — *not read-only* |
+| `["--disallowedTools", "Write,Edit,MultiEdit,NotebookEdit"]` (claude) | served |
+| `["--disallowedTools", "Write,Edit"]` (claude) | refused — *leave MultiEdit, NotebookEdit in the judge's hands* |
+| any args, program this factory reads no flag for | refused — *cannot read a read-only flag for `<program>`* |
+
+The write tools in claude's `--disallowedTools` are not a list this check
+keeps: they are `policy.ts`'s own roster of tools that write a file, so a
+write tool added to the guardrail evaluator is one a `claude` judge has to
+start being denied on the same commit. A harness whose read-only flag this
+factory cannot read still runs every worker role, and still serves judges —
+without a worktree, which is what the refusal has always said.
+
+A harness that does declare read-only `judge_args` still gets rule 6's
+fingerprint-before-and-after — a read-only flag is what the harness
+*promises*, not what this factory has *watched happen*.
 
 Which roles are judges is read once, from `guardrails.yml` through
 `policy.ts` — never a second hand-written list here or in a custom policy
@@ -225,6 +248,7 @@ harnesses:
     args: ["-"]
     worker_args: []
     judge_args: []          # empty: this harness never serves a judge role a worktree
+                            # (§4: non-empty is not enough — the flags are read)
     schema_args: []          # appended last, only when the turn names --schema
     output: text             # or codex-json / claude-json
     env: [HOME, PATH]
@@ -243,7 +267,8 @@ runner as a literal argument and starting the harness in the wrong directory.
 
 - **`harness.judge-worktree`** — see §4. Either the role is not actually a
   judge (check `guardrails.yml`), or the harness needs a `judge_args` entry
-  that makes it read-only, or this call should not carry a worktree at all.
+  that makes it read-only — the message names which part is missing — or
+  this call should not carry a worktree at all.
 - **`harness.missing-substitution`** — the harness's `args` (or
   `worker_args`/`judge_args`) interpolate a placeholder this request left
   unset. On the shipped policy this should not happen for `{schema_file}`

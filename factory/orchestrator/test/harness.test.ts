@@ -16,7 +16,7 @@ import {
   summarizeHarnesses,
 } from '../src/harness.js';
 import { AGENTS_DIR, HARNESS_POLICY_PATH, REPO_ROOT } from '../src/paths.js';
-import { loadGuardrailPolicy } from '../src/policy.js';
+import { INSPECTED_FILE_TOOLS, loadGuardrailPolicy } from '../src/policy.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 
 // ---------------------------------------------------------------------------
@@ -296,7 +296,7 @@ harnesses:
 });
 
 describe('judge_args is the escape valve: OS/tool-enforced read-only, declared by the harness', () => {
-  it('renders a judge invocation with cwd = worktree and sandboxRequired: true when judge_args is non-empty', () => {
+  it('renders a judge invocation with cwd = worktree and sandboxRequired: true when judge_args promise read-only', () => {
     const invocation = planWorkerTurn(
       request({ harness: 'codex-cli', role: 'reviewer', schema: 'judge-verdict' }),
       { policy: JUDGE_CAPABLE_POLICY },
@@ -394,6 +394,148 @@ describe('judge_args is the escape valve: OS/tool-enforced read-only, declared b
       mid: 'gpt-5-codex',
       small: 'gpt-5-mini',
     });
+  });
+});
+
+describe('a judge_args list is read for what it promises, not counted', () => {
+  // The describe above says `judge_args` buys a judge a worktree because the
+  // flags in it make the program read-only. Nothing used to read the flags:
+  // `judgeArgs.length > 0` was the entire check, so `-m gpt-5-high` bought
+  // the same worktree `-s read-only` did, and codex's default sandbox for
+  // `exec` is writable. Each case below is written the way a policy author
+  // writes one — a program and the argv they would hand it — and says which
+  // of them this factory is willing to believe.
+  const CASES: readonly {
+    label: string;
+    command: string;
+    judgeArgs: readonly string[];
+    reason: string | null;
+  }[] = [
+    {
+      label: 'codex, -s read-only',
+      command: 'codex',
+      judgeArgs: ['-s', 'read-only'],
+      reason: null,
+    },
+    {
+      label: 'codex, --sandbox=read-only',
+      command: 'codex',
+      judgeArgs: ['--sandbox=read-only'],
+      reason: null,
+    },
+    {
+      label: 'codex, a model flag and nothing else',
+      command: 'codex',
+      judgeArgs: ['-m', 'gpt-5-high'],
+      reason: 'name no `-s read-only`',
+    },
+    {
+      label: 'codex, the writable sandbox spelled out',
+      command: 'codex',
+      judgeArgs: ['-s', 'workspace-write'],
+      reason: 'the `workspace-write` sandbox, which is not read-only',
+    },
+    {
+      label: 'codex, read-only overridden later in the argv',
+      command: 'codex',
+      judgeArgs: ['-s', 'read-only', '--sandbox', 'danger-full-access'],
+      reason: 'the `danger-full-access` sandbox, which is not read-only',
+    },
+    {
+      label: 'claude, every write tool denied',
+      command: 'claude',
+      judgeArgs: ['--disallowedTools', INSPECTED_FILE_TOOLS.join(',')],
+      reason: null,
+    },
+    {
+      label: 'claude, a roster that has fallen behind policy.ts',
+      command: 'claude',
+      judgeArgs: ['--disallowedTools', 'Write,Edit'],
+      reason: 'leave MultiEdit, NotebookEdit in the judge',
+    },
+    {
+      label: 'claude, no tool denial at all',
+      command: 'claude',
+      judgeArgs: ['--verbose'],
+      reason: 'name no `--disallowedTools`',
+    },
+    {
+      label: 'a program this factory has never read a flag for',
+      command: 'aider',
+      judgeArgs: ['--read-only'],
+      reason: 'cannot read a read-only flag for `aider`',
+    },
+    {
+      label: 'no judge_args at all',
+      command: 'codex',
+      judgeArgs: [],
+      reason: 'declares no judge_args at all',
+    },
+  ];
+
+  function judgePolicy(command: string, judgeArgs: readonly string[]): HarnessPolicy {
+    return parseHarnessPolicy(`
+version: 2
+default: claude-code
+harnesses:
+  - name: claude-code
+    kind: in-process
+  - name: under-test
+    kind: cli
+    command: ${command}
+    args: ["exec", "-C", "{worktree}", "-"]
+    judge_args: ${JSON.stringify(judgeArgs)}
+    env: [HOME, PATH]
+`);
+  }
+
+  for (const { label, command, judgeArgs, reason } of CASES) {
+    it(`${reason === null ? 'serves' : 'refuses'} a judge a worktree — ${label}`, () => {
+      const policy = judgePolicy(command, judgeArgs);
+      for (const role of guardrails.judgeSandbox.roles) {
+        const plan = () => planWorkerTurn(request({ harness: 'under-test', role }), { policy });
+        if (reason === null) {
+          const invocation = plan();
+          if (invocation.kind !== 'cli') throw new Error('unreachable');
+          expect(invocation.cwd).toBe('/tmp/wt');
+          expect(invocation.sandboxRequired).toBe(true);
+          expect(invocation.args).toEqual(expect.arrayContaining([...judgeArgs]));
+          continue;
+        }
+        try {
+          plan();
+          throw new Error(`expected a refusal for ${role}`);
+        } catch (error) {
+          expect(error).toBeInstanceOf(HarnessError);
+          expect((error as HarnessError).code).toBe('harness.judge-worktree');
+          expect((error as HarnessError).message).toContain(reason);
+          expect((error as HarnessError).details.reason).toContain(reason);
+        }
+      }
+      // The listing answers the same question the gate does, from the same
+      // function: a refused harness must not advertise the role it would
+      // refuse, or `smith harness list` becomes a plan that cannot be run.
+      const listed =
+        summarizeHarnesses({ policy }).harnesses.find((h) => h.name === 'under-test')?.roles ?? [];
+      for (const role of guardrails.judgeSandbox.roles) {
+        if (reason === null) expect(listed).toContain(role);
+        else expect(listed).not.toContain(role);
+      }
+      expect(listed).toContain('coder');
+    });
+  }
+
+  it('the shipped policy earns its judge roles through flags, not through length', () => {
+    // The regression this pair guards is not hypothetical in either
+    // direction: reading the flags must not lock out the two harnesses that
+    // ship, and shipping a harness must not be a way around the reading.
+    const policy = loadHarnessPolicy();
+    for (const name of ['codex-cli', 'claude-cli']) {
+      const harness = policy.harnesses.find((h) => h.name === name);
+      expect(harness?.judgeArgs.length ?? 0).toBeGreaterThan(0);
+      const listed = summarizeHarnesses().harnesses.find((h) => h.name === name)?.roles ?? [];
+      for (const role of guardrails.judgeSandbox.roles) expect(listed).toContain(role);
+    }
   });
 });
 

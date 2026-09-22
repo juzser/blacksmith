@@ -620,15 +620,27 @@ export interface PolicyContext {
  * inspect, not a hardcoded branch in `evaluateCommand` — a second Bash-like
  * tool added later is a one-line change here, not new control flow.
  */
-const INSPECTED_TOOLS: readonly string[] = ['Bash'];
+export const INSPECTED_TOOLS: readonly string[] = ['Bash'];
 
 /**
  * Tools whose `file_path` this policy inspects — the write path that does
  * not go through a shell. Nothing here has a command to match, so only the
  * lease rules can fire on them; the base six are all about shell commands
  * and no-op on an empty one.
+ *
+ * Exported because this evaluator is not the only place that has to know
+ * which tools write a file. `harness.ts` asks the same question from the
+ * other side: a `cli` judge is refused a worktree unless its `judge_args`
+ * deny every one of these, and a new write tool added here is a tool that
+ * harness has to start denying on the same commit. Held to that shipped
+ * policy, and to the guard hook's own `matcher`, by policy.test.ts.
  */
-const INSPECTED_FILE_TOOLS: readonly string[] = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+export const INSPECTED_FILE_TOOLS: readonly string[] = [
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+];
 
 function requireRule(policy: GuardrailPolicy, id: string): GuardrailRule {
   const rule = policy.rules.get(id);
