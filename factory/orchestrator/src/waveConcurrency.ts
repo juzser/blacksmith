@@ -42,7 +42,41 @@ const ADMITTED_EVENT_TYPE = 'wave-admitted';
  *                  whole point of separating them: one says the factory ran
  *                  narrow, the other says nobody can tell.
  */
-export type WaveVerdict = 'parallel' | 'partial' | 'serialized' | 'single' | 'unobserved';
+export const WAVE_VERDICTS = ['parallel', 'partial', 'serialized', 'single', 'unobserved'] as const;
+
+/**
+ * The type is derived from the roster above, not written beside it.
+ *
+ * Order is load-bearing: `epicWidth.ts` grades an epic by the best verdict any
+ * of its waves reached, by walking that list and taking the first with a count
+ * against it. A new verdict is RANKED into it, not appended — appended, it
+ * would silently become the worst outcome this factory knows.
+ *
+ * One list, because the two ends of the width record used to hold their own.
+ * `readonly WaveVerdict[]` was never the guard it looked like: it checks that
+ * every entry is a verdict, and can say nothing about whether every verdict is
+ * an entry. The copies happened to agree. A sixth verdict added to the union
+ * alone compiled clean, and then counted into a bucket that did not exist on
+ * the writing side — `undefined + 1`, recorded as NaN and serialised into the
+ * log as null — while the reading side rejected the whole record as malformed
+ * and graded an epic that had run two waves as `unwaved`, which this factory
+ * documents as never a fault.
+ */
+export type WaveVerdict = (typeof WAVE_VERDICTS)[number];
+
+/**
+ * A counter with one bucket per key, all at zero.
+ *
+ * The one place the `Record` cast lives, and here it is true by construction
+ * rather than asserted: the keys ARE the roster. Every caller that used to
+ * write `Object.fromEntries(SOME_LIST.map(...)) as Record<…>` was asserting a
+ * totality that only its own hand-written list was holding up.
+ */
+export function zeroedCounts<K extends string>(keys: readonly K[]): Record<K, number> {
+  const counts = {} as Record<K, number>;
+  for (const key of keys) counts[key] = 0;
+  return counts;
+}
 
 /** One admitted task, as the log shows it actually running. */
 export interface TaskRun {

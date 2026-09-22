@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { summariseEpicWidth, UNMEASURED_HINT } from '../src/epicWidth.js';
+import { summariseEpicConcurrency } from '../src/epic.js';
+import {
+  ALL_VERDICTS,
+  readClosedEpicWidths,
+  summariseEpicWidth,
+  UNMEASURED_HINT,
+} from '../src/epicWidth.js';
 import type { StoredEvent } from '../src/events.js';
-import { UNOBSERVED_HINT } from '../src/waveConcurrency.js';
+import {
+  UNOBSERVED_HINT,
+  WAVE_VERDICTS,
+  type WaveVerdict,
+  zeroedCounts,
+} from '../src/waveConcurrency.js';
 
 // ---------------------------------------------------------------------------
 // The third half of the wave story, and the one that answers the question the
@@ -70,7 +81,7 @@ function width(
   verdicts: Partial<Record<string, number>>,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const counts = { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0, ...verdicts };
+  const counts = { ...zeroedCounts(WAVE_VERDICTS), ...verdicts };
   const waves = Object.values(counts).reduce((n, c) => n + c, 0);
   return {
     waves,
@@ -190,13 +201,10 @@ describe('summariseEpicWidth', () => {
     const summary = summariseEpicWidth([
       close({
         epicId: 'E1',
-        concurrency: {
-          waves: 0,
-          verdicts: { parallel: 0, partial: 0, serialized: 0, single: 0, unobserved: 0 },
-          widest: { declared: 0, observed: 0 },
-          unobserved: [],
-          problem: 'wave-concurrency.missing-task-ids: wave-admitted "s1#4" names no tasks',
-        },
+        concurrency: width(
+          {},
+          { problem: 'wave-concurrency.missing-task-ids: wave-admitted "s1#4" names no tasks' },
+        ),
       }),
     ]);
 
@@ -293,5 +301,63 @@ describe('summariseEpicWidth', () => {
       closedBy: 'operator-override',
       machineVerdict: 'no-go',
     });
+  });
+});
+
+describe('the verdicts an epic width is counted in', () => {
+  /** One wave, as `auditWaveConcurrency` folds it, carrying the given verdict. */
+  function waveWith(verdict: WaveVerdict, eventId: string) {
+    return {
+      eventId,
+      admittedAt: at(1),
+      epicId: 'E1',
+      declared: ['E1-task-1', 'E1-task-2'],
+      observed: [],
+      unobserved: [],
+      peak: 2,
+      verdict,
+    };
+  }
+
+  // epic.ts writes the width into the close; epicWidth.ts reads it back out.
+  // Each used to hold its own hand-written copy of the five verdicts, and
+  // nothing tied the two together: `readonly WaveVerdict[]` checks that every
+  // entry is a verdict, never that every verdict is an entry. A verdict the
+  // writer's copy was missing counted into a bucket that did not exist —
+  // `undefined + 1`, recorded as NaN and serialised into the log as null —
+  // and one the reader's copy was missing made `countsFrom` reject the whole
+  // record as malformed. Both lists are one list now, so walk it and put
+  // every verdict through the real path rather than trusting that.
+  it('survives the fold into a close and the read back out of it', () => {
+    for (const verdict of WAVE_VERDICTS) {
+      const folded = JSON.parse(
+        JSON.stringify(
+          summariseEpicConcurrency([waveWith(verdict, 'w1'), waveWith(verdict, 'w2')]),
+        ),
+      ) as Record<string, unknown>;
+
+      expect(folded.verdicts, `${verdict} was folded into the close`).toMatchObject({
+        [verdict]: 2,
+      });
+
+      const [read] = readClosedEpicWidths([close({ epicId: 'E1', concurrency: folded })]);
+      expect(read?.problem, `${verdict} was read back out of the close`).toBeNull();
+      expect(read?.waves).toBe(2);
+      expect(read?.byVerdict[verdict]).toBe(2);
+      // Graded, and not fallen through to `unwaved` — which this file
+      // documents as "never a fault" and which would clear an epic whose
+      // every wave ran this way without anyone being told.
+      expect(read?.verdict).toBe(verdict);
+    }
+  });
+
+  // The histogram is built by listing keys, so a verdict missing from that
+  // list is a verdict with nowhere to be counted. An empty factory is the
+  // cheapest place to read the shape off.
+  it('has a bucket for every verdict an epic can be graded, before anything is counted', () => {
+    const summary = summariseEpicWidth([]);
+
+    expect(Object.keys(summary.verdicts).sort()).toEqual([...ALL_VERDICTS].sort());
+    expect(Object.values(summary.verdicts).every((n) => n === 0)).toBe(true);
   });
 });

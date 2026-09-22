@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { StoredEvent } from '../src/events.js';
-import { auditWaveConcurrency, summariseWaveConcurrency } from '../src/waveConcurrency.js';
+import {
+  auditWaveConcurrency,
+  summariseWaveConcurrency,
+  WAVE_VERDICTS,
+} from '../src/waveConcurrency.js';
 
 // ---------------------------------------------------------------------------
 // The second half of the wave story. `wave next` computes the widest wave a
@@ -367,5 +374,45 @@ describe('summariseWaveConcurrency', () => {
 
     expect(summary.serialized).toEqual(['E1']);
     expect(summary.waves).toHaveLength(2);
+  });
+});
+
+describe('WAVE_VERDICTS', () => {
+  // The order is neither alphabetical nor arbitrary. `epicWidth.ts` grades an
+  // epic by the BEST verdict any of its waves reached, walking this list and
+  // taking the first one with a count against it, so the list is widest first.
+  // Restated by hand here on purpose: a sixth verdict appended to the end
+  // would quietly become the worst outcome the factory knows about, and this
+  // is what turns "where does it rank" into a decision somebody takes rather
+  // than one the diff makes for them.
+  it('is widest first, because that order is what grades an epic', () => {
+    expect([...WAVE_VERDICTS]).toEqual([
+      'parallel',
+      'partial',
+      'serialized',
+      'single',
+      'unobserved',
+    ]);
+  });
+
+  // `WaveVerdict` is derived from this list, so every counter keyed by the
+  // type gains a bucket the moment the list does, and no
+  // `Record<WaveVerdict, number>` can be short one. The direction no type can
+  // check is the opposite one: a verdict left in the list after the branch
+  // that returned it was deleted is still a perfectly good string, and would
+  // sit in every histogram at a permanent zero that reads like a measurement.
+  // `verdictFor` is the only thing that mints a verdict, so its returns are
+  // scraped back out of the source and held against the list.
+  it('carries exactly the verdicts verdictFor can return', () => {
+    const source = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'waveConcurrency.ts'),
+      'utf8',
+    );
+    const body = /function verdictFor\([^)]*\)[^{]*\{([\s\S]*?)\n\}/.exec(source)?.[1];
+    expect(body, 'verdictFor is still a function in waveConcurrency.ts').toBeDefined();
+
+    const returned = new Set<string>();
+    for (const m of (body as string).matchAll(/return '([a-z-]+)'/g)) returned.add(m[1] as string);
+    expect([...returned].sort()).toEqual([...WAVE_VERDICTS].sort());
   });
 });

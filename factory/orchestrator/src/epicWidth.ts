@@ -1,5 +1,10 @@
 import type { StoredEvent } from './events.js';
-import { UNOBSERVED_HINT, type WaveVerdict } from './waveConcurrency.js';
+import {
+  UNOBSERVED_HINT,
+  WAVE_VERDICTS,
+  type WaveVerdict,
+  zeroedCounts,
+} from './waveConcurrency.js';
 
 /**
  * Does this factory build in parallel, or has every epic it closed been narrow?
@@ -33,6 +38,14 @@ import { UNOBSERVED_HINT, type WaveVerdict } from './waveConcurrency.js';
 const CLOSED_EVENT_TYPE = 'epic-closed';
 
 /**
+ * The three an epic can be graded that no single wave can carry, because they
+ * are facts about the close rather than about a wave. Kept apart from the five
+ * so the union below is the two rosters joined, and the five stay owned by the
+ * module that mints them.
+ */
+const EPIC_ONLY_VERDICTS = ['unwaved', 'unmeasured', 'unreadable'] as const;
+
+/**
  * What the closes say about one epic.
  *
  * The five wave verdicts, read off the record rather than recomputed, plus
@@ -47,23 +60,20 @@ const CLOSED_EVENT_TYPE = 'epic-closed';
  *                  because `epic close` already reported a problem folding it
  *                  or because the payload is not the shape it should be.
  */
-export type EpicWidthVerdict = WaveVerdict | 'unwaved' | 'unmeasured' | 'unreadable';
+export type EpicWidthVerdict = WaveVerdict | (typeof EPIC_ONLY_VERDICTS)[number];
 
-/** The verdicts an epic can be graded on, widest first — see {@link gradeOf}. */
-const BEST_FIRST: readonly WaveVerdict[] = [
-  'parallel',
-  'partial',
-  'serialized',
-  'single',
-  'unobserved',
-];
-
-const ALL_VERDICTS: readonly EpicWidthVerdict[] = [
-  ...BEST_FIRST,
-  'unwaved',
-  'unmeasured',
-  'unreadable',
-];
+/**
+ * Every verdict an epic can be graded, widest first, and the roster the
+ * histogram's buckets are made of.
+ *
+ * The five come from the module that mints them rather than being restated
+ * here. That is the whole coupling this file turns on: `epic.ts` WRITES the
+ * width into the close and this file VALIDATES it on read — `countsFrom`
+ * rejects a record missing any of the five outright — so two hand-written
+ * copies of one list were two halves of a contract with nothing holding them
+ * to each other.
+ */
+export const ALL_VERDICTS = [...WAVE_VERDICTS, ...EPIC_ONLY_VERDICTS] as const;
 
 /** One closed epic, as its close records the width. */
 export interface ClosedEpicWidth {
@@ -142,7 +152,7 @@ function blank(verdict: 'unmeasured' | 'unreadable', problem: string | null) {
   return {
     verdict,
     waves: 0,
-    byVerdict: Object.fromEntries(BEST_FIRST.map((v) => [v, 0])) as Record<WaveVerdict, number>,
+    byVerdict: zeroedCounts(WAVE_VERDICTS),
     widest: { declared: 0, observed: 0 },
     unobserved: [] as string[],
     problem,
@@ -152,8 +162,8 @@ function blank(verdict: 'unmeasured' | 'unreadable', problem: string | null) {
 function countsFrom(raw: unknown): Record<WaveVerdict, number> | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const source = raw as Record<string, unknown>;
-  const counts = {} as Record<WaveVerdict, number>;
-  for (const verdict of BEST_FIRST) {
+  const counts = zeroedCounts(WAVE_VERDICTS);
+  for (const verdict of WAVE_VERDICTS) {
     const n = source[verdict];
     // A missing key is not read as zero. The close projects all five even at
     // zero (D-126), so an absent one means this is not a width record at all,
@@ -184,7 +194,7 @@ function widthFrom(raw: unknown): { declared: number; observed: number } | null 
  */
 function gradeOf(counts: Record<WaveVerdict, number>, waves: number): EpicWidthVerdict {
   if (waves === 0) return 'unwaved';
-  for (const verdict of BEST_FIRST) if (counts[verdict] > 0) return verdict;
+  for (const verdict of WAVE_VERDICTS) if (counts[verdict] > 0) return verdict;
   // Unreachable: every wave carries one of the five. Reported rather than
   // guessed, because a count that adds up to nothing is a malformed record.
   return 'unwaved';
@@ -303,10 +313,7 @@ export function summariseEpicWidth(events: readonly StoredEvent[]): EpicWidthSum
       : b.closedAt.localeCompare(a.closedAt),
   );
 
-  const verdicts = Object.fromEntries(ALL_VERDICTS.map((v) => [v, 0])) as Record<
-    EpicWidthVerdict,
-    number
-  >;
+  const verdicts = zeroedCounts(ALL_VERDICTS);
   for (const epic of epics) verdicts[epic.verdict] += 1;
 
   const serialized = epics.filter((e) => e.byVerdict.serialized > 0).map((e) => e.epicId);

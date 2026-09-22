@@ -41,7 +41,13 @@ import {
 } from './quorum.js';
 import { latestSpecReview, type SpecReviewStatus, specReviewBlockers } from './spec.js';
 import { TERMINAL_OK_TASK_STATUSES } from './taskStatus.js';
-import { auditWaveConcurrency, type WaveConcurrency, type WaveVerdict } from './waveConcurrency.js';
+import {
+  auditWaveConcurrency,
+  WAVE_VERDICTS,
+  type WaveConcurrency,
+  type WaveVerdict,
+  zeroedCounts,
+} from './waveConcurrency.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
 /**
@@ -229,14 +235,6 @@ export interface EpicConcurrency {
   problem: string | null;
 }
 
-const WAVE_VERDICTS: readonly WaveVerdict[] = [
-  'parallel',
-  'partial',
-  'serialized',
-  'single',
-  'unobserved',
-];
-
 /**
  * Reduce one epic's waves to the fact a close records. Pure, and separate from
  * `summariseWaveConcurrency` on purpose: that one scores an operator's audit
@@ -244,10 +242,7 @@ const WAVE_VERDICTS: readonly WaveVerdict[] = [
  * single epic with no verdict of its own to render.
  */
 export function summariseEpicConcurrency(waves: readonly WaveConcurrency[]): EpicConcurrency {
-  const verdicts = Object.fromEntries(WAVE_VERDICTS.map((v) => [v, 0])) as Record<
-    WaveVerdict,
-    number
-  >;
+  const verdicts = zeroedCounts(WAVE_VERDICTS);
   for (const wave of waves) verdicts[wave.verdict] += 1;
   return {
     waves: waves.length,
@@ -264,7 +259,7 @@ export function summariseEpicConcurrency(waves: readonly WaveConcurrency[]): Epi
 /** Nothing the log could be folded into a width, and why. */
 const UNREADABLE_CONCURRENCY = (problem: string): EpicConcurrency => ({
   waves: 0,
-  verdicts: Object.fromEntries(WAVE_VERDICTS.map((v) => [v, 0])) as Record<WaveVerdict, number>,
+  verdicts: zeroedCounts(WAVE_VERDICTS),
   widest: { declared: 0, observed: 0 },
   unobserved: [],
   problem,
