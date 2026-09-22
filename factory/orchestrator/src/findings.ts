@@ -273,6 +273,40 @@ export const OPEN_FOR_DISPATCH: readonly string[] = [...OPEN_FINDING_STATUSES].f
 );
 
 /**
+ * Closed by SHOWING rather than by deciding: the fix was verified, the claim
+ * was refuted, or the window it applied to is gone. Declared rather than read
+ * off the table, for the reason CLOSED_DESPITE_A_WAY_BACK and
+ * OPEN_BUT_ALREADY_ASSIGNED above are: "this closure was earned" is a
+ * judgement about what a status MEANS, and the table only knows an edge is
+ * absent.
+ */
+const EARNED_CLOSED_STATUSES: readonly string[] = ['refuted', 'fix-verified', 'expired'];
+
+/**
+ * Statuses that close a finding by DECIDING rather than by showing a fix
+ * (D-120): closed, and not earned. Disjoint from OPEN_FINDING_STATUSES by
+ * construction — and this file is now what constructs it. epic.ts typed the
+ * pair `{waived, amended}` beside a docblock claiming exactly that, with
+ * nothing anywhere holding it to the table.
+ *
+ * Which way the default falls is the whole design, and here it falls the
+ * visible way. Derived as the remainder, a closed status nobody has
+ * classified yet is discretionary: the judge is told about a closure it may
+ * decide needs no second thought, and the close event records one waiver too
+ * many. Typed instead, the cost of being wrong is a finding closed by a
+ * person's decision that the gate does not block on, the judge is never
+ * shown, and the close event's `discretionary_findings` omits — so "was this
+ * epic closed on decisions?" answers "no", permanently and wrongly. The gate
+ * does not block on these, which is precisely why the judge is told: what
+ * nothing blocks on is what nobody re-reads.
+ */
+export const DISCRETIONARY_FINDING_STATUSES: ReadonlySet<string> = new Set(
+  Object.keys(LEGAL_TRANSITIONS).filter(
+    (status) => !OPEN_FINDING_STATUSES.has(status) && !EARNED_CLOSED_STATUSES.includes(status),
+  ),
+);
+
+/**
  * D-21 Part 4. Appended by `repairObligation` to correct a malformed
  * `amends_task_ids` entry on a finding parked at `amend-pending` — never a
  * `finding-transitioned` event, because a repair changes no status. Folded

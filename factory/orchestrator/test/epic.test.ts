@@ -35,6 +35,7 @@ import {
   type FindingDraft,
   LEGAL_TRANSITIONS,
   listFindings,
+  OPEN_FINDING_STATUSES,
   raiseFinding,
   repairObligation,
   transition,
@@ -342,6 +343,56 @@ describe('epic.ts summarizeEpic (pure)', () => {
     expect(summary.openFindings).toHaveLength(1);
     expect(summary.blockers.length).toBeGreaterThan(0);
   });
+
+  /**
+   * The other half of the same ruling. A closed finding is closed either way,
+   * so readiness cannot tell the two kinds apart — but D-120 keeps them apart
+   * for the one reader that can ask whether a waiver should have been one, and
+   * that split had no reader holding it to the table either.
+   *
+   * The earned side is restated by hand here on purpose. Deriving both sides
+   * from the same list would make this a test of an expression against itself;
+   * typed independently, a status that changes sides in findings.ts turns this
+   * red instead of following it quietly — the shape #165 landed for the three
+   * rosters over one outcome.
+   *
+   * Measured, not assumed. A probe that declared a twelfth finding status in
+   * taxonomy.yml, architecture §8 and LEGAL_TRANSITIONS drove all 129 files of
+   * this suite green — 4009 passed, nothing red — while a finding parked at
+   * it was closed, absent from the judge's prompt and absent from the close
+   * event's `discretionary_findings`, so "was this epic closed on decisions?"
+   * answered no.
+   */
+  const EARNED_BY_SHOWING = ['refuted', 'fix-verified', 'expired'];
+  const closedStatuses = Object.keys(LEGAL_TRANSITIONS).filter(
+    (status) => !OPEN_FINDING_STATUSES.has(status),
+  );
+
+  // A case list that quietly went empty would make every assertion below pass.
+  it('has a closed side to classify at all', () => {
+    expect(closedStatuses).toContain('waived');
+    expect(closedStatuses).toContain(AMENDED_STATUS);
+    expect(closedStatuses).toEqual(expect.arrayContaining(EARNED_BY_SHOWING));
+  });
+
+  it.each(closedStatuses)(
+    'a finding closed at %s reaches the judge iff it was decided',
+    (status) => {
+      const summary = summarizeEpic(
+        'epic-1',
+        [taskRow({ taskStatus: 'completed' })],
+        [findingFixture({ finding_status: status })],
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        okSpecReview(),
+        okGoalCheck(),
+      );
+      expect(summary.openFindings).toHaveLength(0);
+      expect(summary.discretionaryFindings).toHaveLength(
+        EARNED_BY_SHOWING.includes(status) ? 0 : 1,
+      );
+    },
+  );
 
   it('is not mechanically ready when the epic has no tasks at all', () => {
     const summary = summarizeEpic(

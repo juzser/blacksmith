@@ -13,6 +13,7 @@ import {
   AMEND_PENDING_STATUS,
   AMENDED_STATUS,
   type AmendmentDischarge,
+  DISCRETIONARY_FINDING_STATUSES,
   describeMalformedTaskId,
   type EventContext,
   type Finding,
@@ -78,15 +79,6 @@ import { RESERVED_TASK_ID } from './worktree.js';
 
 /** The terminal-OK status that is a decision rather than a completion (D-120). */
 const WAIVED_TASK_STATUS = 'waived';
-
-/**
- * Statuses that close a finding by DECIDING rather than by showing a fix
- * (D-120). Disjoint from OPEN_FINDING_STATUSES by construction — a finding is
- * open, earned-closed (`fix-verified`, `refuted`, `expired`), or one of these.
- * The gate does not block on them, which is precisely why the judge is told:
- * what nothing blocks on is what nobody re-reads.
- */
-const DISCRETIONARY_FINDING_STATUSES = new Set(['waived', AMENDED_STATUS]);
 
 export interface EpicTaskSummary {
   taskId: string;
