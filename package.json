@@ -87,14 +87,14 @@
     "@types/better-sqlite3": "9.6.0",
     "@types/node": "26.6.1",
     "@vitejs/plugin-vue": "6.0.9",
-    "@vitest/coverage-v8": "5.0.0",
+    "@vitest/coverage-v8": "5.0.1",
     "@vue-flow/core": "1.48.2",
     "drizzle-kit": "0.31.10",
     "hono": "4.13.7",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.0",
-    "vitest": "5.0.0",
+    "vitest": "5.0.1",
     "vue": "3.5.43",
     "vue-router": "5.3.1"
   }
