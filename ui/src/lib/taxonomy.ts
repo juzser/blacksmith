@@ -119,12 +119,11 @@ export function taskStatusTone(status: string): Tone {
  * task_status has to know which statuses are an answer, which are still
  * running, and which will never answer at all.
  *
- * `passed` is the {completed, waived} pair that queries.ts's
- * MILESTONE_COMPLETE_TASK_STATUSES and epic.ts's TERMINAL_OK_TASK_STATUSES
- * each already declare — a waived task landed on the team's own decision, so
- * counting only `completed` reports a pass as a non-event. `superseded` is
- * `void` rather than `failed`: a task replaced by a newer plan version never
- * got a verdict, and charging it as a failure invents one.
+ * `passed` is the {completed, waived} pair the orchestrator's taskStatus.ts
+ * declares as TERMINAL_OK_TASK_STATUSES — a waived task landed on the team's
+ * own decision, so counting only `completed` reports a pass as a non-event.
+ * `superseded` is `void` rather than `failed`: a task replaced by a newer
+ * plan version never got a verdict, and charging it as a failure invents one.
  *
  * taxonomy.test.ts holds these keys to taxonomy.yml's task_status list, so a
  * thirteenth status cannot land without a decision about what it means here.

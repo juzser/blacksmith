@@ -36,16 +36,7 @@ import {
 } from './claims.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { livePlanTasks, type PlanFile, type TaskSpecRecord } from './plan.js';
-
-/**
- * A task is *done* only at the two statuses epic.ts already calls terminal —
- * `completed` and `waived`. Everything else non-terminal still holds a
- * worktree, so its claims are still spoken for even when nobody is typing in
- * it: `blocked`, `failed` and `escalated` are waiting on a person, not on
- * nothing, and their uncommitted work is exactly what a second agent in the
- * same paths would destroy.
- */
-const TERMINAL_TASK_STATUSES = new Set(['completed', 'waived']);
+import { TERMINAL_OK_TASK_STATUSES } from './taskStatus.js';
 
 /** The two statuses that mean "nothing has been dispatched for this yet". */
 const CANDIDATE_TASK_STATUSES = new Set(['todo', 'ready']);
@@ -210,7 +201,17 @@ export function computeNextWave(input: NextWaveInput): NextWaveResult {
   for (const record of livePlanTasks(plan)) {
     const id = record.task_id;
     const status = input.statusById?.get(id) ?? String(record.task_status);
-    if (TERMINAL_TASK_STATUSES.has(status)) {
+    // *Done* here is the narrow question — the work ended well, so the
+    // worktree is free. Its neighbour in taskStatus.ts, TERMINAL_TASK_STATUSES,
+    // answers a different one — which rows the log refuses to overwrite — and
+    // holds `failed` and `escalated` too. Those are waiting on a person, not
+    // on nothing, and their uncommitted work is exactly what a second agent in
+    // the same paths would destroy: reading that set here is a data-loss bug,
+    // and this file carried its own copy of this one under *that* name until
+    // both answers moved to the module that owns the dimension.
+    // (`superseded` is in neither conversation: livePlanTasks drops an id
+    // whose every record is superseded, so one never reaches this line.)
+    if (TERMINAL_OK_TASK_STATUSES.has(status)) {
       done.push(id);
       continue;
     }

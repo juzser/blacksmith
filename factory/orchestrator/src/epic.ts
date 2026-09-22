@@ -39,6 +39,7 @@ import {
   runQuorumCase,
 } from './quorum.js';
 import { latestSpecReview, type SpecReviewStatus, specReviewBlockers } from './spec.js';
+import { TERMINAL_OK_TASK_STATUSES } from './taskStatus.js';
 import { auditWaveConcurrency, type WaveConcurrency, type WaveVerdict } from './waveConcurrency.js';
 import { RESERVED_TASK_ID } from './worktree.js';
 
@@ -74,8 +75,6 @@ import { RESERVED_TASK_ID } from './worktree.js';
  *     is whatever it would have been with no externals at all (`go`, since
  *     mechanical readiness already held).
  */
-
-const TERMINAL_OK_TASK_STATUSES = new Set(['completed', 'waived']);
 
 /** The terminal-OK status that is a decision rather than a completion (D-120). */
 const WAIVED_TASK_STATUS = 'waived';
@@ -425,9 +424,9 @@ function integrationBlockers(epicId: string, integration: IntegrationStatus): st
  * Pure readiness check, no I/O: given the epic's own task rows (foldTasks()
  * output, already filtered to this epic) and its findings (listFindings()
  * output), decide whether the epic is mechanically ready to open its
- * integration PR. "Terminal-OK" mirrors db/queries.ts's
- * MILESTONE_COMPLETE_TASK_STATUSES precedent (completed, waived) — a
- * superseded/failed/escalated/blocked/in-progress/etc. task is not one of
+ * integration PR. "Terminal-OK" is taskStatus.ts's exported
+ * TERMINAL_OK_TASK_STATUSES (completed, waived) — a task at superseded,
+ * failed, escalated, blocked, in-progress or anything else is not one of
  * those, so it blocks. "Open" finding is findings.ts's
  * OPEN_FINDING_STATUSES, which reads the statuses LEGAL_TRANSITIONS still has
  * a move out of rather than listing them — a finding stops being open when
