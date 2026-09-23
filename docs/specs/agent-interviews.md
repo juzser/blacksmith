@@ -206,7 +206,8 @@ an inert key is a lie unless the prompt makes it true.
 >
 > **Correction, 2026-09-11.** The premise was wrong: Claude Code *does* read
 > `maxTurns` and stops the subagent at exactly that many turns, whatever the
-> prompt promised. Measured eight times over two dogfood sessions: a
+> prompt promised. Measured eight times over two sessions of dogfooding
+> on an operator-private project: a
 > security-reviewer told 20 cut at its template's 15, a verifier likewise,
 > and a planner told 40 cut at its template's 20 — twice, the second time on
 > 2026-09-11 while planning a successor epic, with nothing written.
