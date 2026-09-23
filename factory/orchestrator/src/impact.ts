@@ -374,6 +374,11 @@ function consumes(names: readonly string[], symbol: string): boolean {
 /**
  * A promise against the diff of the file it names. A file the diff does not
  * hold was not touched, so its exports are as they were: kept.
+ *
+ * That inference is only sound because `collectExportDiffs` never drops a
+ * promised file: whatever it cannot read it hands over as `unverifiable`
+ * rather than leaving out. Absent therefore means untouched here, and can go
+ * on meaning it only while that stays true on the other side.
  */
 function verdictOn(file: string, diffs: readonly ExportDiff[]): PromiseVerdict {
   const diff = diffs.find((entry) => entry.file === file);
@@ -487,16 +492,35 @@ export function exportImpact(
  * `ls-tree` before `show` on purpose — a file added on this branch is absent
  * from the integration branch, and asking `show` for it would raise an error
  * that means "new file", which is not an error at all.
+ *
+ * `keepsExports` is here because silence means two different things downstream.
+ * A changed file this scanner does not speak for — a `.yml`, a lockfile, a
+ * `.vue` — is left out, and for a file nobody named that is right: reporting
+ * every one of them as a hole is the noise the header refuses to make. But
+ * `verdictOn` reads a promised file's absence as "not touched, so kept", and
+ * for a file the diff dropped that inference is false — the task changed it,
+ * nobody read it, and the strongest verdict in this module is minted over a
+ * file that was never opened. A promise is a question that was explicitly
+ * asked, so it gets an explicit answer: unreadable here is `unverifiable`,
+ * which `verdictOn` turns into `unverified` and the header's "reported, never
+ * fatal" covers. Skipped stays skipped for everything else.
  */
 export function collectExportDiffs(
   worktreeDir: string,
   changedFiles: readonly string[],
+  keepsExports: readonly string[] = [],
 ): ExportDiff[] {
   const integrationBranch = integrationBranchFor(worktreeDir);
+  const promised = new Set(keepsExports);
   const diffs: ExportDiff[] = [];
 
   for (const file of changedFiles) {
-    if (!DEFAULT_SOURCE_EXTENSIONS.includes(extname(file))) continue;
+    if (!DEFAULT_SOURCE_EXTENSIONS.includes(extname(file))) {
+      if (promised.has(file)) {
+        diffs.push({ file, removed: [], added: [], signatureChanged: [], unverifiable: true });
+      }
+      continue;
+    }
 
     const listed = runGit(worktreeDir, [
       'ls-tree',

@@ -2,12 +2,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { loadHarnessPolicy } from '../src/harness.js';
+import { REPO_ROOT } from '../src/paths.js';
 import {
   detectCurrentBranch,
   detectRepoRoot,
   EVALUATED_RULE_IDS,
   evaluateCommand,
   type GuardrailPolicy,
+  INSPECTED_FILE_TOOLS,
+  INSPECTED_TOOLS,
   loadGuardrailPolicy,
   type PolicyContext,
   type PolicyDecision,
@@ -1509,6 +1513,44 @@ describe('evaluateCommand — cross-cutting', () => {
 // — because the property that matters is not "a judge is refused" but "only a
 // judge is refused". A rule that fired without a lease would refuse the coder
 // sessions that do the actual work.
+describe('the write-tool roster is one roster, in four places', () => {
+  // Four live surfaces name the tools that can write a file, and until this
+  // test every one of them was typed by hand with nothing holding them
+  // together: this evaluator's own roster, the PreToolUse matcher that
+  // decides whether the guard hook is consulted at all, the `judge_args` that
+  // buy a `claude` judge a worktree, and — the reason a drift here is not
+  // cosmetic — harness.ts, which now measures the third against the first.
+  // A new write tool that landed in only one of them would be a tool the
+  // guard never sees, or a judge that keeps a tool its policy claims to have
+  // taken away. The list below is deliberately re-typed rather than imported:
+  // a test that reads the roster from the roster agrees with itself no matter
+  // what the roster says.
+  const WRITE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'];
+  const INSPECTED = ['Bash', ...WRITE_TOOLS];
+
+  it('is the roster policy.ts inspects', () => {
+    expect([...INSPECTED_TOOLS, ...INSPECTED_FILE_TOOLS]).toEqual(INSPECTED);
+  });
+
+  it('is the roster the guard hook is invoked for', () => {
+    const settings = JSON.parse(
+      readFileSync(path.join(REPO_ROOT, '.claude', 'settings.json'), 'utf8'),
+    ) as { hooks?: { PreToolUse?: { matcher?: string }[] } };
+    const matchers = (settings.hooks?.PreToolUse ?? []).map((entry) => entry.matcher);
+    // A tool the matcher omits never reaches guard.sh, so the rules above are
+    // not consulted for it at all — the quietest way to lose a guard.
+    expect(matchers).toContain(INSPECTED.join('|'));
+  });
+
+  it('is the roster a claude judge is stripped of before it may hold a worktree', () => {
+    const shipped = loadHarnessPolicy().harnesses.find((h) => h.name === 'claude-cli');
+    expect(shipped?.command).toBe('claude');
+    const flag = shipped?.judgeArgs.indexOf('--disallowedTools') ?? -1;
+    expect(flag).toBeGreaterThanOrEqual(0);
+    expect(shipped?.judgeArgs[flag + 1]?.split(',')).toEqual(WRITE_TOOLS);
+  });
+});
+
 describe('evaluateCommand — judge sandbox', () => {
   function both(command: string): { judged: PolicyDecision; free: PolicyDecision } {
     return {
