@@ -343,7 +343,7 @@ describe('findings.ts', () => {
       expect(findings).toHaveLength(0);
     });
 
-    // FD-21 (dogfood-csb-audit-1-findings.md): two defects read off the
+    // FD-21 (a dogfood finding): two defects read off the
     // target by a person had nowhere to go, because `found_by` is
     // taxonomy-valued over `agent` and the only actors listed were roles the
     // factory dispatches. `operator` is the human, and a finding they raise

@@ -410,14 +410,14 @@ describe('lib/timelineDisplay.ts', () => {
   describe('the integration PR the epic opened', () => {
     const pr = entry({
       eventType: 'integration-pr-opened',
-      taskId: 'csb-signing-policy-1/integration',
+      taskId: 'example-2/integration',
       payload: {
         step: 17,
-        pr_url: 'https://github.com/juzser/claude-status-bar-macos/pull/54',
+        pr_url: 'https://github.com/example-org/example-app/pull/54',
         pr_number: 54,
-        repo: 'juzser/claude-status-bar-macos',
-        base_ref: 'smith/csb-audit-1/integration',
-        head_ref: 'smith/csb-signing-policy-1/integration',
+        repo: 'example-org/example-app',
+        base_ref: 'smith/example-1/integration',
+        head_ref: 'smith/example-2/integration',
         head_sha: '931079e',
         commits: 11,
         changed_files: 11,
@@ -426,7 +426,7 @@ describe('lib/timelineDisplay.ts', () => {
 
     it('titles the row with the PR, its repo and the refs it merges', () => {
       expect(titleFor(pr)).toBe(
-        'Integration PR opened — juzser/claude-status-bar-macos#54 (smith/csb-signing-policy-1/integration → smith/csb-audit-1/integration)',
+        'Integration PR opened — example-org/example-app#54 (smith/example-2/integration → smith/example-1/integration)',
       );
     });
 

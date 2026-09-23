@@ -91,7 +91,7 @@ touching `crosscheck.yml`.
 
 The fork was: this clone declares `envkit` and cannot reach it. Measured —
 `workspaces/` is empty, the only envkit checkout on this box is inside the
-sibling clone `black-smith`, whose remote now resolves to `juzser/maestro`,
+sibling fork,
 and `envkit-mcp-followup` has already been run there (branch
 `smith/envkit-mcp-followup/integration` at `924bab0`, four merged `task-*`
 branches, `plan-v1.json` and `plan-v2.json` on disk).
@@ -151,7 +151,7 @@ the null, measured at `84cd46f`: 0 epics, 0 tasks, 14 milestones.
 **AC3 — This clone is watched without an operator typing its own path.** A
 daemon tick run with no `--project` flag and a scratch `--state-dir` raises
 no `unwatched-project` finding whose subject is
-`/Users/ser/scatola/jobs/projects/blacksmith`, and the same tick run with
+`<clone>`, and the same tick run with
 `--no-self` raises none either and reads no lockfile for it — the second
 clause gated by a task-1 test that asserts the tick's project list under
 `--no-self` does not contain `REPO_ROOT`, so suppressing the finding while
@@ -225,7 +225,7 @@ exactly like real ones — a well-formed wrong answer, D-133's shape, in the one
 epic built to end it. So the task spec pins the mechanism rather than leaving
 it to the coder: the session is `phase-10-2026-09-04`, confirmed by listing
 the host clone's event directory first; every read-side invocation carries
-`--state-dir /Users/ser/scatola/jobs/projects/blacksmith/state` explicitly
+`--state-dir <clone>/state` explicitly
 (all six commands accept it — `usage.ts` lines 156, 380, 461, 468, 513, 707);
 writes still go to a scratch state dir outside the repo. And the section may
 not be written at all unless the folded event count is quoted and exceeds the

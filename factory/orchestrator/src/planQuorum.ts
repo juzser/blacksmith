@@ -329,7 +329,7 @@ const DEFAULT_JUDGE_BUDGET: JudgeBudget = { timeout_ms: 120_000, max_output_byte
  * case/token budgets, each task's acceptance criteria and nonfunctional
  * clauses, edge count, fired triggers with their evidence) — never file
  * contents, never a diff. The criteria are part of the claim, not evidence
- * for it: FD-46 (csb-signing-policy-1) had both external critics refute
+ * for it: FD-46 had both external critics refute
  * plan-v1 for missing a case its task already listed as a criterion, because
  * the prompt showed them the objective and nothing under it. The tasks it
  * lists are `livePlanTasks`, not `plan.tasks`: this prompt is the whole of

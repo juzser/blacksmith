@@ -41,10 +41,9 @@ the guides say what exists, and the scope says only what was intended.
 | [`dogfood-4-findings.md`](dogfood-4-findings.md) | 782 kB, 15 408 lines | `D-14`..`D-298` (171 findings, not contiguous) | `grep -n '^## D-245 ' docs/specs/dogfood-4-findings.md`, then `sed -n` from that line to the next `^## ` |
 | [`phase-9-punch-list.md`](phase-9-punch-list.md) | 229 kB | `P9-1`..`P9-37` | `grep -n '^## P9-15 ' docs/specs/phase-9-punch-list.md` |
 | [`dogfood-envkit-findings.md`](dogfood-envkit-findings.md) | 143 kB | `D0`..`D13` (no hyphen — the first dogfood, before the id scheme settled; `D3a` is a sub-heading) | `grep -n '^## D12 ' docs/specs/dogfood-envkit-findings.md` |
-| [`dogfood-csb-audit-1-findings.md`](dogfood-csb-audit-1-findings.md) | 30 kB | `FD-1`..`FD-36` | `grep -n '^## FD-30 ' docs/specs/dogfood-csb-audit-1-findings.md` |
-| [`dogfood-csb-signing-policy-1-findings.md`](dogfood-csb-signing-policy-1-findings.md) | 8 kB | `FD-37`..`FD-50` | the ids are bold inline leads: `grep -n '^\*\*FD-42 ' docs/specs/dogfood-csb-signing-policy-1-findings.md` |
 | [`dogfood-mcp-close.md`](dogfood-mcp-close.md) | 34 kB | — | a close-out, read by heading; its headline is the first section |
 | [`dogfood-envkit-close.md`](dogfood-envkit-close.md) + [`dogfood-envkit-close-event.json`](dogfood-envkit-close-event.json) | 9 kB + 3 kB | — | a close-out and the event that recorded it |
+| not published | — | `FD-1`..`FD-50` | none: dogfood findings from runs on operator-private projects, kept out of the public tree. A cited `FD-n` in a comment or doc is historical; the sentence around it carries the substance |
 | `evidence/` | 37 screenshots | — | named by the finding they belong to (`d140-…`); open one only when its finding names it |
 | [`../../CHANGELOG.md`](../../CHANGELOG.md) | at the repo root | — | the same rule: a renamed verb stays under its old name in the entry that shipped it |
 

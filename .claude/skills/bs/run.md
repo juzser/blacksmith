@@ -165,10 +165,9 @@ playbooks are written to prevent.
     13-16 write. The envelope leaves the flag optional, and an omitted one
     stamps the record `plan_version: 1` — so on an epic that amended, the
     check, the review and the close all claim to have verified a plan that
-    no longer exists. csb-signing-policy-1 closed at v3 with its integration
-    check and its closing spec review both stamped v1
-    (`csb-signing-policy-1-2026-09-11#197`, `#202`); the goal check, passed
-    the flag, says v3. Read the version off `smith plan ingest`'s receipt and
+    no longer exists. One dogfooded product epic closed at v3 with its
+    integration check and its closing spec review both stamped v1; the goal
+    check, passed the flag, said v3. Read the version off `smith plan ingest`'s receipt and
     pass it every time.
 13. Dispatch the **`spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
@@ -276,8 +275,8 @@ playbooks are written to prevent.
     provider is `active` in `crosscheck.yml`: codex spends the operator's
     ChatGPT quota, DeepSeek spends prepaid credit, and step 16 runs the
     verdict again before it writes, so a clean close is two spends, not one
-    (csb-signing-policy-1 wrote two `quorum-decision`s against its
-    integration ref, `#210` from the verdict and `#215` from the close).
+    (one dogfooded epic wrote two `quorum-decision`s against its
+    integration ref, one from the verdict and one from the close).
     Nothing in the `quorum-decision` payload names the purse, so say which
     one it is to the operator before the first call, not after the second.
 16. Record the close. The verdict above is a read-only probe and writes
@@ -302,8 +301,8 @@ playbooks are written to prevent.
     `smith/<epic>/integration`. The base is the target repo's `main` unless
     the epic was cut from another epic's integration branch, in which case
     the PR stacks on that branch and the operator merges the parent's PR
-    first — csb-signing-policy-1 was cut from `smith/csb-audit-1/integration`
-    and opened PR #54 against it, behind PR #53; once the parent has merged
+    first — a child epic cut from `smith/<parent>/integration` opens its PR
+    against that branch, behind the parent's PR; once the parent has merged
     and its branch is deleted, GitHub retargets the child to `main`. The
     operator reviews on GitHub; this session never merges to `main`
     (`docs/standards/guardrails.md`).

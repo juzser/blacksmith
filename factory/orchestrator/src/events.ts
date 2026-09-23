@@ -561,7 +561,7 @@ const TYPED_PAYLOAD_SCHEMAS: Record<string, string> = {
 /**
  * The one field of a `task-result-recorded` payload a reader iterates. The
  * projector writes `artifacts[]` into rows inside the session's transaction,
- * so an object here (csb-audit-1#100 carried `{ claude_half, external_half,
+ * so an object here (a dogfood run's event #100 carried `{ claude_half, external_half,
  * repair_brief }`) rolled back the whole session and the dashboard drew
  * nothing for it. Pinning only this field is deliberate: the full result
  * schema is not enforced on the event, because real logs carry many

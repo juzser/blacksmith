@@ -352,7 +352,7 @@ describe('db/projector.ts', () => {
 
   it('never materialises a task row for an id nothing but a dispatch ever named', async () => {
     const { appendEvent, readEvents } = await import('../../src/events.js');
-    // The csb-audit-1 session ran its planning rounds by hand, before
+    // One dogfood epic's session ran its planning rounds by hand, before
     // planRefTaskId() existed, and stamped each round's dispatch with an id it
     // made up on the spot: `<epic>/plan-r12`, `<epic>/spec-review-r15`, ...
     // Twenty-two of them sat in the board's "In progress" column for a week,
@@ -925,7 +925,7 @@ describe('D-200: a finding transitioned from a continuation session', () => {
 
 // ---------------------------------------------------------------------------
 // A task-result-recorded whose `artifacts` is an object instead of a list.
-// csb-audit-1#100 carried `{ claude_half, external_half, repair_brief }`;
+// A dogfood run's event #100 carried `{ claude_half, external_half, repair_brief }`;
 // the projector's `.forEach` threw on it inside the session transaction, so
 // the *whole session* rolled back and the dashboard drew nothing for an epic
 // that was three waves deep. The fix shape is D-141's: land everything that
@@ -1250,7 +1250,7 @@ describe('db/projector.ts — an error-logged moves a task only when its severit
 });
 
 // ---------------------------------------------------------------------------
-// Item (k) of the csb-signing-policy-1 dogfood. A spec finding is minted with
+// Item (k) of a dogfood run's findings. A spec finding is minted with
 // `finding_scope: 'spec'` and a `spec_ref` naming the plan version and the
 // criterion it failed (findings.ts, D-33/P9-9) — and neither ever reached the
 // projection. The findings table carried scope-less rows, so the dashboard

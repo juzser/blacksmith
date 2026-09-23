@@ -261,7 +261,7 @@ interface ResultArtifact {
 interface ResultPayload {
   task_id?: string;
   // Typed loosely on purpose: the row writer below checks the shape. A
-  // hand-written log (csb-audit-1#100) carried an object here, and typing it
+  // hand-written log (a dogfood run's event #100) carried an object here, and typing it
   // as a list let the projector call `.forEach` on it and roll back the
   // whole session.
   artifacts?: unknown;

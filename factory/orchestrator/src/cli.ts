@@ -2928,7 +2928,7 @@ async function main(): Promise<number> {
     // close per role: a judge that splits its findings across two files still
     // owes one turn, and a second report against it would be a duplicate.
     //
-    // FD-1 (csb-audit-1): `--grader` is the same hand-over for the grader. Its
+    // FD-1: `--grader` is the same hand-over for the grader. Its
     // verdict document is not a findings list, so until `judge report` learned
     // the shape the grader's turn stayed open with its verdict on the command
     // line, and the gate blocked on the judge it was about to read.

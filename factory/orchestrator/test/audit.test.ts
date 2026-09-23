@@ -214,12 +214,12 @@ describe('foldAuditStore — status is a line, never an edit', () => {
         [
           r,
           { fingerprint: r.fingerprint, status: 'accepted', ts: daysBefore(3) },
-          { fingerprint: r.fingerprint, status: 'fixed', ts: daysBefore(1), epic: 'csb-perf-1' },
+          { fingerprint: r.fingerprint, status: 'fixed', ts: daysBefore(1), epic: 'perf-1' },
         ],
         { now: NOW },
       ),
     );
-    expect(folded.epic).toBe('csb-perf-1');
+    expect(folded.epic).toBe('perf-1');
   });
 
   it('refuses a store line with no raised line to hang off', () => {
@@ -307,7 +307,7 @@ describe('suppression — the rule that decides whether an axis may re-raise', (
         [
           r,
           { fingerprint: r.fingerprint, status: 'accepted', ts: daysBefore(30) },
-          { fingerprint: r.fingerprint, status: 'fixed', ts: daysBefore(2), epic: 'csb-perf-1' },
+          { fingerprint: r.fingerprint, status: 'fixed', ts: daysBefore(2), epic: 'perf-1' },
         ],
         { now: NOW },
       ),
@@ -321,7 +321,7 @@ describe('suppression — the rule that decides whether an axis may re-raise', (
       foldAuditStore(
         [
           r,
-          { fingerprint: r.fingerprint, status: 'fixed', ts: daysBefore(30), epic: 'csb-perf-1' },
+          { fingerprint: r.fingerprint, status: 'fixed', ts: daysBefore(30), epic: 'perf-1' },
           { ...r, ts: daysBefore(1) },
         ],
         { now: NOW },

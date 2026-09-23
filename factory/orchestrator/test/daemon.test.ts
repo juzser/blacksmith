@@ -259,7 +259,7 @@ describe('what one tick notices', () => {
   // A closed epic's bill is final: nothing will be dispatched to it again, so
   // "the projected ceiling has crossed the alarm" is a warning about spend
   // that cannot happen. The two verdicts the daemon used to raise on every
-  // tick were csb-audit-1 (closed 2026-09-10) and phase-10 (closed 2026-09-05),
+  // tick were a dogfooded product epic (closed 2026-09-10) and phase-10 (closed 2026-09-05),
   // both standing as `attention` for days with nobody able to act on them.
   // `smith budget alarm` still reports the closed epic; the daemon does not.
   it('says nothing about the budget of an epic the log has already closed', () => {

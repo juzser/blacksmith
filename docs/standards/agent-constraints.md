@@ -170,7 +170,7 @@ M-3).
 - **`maxTurns` is the ceiling, and the harness enforces it.** The
   2026-08-05 reading — inert, kept as recorded intent — was wrong: Claude
   Code stops an `Agent`-tool subagent at the template's `maxTurns` exactly
-  (measured 2026-09-07 and 2026-09-11, dogfood-csb-audit-1 FD-7, FD-14), and
+  (measured on two dogfood runs, 2026-09-07 and 2026-09-11), and
   the agent cannot see how many turns it has left. The template's number is
   therefore a real per-role budget; the `/bs` dispatch contract restates it
   in the prompt verbatim so the agent can plan against it, and never a
