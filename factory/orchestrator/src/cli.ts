@@ -2602,7 +2602,14 @@ async function main(): Promise<number> {
     const spec = readJsonFile<ClaimedTask>(specFile);
     // The worktree is a full checkout, so it is both halves of the question:
     // the diff this task committed, and everyone in the repo who imports it.
-    const diffs = collectExportDiffs(worktreeDir, collectCommittedChanges(worktreeDir));
+    // The promises go in too: a promised file the collector cannot read is
+    // reported unverified rather than dropped, which is the only way absent
+    // from the diff keeps meaning untouched.
+    const diffs = collectExportDiffs(
+      worktreeDir,
+      collectCommittedChanges(worktreeDir),
+      spec.keeps_exports ?? [],
+    );
     const graph = buildSymbolGraph(collectSources(worktreeDir));
     const report = exportImpact(graph, diffs, spec.claims, spec.keeps_exports ?? []);
     printJson(report);
