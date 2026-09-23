@@ -1475,8 +1475,8 @@ describe('events.ts', () => {
   // -------------------------------------------------------------------------
   // The same fuse, on `task-result-recorded`. Its payload is the Result
   // envelope, and the projector turns `artifacts[]` into rows inside the
-  // session's transaction -- so an `artifacts` that is an object (csb-audit-1
-  // #100 carried `{ claude_half, external_half, repair_brief }`) rolled the
+  // session's transaction -- so an `artifacts` that is an object (a dogfood
+  // run's event #100 carried `{ claude_half, external_half, repair_brief }`) rolled the
   // whole session back. The check is deliberately narrow: only the one field
   // a reader iterates is pinned to its shape. The full result schema is not
   // enforced here because real logs carry many hand-written result payloads

@@ -384,7 +384,7 @@ function graderFindingCount(parsed: unknown): number | undefined {
  *
  * The grader is the one role whose declared shape is not a list: it writes a
  * verdict document, and refusing that document left its turn closable only by
- * a hand-written evidence file (FD-1, csb-audit-1). For `role === 'grader'`
+ * a hand-written evidence file (FD-1). For `role === 'grader'`
  * the grader result document is accepted beside the list, and the count is
  * its non-pass criteria. No other role gets that reading — a reviewer that
  * wrote a verdict wrote the wrong shape.

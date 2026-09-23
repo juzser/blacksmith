@@ -218,7 +218,7 @@ describe('checkArtifacts', () => {
 
   describe('a path spelled from the work root', () => {
     // FD-5. The template says "write them under `state/artifacts/<task-id>/`",
-    // and the round-2 coder of csb-audit-1 declared exactly that:
+    // and the round-2 coder of a dogfood epic declared exactly that:
     // `state/artifacts/<epic>/<task>/round2-….txt`. Resolved against the home
     // it became `<home>/state/artifacts/<epic>/<task>/…` — lexically inside,
     // so the gate said `missing` about a file that existed and blocked the

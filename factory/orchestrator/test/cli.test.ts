@@ -244,7 +244,7 @@ describe('cli.ts (built binary)', () => {
     expect(err.message).toContain('plan-v100.json');
   });
 
-  // FD-45 / FD-49 (csb-signing-policy-1). plan.md step 4 critiques the plan
+  // FD-45 / FD-49. plan.md step 4 critiques the plan
   // before step 6 files it as plan-v1.json, so the verb has to take the draft
   // by path; and its output -- three rationales of several kB each -- is read
   // back from a file more often than from a terminal.
@@ -5697,8 +5697,8 @@ describe('cli.ts (built binary)', () => {
         );
       });
 
-      // Item (j) of the csb-signing-policy-1 dogfood: the one refusal a
-      // spec-reviewer actually hit in csb-audit-1 was this one, and it was
+      // Item (j) of a dogfood run's findings: the one refusal a
+      // spec-reviewer actually hit in an earlier dogfood epic was this one, and it was
       // reported back as "error object with exit 0". The exit code was the
       // pipe's, not the CLI's - but nothing here had ever pinned it either.
       it('refuses spec evidence that names no criterion_ref, with exit 1 and no event', async () => {
@@ -7976,7 +7976,7 @@ describe('cli.ts (built binary)', () => {
       ]);
     });
 
-    // FD-1 (csb-audit-1). `--grader` hands the gate the grader's verdict the
+    // FD-1. `--grader` hands the gate the grader's verdict the
     // way `--evidence` hands it a judge's findings, but only the evidence path
     // closed the judge's turn. A grader dispatched by `judge dispatch` then
     // blocked its own gate as `judges-outstanding` with its verdict sitting
@@ -8877,7 +8877,7 @@ describe('cli.ts (built binary)', () => {
         '--kind',
         'issue-text',
         '--source',
-        'juzser/black-smith#12',
+        'example-org/example-app#12',
         '--json',
       ]);
 

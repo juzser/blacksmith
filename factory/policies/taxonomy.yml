@@ -32,7 +32,7 @@ agent:     [planner, spec-reviewer, researcher, coder, tester, grader,
             # operator — the human, as a `found_by`: a defect read off the code
             #   by a person. Never dispatched — no template, no budget, no
             #   delegation grant, no judge turn — so nothing that counts
-            #   rounds or pairs roles ever sees it (dogfood-csb-audit-1 FD-21)
+            #   rounds or pairs roles ever sees it (added after a dogfood run)
 
 provider:  [claude, codex, deepseek]
 model_tier: [frontier, mid, small]        # fable/opus · sonnet · haiku

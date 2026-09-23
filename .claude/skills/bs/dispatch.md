@@ -11,7 +11,7 @@ task spec or the one question · the **absolute** worktree path · the path
 claims it may touch · its token cap · **its turn budget, copied verbatim
 from the template's `maxTurns`**. That last one is why it is listed: Claude
 Code enforces the template's `maxTurns` on every `Agent`-tool dispatch
-(dogfood-csb-audit-1 FD-7, FD-14),
+(measured on two dogfood runs, 2026-09-07 and 2026-09-11),
 and the agent cannot see how many turns it has left. A prompt that promises
 more than the template is a fiction the agent plans against and gets cut in
 the middle of (a planner told 40 under a template saying 20 stopped twice
@@ -216,8 +216,8 @@ stamp) and `<epic>/plan-v<n>` (a plan version, the ref `plan quorum`
 stamps). Anything else — `<epic>/plan-draft`, `<epic>/spec-review-r27` —
 folds a real row that nothing can ever move on, because no planner or
 spec-reviewer dispatch produces the `wave-merged` or `gate-outcome` that
-would: twenty-one of csb-audit-1's twenty-four non-terminal rows were these
-(`docs/specs/dogfood-csb-audit-1-findings.md` FD-27).
+would: on one dogfooded product epic, twenty-one of its twenty-four
+non-terminal rows were these.
 
 So: the closing spec-reviewer, the goal-check spec-reviewer, the planner
 rendering a verdict and the scribe are dispatched against

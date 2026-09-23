@@ -1333,7 +1333,7 @@ describe('ui/server app.ts — a finding the projection cannot store', () => {
 // The other quiet undercount. createRefresher() names a session it could not
 // project on stderr and moves on -- which is the right thing for the read,
 // and the wrong thing for the operator, who is looking at the dashboard and
-// not at the terminal that launched it. csb-audit-1 drew as nothing for
+// not at the terminal that launched it. A dogfood epic drew as nothing for
 // three waves because one hand-written result payload carried `artifacts`
 // as an object: the session rolled back, stderr said so, no page did. The
 // pulse is the one read every page makes, so that is where the projection

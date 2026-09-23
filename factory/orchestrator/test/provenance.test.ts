@@ -37,7 +37,7 @@ describe('wrapIngested', () => {
     const wrapped = wrapIngested({
       text: 'hello',
       kind: 'issue-text',
-      source: 'juzser/black-smith#12',
+      source: 'example-org/example-app#12',
     });
 
     expect(wrapped.digest).toMatch(/^[0-9a-f]{12}$/);

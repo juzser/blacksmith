@@ -25,6 +25,16 @@ private repository and published here as a single initial commit, so the phase
 entries below record development that predates this repo's git history rather
 than appearing in it.
 
+### Removed
+
+- **Operator-private project specs and local paths.** The tracked tree no
+  longer carries the plans, epic specs and dogfood findings of epics run
+  against the operator's own private projects, their milestones in
+  `factory/specs/roadmap.md` (which ships in the npm tarball), or absolute
+  paths from the operator's machine; docs, comments and test fixtures that
+  cited them now use neutral wording and example names. They remain in git
+  history.
+
 ### Added
 
 - **0.3.0 — caps move per box, errors file themselves, and hand-typed
@@ -226,9 +236,9 @@ than appearing in it.
   are untouched.
 
   *`keeps_exports` (#134).* The wave gate treated every HEAD import edge
-  between two tasks' claims as a reason to serialize them; on `vam-audit-1`
-  that turned a planned 1×3 wave into 3×1 — nine crossings, five type-only.
-  A task may now list in `keeps_exports` (task-spec schema, optional,
+  between two tasks' claims as a reason to serialize them; on an audit epic
+  on another project that turned a planned 1×3 wave into 3×1 — nine
+  crossings, five type-only. A task may now list in `keeps_exports` (task-spec schema, optional,
   literal paths inside its own claims) the files whose existing exports it
   keeps. A crossing whose producer promised the file moves out of
   `crossings` into `symbolImpact.promised` and no longer serializes the
@@ -241,10 +251,10 @@ than appearing in it.
 
 - **The turn cap the harness does read.** M-4 (2026-08-05) called the
   templates' `maxTurns` inert and moved the turn budget into the dispatch
-  prompt. Dogfooding `csb-audit-1` measured the opposite eight times — Claude
+  prompt. Dogfooding a product epic measured the opposite eight times — Claude
   Code stops an `Agent`-tool subagent at exactly the template's number,
-  whatever the prompt promised (FD-7, FD-14) — and on 2026-09-11 the planner
-  for `csb-signing-policy-1` was cut at its template's 20 against a stated
+  whatever the prompt promised — and on 2026-09-11 the planner for its
+  successor epic was cut at its template's 20 against a stated
   40 with nothing written, the second planner lost that way. So the roles
   reverse: `dispatch.md` now carries the template's `maxTurns` verbatim and
   never a higher figure, `budgets.yml`, `agent-constraints.md`,

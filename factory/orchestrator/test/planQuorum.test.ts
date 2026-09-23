@@ -331,7 +331,7 @@ describe('planQuorum.ts planQuorumJudgeRequest (the evidence the critic reads)',
     expect(request.prompt).toContain('(no tasks)');
   });
 
-  // FD-46 (csb-signing-policy-1). Both external refutations of plan-v1 argued
+  // FD-46. Both external refutations of plan-v1 argued
   // against a case the plan already carried in a task's acceptance_criteria,
   // because the prompt listed each task's objective, case and budget and
   // nothing else. A critic that cannot read the plan's criteria is critiquing
@@ -587,7 +587,7 @@ describe('planQuorum.ts runPlanQuorum (plan_quorum quorum trigger, critique-only
   });
 
   // -------------------------------------------------------------------------
-  // FD-45 (csb-signing-policy-1): plan.md step 4 runs the quorum BEFORE step 6
+  // FD-45: plan.md step 4 runs the quorum BEFORE step 6
   // writes plan-v1.json, but runPlanQuorum only ever read plan-v<n>.json. The
   // playbook, followed literally, failed with plan.not-found; the session
   // copied the draft to plan-v1.json by hand, which is a v1 that existed

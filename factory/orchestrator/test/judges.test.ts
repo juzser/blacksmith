@@ -308,7 +308,7 @@ describe('judges.ts', () => {
       expect(report.findingCount).toBe(0);
     });
 
-    // FD-1 (csb-audit-1). The grader writes a verdict document, not a findings
+    // FD-1. The grader writes a verdict document, not a findings
     // list, so a grader dispatch minted an obligation that only a re-shaped
     // copy of the grader's own output could discharge — round 1 closed it
     // with a hand-written evidence file. The grader's result file is its

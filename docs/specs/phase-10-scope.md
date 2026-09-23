@@ -56,7 +56,7 @@ one of those greens was produced by the factory running on this repository.
 repo, with the items below as its tasks. That is not ceremony: it is the
 only thing that converts "built" into "exercised" for the instruments, and
 it is the only way `wave audit` ever gets a wave to audit. Add
-`--project /Users/ser/scatola/jobs/projects/blacksmith` to the daemon and
+`--project <clone>` to the daemon and
 scheduler passes so the clone stops being invisible to its own watcher.
 
 **Whose call.** The operator's, and it is the fork that decides the shape of
@@ -210,8 +210,7 @@ currently folding zero of.
 **Whose call.** Sequencing is the operator's; the plan already exists.
 
 **Settled 2026-09-04 — struck.** The item's premise is false for this
-clone: `workspaces/` is empty, the only checkout inside the sibling clone
-whose remote resolves to `juzser/maestro` has already run
+clone: `workspaces/` is empty, the only checkout inside the sibling fork has already run
 `envkit-mcp-followup`. The fork this item posed — adopt envkit into this
 clone, leave the rows while correcting their goal lines, or strike — was
 answered strike. This is task-2's work, recorded as [[D-271]].
@@ -264,7 +263,7 @@ index.
    the first thing this factory builds for itself is to build it that way.
    This also answers P10-6, which follows from it — `phase-10` gets an epic
    id, and the items above become its task specs. The same decision adds
-   `--project /Users/ser/scatola/jobs/projects/blacksmith` to the daemon and
+   `--project <clone>` to the daemon and
    the scheduler, so the recheck and maintenance proposals the fourth axis
    is made of are computed over this clone rather than over nothing.
 2. **Is the Cloudflare port in scope, or struck to its own milestone?** —
@@ -294,7 +293,7 @@ number below came from a command run inside `smith/phase-10/task-6-fold-
 what-this-epic-emitted`, against the host clone's own state, not this task's
 worktree: `.gitignore` line 2 is `state/`, so the worktree starts with no
 `state/events/` and no `state/smith.db`, and the fold below always names
-`--state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events`
+`--state-dir <clone>/state/events`
 explicitly on every read-side command. That value — the `events/`
 subdirectory itself, not its parent `state/` — is what `logPath` in
 `factory/orchestrator/src/events.ts` actually joins the flag onto; pointing
@@ -304,7 +303,7 @@ right value was found rather than assumed.
 The session read is this epic's own. Listed before anything else was folded:
 
 ```
-$ ls /Users/ser/scatola/jobs/projects/blacksmith/state/events
+$ ls <clone>/state/events
 maint-2026-09-03.jsonl
 phase-10-2026-09-04.jsonl
 ```
@@ -314,8 +313,8 @@ phase-10-2026-09-04.jsonl
 ### Event count
 
 ```
-$ wc -l /Users/ser/scatola/jobs/projects/blacksmith/state/events/phase-10-2026-09-04.jsonl
-219 /Users/ser/scatola/jobs/projects/blacksmith/state/events/phase-10-2026-09-04.jsonl
+$ wc -l <clone>/state/events/phase-10-2026-09-04.jsonl
+219 <clone>/state/events/phase-10-2026-09-04.jsonl
 ```
 
 219 events (JSONL, one per line — line count is event count). That is well
@@ -347,7 +346,7 @@ Over this epic's own log:
 ```
 $ node factory/orchestrator/dist/cli.js wave audit \
     --session phase-10-2026-09-04 --epic phase-10 \
-    --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
+    --state-dir <clone>/state/events
 ```
 
 Exit 0. Three waves admitted and observed, `"widest":{"declared":3,
@@ -403,7 +402,7 @@ rebuild` writes):
 ```
 $ node factory/orchestrator/dist/cli.js db rebuild --db <scratch>/rebuild.db \
     --session phase-10-2026-09-04 \
-    --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
+    --state-dir <clone>/state/events
 {"sessionsProcessed":1,"eventsApplied":219,"skippedFindings":[]}
 ```
 
@@ -477,7 +476,7 @@ classifies what is due without enacting anything:
 ```
 $ node factory/orchestrator/dist/cli.js daemon run --once \
     --dir <scratch-dir> \
-    --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
+    --state-dir <clone>/state/events
 ```
 
 Exit 0. One tick, sessions `[maint-2026-09-03, phase-10-2026-09-04]`.
@@ -504,7 +503,7 @@ named a scratch directory outside it.
 ```
 $ node factory/orchestrator/dist/cli.js scheduler admit \
     --session phase-10-2026-09-04 \
-    --state-dir /Users/ser/scatola/jobs/projects/blacksmith/state/events
+    --state-dir <clone>/state/events
 ```
 
 Exit 0. Two admissions, both `operator`-held: a `maintenance` proposal

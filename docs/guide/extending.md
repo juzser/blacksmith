@@ -123,7 +123,7 @@ providers:
 out and the vendor picks, and for a reasoning model the reasoning counts
 against that ceiling too — the first two `plan quorum` calls against
 `deepseek-reasoner` ended `length`-truncated before the JSON was finished
-(dogfood csb-signing-policy-1, FD-37). A `judge run --max-output-tokens <n>`
+(measured while dogfooding, 2026-09-11). A `judge run --max-output-tokens <n>`
 overrides the policy value for one call. When the vendor stops
 the answer at the ceiling (`finish_reason: "length"`) the transport reports
 `provider.output-truncated` and does **not** nudge: the prompt was fine, the

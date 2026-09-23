@@ -316,7 +316,7 @@ repair to make:
   at the same cap. One call, one failure, one clear message. For a
   reasoning model the reasoning tokens count against the ceiling too, which
   is how a plan critique against `deepseek-reasoner` ran out of room before
-  its JSON was finished (dogfood csb-signing-policy-1, FD-37).
+  its JSON was finished (measured while dogfooding, 2026-09-11).
 - **`provider.invalid-output`** — the vendor finished (`finish_reason:
   "stop"`, or a vendor that reports none) and what it wrote is still not a
   usable answer: no JSON, JSON the schema rejects, or a body past

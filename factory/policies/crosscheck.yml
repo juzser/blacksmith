@@ -114,13 +114,13 @@ providers:
     # Funded for THIS box, 2026-09-04, by the operator who owns the key.
     enabled: auto
     # Promoted shadow -> active by the operator on 2026-09-14, after the
-    # csb-signing-policy-1 epic-final verdict held on `insufficient-providers`
+    # epic-final verdict of a dogfooded product epic held on `insufficient-providers`
     # with all three participants at `confirm`: with claude excluded as the
     # finder and deepseek in shadow, the gating pool was codex alone (1 <
     # `quorum_rule.min_providers` 2), so no mechanically-ready epic could ever
     # reach quorum on this box (epic.ts, "exactly 1 active external"). The
     # calibration run it replaced is the recorded shadow verdicts from
-    # csb-audit-1 and csb-signing-policy-1 (docs/runbooks/providers.md §3).
+    # two dogfooded product epics (docs/runbooks/providers.md §3).
     # Rollback is `mode: shadow` here; nothing else remembers the promotion.
     mode: active
 

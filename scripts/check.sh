@@ -126,7 +126,7 @@ root = sys.argv[1]
 fail = False
 required = ["name", "description", "model", "tools"]
 # `maxTurns` is enforced by Claude Code as the subagent's turn ceiling
-# (dogfood-csb-audit-1 FD-7/FD-14, measured 2026-09-07 and 2026-09-11), so
+# (measured on two dogfood runs, 2026-09-07 and 2026-09-11), so
 # a template without it ships an uncapped role and a non-integer value is
 # a cap of unknown effect. Checked apart from `required` because `0` is
 # falsy and must be refused by name, not read as missing.
@@ -136,7 +136,7 @@ files = sorted(glob.glob(os.path.join(root, ".claude", "agents", "*.md")))
 with open(os.path.join(root, "factory", "policies", "taxonomy.yml")) as fh:
     tax_agents = set(yaml.safe_load(fh)["agent"])
 # `operator` is the human as a `found_by` value — never dispatched, so no
-# template by design (taxonomy v10, dogfood-csb-audit-1 FD-21). A template
+# template by design (taxonomy v10). A template
 # with `model`/`tools` frontmatter for a role nobody dispatches would be a
 # false declaration, so the equality below is over dispatched roles only.
 never_dispatched = {"operator"}

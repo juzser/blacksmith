@@ -2565,7 +2565,7 @@ because nothing stops a stale verdict from carrying one to `main`.
 **D-144's stated fix is not available on this repository.**
 
 ```
-GET /repos/juzser/black-smith/branches/main/protection → 403
+GET /repos/<owner>/<repo>/branches/main/protection → 403
 {"message":"Upgrade to GitHub Pro or make this repository public to
   enable this feature."}
 ```
@@ -2958,7 +2958,7 @@ Zero insertions, zero deletions, for the commit that rewrote the file. GitHub
 agrees, which is what makes this a review hole rather than a local annoyance:
 
 ```
-$ gh api repos/juzser/black-smith/commits/b00d67f --jq '.files[]'
+$ gh api repos/<owner>/<repo>/commits/b00d67f --jq '.files[]'
 {"additions":0,"changes":0,"deletions":0,
  "filename":"factory/orchestrator/src/judges.ts",
  "has_patch":false,"status":"modified"}
@@ -13825,8 +13825,7 @@ tests in `dotenv.test.ts`; `smith judge preflight` moves deepseek from
 because `envkit-config-loader` and `envkit-mcp-surface` were dogfooded here
 and `envkit-mcp-followup` was planned to follow them. By the time of P10-5,
 `workspaces/` in this clone is empty: the only envkit checkout left on this
-box lives inside the sibling clone whose remote resolves to
-`juzser/maestro`, and `envkit-mcp-followup` has already been run there
+box lives inside the sibling fork, and `envkit-mcp-followup` has already been run there
 rather than here. This repository was declaring a project it cannot reach.
 
 The operator settled the fork on 2026-09-04

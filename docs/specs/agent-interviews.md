@@ -206,11 +206,10 @@ an inert key is a lie unless the prompt makes it true.
 >
 > **Correction, 2026-09-11.** The premise was wrong: Claude Code *does* read
 > `maxTurns` and stops the subagent at exactly that many turns, whatever the
-> prompt promised. Measured eight times over two sessions
-> (`docs/specs/dogfood-csb-audit-1-findings.md` FD-7, FD-14): a
+> prompt promised. Measured eight times over two dogfood sessions: a
 > security-reviewer told 20 cut at its template's 15, a verifier likewise,
 > and a planner told 40 cut at its template's 20 — twice, the second time on
-> 2026-09-11 while planning `csb-signing-policy-1`, with nothing written.
+> 2026-09-11 while planning a successor epic, with nothing written.
 > (c) survives with the roles reversed: the template is the limit and the
 > prompt restates it, never the other way round. `scripts/check.sh` now
 > requires `maxTurns` as a positive integer on every template, and the
