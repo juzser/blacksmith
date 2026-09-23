@@ -16,6 +16,7 @@ import { appendEvent, readEvents } from '../src/events.js';
 import { computeFingerprint, type FindingEvidence } from '../src/findings.js';
 import { decide, type LessonRule } from '../src/severity.js';
 import { crosscheckDefaults } from './helpers/crosscheckPolicy.js';
+import { legacyComputeFingerprint } from './helpers/legacyFingerprint.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(here, 'fixtures', 'fake-judge-cli.mjs');
@@ -379,6 +380,54 @@ describe('crossFinding.ts reconcile — the additive direction', () => {
       'native-only': 0,
     });
     expect(report.entries).toHaveLength(3);
+  });
+});
+
+describe('crossFinding.ts reconcile — legacy (pre-#178) native fingerprints', () => {
+  it('corroborates a native finding whose stored fingerprint predates the #178 normalizer widening', () => {
+    // A summary with a line span: the widened normalizer (issue #178,
+    // findings.ts LINE_SPAN_RE) strips it before hashing, but the pre-widening
+    // one did not -- so a finding raised before the widening landed carries a
+    // fingerprint the current computeFingerprint() will never reproduce from
+    // the same fields, even though nothing about the underlying bug changed.
+    const summary = 'off-by-one in the retry loop (lines 40-42)';
+    const legacyFingerprint = legacyComputeFingerprint({
+      filePath: 'src/a.ts',
+      category: 'correctness',
+      summary,
+    });
+    // Sanity: prove the two algorithms really do disagree on this summary,
+    // otherwise the test would pass for the wrong reason.
+    expect(legacyFingerprint).not.toBe(
+      computeFingerprint({ filePath: 'src/a.ts', category: 'correctness', summary }),
+    );
+
+    const report = reconcile({
+      taskId: 'epic-1/task-1',
+      native: [native({ summary, fingerprint: legacyFingerprint })],
+      independent: [run({ evidence: [evidence({ summary, severity: 'S1-stop-the-line' })] })],
+      policy: finder(),
+    });
+
+    // Without the alias widening this native record and the independent
+    // group's freshly-computed fingerprint never meet: the corroboration is
+    // missed, and the native finding is reported a second time as
+    // `native-only` because `accounted` was never marked for it.
+    expect(report.entries).toHaveLength(1);
+    expect(report.entries[0]).toMatchObject({
+      outcome: 'corroborated',
+      native_finding_id: 'f-1',
+      native_severity: 'S3-minor',
+      independent_severity: 'S1-stop-the-line',
+      resolved_severity: 'S1-stop-the-line',
+      applied: true,
+    });
+    expect(report.counts).toEqual({
+      corroborated: 1,
+      'co-located': 0,
+      'independent-only': 0,
+      'native-only': 0,
+    });
   });
 });
 
