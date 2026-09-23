@@ -19,6 +19,12 @@ with nothing written). So state the template's number, never a higher one,
 and tell every role that owes a file to write it before it refines it. A
 role that keeps running out is a template to raise, not a prompt to inflate.
 
+Read that number from `.claude/agents/<role>.md` as the file stands now, at
+dispatch time — not from memory, an earlier dispatch, or a doc that quotes
+it. `smith agents sync` may have rewritten it locally from
+`SMITH_MAXTURNS_<ROLE>` (an uncommitted, per-box edit), and Claude Code
+enforces what the file says. A sync reaches only agents spawned after it.
+
 ## Splice the compiled lessons into every prompt (agent-interviews.md N-9, P9-2)
 
 Before you dispatch, run

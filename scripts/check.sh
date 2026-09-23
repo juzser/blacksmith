@@ -322,8 +322,9 @@ echo "-- Secret scan: gitleaks --"
 # allowlisted literal (the fake credential the envkit-mcp acceptance criteria
 # quote by name) rather than a path-allowlist over factory/specs, so the
 # generic-api-key rule stays armed everywhere else. .env.example is NOT
-# allowlisted — it holds variable names, and a value appearing there is
-# precisely the mistake worth catching.
+# allowlisted — it holds secrets by name only (its SMITH_* values are plain
+# numbers), and a credential appearing there is precisely the mistake worth
+# catching.
 if command -v gitleaks >/dev/null 2>&1; then
   if gitleaks dir . --no-banner --redact --exit-code 1; then
     echo "OK   gitleaks dir ."

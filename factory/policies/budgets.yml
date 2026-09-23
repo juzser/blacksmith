@@ -97,7 +97,14 @@ epic:
                               # Two things this does NOT fix, both worth a
                               # follow-up: (1) there is no per-epic override,
                               # so a number raised for one epic is raised for
-                              # every epic black-smith will ever run; (2) a
+                              # every epic black-smith will ever run. What
+                              # exists is a per-BOX override, a different
+                              # thing: SMITH_EPIC_CAP_TOKENS in the env (or
+                              # `.env`) replaces this number for every epic
+                              # run on that box while it is set — the
+                              # SMITH_EPIC_* / SMITH_TASK_* names in
+                              # .env.example cover each number in this file
+                              # that a box may want to move; (2) a
                               # large share of that 1.5M was rework — stopped
                               # dispatches and re-dispatches that `smith
                               # escalation check` recorded as ladder

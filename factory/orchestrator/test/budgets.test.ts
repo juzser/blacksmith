@@ -1,7 +1,12 @@
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  applyBudgetEnv,
+  BUDGET_ENV_VARS,
   BudgetError,
+  budgetEnvOverrides,
   checkTaskBudget,
   loadBudgetPolicy,
   parseBudgetPolicy,
@@ -191,5 +196,125 @@ describe('checkTaskBudget (P9-18)', () => {
     expect(policy.epic.alarmRatio).toBe(0.7);
     expect(policy.task.coder.capDiffLines).toBe(400);
     expect(policy.preCodeBudget.shareOfEpicBudgetMax).toBe(0.15);
+  });
+});
+
+describe('env overrides on top of budgets.yml', () => {
+  // budgets.yml is the committed default; a box's `.env` (or its exported
+  // shell) may raise or lower a cap for that box alone without editing it.
+  const base = parseBudgetPolicy('');
+
+  it('overrides each documented knob, and only that knob', () => {
+    const cases: Array<
+      [string, string, (p: ReturnType<typeof parseBudgetPolicy>) => unknown, unknown]
+    > = [
+      ['SMITH_EPIC_CAP_TOKENS', '5000000', (p) => p.epic.capTokens, 5_000_000],
+      ['SMITH_EPIC_ALARM_RATIO', '0.85', (p) => p.epic.alarmRatio, 0.85],
+      ['SMITH_EPIC_MAX_IN_FLIGHT_TASKS', '4', (p) => p.epic.maxInFlightTasks, 4],
+      ['SMITH_TASK_CODER_CAP_TOKENS', '200000', (p) => p.task.coder.capTokens, 200_000],
+      ['SMITH_TASK_CODER_CAP_DIFF_LINES', '600', (p) => p.task.coder.capDiffLines, 600],
+      ['SMITH_TASK_RESEARCHER_CAP_TOKENS', '90000', (p) => p.task.researcher.capTokens, 90_000],
+      ['SMITH_TASK_JUDGES_CAP_TOKENS', '55000', (p) => p.task.judges.capTokens, 55_000],
+    ];
+    expect(cases.map(([name]) => name).sort()).toEqual([...BUDGET_ENV_VARS].sort());
+    for (const [name, value, read, expected] of cases) {
+      const policy = applyBudgetEnv(base, { [name]: value });
+      expect(read(policy)).toBe(expected);
+      // Everything else is untouched.
+      const again = applyBudgetEnv(policy, {});
+      expect(again).toEqual(policy);
+    }
+  });
+
+  it('leaves the policy exactly as parsed when nothing is set', () => {
+    expect(applyBudgetEnv(base, {})).toEqual(base);
+  });
+
+  it('treats an empty value as no override', () => {
+    expect(applyBudgetEnv(base, { SMITH_EPIC_CAP_TOKENS: '', SMITH_EPIC_ALARM_RATIO: '' })).toEqual(
+      base,
+    );
+  });
+
+  it('does not mutate the policy it was given', () => {
+    const copy = structuredClone(base);
+    applyBudgetEnv(base, { SMITH_EPIC_CAP_TOKENS: '9' });
+    expect(base).toEqual(copy);
+  });
+
+  it('refuses an integer knob that is not a positive integer', () => {
+    for (const bad of ['0', '-5', '4.5', '4e6', '4_000_000', '200k', 'abc', ' 12 x']) {
+      expect(() => applyBudgetEnv(base, { SMITH_TASK_CODER_CAP_TOKENS: bad })).toThrow(BudgetError);
+    }
+  });
+
+  it('refuses a ratio outside (0, 1]', () => {
+    for (const bad of ['0', '1.01', '-0.2', '80%', 'NaN', 'Infinity', '']) {
+      if (bad === '') continue; // empty is "no override", covered above
+      expect(() => applyBudgetEnv(base, { SMITH_EPIC_ALARM_RATIO: bad })).toThrow(BudgetError);
+    }
+    expect(applyBudgetEnv(base, { SMITH_EPIC_ALARM_RATIO: '1' }).epic.alarmRatio).toBe(1);
+  });
+
+  it('names the variable and the bad value in the error, with a stable code', () => {
+    try {
+      applyBudgetEnv(base, { SMITH_EPIC_CAP_TOKENS: '4M' });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(BudgetError);
+      expect((err as BudgetError).code).toBe('budgets.invalid-env');
+      expect((err as Error).message).toMatch(/SMITH_EPIC_CAP_TOKENS.*"4M"/);
+    }
+  });
+
+  it('lists which names overrode a cap, names only', () => {
+    expect(
+      budgetEnvOverrides(base, {
+        SMITH_EPIC_CAP_TOKENS: '5000000',
+        SMITH_TASK_JUDGES_CAP_TOKENS: '',
+        SMITH_UNRELATED: '1',
+      }),
+    ).toEqual(['SMITH_EPIC_CAP_TOKENS']);
+    expect(budgetEnvOverrides(base, {})).toEqual([]);
+  });
+
+  it('does not list a name set to the value budgets.yml already holds', () => {
+    // `.env.example` ships every knob at its budgets.yml default, so a copied
+    // `.env` sets them all; only a value that differs overrode anything.
+    expect(
+      budgetEnvOverrides(base, {
+        SMITH_EPIC_CAP_TOKENS: String(base.epic.capTokens),
+        SMITH_EPIC_ALARM_RATIO: String(base.epic.alarmRatio),
+        SMITH_TASK_CODER_CAP_TOKENS: String(base.task.coder.capTokens + 1),
+      }),
+    ).toEqual(['SMITH_TASK_CODER_CAP_TOKENS']);
+  });
+});
+
+describe('loadBudgetPolicy applies the env overlay', () => {
+  it('overrides the file with the env it is given, so every consumer sees it', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'smith-budgets-'));
+    try {
+      const file = path.join(dir, 'budgets.yml');
+      writeFileSync(file, 'epic:\n  cap_tokens: 3000000\n  alarm_ratio: 0.5\n');
+      expect(loadBudgetPolicy(file, {}).epic.capTokens).toBe(3_000_000);
+      const policy = loadBudgetPolicy(file, { SMITH_EPIC_CAP_TOKENS: '6000000' });
+      expect(policy.epic.capTokens).toBe(6_000_000);
+      expect(policy.epic.alarmRatio).toBe(0.5);
+      expect(() => loadBudgetPolicy(file, { SMITH_EPIC_ALARM_RATIO: '2' })).toThrow(BudgetError);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('defaults the env to process.env', () => {
+    const saved = process.env.SMITH_TASK_CODER_CAP_DIFF_LINES;
+    process.env.SMITH_TASK_CODER_CAP_DIFF_LINES = '777';
+    try {
+      expect(loadBudgetPolicy().task.coder.capDiffLines).toBe(777);
+    } finally {
+      if (saved === undefined) delete process.env.SMITH_TASK_CODER_CAP_DIFF_LINES;
+      else process.env.SMITH_TASK_CODER_CAP_DIFF_LINES = saved;
+    }
   });
 });

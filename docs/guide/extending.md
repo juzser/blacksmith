@@ -16,7 +16,10 @@ To add one:
 1. **Write the file** `.claude/agents/<role>.md` with required
    frontmatter fields `name`, `description`, `model`, `tools`, and
    `maxTurns` — a positive integer that Claude Code enforces as the agent's
-   turn ceiling, so leaving it out ships an uncapped role. `description`
+   turn ceiling, so leaving it out ships an uncapped role. Add a matching
+   `SMITH_MAXTURNS_<ROLE>` line to `.env.example` at the same value
+   (`test/envExample.test.ts` fails without one), so `smith agents sync`
+   can override it per box. `description`
    should say what the role does
    *and* when to dispatch it — it's the routing signal, not just a label.
 2. **Add `<role>` to the taxonomy's `agent` dimension**

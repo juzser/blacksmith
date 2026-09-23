@@ -102,7 +102,10 @@
   (gitignored), `wrangler secret` for deployed Workers, GitHub Actions
   secrets for CI. Code references names, never values.
 - **`.env.example` is the only committed env file** — variable names and
-  comments, no values.
+  comments, and no secret value ever. The one exception is the non-secret
+  `SMITH_*` tuning knobs, which carry their shipped defaults (budgets.yml's
+  numbers, the templates' `maxTurns`), held equal to those files by
+  `test/envExample.test.ts`.
 - **Provider keys** (Codex, DeepSeek, any future judge) follow the same rule:
   `crosscheck.yml` references env var names only.
 - **No secrets in outputs.** Agents never echo credential values into logs,

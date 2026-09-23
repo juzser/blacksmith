@@ -18,6 +18,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
 import { type ParsedArgs, parseArgs } from './args.js';
 import {
   type AuditAxis,
@@ -32,7 +33,7 @@ import {
 } from './audit.js';
 import { checkBudgetAlarm } from './budgetAlarm.js';
 import type { TaskBudget } from './budgets.js';
-import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
+import { type BudgetPolicy, budgetEnvOverrides, loadBudgetPolicy } from './budgets.js';
 import {
   type ClaimedTask,
   collectCommittedChanges,
@@ -1593,7 +1594,15 @@ async function main(): Promise<number> {
         admissionBudget(budget, overridden ? rationale : undefined),
       );
     }
-    printJson({ ...result, symbolImpact, budget });
+    // Names only, and only when some differ from budgets.yml: which caps came
+    // from the box's env rather than the file.
+    const envOverrides = budgetEnvOverrides(loadBudgetPolicy(flags['budget-policy'], {}));
+    printJson({
+      ...result,
+      symbolImpact,
+      budget,
+      ...(envOverrides.length > 0 ? { budgetEnvOverrides: envOverrides } : {}),
+    });
     return result.valid && !coupled && !blocked ? 0 : 1;
   }
 
@@ -2741,6 +2750,21 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // A turn cap is per role (the template's frontmatter), never per task, and
+  // Claude Code reads it at spawn — so the box-level override has to land in
+  // the file. The edit is local and left uncommitted on purpose; `--reset`
+  // puts back what git HEAD says.
+  if (namespace === 'agents' && action === 'sync') {
+    const agentsDir = flags['agents-dir'];
+    const dryRun = flags['dry-run'] === 'true';
+    printJson(
+      flags.reset === 'true'
+        ? resetAgentMaxTurns({ ...(agentsDir ? { agentsDir } : {}), dryRun })
+        : syncAgentMaxTurns({ ...(agentsDir ? { agentsDir } : {}), dryRun }),
+    );
+    return 0;
+  }
+
   if (namespace === 'harness' && action === 'plan') {
     const tier = flags.tier as ModelTier | undefined;
     const invocation = planWorkerTurn(
@@ -3031,7 +3055,8 @@ async function main(): Promise<number> {
       sessionId,
       ...(flags.epic ? { epicId: flags.epic } : {}),
     });
-    printJson(report);
+    const envOverrides = budgetEnvOverrides(loadBudgetPolicy(flags.policy, {}));
+    printJson(envOverrides.length > 0 ? { ...report, budgetEnvOverrides: envOverrides } : report);
     return report.ok ? 0 : 1;
   }
 

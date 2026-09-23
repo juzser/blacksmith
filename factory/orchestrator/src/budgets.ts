@@ -251,8 +251,134 @@ export function parseBudgetPolicy(yamlText: string): BudgetPolicy {
   };
 }
 
-export function loadBudgetPolicy(filePath: string = BUDGETS_POLICY_PATH): BudgetPolicy {
-  return parseBudgetPolicy(readFileSync(filePath, 'utf8'));
+/**
+ * The env names that may override a budgets.yml number on one box, and the
+ * field each one replaces. budgets.yml stays the committed default; these are
+ * how an operator raises or lowers a cap for their own machine (`.env`, which
+ * the CLI loads at start, or an exported shell value, which beats it) without
+ * editing a file every other clone reads.
+ *
+ * A per-box override, not a per-epic one: it applies to every epic run on
+ * that box while it is set.
+ */
+type IntField =
+  | 'epicCap'
+  | 'maxInFlight'
+  | 'coderCap'
+  | 'coderDiff'
+  | 'researcherCap'
+  | 'judgesCap';
+
+const INT_OVERRIDES: ReadonlyArray<readonly [string, IntField]> = [
+  ['SMITH_EPIC_CAP_TOKENS', 'epicCap'],
+  ['SMITH_EPIC_MAX_IN_FLIGHT_TASKS', 'maxInFlight'],
+  ['SMITH_TASK_CODER_CAP_TOKENS', 'coderCap'],
+  ['SMITH_TASK_CODER_CAP_DIFF_LINES', 'coderDiff'],
+  ['SMITH_TASK_RESEARCHER_CAP_TOKENS', 'researcherCap'],
+  ['SMITH_TASK_JUDGES_CAP_TOKENS', 'judgesCap'],
+];
+const RATIO_OVERRIDE = 'SMITH_EPIC_ALARM_RATIO';
+
+export const BUDGET_ENV_VARS: readonly string[] = Object.freeze([
+  'SMITH_EPIC_CAP_TOKENS',
+  RATIO_OVERRIDE,
+  ...INT_OVERRIDES.slice(1).map(([name]) => name),
+]);
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+function envValue(env: Env, name: string): string | null {
+  const value = env[name];
+  return value === undefined || value === '' ? null : value;
+}
+
+/**
+ * Strict on purpose, and stricter than the YAML: a `.env` line is typed by
+ * hand, and `4M`, `4e6` or `4_000_000` read as something else by every parser
+ * that accepts them. Digits only, no sign, no exponent, greater than zero.
+ * The error names the variable and the value it was given, and nothing else.
+ */
+function envPositiveInt(name: string, raw: string): number {
+  const value = /^[0-9]+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new BudgetError(
+      'budgets.invalid-env',
+      `${name} must be a positive integer (digits only); got ${JSON.stringify(raw)}.`,
+      { variable: name },
+    );
+  }
+  return value;
+}
+
+function envRatio(name: string, raw: string): number {
+  const value = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0 || value > 1) {
+    throw new BudgetError(
+      'budgets.invalid-env',
+      `${name} must be a decimal in (0, 1]; got ${JSON.stringify(raw)}.`,
+      { variable: name },
+    );
+  }
+  return value;
+}
+
+/**
+ * `policy` with every set budget env name applied on top. Pure: it reads only
+ * `env` and returns a new policy. Every name is validated before any is
+ * applied, so a bad value refuses the whole overlay rather than half of it.
+ */
+export function applyBudgetEnv(policy: BudgetPolicy, env: Env): BudgetPolicy {
+  const ints = new Map<IntField, number>();
+  for (const [name, field] of INT_OVERRIDES) {
+    const raw = envValue(env, name);
+    if (raw !== null) ints.set(field, envPositiveInt(name, raw));
+  }
+  const rawRatio = envValue(env, RATIO_OVERRIDE);
+  const ratio = rawRatio === null ? null : envRatio(RATIO_OVERRIDE, rawRatio);
+
+  return {
+    ...policy,
+    epic: {
+      capTokens: ints.get('epicCap') ?? policy.epic.capTokens,
+      alarmRatio: ratio ?? policy.epic.alarmRatio,
+      maxInFlightTasks: ints.get('maxInFlight') ?? policy.epic.maxInFlightTasks,
+    },
+    task: {
+      coder: {
+        capTokens: ints.get('coderCap') ?? policy.task.coder.capTokens,
+        capDiffLines: ints.get('coderDiff') ?? policy.task.coder.capDiffLines,
+      },
+      researcher: { capTokens: ints.get('researcherCap') ?? policy.task.researcher.capTokens },
+      judges: { capTokens: ints.get('judgesCap') ?? policy.task.judges.capTokens },
+    },
+  };
+}
+
+/**
+ * The budget env names whose value actually changed a number of `base` (the
+ * policy as budgets.yml has it) — names only, never values — so a report that
+ * prints an effective cap can say it did not come from budgets.yml. A name
+ * set to the value budgets.yml already holds overrode nothing and is left
+ * out: `.env.example` ships every knob at its default, so a copied `.env`
+ * sets all of them.
+ */
+export function budgetEnvOverrides(base: BudgetPolicy, env: Env = process.env): string[] {
+  return BUDGET_ENV_VARS.filter((name) => {
+    if (envValue(env, name) === null) return false;
+    const alone = applyBudgetEnv(base, { [name]: env[name] });
+    return JSON.stringify(alone) !== JSON.stringify(base);
+  });
+}
+
+/**
+ * budgets.yml, with the box's env overrides on top. Every consumer reads the
+ * policy through here, so an override reaches all of them or none.
+ */
+export function loadBudgetPolicy(
+  filePath: string = BUDGETS_POLICY_PATH,
+  env: Env = process.env,
+): BudgetPolicy {
+  return applyBudgetEnv(parseBudgetPolicy(readFileSync(filePath, 'utf8')), env);
 }
 
 /** A task spec's `budget` block, in the plan's own snake_case shape. */
