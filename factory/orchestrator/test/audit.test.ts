@@ -351,6 +351,37 @@ describe('suppression — the rule that decides whether an axis may re-raise', (
     );
     expect([...suppressed]).toEqual([open.fingerprint]);
   });
+
+  // Issue #178: widening the normalizer does not rewrite fingerprints
+  // already on disk — a decline recorded before the fix carries whatever
+  // hash the OLD normalizer produced. The fold has the raised line's
+  // file_path/axis/summary right there, so it can recompute the CURRENT
+  // fingerprint too and suppress under that as well, with no store rewrite.
+  it('also suppresses under the fingerprint a pre-existing decline would get from the CURRENT normalizer, so a normalizer fix does not strand an old decline', () => {
+    const staleFingerprint = 'pre-fix-hash-the-old-normalizer-produced';
+    const staleLine = raised({
+      file_path: 'src/app/Widget.tsx',
+      axis: 'architecture',
+      summary: 'Widget.tsx mixes concerns across lines 1549-6600',
+      fingerprint: staleFingerprint,
+    });
+    const suppressed = suppressedFingerprints(
+      [staleLine, { fingerprint: staleFingerprint, status: 'declined', ts: daysBefore(10) }],
+      { now: NOW },
+    );
+
+    // The stale fingerprint itself still suppresses (nothing regresses)...
+    expect(suppressed.has(staleFingerprint)).toBe(true);
+    // ...and so does the fingerprint a re-raise of the same defect gets
+    // today, even though its line numbers moved and it was never hashed
+    // with the old normalizer.
+    const freshFingerprint = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes concerns across lines 1576-6679',
+    });
+    expect(suppressed.has(freshFingerprint)).toBe(true);
+  });
 });
 
 describe('clusterByPath — convergence is a different key from dedupe', () => {

@@ -252,6 +252,50 @@ describe('the audit verbs', () => {
       expect(again.suppressed).toEqual([fingerprint]);
       expect(readAuditStore(project)).toHaveLength(1);
     });
+
+    // Issue #178: a decline is supposed to hold for 90 days (spec §4.4), but
+    // the next audit's judge rarely repeats the exact same sentence — it
+    // repeats the same *shape of sentence* with different line numbers. A
+    // decline that cannot survive that drift is not a 90-day suppression at
+    // all, it is a suppression that lasts until the next audit runs.
+    it('a decline still suppresses a re-raise whose summary differs only in line spans and counts', async () => {
+      await openAudit(project, ctx, opts());
+      const firstPass = await recordAudit(
+        project,
+        'architecture',
+        [
+          evidence({
+            file_path: 'src/app/Widget.tsx',
+            summary:
+              'Widget.tsx is a ~5,050-line component (lines 1549-6600 of a 6,720-line file) that mixes routing and business logic',
+          }),
+        ],
+        ctx,
+        opts(),
+      );
+      const fingerprint = only(firstPass.appended);
+      await decideAudit(project, { fingerprint, decision: 'decline' }, ctx, opts());
+      await closeAudit(project, {}, ctx, opts());
+
+      await openAudit(project, ctx, opts());
+      const secondPass = await recordAudit(
+        project,
+        'architecture',
+        [
+          evidence({
+            file_path: 'src/app/Widget.tsx',
+            summary:
+              'Widget.tsx is a ~5,100-line component (lines 1576-6679 of a 6,799-line file) that mixes routing and business logic',
+          }),
+        ],
+        ctx,
+        opts(),
+      );
+
+      expect(secondPass.appended).toEqual([]);
+      expect(secondPass.suppressed).toEqual([fingerprint]);
+      expect(readAuditStore(project)).toHaveLength(2);
+    });
   });
 
   describe('audit consolidate', () => {

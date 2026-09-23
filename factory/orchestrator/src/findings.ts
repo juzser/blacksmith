@@ -371,7 +371,9 @@ function escapeRegExp(text: string): string {
  * forms) — never a bare `:digits` anywhere in the text. A blanket
  * `:\d+` strip is wrong: free-text like "debug endpoint exposed on :8080"
  * would collide with an unrelated ":9090" finding (reproduced regression,
- * reviewer finding #3).
+ * reviewer finding #3). The line number may itself be a range
+ * (`Widget.tsx:1549-1576`), which a re-review reports as often as a single
+ * line (issue #178).
  */
 function stripPathLineRef(summary: string, filePath: string): string {
   const forwardSlashPath = filePath.replace(/\\/g, '/');
@@ -379,17 +381,41 @@ function stripPathLineRef(summary: string, filePath: string): string {
   let result = summary;
   for (const candidate of candidates) {
     if (!candidate) continue;
-    const pattern = new RegExp(`${escapeRegExp(candidate)}:\\d+(?::\\d+)?`, 'g');
+    const pattern = new RegExp(`${escapeRegExp(candidate)}:\\d+(?:[-–—]\\d+)?(?::\\d+)?`, 'g');
     result = result.replace(pattern, candidate);
   }
   return result;
 }
 
+/**
+ * A `lines N-M` / `lines N–M` (en dash) / `line N to line M` range — the
+ * shape a judge describing a large component actually writes, and the one
+ * the original single `line N` strip below never covered (issue #178).
+ * Anchored on the word "line"/"lines" immediately before the numbers, so
+ * free-text numerics elsewhere in the sentence are never touched.
+ */
+const LINE_SPAN_RE = /\blines?\s+\d[\d,]*\s*(?:[-–—]|to(?:\s+lines?)?)\s*\d[\d,]*\b/g;
+
+/**
+ * `~5,050-line` / `6,720-line` — a size given as a hyphenated adjective
+ * before "line"/"component"/"file"/etc, approximate or exact. Only the
+ * `<number>-line` token is removed; the noun it modifies is untouched, and
+ * a hyphenated count before any OTHER noun (`3-day`, `5-retry`) is left
+ * alone — it is not a line reference.
+ */
+const LINE_COUNT_RE = /~?\d[\d,]*-line\b/g;
+
+/** `L1549-L6600` — a GitHub-style permalink line range, bare or after `#`. */
+const GITHUB_LINE_RANGE_RE = /\bl\d+-l\d+\b/g;
+
 /** lowercase, whitespace collapsed (spec wording; path-anchored line refs stripped by the caller). */
 function normalizeSummary(summary: string): string {
   return summary
     .toLowerCase()
+    .replace(LINE_SPAN_RE, '')
     .replace(/\bline\s+\d+\b/g, '')
+    .replace(LINE_COUNT_RE, '')
+    .replace(GITHUB_LINE_RANGE_RE, '')
     .replace(/\s+/g, ' ')
     .trim();
 }

@@ -148,6 +148,155 @@ describe('computeFingerprint', () => {
     });
     expect(basenameWithLineRef).toBe(basenameWithoutLineRef);
   });
+
+  // Issue #178: an architecture judge's actual prose shape — a line *span*,
+  // an approximate `~N,NNN-line` size, and a `N,NNN-line file` count — is
+  // the one form drift the original normalizer let through, so a decline
+  // never survived into the next audit once line numbers moved.
+  it('is stable across a "lines N-M" span in the summary', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes rendering and data-fetching across lines 1549-6600',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes rendering and data-fetching across lines 1576-6679',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across a "lines N–M" span using an en dash', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes rendering and data-fetching across lines 1549–6600',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes rendering and data-fetching across lines 1576–6679',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across a "line N to line M" span', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes concerns from line 1549 to line 6600',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'Widget.tsx mixes concerns from line 1576 to line 6679',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across an "~N,NNN-line" approximate size', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'a ~5,050-line component that mixes routing and business logic',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'a ~5,100-line component that mixes routing and business logic',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across a "N,NNN-line file" count', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'the component lives in a 6,720-line file with no clear boundaries',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'the component lives in a 6,799-line file with no clear boundaries',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across the full combination of span, approximate size and file size (issue #178 table)', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary:
+        'Widget.tsx is a ~5,050-line component (lines 1549-6600 of a 6,720-line file) that mixes routing and business logic',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary:
+        'Widget.tsx is a ~5,100-line component (lines 1576-6679 of a 6,799-line file) that mixes routing and business logic',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across a bare path-anchored line range ("<path>:N-M")', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'correctness',
+      summary: 'src/app/Widget.tsx:1549-1576 duplicated validation logic',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'correctness',
+      summary: 'src/app/Widget.tsx:1600-1620 duplicated validation logic',
+    });
+    expect(a).toBe(b);
+  });
+
+  it('is stable across a GitHub-style "L1549-L6600" permalink range', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'see Widget.tsx#L1549-L6600 for the mixed concerns',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'architecture',
+      summary: 'see Widget.tsx#L1576-L6679 for the mixed concerns',
+    });
+    expect(a).toBe(b);
+  });
+
+  // A number that carries meaning rather than pointing at a line must still
+  // tell two findings apart — the fix is a line-reference strip, not a
+  // blanket digit strip (mirrors the :8080 vs :9090 regression above).
+  it('does NOT strip a meaningful non-line number — 3 retries and 5 retries must differ', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'reliability',
+      summary: 'the fetch helper retries 3 times with no backoff',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'reliability',
+      summary: 'the fetch helper retries 5 times with no backoff',
+    });
+    expect(a).not.toBe(b);
+  });
+
+  it('does NOT strip a hyphenated count that modifies a different noun than "line"', () => {
+    const a = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'performance',
+      summary: 'the cache expires after a 3-day window',
+    });
+    const b = computeFingerprint({
+      filePath: 'src/app/Widget.tsx',
+      category: 'performance',
+      summary: 'the cache expires after a 5-day window',
+    });
+    expect(a).not.toBe(b);
+  });
 });
 
 // Interview N-2: a judge returns evidence, never identity. finding_id,
