@@ -391,9 +391,9 @@ runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
 what you accept.
 
-The CLI is on npm as `@juzser/blacksmith`, at `0.2.0` — two binaries now,
-`smith` and `smith-run`, the second being what runs a rendered turn on a
-`cli` harness such as Codex. `0.1.1` was the first version that ran beside
+The CLI is on npm as `@juzser/blacksmith`, at `0.3.0` — two binaries,
+`smith` and `smith-run`, the second (since `0.2.0`) being what runs a
+rendered turn on a `cli` harness such as Codex. `0.1.1` was the first version that ran beside
 you and knew it was a package, rather than out of the clone-shaped install
 `0.1.0` was. The package is the binaries and what they
 read. The dashboard, the docs, the test suite and `/bs` itself come from a

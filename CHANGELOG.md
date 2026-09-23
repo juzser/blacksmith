@@ -27,6 +27,102 @@ than appearing in it.
 
 ### Added
 
+- **0.3.0 — caps move per box, errors file themselves, and hand-typed
+  rosters give way to the tables they copied.** Thirty-nine commits since
+  0.2.0 (#136–#174), grouped by theme rather than by order.
+
+  *Per-box budget and turn caps (#174).* The headline for an operator. Seven
+  `SMITH_EPIC_*` / `SMITH_TASK_*` names override budgets.yml per box
+  (`SMITH_EPIC_CAP_TOKENS`, `SMITH_EPIC_ALARM_RATIO`,
+  `SMITH_EPIC_MAX_IN_FLIGHT_TASKS`, `SMITH_TASK_CODER_CAP_TOKENS`,
+  `SMITH_TASK_CODER_CAP_DIFF_LINES`, `SMITH_TASK_RESEARCHER_CAP_TOKENS`,
+  `SMITH_TASK_JUDGES_CAP_TOKENS`); a bad value throws `budgets.invalid-env`,
+  and `budget alarm` / `wave check` name the overridden knobs, never their
+  values. `smith agents sync [--dry-run] [--reset]` rewrites an agent
+  template's `maxTurns:` from `SMITH_MAXTURNS_<ROLE>`, locally and
+  uncommitted; `--reset` restores the value at git HEAD. `.env.example`
+  lists every one of these at its shipped default, and
+  `test/envExample.test.ts` holds the file to budgets.yml and the templates.
+  Full entry below.
+
+  *The run reports the error it just logged (#142).* `smith issues report`
+  and `smith issues preview` fold `error-logged`, blocked gate outcomes and
+  failed tasks into deduplicated issues on the project's tracker, with a
+  metadata-only body and a per-project `error_issues` switch; each attempt
+  is recorded as an `issue-reported` event (taxonomy v10 → v11). The
+  dispatch contract calls it after every such write. Filing is never
+  auto-dispatched: autonomy.ts refuses the kind as
+  `tracker-write-never-auto`, and scheduler.yml's autonomy block says why.
+  Full entry below.
+
+  *The queue and the gate stop leaking the factory's environment (#137).*
+  `smith queue run` and `smith gate run` spawned a project's test and check
+  commands with the CLI's own env, so `SMITH_HOME` moved the project's work
+  root onto the factory's clone and a green branch failed in the queue.
+  Both now run the command under `projectCommandEnv`, which drops every
+  `SMITH_*` name.
+
+  *One roster per fact.* A run of changes found the same shape again and
+  again — a set of status strings typed by hand beside the declaration or
+  transition table that already answered the question, agreeing only until
+  someone added a value, and failing silently when they did. Each now reads
+  its source. Task status: an unknown status no longer reads as idle in
+  `inFlightEpics` (#153); `{completed, waived}` and the terminal and
+  settled rosters are consolidated in `taskStatus.ts` (#159, #165), and the
+  operator-held exception is tied to taxonomy.yml like the other two (#173).
+  Findings: the open set, the dispatchable set and the discretionary-closure
+  set derive from `LEGAL_TRANSITIONS` (#158, #164, #166). Waivers: the
+  pending count reads the transition table (#154). Severity: the note-only
+  severities follow severity.yml's `blocks_merge` (#157), and a severity
+  nobody ruled on is a test failure (#155). Lessons: one partition of the
+  scopes instead of three (#156), and a checkpoint type with no registered
+  extractor is now a build error rather than a silent zero (#172). Also the
+  issue-scoping roster (#167), the five wave-width verdicts (#171) and the
+  projector test's table roster (#146).
+
+  *Promises that are checked, not counted.* `claims impact` reports a
+  `keeps_exports` promise on a file its collector never opened (a `.vue`
+  file, say) as unverified rather than kept (#168). A `cli` judge gets a
+  worktree only when its `judge_args` actually make the program read-only —
+  codex's `--sandbox read-only`, claude's `--disallowedTools` covering the
+  write tools — not merely when they are non-empty (#169). guardrails.yml
+  rule ids are checked in both directions: a duplicate id and a declared
+  rule nothing evaluates are both refused on load (#170).
+
+  *Audit and roadmap.* `/bs audit` step 8 writes the cut milestone and spec
+  into the audited project, not into this repository (#149); the audit's
+  critic-work map reads its event types from their producers (#150). The
+  roadmap gains `coverage-excluded-status` and `audit-finding-retire`
+  (#136), six milestones from research into durable execution and
+  evaluation (#138), and a cheaper answer to the first
+  `coverage-excluded-status` question (#140). The continuous-loop scope
+  replaces the operator's merge with six conjunctive conditions the loop
+  can refuse on (#141).
+
+  *Doc and policy guards.* The doc guards read the tracked tree rather than
+  the working directory, so an uncommitted draft cannot fail them (#144).
+  The compiled lessons file gains fifty-six approved lessons, merged as a
+  union because a recompile would drop entries the store never held
+  (#143). The migration checks build their pre-change set from the working
+  tree instead of an orphaned commit CI cannot fetch (#145), and find the
+  migration that creates `issue_reports` by reading the files rather than
+  by a remembered index (#152).
+
+  *The wave takeover session (#139).* `wave.md` says what the third case
+  does — a session that picks up a dead or capped wave-runner opens a
+  session of its own and names the dead one's last event as its causal
+  parent, rather than appending into the dead runner's log.
+
+  *Dev dependencies (#160–#163).* Biome 2.5.14, `@types/node` 26.6.1,
+  `@vitejs/plugin-vue` 6.0.9, vitest and `@vitest/coverage-v8` 5.0.1,
+  hono 4.13.8, vue 3.5.43.
+
+  *Packaging and migrations.* `package.json` changes only its version and
+  dev dependencies: same bins (`smith`, `smith-run`), same `files`, same
+  `engines`. One migration lands, `0012_issue_reports_error_issues` (#142):
+  a new `issue_reports` table and a `milestones.error_issues` column
+  defaulting to true.
+
 - **Budget caps and agent turn caps can be moved per box, from the env.**
   budgets.yml and the agent templates stay the committed defaults; a box now
   overrides them without editing a file every other clone reads.
