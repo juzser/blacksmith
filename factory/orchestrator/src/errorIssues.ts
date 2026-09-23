@@ -63,9 +63,6 @@ const TASK_ADDED_EVENT_TYPE = 'task-added';
  */
 const TASK_FAILED_ERROR_CLASS = 'task.failed';
 
-/** Default project for an event stamped with none (events.ts's documented convention; the writer never sets it, only read helpers default it). */
-const DEFAULT_PROJECT = 'black-smith';
-
 export type ErrorSource = 'gate-outcome' | 'error-logged' | 'task-failed';
 
 /**
@@ -76,7 +73,7 @@ export type ErrorSource = 'gate-outcome' | 'error-logged' | 'task-failed';
  */
 export interface ErrorReport {
   fingerprint: string;
-  project: string;
+  project: string | null;
   source: ErrorSource;
   error_class: string;
   task_ref: string;
@@ -95,7 +92,7 @@ export interface FoldResult {
 }
 
 interface Candidate {
-  project: string;
+  project: string | null;
   source: ErrorSource;
   errorClass: string;
   taskRef: string;
@@ -118,7 +115,7 @@ function asNumber(value: unknown): number | undefined {
 /** The fields every reader takes off the envelope rather than the payload — read once, identical across the sources. */
 interface Envelope {
   payload: Record<string, unknown>;
-  project: string;
+  project: string | null;
   sessionId: string | undefined;
   planVersion: number | null;
   ts: string | undefined;
@@ -216,12 +213,24 @@ export const ISSUE_CANDIDATE_EVENT_TYPES: ReadonlySet<string> = new Set(
  * ref, answer the project that task belongs to, or `null` to say "cannot
  * tell" -- never a guess, and never this factory's own name. Optional at
  * every call site in this module (default `() => null`, see below);
- * `cli.ts` is the only caller wiring in a real answer, because it is the
- * only caller that goes on to call `gh` with the result (D-246 precedent:
+ * `cli.ts` is the only caller wiring in a real answer (D-246 precedent:
  * `db/projector.ts`'s `planProjectResolver` never backfills 'black-smith'
- * either).
+ * either). A `null` answer from this resolver no longer becomes a default
+ * project anywhere downstream -- `withSessionFallback` below gets one more
+ * try from the row's own session before the row is reported unresolvable.
  */
 export type ResolveProjectForTaskRef = (taskRef: string) => string | null;
+
+/**
+ * The composed per-row answer `toCandidate`/`issueReporter.ts`'s
+ * `resolveRecordProject` actually call: a task ref's own resolved project,
+ * widened with the two session-scoped fallbacks `withSessionFallback` builds
+ * below, or `null` when none of them can tell.
+ */
+export type RowProjectResolver = (
+  taskRef: string | undefined,
+  sessionId: string | undefined,
+) => string | null;
 
 /** The row's task ref, off the envelope first and the payload second -- the same two places every `CandidateReader` above already looks. */
 function candidateTaskRef(record: StoredEvent['record']): string | undefined {
@@ -229,25 +238,108 @@ function candidateTaskRef(record: StoredEvent['record']): string | undefined {
   return asString(record.task_id) ?? asString(payload.task_ref);
 }
 
+/**
+ * The first explicit `project` stamp seen per session, in stored order --
+ * "first stamp wins" the same way the fold's grouping does. Real sessions
+ * mix dozens of stamped rows with unstamped ones (evidence: a foreign
+ * project's session stamps some events and not others); a stamped sibling in
+ * the same session is strong evidence for an unstamped one.
+ */
+function sessionProjectStamps(events: readonly StoredEvent[]): ReadonlyMap<string, string> {
+  const stamps = new Map<string, string>();
+  for (const { record } of events) {
+    if (stamps.has(record.session_id)) continue;
+    const project = asString(record.project);
+    if (project !== undefined) stamps.set(record.session_id, project);
+  }
+  return stamps;
+}
+
+function taskAddedKey(sessionId: string, taskId: string): string {
+  return `${sessionId}\u0000${taskId}`;
+}
+
+/** `task-added`'s own `payload.epic_id`, keyed by session and task id, so a bare ref (no epic segment) can still be widened to `<epic>/<ref>` before asking the resolver. */
+function taskAddedEpicIds(events: readonly StoredEvent[]): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const { record } of events) {
+    if (record.event_type !== TASK_ADDED_EVENT_TYPE) continue;
+    const taskId = asString(record.task_id);
+    const epicId = asString((record.payload as { epic_id?: unknown } | undefined)?.epic_id);
+    if (taskId !== undefined && epicId !== undefined) {
+      out.set(taskAddedKey(record.session_id, taskId), epicId);
+    }
+  }
+  return out;
+}
+
+/**
+ * Widens a per-epic `ResolveProjectForTaskRef` into a `RowProjectResolver`
+ * with two session-scoped fallbacks a single task ref cannot answer alone: a
+ * bare ref (no epic segment) tried again as `<epic>/<ref>` using the same
+ * session's own `task-added` row, then -- if still unanswered -- the first
+ * project any row in the same session was stamped with. Exported so
+ * `issueReporter.ts`'s `priorOpenReports` can apply the identical fallback
+ * to the same event snapshot.
+ */
+export function withSessionFallback(
+  events: readonly StoredEvent[],
+  resolveProject: ResolveProjectForTaskRef,
+): RowProjectResolver {
+  const stamps = sessionProjectStamps(events);
+  const epicIds = taskAddedEpicIds(events);
+  return (taskRef, sessionId) => {
+    if (taskRef !== undefined) {
+      const direct = resolveProject(taskRef);
+      if (direct !== null) return direct;
+      if (sessionId !== undefined) {
+        const epicId = epicIds.get(taskAddedKey(sessionId, taskRef));
+        if (epicId !== undefined) {
+          const viaEpic = resolveProject(`${epicId}/${taskRef}`);
+          if (viaEpic !== null) return viaEpic;
+        }
+      }
+    }
+    if (sessionId !== undefined) {
+      const stamp = stamps.get(sessionId);
+      if (stamp !== undefined) return stamp;
+    }
+    return null;
+  };
+}
+
 /** One event to a `Candidate`, or `'ignore'` when no source claims its event type at all. */
 function toCandidate(
   event: StoredEvent,
-  resolveProject: ResolveProjectForTaskRef,
+  resolveRow: RowProjectResolver,
 ): Candidate | 'ignore' | null {
   const { record } = event;
   const read = CANDIDATE_READERS[record.event_type];
   if (!read) return 'ignore';
   const stamped = asString(record.project);
   const taskRef = candidateTaskRef(record);
-  const project = stamped ?? (taskRef ? resolveProject(taskRef) : null) ?? DEFAULT_PROJECT;
+  const sessionId = asString(record.session_id);
+  const project = stamped ?? resolveRow(taskRef, sessionId);
   return read(event, {
     payload: record.payload ?? {},
     project,
-    sessionId: asString(record.session_id),
+    sessionId,
     planVersion: asNumber(record.plan_version) ?? null,
     ts: asString(record.ts),
   });
 }
+
+/**
+ * A row whose project cannot be resolved at all still needs a stable
+ * fingerprint-grouping key -- otherwise two unrelated foreign projects'
+ * rows sharing `(source, error_class, task_ref)` would incorrectly group
+ * together and leak one row's session/epic/severity metadata onto the
+ * other's report, inside this factory's own private log (both rows are
+ * always skipped before anything is filed publicly, but the log itself
+ * should stay correct). `task_ref` alone already disambiguates in practice
+ * (refs are namespaced by epic id), so a single fixed sentinel is enough.
+ */
+const UNRESOLVED_PROJECT_FINGERPRINT_KEY = '\u0000unresolved-project\u0000';
 
 /**
  * The first 16 hex characters of a SHA-256 over the NUL-joined tuple
@@ -257,12 +349,17 @@ function toCandidate(
  * and including any of them would open one issue per round instead of one.
  */
 function computeFingerprint(
-  project: string,
+  project: string | null,
   source: ErrorSource,
   errorClass: string,
   taskRef: string,
 ): string {
-  const material = [project, source, errorClass, taskRef].join('\0');
+  const material = [
+    project ?? UNRESOLVED_PROJECT_FINGERPRINT_KEY,
+    source,
+    errorClass,
+    taskRef,
+  ].join('\0');
   return createHash('sha256').update(material).digest('hex').slice(0, 16);
 }
 
@@ -272,10 +369,12 @@ function computeFingerprint(
  * than read off the clock; nothing in this contract branches on it yet.
  *
  * `resolveProject` defaults to "no answer" so the ~50 existing call sites
- * across this module's own tests and `issueReporter.ts`'s need no change:
- * an unstamped row with no resolver wired in is exactly the "nothing
- * identifies it as foreign" case the factory-project default is still
- * correct for.
+ * across this module's own tests and `issueReporter.ts`'s need no change.
+ * An unstamped row still unresolved after `withSessionFallback`'s two
+ * fallbacks reports `project: null` rather than this factory's own name --
+ * `isProjectEnabled` is never asked about a row it cannot identify, and the
+ * decision to skip filing it belongs to `issueReporter.ts`, the one caller
+ * that goes on to call `gh`.
  */
 export function foldErrorEvents(
   events: readonly StoredEvent[],
@@ -285,17 +384,18 @@ export function foldErrorEvents(
 ): FoldResult {
   void now;
 
+  const resolveRow = withSessionFallback(events, resolveProject);
   const candidates: Candidate[] = [];
   let skipped = 0;
 
   for (const event of events) {
-    const outcome = toCandidate(event, resolveProject);
+    const outcome = toCandidate(event, resolveRow);
     if (outcome === 'ignore') continue;
     if (outcome === null) {
       skipped += 1;
       continue;
     }
-    if (!isProjectEnabled(outcome.project)) continue;
+    if (outcome.project !== null && !isProjectEnabled(outcome.project)) continue;
     candidates.push(outcome);
   }
 
@@ -359,7 +459,7 @@ export interface IssueBodyFields {
   session_id: string;
   epic_id: string | null;
   plan_version: number | null;
-  project: string;
+  project: string | null;
   source: ErrorSource;
   fingerprint: string;
 }
@@ -415,7 +515,7 @@ export function renderBody(fields: IssueBodyFields): string {
     `Session: ${fields.session_id}`,
     `Epic: ${fields.epic_id ?? '(none)'}`,
     `Plan version: ${fields.plan_version ?? '(unknown)'}`,
-    `Project: ${fields.project}`,
+    `Project: ${fields.project ?? '(unknown)'}`,
     `Source: ${fields.source}`,
     fingerprintLine(fields.fingerprint),
     '',

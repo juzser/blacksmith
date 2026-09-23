@@ -317,6 +317,19 @@ describe('gh.ts', () => {
       expect(argv).toContain('o/r');
     });
 
+    // Without --json, `gh issue list` prints a human-readable table, which
+    // parseSearchResult (issueReporter.ts) can never parse as JSON — that gap
+    // is exactly what folded a real search into the generic 'search-failed'
+    // reason. The fields requested must be exactly what parseSearchResult
+    // reads off each item: number, body, and (optional) url.
+    it('requests --json with exactly the fields parseSearchResult reads', () => {
+      const argv = buildSearchIssuesArgv('o/r', 'is:open label:factory-error');
+      const jsonIndex = argv.indexOf('--json');
+      expect(jsonIndex).toBeGreaterThanOrEqual(0);
+      const fields = (argv[jsonIndex + 1] ?? '').split(',');
+      expect(fields.sort()).toEqual(['body', 'number', 'url'].sort());
+    });
+
     it('builds a comment argv as an array, delivering the body byte-for-byte', () => {
       const argv = buildCommentArgv('o/r', 42, hostileBody);
       expect(Array.isArray(argv)).toBe(true);

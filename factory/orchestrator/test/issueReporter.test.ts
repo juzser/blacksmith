@@ -198,7 +198,7 @@ describe('issueReporter.ts', () => {
   it('collapses five rounds of one broken gate into one create and four comments (AC1)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-a');
+    const events = await fiveGateRounds('epic-1/task-a', 'black-smith');
     const { runner, bucket, calls } = makeStub({ search: foundAfterFirst() });
 
     const records = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
@@ -256,6 +256,7 @@ describe('issueReporter.ts', () => {
             eventType,
             payload: payload(taskId),
             taskId,
+            project: 'black-smith',
             planVersion: n,
           }),
         );
@@ -273,7 +274,9 @@ describe('issueReporter.ts', () => {
   it('comments on an exact fingerprint-line match (AC3a)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-exact').then((all) => all.slice(0, 1));
+    const events = await fiveGateRounds('epic-1/task-exact', 'black-smith').then((all) =>
+      all.slice(0, 1),
+    );
     const { runner, bucket } = makeStub({
       search: (query) => ({
         status: 0,
@@ -291,7 +294,9 @@ describe('issueReporter.ts', () => {
   it('opens a new issue when the fingerprint only appears as a substring (AC3b)', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-substr').then((all) => all.slice(0, 1));
+    const events = await fiveGateRounds('epic-1/task-substr', 'black-smith').then((all) =>
+      all.slice(0, 1),
+    );
     const { runner, bucket } = makeStub({
       search: (query) => ({
         status: 0,
@@ -313,11 +318,17 @@ describe('issueReporter.ts', () => {
   });
 
   // --- AC4 gap: a search that exits 0 but returns something the module
-  // cannot read as an issue list must fail the same way a nonzero exit
-  // does (reason: 'search-failed'), via a different branch (parseSearchResult
-  // returning null) than the "search exits non-zero" row already covers.
+  // cannot read as an issue list must fail DISTINGUISHABLY from a genuine
+  // nonzero exit (reason: 'search-failed', covered by the "search fails" row
+  // of the outcome table below). buildSearchIssuesArgv now requests --json,
+  // so in real use this branch only fires on a malformed/short JSON payload —
+  // the first case below stands in for that (e.g. gh printing a human table
+  // because --json was somehow dropped, or a truncated response).
   it.each<{ name: string; stdout: string }>([
-    { name: 'stdout is not JSON at all', stdout: 'not json' },
+    {
+      name: 'stdout is a gh issue-list human table, not JSON',
+      stdout: '123\tOPEN\tSome bug title\tfactory-error\t2024-01-01T00:00:00Z\n',
+    },
     { name: 'stdout is valid JSON but not an array', stdout: JSON.stringify({ items: [] }) },
     {
       name: 'stdout is an array but an item is missing body',
@@ -328,12 +339,12 @@ describe('issueReporter.ts', () => {
       stdout: JSON.stringify([{ number: 1, body: 42 }]),
     },
   ])(
-    'search exits 0 with unreadable output: $name (AC4 search-failed branch)',
+    'search exits 0 with unreadable output: $name (AC4 search-unparseable branch)',
     async ({ stdout }) => {
       const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
       const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-      const events = await fiveGateRounds('epic-1/task-unreadable-search').then((all) =>
-        all.slice(0, 1),
+      const events = await fiveGateRounds('epic-1/task-unreadable-search', 'black-smith').then(
+        (all) => all.slice(0, 1),
       );
       const { runner, bucket } = makeStub({
         search: () => ({ status: 0, stdout, stderr: '' }),
@@ -342,7 +353,7 @@ describe('issueReporter.ts', () => {
       const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
 
       expect(record?.outcome).toBe('failed');
-      expect(record?.reason).toBe('search-failed');
+      expect(record?.reason).toBe('search-unparseable');
       expect(bucket('create')).toHaveLength(0);
       expect(bucket('comment')).toHaveLength(0);
     },
@@ -362,7 +373,7 @@ describe('issueReporter.ts', () => {
 
     type Row = {
       name: string;
-      project: string;
+      project?: string;
       register: ProjectRef[];
       enabled: (p: string) => boolean;
       stub: ReturnType<typeof makeStub>;
@@ -501,6 +512,16 @@ describe('issueReporter.ts', () => {
       expected: { outcome: 'failed', reason: 'create-failed' },
       expectZeroWrites: false,
     });
+    // 13. unstamped and unresolvable -- fail closed, never the factory's own project by default
+    rows.push({
+      name: 'project unresolved',
+      project: undefined,
+      register,
+      enabled: () => true,
+      stub: makeStub(),
+      expected: { outcome: 'skipped-unresolved-project', reason: 'project-unresolved' },
+      expectZeroWrites: true,
+    });
 
     // 7. nothing new since the last report -- deduped-open, needs prior history.
     // Built by actually reporting once (recording a real `opened` event),
@@ -511,6 +532,7 @@ describe('issueReporter.ts', () => {
       eventType: 'gate-outcome',
       payload: { outcome: 'blocked', reason: 'tests-failed' },
       taskId: 'epic-1/task-dedup',
+      project: 'black-smith',
     });
     const firstStub = makeStub({ search: () => ({ status: 0, stdout: '[]', stderr: '' }) });
     await reportErrors([dedupEvent], () => true, register, firstStub.runner, CLOCK, { stateDir });
@@ -598,6 +620,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-factory',
+        project: 'black-smith',
       }),
     ];
     const { runner, calls } = makeStub();
@@ -647,6 +670,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-on',
+        project: 'black-smith',
       }),
       await seed({
         sessionId: 'session-off',
@@ -665,7 +689,7 @@ describe('issueReporter.ts', () => {
     expect(records.find((r) => r.project === 'off-project')?.outcome).toBe('skipped-disabled');
   });
 
-  it('reports on the factory itself by default, with no explicit bullet', async () => {
+  it('skips with skipped-unresolved-project -- never a default report on the factory itself -- when a row is unstamped and unresolved', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
     const events = [
@@ -678,9 +702,10 @@ describe('issueReporter.ts', () => {
     ];
     const { runner, bucket } = makeStub();
 
-    await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+    const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
 
-    expect(bucket('create')).toHaveLength(1);
+    expect(record?.outcome).toBe('skipped-unresolved-project');
+    expect(bucket('create')).toHaveLength(0);
   });
 
   // --- AC7: the act is a fact -- allowlist and secret containment ---
@@ -693,6 +718,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-opened',
+        project: 'black-smith',
       }),
     ];
     const dedupEvents = [
@@ -701,6 +727,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-payload-dedup',
+        project: 'black-smith',
       }),
     ];
     const failedEvents = [
@@ -709,6 +736,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-payload-failed',
+        project: 'black-smith',
       }),
     ];
 
@@ -829,6 +857,7 @@ describe('issueReporter.ts', () => {
           detail: SECRET,
         },
         taskId: 'epic-1/task-secret',
+        project: 'black-smith',
       }),
     ];
     const { runner, calls } = makeStub();
@@ -852,7 +881,7 @@ describe('issueReporter.ts', () => {
   it('the comment body is renderComment()s output, strictly equal', async () => {
     const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
     const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
-    const events = await fiveGateRounds('epic-1/task-render');
+    const events = await fiveGateRounds('epic-1/task-render', 'black-smith');
     const { runner, calls } = makeStub({ search: foundAfterFirst() });
 
     const records = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
@@ -883,6 +912,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed', detail: `${SECRET}\n${DIFF}` },
         taskId: 'epic-1/task-secret-comment',
+        project: 'black-smith',
       }),
     ];
     const { bucket: bucket1, runner: runner1 } = makeStub({
@@ -896,6 +926,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed', detail: `${SECRET}\n${DIFF}` },
         taskId: 'epic-1/task-secret-comment',
+        project: 'black-smith',
       }),
     ];
     const { runner: runner2, calls } = makeStub({
@@ -934,6 +965,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: 'epic-1/task-idem',
+        project: 'black-smith',
       }),
     ];
     const { runner: runner1 } = makeStub({
@@ -965,6 +997,7 @@ describe('issueReporter.ts', () => {
         eventType: 'gate-outcome',
         payload: { outcome: 'blocked', reason: 'tests-failed' },
         taskId: `epic-1/task-preview-${letter}`,
+        project: 'black-smith',
       });
     // A: reported once for real (against a stub), so the log carries a prior
     // `issue-reported` whose fingerprint matches A. B: never reported.
@@ -1006,7 +1039,16 @@ describe('issueReporter.ts', () => {
     // (b) B carries the search argv and both candidate argvs, with the
     // rendered issue body and comment text.
     expect(b.settled_at_step).toBeUndefined();
-    const search = ['issue', 'list', '--repo', 'juzser/blacksmith', '--state', 'open'];
+    const search = [
+      'issue',
+      'list',
+      '--repo',
+      'juzser/blacksmith',
+      '--state',
+      'open',
+      '--json',
+      'number,body,url',
+    ];
     expect(b.search_argv).toEqual([...search, '--search', b.fingerprint]);
     expect(b.create_argv?.slice(0, 4)).toEqual(['issue', 'create', '--repo', 'juzser/blacksmith']);
     expect(b.comment_argv?.slice(0, 2)).toEqual(['issue', 'comment']);
@@ -1245,7 +1287,7 @@ describe('issueReporter.ts', () => {
       expect(calls).toHaveLength(0);
     });
 
-    it('still defaults an unstamped row to the factory project when no resolver is wired in (backward compatible)', async () => {
+    it('skips with skipped-unresolved-project rather than defaulting to the factory project when no resolver is wired in (backward compatible)', async () => {
       const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
       const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
       const events = [
@@ -1260,8 +1302,9 @@ describe('issueReporter.ts', () => {
 
       const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
 
-      expect(record?.project).toBe('black-smith');
-      expect(bucket('create')).toHaveLength(1);
+      expect(record?.project).toBeNull();
+      expect(record?.outcome).toBe('skipped-unresolved-project');
+      expect(bucket('create')).toHaveLength(0);
     });
 
     it("previewOutcomes resolves the same way: an unstamped foreign row previews against its own repo, never the factory's", async () => {

@@ -1930,6 +1930,20 @@ describe('an error nobody has reported', () => {
     expect(findings[0]?.detail).toContain('smith issues report --session sess-1');
   });
 
+  // No resolver in OPTS, no project stamp on the event: proposal.project is
+  // null (errorIssues.ts's fail-closed fold, scheduler.ts's now-nullable
+  // ErrorReportProposal.project). The finding text must say so in words, not
+  // interpolate the bare JS value -- "project null" reads as a real project
+  // named null to an operator skimming the daemon report.
+  it('names an unresolved project in words rather than the literal null', () => {
+    const events = [loggedError('sess-1')];
+    const findings = unreported(inspectSession('sess-1', events, OPTS));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.subject).not.toContain('null');
+    expect(findings[0]?.detail).not.toContain('null');
+    expect(findings[0]?.detail.toLowerCase()).toContain('unresolved');
+  });
+
   it('clears once a matching issue-reported event is in the log', () => {
     const events = [loggedError('sess-1'), loggedError('sess-1')];
     const { fingerprint, latestEventId } = fingerprintOf(events);

@@ -505,20 +505,20 @@ describe('foldErrorEvents', () => {
       expect(result.reports[0]?.project).toBe('example-app');
     });
 
-    it('still defaults an unstamped row to black-smith when the resolver has no answer', () => {
+    it('answers a null project -- never black-smith -- when the resolver has no answer', () => {
       const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed')];
 
       const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled, () => null);
 
-      expect(result.reports[0]?.project).toBe('black-smith');
+      expect(result.reports[0]?.project).toBeNull();
     });
 
-    it('still defaults an unstamped row to black-smith when no resolver is supplied at all (backward compatible)', () => {
+    it('answers a null project -- never black-smith -- when no resolver is supplied at all (backward compatible)', () => {
       const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed')];
 
       const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
 
-      expect(result.reports[0]?.project).toBe('black-smith');
+      expect(result.reports[0]?.project).toBeNull();
     });
 
     it('an explicit project stamp always wins over the resolver', () => {
@@ -556,6 +556,44 @@ describe('foldErrorEvents', () => {
       );
 
       expect(result.reports[0]?.project).toBe('example-app');
+    });
+
+    it("resolves a bare ref (no epic segment) via the session's task-added epic_id before giving up", () => {
+      const events: StoredEvent[] = [
+        ev(
+          'task-added',
+          { task_status: 'todo', epic_id: 'epic-9' },
+          { task_id: 'task-bare', session_id: 'session-bare' },
+        ),
+        gateBlocked('task-bare', 'tests-failed', { session_id: 'session-bare' }),
+      ];
+      const resolveProject = (taskRef: string) =>
+        taskRef === 'epic-9/task-bare' ? 'example-app' : null;
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        resolveProject,
+      );
+
+      const report = result.reports.find((r) => r.task_ref === 'task-bare');
+      expect(report?.project).toBe('example-app');
+    });
+
+    it("resolves an unstamped row via another row's project stamp from the same session", () => {
+      const events: StoredEvent[] = [
+        gateBlocked('epic-1/task-a', 'tests-failed', {
+          session_id: 'session-mixed',
+          project: 'stamped-project',
+        }),
+        gateBlocked('epic-1/task-b', 'tests-failed', { session_id: 'session-mixed' }),
+      ];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-b');
+      expect(report?.project).toBe('stamped-project');
     });
   });
 });

@@ -345,14 +345,21 @@ export function inspectSession(
       // the discharge command below clears. Reported here and not in
       // inspectFactory because `issue-reported` lands in the error's own
       // session, so this lineage is the one that can answer it.
-      const project = proposal.project === FACTORY_PROJECT ? '' : ` (${proposal.project})`;
+      const project =
+        proposal.project === null
+          ? ' (unresolved project)'
+          : proposal.project === FACTORY_PROJECT
+            ? ''
+            : ` (${proposal.project})`;
+      const projectPhrase =
+        proposal.project === null ? 'an unresolved project' : `project ${proposal.project}`;
       findings.push({
         kind: 'unreported-error',
         severity: 'info',
         sessionId,
         subject: `error ${proposal.fingerprint}${project}`,
         detail:
-          `Error ${proposal.fingerprint} in project ${proposal.project} ` +
+          `Error ${proposal.fingerprint} in ${projectPhrase} ` +
           `(${proposal.errorClass}, task ${proposal.taskRef}, ${proposal.occurrences} occurrence(s)) ` +
           'has no issue-reported event. Report it with ' +
           `\`smith issues report --session ${proposal.sessionId}\`; ` +

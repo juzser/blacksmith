@@ -783,8 +783,16 @@ describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
   });
 
   it('leaves a project the caller switched off alone', () => {
+    // Stamped, not left to resolve: a null-project row (nothing resolves it)
+    // is a DIFFERENT case -- see 'still proposes an unstamped row nothing
+    // resolves...' below -- and isProjectEnabled never gets a chance to
+    // filter it, since foldErrorEvents only applies that check once a
+    // project is actually known. This test is about a KNOWN, disabled
+    // project, so it must stamp one.
+    const event = errorLogged();
+    const stamped: StoredEvent = { ...event, record: { ...event.record, project: 'stamped-off' } };
     const proposals = computeProposals({
-      events: [errorLogged()],
+      events: [stamped],
       now: NOW,
       policy: POLICY,
       isErrorTrackerEnabled: () => false,
@@ -873,6 +881,17 @@ describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
       resolveProjectForTaskRef,
     }).filter((p) => p.kind === 'error-report');
     expect(proposal?.kind === 'error-report' && proposal.project).toBe('example-app');
+  });
+
+  it('still proposes an unstamped row nothing resolves, carrying project: null rather than dropping it', () => {
+    // No resolver at all: the default `() => null` in proposeErrorReports.
+    // The row stays actionable (running `smith issues report` settles it,
+    // even as a skip) rather than nagging forever with nothing to run.
+    const event = errorLogged('epic-9/task-unresolvable');
+    const [proposal] = computeProposals({ events: [event], now: NOW, policy: POLICY }).filter(
+      (p) => p.kind === 'error-report',
+    );
+    expect(proposal?.kind === 'error-report' && proposal.project).toBeNull();
   });
 });
 

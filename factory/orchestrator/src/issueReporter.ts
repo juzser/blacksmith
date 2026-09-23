@@ -31,11 +31,13 @@ import {
   FINGERPRINT_LINE_PREFIX,
   foldErrorEvents,
   type ResolveProjectForTaskRef,
+  type RowProjectResolver,
   renderBody,
   renderComment,
   renderTitle,
   toIssueBodyFields,
   toIssueCommentFields,
+  withSessionFallback,
 } from './errorIssues.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
 import {
@@ -49,8 +51,11 @@ import {
 import type { ProjectRef } from './projects.js';
 
 /**
- * The closed, named outcome vocabulary. Exactly one of these eight words is
+ * The closed, named outcome vocabulary. Exactly one of these nine words is
  * recorded for every candidate error, always — functional clause 2.
+ * `skipped-unresolved-project` is settled before any of the others can be:
+ * a row this factory cannot identify the project of is never filed against
+ * this factory's own repository by default (the privacy-leak guard).
  */
 export const ISSUE_REPORT_OUTCOMES = [
   'opened',
@@ -60,6 +65,7 @@ export const ISSUE_REPORT_OUTCOMES = [
   'skipped-no-remote',
   'skipped-gh-missing',
   'skipped-unauthenticated',
+  'skipped-unresolved-project',
   'failed',
 ] as const;
 
@@ -85,13 +91,10 @@ export const ISSUE_REPORT_PAYLOAD_KEYS = [
   'task_ref',
 ] as const;
 
-/** Default project for an event stamped with none — matches events.ts's documented convention. */
-const DEFAULT_PROJECT = 'black-smith';
-
 export interface IssueReportRecord {
   outcome: IssueReportOutcome;
   fingerprint: string;
-  project: string;
+  project: string | null;
   source: ErrorReport['source'];
   error_class: string;
   task_ref: string;
@@ -166,20 +169,20 @@ function candidateTaskRef(record: StoredEvent['record']): string | undefined {
 
 /**
  * A row's project, resolved the same way `errorIssues.ts`'s fold resolves
- * one: an explicit stamp always wins; absent that, an injected resolver gets
- * first say from the row's task ref; only when neither answers does this
- * default to the factory's own project. This is what keeps an unstamped row
- * from a foreign project's session from being folded into this factory's
- * own prior-report history (and, through `decideOutcome`'s dedup key, its
- * own repository) merely because nothing stamped it.
+ * one: an explicit stamp always wins; absent that, `resolveRow` (the row's
+ * own task ref widened with `withSessionFallback`'s session fallbacks) gets
+ * the answer. `null` when none of them can tell -- this factory's own
+ * project is never guessed. This is what keeps an unstamped row from a
+ * foreign (or unidentifiable) project's session from being folded into this
+ * factory's own prior-report history (and, through `decideOutcome`'s dedup
+ * key, its own repository) merely because nothing stamped it.
  */
 function resolveRecordProject(
   record: StoredEvent['record'],
-  resolveProject: ResolveProjectForTaskRef,
-): string {
+  resolveRow: RowProjectResolver,
+): string | null {
   if (typeof record.project === 'string') return record.project;
-  const taskRef = candidateTaskRef(record);
-  return (taskRef ? resolveProject(taskRef) : null) ?? DEFAULT_PROJECT;
+  return resolveRow(candidateTaskRef(record), record.session_id);
 }
 
 /**
@@ -188,11 +191,17 @@ function resolveRecordProject(
  * itself appends. That is what lets the five duplicate candidates a single
  * broken gate produces in one round resolve through GitHub search (one
  * create, four comments) rather than short-circuiting on each other.
+ *
+ * A record whose project cannot be resolved at all is dropped rather than
+ * pushed: it can never match `priorReportFor`'s `h.project === report.project`
+ * comparison against a null-project report either (Step 0 below settles
+ * those before Step 4 runs), so keeping it around would only cost a lookup.
  */
 function priorOpenReports(
   events: readonly StoredEvent[],
   resolveProject: ResolveProjectForTaskRef = () => null,
 ): PriorReport[] {
+  const resolveRow = withSessionFallback(events, resolveProject);
   const out: PriorReport[] = [];
   for (const event of events) {
     const { record } = event;
@@ -208,8 +217,10 @@ function priorOpenReports(
     if (typeof payload.fingerprint !== 'string' || typeof payload.latest_event_id !== 'string') {
       continue;
     }
+    const project = resolveRecordProject(record, resolveRow);
+    if (project === null) continue;
     out.push({
-      project: resolveRecordProject(record, resolveProject),
+      project,
       fingerprint: payload.fingerprint,
       outcome: payload.outcome,
       latest_event_id: payload.latest_event_id,
@@ -250,7 +261,10 @@ async function appendIssueReported(
       plan_version: report.plan_version ?? 1,
       causal_parent: report.latest_event_id,
       payload: toPayload(record),
-      project: report.project,
+      // `EventInput.project` is `string | undefined` -- omitted, never
+      // `null`, when a row's project could not be resolved; the writer
+      // never stamps a guess (events.ts's documented convention).
+      ...(report.project !== null ? { project: report.project } : {}),
     },
     opts,
   );
@@ -302,13 +316,23 @@ async function decideOutcome(
     latest_event_id: report.latest_event_id,
   };
 
+  // Step 0: can this row's project be identified at all. A row still
+  // unresolved after the fold's own session fallbacks is never filed
+  // against this factory's own repository by default (the privacy-leak
+  // guard this whole module exists to close) -- settled before repo
+  // resolution or any `gh` interaction, ahead of every other step.
+  if (report.project === null) {
+    return { ...base, outcome: 'skipped-unresolved-project', reason: 'project-unresolved' };
+  }
+  const project = report.project;
+
   // Step 1: the switch.
-  if (!isProjectEnabled(report.project)) {
+  if (!isProjectEnabled(project)) {
     return { ...base, outcome: 'skipped-disabled', reason: 'switch-off' };
   }
 
   // Step 2: which repository.
-  const repo = resolveProjectRepo(report.project, register);
+  const repo = resolveProjectRepo(project, register);
   if (!('slug' in repo)) {
     return { ...base, outcome: 'skipped-no-remote', reason: repo.reason, detail: repo.detail };
   }
@@ -353,7 +377,11 @@ async function decideOutcome(
   }
   const issues = parseSearchResult(searchResult.stdout);
   if (issues === null) {
-    return { ...base, outcome: 'failed', reason: 'search-failed', repo_slug: repoSlug };
+    // gh exited 0 but the output could not be read as an issue list (e.g.
+    // --json was dropped somewhere upstream and gh printed its human table,
+    // or the response was truncated). Distinct from a genuine nonzero exit
+    // above, which is a process failure rather than an unreadable payload.
+    return { ...base, outcome: 'failed', reason: 'search-unparseable', repo_slug: repoSlug };
   }
 
   // Step 6: an exact fingerprint-line match gets a comment.
@@ -401,14 +429,17 @@ const DECISION_NOTE =
  */
 export interface IssuePreviewRecord {
   fingerprint: string;
-  project: string;
+  project: string | null;
   source: ErrorReport['source'];
   error_class: string;
   task_ref: string;
   latest_event_id: string;
   step_3_gh_availability: typeof STEP_3_NOT_PERFORMED;
-  settled_at_step?: 1 | 2 | 4;
-  outcome?: Extract<IssueReportOutcome, 'skipped-disabled' | 'skipped-no-remote' | 'deduped-open'>;
+  settled_at_step?: 0 | 1 | 2 | 4;
+  outcome?: Extract<
+    IssueReportOutcome,
+    'skipped-unresolved-project' | 'skipped-disabled' | 'skipped-no-remote' | 'deduped-open'
+  >;
   reason?: string;
   detail?: string;
   repo_slug?: string;
@@ -450,6 +481,16 @@ export async function previewOutcomes(
     const step3 = { step_3_gh_availability: STEP_3_NOT_PERFORMED as typeof STEP_3_NOT_PERFORMED };
     const settle = (rest: Omit<IssuePreviewRecord, keyof typeof base | keyof typeof step3>) =>
       out.push({ ...base, ...step3, ...rest });
+
+    // Step 0: can this row's project be identified at all.
+    if (project === null) {
+      settle({
+        settled_at_step: 0,
+        outcome: 'skipped-unresolved-project',
+        reason: 'project-unresolved',
+      });
+      continue;
+    }
 
     // Step 1: the switch.
     if (!isProjectEnabled(project)) {

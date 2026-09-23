@@ -586,7 +586,14 @@ export function proposeGrowthReview(
 export interface ErrorReportProposal {
   kind: 'error-report';
   fingerprint: string;
-  project: string;
+  /**
+   * `null` when nothing -- neither a stamp, a session-mate's stamp, nor a
+   * plan on disk -- can identify whose project this row belongs to
+   * (errorIssues.ts's fail-closed fold). The proposal still stands: running
+   * `smith issues report` settles the fingerprint even as a
+   * `skipped-unresolved-project` outcome, which is what actually clears it.
+   */
+  project: string | null;
   source: ErrorSource;
   errorClass: string;
   taskRef: string;

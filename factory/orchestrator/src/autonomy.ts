@@ -139,11 +139,15 @@ function securityFields(proposal: SchedulerProposal, ctx: AdmissionContext): Fie
     case 'growth-review-due':
       return [];
     case 'error-report':
-      // Refused ahead of the keyword match; listed so the switch stays exhaustive.
+      // Refused ahead of the keyword match (see classify() below); listed so
+      // the switch stays exhaustive. proposal.project is only ever null when
+      // errorIssues.ts's fail-closed fold could not resolve one, which this
+      // branch never actually returns for -- see classify()'s early
+      // 'tracker-write-never-auto' refusal for every 'error-report' kind.
       return [
         { field: 'task ref', value: proposal.taskRef },
         { field: 'error class', value: proposal.errorClass },
-        { field: 'project', value: proposal.project },
+        { field: 'project', value: proposal.project ?? '(unresolved)' },
       ];
   }
 }
