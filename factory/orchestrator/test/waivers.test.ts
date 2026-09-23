@@ -4,6 +4,8 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendEvent } from '../src/events.js';
 import {
+  computeFingerprint,
+  type Finding,
   type FindingDraft,
   listFindings,
   raiseFinding,
@@ -20,6 +22,7 @@ import {
   WAIVABLE_SEVERITIES,
   WaiverError,
 } from '../src/waivers.js';
+import { legacyComputeFingerprint } from './helpers/legacyFingerprint.js';
 
 function draft(overrides: Partial<FindingDraft> = {}): FindingDraft {
   return {
@@ -524,6 +527,154 @@ describe('waivers.ts', () => {
           isWaived(raised.finding.fingerprint, { sessionId }, { stateDir }),
         ).resolves.toBe(true);
       });
+    });
+  });
+
+  // Issue #178: normalizeSummary/stripPathLineRef grew to also strip line
+  // spans ("lines 1549-1576"), so a finding whose summary names one now
+  // fingerprints differently than it did before that widening landed. Every
+  // place that compares a STORED fingerprint against a FRESHLY computed one
+  // has to treat both as equivalent, or an operator's already-recorded
+  // decision silently stops applying the moment review text mentions a line
+  // span that the old normalizer never stripped.
+  describe('fingerprint aliasing across the #178 normalizer widening', () => {
+    const filePath = 'src/widget.ts';
+    const category = 'correctness';
+    const summary = 'refactor the auth widget spanning lines 1549-1576 before it grows further';
+
+    function legacyFinding(findingId: string, fingerprint: string): Finding {
+      return {
+        ...draft({ finding_id: findingId, summary, finding_category: category }),
+        fingerprint,
+        file_path: filePath,
+      };
+    }
+
+    it('honours a waiver granted against a legacy (pre-#178) fingerprint when the identical finding is raised again under the widened normalizer', async () => {
+      const legacyFingerprint = legacyComputeFingerprint({ filePath, category, summary });
+      expect(legacyFingerprint).not.toBe(computeFingerprint({ filePath, category, summary }));
+
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'reviewer',
+          event_type: 'finding-raised',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: legacyFinding('f-legacy-1', legacyFingerprint) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        { stateDir },
+      );
+
+      await grantWaiver(legacyFingerprint, 'accepted, cosmetic', ctx(), { stateDir });
+      const [beforeReRaise] = await listFindings(
+        sessionId,
+        { taskId: 'epic-1/task-1' },
+        {
+          stateDir,
+        },
+      );
+      expect(beforeReRaise?.finding_status).toBe('waived');
+
+      const reRaised = await raiseFinding(
+        { finding: draft({ finding_id: 'f-new-1', summary }), filePath },
+        ctx(),
+        { stateDir },
+      );
+
+      expect(reRaised.suppressed).toBe(true);
+      if (!reRaised.suppressed) throw new Error('unreachable');
+      expect(reRaised.fingerprint).not.toBe(legacyFingerprint);
+    });
+
+    it('recognizes a decision recorded under the current fingerprint as covering a finding row stored under the legacy one (pendingBatch)', async () => {
+      const legacyFingerprint = legacyComputeFingerprint({ filePath, category, summary });
+      const freshFingerprint = computeFingerprint({ filePath, category, summary });
+      expect(legacyFingerprint).not.toBe(freshFingerprint);
+
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'reviewer',
+          event_type: 'finding-raised',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: legacyFinding('f-legacy-2', legacyFingerprint) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        { stateDir },
+      );
+
+      const pendingBefore = await pendingBatch('epic-1', { sessionId }, { stateDir });
+      expect(pendingBefore.map((f) => f.finding_id)).toContain('f-legacy-2');
+
+      await grantWaiver(freshFingerprint, 'accepted, cosmetic', ctx(), { stateDir });
+
+      const pendingAfter = await pendingBatch('epic-1', { sessionId }, { stateDir });
+      expect(pendingAfter.map((f) => f.finding_id)).not.toContain('f-legacy-2');
+      await expect(isWaived(legacyFingerprint, { sessionId }, { stateDir })).resolves.toBe(true);
+    });
+
+    it('reconciles a finding row stored under the legacy fingerprint when the grant targets its widened-normalizer alias', async () => {
+      const legacyFingerprint = legacyComputeFingerprint({ filePath, category, summary });
+
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'reviewer',
+          event_type: 'finding-raised',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: legacyFinding('f-legacy-3', legacyFingerprint) as unknown as Record<
+            string,
+            unknown
+          >,
+        },
+        { stateDir },
+      );
+
+      const fresh = await raiseFinding(
+        { finding: draft({ finding_id: 'f-fresh-1', summary }), filePath },
+        ctx(),
+        { stateDir },
+      );
+      if (fresh.suppressed) throw new Error('unreachable');
+      expect(fresh.finding.fingerprint).not.toBe(legacyFingerprint);
+
+      // The operator answers against the CURRENT (fresh) fingerprint — the
+      // one raiseFinding just reported. A finding row from before the
+      // widening landed, describing the identical defect, should reconcile
+      // to `waived` too, not just the row that happens to carry this exact
+      // fingerprint.
+      await grantWaiver(fresh.finding.fingerprint, 'accepted, cosmetic', ctx(), { stateDir });
+
+      const byId = new Map(
+        (await listFindings(sessionId, { taskId: 'epic-1/task-1' }, { stateDir })).map((f) => [
+          f.finding_id,
+          f,
+        ]),
+      );
+      expect(byId.get('f-fresh-1')?.finding_status).toBe('waived');
+      expect(byId.get('f-legacy-3')?.finding_status).toBe('waived');
+
+      // And the mirror: denying reopens both.
+      await denyWaiver(fresh.finding.fingerprint, 'reconsidered', ctx(), { stateDir });
+      const byIdAfterDenial = new Map(
+        (await listFindings(sessionId, { taskId: 'epic-1/task-1' }, { stateDir })).map((f) => [
+          f.finding_id,
+          f,
+        ]),
+      );
+      expect(byIdAfterDenial.get('f-fresh-1')?.finding_status).toBe('raised');
+      expect(byIdAfterDenial.get('f-legacy-3')?.finding_status).toBe('raised');
     });
   });
 });

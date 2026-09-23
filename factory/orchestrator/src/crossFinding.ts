@@ -269,6 +269,26 @@ export function reconcile(input: ReconcileInput): ReconcileReport {
     if (!nativeByFingerprint.has(finding.fingerprint)) {
       nativeByFingerprint.set(finding.fingerprint, finding);
     }
+    // Also key by the fingerprint computeFingerprint() would produce for this
+    // record TODAY, not just the one stored at raise time. `input.native`
+    // comes straight out of listFindings() (a lineage-wide, possibly
+    // long-lived read) while `group.fingerprint` below is always computed
+    // fresh from the independent provider's evidence -- so a native finding
+    // raised before issue #178 widened the normalizer (its summary containing
+    // a line span the old algorithm did not strip) would otherwise never
+    // match an independent finder's evidence for the identical bug, and get
+    // reported as `co-located`/`independent-only` plus a duplicate
+    // `native-only` instead of `corroborated`.
+    if (finding.file_path !== undefined) {
+      const recomputed = computeFingerprint({
+        filePath: finding.file_path,
+        category: finding.finding_category,
+        summary: finding.summary,
+      });
+      if (!nativeByFingerprint.has(recomputed)) {
+        nativeByFingerprint.set(recomputed, finding);
+      }
+    }
     if (finding.file_path === undefined) continue;
     const key = coLocationKey(finding.file_path, finding.finding_category);
     const bucket = nativeByLocation.get(key);

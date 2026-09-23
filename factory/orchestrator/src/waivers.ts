@@ -2,6 +2,8 @@ import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext, Finding, StaleEvidence } from './findings.js';
 import {
+  computeFingerprint,
+  foldFindings,
   listFindings,
   preWaiverStatus,
   staleFindings,
@@ -24,6 +26,38 @@ export interface SessionRef {
 }
 
 /**
+ * Every fingerprint that names the same finding as `fingerprint`, for each
+ * candidate in `findings` that could stand in for it: its own stored value,
+ * and what computeFingerprint would produce today from its persisted
+ * file_path/finding_category/summary. Mirrors audit.ts's
+ * suppressedFingerprints, for the same reason (issue #178): a `finding-raised`
+ * or waiver-decision record written before the normalizer widened to also
+ * strip line spans ("lines 1549-1576") fingerprints differently than the
+ * identical text does now, so a stored fingerprint and a freshly computed one
+ * for the same defect can legitimately disagree.
+ *
+ * Always includes `fingerprint` itself, so a caller with no backing finding
+ * yet (e.g. a batch decision not folded into findings) still gets an
+ * exact-match-only set — unchanged behaviour.
+ */
+function fingerprintAliases(fingerprint: string, findings: readonly Finding[]): Set<string> {
+  const aliases = new Set<string>([fingerprint]);
+  for (const finding of findings) {
+    if (finding.file_path === undefined) continue;
+    const recomputed = computeFingerprint({
+      filePath: finding.file_path,
+      category: finding.finding_category,
+      summary: finding.summary,
+    });
+    if (finding.fingerprint === fingerprint || recomputed === fingerprint) {
+      aliases.add(finding.fingerprint);
+      aliases.add(recomputed);
+    }
+  }
+  return aliases;
+}
+
+/**
  * Fold waiver-granted/waiver-denied events for one fingerprint: the last
  * decision wins (a denial can, in principle, be revisited by a later grant
  * — the log keeps both, this just answers "is it waived right now").
@@ -33,6 +67,10 @@ export interface SessionRef {
  * would re-raise a finding the operator already waived the moment an epic
  * continued in a new session. "Last decision wins" is decided on the merged
  * order, which is `ts` between sessions and append order within one.
+ *
+ * Matches against `fingerprintAliases(fingerprint, ...)` rather than strict
+ * equality (issue #178): a decision recorded under the fingerprint's old
+ * spelling still answers a lookup under its current one, and vice versa.
  */
 export async function isWaived(
   fingerprint: string,
@@ -40,10 +78,12 @@ export async function isWaived(
   opts: EventOpts = {},
 ): Promise<boolean> {
   const events = await readLineageEvents(ref.sessionId, opts);
+  const equivalents = fingerprintAliases(fingerprint, foldFindings(events));
   let waived = false;
   for (const { record } of events) {
     const payload = record.payload as { fingerprint?: string };
-    if (payload.fingerprint !== fingerprint) continue;
+    const fp = payload.fingerprint;
+    if (fp === undefined || !equivalents.has(fp)) continue;
     if (record.event_type === 'waiver-granted') waived = true;
     else if (record.event_type === 'waiver-denied') waived = false;
   }
@@ -53,7 +93,8 @@ export async function isWaived(
 /**
  * Has the operator recorded ANY waiver decision for this fingerprint (granted
  * or denied)? Lineage-wide, for isWaived's reason (D-119): a decision recorded
- * in the parent session is still a decision.
+ * in the parent session is still a decision. Same alias widening as isWaived,
+ * and for the same reason (issue #178).
  */
 async function hasDecision(
   fingerprint: string,
@@ -61,10 +102,13 @@ async function hasDecision(
   opts: EventOpts,
 ): Promise<boolean> {
   const events = await readLineageEvents(ref.sessionId, opts);
+  const equivalents = fingerprintAliases(fingerprint, foldFindings(events));
   return events.some(({ record }) => {
     const payload = record.payload as { fingerprint?: string };
+    const fp = payload.fingerprint;
     return (
-      payload.fingerprint === fingerprint &&
+      fp !== undefined &&
+      equivalents.has(fp) &&
       (record.event_type === 'waiver-granted' || record.event_type === 'waiver-denied')
     );
   });
@@ -78,6 +122,11 @@ async function hasDecision(
  * finding as open forever. Findings the state machine can't legally move
  * (already terminal, or a non-S3/S4 severity that somehow shares this
  * fingerprint) are left alone; this is reconciliation, not a mandate.
+ *
+ * Matched via fingerprintAliases (issue #178), not strict equality: a grant
+ * against a finding's current fingerprint also reconciles a row for the
+ * identical defect still carrying the pre-widening fingerprint it was raised
+ * under, and vice versa.
  */
 async function reconcileFindingsToWaived(
   fingerprint: string,
@@ -86,9 +135,10 @@ async function reconcileFindingsToWaived(
   opts: EventOpts,
 ): Promise<void> {
   const findings = await listFindings(ctx.sessionId, {}, opts);
+  const equivalents = fingerprintAliases(fingerprint, findings);
   const reconcilable = findings.filter(
     (f) =>
-      f.fingerprint === fingerprint &&
+      equivalents.has(f.fingerprint) &&
       WAIVABLE_SEVERITIES.includes(f.severity) &&
       WAIVABLE_STATUSES.includes(f.finding_status),
   );
@@ -134,7 +184,11 @@ export async function grantWaiver(
  *
  * Only findings this session's log actually shows at `waived` are touched, and
  * each goes back to the status its own grant recorded as from_status. A
- * finding waived under some other fingerprint is not this denial's business.
+ * finding waived under some other fingerprint is not this denial's business —
+ * "other" meaning a different defect, not merely a different spelling: matched
+ * via fingerprintAliases (issue #178), the same widening reconcileFindingsToWaived
+ * applies, so a row still carrying the pre-widening fingerprint it was raised
+ * under reopens alongside its current-fingerprint sibling.
  */
 async function reconcileFindingsFromWaived(
   fingerprint: string,
@@ -143,8 +197,9 @@ async function reconcileFindingsFromWaived(
   opts: EventOpts,
 ): Promise<void> {
   const findings = await listFindings(ctx.sessionId, {}, opts);
+  const equivalents = fingerprintAliases(fingerprint, findings);
   const reopenable = findings.filter(
-    (f) => f.fingerprint === fingerprint && f.finding_status === 'waived',
+    (f) => equivalents.has(f.fingerprint) && f.finding_status === 'waived',
   );
   const transitionCtx: EventContext = { ...ctx, causalParent: denialEventId };
   for (const finding of reopenable) {

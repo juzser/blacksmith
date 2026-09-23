@@ -417,16 +417,35 @@ export function foldAuditStore(
  * The fingerprints an axis may not raise again. This is the whole of the
  * dedupe half of §3.1 — `audit record` drops what this names and appends the
  * rest.
+ *
+ * Each suppressing finding contributes two fingerprints, not one. Its
+ * stored `finding.fingerprint` is whatever `computeFingerprint` produced
+ * *when the line was written* — widening that normalizer (issue #178) does
+ * not rewrite `findings.jsonl`, so a decline recorded before a normalizer
+ * fix keeps its old hash forever. The raised line still carries its own
+ * `file_path`/`axis`/`summary`, so recomputing the fingerprint with today's
+ * normalizer costs nothing and lets a pre-existing decline suppress a
+ * re-raise that only differs in what the new normalizer now strips — no
+ * store rewrite, no migration. When the stored hash and the recomputed one
+ * already agree (the common case), the second `add` is a no-op.
  */
 export function suppressedFingerprints(
   lines: readonly AuditLine[],
   opts: FoldOptions = {},
 ): Set<string> {
-  return new Set(
-    foldAuditStore(lines, opts)
-      .filter((finding) => finding.suppressesReraise)
-      .map((finding) => finding.fingerprint),
-  );
+  const set = new Set<string>();
+  for (const finding of foldAuditStore(lines, opts)) {
+    if (!finding.suppressesReraise) continue;
+    set.add(finding.fingerprint);
+    set.add(
+      computeFingerprint({
+        filePath: finding.file_path,
+        category: finding.axis,
+        summary: finding.summary,
+      }),
+    );
+  }
+  return set;
 }
 
 function clusterOf(filePath: string, findings: readonly FoldedFinding[]): PathCluster {
