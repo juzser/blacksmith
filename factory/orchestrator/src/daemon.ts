@@ -32,6 +32,7 @@ import { loadCrosscheckPolicy } from './crosscheck.js';
 import type { DbOpts } from './db/projector.js';
 import { apply, foldTasks, rebuild } from './db/projector.js';
 import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
+import type { ResolveProjectForTaskRef } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import {
   listSessionIds,
@@ -205,6 +206,15 @@ export interface InspectOptions {
    * field's note on why absent must not read as `auto`.
    */
   admission?: AdmissionLens;
+  /**
+   * Threaded straight through to `computeProposals`/`SchedulerRunInput`: how
+   * an unstamped error/gate/task-added row's project is decided when nothing
+   * else names it. Omitted -> the scheduler's own default (the factory's own
+   * project), same as today. A caller that watches other projects' sessions
+   * supplies the real plan-backed resolver so this advisory naming does not
+   * read a foreign project's unstamped row back as this factory's own.
+   */
+  resolveProjectForTaskRef?: ResolveProjectForTaskRef;
 }
 
 function staleSubject(agent: AgentRecord): string {
@@ -306,7 +316,14 @@ export function inspectSession(
     });
   }
 
-  const proposals = computeProposals({ events, now, policy: schedulerPolicy });
+  const proposals = computeProposals({
+    events,
+    now,
+    policy: schedulerPolicy,
+    ...(opts.resolveProjectForTaskRef === undefined
+      ? {}
+      : { resolveProjectForTaskRef: opts.resolveProjectForTaskRef }),
+  });
   const admissions = admitFor(proposals, events, opts.admission);
   for (const [index, proposal] of proposals.entries()) {
     const admission = admissions[index];
@@ -371,6 +388,9 @@ export function inspectFactory(
     policy,
     ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
     ...(opts.readOutdated === undefined ? {} : { readOutdated: opts.readOutdated }),
+    ...(opts.resolveProjectForTaskRef === undefined
+      ? {}
+      : { resolveProjectForTaskRef: opts.resolveProjectForTaskRef }),
   });
 
   const admissions = admitFor(proposals, events, opts.admission);
@@ -649,6 +669,9 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
     ...(opts.readOutdated === undefined ? {} : { readOutdated: opts.readOutdated }),
     ...(opts.readProjects === undefined ? {} : { readProjects: opts.readProjects }),
+    ...(opts.resolveProjectForTaskRef === undefined
+      ? {}
+      : { resolveProjectForTaskRef: opts.resolveProjectForTaskRef }),
   };
 
   const projectDb = opts.projectDb ?? true;

@@ -30,6 +30,7 @@ import {
   type ErrorReport,
   FINGERPRINT_LINE_PREFIX,
   foldErrorEvents,
+  type ResolveProjectForTaskRef,
   renderBody,
   renderComment,
   renderTitle,
@@ -150,13 +151,48 @@ interface PriorReport {
 }
 
 /**
+ * The task ref an unstamped row carries, if any -- the envelope's own
+ * `task_id` first, falling back to a hand-appended row's `payload.task_ref`.
+ * Mirrors errorIssues.ts's `candidateTaskRef`, which this module never
+ * imports so as to keep the two folds' internals independent.
+ */
+function candidateTaskRef(record: StoredEvent['record']): string | undefined {
+  if (typeof record.task_id === 'string' && record.task_id.length > 0) return record.task_id;
+  const payload = (record.payload ?? {}) as { task_ref?: unknown };
+  return typeof payload.task_ref === 'string' && payload.task_ref.length > 0
+    ? payload.task_ref
+    : undefined;
+}
+
+/**
+ * A row's project, resolved the same way `errorIssues.ts`'s fold resolves
+ * one: an explicit stamp always wins; absent that, an injected resolver gets
+ * first say from the row's task ref; only when neither answers does this
+ * default to the factory's own project. This is what keeps an unstamped row
+ * from a foreign project's session from being folded into this factory's
+ * own prior-report history (and, through `decideOutcome`'s dedup key, its
+ * own repository) merely because nothing stamped it.
+ */
+function resolveRecordProject(
+  record: StoredEvent['record'],
+  resolveProject: ResolveProjectForTaskRef,
+): string {
+  if (typeof record.project === 'string') return record.project;
+  const taskRef = candidateTaskRef(record);
+  return (taskRef ? resolveProject(taskRef) : null) ?? DEFAULT_PROJECT;
+}
+
+/**
  * Every already-appended `issue-reported` record still open, read off the
  * SNAPSHOT of events this call was handed — never off events this same call
  * itself appends. That is what lets the five duplicate candidates a single
  * broken gate produces in one round resolve through GitHub search (one
  * create, four comments) rather than short-circuiting on each other.
  */
-function priorOpenReports(events: readonly StoredEvent[]): PriorReport[] {
+function priorOpenReports(
+  events: readonly StoredEvent[],
+  resolveProject: ResolveProjectForTaskRef = () => null,
+): PriorReport[] {
   const out: PriorReport[] = [];
   for (const event of events) {
     const { record } = event;
@@ -173,7 +209,7 @@ function priorOpenReports(events: readonly StoredEvent[]): PriorReport[] {
       continue;
     }
     out.push({
-      project: record.project ?? DEFAULT_PROJECT,
+      project: resolveRecordProject(record, resolveProject),
       fingerprint: payload.fingerprint,
       outcome: payload.outcome,
       latest_event_id: payload.latest_event_id,
@@ -400,11 +436,12 @@ export async function previewOutcomes(
   register: readonly ProjectRef[],
   runner: CommandRunner,
   clock: () => string,
+  resolveProject: ResolveProjectForTaskRef = () => null,
 ): Promise<IssuePreviewRecord[]> {
   requireRegister(register, 'previewOutcomes');
   void runner;
-  const { reports } = foldErrorEvents(events, clock(), () => true);
-  const history = priorOpenReports(events);
+  const { reports } = foldErrorEvents(events, clock(), () => true, resolveProject);
+  const history = priorOpenReports(events, resolveProject);
 
   const out: IssuePreviewRecord[] = [];
   for (const report of reports) {
@@ -470,13 +507,14 @@ export async function reportErrors(
   runner: CommandRunner,
   clock: () => string,
   opts: EventOpts = {},
+  resolveProject: ResolveProjectForTaskRef = () => null,
 ): Promise<IssueReportRecord[]> {
   requireRegister(register, 'reportErrors');
   // Every project's switch is applied by this module's own step 1, not by
   // the fold: foldErrorEvents dropping a disabled project's candidates
   // silently would lose the `skipped-disabled` record clause 2 requires.
-  const { reports } = foldErrorEvents(events, clock(), () => true);
-  const history = priorOpenReports(events);
+  const { reports } = foldErrorEvents(events, clock(), () => true, resolveProject);
+  const history = priorOpenReports(events, resolveProject);
 
   const out: IssueReportRecord[] = [];
   for (const report of reports) {

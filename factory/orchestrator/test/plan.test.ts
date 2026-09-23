@@ -12,6 +12,7 @@ import {
   nextVersion,
   PlanError,
   type PlanFile,
+  planProjectResolverForTaskRef,
   resolveTaskId,
   type TaskSpecRecord,
   validatePlan,
@@ -805,6 +806,69 @@ describe('plan.ts', () => {
       expect(bareTaskId('epic-1', 'epic-1/task-1')).toBe('task-1');
       expect(bareTaskId('epic-1', 'task-1')).toBe('task-1');
       expect(bareTaskId('epic-1', 'epic-2/task-1')).toBe('epic-2/task-1');
+    });
+  });
+
+  // The privacy-leak guard's other half: given a task ref, answer the
+  // project its OWN epic's plan declares -- never a crash, never a guess,
+  // and never 'black-smith' by default (that fallback belongs to the
+  // reader, errorIssues.ts's DEFAULT_PROJECT, not to this resolver).
+  describe('planProjectResolverForTaskRef', () => {
+    it("resolves a task ref's project from its epic's latest plan version", async () => {
+      await writePlanFixture({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task()],
+        edges: [],
+        project: 'example-app',
+      });
+
+      const resolve = planProjectResolverForTaskRef({ specsDir });
+
+      expect(resolve('epic-1/task-1')).toBe('example-app');
+    });
+
+    it('answers null for a task ref whose epic has no plan on disk, rather than throwing', () => {
+      const resolve = planProjectResolverForTaskRef({ specsDir });
+
+      expect(resolve('epic-never-planned/task-1')).toBeNull();
+    });
+
+    it('answers null for a task ref with no epic segment at all', () => {
+      const resolve = planProjectResolverForTaskRef({ specsDir });
+
+      expect(resolve('not-a-task-ref')).toBeNull();
+    });
+
+    it("answers null when the resolved plan carries no project field (belongs to the reader's default)", async () => {
+      await writePlanFixture({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task()],
+        edges: [],
+      });
+
+      const resolve = planProjectResolverForTaskRef({ specsDir });
+
+      expect(resolve('epic-1/task-1')).toBeNull();
+    });
+
+    it('caches by epic id: a plan written after the first lookup does not change the answer', async () => {
+      const resolve = planProjectResolverForTaskRef({ specsDir });
+      expect(resolve('epic-1/task-1')).toBeNull();
+
+      await writePlanFixture({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task()],
+        edges: [],
+        project: 'example-app',
+      });
+
+      expect(resolve('epic-1/task-1')).toBeNull();
     });
   });
 });

@@ -11,6 +11,7 @@ import {
   type ValidationIssue,
   validateRecord,
 } from './schemas.js';
+import { epicOfTaskId } from './taskId.js';
 import {
   loadTaxonomy,
   type Taxonomy,
@@ -240,6 +241,43 @@ export function loadPlan(epicId: string, version: number, opts: PlanOpts = {}): 
     throw new PlanError('plan.not-found', `No plan file at ${filePath}.`, { epicId, version });
   }
   return JSON.parse(readFileSync(filePath, 'utf8')) as PlanFile;
+}
+
+/**
+ * A task ref's project, read off its own epic's latest plan version -- the
+ * D-246 precedent (`db/projector.ts`'s `planProjectResolver`, for the board)
+ * restated here so `errorIssues.ts` can answer the same question without
+ * importing anything database-shaped (`test/cliBoot.test.ts` pins `cli.ts`'s
+ * built module graph off drizzle/sqlite entirely, and `cli.ts` statically
+ * imports the error-issue reporter).
+ *
+ * Never throws and never guesses: an id with no epic segment, an epic with
+ * no plan on disk, and an unreadable or unparseable plan file all answer
+ * `null` alike, on purpose -- "cannot tell" and "the plan has no project" are
+ * the same non-answer to a caller that must never turn either one into this
+ * factory's own name. Answers cache by epic id for the resolver's lifetime,
+ * since one `issues report` run reads the same epic's plan for every row
+ * that epic contributed.
+ */
+export function planProjectResolverForTaskRef(
+  opts: PlanOpts = {},
+): (taskRef: string) => string | null {
+  const cache = new Map<string, string | null>();
+  return (taskRef: string): string | null => {
+    const epicId = epicOfTaskId(taskRef);
+    if (epicId === null) return null;
+    const cached = cache.get(epicId);
+    if (cached !== undefined) return cached;
+    let project: string | null = null;
+    try {
+      const version = latestPlanVersion(epicId, opts);
+      if (version !== null) project = loadPlan(epicId, version, opts).project ?? null;
+    } catch {
+      // Unreadable or unparseable plan file: no answer, not a crash.
+    }
+    cache.set(epicId, project);
+    return project;
+  };
 }
 
 /**
