@@ -495,6 +495,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Render the invocation that would run one worker turn, as JSON. Prints it; never starts it.',
   },
   {
+    command: 'agents sync',
+    positionals: '',
+    flags: '[--dry-run] [--reset] [--agents-dir <dir>]',
+    summary:
+      'Set each agent template’s frontmatter maxTurns from SMITH_MAXTURNS_<ROLE> (role upper-cased, - as _); --reset restores git HEAD’s value; --dry-run prints role/from/to only. A local, uncommitted edit by design.',
+  },
+  {
     command: 'sandbox open',
     positionals: '<worktree-dir>',
     flags: '--role <role> --task <id> --session <id> [--at <iso>] [--lease-dir <dir>]',

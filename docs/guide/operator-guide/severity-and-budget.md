@@ -84,6 +84,20 @@ quality KPI: same-mistake rate should trend to zero.
 
 (`factory/policies/budgets.yml`)
 
+**Per-box overrides.** Each number above can be replaced on one machine without
+editing `budgets.yml`: `SMITH_EPIC_CAP_TOKENS`, `SMITH_EPIC_ALARM_RATIO`,
+`SMITH_EPIC_MAX_IN_FLIGHT_TASKS`, `SMITH_TASK_CODER_CAP_TOKENS`,
+`SMITH_TASK_CODER_CAP_DIFF_LINES`, `SMITH_TASK_RESEARCHER_CAP_TOKENS` and
+`SMITH_TASK_JUDGES_CAP_TOKENS`, set in `.env` or exported (an exported value
+beats `.env`). `.env.example` lists each at its `budgets.yml` default. This is
+per box, not per epic: while set, it applies to every epic that box runs. Every
+verb reads the policy through one loader, so an override reaches all of them.
+Integers must be positive and the ratio must lie in (0, 1]; anything else stops
+the verb with `budgets.invalid-env`, naming the variable. `smith budget alarm`
+and `smith wave check` add `budgetEnvOverrides` — the names, never the values,
+of the knobs whose value differs from `budgets.yml` — so a report never passes
+off a box's number as the committed one.
+
 ## 9a. `smith budget alarm` — the alarm, counted instead of remembered
 
 `epic.alarm_ratio` sat in `budgets.yml` from Phase 1 with no reader. It parsed

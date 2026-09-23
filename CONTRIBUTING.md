@@ -230,7 +230,8 @@ Do not open a public issue for a vulnerability — see
 [`SECURITY.md`](SECURITY.md).
 
 Never commit a secret. `.env.example` is the only committed env file and it
-carries variable **names**, never values. The event logger redacts
+carries a secret's variable **name**, never its value (only the non-secret
+`SMITH_*` tuning knobs carry a value: their shipped default). The event logger redacts
 credential-shaped strings before write; do not rely on that instead of not
 writing them.
 

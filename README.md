@@ -331,7 +331,7 @@ runs, plus branch protection — not by trust. Full rules:
 **[`docs/standards/guardrails.md`](docs/standards/guardrails.md)**.
 
 - **Secrets are environment-only.** `.env.example` is the only committed env
-  file (variable names, never values), and the event logger redacts
+  file (variable names, never a secret's value), and the event logger redacts
   credential-shaped strings before write.
 - **Only you merge to `main`.** No agent may push or merge to a protected
   branch, and force-push is refused on every branch, protected or not — an

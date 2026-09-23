@@ -27,6 +27,51 @@ than appearing in it.
 
 ### Added
 
+- **Budget caps and agent turn caps can be moved per box, from the env.**
+  budgets.yml and the agent templates stay the committed defaults; a box now
+  overrides them without editing a file every other clone reads.
+
+  *Budgets.* `loadBudgetPolicy` lays seven names over budgets.yml through a
+  new pure `applyBudgetEnv(policy, env)`: `SMITH_EPIC_CAP_TOKENS`,
+  `SMITH_EPIC_ALARM_RATIO`, `SMITH_EPIC_MAX_IN_FLIGHT_TASKS`,
+  `SMITH_TASK_CODER_CAP_TOKENS`, `SMITH_TASK_CODER_CAP_DIFF_LINES`,
+  `SMITH_TASK_RESEARCHER_CAP_TOKENS`, `SMITH_TASK_JUDGES_CAP_TOKENS`.
+  Integers must be positive (digits only) and the ratio must lie in (0, 1];
+  a bad value throws `budgets.invalid-env` naming the variable and the value,
+  and an empty or unset name overrides nothing. `parseBudgetPolicy` stays
+  pure, and every consumer already read the policy through the loader, so
+  the override reaches all of them. It is per box, not per epic — the
+  budgets.yml note that there is no per-epic override still holds, and now
+  says which of the two this is. `smith budget alarm` and `smith wave check`
+  add `budgetEnvOverrides` to their JSON — the names, never the values, of
+  the knobs whose value differs from budgets.yml — only when there are any.
+
+  *Turn caps.* `smith agents sync` reads `SMITH_MAXTURNS_<ROLE>` (role
+  upper-cased, `-` as `_`) and rewrites only the frontmatter `maxTurns:` line
+  of `.claude/agents/<role>.md`, because Claude Code reads the cap from the
+  template at spawn and a turn cap is per role, never per task.
+  `--dry-run` prints role/from/to and writes nothing; `--reset` restores the
+  value committed at git HEAD, touching only that line. An unknown role or a
+  value that is not a positive integer refuses the whole sync before
+  anything is written. The edit is local and uncommitted by design. The
+  `/bs` dispatch contract now says to read the number from the template as
+  it stands at dispatch time, since a sync may have changed it.
+
+  *`.env.example`.* Lists every new name at its shipped default — the seven
+  budget knobs at budgets.yml's values (`SMITH_EPIC_MAX_IN_FLIGHT_TASKS`
+  empty, budgets.yml's `null`) and one `SMITH_MAXTURNS_<ROLE>` per role
+  template at its `maxTurns` — each with a comment saying what it bounds,
+  which verb reads it, its unit and its valid values; the maxTurns block
+  says the values take effect only after `smith agents sync`, and that
+  `--reset` restores the committed ones. The header still says an exported
+  shell value beats `.env`. Since the defaults now live in two places,
+  `test/envExample.test.ts` holds them together: every SMITH_* default
+  equals budgets.yml or the template, every role template has exactly one
+  `SMITH_MAXTURNS_*` line, and the budget names in the file and the names
+  the code accepts are the same set. guardrails.md, README.md and
+  CONTRIBUTING.md now say the file carries no secret's value, rather than
+  no value at all.
+
 - **The run reports the error it just logged.** `.claude/skills/bs/dispatch.md`
   now calls `smith issues report` right after any dispatch writes
   `error-logged`, records a `gate-outcome` as `blocked`, or writes a
