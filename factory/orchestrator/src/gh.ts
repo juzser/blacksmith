@@ -200,9 +200,26 @@ export function buildCreateIssueArgv(repo: string, title: string, body: string):
   return ['issue', 'create', '--repo', repo, '--title', title, '--body-file', writeBodyFile(body)];
 }
 
-/** Pure builder: the argv for `gh issue list` restricted to open issues matching `query`. */
+/**
+ * Pure builder: the argv for `gh issue list` restricted to open issues
+ * matching `query`. Without --json, gh prints a human-readable table that
+ * parseSearchResult can never parse as JSON, folding a real search into a
+ * generic failure indistinguishable from an actual nonzero exit. The fields
+ * requested here are exactly the ones parseSearchResult reads off each item.
+ */
 export function buildSearchIssuesArgv(repo: string, query: string): string[] {
-  return ['issue', 'list', '--repo', repo, '--state', 'open', '--search', query];
+  return [
+    'issue',
+    'list',
+    '--repo',
+    repo,
+    '--state',
+    'open',
+    '--json',
+    'number,body,url',
+    '--search',
+    query,
+  ];
 }
 
 /** Pure builder: the argv for `gh issue comment`. Spawns nothing. */

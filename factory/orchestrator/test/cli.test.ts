@@ -8519,8 +8519,21 @@ describe('cli.ts (built binary)', () => {
       'task-added': () => ({ task_status: 'failed' }),
     };
 
-    /** One session with a candidate of `eventType` per task id. */
-    function seedTyped(label: string, eventType: string, taskIds: string[]): [string, string] {
+    /**
+     * One session with a candidate of `eventType` per task id. `project`
+     * left undefined reproduces an ordinary unstamped row (most of this
+     * describe block's tests only care about scoping/argv shape and stay
+     * agnostic to how -- or whether -- the row's project resolves); a caller
+     * that needs a row to actually settle as this factory's own passes
+     * `'black-smith'` explicitly, the same stamp production code writes for
+     * a session it knows is its own (Phase 6b, `events.ts`'s `project?`).
+     */
+    function seedTyped(
+      label: string,
+      eventType: string,
+      taskIds: string[],
+      project?: string,
+    ): [string, string] {
       const sessionId = `cli-issues-${label}-${Date.now()}`;
       const eventsDir = path.join(scratchDir, `${sessionId}-events`);
       const append = (event: Record<string, unknown>) => {
@@ -8528,7 +8541,12 @@ describe('cli.ts (built binary)', () => {
         expect(run.status).toBe(0);
         return JSON.parse(run.stdout).event_id as string;
       };
-      const base = { session_id: sessionId, actor: 'system', plan_version: 1 };
+      const base = {
+        session_id: sessionId,
+        actor: 'system',
+        plan_version: 1,
+        ...(project === undefined ? {} : { project }),
+      };
       const rootId = append({
         ...base,
         event_type: 'session-start',
@@ -8545,8 +8563,8 @@ describe('cli.ts (built binary)', () => {
     }
 
     /** One session with a blocked `gate-outcome` candidate per task id. */
-    function seedCandidates(label: string, taskIds: string[]): [string, string] {
-      return seedTyped(label, 'gate-outcome', taskIds);
+    function seedCandidates(label: string, taskIds: string[], project?: string): [string, string] {
+      return seedTyped(label, 'gate-outcome', taskIds, project);
     }
 
     function eventCount(sessionId: string, eventsDir: string): number {
@@ -8560,7 +8578,10 @@ describe('cli.ts (built binary)', () => {
     // candidate. AC2: (a) zero `gh` processes and all three argv blocks;
     // (b) the literal slug from this checkout's `origin`; (c) no new event.
     it('issues preview prints one JSON record per candidate naming its argv, spawns no gh, and appends nothing (AC1, AC2)', () => {
-      const [sessionId, eventsDir] = seedCandidates('ac1', ['epic-1/task-a']);
+      // Stamped: this test is about argv/repo_slug plumbing for a row that
+      // resolves, not about project resolution itself -- see the fail-closed
+      // 'project resolution' describe block below for the unstamped cases.
+      const [sessionId, eventsDir] = seedCandidates('ac1', ['epic-1/task-a'], 'black-smith');
       const { binDir, marker } = ghShimDir();
       const before = eventCount(sessionId, eventsDir);
 
@@ -8593,7 +8614,16 @@ describe('cli.ts (built binary)', () => {
       if (!('slug' in resolved)) throw new Error(`no slug: ${resolved.reason}`);
       expect(resolved.slug).toBe('juzser/blacksmith');
       expect(record.repo_slug).toBe('juzser/blacksmith');
-      const search = ['issue', 'list', '--repo', 'juzser/blacksmith', '--state', 'open'];
+      const search = [
+        'issue',
+        'list',
+        '--repo',
+        'juzser/blacksmith',
+        '--state',
+        'open',
+        '--json',
+        'number,body,url',
+      ];
       expect(record.search_argv).toEqual([...search, '--search', record.fingerprint]);
       expect(record.create_argv).toContain('juzser/blacksmith');
       expect(record.comment_argv).toContain('juzser/blacksmith');
@@ -8647,7 +8677,12 @@ describe('cli.ts (built binary)', () => {
     // AC4: every candidate settled `skipped-disabled` at step 1 is a
     // recorded answer, so the run exits 0 and prints no argv for it.
     it('issues preview exits 0 when every candidate is skipped-disabled (AC4)', () => {
-      const [sessionId, eventsDir] = seedCandidates('off', ['epic-1/task-e']);
+      // Stamped: this switch-off gate reads isEnabled(project), so the row
+      // needs a resolved project to be disabled in the first place -- an
+      // unresolved row settles skipped-unresolved-project before the switch
+      // is ever consulted (skipped-unresolved-project is settled first, see
+      // issueReporter.ts).
+      const [sessionId, eventsDir] = seedCandidates('off', ['epic-1/task-e'], 'black-smith');
       const roadmapPath = path.join(scratchDir, 'issues-off-roadmap.md');
       const row = '## Phase 1 — Off\n- id: phase-1\n- status: planned\n- error_issues: off\n';
       writeFileSync(roadmapPath, `# Roadmap\n\n${row}`);
@@ -8677,6 +8712,149 @@ describe('cli.ts (built binary)', () => {
       const { stdout, status } = runCli(['issues', 'preview', ...flags]);
       expect(status).toBe(1);
       expect(JSON.parse(stdout).error.message).toMatch(/no-such-session/);
+    });
+
+    // PR #177's S1 finding: an unstamped row that cannot be resolved must be
+    // SKIPPED, never filed against this repo. The three cases below drive
+    // that through the real `issueInputs` wiring (the built binary's
+    // `planProjectResolverForTaskRefOrSelf` + `withSessionFallback`, not a
+    // stub resolver), the same three shapes errorIssues.ts's fold actually
+    // has to tell apart.
+    describe('project resolution (fail closed)', () => {
+      // (i) A foreign epic's own ref shape (`<epic>/integration`), unstamped,
+      // with no plan on disk anywhere this run can see: none of
+      // withSessionFallback's three steps -- a stamp, a session-mate's
+      // stamp, or a plan on disk -- can name a project, so the row settles
+      // skipped-unresolved-project at step 0 rather than defaulting to this
+      // factory's own name.
+      it('reports skipped-unresolved-project for a foreign <epic>/integration ref with no local plan', () => {
+        const [sessionId, eventsDir] = seedCandidates('foreign', ['epic-foreign/integration']);
+        const specsDir = path.join(scratchDir, 'issues-foreign-specs');
+        mkdirSync(specsDir, { recursive: true });
+        const flags = ['--session', sessionId, '--specs-dir', specsDir, '--state-dir', eventsDir];
+        const { stdout, status } = runCli(['issues', 'preview', ...flags]);
+        expect(status).toBe(0);
+        const [record] = JSON.parse(stdout);
+        expect(record.task_ref).toBe('epic-foreign/integration');
+        expect(record.project).toBeNull();
+        expect(record.outcome).toBe('skipped-unresolved-project');
+        expect(record.reason).toBe('project-unresolved');
+        expect(record.settled_at_step).toBe(0);
+        expect(record.search_argv).toBeUndefined();
+      });
+
+      // (ii) A BARE ref (no epic segment): the direct resolver cannot even
+      // try, since there is no epic to look a plan up under. It is only
+      // reachable at all through this session's own `task-added` row, whose
+      // `payload.epic_id` widens it to `<epic>/<ref>` -- and a real plan
+      // fixture on disk for that epic, declaring no `project` field, is
+      // itself the "self" signal (plan.ts's `planProjectResolverForTaskRefOrSelf`
+      // doc comment: only this checkout's own epics have a plan under the
+      // configured specs dir at all).
+      it('resolves a bare ref via task-added payload.epic_id plus a real plan fixture naming no project', () => {
+        const sessionId = `cli-issues-bare-${Date.now()}`;
+        const eventsDir = path.join(scratchDir, `${sessionId}-events`);
+        const specsDir = path.join(scratchDir, `${sessionId}-specs`);
+        const append = (event: Record<string, unknown>) => {
+          const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+          expect(run.status).toBe(0);
+          return JSON.parse(run.stdout).event_id as string;
+        };
+        const base = { session_id: sessionId, actor: 'system', plan_version: 1 };
+        const rootId = append({
+          ...base,
+          event_type: 'session-start',
+          causal_parent: null,
+          payload: {},
+        });
+        // The only source of the epic id: a task-added row for this exact
+        // bare task id, same session. It is also itself a candidate --
+        // task-added is one of ISSUE_CANDIDATE_EVENT_TYPES -- so one event
+        // does both jobs, the way a real log's would.
+        append({
+          ...base,
+          event_type: 'task-added',
+          task_id: 'task-bare',
+          causal_parent: rootId,
+          payload: { task_status: 'failed', epic_id: 'epic-1' },
+        });
+
+        // A real plan on disk for epic-1, naming no `project` -- the "self"
+        // fallback plan.ts's doc comment describes, mirrored from
+        // test/plan.test.ts's writePlanFixture pattern.
+        mkdirSync(path.join(specsDir, 'epic-1'), { recursive: true });
+        writeFileSync(
+          path.join(specsDir, 'epic-1', 'plan-v1.json'),
+          JSON.stringify({
+            epic_id: 'epic-1',
+            version: 1,
+            status: 'active',
+            tasks: [],
+            edges: [],
+          }),
+        );
+
+        const flags = ['--session', sessionId, '--specs-dir', specsDir, '--state-dir', eventsDir];
+        const { stdout, status } = runCli(['issues', 'preview', ...flags]);
+        expect(status).toBe(0);
+        const [record] = JSON.parse(stdout);
+        expect(record.task_ref).toBe('task-bare');
+        expect(record.project).toBe('black-smith');
+        expect(record.outcome).not.toBe('skipped-unresolved-project');
+      });
+
+      // (iii) The session-stamp fallback: one row in a session carries an
+      // explicit `project`, a sibling row in the SAME session carries none.
+      // withSessionFallback's third and last step picks up the session-mate's
+      // stamp for the unstamped row -- proven here against an EMPTY specs
+      // dir, so a plan on disk cannot be the thing that resolves it.
+      it("resolves an unstamped row from a session-mate's project stamp", () => {
+        const sessionId = `cli-issues-sessfallback-${Date.now()}`;
+        const eventsDir = path.join(scratchDir, `${sessionId}-events`);
+        const specsDir = path.join(scratchDir, `${sessionId}-specs`);
+        mkdirSync(specsDir, { recursive: true });
+        const append = (event: Record<string, unknown>) => {
+          const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+          expect(run.status).toBe(0);
+          return JSON.parse(run.stdout).event_id as string;
+        };
+        const base = { session_id: sessionId, actor: 'system', plan_version: 1 };
+        const rootId = append({
+          ...base,
+          event_type: 'session-start',
+          causal_parent: null,
+          payload: {},
+        });
+        append({
+          ...base,
+          project: 'stamped-project',
+          event_type: 'gate-outcome',
+          task_id: 'epic-a/task-x',
+          causal_parent: rootId,
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+        });
+        append({
+          ...base,
+          event_type: 'gate-outcome',
+          task_id: 'epic-b/task-y',
+          causal_parent: rootId,
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+        });
+
+        const flags = ['--session', sessionId, '--specs-dir', specsDir, '--state-dir', eventsDir];
+        const { stdout, status } = runCli(['issues', 'preview', ...flags]);
+        expect(status).toBe(0);
+        const records: Array<{ task_ref: string; project: string | null; outcome?: string }> =
+          JSON.parse(stdout);
+        expect(records).toHaveLength(2);
+        const unstamped = records.find((r) => r.task_ref === 'epic-b/task-y');
+        if (!unstamped) throw new Error('no record for epic-b/task-y');
+        // Neither the direct resolver (no plan on disk) nor the session's
+        // task-added map (there is none) could have produced this --
+        // the session stamp is the only path left standing.
+        expect(unstamped.project).toBe('stamped-project');
+        expect(unstamped.outcome).not.toBe('skipped-unresolved-project');
+      });
     });
   });
 

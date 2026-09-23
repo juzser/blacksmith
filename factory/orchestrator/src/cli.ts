@@ -132,7 +132,7 @@ import {
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
-  planProjectResolverForTaskRef,
+  planProjectResolverForTaskRefOrSelf,
   resolveTaskId,
   type TaskSpecRecord,
   validatePlan,
@@ -151,7 +151,7 @@ import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
 import { admit, adopt, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
-import { isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
+import { FACTORY_PROJECT, isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
 import { checkRuntime } from './runtime.js';
 import { checkSameMistakeKpi } from './sameMistakeKpi.js';
 import {
@@ -506,14 +506,29 @@ function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, strin
  *
  * `resolveProject` closes the privacy-leak gap an unstamped row otherwise
  * falls into: a session or plan driving a project other than this factory
- * writes error/gate/task-added rows with no top-level `project` stamp, and
- * without this resolver those rows would default to `black-smith` --
- * folding a foreign project's errors into, and potentially filing its
- * issues against, this factory's own repository. `planProjectResolverForTaskRef`
- * (D-246's `db/projector.ts` precedent, restated here without a DB
- * dependency `cli.ts`'s boot graph cannot carry) answers from the row's own
- * task ref's epic's plan file; `reportErrors`/`previewOutcomes` still
- * default to `black-smith` only when that answer is itself `null`.
+ * writes error/gate/task-added rows with no top-level `project` stamp.
+ * `planProjectResolverForTaskRefOrSelf` (D-246's `db/projector.ts` precedent,
+ * restated here without a DB dependency `cli.ts`'s boot graph cannot carry)
+ * answers from the row's own task ref's epic's plan file: a plan on disk
+ * naming a project wins outright; a plan on disk naming none is this
+ * checkout's own epic, so it resolves to `FACTORY_PROJECT`; no plan found at
+ * all (a foreign epic, or a bare ref) stays `null`, and `reportErrors`/
+ * `previewOutcomes` skip that row with `skipped-unresolved-project` rather
+ * than ever defaulting it into this factory's own repository. `null` answers
+ * also fall back to any `project` stamp elsewhere in the same session, or to
+ * a bare ref's `task-added` `epic_id`, before landing on `null` for good
+ * (`withSessionFallback`, `errorIssues.ts`).
+ *
+ * `--specs-dir` (via `planOptsFromFlags`) and `--state-dir` (via
+ * `eventOptsFromFlags`) are two independent flags on purpose: `--state-dir`
+ * says where THIS session's own events live, `--specs-dir` says where the
+ * epics IT references keep their plans, and a session's events and the
+ * plans its tasks belong to are not always colocated (the daemon's own
+ * event log and a target checkout's specs tree, for one). Requiring them to
+ * travel together would make `issues report` unable to point one flag at a
+ * remote-events state dir while resolving projects from this checkout's own
+ * specs/active, which is `smith`'s ordinary daemon posture. Callers who do
+ * mean the same tree for both pass the same path to both flags.
  */
 async function issueInputs(flags: Record<string, string>) {
   const sessionId = requireFlag(flags, 'session');
@@ -522,11 +537,18 @@ async function issueInputs(flags: Record<string, string>) {
   const events = scopeIssueCandidates(await readLineageEvents(sessionId, eventOpts), flags);
   const milestones = loadRoadmap(flags['roadmap-path']);
   const isEnabled = (project: string) => isErrorTrackerWritable(milestones, project);
-  const resolveProject = planProjectResolverForTaskRef(planOptsFromFlags(flags));
+  const resolveProject = planProjectResolverForTaskRefOrSelf(
+    FACTORY_PROJECT,
+    planOptsFromFlags(flags),
+  );
   return { events, isEnabled, register: factoryProjects(), eventOpts, resolveProject };
 }
 
-/** Where plan version files are read from and written to; defaults to factory/specs/active. */
+/**
+ * Where plan version files are read from and written to; defaults to
+ * factory/specs/active. See `issueInputs`'s doc comment for why this
+ * deliberately does not travel with `--state-dir`.
+ */
 function planOptsFromFlags(flags: Record<string, string>): PlanOpts {
   return flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {};
 }
@@ -1898,7 +1920,15 @@ async function main(): Promise<number> {
       ...eventOptsFromFlags(flags),
       projectDirs: resolveProjectDirs(repeated.project, { self }),
       readProjects: () => factoryProjects().filter((ref) => self || !ref.self),
-      resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
+      // Same D-246 self-fallback as issueInputs (see its doc comment): a
+      // plan on disk naming no project is this checkout's own epic, so it
+      // reads as FACTORY_PROJECT rather than staying an unresolved null the
+      // daemon would report as an unlabeled finding and the on/off switch
+      // for 'black-smith' would never get asked about.
+      resolveProjectForTaskRef: planProjectResolverForTaskRefOrSelf(
+        FACTORY_PROJECT,
+        planOptsFromFlags(flags),
+      ),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };

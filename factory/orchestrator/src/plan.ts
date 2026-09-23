@@ -281,6 +281,38 @@ export function planProjectResolverForTaskRef(
 }
 
 /**
+ * `planProjectResolverForTaskRef`, with its own doc comment's "belongs to
+ * the reader's default" case made concrete: a plan found on disk for the
+ * epic that simply declares no `project` field IS this factory's own
+ * project, by construction -- only this checkout's own epics have a plan
+ * under `specs/active` at all, so finding one there is itself the "self"
+ * signal a foreign epic's plan (which lives in the foreign project's own
+ * specs tree, never this one) can never produce. An epic with no plan on
+ * disk anywhere, or a bare ref with no epic segment, stays the OTHER null
+ * -- "cannot tell whose project this is" -- because plan.ts must not be
+ * the module that hardcodes this factory's name; the caller supplies it.
+ */
+export function planProjectResolverForTaskRefOrSelf(
+  selfProject: string,
+  opts: PlanOpts = {},
+): (taskRef: string) => string | null {
+  const resolve = planProjectResolverForTaskRef(opts);
+  const hasPlanCache = new Map<string, boolean>();
+  return (taskRef: string): string | null => {
+    const direct = resolve(taskRef);
+    if (direct !== null) return direct;
+    const epicId = epicOfTaskId(taskRef);
+    if (epicId === null) return null;
+    let hasPlan = hasPlanCache.get(epicId);
+    if (hasPlan === undefined) {
+      hasPlan = latestPlanVersion(epicId, opts) !== null;
+      hasPlanCache.set(epicId, hasPlan);
+    }
+    return hasPlan ? selfProject : null;
+  };
+}
+
+/**
  * Reduce an `output_schema_ref` to the name the compiled schema set knows it
  * by. `compileSchemas` keys on filename-minus-`.schema.json`, so a path, a
  * bare filename, a `$id` URL and a bare name all have to land on the same

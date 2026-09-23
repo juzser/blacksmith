@@ -201,4 +201,15 @@ describe('error-report proposals', () => {
     expect(admission?.decision).toBe('operator');
     expect(admission?.code).toBe('tracker-write-never-auto');
   });
+
+  // errorIssues.ts's fail-closed fold mints proposals with project: null when
+  // nothing can resolve one (scheduler.ts's ErrorReportProposal.project is
+  // string | null for exactly this reason). The refusal must not depend on
+  // the project being a resolved string.
+  it('still holds a report whose project never resolved (project: null)', () => {
+    const unresolved = { ...errorReport(0.95), project: null } as SchedulerProposal;
+    const [admission] = admitProposals([unresolved], POLICY, ctx());
+    expect(admission?.decision).toBe('operator');
+    expect(admission?.code).toBe('tracker-write-never-auto');
+  });
 });

@@ -13,6 +13,7 @@ import {
   PlanError,
   type PlanFile,
   planProjectResolverForTaskRef,
+  planProjectResolverForTaskRefOrSelf,
   resolveTaskId,
   type TaskSpecRecord,
   validatePlan,
@@ -869,6 +870,56 @@ describe('plan.ts', () => {
       });
 
       expect(resolve('epic-1/task-1')).toBeNull();
+    });
+  });
+
+  // The reader's default, made concrete: a plan found on disk under THIS
+  // checkout's own specs/active is itself the "self" signal, whether or not
+  // it declares a `project` field -- a foreign project's plan cannot live in
+  // this repo's specs tree. An epic with no plan anywhere, or a bare ref with
+  // no epic segment, stays the other null: "cannot tell whose project this
+  // is," because plan.ts must not be the module that hardcodes the caller's
+  // own project name.
+  describe('planProjectResolverForTaskRefOrSelf', () => {
+    it('answers the caller-supplied self project when the plan exists but declares no project field', async () => {
+      await writePlanFixture({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task()],
+        edges: [],
+      });
+
+      const resolve = planProjectResolverForTaskRefOrSelf('black-smith', { specsDir });
+
+      expect(resolve('epic-1/task-1')).toBe('black-smith');
+    });
+
+    it('still answers the plan-declared project when the plan carries one, rather than the self default', async () => {
+      await writePlanFixture({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [task()],
+        edges: [],
+        project: 'example-app',
+      });
+
+      const resolve = planProjectResolverForTaskRefOrSelf('black-smith', { specsDir });
+
+      expect(resolve('epic-1/task-1')).toBe('example-app');
+    });
+
+    it('answers null for a task ref whose epic has no plan on disk anywhere (a foreign epic, not self)', () => {
+      const resolve = planProjectResolverForTaskRefOrSelf('black-smith', { specsDir });
+
+      expect(resolve('epic-never-planned/task-1')).toBeNull();
+    });
+
+    it('answers null for a bare ref with no epic segment', () => {
+      const resolve = planProjectResolverForTaskRefOrSelf('black-smith', { specsDir });
+
+      expect(resolve('not-a-task-ref')).toBeNull();
     });
   });
 });
