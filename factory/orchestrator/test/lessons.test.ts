@@ -6,6 +6,8 @@ import { foldLessons } from '../src/db/projector.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { appendEvent, readEvents } from '../src/events.js';
 import {
+  CHECKPOINT_TYPES,
+  type CheckpointType,
   type CompiledLessonInput,
   checkNovelty,
   compileLessons,
@@ -766,6 +768,61 @@ describe('extractDecisionCheckpoints', () => {
     const checkpoints = extractDecisionCheckpoints([early, late], '2026-08-01T00:00:00.000Z');
     expect(checkpoints).toHaveLength(1);
     expect(checkpoints[0]?.summary).toContain('fp-new');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The roster is the declaration, and these are the two halves of it the
+// compiler cannot see.
+//
+// `CHECKPOINT_EXTRACTORS` is a total `Record<CheckpointType, ...>`, so a type
+// on the roster with no extractor is a build error. What still typechecks is a
+// registered extractor that never fires -- because its predicate matches no
+// event the factory writes, or because the id it returns is not the id it was
+// registered under. Both produce the same silence the derivation was added to
+// end: a checkpoint fully declared, fully typed, and absent from every dream
+// pass.
+// ---------------------------------------------------------------------------
+
+/**
+ * One event that must make each checkpoint type fire. Total by type on
+ * purpose: a checkpoint added to the roster cannot land until somebody has
+ * shown it firing on a real event shape.
+ */
+const FIRING_EVENT: Record<CheckpointType, StoredEvent> = {
+  'plan-sign-off': ev({
+    event_type: 'plan-version-created',
+    actor: 'operator',
+    payload: { epic_id: 'epic-roster', version: 1 },
+  }),
+  'waiver-decision': ev({ event_type: 'waiver-granted', payload: { fingerprint: 'fp-roster' } }),
+  escalation: ev({ event_type: 'error-logged', payload: { error: 'coordination.deadlock' } }),
+  'gate-block': ev({
+    event_type: 'gate-outcome',
+    payload: { outcome: 'blocked', reason: 'tests-failed' },
+  }),
+};
+
+describe('CHECKPOINT_TYPES', () => {
+  it('fires every type on the roster, under the id it is registered as', () => {
+    const fired = CHECKPOINT_TYPES.map(
+      (checkpointType) =>
+        extractDecisionCheckpoints([FIRING_EVENT[checkpointType]])[0]?.checkpointType ?? null,
+    );
+    expect(fired).toEqual([...CHECKPOINT_TYPES]);
+  });
+
+  // `extractDecisionCheckpoints` takes the first extractor that claims an event
+  // and stops, so this order is what settles an overlap. Restated by hand on
+  // purpose: placing a new type becomes a decision somebody takes, not one the
+  // diff makes for them.
+  it('is in the order the scan depends on', () => {
+    expect([...CHECKPOINT_TYPES]).toEqual([
+      'plan-sign-off',
+      'waiver-decision',
+      'escalation',
+      'gate-block',
+    ]);
   });
 });
 

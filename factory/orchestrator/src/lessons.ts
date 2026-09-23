@@ -848,7 +848,25 @@ export function lessonsForDispatch(
 // (c) smith dream — decision-checkpoint extraction
 // ---------------------------------------------------------------------------
 
-export type CheckpointType = 'plan-sign-off' | 'waiver-decision' | 'escalation' | 'gate-block';
+/**
+ * The checkpoint roster, in scan order — the one place a checkpoint type is
+ * declared. `CheckpointType` is derived from it and `CHECKPOINT_EXTRACTORS` is
+ * a total `Record` over it, so a type named here without an extractor, or an
+ * extractor written without a name here, is a compile error rather than a scan
+ * that silently never runs.
+ *
+ * The order is load-bearing: `extractDecisionCheckpoints` takes the first
+ * extractor that claims an event and stops, so placing a new type ahead of an
+ * existing one decides which of the two wins.
+ */
+export const CHECKPOINT_TYPES = [
+  'plan-sign-off',
+  'waiver-decision',
+  'escalation',
+  'gate-block',
+] as const;
+
+export type CheckpointType = (typeof CHECKPOINT_TYPES)[number];
 
 export interface DecisionCheckpoint {
   checkpointType: CheckpointType;
@@ -936,17 +954,20 @@ function gateBlockCheckpoint(event: StoredEvent): DecisionCheckpoint | null {
   };
 }
 
-const CHECKPOINT_EXTRACTORS = [
-  planSignOffCheckpoint,
-  waiverDecisionCheckpoint,
-  escalationCheckpoint,
-  gateBlockCheckpoint,
-];
+type CheckpointExtractor = (event: StoredEvent) => DecisionCheckpoint | null;
+
+const CHECKPOINT_EXTRACTORS: Record<CheckpointType, CheckpointExtractor> = {
+  'plan-sign-off': planSignOffCheckpoint,
+  'waiver-decision': waiverDecisionCheckpoint,
+  escalation: escalationCheckpoint,
+  'gate-block': gateBlockCheckpoint,
+};
 
 /**
  * Deterministic scan for decision checkpoints (architecture §9.1: "what was
- * proposed, approved, modified, rejected — and why"): plan sign-offs, waiver
- * grants/denials, escalations (coordination.* errors), and gate blocks.
+ * proposed, approved, modified, rejected — and why"). `CHECKPOINT_TYPES` is
+ * the roster it walks, in that order, and the first extractor to claim an
+ * event owns it.
  */
 export function extractDecisionCheckpoints(
   events: readonly StoredEvent[],
@@ -956,8 +977,8 @@ export function extractDecisionCheckpoints(
   const checkpoints: DecisionCheckpoint[] = [];
   for (const event of events) {
     if (sinceMs !== null && Date.parse(event.record.ts) < sinceMs) continue;
-    for (const extractor of CHECKPOINT_EXTRACTORS) {
-      const checkpoint = extractor(event);
+    for (const checkpointType of CHECKPOINT_TYPES) {
+      const checkpoint = CHECKPOINT_EXTRACTORS[checkpointType](event);
       if (checkpoint) {
         checkpoints.push(checkpoint);
         break;
