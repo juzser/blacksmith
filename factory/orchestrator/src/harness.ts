@@ -4,7 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import { SmithError } from './errors.js';
 import { AGENTS_DIR, HARNESS_POLICY_PATH, REPO_ROOT } from './paths.js';
-import { type GuardrailPolicy, loadGuardrailPolicy } from './policy.js';
+import { type GuardrailPolicy, INSPECTED_FILE_TOOLS, loadGuardrailPolicy } from './policy.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 
 /**
@@ -82,11 +82,15 @@ import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
  * weaker promise than the in-process path's sandbox lease — it is a
  * differently-shaped one. An in-process judge runs under guard.sh with a
  * Bash tool in hand, and the lease is what stops it from writing; a cli judge
- * with `judge_args` set never has the ability to write at all, which a lease
- * revocation cannot improve on. Rule 6's fingerprint-before-and-after still
- * runs either way, because a read-only flag is what the harness promises, not
- * what this factory has watched happen. An empty `judge_args` means the
- * harness makes no such promise, and the refusal stands as before.
+ * whose `judge_args` this factory has read as read-only never has the ability
+ * to write at all, which a lease revocation cannot improve on. Rule 6's
+ * fingerprint-before-and-after still runs either way, because a read-only
+ * flag is what the harness promises, not what this factory has watched
+ * happen. `judge_args` that do not read as read-only — absent, or present
+ * and spent on something else — mean the harness makes no such promise, and
+ * the refusal stands as before. Which flags read that way, for which
+ * program, is declared at `judgeReadOnly` below; it is the one thing about
+ * this escape valve that must not be taken on trust.
  *
  * `schema_args` is a smaller instance of the same shape: arguments appended
  * only when the request resolved a schema, so a turn that validates nothing
@@ -599,6 +603,108 @@ function substitute(
 }
 
 /**
+ * Whether a `cli` harness's `judge_args` actually put the program in a mode
+ * where it cannot write — and when they do not, which part is missing.
+ *
+ * `judge_args` is §18 rule 5's escape valve, and what it is supposed to
+ * carry is specific: flags that make writing impossible, enforced by the OS
+ * or the tool. What this file checked was whether the array was empty.
+ * `judge_args: ["-m", "gpt-5-high"]` is not empty, and a reviewer planned
+ * against it came back with `exec -C <worktree>` and codex's *default*,
+ * writable sandbox — the whole of rule 5 spent on a model flag. A promise
+ * nobody reads is not a promise; it is a length.
+ *
+ * So the flags are declared here, per program, and every other shape of
+ * `judge_args` falls where an empty one already fell. That refusal is not a
+ * new one: it is rule 5's, now reaching the configurations that only looked
+ * like a promise. A harness whose read-only flag this factory cannot read
+ * still runs every worker role, and still serves judges — without a worktree
+ * in hand, which is what the refusal has always said.
+ *
+ * Adding a program below means checking what read-only means for it, not
+ * trusting the name.
+ */
+type JudgeReadOnly =
+  | { readonly promised: true; readonly flag: string }
+  | { readonly promised: false; readonly reason: string };
+
+/** `--flag value` or `--flag=value`. The last occurrence wins, as an argv does. */
+function flagValue(args: readonly string[], names: readonly string[]): string | null {
+  let found: string | null = null;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    for (const name of names) {
+      if (arg === name) {
+        const next = args[i + 1];
+        if (next !== undefined) found = next;
+      } else if (arg.startsWith(`${name}=`)) {
+        found = arg.slice(name.length + 1);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * A Map rather than an object literal on purpose: the key is a program name
+ * read off a policy file, and `Object.prototype` answers to several of them.
+ */
+const READ_ONLY_JUDGE_FLAGS = new Map<string, (args: readonly string[]) => JudgeReadOnly>([
+  // codex brings its own sandbox: `read-only` is enforced by the OS, so the
+  // worktree path the process holds is a path it can only read.
+  [
+    'codex',
+    (args) => {
+      const sandbox = flagValue(args, ['-s', '--sandbox']);
+      if (sandbox === 'read-only') return { promised: true, flag: '-s read-only' };
+      return {
+        promised: false,
+        reason:
+          sandbox === null
+            ? 'its judge_args name no `-s read-only`'
+            : `its judge_args ask for the \`${sandbox}\` sandbox, which is not read-only`,
+      };
+    },
+  ],
+  // claude has no filesystem sandbox to ask for; it has the tools it is
+  // given. Denying every tool that writes a file is the same promise by a
+  // different mechanism — and which tools those are is policy.ts's roster,
+  // read from there rather than typed again here.
+  [
+    'claude',
+    (args) => {
+      const denied = flagValue(args, ['--disallowedTools']);
+      if (denied === null) {
+        return { promised: false, reason: 'its judge_args name no `--disallowedTools`' };
+      }
+      const names = new Set(denied.split(',').map((name) => name.trim()));
+      const left = INSPECTED_FILE_TOOLS.filter((tool) => !names.has(tool));
+      if (left.length === 0) return { promised: true, flag: `--disallowedTools ${denied}` };
+      return {
+        promised: false,
+        reason: `its judge_args leave ${left.join(', ')} in the judge's hands`,
+      };
+    },
+  ],
+]);
+
+function judgeReadOnly(harness: HarnessConfig): JudgeReadOnly {
+  if (harness.judgeArgs.length === 0) {
+    return { promised: false, reason: 'it declares no judge_args at all' };
+  }
+  const program = harness.command === null ? '' : path.basename(harness.command);
+  const recognise = READ_ONLY_JUDGE_FLAGS.get(program);
+  if (recognise === undefined) {
+    const known = [...READ_ONLY_JUDGE_FLAGS.keys()].join(' and ');
+    return {
+      promised: false,
+      reason: `this factory cannot read a read-only flag for \`${program}\` (it reads ${known})`,
+    };
+  }
+  return recognise(harness.judgeArgs);
+}
+
+/**
  * Describe the process that would run this turn. Start nothing.
  *
  * Every refusal below is a fact the caller could not have checked cheaply:
@@ -703,15 +809,17 @@ export function planWorkerTurn(
     };
   }
 
-  if (access === 'judge' && worktree !== null && harness.judgeArgs.length === 0) {
+  const readOnly = access === 'judge' && worktree !== null ? judgeReadOnly(harness) : null;
+  if (readOnly !== null && !readOnly.promised) {
     // §18 rule 5, one step out from providers/types.ts. An external process
     // holding a worktree path holds write access to it; no lease this side of
     // the boundary can take that back — unless the harness's own policy entry
-    // declares judge_args that make the program read-only. See the header.
+    // declares judge_args that are read-only and not merely present. See the
+    // header.
     throw new HarnessError(
       'harness.judge-worktree',
-      `Harness "${harness.name}" runs a separate program, and ${role} is a judge role. A judge outside this process gets the prompt and nothing else — a worktree path it holds is write access no sandbox lease can revoke (architecture §18 rule 5). ${harness.name} could still serve ${role} a worktree if its policy entry were to declare judge_args that make the program read-only.`,
-      { harness: harness.name, role },
+      `Harness "${harness.name}" runs a separate program, and ${role} is a judge role. A judge outside this process gets the prompt and nothing else — a worktree path it holds is write access no sandbox lease can revoke (architecture §18 rule 5). ${harness.name} could still serve ${role} a worktree if its policy entry declared judge_args that make the program read-only, but ${readOnly.reason}.`,
+      { harness: harness.name, role, reason: readOnly.reason },
     );
   }
 
@@ -805,7 +913,7 @@ export function summarizeHarnesses(options: HarnessOptions = {}): HarnessListing
         if (!serves(harness, role)) return false;
         if (!templateFor(role, agentsDir).exists) return false;
         if (roleAccess(role, guardrails) === 'judge') {
-          return harness.kind === 'in-process' || harness.judgeArgs.length > 0;
+          return harness.kind === 'in-process' || judgeReadOnly(harness).promised;
         }
         return true;
       }),
