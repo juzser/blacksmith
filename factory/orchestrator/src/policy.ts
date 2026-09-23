@@ -106,7 +106,7 @@ export interface GuardrailPolicy {
   readonly judgeSandbox: JudgeSandboxPolicy;
   /** Roles whose lease narrows their writes to a glob set instead of forbidding writes outright. */
   readonly roleWriteScopes: readonly RoleWriteScope[];
-  /** Keyed by rule id (`push-to-protected`, etc.) — every id in `REQUIRED_RULE_IDS` is guaranteed present. */
+  /** Keyed by rule id — exactly `EVALUATED_RULE_IDS`, no fewer and no more. */
   readonly rules: ReadonlyMap<string, GuardrailRule>;
 }
 
@@ -141,8 +141,20 @@ interface RawGuardrailsYaml {
  * that reason: it is the mechanism that keeps a tester out of the code it is
  * grading, and a policy that cannot name it either blocks the tester
  * entirely or lets it mark its own homework.
+ *
+ * The list is closed in both directions. Every id here must appear in
+ * guardrails.yml, for the reasons above; and every id guardrails.yml declares
+ * must appear here, because a rule is a row in that file *plus* a branch in
+ * this one that looks the row up. A row with no branch parses, counts and
+ * prints like the others and enforces nothing — the file says the door is
+ * shut and no one is standing at it. So the name is what the evaluator
+ * consults, not what the file happens to carry, and `GuardrailRuleId` below
+ * makes the compiler hold every `requireRule`/`sandboxViolation` call site to
+ * it. What no type can check is a stale entry — an id left here after its
+ * branch was deleted — so policy.test.ts scrapes the call sites back out of
+ * this file and holds them against the list.
  */
-const REQUIRED_RULE_IDS = [
+export const EVALUATED_RULE_IDS = [
   'push-to-protected',
   'force-push',
   'merge-into-protected',
@@ -154,6 +166,11 @@ const REQUIRED_RULE_IDS = [
   'judge-sandbox-escape',
   'role-write-scope',
 ] as const;
+
+/** A rule id this evaluator actually consults. Anything else is not a rule, just a row. */
+export type GuardrailRuleId = (typeof EVALUATED_RULE_IDS)[number];
+
+const EVALUATED_RULE_ID_SET: ReadonlySet<string> = new Set(EVALUATED_RULE_IDS);
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === 'string');
@@ -194,8 +211,20 @@ function parseCommandSpecs(raw: unknown, key: string): DeployCommandSpec[] {
   });
 }
 
-/** Fold one `rules:` list into the shared id-keyed map. Used for the top-level list and the judge_sandbox one. */
-function collectRules(raw: unknown, into: Map<string, GuardrailRule>, key: string): void {
+/**
+ * Fold one `rules:` list into the shared id-keyed map, used for the top-level
+ * list and the two block-level ones. `declaredIn` remembers which block each
+ * id came from, so a second definition can be refused by name rather than
+ * overwriting the first: the folds run in source order, and a plain `set`
+ * would leave the last block read holding the rule while the file still reads
+ * as if the first one did.
+ */
+function collectRules(
+  raw: unknown,
+  into: Map<string, GuardrailRule>,
+  declaredIn: Map<string, string>,
+  key: string,
+): void {
   if (!Array.isArray(raw)) {
     throw new PolicyError('policy.invalid-document', `guardrails.yml is missing ${key} (a list).`, {
       key,
@@ -219,6 +248,15 @@ function collectRules(raw: unknown, into: Map<string, GuardrailRule>, key: strin
         { key, rule: entry },
       );
     }
+    const already = declaredIn.get(r.id);
+    if (already !== undefined) {
+      throw new PolicyError(
+        'policy.invalid-document',
+        `guardrails.yml declares rule "${r.id}" in both ${already} and ${key}; a rule gets one definition, not two.`,
+        { rule: r.id, declaredIn: already, redeclaredIn: key },
+      );
+    }
+    declaredIn.set(r.id, key);
     into.set(r.id, {
       id: r.id,
       severity: r.severity,
@@ -379,10 +417,20 @@ export function parseGuardrailPolicy(yamlText: string): GuardrailPolicy {
   const roleWriteScopes = parseRoleWriteScopes(rawScopes.scopes, judgeSandbox.roles);
 
   const rules = new Map<string, GuardrailRule>();
-  collectRules(doc.rules, rules, 'rules');
-  collectRules(rawSandbox.rules, rules, 'judge_sandbox.rules');
-  collectRules(rawScopes.rules, rules, 'role_write_scopes.rules');
-  for (const requiredId of REQUIRED_RULE_IDS) {
+  const declaredIn = new Map<string, string>();
+  collectRules(doc.rules, rules, declaredIn, 'rules');
+  collectRules(rawSandbox.rules, rules, declaredIn, 'judge_sandbox.rules');
+  collectRules(rawScopes.rules, rules, declaredIn, 'role_write_scopes.rules');
+  for (const [declaredId, key] of declaredIn) {
+    if (!EVALUATED_RULE_ID_SET.has(declaredId)) {
+      throw new PolicyError(
+        'policy.invalid-document',
+        `guardrails.yml declares rule "${declaredId}" in ${key}, which nothing in the evaluator consults; a rule with no branch to fire it enforces nothing.`,
+        { rule: declaredId, key },
+      );
+    }
+  }
+  for (const requiredId of EVALUATED_RULE_IDS) {
     if (!rules.has(requiredId)) {
       throw new PolicyError(
         'policy.invalid-document',
@@ -642,12 +690,15 @@ export const INSPECTED_FILE_TOOLS: readonly string[] = [
   'NotebookEdit',
 ];
 
-function requireRule(policy: GuardrailPolicy, id: string): GuardrailRule {
+function requireRule(policy: GuardrailPolicy, id: GuardrailRuleId): GuardrailRule {
   const rule = policy.rules.get(id);
   if (!rule) {
     // Unreachable once a policy has passed parseGuardrailPolicy (which
-    // requires every id in REQUIRED_RULE_IDS) — this is a defensive
-    // safety-net, not a real code path.
+    // requires every id in EVALUATED_RULE_IDS) — this is a defensive
+    // safety-net, not a real code path. Taking a `GuardrailRuleId` rather
+    // than a string is the other half: a call site that invents an id the
+    // roster does not carry does not compile, so the only way to reach a
+    // rule from here is to have declared it as one.
     throw new PolicyError('policy.missing-rule', `guardrails.yml has no rule "${id}".`, {
       rule: id,
     });
@@ -1409,7 +1460,7 @@ function renderSandboxReason(
 
 function sandboxViolation(
   policy: GuardrailPolicy,
-  id: string,
+  id: GuardrailRuleId,
   lease: SandboxLease,
 ): PolicyViolation {
   const rule = requireRule(policy, id);

@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadHarnessPolicy } from '../src/harness.js';
 import { REPO_ROOT } from '../src/paths.js';
 import {
   detectCurrentBranch,
   detectRepoRoot,
+  EVALUATED_RULE_IDS,
   evaluateCommand,
   type GuardrailPolicy,
   INSPECTED_FILE_TOOLS,
@@ -195,14 +197,71 @@ ${MINI_JUDGE_SANDBOX}`;
   });
 
   it('folds judge_sandbox.rules into the same id-keyed map as the top-level rules', () => {
-    // One map, not two, so a duplicate id between the blocks is caught by the
-    // same collision check and `requireRule` has one place to look.
+    // One map, not two, so `requireRule` has one place to look — and so an id
+    // that appears in two blocks is a collision rather than a shadowing. The
+    // next test is the one that refuses it.
     expect(policy.rules.get('judge-network')?.severity).toBe('S1');
     expect(policy.judgeSandbox.writeRoots).toEqual(['state/results', 'state/artifacts']);
     expect(policy.judgeSandbox.networkSubcommands[0]).toEqual({
       command: 'git',
       subcommands: ['push', 'pull', 'fetch', 'clone', 'remote'],
     });
+  });
+
+  it('refuses one rule id declared in two blocks, naming both, rather than keeping the last read', () => {
+    // The three blocks fold in source order, so without this the second copy
+    // wins in silence. The rule still fires — what changes is the reason and
+    // the severity the agent is handed, while the file goes on reading as if
+    // the copy an operator can see at the top were the one in force.
+    const duplicated = MINI_POLICY_YAML.replace(
+      '  rules:\n    - id: judge-network',
+      `  rules:
+    - id: unbounded-rm
+      severity: S4
+      reason: a {role} judge may clean inside its own write roots.
+    - id: judge-network`,
+    );
+    expect(duplicated).not.toBe(MINI_POLICY_YAML);
+    expect(() => parseGuardrailPolicy(duplicated)).toThrow(/unbounded-rm/);
+    expect(() => parseGuardrailPolicy(duplicated)).toThrow(/judge_sandbox\.rules/);
+  });
+
+  it('refuses a rule id nothing evaluates, rather than loading a rule that can never fire', () => {
+    // A rule is a row in guardrails.yml plus a branch in policy.ts that looks
+    // the row up. Write only the row and the file gains a rule the factory
+    // parses, counts and never enforces — an entry whose whole effect is to
+    // make an operator believe a door is shut.
+    const invented = MINI_POLICY_YAML.replace(
+      '  - id: unbounded-rm',
+      `  - id: no-shallow-clone
+    severity: S1
+    reason: a shallow clone hides the history a fail-first proof is read from.
+  - id: unbounded-rm`,
+    );
+    expect(invented).not.toBe(MINI_POLICY_YAML);
+    expect(() => parseGuardrailPolicy(invented)).toThrow(/no-shallow-clone/);
+  });
+
+  it('asks for exactly the rule ids it looks up, in policy.ts and in the shipped guardrails.yml', () => {
+    // Three places name this roster, and this is where they are held to each
+    // other. The compiler binds the call sites to the exported list, since
+    // `requireRule` takes a `GuardrailRuleId`; `parseGuardrailPolicy` binds
+    // guardrails.yml to it in both directions. Nothing but the scrape below
+    // binds the list back to the call sites, so a rule dropped from the
+    // evaluator would otherwise leave its id behind as a required entry that
+    // no longer stands for a branch anyone can reach.
+    const source = readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'policy.ts'),
+      'utf8',
+    );
+    const lookedUp = new Set<string>();
+    for (const m of source.matchAll(
+      /(?:requireRule|sandboxViolation)\(\s*policy,\s*'([a-z-]+)'/g,
+    )) {
+      lookedUp.add(m[1] as string);
+    }
+    expect([...lookedUp].sort()).toEqual([...EVALUATED_RULE_IDS].sort());
+    expect([...loadGuardrailPolicy().rules.keys()].sort()).toEqual([...EVALUATED_RULE_IDS].sort());
   });
 
   it('rejects a document with no judge_sandbox block at all', () => {
@@ -215,7 +274,7 @@ ${MINI_JUDGE_SANDBOX}`;
 
   it('the real repo guardrails.yml loads and satisfies the schema', () => {
     const real = loadGuardrailPolicy();
-    expect(real.rules.size).toBeGreaterThanOrEqual(9);
+    expect(real.rules.size).toBe(EVALUATED_RULE_IDS.length);
     expect(real.judgeSandbox.writeRoots).toContain('state/results');
     expect(real.protectedBranchNames).toContain('main');
     expect([...real.allowedRemovalRoots].sort()).toEqual(['state', 'workspaces']);
