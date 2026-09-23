@@ -132,6 +132,7 @@ import {
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
+  planProjectResolverForTaskRef,
   resolveTaskId,
   type TaskSpecRecord,
   validatePlan,
@@ -500,7 +501,20 @@ function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, strin
   });
 }
 
-/** Both `issues` actions read the same inputs; only the entry point differs. */
+/**
+ * Both `issues` actions read the same inputs; only the entry point differs.
+ *
+ * `resolveProject` closes the privacy-leak gap an unstamped row otherwise
+ * falls into: a session or plan driving a project other than this factory
+ * writes error/gate/task-added rows with no top-level `project` stamp, and
+ * without this resolver those rows would default to `black-smith` --
+ * folding a foreign project's errors into, and potentially filing its
+ * issues against, this factory's own repository. `planProjectResolverForTaskRef`
+ * (D-246's `db/projector.ts` precedent, restated here without a DB
+ * dependency `cli.ts`'s boot graph cannot carry) answers from the row's own
+ * task ref's epic's plan file; `reportErrors`/`previewOutcomes` still
+ * default to `black-smith` only when that answer is itself `null`.
+ */
 async function issueInputs(flags: Record<string, string>) {
   const sessionId = requireFlag(flags, 'session');
   const eventOpts = eventOptsFromFlags(flags);
@@ -508,7 +522,8 @@ async function issueInputs(flags: Record<string, string>) {
   const events = scopeIssueCandidates(await readLineageEvents(sessionId, eventOpts), flags);
   const milestones = loadRoadmap(flags['roadmap-path']);
   const isEnabled = (project: string) => isErrorTrackerWritable(milestones, project);
-  return { events, isEnabled, register: factoryProjects(), eventOpts };
+  const resolveProject = planProjectResolverForTaskRef(planOptsFromFlags(flags));
+  return { events, isEnabled, register: factoryProjects(), eventOpts, resolveProject };
 }
 
 /** Where plan version files are read from and written to; defaults to factory/specs/active. */
@@ -1883,6 +1898,7 @@ async function main(): Promise<number> {
       ...eventOptsFromFlags(flags),
       projectDirs: resolveProjectDirs(repeated.project, { self }),
       readProjects: () => factoryProjects().filter((ref) => self || !ref.self),
+      resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
@@ -2659,10 +2675,18 @@ async function main(): Promise<number> {
 
   if (namespace === 'issues' && action === 'report') {
     // The one path in this epic that runs `gh` for real.
-    const { events, isEnabled, register, eventOpts } = await issueInputs(flags);
+    const { events, isEnabled, register, eventOpts, resolveProject } = await issueInputs(flags);
     const clock = () => new Date().toISOString();
     printJson(
-      await reportErrors(events, isEnabled, register, issueCommandRunner, clock, eventOpts),
+      await reportErrors(
+        events,
+        isEnabled,
+        register,
+        issueCommandRunner,
+        clock,
+        eventOpts,
+        resolveProject,
+      ),
     );
     return 0;
   }
@@ -2670,12 +2694,12 @@ async function main(): Promise<number> {
   if (namespace === 'issues' && action === 'preview') {
     // Same inputs, no `gh` and no event: the runner throws if anything
     // reaches it, so a preview that spawned would fail loudly, not quietly.
-    const { events, isEnabled, register } = await issueInputs(flags);
+    const { events, isEnabled, register, resolveProject } = await issueInputs(flags);
     const neverRun = (cmd: string): CommandResult => {
       throw new Error(`issues preview must never run a command, asked for ${cmd}`);
     };
     const clock = () => new Date().toISOString();
-    printJson(await previewOutcomes(events, isEnabled, register, neverRun, clock));
+    printJson(await previewOutcomes(events, isEnabled, register, neverRun, clock, resolveProject));
     return 0;
   }
 

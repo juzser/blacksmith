@@ -1169,4 +1169,160 @@ describe('issueReporter.ts', () => {
     });
     expect(preview?.detail).toBe('no checkout registered for project "unregistered-project"');
   });
+
+  // --- privacy leak guard: an unstamped row from a session or plan driving a
+  // foreign project must never resolve to this factory's own repo. The
+  // resolver is the optional last parameter `reportErrors`/`previewOutcomes`
+  // do not yet accept: these fail to compile (thus to pass) until they do.
+  describe('project resolution for unstamped rows (privacy leak guard)', () => {
+    it("routes an unstamped row to its own project's registered repo, not the factory's, when a resolver is wired in", async () => {
+      const factoryDir = await makeRepo('git@github.com:juzser/blacksmith.git');
+      const foreignDir = await makeRepo('git@github.com:example-org/example-app.git');
+      const register: ProjectRef[] = [
+        { name: 'black-smith', dir: factoryDir, self: true },
+        { name: 'example-app', dir: foreignDir, self: false },
+      ];
+      const events = [
+        // Unstamped: no `project` field at all -- exactly what a session
+        // driving a foreign project writes when nothing stamps the row.
+        await seed({
+          sessionId: 'session-foreign',
+          eventType: 'gate-outcome',
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+          taskId: 'epic-9/task-foreign',
+        }),
+      ];
+      const resolveProject = (taskRef: string) =>
+        taskRef.startsWith('epic-9/') ? 'example-app' : null;
+      const { runner, bucket } = makeStub();
+
+      const [record] = await reportErrors(
+        events,
+        ENABLED,
+        register,
+        runner,
+        CLOCK,
+        { stateDir },
+        resolveProject,
+      );
+
+      expect(record?.project).toBe('example-app');
+      const createArgvs = bucket('create').map((c) => c.args);
+      expect(createArgvs).toHaveLength(1);
+      expect(createArgvs[0]).toContain('example-org/example-app');
+      expect(createArgvs.some((a) => a.includes('juzser/blacksmith'))).toBe(false);
+    });
+
+    it('skips with skipped-no-remote rather than defaulting to the factory repo when the foreign project has no registered checkout', async () => {
+      const register: ProjectRef[] = [];
+      const events = [
+        await seed({
+          sessionId: 'session-foreign-unregistered',
+          eventType: 'gate-outcome',
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+          taskId: 'epic-9/task-foreign',
+        }),
+      ];
+      const resolveProject = (taskRef: string) =>
+        taskRef.startsWith('epic-9/') ? 'example-app' : null;
+      const { runner, calls } = makeStub();
+
+      const [record] = await reportErrors(
+        events,
+        ENABLED,
+        register,
+        runner,
+        CLOCK,
+        { stateDir },
+        resolveProject,
+      );
+
+      expect(record).toMatchObject({
+        project: 'example-app',
+        outcome: 'skipped-no-remote',
+        reason: 'no-checkout',
+      });
+      expect(calls).toHaveLength(0);
+    });
+
+    it('still defaults an unstamped row to the factory project when no resolver is wired in (backward compatible)', async () => {
+      const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
+      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const events = [
+        await seed({
+          sessionId: 'session-no-resolver',
+          eventType: 'gate-outcome',
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+          taskId: 'epic-9/task-no-resolver',
+        }),
+      ];
+      const { runner, bucket } = makeStub();
+
+      const [record] = await reportErrors(events, ENABLED, register, runner, CLOCK, { stateDir });
+
+      expect(record?.project).toBe('black-smith');
+      expect(bucket('create')).toHaveLength(1);
+    });
+
+    it("previewOutcomes resolves the same way: an unstamped foreign row previews against its own repo, never the factory's", async () => {
+      const factoryDir = await makeRepo('git@github.com:juzser/blacksmith.git');
+      const foreignDir = await makeRepo('git@github.com:example-org/example-app.git');
+      const register: ProjectRef[] = [
+        { name: 'black-smith', dir: factoryDir, self: true },
+        { name: 'example-app', dir: foreignDir, self: false },
+      ];
+      const events = [
+        await seed({
+          sessionId: 'session-foreign-preview',
+          eventType: 'gate-outcome',
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+          taskId: 'epic-9/task-foreign-preview',
+        }),
+      ];
+      const resolveProject = (taskRef: string) =>
+        taskRef.startsWith('epic-9/') ? 'example-app' : null;
+      const previewRunner = makeStub().runner;
+
+      const [preview] = await previewOutcomes(
+        events,
+        ENABLED,
+        register,
+        previewRunner,
+        CLOCK,
+        resolveProject,
+      );
+
+      expect(preview?.project).toBe('example-app');
+      expect(preview?.repo_slug).toBe('example-org/example-app');
+    });
+
+    it('a project stamp on the row always wins over the resolver, in both reportErrors and previewOutcomes', async () => {
+      const stampedDir = await makeRepo('git@github.com:example-org/stamped-app.git');
+      const register: ProjectRef[] = [{ name: 'stamped-app', dir: stampedDir, self: false }];
+      const events = [
+        await seed({
+          sessionId: 'session-stamped',
+          eventType: 'gate-outcome',
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+          taskId: 'epic-9/task-stamped',
+          project: 'stamped-app',
+        }),
+      ];
+      const resolveProject = () => 'resolver-said-this';
+      const { runner, bucket } = makeStub();
+
+      const [record] = await reportErrors(
+        events,
+        ENABLED,
+        register,
+        runner,
+        CLOCK,
+        { stateDir },
+        resolveProject,
+      );
+
+      expect(record?.project).toBe('stamped-app');
+      expect(bucket('create').map((c) => c.args)[0]).toContain('example-org/stamped-app');
+    });
+  });
 });

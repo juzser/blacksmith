@@ -59,7 +59,7 @@ const EVENTS_DIR = `${EVENTS} [--state-dir <dir>]`;
 const STATS = '[--db <file>] [--session <id>] [--lineage]';
 /** The scope both `issues` actions accept: a session's lineage, narrowed by epic and ISO since. */
 const ISSUES =
-  '--session <id> [--epic <id>] [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]';
+  '--session <id> [--epic <id>] [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>] [--specs-dir <dir>]';
 
 export const COMMANDS: readonly CommandDoc[] = [
   {
@@ -248,7 +248,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'daemon run',
     positionals: '',
-    flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>...] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]`,
+    flags: `[--interval <seconds>] [--once] [--dir <dir>] [--project <dir>...] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>] [--specs-dir <dir>]`,
     summary:
       'Watch the event log in the foreground: budgets, stale agents, work that is due. ' +
       'Prints one report per tick, one JSON line each; --once prints one document and exits. ' +

@@ -483,4 +483,79 @@ describe('foldErrorEvents', () => {
       expect(report.session_id).toBe('session-1');
     }
   });
+
+  // A row from a session or plan driving a project other than this factory's
+  // own must never resolve to the factory's own project -- the privacy leak
+  // this fold exists to close off. `resolveProject` is the 4th, optional
+  // parameter foldErrorEvents does not yet accept: these fail to compile
+  // (thus to pass) until it does.
+  describe('project resolution (privacy leak guard)', () => {
+    it('routes an unstamped row through the injected resolver instead of defaulting to black-smith', () => {
+      const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed')];
+      const resolveProject = (taskRef: string) =>
+        taskRef.startsWith('epic-1/') ? 'example-app' : null;
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        resolveProject,
+      );
+
+      expect(result.reports[0]?.project).toBe('example-app');
+    });
+
+    it('still defaults an unstamped row to black-smith when the resolver has no answer', () => {
+      const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed')];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled, () => null);
+
+      expect(result.reports[0]?.project).toBe('black-smith');
+    });
+
+    it('still defaults an unstamped row to black-smith when no resolver is supplied at all (backward compatible)', () => {
+      const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed')];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+      expect(result.reports[0]?.project).toBe('black-smith');
+    });
+
+    it('an explicit project stamp always wins over the resolver', () => {
+      const events: StoredEvent[] = [
+        gateBlocked('epic-1/task-a', 'tests-failed', { project: 'stamped-project' }),
+      ];
+      const resolveProject = () => 'resolver-said-this';
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        resolveProject,
+      );
+
+      expect(result.reports[0]?.project).toBe('stamped-project');
+    });
+
+    it('resolves a hand-appended error-logged row via payload.task_ref when the envelope carries no task_id', () => {
+      const events: StoredEvent[] = [
+        ev(
+          'error-logged',
+          { error: 'execution.test-failure', severity: 'S2-major', task_ref: 'epic-2/task-z' },
+          { session_id: 'hand-appended' },
+        ),
+      ];
+      const resolveProject = (taskRef: string) =>
+        taskRef.startsWith('epic-2/') ? 'example-app' : null;
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        resolveProject,
+      );
+
+      expect(result.reports[0]?.project).toBe('example-app');
+    });
+  });
 });

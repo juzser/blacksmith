@@ -859,6 +859,21 @@ describe("computeProposals (error-report, from errorIssues.ts's fold)", () => {
     expect(proposals).toHaveLength(1);
     expect(proposals[0]?.kind === 'error-report' && proposals[0].project).toBe('proj-on');
   });
+
+  it("resolves an unstamped row's project via the injected resolveProjectForTaskRef, not the black-smith default (privacy leak guard)", () => {
+    // Unstamped: ev() never sets `project`, exactly what a session driving a
+    // foreign project writes when nothing stamps the row.
+    const event = errorLogged('epic-9/task-foreign');
+    const resolveProjectForTaskRef = (taskRef: string) =>
+      taskRef.startsWith('epic-9/') ? 'example-app' : null;
+    const [proposal] = computeProposals({
+      events: [event],
+      now: NOW,
+      policy: POLICY,
+      resolveProjectForTaskRef,
+    }).filter((p) => p.kind === 'error-report');
+    expect(proposal?.kind === 'error-report' && proposal.project).toBe('example-app');
+  });
 });
 
 // pnpm itself must be reachable for runPnpmOutdated's "when available"

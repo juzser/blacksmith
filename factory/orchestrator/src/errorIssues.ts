@@ -211,14 +211,38 @@ export const ISSUE_CANDIDATE_EVENT_TYPES: ReadonlySet<string> = new Set(
   Object.keys(CANDIDATE_READERS),
 );
 
+/**
+ * A row's project when nothing has stamped one: given the row's own task
+ * ref, answer the project that task belongs to, or `null` to say "cannot
+ * tell" -- never a guess, and never this factory's own name. Optional at
+ * every call site in this module (default `() => null`, see below);
+ * `cli.ts` is the only caller wiring in a real answer, because it is the
+ * only caller that goes on to call `gh` with the result (D-246 precedent:
+ * `db/projector.ts`'s `planProjectResolver` never backfills 'black-smith'
+ * either).
+ */
+export type ResolveProjectForTaskRef = (taskRef: string) => string | null;
+
+/** The row's task ref, off the envelope first and the payload second -- the same two places every `CandidateReader` above already looks. */
+function candidateTaskRef(record: StoredEvent['record']): string | undefined {
+  const payload = (record.payload ?? {}) as { task_ref?: unknown };
+  return asString(record.task_id) ?? asString(payload.task_ref);
+}
+
 /** One event to a `Candidate`, or `'ignore'` when no source claims its event type at all. */
-function toCandidate(event: StoredEvent): Candidate | 'ignore' | null {
+function toCandidate(
+  event: StoredEvent,
+  resolveProject: ResolveProjectForTaskRef,
+): Candidate | 'ignore' | null {
   const { record } = event;
   const read = CANDIDATE_READERS[record.event_type];
   if (!read) return 'ignore';
+  const stamped = asString(record.project);
+  const taskRef = candidateTaskRef(record);
+  const project = stamped ?? (taskRef ? resolveProject(taskRef) : null) ?? DEFAULT_PROJECT;
   return read(event, {
     payload: record.payload ?? {},
-    project: asString(record.project) ?? DEFAULT_PROJECT,
+    project,
     sessionId: asString(record.session_id),
     planVersion: asNumber(record.plan_version) ?? null,
     ts: asString(record.ts),
@@ -246,11 +270,18 @@ function computeFingerprint(
  * Fold a stored event sequence into reportable errors. Pure: two calls with
  * identical input return byte-identical output. `now` is threaded in rather
  * than read off the clock; nothing in this contract branches on it yet.
+ *
+ * `resolveProject` defaults to "no answer" so the ~50 existing call sites
+ * across this module's own tests and `issueReporter.ts`'s need no change:
+ * an unstamped row with no resolver wired in is exactly the "nothing
+ * identifies it as foreign" case the factory-project default is still
+ * correct for.
  */
 export function foldErrorEvents(
   events: readonly StoredEvent[],
   now: string,
   isProjectEnabled: (project: string) => boolean,
+  resolveProject: ResolveProjectForTaskRef = () => null,
 ): FoldResult {
   void now;
 
@@ -258,7 +289,7 @@ export function foldErrorEvents(
   let skipped = 0;
 
   for (const event of events) {
-    const outcome = toCandidate(event);
+    const outcome = toCandidate(event, resolveProject);
     if (outcome === 'ignore') continue;
     if (outcome === null) {
       skipped += 1;

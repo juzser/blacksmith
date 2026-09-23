@@ -12,7 +12,7 @@ import { parse as parseYaml } from 'yaml';
 import type { AutonomyPolicy } from './autonomy.js';
 import { globsOverlap } from './claims.js';
 import { foldTasks, type TaskFoldRow, taskIdCanonicalizer } from './db/projector.js';
-import { type ErrorSource, foldErrorEvents } from './errorIssues.js';
+import { type ErrorSource, foldErrorEvents, type ResolveProjectForTaskRef } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
 import { SCHEDULER_POLICY_PATH } from './paths.js';
@@ -613,6 +613,7 @@ export function proposeErrorReports(
   events: readonly StoredEvent[],
   now: Date,
   isProjectEnabled: (project: string) => boolean,
+  resolveProjectForTaskRef: ResolveProjectForTaskRef = () => null,
 ): ErrorReportProposal[] {
   const answered = new Set<string>();
   for (const { record } of events) {
@@ -625,7 +626,12 @@ export function proposeErrorReports(
     answered.add(`${fingerprint}\0${latestEventId}`);
   }
 
-  const { reports } = foldErrorEvents(events, now.toISOString(), isProjectEnabled);
+  const { reports } = foldErrorEvents(
+    events,
+    now.toISOString(),
+    isProjectEnabled,
+    resolveProjectForTaskRef,
+  );
   const byFingerprint = new Map<string, ErrorReportProposal>();
   for (const report of reports) {
     if (answered.has(`${report.fingerprint}\0${report.latest_event_id}`)) continue;
@@ -689,6 +695,15 @@ export interface SchedulerRunInput {
    * proposal — when the tracker is off.
    */
   isErrorTrackerEnabled?: (project: string) => boolean;
+  /**
+   * How an unstamped row's project is decided when nothing else names it.
+   * Defaults to `foldErrorEvents`'s own default (`() => null`, i.e. the
+   * factory's own project) so every existing caller is unaffected; a caller
+   * that drives other projects (the daemon, eventually) supplies the real
+   * plan-backed resolver so an unstamped row from one of THEM does not read
+   * back here as this factory's own.
+   */
+  resolveProjectForTaskRef?: ResolveProjectForTaskRef;
 }
 
 /** Pure: computes every proposal this pass would make, without touching the event log. */
@@ -714,7 +729,12 @@ export function computeProposals(input: SchedulerRunInput): SchedulerProposal[] 
   if (growth) proposals.push(growth);
 
   proposals.push(
-    ...proposeErrorReports(input.events, now, input.isErrorTrackerEnabled ?? (() => true)),
+    ...proposeErrorReports(
+      input.events,
+      now,
+      input.isErrorTrackerEnabled ?? (() => true),
+      input.resolveProjectForTaskRef,
+    ),
   );
 
   return proposals;
