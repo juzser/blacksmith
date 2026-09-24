@@ -51,6 +51,7 @@ import {
   type WorktreeDrift,
   type WorktreeFingerprint,
 } from './immutability.js';
+import { SPECS_ACTIVE_DIR } from './paths.js';
 import {
   latestPlanVersion,
   loadPlan,
@@ -1184,9 +1185,10 @@ function resolveEpicPlan(epicId: string, resolveOpts: ResolveAuditOptions): Plan
   const planOpts = resolveOpts.planOpts ?? {};
   const version = latestPlanVersion(epicId, planOpts);
   if (version === null) {
+    const searchedDir = path.join(planOpts.specsDir ?? SPECS_ACTIVE_DIR, epicId);
     throw new AuditError(
       'audit.no-plan',
-      `no plan found for epic ${epicId}: \`audit resolve\` only marks a finding fixed when some plan task claims its file, so a missing plan cannot be treated as an empty one. Cut a plan for this epic, or pass --plan.`,
+      `no plan found for epic ${epicId}: \`audit resolve\` only marks a finding fixed when some plan task claims its file, so a missing plan cannot be treated as an empty one. Searched ${searchedDir}. If this epic's plans live elsewhere, pass --specs-dir <dir> naming the directory they live in, or --plan <plan.json> to point at one directly.`,
       { epic: epicId },
     );
   }

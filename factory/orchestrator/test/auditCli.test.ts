@@ -22,6 +22,7 @@ import {
 } from '../src/audit.js';
 import { type EventRecord, readEvents, startSession } from '../src/events.js';
 import type { EventContext } from '../src/findings.js';
+import { SPECS_ACTIVE_DIR } from '../src/paths.js';
 import type { PlanFile, TaskSpecRecord } from '../src/plan.js';
 import { assertExited, git, runProcess } from './helpers/process.js';
 
@@ -533,11 +534,48 @@ describe('the audit verbs', () => {
       await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
       await cutAudit(project, input, ctx, opts());
 
+      // The message must name the directory it searched -- the default,
+      // work-root-relative one, since this call passes no --plan / --specs-dir
+      // -- and tell the operator the two ways out, so a project whose plans
+      // live elsewhere is not left guessing why `audit resolve` refused.
       await expect(resolveAudit(project, input.epicId, ctx, opts())).rejects.toThrowError(
-        expect.objectContaining({ code: 'audit.no-plan' }),
+        expect.objectContaining({
+          code: 'audit.no-plan',
+          message: expect.stringContaining(path.join(SPECS_ACTIVE_DIR, input.epicId)),
+        }),
+      );
+      await expect(resolveAudit(project, input.epicId, ctx, opts())).rejects.toThrowError(
+        expect.objectContaining({
+          message: expect.stringMatching(/--specs-dir.*--plan/s),
+        }),
       );
       expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
       expect(await eventTypes()).not.toContain('audit-resolved');
+    });
+
+    it('discovers the newest plan on disk from planOpts.specsDir, not just --plan', async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+      await cutAudit(project, input, ctx, opts());
+
+      // Two real versions on disk, in a specs dir that is NOT the default
+      // SPECS_ACTIVE_DIR -- v1 claims the finding's file, v2 (the newer one)
+      // does not, so which one `resolveEpicPlan` actually consults is
+      // observable from the verdict rather than asserted directly.
+      const specsDir = path.join(root, 'elsewhere-specs');
+      const epicDir = path.join(specsDir, input.epicId);
+      mkdirSync(epicDir, { recursive: true });
+      const v1: PlanFile = { ...planClaiming('src/foo.ts'), version: 1 };
+      const v2: PlanFile = { ...planClaiming('src/unrelated/**'), version: 2 };
+      writeFileSync(path.join(epicDir, 'plan-v1.json'), JSON.stringify(v1, null, 2));
+      writeFileSync(path.join(epicDir, 'plan-v2.json'), JSON.stringify(v2, null, 2));
+
+      const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+        planOpts: { specsDir },
+      });
+      expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      const folded = only(foldAuditStore(readAuditStore(project)));
+      expect(folded.status).toBe('accepted');
     });
 
     it("marks the epic's findings fixed once, and says so the second time", async () => {
