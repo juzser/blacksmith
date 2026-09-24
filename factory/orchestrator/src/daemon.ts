@@ -207,14 +207,26 @@ export interface InspectOptions {
    */
   admission?: AdmissionLens;
   /**
-   * Threaded straight through to `computeProposals`/`SchedulerRunInput`: how
-   * an unstamped error/gate/task-added row's project is decided when nothing
-   * else names it. Omitted -> the scheduler's own default (the factory's own
-   * project), same as today. A caller that watches other projects' sessions
-   * supplies the real plan-backed resolver so this advisory naming does not
-   * read a foreign project's unstamped row back as this factory's own.
+   * Threaded straight through to `computeProposals`/`SchedulerRunInput`'s
+   * strict tier: how an unstamped error/gate/task-added row's project is
+   * decided by an explicit plan-declared `project`, before any fallback.
+   * Omitted -> the scheduler's own fail-closed default (`() => null`,
+   * unresolved), not "the factory's own project" -- an unstamped row neither
+   * this resolver, a session stamp, nor `selfFallbackForTaskRef` can place
+   * is skipped as `skipped-unresolved-project` rather than guessed. A
+   * caller that watches other projects' sessions supplies the real
+   * plan-backed resolver so this advisory naming does not read a foreign
+   * project's unstamped row back as this factory's own.
    */
   resolveProjectForTaskRef?: ResolveProjectForTaskRef;
+  /**
+   * Threaded straight through to `computeProposals`/`SchedulerRunInput`'s
+   * weakest tier (S2-c): tried only after `resolveProjectForTaskRef` and a
+   * session's own unanimous stamp have both failed to answer. Omitted -> no
+   * self-fallback at all, same fail-closed default as
+   * `resolveProjectForTaskRef`.
+   */
+  selfFallbackForTaskRef?: ResolveProjectForTaskRef;
 }
 
 function staleSubject(agent: AgentRecord): string {
@@ -323,6 +335,9 @@ export function inspectSession(
     ...(opts.resolveProjectForTaskRef === undefined
       ? {}
       : { resolveProjectForTaskRef: opts.resolveProjectForTaskRef }),
+    ...(opts.selfFallbackForTaskRef === undefined
+      ? {}
+      : { selfFallbackForTaskRef: opts.selfFallbackForTaskRef }),
   });
   const admissions = admitFor(proposals, events, opts.admission);
   for (const [index, proposal] of proposals.entries()) {
@@ -398,6 +413,9 @@ export function inspectFactory(
     ...(opts.resolveProjectForTaskRef === undefined
       ? {}
       : { resolveProjectForTaskRef: opts.resolveProjectForTaskRef }),
+    ...(opts.selfFallbackForTaskRef === undefined
+      ? {}
+      : { selfFallbackForTaskRef: opts.selfFallbackForTaskRef }),
   });
 
   const admissions = admitFor(proposals, events, opts.admission);
@@ -679,6 +697,9 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     ...(opts.resolveProjectForTaskRef === undefined
       ? {}
       : { resolveProjectForTaskRef: opts.resolveProjectForTaskRef }),
+    ...(opts.selfFallbackForTaskRef === undefined
+      ? {}
+      : { selfFallbackForTaskRef: opts.selfFallbackForTaskRef }),
   };
 
   const projectDb = opts.projectDb ?? true;

@@ -642,7 +642,7 @@ reporting verb for that project's errors — the daemon may still propose the
 finding, but the run's call to `issues report` resolves it as
 `skipped-disabled` before it touches `gh` at all.
 
-**The eight outcomes.** Exactly one is recorded per candidate:
+**The nine outcomes.** Exactly one is recorded per candidate:
 
 | Outcome | When it happens | What to do |
 | --- | --- | --- |
@@ -653,7 +653,8 @@ finding, but the run's call to `issues report` resolves it as
 | `skipped-no-remote` | One of six reasons: `no-checkout` (no worktree), `not-a-repo`, `no-origin`, `unparseable-remote`, `non-github-host`, or `git-failed` (git could not be run at the checkout, or ran and failed for a reason other than the two above; the record's `detail` carries git's own words). | Fix the checkout's remote if tracking is wanted; otherwise expected for a project with no GitHub remote; for `git-failed`, read `detail`. |
 | `skipped-gh-missing` | Reason `gh-not-on-path`: `gh` is not on `PATH` for the process running the reporter. | Install `gh` on that box if this project should be tracked. |
 | `skipped-unauthenticated` | Reason `gh-unauthenticated`: `gh` is on `PATH` but not logged in. | Run `gh auth login` on that box (an operator action, never scripted here). |
-| `failed` | One of four `gh`-step reasons: `gh-unknown` (the availability check couldn't classify `gh`), `search-failed` (the dedup search), `comment-failed`, or `create-failed`. | Re-run `issues report` for the same session — it is idempotent — after checking `gh`'s own error output for that step; a transient network or rate-limit failure usually clears on retry. |
+| `skipped-unresolved-project` | Reason `project-unresolved`: this factory could not identify which project the row belongs to (no session/epic stamp, no plan match, no self-fallback). Settled before any other outcome — a row that fails this check is never filed against this factory's own repository by default (the privacy-leak guard). | Check the event's `session_id`/`task_ref` for a project stamp; if it genuinely belongs to a tracked project, fix the stamp or the plan naming it. |
+| `failed` | One of five `gh`-step reasons: `gh-unknown` (the availability check couldn't classify `gh`), `search-failed` (the dedup search failed to run), `search-unparseable` (the dedup search ran but its output could not be parsed), `comment-failed`, or `create-failed`. | Re-run `issues report` for the same session — it is idempotent — after checking `gh`'s own error output for that step; a transient network or rate-limit failure usually clears on retry. |
 
 Preview every run you are unsure of first: it is free, writes nothing, and
 shows the exact `gh` argv and body the report would use.

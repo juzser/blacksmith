@@ -2341,6 +2341,125 @@ describe('cli.ts (built binary)', () => {
     expect(status).toBe(0);
   });
 
+  // S1-b: `scheduler run` used to compute error-report fingerprints with no
+  // project resolver at all (scheduler.ts's `() => null` default), while
+  // `issues report`/`preview` resolved the same row through
+  // `planProjectResolverForTaskRefOrSelf`. Two different `project` values
+  // hashed into two different fingerprints for the same underlying row, so
+  // a real report's `issue-reported` event -- keyed by fingerprint +
+  // latest_event_id -- never matched the proposal `scheduler run` kept
+  // re-appending. Proven two ways: the fingerprint `scheduler run` computes
+  // must equal the one `issues preview` computes for the same row, and a
+  // hand-appended `issue-reported` row carrying that shared fingerprint
+  // must clear the proposal on the next tick.
+  it('scheduler run resolves error-report projects the same way issues preview does, so a report clears the proposal (S1-b)', () => {
+    const sessionId = `cli-scheduler-clears-${Date.now()}`;
+    const eventsDir = path.join(scratchDir, `${sessionId}-events`);
+    const specsDir = path.join(scratchDir, `${sessionId}-specs`);
+    mkdirSync(path.join(specsDir, 'epic-1'), { recursive: true });
+    writeFileSync(
+      path.join(specsDir, 'epic-1', 'plan-v1.json'),
+      JSON.stringify({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        project: 'explicit-project',
+        tasks: [],
+        edges: [],
+      }),
+    );
+
+    const append = (event: Record<string, unknown>) => {
+      const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+      expect(run.status).toBe(0);
+      return JSON.parse(run.stdout).event_id as string;
+    };
+    const base = { session_id: sessionId, actor: 'system', plan_version: 1 };
+    const rootId = append({
+      ...base,
+      event_type: 'session-start',
+      causal_parent: null,
+      payload: {},
+    });
+    append({
+      ...base,
+      event_type: 'gate-outcome',
+      task_id: 'epic-1/task-a',
+      causal_parent: rootId,
+      payload: { outcome: 'blocked', reason: 'tests-failed' },
+    });
+
+    const previewFlags = [
+      '--session',
+      sessionId,
+      '--specs-dir',
+      specsDir,
+      '--state-dir',
+      eventsDir,
+    ];
+    const preview = runCli(['issues', 'preview', ...previewFlags]);
+    expect(preview.status).toBe(0);
+    const [previewRecord] = JSON.parse(preview.stdout);
+    expect(previewRecord.project).toBe('explicit-project');
+
+    const schedulerFlags = [
+      'scheduler',
+      'run',
+      '--session',
+      sessionId,
+      '--dry',
+      'true',
+      '--specs-dir',
+      specsDir,
+      '--no-self',
+      '--state-dir',
+      eventsDir,
+    ];
+    type ErrorReportProposalJson = {
+      kind: string;
+      project: string | null;
+      fingerprint: string;
+      taskRef: string;
+      source: string;
+      errorClass: string;
+      latestEventId: string;
+    };
+    const firstRun = runCli(schedulerFlags);
+    expect(firstRun.status).toBe(0);
+    const firstProposals: ErrorReportProposalJson[] = JSON.parse(firstRun.stdout).proposals;
+    const errorProposal = firstProposals.find((p) => p.kind === 'error-report');
+    if (!errorProposal) throw new Error('expected an error-report proposal in the first run');
+    expect(errorProposal.project).toBe('explicit-project');
+    expect(errorProposal.fingerprint).toBe(previewRecord.fingerprint);
+
+    // The `issue-reported` row the real reporter would append for this exact
+    // fingerprint/latest-event pair (issueReporter.ts's `appendIssueReported`
+    // and its `ISSUE_REPORT_PAYLOAD_KEYS` allowlist) -- proposeErrorReports
+    // clears a proposal by that pair alone (scheduler.ts's `answered` set).
+    append({
+      ...base,
+      event_type: 'issue-reported',
+      task_id: errorProposal.taskRef,
+      causal_parent: errorProposal.latestEventId,
+      project: errorProposal.project,
+      payload: {
+        outcome: 'opened',
+        fingerprint: errorProposal.fingerprint,
+        source: errorProposal.source,
+        error_class: errorProposal.errorClass,
+        task_ref: errorProposal.taskRef,
+        latest_event_id: errorProposal.latestEventId,
+        repo_slug: 'juzser/explicit-project',
+        issue_url: 'https://github.com/juzser/explicit-project/issues/1',
+      },
+    });
+
+    const secondRun = runCli(schedulerFlags);
+    expect(secondRun.status).toBe(0);
+    const secondProposals: ErrorReportProposalJson[] = JSON.parse(secondRun.stdout).proposals;
+    expect(secondProposals.some((p) => p.kind === 'error-report')).toBe(false);
+  });
+
   // `scheduler admit` is the second half of the same tick: `run --dry` says
   // what is due, this says which of it may proceed without an operator. It is
   // a report and only a report -- the whole point of splitting it out of
@@ -8743,15 +8862,21 @@ describe('cli.ts (built binary)', () => {
         expect(record.search_argv).toBeUndefined();
       });
 
-      // (ii) A BARE ref (no epic segment): the direct resolver cannot even
-      // try, since there is no epic to look a plan up under. It is only
-      // reachable at all through this session's own `task-added` row, whose
-      // `payload.epic_id` widens it to `<epic>/<ref>` -- and a real plan
-      // fixture on disk for that epic, declaring no `project` field, is
-      // itself the "self" signal (plan.ts's `planProjectResolverForTaskRefOrSelf`
-      // doc comment: only this checkout's own epics have a plan under the
-      // configured specs dir at all).
-      it('resolves a bare ref via task-added payload.epic_id plus a real plan fixture naming no project', () => {
+      // (ii) A BARE ref (no epic segment), `--specs-dir` pointed at a temp
+      // directory that is NOT this checkout's own `specs/active` tree: the
+      // direct resolver cannot even try, since there is no epic to look a
+      // plan up under except through this session's own `task-added` row,
+      // whose `payload.epic_id` widens it to `<epic>/<ref>`. A real plan
+      // fixture on disk for that epic, declaring no `project` field, would
+      // once have been treated as "self" -- but plan.ts's
+      // `planProjectResolverForTaskRefOrSelf` only applies that fallback
+      // when `--specs-dir` names THIS checkout's own active tree (S2-b):
+      // `--specs-dir` is also how a caller points this resolver at a
+      // DIFFERENT checkout's specs tree entirely (`issueInputs`'s own doc
+      // comment), and an unlabeled plan found there is that OTHER project's
+      // silence, not evidence of self. So this settles unresolved, same as
+      // case (i), rather than defaulting to this factory's own name.
+      it('reports skipped-unresolved-project for a bare ref whose plan fixture lives under a foreign --specs-dir', () => {
         const sessionId = `cli-issues-bare-${Date.now()}`;
         const eventsDir = path.join(scratchDir, `${sessionId}-events`);
         const specsDir = path.join(scratchDir, `${sessionId}-specs`);
@@ -8779,9 +8904,9 @@ describe('cli.ts (built binary)', () => {
           payload: { task_status: 'failed', epic_id: 'epic-1' },
         });
 
-        // A real plan on disk for epic-1, naming no `project` -- the "self"
-        // fallback plan.ts's doc comment describes, mirrored from
-        // test/plan.test.ts's writePlanFixture pattern.
+        // A real plan on disk for epic-1, naming no `project`, but under a
+        // temp `--specs-dir` -- never this checkout's own active tree, so
+        // the self-fallback must not fire for it (S2-b).
         mkdirSync(path.join(specsDir, 'epic-1'), { recursive: true });
         writeFileSync(
           path.join(specsDir, 'epic-1', 'plan-v1.json'),
@@ -8796,6 +8921,70 @@ describe('cli.ts (built binary)', () => {
 
         const flags = ['--session', sessionId, '--specs-dir', specsDir, '--state-dir', eventsDir];
         const { stdout, status } = runCli(['issues', 'preview', ...flags]);
+        expect(status).toBe(0);
+        const [record] = JSON.parse(stdout);
+        expect(record.task_ref).toBe('task-bare');
+        expect(record.project).toBeNull();
+        expect(record.outcome).toBe('skipped-unresolved-project');
+      });
+
+      // (ii-b) The same shape as (ii), but WITHOUT `--specs-dir`: the plan
+      // fixture is written under this run's own `SMITH_HOME`-relocated
+      // `specs/active` tree instead, so `planOptsFromFlags` returns
+      // `{ specsDir: undefined }` and the resolver's self-fallback IS
+      // eligible (S2-b's `isSelfSpecsDir` treats "absent" as self). Proves
+      // the restriction only narrows the foreign-specs-dir case above, and
+      // does not regress the real, intended default -- an unlabeled local
+      // plan still resolves to this factory's own name.
+      it('still resolves a bare ref via self-fallback when --specs-dir is omitted (plan lives under SMITH_HOME)', () => {
+        const sessionId = `cli-issues-bare-self-${Date.now()}`;
+        const smithHome = path.join(scratchDir, `${sessionId}-home`);
+        const eventsDir = path.join(scratchDir, `${sessionId}-events`);
+        const envOverrides = { SMITH_HOME: smithHome };
+        const append = (event: Record<string, unknown>) => {
+          const run = runCli(
+            ['event', 'append', JSON.stringify(event), '--state-dir', eventsDir],
+            envOverrides,
+          );
+          expect(run.status).toBe(0);
+          return JSON.parse(run.stdout).event_id as string;
+        };
+        const base = { session_id: sessionId, actor: 'system', plan_version: 1 };
+        const rootId = append({
+          ...base,
+          event_type: 'session-start',
+          causal_parent: null,
+          payload: {},
+        });
+        append({
+          ...base,
+          event_type: 'task-added',
+          task_id: 'task-bare',
+          causal_parent: rootId,
+          payload: { task_status: 'failed', epic_id: 'epic-1' },
+        });
+
+        // A real plan on disk under SMITH_HOME's own specs/active/epic-1,
+        // naming no `project` -- the self-fallback case plan.ts's doc
+        // comment describes.
+        const selfSpecsDir = path.join(smithHome, 'factory', 'specs', 'active');
+        mkdirSync(path.join(selfSpecsDir, 'epic-1'), { recursive: true });
+        writeFileSync(
+          path.join(selfSpecsDir, 'epic-1', 'plan-v1.json'),
+          JSON.stringify({
+            epic_id: 'epic-1',
+            version: 1,
+            status: 'active',
+            tasks: [],
+            edges: [],
+          }),
+        );
+
+        // No --specs-dir: planOptsFromFlags leaves specsDir undefined, so
+        // the resolver falls back to SPECS_ACTIVE_DIR -- SMITH_HOME's own,
+        // in this child process.
+        const flags = ['--session', sessionId, '--state-dir', eventsDir];
+        const { stdout, status } = runCli(['issues', 'preview', ...flags], envOverrides);
         expect(status).toBe(0);
         const [record] = JSON.parse(stdout);
         expect(record.task_ref).toBe('task-bare');
@@ -8852,6 +9041,75 @@ describe('cli.ts (built binary)', () => {
         // Neither the direct resolver (no plan on disk) nor the session's
         // task-added map (there is none) could have produced this --
         // the session stamp is the only path left standing.
+        expect(unstamped.project).toBe('stamped-project');
+        expect(unstamped.outcome).not.toBe('skipped-unresolved-project');
+      });
+
+      // (iv) S3: the same session-stamp fallback as (iii), but the stamped
+      // row lives under a DIFFERENT epic than the one `--epic` narrows to.
+      // `scopeIssueCandidates` drops the stamped row from the candidate
+      // list `events` before it ever reaches the fold -- if the session
+      // stamp were read off that same narrowed list, the unstamped row
+      // would lose its only path to a project and settle
+      // skipped-unresolved-project purely because of the `--epic` flag,
+      // silently changing this row's fingerprint depending on whether the
+      // caller happened to pass --epic. `issueInputs`'s `lineageEvents`
+      // (unscoped) is what the session-stamp tier must consult instead, so
+      // the row resolves exactly as it did in (iii) even though `--epic`
+      // excludes the row that carries the stamp.
+      it("resolves an unstamped row from a session-mate's stamp even when --epic excludes the stamped row (S3)", () => {
+        const sessionId = `cli-issues-sessfallback-epic-${Date.now()}`;
+        const eventsDir = path.join(scratchDir, `${sessionId}-events`);
+        const specsDir = path.join(scratchDir, `${sessionId}-specs`);
+        mkdirSync(specsDir, { recursive: true });
+        const append = (event: Record<string, unknown>) => {
+          const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+          expect(run.status).toBe(0);
+          return JSON.parse(run.stdout).event_id as string;
+        };
+        const base = { session_id: sessionId, actor: 'system', plan_version: 1 };
+        const rootId = append({
+          ...base,
+          event_type: 'session-start',
+          causal_parent: null,
+          payload: {},
+        });
+        append({
+          ...base,
+          project: 'stamped-project',
+          event_type: 'gate-outcome',
+          task_id: 'epic-a/task-x',
+          causal_parent: rootId,
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+        });
+        append({
+          ...base,
+          event_type: 'gate-outcome',
+          task_id: 'epic-b/task-y',
+          causal_parent: rootId,
+          payload: { outcome: 'blocked', reason: 'tests-failed' },
+        });
+
+        const flags = [
+          '--session',
+          sessionId,
+          '--epic',
+          'epic-b',
+          '--specs-dir',
+          specsDir,
+          '--state-dir',
+          eventsDir,
+        ];
+        const { stdout, status } = runCli(['issues', 'preview', ...flags]);
+        expect(status).toBe(0);
+        const records: Array<{ task_ref: string; project: string | null; outcome?: string }> =
+          JSON.parse(stdout);
+        // --epic epic-b narrowed the candidates to one row -- the stamped
+        // epic-a/task-x row is history/scope only now, not a candidate.
+        expect(records).toHaveLength(1);
+        const [unstamped] = records;
+        if (!unstamped) throw new Error('no record for epic-b/task-y');
+        expect(unstamped.task_ref).toBe('epic-b/task-y');
         expect(unstamped.project).toBe('stamped-project');
         expect(unstamped.outcome).not.toBe('skipped-unresolved-project');
       });

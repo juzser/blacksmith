@@ -595,5 +595,166 @@ describe('foldErrorEvents', () => {
       const report = result.reports.find((r) => r.task_ref === 'epic-1/task-b');
       expect(report?.project).toBe('stamped-project');
     });
+
+    it("ignores an issue-reported row's own project stamp when resolving a session mate -- it is the reporter's own guess, not an origin stamp (S1-a)", () => {
+      const events: StoredEvent[] = [
+        // Exactly what appendIssueReported writes back: a possibly-guessed
+        // project on the reporter's own output event, in the same session.
+        ev('issue-reported', {}, { session_id: 'session-loop', project: 'black-smith' }),
+        gateBlocked('epic-1/task-c', 'tests-failed', { session_id: 'session-loop' }),
+      ];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-c');
+      expect(report?.project).toBeNull();
+    });
+
+    it('treats a dispatch_decision row as a legitimate origin stamp for its session', () => {
+      const events: StoredEvent[] = [
+        ev('dispatch_decision', {}, { session_id: 'session-dispatch', project: 'example-app' }),
+        gateBlocked('epic-1/task-d', 'tests-failed', { session_id: 'session-dispatch' }),
+      ];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-d');
+      expect(report?.project).toBe('example-app');
+    });
+
+    it('answers null -- not the first stamp seen -- when a session carries conflicting origin stamps (S2-a)', () => {
+      const events: StoredEvent[] = [
+        gateBlocked('epic-1/task-a', 'tests-failed', {
+          session_id: 'session-conflict',
+          project: 'project-one',
+        }),
+        gateBlocked('epic-1/task-b', 'tests-failed', {
+          session_id: 'session-conflict',
+          project: 'project-two',
+        }),
+        gateBlocked('epic-1/task-c', 'tests-failed', { session_id: 'session-conflict' }),
+      ];
+
+      const result = foldErrorEvents(events, '2026-01-06T00:00:00.000Z', alwaysEnabled);
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-c');
+      expect(report?.project).toBeNull();
+    });
+
+    // Tier order (S2-c): explicit plan `project` > unanimous session stamp >
+    // self-fallback. `selfFallback` is `foldErrorEvents`'s 5th, optional
+    // parameter it does not yet accept: this fails to compile (thus to pass)
+    // until it does. Before this fix, a local epic resolved through the
+    // combined OrSelf resolver's self case beat a session-mate's unanimous
+    // stamp outright -- a session plainly stamped for one project could have
+    // an unrelated unstamped row in the SAME session misattributed to this
+    // factory's own name merely because a local, unlabeled plan also existed
+    // for that row's epic.
+    it("prefers a session-mate's unanimous stamp over the self-fallback resolver (S2-c)", () => {
+      const events: StoredEvent[] = [
+        gateBlocked('epic-1/task-a', 'tests-failed', {
+          session_id: 'session-self-vs-stamp',
+          project: 'stamped-project',
+        }),
+        gateBlocked('epic-1/task-b', 'tests-failed', { session_id: 'session-self-vs-stamp' }),
+      ];
+      // Would answer 'black-smith' for epic-1/task-b if tried before the
+      // session stamp -- exactly what a local, unlabeled plan's self-fallback
+      // does today.
+      const selfFallback = (taskRef: string) =>
+        taskRef.startsWith('epic-1/') ? 'black-smith' : null;
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        () => null,
+        selfFallback,
+      );
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-b');
+      expect(report?.project).toBe('stamped-project');
+    });
+
+    it('still falls back to the self-fallback resolver when neither a stamp nor a session-mate can answer (S2-c)', () => {
+      const events: StoredEvent[] = [gateBlocked('epic-1/task-a', 'tests-failed')];
+      const selfFallback = (taskRef: string) =>
+        taskRef.startsWith('epic-1/') ? 'black-smith' : null;
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        () => null,
+        selfFallback,
+      );
+
+      expect(result.reports[0]?.project).toBe('black-smith');
+    });
+
+    it('an explicit plan-declared project (the strict resolver) still wins over both the session stamp and the self-fallback (S2-c)', () => {
+      const events: StoredEvent[] = [
+        gateBlocked('epic-1/task-a', 'tests-failed', {
+          session_id: 'session-strict-wins',
+          project: 'stamped-project',
+        }),
+        gateBlocked('epic-1/task-b', 'tests-failed', { session_id: 'session-strict-wins' }),
+      ];
+      const resolveProject = (taskRef: string) =>
+        taskRef === 'epic-1/task-b' ? 'plan-declared-project' : null;
+      const selfFallback = () => 'black-smith';
+
+      const result = foldErrorEvents(
+        events,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        resolveProject,
+        selfFallback,
+      );
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-b');
+      expect(report?.project).toBe('plan-declared-project');
+    });
+
+    // S3: `cli.ts`'s `--epic`/`--since` narrow which rows `foldErrorEvents`
+    // folds into candidates, but must not also narrow which rows
+    // `sessionProjectStamps` reads a session's stamp consensus from -- a
+    // session-mate's stamped row sitting OUTSIDE the `--epic` window is still
+    // real evidence for an unstamped row INSIDE it, and dropping it from the
+    // stamp computation just because `--epic` scoped it out of the candidate
+    // list changes the fingerprint `issues report --epic X` computes for the
+    // very same unstamped row `scheduler run` (which never scopes) computes a
+    // fingerprint for -- the divergence S1-b already fixed for the resolver,
+    // reopened for the session fallback by scoping alone. `scopeEvents`, the
+    // 6th and last optional parameter, lets the caller hand the UNSCOPED
+    // lineage to the session-stamp computation while `events` -- the 1st
+    // parameter -- still governs which rows are folded into candidates.
+    it('computes the session stamp from the unscoped lineage, not the --epic/--since-narrowed candidate list (S3)', () => {
+      const fullLineage: StoredEvent[] = [
+        gateBlocked('epic-2/task-out-of-scope', 'tests-failed', {
+          session_id: 'session-scoped',
+          project: 'stamped-project',
+        }),
+        gateBlocked('epic-1/task-in-scope', 'tests-failed', { session_id: 'session-scoped' }),
+      ];
+      // Simulates `scopeIssueCandidates(events, { epic: 'epic-1' })`: the
+      // out-of-scope stamped row is gone from the candidate list, same as a
+      // real `--epic epic-1` run would leave it.
+      const scopedCandidates = fullLineage.filter(
+        (e) => e.record.task_id === 'epic-1/task-in-scope',
+      );
+
+      const result = foldErrorEvents(
+        scopedCandidates,
+        '2026-01-06T00:00:00.000Z',
+        alwaysEnabled,
+        () => null,
+        () => null,
+        fullLineage,
+      );
+
+      const report = result.reports.find((r) => r.task_ref === 'epic-1/task-in-scope');
+      expect(report?.project).toBe('stamped-project');
+    });
   });
 });

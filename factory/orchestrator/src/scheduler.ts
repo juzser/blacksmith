@@ -621,6 +621,7 @@ export function proposeErrorReports(
   now: Date,
   isProjectEnabled: (project: string) => boolean,
   resolveProjectForTaskRef: ResolveProjectForTaskRef = () => null,
+  selfFallbackForTaskRef: ResolveProjectForTaskRef = () => null,
 ): ErrorReportProposal[] {
   const answered = new Set<string>();
   for (const { record } of events) {
@@ -638,6 +639,7 @@ export function proposeErrorReports(
     now.toISOString(),
     isProjectEnabled,
     resolveProjectForTaskRef,
+    selfFallbackForTaskRef,
   );
   const byFingerprint = new Map<string, ErrorReportProposal>();
   for (const report of reports) {
@@ -703,14 +705,35 @@ export interface SchedulerRunInput {
    */
   isErrorTrackerEnabled?: (project: string) => boolean;
   /**
-   * How an unstamped row's project is decided when nothing else names it.
-   * Defaults to `foldErrorEvents`'s own default (`() => null`, i.e. the
-   * factory's own project) so every existing caller is unaffected; a caller
-   * that drives other projects (the daemon, eventually) supplies the real
-   * plan-backed resolver so an unstamped row from one of THEM does not read
-   * back here as this factory's own.
+   * How an unstamped row's project is decided when nothing else names it,
+   * strict tier only -- an explicit plan-declared `project`, or `null`.
+   * Defaults to `foldErrorEvents`'s own default (`() => null`, i.e.
+   * unresolved -- fail closed, not "the factory's own project": the fail-
+   * closed fix means an unstamped row neither this resolver nor a session
+   * stamp nor `selfFallbackForTaskRef` can place is skipped as
+   * `skipped-unresolved-project` rather than guessed). Every production
+   * caller (`scheduler run`, `scheduler admit`, the daemon) supplies the
+   * real plan-backed resolver (`planProjectResolverForTaskRef`) so a row's
+   * project -- and therefore the fingerprint `computeFingerprint` hashes it
+   * into -- resolves the same way here as it does in `issues
+   * report`/`preview`; a caller that diverges or omits this computes a
+   * different fingerprint for the "same" row, so an already-filed report
+   * never clears the proposal that keeps re-appending it (S1-b). Tests that
+   * do not care about project resolution are the only intended users of the
+   * default.
    */
   resolveProjectForTaskRef?: ResolveProjectForTaskRef;
+  /**
+   * The weakest tier, tried only after both `resolveProjectForTaskRef` and a
+   * session's own unanimous stamp have failed to answer (S2-c): "no plan
+   * says otherwise, and a plan exists locally for this epic, so guess this
+   * factory's own name." Kept as a separate parameter, not folded into
+   * `resolveProjectForTaskRef`, precisely so a session-mate's real stamp
+   * naming a DIFFERENT project outranks this guess rather than losing to it
+   * -- production callers supply `planSelfFallbackForTaskRef`. Defaults to
+   * `() => null`, same fail-closed default as `resolveProjectForTaskRef`.
+   */
+  selfFallbackForTaskRef?: ResolveProjectForTaskRef;
 }
 
 /** Pure: computes every proposal this pass would make, without touching the event log. */
@@ -741,6 +764,7 @@ export function computeProposals(input: SchedulerRunInput): SchedulerProposal[] 
       now,
       input.isErrorTrackerEnabled ?? (() => true),
       input.resolveProjectForTaskRef,
+      input.selfFallbackForTaskRef,
     ),
   );
 

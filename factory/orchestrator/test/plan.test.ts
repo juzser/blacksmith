@@ -880,8 +880,17 @@ describe('plan.ts', () => {
   // no epic segment, stays the other null: "cannot tell whose project this
   // is," because plan.ts must not be the module that hardcodes the caller's
   // own project name.
+  //
+  // `specsDir` is also how a caller points this resolver at a DIFFERENT
+  // checkout's specs tree entirely -- `issueInputs`'s own doc comment names
+  // "the daemon's own event log and a target checkout's specs tree" as an
+  // intended `--specs-dir` use (S2-b). A test fixture's own temp `specsDir`
+  // is exactly that shape: an explicit dir that is never this factory's real
+  // specs/active, so a plan found there naming no project is that OTHER
+  // project's own silence, not evidence of self, and must not read back as
+  // `selfProject` (the privacy-leak guard this whole resolver exists for).
   describe('planProjectResolverForTaskRefOrSelf', () => {
-    it('answers the caller-supplied self project when the plan exists but declares no project field', async () => {
+    it("answers null, not the self default, when the plan exists but declares no project field and specsDir is not this checkout's own active tree", async () => {
       await writePlanFixture({
         epic_id: 'epic-1',
         version: 1,
@@ -892,7 +901,7 @@ describe('plan.ts', () => {
 
       const resolve = planProjectResolverForTaskRefOrSelf('black-smith', { specsDir });
 
-      expect(resolve('epic-1/task-1')).toBe('black-smith');
+      expect(resolve('epic-1/task-1')).toBeNull();
     });
 
     it('still answers the plan-declared project when the plan carries one, rather than the self default', async () => {

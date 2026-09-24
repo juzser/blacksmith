@@ -200,8 +200,10 @@ function resolveRecordProject(
 function priorOpenReports(
   events: readonly StoredEvent[],
   resolveProject: ResolveProjectForTaskRef = () => null,
+  selfFallback: ResolveProjectForTaskRef = () => null,
+  scopeEvents: readonly StoredEvent[] = events,
 ): PriorReport[] {
-  const resolveRow = withSessionFallback(events, resolveProject);
+  const resolveRow = withSessionFallback(scopeEvents, resolveProject, selfFallback);
   const out: PriorReport[] = [];
   for (const event of events) {
     const { record } = event;
@@ -468,11 +470,20 @@ export async function previewOutcomes(
   runner: CommandRunner,
   clock: () => string,
   resolveProject: ResolveProjectForTaskRef = () => null,
+  selfFallback: ResolveProjectForTaskRef = () => null,
+  scopeEvents: readonly StoredEvent[] = events,
 ): Promise<IssuePreviewRecord[]> {
   requireRegister(register, 'previewOutcomes');
   void runner;
-  const { reports } = foldErrorEvents(events, clock(), () => true, resolveProject);
-  const history = priorOpenReports(events, resolveProject);
+  const { reports } = foldErrorEvents(
+    events,
+    clock(),
+    () => true,
+    resolveProject,
+    selfFallback,
+    scopeEvents,
+  );
+  const history = priorOpenReports(events, resolveProject, selfFallback, scopeEvents);
 
   const out: IssuePreviewRecord[] = [];
   for (const report of reports) {
@@ -549,13 +560,22 @@ export async function reportErrors(
   clock: () => string,
   opts: EventOpts = {},
   resolveProject: ResolveProjectForTaskRef = () => null,
+  selfFallback: ResolveProjectForTaskRef = () => null,
+  scopeEvents: readonly StoredEvent[] = events,
 ): Promise<IssueReportRecord[]> {
   requireRegister(register, 'reportErrors');
   // Every project's switch is applied by this module's own step 1, not by
   // the fold: foldErrorEvents dropping a disabled project's candidates
   // silently would lose the `skipped-disabled` record clause 2 requires.
-  const { reports } = foldErrorEvents(events, clock(), () => true, resolveProject);
-  const history = priorOpenReports(events, resolveProject);
+  const { reports } = foldErrorEvents(
+    events,
+    clock(),
+    () => true,
+    resolveProject,
+    selfFallback,
+    scopeEvents,
+  );
+  const history = priorOpenReports(events, resolveProject, selfFallback, scopeEvents);
 
   const out: IssueReportRecord[] = [];
   for (const report of reports) {
