@@ -271,6 +271,10 @@ one thing this playbook never asks you to.
     auto-resolve a semantic conflict silently (`worktree.yml`
     `conflict_resolution_ladder`).
 
+    An `integration-dirty` outcome names a `worktree` holding
+    `smith/<epic>/integration` with uncommitted tracked changes (`dirty`):
+    commit or stash those there, then re-run `smith queue run`.
+
     Once the wave is merged, check the epic's spend — `smith budget alarm
     <session-id> [--epic <epic>]`. Exit 1 means either the epic crossed
     `alarm_ratio` (re-plan the remaining work to fit, or ask the operator —

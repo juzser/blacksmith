@@ -1,12 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { collectCommittedChanges } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
 import type { EventOpts } from './events.js';
-import { runGit, runGitRaw } from './git.js';
+import { runGit, runGitRaw, writeMergeTree } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
@@ -196,11 +193,14 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     };
   }
 
-  // Merge where the integration branch already lives, or in a worktree made
-  // for this merge alone — never by `git checkout` in the project directory,
-  // which moved the operator's own clone off the branch they were using.
+  // Merge where the integration branch already lives, or with no working tree
+  // at all — never by `git checkout` in the project directory, which moved
+  // the operator's own clone off the branch they were using.
+  const message = `Merge ${task.taskId} into ${integrationBranch}`;
   const holder = worktreeHolding(opts.projectDir, integrationBranch);
-  if (holder !== null) {
+  if (holder === null) {
+    mergeWithoutWorktree(opts.projectDir, integrationBranch, task.branch, message);
+  } else {
     // A merge into a worktree with edits in it either stops half-way or folds
     // someone's unfinished work into the merge's checkout; neither is ours.
     const dirty = trackedChanges(holder);
@@ -217,14 +217,11 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
         ...(plan.report ? { tests: plan.report } : {}),
       };
     }
+    execFileSync('git', ['merge', '--no-ff', task.branch, '-m', message], {
+      cwd: holder,
+      stdio: 'pipe',
+    });
   }
-  runInBranchWorktree(opts.projectDir, holder, integrationBranch, [
-    'merge',
-    '--no-ff',
-    task.branch,
-    '-m',
-    `Merge ${task.taskId} into ${integrationBranch}`,
-  ]);
 
   if (events) {
     const { ctx, ...opt } = events;
@@ -237,14 +234,20 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
 /**
  * The worktree (the main one or any linked one) that has `branch` checked
  * out, or null when none does. git refuses to check a branch out in two
- * worktrees at once, so there is at most one.
+ * worktrees at once, so there is at most one. An entry git marks `prunable`
+ * — its directory is gone — holds nothing: there is no checkout to merge in,
+ * and moving the branch under it harms nothing. It is not pruned here either;
+ * the operator's worktree registrations are theirs (architecture §18 rule 10).
  */
 function worktreeHolding(projectDir: string, branch: string): string | null {
   const ref = `branch refs/heads/${branch}`;
-  let current: string | null = null;
-  for (const line of runGitRaw(projectDir, ['worktree', 'list', '--porcelain']).split('\n')) {
-    if (line.startsWith('worktree ')) current = line.slice('worktree '.length);
-    else if (line === ref) return current;
+  const records = runGitRaw(projectDir, ['worktree', 'list', '--porcelain', '-z']).split('\0\0');
+  for (const record of records) {
+    const lines = record.split('\0');
+    const dir = lines.find((l) => l.startsWith('worktree '));
+    if (dir === undefined || !lines.includes(ref)) continue;
+    if (lines.some((l) => l === 'prunable' || l.startsWith('prunable '))) continue;
+    return dir.slice('worktree '.length);
   }
   return null;
 }
@@ -269,34 +272,30 @@ function trackedChanges(worktreeDir: string): string[] {
 }
 
 /**
- * Run a git command in `holder`, the worktree that has `branch` out — or, when
- * none does, in a temporary worktree checked out on it, removed afterwards
- * whether the command succeeded or threw.
+ * Merge `source` into `branch` with plumbing alone, for when no worktree has
+ * `branch` checked out: `merge-tree --write-tree` builds the merged tree,
+ * `commit-tree` makes the two-parent merge commit (author and committer from
+ * git config, as `git merge` would), and `update-ref` moves `branch` only if
+ * it still points where the merge started.
+ *
+ * No working tree means no commit hook runs — deliberately: the queue is
+ * plumbing, and the gate runs the suite. It also means nothing is added to,
+ * removed from or pruned out of the repository's worktree list.
+ *
+ * A conflict throws, and so does a `branch` that moved during the merge;
+ * either way `branch` is left where it was.
  */
-function runInBranchWorktree(
+function mergeWithoutWorktree(
   projectDir: string,
-  holder: string | null,
   branch: string,
-  args: string[],
+  source: string,
+  message: string,
 ): void {
-  if (holder !== null) {
-    execFileSync('git', args, { cwd: holder, stdio: 'pipe' });
-    return;
-  }
-  const parent = mkdtempSync(path.join(tmpdir(), 'smith-merge-'));
-  const dir = path.join(parent, 'wt');
-  try {
-    runGit(projectDir, ['worktree', 'add', '--quiet', dir, branch]);
-    execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
-  } finally {
-    try {
-      runGit(projectDir, ['worktree', 'remove', '--force', dir]);
-    } catch {
-      // Already gone, or never added: prune below drops any registration left.
-    }
-    runGit(projectDir, ['worktree', 'prune']);
-    rmSync(parent, { recursive: true, force: true });
-  }
+  const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
+  const head = runGit(projectDir, ['rev-parse', '--verify', `${source}^{commit}`]);
+  const tree = writeMergeTree(projectDir, base, head);
+  const commit = runGit(projectDir, ['commit-tree', tree, '-p', base, '-p', head, '-m', message]);
+  runGit(projectDir, ['update-ref', '-m', message, `refs/heads/${branch}`, commit, base]);
 }
 
 export type AdoptTask = Omit<QueueTask, 'worktreeDir'>;

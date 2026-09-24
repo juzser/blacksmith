@@ -55,7 +55,11 @@ export function redactCredentials(text: string): string {
   );
 }
 
-function exec(cwd: string, args: string[]): string {
+/**
+ * `onConflict`, when given, reads what git said from stdout on exit 1 — for
+ * the commands (merge-tree) that report a conflict there, not on stderr.
+ */
+function exec(cwd: string, args: string[], onConflict?: (stdout: string) => string): string {
   try {
     return execFileSync('git', args, {
       cwd,
@@ -67,7 +71,10 @@ function exec(cwd: string, args: string[]): string {
     // A child that never spawned has no exit code; `code` carries the errno
     // string instead, and that is the only thing worth reporting.
     const status = typeof e.status === 'number' ? e.status : null;
-    const said = e.stderr ?? (typeof e.code === 'string' ? `git could not be run (${e.code})` : '');
+    const said =
+      onConflict !== undefined && status === 1
+        ? onConflict(e.stdout ?? '')
+        : (e.stderr ?? (typeof e.code === 'string' ? `git could not be run (${e.code})` : ''));
     throw new GitCommandError(cwd, args, status, redactCredentials(said));
   }
 }
@@ -83,6 +90,19 @@ export function runGit(cwd: string, args: string[]): string {
  */
 export function runGitRaw(cwd: string, args: string[]): string {
   return exec(cwd, args);
+}
+
+/**
+ * `git merge-tree --write-tree` of two commits: the merged tree's id, with no
+ * working tree or index touched. A conflict (exit 1) throws GitCommandError
+ * carrying the conflicted paths and git's CONFLICT messages, which merge-tree
+ * prints on stdout rather than stderr.
+ */
+export function writeMergeTree(cwd: string, base: string, head: string): string {
+  const args = ['merge-tree', '--write-tree', '--name-only', base, head];
+  // stdout on a conflict is the would-be tree id, then what conflicted.
+  const out = exec(cwd, args, (stdout) => stdout.split('\n').slice(1).join('\n'));
+  return out.split('\n')[0] as string;
 }
 
 /**
