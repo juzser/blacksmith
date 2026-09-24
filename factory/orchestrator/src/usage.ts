@@ -100,9 +100,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'audit resolve',
     positionals: '<project-dir>',
-    flags: `--epic <epic-id> ${EVENTS_DIR}`,
+    flags: `--epic <epic-id> [--except <fp[,fp...]>] [--plan <plan.json>] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary:
-      'Append a fixed line for every finding the epic carried. Run from the epic-close step.',
+      "Append a fixed line for every carried finding the epic's newest plan still claims; list the rest as deferred. Run from the epic-close step.",
   },
   {
     command: 'audit close',

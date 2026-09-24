@@ -293,8 +293,10 @@ playbooks are written to prevent.
     quote the blockers. If the epic was cut by `/bs audit`
     ([`audit.md`](audit.md) step 10), follow the close with
     `smith audit resolve <project-dir> --epic <epic> --session <session-id> --causal-parent <event-id>`
-    so every finding the epic carried is marked `fixed` in the project's
-    audit store — the store, not the epic, is where a finding's life ends.
+    so every finding this plan still claims is marked `fixed` in the
+    project's audit store — the rest come back `deferred`, left exactly as
+    they were, because the plan scoped them out on purpose. The store, not
+    the epic, is where a finding's life ends.
 17. Open **one integration PR per epic** with the scribe-written body
     (`/bs report`'s playbook, [`report.md`](report.md)) — screenshots, test
     results, reviewer verdict, waivers granted, timeline link. The head is

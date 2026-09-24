@@ -255,7 +255,11 @@ The epic is now an ordinary roadmap milestone: run `/bs plan` on it
 ([`plan.md`](plan.md)), then `/bs run`. When that run reaches its epic-close
 step, it runs
 `smith audit resolve <project-dir> --epic <epic-id> --session <session-id> --causal-parent <event-id>`,
-which appends `fixed` for every finding the epic carried — repeatable, and
-`audit.unknown-epic` if the id was never cut from this store. That is the
-only step of an audit that runs outside this playbook, and it is why the
-store, not this transcript, is where a finding's life is kept.
+which reads the epic's newest plan and appends `fixed` only for a carried
+finding some task in it still claims — the rest come back `deferred`, still
+`accepted`, because the plan scoped them out on purpose. Repeatable;
+`audit.unknown-epic` if the id was never cut from this store, `audit.no-plan`
+if no plan can be found (refuses rather than guess). `--except <fp[,fp...]>`
+forces specific fingerprints into `deferred` even when a task claims them.
+That is the only step of an audit that runs outside this playbook, and it is
+why the store, not this transcript, is where a finding's life is kept.
