@@ -52,6 +52,10 @@ const BLOCKING_SEVERITY = 'S2-major';
 const GATE_OUTCOME_EVENT_TYPE = 'gate-outcome';
 const ERROR_LOGGED_EVENT_TYPE = 'error-logged';
 const TASK_ADDED_EVENT_TYPE = 'task-added';
+/** `agents-registry.ts`'s `DISPATCH_EVENT_TYPE`, hand-restated rather than
+ * imported -- this module's only imports are `node:crypto` and two local,
+ * type-only siblings, on purpose (see the file banner). */
+const DISPATCH_DECISION_EVENT_TYPE = 'dispatch_decision';
 
 /**
  * Source 2: `task_status: failed` is set in exactly one place in the whole
@@ -239,18 +243,45 @@ function candidateTaskRef(record: StoredEvent['record']): string | undefined {
 }
 
 /**
- * The first explicit `project` stamp seen per session, in stored order --
- * "first stamp wins" the same way the fold's grouping does. Real sessions
- * mix dozens of stamped rows with unstamped ones (evidence: a foreign
- * project's session stamps some events and not others); a stamped sibling in
- * the same session is strong evidence for an unstamped one.
+ * Event types allowed to stamp a session's project for
+ * `sessionProjectStamps` below: the issue candidates themselves, plus
+ * `task-added` and `dispatch_decision` rows recording where a task was
+ * planned or dispatched. Deliberately excludes `issue-reported` and every
+ * other reporter-authored row -- those carry this module's own *guess* at a
+ * row's project (see `appendIssueReported` in `issueReporter.ts`), not an
+ * independent origin stamp, so folding them back in here would let one run's
+ * guess leak into the next run's resolution of an unrelated, unstamped row
+ * in the same session.
+ */
+const ORIGIN_STAMP_EVENT_TYPES: ReadonlySet<string> = new Set([
+  ...ISSUE_CANDIDATE_EVENT_TYPES,
+  DISPATCH_DECISION_EVENT_TYPE,
+]);
+
+/**
+ * The session's project, from its origin-stamped rows only -- and only when
+ * every one of them agrees. Real sessions mix dozens of stamped rows with
+ * unstamped ones (evidence: a foreign project's session stamps some events
+ * and not others); a unanimous stamped sibling in the same session is strong
+ * evidence for an unstamped one. A session whose origin stamps disagree
+ * tells us nothing safe to guess, so it answers unresolved rather than
+ * picking whichever stamp happened to come first.
  */
 function sessionProjectStamps(events: readonly StoredEvent[]): ReadonlyMap<string, string> {
-  const stamps = new Map<string, string>();
+  const bySession = new Map<string, Set<string>>();
   for (const { record } of events) {
-    if (stamps.has(record.session_id)) continue;
+    if (!ORIGIN_STAMP_EVENT_TYPES.has(record.event_type)) continue;
     const project = asString(record.project);
-    if (project !== undefined) stamps.set(record.session_id, project);
+    if (project === undefined) continue;
+    const seen = bySession.get(record.session_id);
+    if (seen) seen.add(project);
+    else bySession.set(record.session_id, new Set([project]));
+  }
+  const stamps = new Map<string, string>();
+  for (const [sessionId, projects] of bySession) {
+    if (projects.size !== 1) continue;
+    const [project] = projects;
+    if (project !== undefined) stamps.set(sessionId, project);
   }
   return stamps;
 }
@@ -275,36 +306,57 @@ function taskAddedEpicIds(events: readonly StoredEvent[]): ReadonlyMap<string, s
 
 /**
  * Widens a per-epic `ResolveProjectForTaskRef` into a `RowProjectResolver`
- * with two session-scoped fallbacks a single task ref cannot answer alone: a
- * bare ref (no epic segment) tried again as `<epic>/<ref>` using the same
- * session's own `task-added` row, then -- if still unanswered -- the first
- * project any row in the same session was stamped with. Exported so
- * `issueReporter.ts`'s `priorOpenReports` can apply the identical fallback
- * to the same event snapshot.
+ * with three session-scoped fallbacks a single task ref cannot answer alone,
+ * tried strictly in this order (S2-c):
+ *
+ * 1. `resolveProject`, the strict/direct resolver -- a bare ref (no epic
+ *    segment) tried again as `<epic>/<ref>` using the same session's own
+ *    `task-added` row when the bare ref alone cannot answer.
+ * 2. The session stamp: the ONE project every origin-stamped row in the same
+ *    session agrees on (`sessionProjectStamps`), when unanimous.
+ * 3. `selfFallback`, tried last and only when neither of the above could
+ *    answer -- same widening as step 1.
+ *
+ * Self-fallback sits last on purpose: it is "no plan says otherwise, and a
+ * plan exists locally for this epic, so guess this factory's own name" --
+ * the weakest of the three signals. A session's OWN unanimous stamp naming a
+ * DIFFERENT project is stronger evidence than that guess, and must not be
+ * overridden by it just because the same session also has an unrelated,
+ * unstamped row whose epic happens to have a local, unlabeled plan. Before
+ * this order existed, the self-fallback was folded into `resolveProject`
+ * itself (step 1) and so always outran the session stamp.
+ *
+ * Exported so `issueReporter.ts`'s `priorOpenReports` can apply the identical
+ * fallback to the same event snapshot.
  */
 export function withSessionFallback(
   events: readonly StoredEvent[],
   resolveProject: ResolveProjectForTaskRef,
+  selfFallback: ResolveProjectForTaskRef = () => null,
 ): RowProjectResolver {
   const stamps = sessionProjectStamps(events);
   const epicIds = taskAddedEpicIds(events);
+  const tryResolve = (
+    resolve: ResolveProjectForTaskRef,
+    taskRef: string | undefined,
+    sessionId: string | undefined,
+  ): string | null => {
+    if (taskRef === undefined) return null;
+    const direct = resolve(taskRef);
+    if (direct !== null) return direct;
+    if (sessionId === undefined) return null;
+    const epicId = epicIds.get(taskAddedKey(sessionId, taskRef));
+    if (epicId === undefined) return null;
+    return resolve(`${epicId}/${taskRef}`);
+  };
   return (taskRef, sessionId) => {
-    if (taskRef !== undefined) {
-      const direct = resolveProject(taskRef);
-      if (direct !== null) return direct;
-      if (sessionId !== undefined) {
-        const epicId = epicIds.get(taskAddedKey(sessionId, taskRef));
-        if (epicId !== undefined) {
-          const viaEpic = resolveProject(`${epicId}/${taskRef}`);
-          if (viaEpic !== null) return viaEpic;
-        }
-      }
-    }
+    const direct = tryResolve(resolveProject, taskRef, sessionId);
+    if (direct !== null) return direct;
     if (sessionId !== undefined) {
       const stamp = stamps.get(sessionId);
       if (stamp !== undefined) return stamp;
     }
-    return null;
+    return tryResolve(selfFallback, taskRef, sessionId);
   };
 }
 
@@ -368,23 +420,36 @@ function computeFingerprint(
  * identical input return byte-identical output. `now` is threaded in rather
  * than read off the clock; nothing in this contract branches on it yet.
  *
- * `resolveProject` defaults to "no answer" so the ~50 existing call sites
- * across this module's own tests and `issueReporter.ts`'s need no change.
- * An unstamped row still unresolved after `withSessionFallback`'s two
- * fallbacks reports `project: null` rather than this factory's own name --
- * `isProjectEnabled` is never asked about a row it cannot identify, and the
- * decision to skip filing it belongs to `issueReporter.ts`, the one caller
- * that goes on to call `gh`.
+ * `resolveProject` and `selfFallback` both default to "no answer" so the
+ * ~50 existing call sites across this module's own tests and
+ * `issueReporter.ts`'s need no change. An unstamped row still unresolved
+ * after `withSessionFallback`'s three fallbacks reports `project: null`
+ * rather than this factory's own name -- `isProjectEnabled` is never asked
+ * about a row it cannot identify, and the decision to skip filing it
+ * belongs to `issueReporter.ts`, the one caller that goes on to call `gh`.
+ *
+ * `scopeEvents` defaults to `events` itself -- the session-stamp/`task-added`
+ * maps `withSessionFallback` builds read the same rows this fold iterates,
+ * same as before this parameter existed. A caller that narrows `events` to a
+ * candidate WINDOW (`cli.ts`'s `--epic`/`--since`) passes the full, unscoped
+ * lineage here instead (S3), so a session-mate's stamp sitting outside that
+ * window still counts as evidence for a row inside it -- scoping which rows
+ * get REPORTED must not also scope which rows get CONSULTED, or the same
+ * unstamped row resolves to a different project (and hashes a different
+ * fingerprint, S1-b) depending on whether the caller happened to pass
+ * `--epic`.
  */
 export function foldErrorEvents(
   events: readonly StoredEvent[],
   now: string,
   isProjectEnabled: (project: string) => boolean,
   resolveProject: ResolveProjectForTaskRef = () => null,
+  selfFallback: ResolveProjectForTaskRef = () => null,
+  scopeEvents: readonly StoredEvent[] = events,
 ): FoldResult {
   void now;
 
-  const resolveRow = withSessionFallback(events, resolveProject);
+  const resolveRow = withSessionFallback(scopeEvents, resolveProject, selfFallback);
   const candidates: Candidate[] = [];
   let skipped = 0;
 

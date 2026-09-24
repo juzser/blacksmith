@@ -281,26 +281,56 @@ export function planProjectResolverForTaskRef(
 }
 
 /**
- * `planProjectResolverForTaskRef`, with its own doc comment's "belongs to
- * the reader's default" case made concrete: a plan found on disk for the
- * epic that simply declares no `project` field IS this factory's own
- * project, by construction -- only this checkout's own epics have a plan
- * under `specs/active` at all, so finding one there is itself the "self"
- * signal a foreign epic's plan (which lives in the foreign project's own
- * specs tree, never this one) can never produce. An epic with no plan on
- * disk anywhere, or a bare ref with no epic segment, stays the OTHER null
- * -- "cannot tell whose project this is" -- because plan.ts must not be
- * the module that hardcodes this factory's name; the caller supplies it.
+ * Whether `opts.specsDir` names THIS checkout's own specs/active tree --
+ * absent (so `planFilePath`/`latestPlanVersion` fall back to
+ * `SPECS_ACTIVE_DIR` themselves) or an explicit path that resolves to the
+ * same directory. Only then is a plan found there, naming no project,
+ * evidence of "self": `--specs-dir` is also how a caller points this
+ * resolver at a DIFFERENT checkout's specs tree entirely -- `issueInputs`'s
+ * own doc comment names "the daemon's own event log and a target checkout's
+ * specs tree" as an intended use -- and a plan found THERE naming no project
+ * is that other project's own silence, not this factory's (S2-b).
  */
-export function planProjectResolverForTaskRefOrSelf(
+function isSelfSpecsDir(opts: PlanOpts): boolean {
+  return opts.specsDir === undefined || path.resolve(opts.specsDir) === SPECS_ACTIVE_DIR;
+}
+
+/**
+ * The self-fallback half of `planProjectResolverForTaskRefOrSelf`, on its
+ * own: a plan found on disk for the epic that simply declares no `project`
+ * field IS this factory's own project, by construction -- only this
+ * checkout's own epics have a plan under `specs/active` at all, so finding
+ * one there is itself the "self" signal a foreign epic's plan (which lives
+ * in the foreign project's own specs tree, never this one) can never
+ * produce. An epic with no plan on disk anywhere, or a bare ref with no
+ * epic segment, answers `null` -- "cannot tell whose project this is" --
+ * because plan.ts must not be the module that hardcodes this factory's
+ * name; the caller supplies it.
+ *
+ * That "only this checkout's own epics" premise holds only while `opts`
+ * actually points at this checkout's own specs/active tree
+ * (`isSelfSpecsDir`, S2-b): a caller that redirected `--specs-dir` at some
+ * OTHER checkout's specs tree gets no self-fallback at all, `null` only,
+ * because a plan found there naming no project is that other checkout's own
+ * silence, not this factory's.
+ *
+ * Exported as its own resolver, separate from `planProjectResolverForTaskRef`
+ * (S2-c): production callers (`cli.ts`'s `issueInputs`) hand the two to
+ * `withSessionFallback`/`foldErrorEvents` as DISTINCT tiers -- the strict
+ * resolver first, then a session's own unanimous stamp, and only then this
+ * guess -- so a session-mate's real stamp naming a different project
+ * outranks this weakest signal rather than losing to it, which is what
+ * happened when the two were folded into one resolver and tried together as
+ * a single first tier.
+ */
+export function planSelfFallbackForTaskRef(
   selfProject: string,
   opts: PlanOpts = {},
 ): (taskRef: string) => string | null {
-  const resolve = planProjectResolverForTaskRef(opts);
+  const selfEligible = isSelfSpecsDir(opts);
   const hasPlanCache = new Map<string, boolean>();
   return (taskRef: string): string | null => {
-    const direct = resolve(taskRef);
-    if (direct !== null) return direct;
+    if (!selfEligible) return null;
     const epicId = epicOfTaskId(taskRef);
     if (epicId === null) return null;
     let hasPlan = hasPlanCache.get(epicId);
@@ -309,6 +339,28 @@ export function planProjectResolverForTaskRefOrSelf(
       hasPlanCache.set(epicId, hasPlan);
     }
     return hasPlan ? selfProject : null;
+  };
+}
+
+/**
+ * `planProjectResolverForTaskRef` composed with `planSelfFallbackForTaskRef`
+ * as a single resolver, direct answer first and self-fallback second, for
+ * callers that want the OLD combined behavior (both tiers tried back to
+ * back, with nothing -- such as a session stamp -- able to sit between
+ * them). Kept for callers that do not need the S2-c tier split; `cli.ts`'s
+ * `issueInputs` no longer uses this, it hands the two halves to
+ * `withSessionFallback` separately instead.
+ */
+export function planProjectResolverForTaskRefOrSelf(
+  selfProject: string,
+  opts: PlanOpts = {},
+): (taskRef: string) => string | null {
+  const resolve = planProjectResolverForTaskRef(opts);
+  const selfFallback = planSelfFallbackForTaskRef(selfProject, opts);
+  return (taskRef: string): string | null => {
+    const direct = resolve(taskRef);
+    if (direct !== null) return direct;
+    return selfFallback(taskRef);
   };
 }
 

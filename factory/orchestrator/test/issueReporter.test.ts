@@ -1307,6 +1307,58 @@ describe('issueReporter.ts', () => {
       expect(bucket('create')).toHaveLength(0);
     });
 
+    it("does not let one run's own issue-reported project stamp leak into a later run's unresolved row in the same session (S1-a)", async () => {
+      const dir = await makeRepo('git@github.com:juzser/blacksmith.git');
+      const register: ProjectRef[] = [{ name: 'black-smith', dir, self: true }];
+      const firstEvent = await seed({
+        sessionId: 'session-loop',
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: 'epic-1/task-first',
+      });
+      // Run 1: nothing stamps this row, but a resolver (standing in for the
+      // real self-fallback wired into the CLI) answers it -- appendIssueReported
+      // then writes that answer onto the resulting issue-reported row's own
+      // `project` field, exactly as the real resolver would.
+      const resolverRun1 = (taskRef: string) =>
+        taskRef === 'epic-1/task-first' ? 'black-smith' : null;
+      await reportErrors(
+        [firstEvent],
+        ENABLED,
+        register,
+        makeStub().runner,
+        CLOCK,
+        { stateDir },
+        resolverRun1,
+      );
+      const fullLog = await readEvents('session-loop', { stateDir });
+      const secondEvent = await seed({
+        sessionId: 'session-loop',
+        eventType: 'gate-outcome',
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+        taskId: 'epic-1/task-second',
+      });
+
+      // Run 2: a resolver that cannot answer this different row directly.
+      // The only way it could still resolve is by reading run 1's own
+      // issue-reported stamp back off the shared session -- the feedback
+      // loop this guards against.
+      const { runner: runner2, bucket } = makeStub();
+      const [record] = await reportErrors(
+        [...fullLog, secondEvent],
+        ENABLED,
+        register,
+        runner2,
+        CLOCK,
+        { stateDir },
+        () => null,
+      );
+
+      expect(record?.project).toBeNull();
+      expect(record?.outcome).toBe('skipped-unresolved-project');
+      expect(bucket('create')).toHaveLength(0);
+    });
+
     it("previewOutcomes resolves the same way: an unstamped foreign row previews against its own repo, never the factory's", async () => {
       const factoryDir = await makeRepo('git@github.com:juzser/blacksmith.git');
       const foreignDir = await makeRepo('git@github.com:example-org/example-app.git');

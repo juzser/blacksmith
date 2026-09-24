@@ -285,7 +285,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'scheduler run',
     positionals: '',
-    flags: `[--dry] [--now <iso>] [--project <dir>...] [--no-self] ${EVENTS_DIR}`,
+    flags: `[--dry] [--now <iso>] [--project <dir>...] [--no-self] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary: 'Propose and enact the next scheduler moves for a session. --dry proposes only.',
   },
   {
@@ -293,7 +293,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags:
       '--session <id> [--state-dir <dir>] [--now <iso>] [--project <dir>...] [--no-self] ' +
-      '[--policy <file>] [--crosscheck <file>]',
+      '[--specs-dir <dir>] [--policy <file>] [--crosscheck <file>]',
     summary:
       "Classify what's due into auto or operator per scheduler.yml autonomy. Enacts nothing.",
   },

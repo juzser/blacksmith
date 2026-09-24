@@ -132,7 +132,8 @@ import {
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
-  planProjectResolverForTaskRefOrSelf,
+  planProjectResolverForTaskRef,
+  planSelfFallbackForTaskRef,
   resolveTaskId,
   type TaskSpecRecord,
   validatePlan,
@@ -504,20 +505,28 @@ function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, strin
 /**
  * Both `issues` actions read the same inputs; only the entry point differs.
  *
- * `resolveProject` closes the privacy-leak gap an unstamped row otherwise
- * falls into: a session or plan driving a project other than this factory
- * writes error/gate/task-added rows with no top-level `project` stamp.
- * `planProjectResolverForTaskRefOrSelf` (D-246's `db/projector.ts` precedent,
- * restated here without a DB dependency `cli.ts`'s boot graph cannot carry)
- * answers from the row's own task ref's epic's plan file: a plan on disk
- * naming a project wins outright; a plan on disk naming none is this
- * checkout's own epic, so it resolves to `FACTORY_PROJECT`; no plan found at
- * all (a foreign epic, or a bare ref) stays `null`, and `reportErrors`/
- * `previewOutcomes` skip that row with `skipped-unresolved-project` rather
- * than ever defaulting it into this factory's own repository. `null` answers
- * also fall back to any `project` stamp elsewhere in the same session, or to
- * a bare ref's `task-added` `epic_id`, before landing on `null` for good
- * (`withSessionFallback`, `errorIssues.ts`).
+ * `resolveProject` and `selfFallback` together close the privacy-leak gap an
+ * unstamped row otherwise falls into: a session or plan driving a project
+ * other than this factory writes error/gate/task-added rows with no
+ * top-level `project` stamp. Both answer from the row's own task ref's
+ * epic's plan file (D-246's `db/projector.ts` precedent, restated here
+ * without a DB dependency `cli.ts`'s boot graph cannot carry) -- a plan on
+ * disk naming a project wins outright via `resolveProject`; a plan on disk
+ * naming none is this checkout's own epic, so `selfFallback` resolves it to
+ * `FACTORY_PROJECT`; no plan found at all (a foreign epic, or a bare ref)
+ * stays `null` from both, and `reportErrors`/`previewOutcomes` skip that row
+ * with `skipped-unresolved-project` rather than ever defaulting it into this
+ * factory's own repository.
+ *
+ * The two are kept as SEPARATE resolvers, not one combined
+ * `planProjectResolverForTaskRefOrSelf`, so `withSessionFallback`
+ * (`errorIssues.ts`) can try them as distinct tiers with a session's own
+ * stamp riding between them: `resolveProject` first, then any `project`
+ * stamp elsewhere in the same session (or a bare ref's `task-added`
+ * `epic_id` re-asked of `resolveProject`), and only then `selfFallback`
+ * (S2-c) -- a session-mate's real stamp naming a different project must
+ * outrank this weakest, locally-guessed signal, which a single combined
+ * resolver tried as one first tier could not guarantee.
  *
  * `--specs-dir` (via `planOptsFromFlags`) and `--state-dir` (via
  * `eventOptsFromFlags`) are two independent flags on purpose: `--state-dir`
@@ -529,19 +538,39 @@ function scopeIssueCandidates(events: StoredEvent[], flags: Record<string, strin
  * remote-events state dir while resolving projects from this checkout's own
  * specs/active, which is `smith`'s ordinary daemon posture. Callers who do
  * mean the same tree for both pass the same path to both flags.
+ *
+ * `lineageEvents` is the session's UNSCOPED lineage, read before
+ * `scopeIssueCandidates` narrows `events` to `--epic`/`--since` (S3):
+ * `ORIGIN_STAMP_EVENT_TYPES` overlaps the scoped `ISSUE_CANDIDATE_EVENT_TYPES`
+ * set, so `sessionProjectStamps` reading straight off the narrowed `events`
+ * could lose a session-mate's stamp purely because `--epic`/`--since`
+ * excluded that row, changing an unrelated in-scope row's resolved project
+ * -- and therefore its fingerprint -- based only on which scoping flags were
+ * passed. `reportErrors`/`previewOutcomes` fold `events` for candidates but
+ * consult `lineageEvents` for the session-stamp tier, so `--epic`/`--since`
+ * narrow what gets reported without perturbing how a row's project is
+ * resolved.
  */
 async function issueInputs(flags: Record<string, string>) {
   const sessionId = requireFlag(flags, 'session');
   const eventOpts = eventOptsFromFlags(flags);
   requireSession(sessionId, eventOpts);
-  const events = scopeIssueCandidates(await readLineageEvents(sessionId, eventOpts), flags);
+  const lineageEvents = await readLineageEvents(sessionId, eventOpts);
+  const events = scopeIssueCandidates(lineageEvents, flags);
   const milestones = loadRoadmap(flags['roadmap-path']);
   const isEnabled = (project: string) => isErrorTrackerWritable(milestones, project);
-  const resolveProject = planProjectResolverForTaskRefOrSelf(
-    FACTORY_PROJECT,
-    planOptsFromFlags(flags),
-  );
-  return { events, isEnabled, register: factoryProjects(), eventOpts, resolveProject };
+  const planOpts = planOptsFromFlags(flags);
+  const resolveProject = planProjectResolverForTaskRef(planOpts);
+  const selfFallback = planSelfFallbackForTaskRef(FACTORY_PROJECT, planOpts);
+  return {
+    events,
+    isEnabled,
+    register: factoryProjects(),
+    eventOpts,
+    resolveProject,
+    selfFallback,
+    lineageEvents,
+  };
 }
 
 /**
@@ -1804,7 +1833,21 @@ async function main(): Promise<number> {
     const projectDirs = resolveProjectDirs(repeated.project, {
       self: flags['no-self'] !== 'true',
     });
-    const input = { events, now, projectDirs };
+    // Same resolver `issues report`/`preview` and the daemon use (D-246): an
+    // error-report proposal's fingerprint is hashed over its `project`
+    // (computeFingerprint), so this verb has to resolve a row's project the
+    // same way the reporter that later clears the proposal does. A divergent
+    // resolver here -- or none, which folds every row to `project: null` --
+    // hashes a different fingerprint than the reporter's `issue-reported`
+    // event names, so the proposal `scheduler run` keeps proposing never
+    // matches the one already answered and is re-appended forever (S1-b).
+    const input = {
+      events,
+      now,
+      projectDirs,
+      resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
+      selfFallbackForTaskRef: planSelfFallbackForTaskRef(FACTORY_PROJECT, planOptsFromFlags(flags)),
+    };
 
     if (dry) {
       printJson({ proposals: computeProposals(input) });
@@ -1860,11 +1903,17 @@ async function main(): Promise<number> {
     // This clone joins the pass by default (contract clause 1); `--no-self`
     // is the refusal path.
     const { resolveProjectDirs } = await import('./projects.js');
+    // Same resolver as `scheduler run` above, for the same reason (S1-b): a
+    // divergent or absent resolver hashes a different fingerprint than the
+    // reporter's `issue-reported` event names, so an already-answered
+    // error-report proposal never clears.
     const proposals = computeProposals({
       events,
       now,
       policy,
       projectDirs: resolveProjectDirs(repeated.project, { self: flags['no-self'] !== 'true' }),
+      resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
+      selfFallbackForTaskRef: planSelfFallbackForTaskRef(FACTORY_PROJECT, planOptsFromFlags(flags)),
     });
 
     // A RecheckProposal names a task and no paths, so without this the
@@ -1924,11 +1973,11 @@ async function main(): Promise<number> {
       // plan on disk naming no project is this checkout's own epic, so it
       // reads as FACTORY_PROJECT rather than staying an unresolved null the
       // daemon would report as an unlabeled finding and the on/off switch
-      // for 'black-smith' would never get asked about.
-      resolveProjectForTaskRef: planProjectResolverForTaskRefOrSelf(
-        FACTORY_PROJECT,
-        planOptsFromFlags(flags),
-      ),
+      // for 'black-smith' would never get asked about. Split into strict
+      // (resolveProjectForTaskRef) and self-only (selfFallbackForTaskRef)
+      // tiers so a session's own stamp can ride between them (S2-c).
+      resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
+      selfFallbackForTaskRef: planSelfFallbackForTaskRef(FACTORY_PROJECT, planOptsFromFlags(flags)),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
@@ -2705,7 +2754,8 @@ async function main(): Promise<number> {
 
   if (namespace === 'issues' && action === 'report') {
     // The one path in this epic that runs `gh` for real.
-    const { events, isEnabled, register, eventOpts, resolveProject } = await issueInputs(flags);
+    const { events, isEnabled, register, eventOpts, resolveProject, selfFallback, lineageEvents } =
+      await issueInputs(flags);
     const clock = () => new Date().toISOString();
     printJson(
       await reportErrors(
@@ -2716,6 +2766,8 @@ async function main(): Promise<number> {
         clock,
         eventOpts,
         resolveProject,
+        selfFallback,
+        lineageEvents,
       ),
     );
     return 0;
@@ -2724,12 +2776,24 @@ async function main(): Promise<number> {
   if (namespace === 'issues' && action === 'preview') {
     // Same inputs, no `gh` and no event: the runner throws if anything
     // reaches it, so a preview that spawned would fail loudly, not quietly.
-    const { events, isEnabled, register, resolveProject } = await issueInputs(flags);
+    const { events, isEnabled, register, resolveProject, selfFallback, lineageEvents } =
+      await issueInputs(flags);
     const neverRun = (cmd: string): CommandResult => {
       throw new Error(`issues preview must never run a command, asked for ${cmd}`);
     };
     const clock = () => new Date().toISOString();
-    printJson(await previewOutcomes(events, isEnabled, register, neverRun, clock, resolveProject));
+    printJson(
+      await previewOutcomes(
+        events,
+        isEnabled,
+        register,
+        neverRun,
+        clock,
+        resolveProject,
+        selfFallback,
+        lineageEvents,
+      ),
+    );
     return 0;
   }
 
