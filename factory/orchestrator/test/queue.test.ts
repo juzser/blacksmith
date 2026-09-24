@@ -1,5 +1,5 @@
 import { existsSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -75,6 +75,107 @@ describe('step', () => {
 
     const log = git(projectDir, ['log', 'smith/epic-1/integration', '--oneline']);
     expect(log).toContain('edit a');
+  });
+
+  // The queue used to `git checkout` the integration branch in the project
+  // directory to merge, which moved the operator's own clone off the branch
+  // they were working on. The merge now happens in a worktree of its own.
+  it('never changes the branch the project directory has checked out', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+    const worktreesBefore = git(projectDir, ['worktree', 'list', '--porcelain']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true' },
+    );
+
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('main');
+    expect(git(projectDir, ['status', '--porcelain'])).toBe('');
+    expect(git(projectDir, ['log', 'smith/epic-1/integration', '--oneline'])).toContain(
+      'Merge task-1 into smith/epic-1/integration',
+    );
+    // The temporary merge worktree is gone, registration included.
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).toBe(worktreesBefore);
+  });
+
+  it('removes the temporary merge worktree when the merge itself fails', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+    const worktreesBefore = git(projectDir, ['worktree', 'list', '--porcelain']);
+    // Hooks are shared by every worktree of the repo, the temporary one included.
+    const hook = path.join(projectDir, '.git', 'hooks', 'pre-merge-commit');
+    writeFileSync(hook, '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+
+    await expect(
+      step(
+        { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+        { projectDir, epic: 'epic-1', testCmd: 'true' },
+      ),
+    ).rejects.toThrow(/git merge --no-ff/);
+
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('main');
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).toBe(worktreesBefore);
+  });
+
+  it('merges in the project directory when it already has the integration branch out', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true' },
+    );
+
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('smith/epic-1/integration');
+    expect(git(projectDir, ['status', '--porcelain'])).toBe('');
+    expect(await readFile(path.join(projectDir, 'a.txt'), 'utf8')).toBe('a-edited\n');
+  });
+
+  it('merges in the linked worktree that already has the integration branch out', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+    const integrationDir = path.join(root, 'integration');
+    git(projectDir, ['worktree', 'add', '-q', integrationDir, 'smith/epic-1/integration']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true' },
+    );
+
+    expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('main');
+    expect(git(integrationDir, ['status', '--porcelain'])).toBe('');
+    expect(await readFile(path.join(integrationDir, 'a.txt'), 'utf8')).toBe('a-edited\n');
+  });
+
+  it('refuses to merge into a worktree whose integration checkout has uncommitted changes', async () => {
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    await writeFile(path.join(projectDir, 'b.txt'), 'operator is editing\n');
+    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+
+    const result = await step(
+      { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true' },
+    );
+
+    expect(result).toMatchObject({ outcome: 'integration-dirty', taskId: 'task-1' });
+    if (result.outcome !== 'integration-dirty') throw new Error('unreachable');
+    expect(await realpath(result.worktree)).toBe(await realpath(projectDir));
+    expect(result.dirty).toEqual(['b.txt']);
+    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
+    // The operator's edit is untouched.
+    expect(await readFile(path.join(projectDir, 'b.txt'), 'utf8')).toBe('operator is editing\n');
   });
 
   it('reports tests-failed when the epic test command fails, without merging', async () => {
@@ -307,6 +408,26 @@ describe('step', () => {
 
       const [event] = await logged();
       expect(event?.payload).toMatchObject({ error: 'integration.merge-conflict-textual' });
+    });
+
+    it('logs an env-failure error-logged when the integration checkout is dirty', async () => {
+      const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+      await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+      git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+      git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+      await writeFile(path.join(projectDir, 'b.txt'), 'operator is editing\n');
+
+      await step(
+        { taskId: 'epic-1/task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+        { projectDir, epic: 'epic-1', testCmd: 'true', events },
+      );
+
+      const all = await logged();
+      expect(all.map((e) => e.type)).toEqual(['error-logged']);
+      expect(all[0]?.payload).toMatchObject({
+        error: 'execution.env-failure',
+        task_ref: 'epic-1/task-1',
+      });
     });
 
     it('logs a contract error-logged when the task has nothing to merge (D-30)', async () => {

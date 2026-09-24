@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { collectCommittedChanges } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
 import type { EventOpts } from './events.js';
-import { runGit } from './git.js';
+import { runGit, runGitRaw } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
@@ -98,6 +101,18 @@ export type StepOutcome =
       dirty: string[];
       /** No test ran: there was nothing to test. */
       tests?: undefined;
+    }
+  /**
+   * The worktree that has the integration branch checked out carries
+   * uncommitted tracked changes, so the queue would not merge into it. The
+   * tests ran and passed; nothing landed.
+   */
+  | {
+      outcome: 'integration-dirty';
+      taskId: string;
+      worktree: string;
+      dirty: string[];
+      tests?: TestRunReport;
     };
 
 const OUTPUT_TAIL_LINES = 50;
@@ -181,19 +196,107 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     };
   }
 
-  execFileSync('git', ['checkout', integrationBranch], { cwd: opts.projectDir, stdio: 'pipe' });
-  execFileSync(
-    'git',
-    ['merge', '--no-ff', task.branch, '-m', `Merge ${task.taskId} into ${integrationBranch}`],
-    { cwd: opts.projectDir, stdio: 'pipe' },
-  );
+  // Merge where the integration branch already lives, or in a worktree made
+  // for this merge alone — never by `git checkout` in the project directory,
+  // which moved the operator's own clone off the branch they were using.
+  const holder = worktreeHolding(opts.projectDir, integrationBranch);
+  if (holder !== null) {
+    // A merge into a worktree with edits in it either stops half-way or folds
+    // someone's unfinished work into the merge's checkout; neither is ours.
+    const dirty = trackedChanges(holder);
+    if (dirty.length > 0) {
+      await logBlocked(
+        'execution.env-failure',
+        `${integrationBranch} is checked out in ${holder}, which has uncommitted changes: ${dirty.join(', ')}`,
+      );
+      return {
+        outcome: 'integration-dirty',
+        taskId: task.taskId,
+        worktree: holder,
+        dirty,
+        ...(plan.report ? { tests: plan.report } : {}),
+      };
+    }
+  }
+  runInBranchWorktree(opts.projectDir, holder, integrationBranch, [
+    'merge',
+    '--no-ff',
+    task.branch,
+    '-m',
+    `Merge ${task.taskId} into ${integrationBranch}`,
+  ]);
 
   if (events) {
     const { ctx, ...opt } = events;
-    await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(opts.projectDir));
+    await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(opts.projectDir, integrationBranch));
   }
 
   return { outcome: 'merged', taskId: task.taskId, ...(plan.report ? { tests: plan.report } : {}) };
+}
+
+/**
+ * The worktree (the main one or any linked one) that has `branch` checked
+ * out, or null when none does. git refuses to check a branch out in two
+ * worktrees at once, so there is at most one.
+ */
+function worktreeHolding(projectDir: string, branch: string): string | null {
+  const ref = `branch refs/heads/${branch}`;
+  let current: string | null = null;
+  for (const line of runGitRaw(projectDir, ['worktree', 'list', '--porcelain']).split('\n')) {
+    if (line.startsWith('worktree ')) current = line.slice('worktree '.length);
+    else if (line === ref) return current;
+  }
+  return null;
+}
+
+/** Tracked paths with staged or unstaged changes. Untracked files never block a merge. */
+function trackedChanges(worktreeDir: string): string[] {
+  const fields = runGitRaw(worktreeDir, [
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=no',
+  ]).split('\0');
+  const paths: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i] as string;
+    if (field.length < 4) continue;
+    paths.push(field.slice(3));
+    // A rename or copy carries its source path as the next NUL field.
+    if (field[0] === 'R' || field[0] === 'C') i++;
+  }
+  return paths;
+}
+
+/**
+ * Run a git command in `holder`, the worktree that has `branch` out — or, when
+ * none does, in a temporary worktree checked out on it, removed afterwards
+ * whether the command succeeded or threw.
+ */
+function runInBranchWorktree(
+  projectDir: string,
+  holder: string | null,
+  branch: string,
+  args: string[],
+): void {
+  if (holder !== null) {
+    execFileSync('git', args, { cwd: holder, stdio: 'pipe' });
+    return;
+  }
+  const parent = mkdtempSync(path.join(tmpdir(), 'smith-merge-'));
+  const dir = path.join(parent, 'wt');
+  try {
+    runGit(projectDir, ['worktree', 'add', '--quiet', dir, branch]);
+    execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
+  } finally {
+    try {
+      runGit(projectDir, ['worktree', 'remove', '--force', dir]);
+    } catch {
+      // Already gone, or never added: prune below drops any registration left.
+    }
+    runGit(projectDir, ['worktree', 'prune']);
+    rmSync(parent, { recursive: true, force: true });
+  }
 }
 
 export type AdoptTask = Omit<QueueTask, 'worktreeDir'>;
