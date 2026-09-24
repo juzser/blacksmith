@@ -60,7 +60,7 @@ If you are a Claude Code session executing this runbook, these are binding:
 |---|---|
 | **Node ≥ 22** | `engines` in `package.json`; ESM + `node:` builtins throughout |
 | **Claude Code CLI** | `/bs` is a Claude Code skill, and every worker it dispatches is a Claude Code session |
-| **git ≥ 2.17** | `worktree add` / `remove` / `list --porcelain` *is* the isolation mechanism, once you run an epic |
+| **git ≥ 2.38** | `worktree add` / `remove` / `list --porcelain` *is* the isolation mechanism, once you run an epic; the merge queue needs `merge-tree --write-tree` (2.38) |
 
 **A clone** needs those, plus the toolchain this repo's own gates run on:
 
@@ -302,7 +302,7 @@ handling, not the native module.
 ```bash
 node --version      # expect v22 or higher
 pnpm --version      # expect 9.3.0 (any pnpm 9 works; see Known gaps)
-git --version       # expect 2.17 or higher
+git --version       # expect 2.38 or higher
 bash --version      # expect any GNU bash
 python3 -c "import yaml; print('pyyaml ok')"
 ```

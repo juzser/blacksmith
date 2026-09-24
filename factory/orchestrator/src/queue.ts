@@ -3,7 +3,7 @@ import { collectCommittedChanges } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
 import type { EventOpts } from './events.js';
-import { runGit } from './git.js';
+import { runGit, runGitRaw, writeMergeTree } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
@@ -98,6 +98,18 @@ export type StepOutcome =
       dirty: string[];
       /** No test ran: there was nothing to test. */
       tests?: undefined;
+    }
+  /**
+   * The worktree that has the integration branch checked out carries
+   * uncommitted tracked changes, so the queue would not merge into it. The
+   * tests ran and passed; nothing landed.
+   */
+  | {
+      outcome: 'integration-dirty';
+      taskId: string;
+      worktree: string;
+      dirty: string[];
+      tests?: TestRunReport;
     };
 
 const OUTPUT_TAIL_LINES = 50;
@@ -181,19 +193,109 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     };
   }
 
-  execFileSync('git', ['checkout', integrationBranch], { cwd: opts.projectDir, stdio: 'pipe' });
-  execFileSync(
-    'git',
-    ['merge', '--no-ff', task.branch, '-m', `Merge ${task.taskId} into ${integrationBranch}`],
-    { cwd: opts.projectDir, stdio: 'pipe' },
-  );
+  // Merge where the integration branch already lives, or with no working tree
+  // at all — never by `git checkout` in the project directory, which moved
+  // the operator's own clone off the branch they were using.
+  const message = `Merge ${task.taskId} into ${integrationBranch}`;
+  const holder = worktreeHolding(opts.projectDir, integrationBranch);
+  if (holder === null) {
+    mergeWithoutWorktree(opts.projectDir, integrationBranch, task.branch, message);
+  } else {
+    // A merge into a worktree with edits in it either stops half-way or folds
+    // someone's unfinished work into the merge's checkout; neither is ours.
+    const dirty = trackedChanges(holder);
+    if (dirty.length > 0) {
+      await logBlocked(
+        'execution.env-failure',
+        `${integrationBranch} is checked out in ${holder}, which has uncommitted changes: ${dirty.join(', ')}`,
+      );
+      return {
+        outcome: 'integration-dirty',
+        taskId: task.taskId,
+        worktree: holder,
+        dirty,
+        ...(plan.report ? { tests: plan.report } : {}),
+      };
+    }
+    execFileSync('git', ['merge', '--no-ff', task.branch, '-m', message], {
+      cwd: holder,
+      stdio: 'pipe',
+    });
+  }
 
   if (events) {
     const { ctx, ...opt } = events;
-    await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(opts.projectDir));
+    await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(opts.projectDir, integrationBranch));
   }
 
   return { outcome: 'merged', taskId: task.taskId, ...(plan.report ? { tests: plan.report } : {}) };
+}
+
+/**
+ * The worktree (the main one or any linked one) that has `branch` checked
+ * out, or null when none does. git refuses to check a branch out in two
+ * worktrees at once, so there is at most one. An entry git marks `prunable`
+ * — its directory is gone — holds nothing: there is no checkout to merge in,
+ * and moving the branch under it harms nothing. It is not pruned here either;
+ * the operator's worktree registrations are theirs (architecture §18 rule 10).
+ */
+function worktreeHolding(projectDir: string, branch: string): string | null {
+  const ref = `branch refs/heads/${branch}`;
+  const records = runGitRaw(projectDir, ['worktree', 'list', '--porcelain', '-z']).split('\0\0');
+  for (const record of records) {
+    const lines = record.split('\0');
+    const dir = lines.find((l) => l.startsWith('worktree '));
+    if (dir === undefined || !lines.includes(ref)) continue;
+    if (lines.some((l) => l === 'prunable' || l.startsWith('prunable '))) continue;
+    return dir.slice('worktree '.length);
+  }
+  return null;
+}
+
+/** Tracked paths with staged or unstaged changes. Untracked files never block a merge. */
+function trackedChanges(worktreeDir: string): string[] {
+  const fields = runGitRaw(worktreeDir, [
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=no',
+  ]).split('\0');
+  const paths: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i] as string;
+    if (field.length < 4) continue;
+    paths.push(field.slice(3));
+    // A rename or copy carries its source path as the next NUL field.
+    if (field[0] === 'R' || field[0] === 'C') i++;
+  }
+  return paths;
+}
+
+/**
+ * Merge `source` into `branch` with plumbing alone, for when no worktree has
+ * `branch` checked out: `merge-tree --write-tree` builds the merged tree,
+ * `commit-tree` makes the two-parent merge commit (author and committer from
+ * git config, as `git merge` would), and `update-ref` moves `branch` only if
+ * it still points where the merge started.
+ *
+ * No working tree means no commit hook runs — deliberately: the queue is
+ * plumbing, and the gate runs the suite. It also means nothing is added to,
+ * removed from or pruned out of the repository's worktree list.
+ *
+ * A conflict throws, and so does a `branch` that moved during the merge;
+ * either way `branch` is left where it was.
+ */
+function mergeWithoutWorktree(
+  projectDir: string,
+  branch: string,
+  source: string,
+  message: string,
+): void {
+  const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
+  const head = runGit(projectDir, ['rev-parse', '--verify', `${source}^{commit}`]);
+  const tree = writeMergeTree(projectDir, base, head);
+  const commit = runGit(projectDir, ['commit-tree', tree, '-p', base, '-p', head, '-m', message]);
+  runGit(projectDir, ['update-ref', '-m', message, `refs/heads/${branch}`, commit, base]);
 }
 
 export type AdoptTask = Omit<QueueTask, 'worktreeDir'>;

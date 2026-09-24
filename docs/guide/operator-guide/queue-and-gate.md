@@ -55,6 +55,19 @@ not ahead of `smith/<epic>/integration` returns `nothing-to-merge` and is
 never rebased, so the uncommitted work is still sitting exactly where the
 agent left it when you go look.
 
+The queue never changes which branch `--project` has checked out. The merge
+runs in whichever worktree already has `smith/<epic>/integration` out — the
+project directory itself or a linked worktree — and, when none does, with no
+working tree at all: `git merge-tree` builds the merged tree, `commit-tree`
+makes the merge commit and `update-ref` moves the branch only if it has not
+moved meanwhile. That path runs no commit hooks, on purpose — the queue is
+plumbing and the gate runs the suite — and it never adds, removes or prunes a
+worktree. If the worktree holding the integration branch has
+uncommitted tracked changes, the queue does not merge into it: it logs
+`execution.env-failure` and returns
+`{"outcome":"integration-dirty","worktree":...,"dirty":[...]}`. Commit or
+stash there and re-run.
+
 ### 4a. `smith queue adopt` — the merge that happened without the queue
 
 `wave-merged` is the only event the projector folds to `completed`, and
