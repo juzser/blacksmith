@@ -40,6 +40,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { resolveFindingOwner } from './claims.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
 import { computeFingerprint, type EventContext, normalizeFilePath } from './findings.js';
@@ -50,6 +51,14 @@ import {
   type WorktreeDrift,
   type WorktreeFingerprint,
 } from './immutability.js';
+import { SPECS_ACTIVE_DIR } from './paths.js';
+import {
+  latestPlanVersion,
+  loadPlan,
+  type PlanFile,
+  type PlanOpts,
+  planClaimedTasks,
+} from './plan.js';
 import { loadTaxonomy } from './taxonomy.js';
 
 export class AuditError extends SmithError {}
@@ -1059,7 +1068,7 @@ function renderSpec(
     `- **Epic id** — \`${input.epicId}\``,
     `- **Project** — \`${path.basename(project)}\` at \`${project}\`, and every worktree is placed beside that clone (\`AGENTS.md\` "Worktrees").`,
     `- **Roadmap milestone** — \`${input.epicId}\` in \`factory/specs/roadmap.md\`.`,
-    `- **Provenance** — cut by \`smith audit cut\` from audit ${audits.join(', ')} (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}). Each finding carries this epic id in \`.blacksmith/findings.jsonl\`; \`smith audit resolve\` marks them fixed when the epic closes.`,
+    `- **Provenance** — cut by \`smith audit cut\` from audit ${audits.join(', ')} (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}). Each finding carries this epic id in \`.blacksmith/findings.jsonl\`; \`smith audit resolve\` marks fixed only the ones a task in this plan still claims, and leaves the rest \`deferred\`.`,
     '',
     '## What this epic is',
     '',
@@ -1134,26 +1143,117 @@ export async function cutAudit(
   };
 }
 
+export interface ResolveAuditOptions {
+  /**
+   * The plan to check claims against, already loaded. Bypasses version
+   * discovery entirely — the same escape hatch `findings raise --plan` gives
+   * a caller that already has the file.
+   */
+  plan?: PlanFile;
+  /** Where to discover the epic's newest plan when `plan` is not given. */
+  planOpts?: PlanOpts;
+  /**
+   * Fingerprints (full, or a prefix unique among what the epic carries) to
+   * force into `deferred` even though a plan task claims them. An operator's
+   * "not yet" that ownership alone cannot express.
+   */
+  except?: readonly string[];
+}
+
 export interface ResolveAuditResult {
   epic: string;
   /** Fingerprints that got a `fixed` line now. */
   fixed: string[];
   /** Fingerprints the epic carried that were already fixed. */
   already: string[];
+  /**
+   * Fingerprints the epic carried that no plan task claims, or that
+   * `--except` forced aside. Left exactly as they were — still `accepted`.
+   */
+  deferred: string[];
   event_id: string;
 }
 
 /**
- * `audit resolve <project-dir> --epic <epic-id>`. Appends a `fixed` line for
- * every finding the epic carried. Called from `/bs run`'s epic-close step, so
- * it is repeatable; an epic no finding carries is refused, because the likely
- * cause is a typo and a silent no-op would leave every finding open.
+ * The epic's newest plan, however `resolveOpts` asks for it found. Refuses
+ * rather than guesses: `resolveAudit` must never treat "I could not find a
+ * plan" as "nothing is claimed", because that reading marks every carried
+ * finding fixed.
+ */
+function resolveEpicPlan(epicId: string, resolveOpts: ResolveAuditOptions): PlanFile {
+  if (resolveOpts.plan !== undefined) return resolveOpts.plan;
+  const planOpts = resolveOpts.planOpts ?? {};
+  const version = latestPlanVersion(epicId, planOpts);
+  if (version === null) {
+    const searchedDir = path.join(planOpts.specsDir ?? SPECS_ACTIVE_DIR, epicId);
+    throw new AuditError(
+      'audit.no-plan',
+      `no plan found for epic ${epicId}: \`audit resolve\` only marks a finding fixed when some plan task claims its file, so a missing plan cannot be treated as an empty one. Searched ${searchedDir}. If this epic's plans live elsewhere, pass --specs-dir <dir> naming the directory they live in, or --plan <plan.json> to point at one directly.`,
+      { epic: epicId },
+    );
+  }
+  return loadPlan(epicId, version, planOpts);
+}
+
+/**
+ * `--except` entries against the epic's carried fingerprints, full or a
+ * unique prefix — the same latitude other audit verbs give a fingerprint
+ * argument. A value that matches nothing is refused as a likely typo (same
+ * spirit as `audit.unknown-epic`); one whose prefix matches more than one
+ * carried fingerprint is refused rather than guessed.
+ */
+function matchExceptFingerprints(
+  except: readonly string[],
+  carried: readonly FoldedFinding[],
+  epicId: string,
+): Set<string> {
+  const known = carried.map((finding) => finding.fingerprint);
+  const matched = new Set<string>();
+  for (const value of except) {
+    if (known.includes(value)) {
+      matched.add(value);
+      continue;
+    }
+    const candidates = known.filter((fingerprint) => fingerprint.startsWith(value));
+    if (candidates.length === 1) {
+      matched.add(candidates[0] as string);
+      continue;
+    }
+    if (candidates.length > 1) {
+      throw new AuditError(
+        'audit.ambiguous-except',
+        `--except ${value} matches ${candidates.length} findings epic ${epicId} carries: ${candidates.join(', ')}`,
+        { epic: epicId, value, candidates },
+      );
+    }
+    throw new AuditError(
+      'audit.unknown-finding',
+      `--except ${value} matches no finding epic ${epicId} carries`,
+      { epic: epicId, value },
+    );
+  }
+  return matched;
+}
+
+/**
+ * `audit resolve <project-dir> --epic <epic-id>`. Appends a `fixed` line only
+ * for a carried finding some task in the epic's newest plan still claims
+ * (`resolveFindingOwner`, D-41/P9-24) — an operator who scoped the plan
+ * narrower than the audit deferred the rest on purpose, and marking them
+ * fixed anyway would erase that choice. Unclaimed findings stay exactly as
+ * they were and come back in `deferred`; `--except` forces specific
+ * fingerprints there even when a task claims them. Called from `/bs run`'s
+ * epic-close step, so it is repeatable; an epic no finding carries is
+ * refused, because the likely cause is a typo and a silent no-op would leave
+ * every finding open. A plan that cannot be found is refused too
+ * (`audit.no-plan`): being unsure must never mark anything fixed.
  */
 export async function resolveAudit(
   projectDir: string,
   epicId: string,
   ctx: EventContext,
   opts: EventOpts = {},
+  resolveOpts: ResolveAuditOptions = {},
 ): Promise<ResolveAuditResult> {
   const project = path.resolve(projectDir);
   const carried = foldAuditStore(readAuditStore(project)).filter(
@@ -1167,14 +1267,25 @@ export async function resolveAudit(
     );
   }
   const open = carried.filter((finding) => finding.status !== 'fixed');
+  const plan = resolveEpicPlan(epicId, resolveOpts);
+  const claimedTasks = planClaimedTasks(plan);
+  const except = matchExceptFingerprints(resolveOpts.except ?? [], carried, epicId);
+  const toFix = open.filter(
+    (finding) =>
+      !except.has(finding.fingerprint) &&
+      resolveFindingOwner(finding.file_path, claimedTasks).owner !== 'unclaimed',
+  );
+  const toFixFingerprints = new Set(toFix.map((finding) => finding.fingerprint));
+  const deferred = open.filter((finding) => !toFixFingerprints.has(finding.fingerprint));
   const stored = await emit('audit-resolved', project, ctx, opts, {
     epic: epicId,
-    fixed: open.map((finding) => finding.fingerprint),
+    fixed: toFix.map((finding) => finding.fingerprint),
+    deferred: deferred.map((finding) => finding.fingerprint),
   });
   const ts = new Date().toISOString();
   appendAuditLines(
     project,
-    open.map((finding) => ({
+    toFix.map((finding) => ({
       fingerprint: finding.fingerprint,
       status: 'fixed' as const,
       ts,
@@ -1185,10 +1296,11 @@ export async function resolveAudit(
   );
   return {
     epic: epicId,
-    fixed: open.map((finding) => finding.fingerprint),
+    fixed: toFix.map((finding) => finding.fingerprint),
     already: carried
       .filter((finding) => finding.status === 'fixed')
       .map((finding) => finding.fingerprint),
+    deferred: deferred.map((finding) => finding.fingerprint),
     event_id: stored.event_id,
   };
 }

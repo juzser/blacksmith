@@ -277,16 +277,24 @@ two implementers invent two:
 | `merged` | `audit decide --decision merge --same-as <fp>` | the same defect as another member of its path-cluster (§3.1); the survivor carries it from here |
 | `accepted` | `audit decide --decision accept` | it becomes epic scope (§5) |
 | `declined` | `audit decide --decision decline` | the operator said no; expires in 90 days (§4.4) |
-| `fixed` | `audit resolve --epic <epic-id>` | the epic that carried it closed |
+| `fixed` | `audit resolve --epic <epic-id>` | some task in the epic's newest plan still claims the file it names |
 
 `fixed` is the one that outlives the audit, and that is why it needs a verb of
 its own rather than a clause in `audit close`: the audit closes in the same
 sitting, the epic closes days later. The chain is `audit cut` stamping the
 epic id it rendered onto each accepted finding, the epic running its ordinary
 course, and `/bs run`'s epic-close step calling `audit resolve --epic
-<epic-id>` — which appends one `fixed` line per finding that epic carried. If
-that call never happens the store is stale but not wrong: the findings stay
-`accepted`, which is exactly what they are.
+<epic-id>` — which reads the epic's newest plan and appends a `fixed` line
+only for a carried finding some task in that plan still claims
+(`resolveFindingOwner`, D-41/P9-24). An operator who scoped the plan narrower
+than the audit deferred the rest on purpose; `resolve` reports those back as
+`deferred` and leaves them exactly as they were, still `accepted`. `--except
+<fp[,fp...]>` forces specific fingerprints into `deferred` even when a task
+claims them — the operator's "not yet" that ownership alone cannot express.
+If a plan cannot be found for the epic, `resolve` refuses outright
+(`audit.no-plan`) rather than guess: being unsure must never mark anything
+fixed. If the call never happens at all the store is stale but not wrong: the
+findings stay `accepted`, which is exactly what they are.
 
 **What the fold suppresses on a later run is decided by the folded status, not
 by the fingerprint's mere presence.** `raised`, `merged` and `accepted`
@@ -330,7 +338,8 @@ Accepted findings become one roadmap milestone and one epic spec — `- project:
 no audit-specific run path: the value of the command is the insight and the
 ranking, and an epic it cut is an ordinary epic. The one thread back is the
 epic id `audit cut` stamps onto each accepted finding, which is what lets
-`audit resolve` mark them `fixed` when that epic closes (§4.3).
+`audit resolve` mark fixed the ones that epic's plan still claims when it
+closes, and defer the rest (§4.3).
 
 Scope discipline at the cut: **one epic**. An audit that accepted fourteen
 findings produces one epic with fourteen criteria, not fourteen epics — the
@@ -351,7 +360,7 @@ inclusion).
 | `audit consolidate <project-dir>` | fold the store, compute path-clusters, rank by severity → convergence → confidence, print the ranked list with each cluster's members side by side |
 | `audit decide <project-dir> --fingerprint <fp> --decision accept\|decline\|merge [--same-as <fp>]` | append the operator's answer; `--same-as` is required by `merge` and refused by the other two |
 | `audit cut <project-dir> --epic <epic-id>` | render the roadmap milestone and the epic spec from the accepted findings, stamping that epic id onto each of them |
-| `audit resolve <project-dir> --epic <epic-id>` | append a `fixed` line for every finding that epic carried. Called from `/bs run`'s epic-close step, not from inside the audit — see §4.3 |
+| `audit resolve <project-dir> --epic <epic-id> [--except <fp[,fp...]>] [--plan <plan.json>] [--specs-dir <dir>]` | read the epic's newest plan, append a `fixed` line for every carried finding some task in it still claims, and report the rest as `deferred`. `--except` forces specific fingerprints into `deferred`; a plan that cannot be found refuses the call (`audit.no-plan`). Called from `/bs run`'s epic-close step, not from inside the audit — see §4.3 |
 | `audit close <project-dir>` | `worktree verify`, remove the read-only worktree, close the audit in the event log |
 
 **The project directory is a positional on every verb, not only on `open`.**

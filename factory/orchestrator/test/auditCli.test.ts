@@ -22,6 +22,8 @@ import {
 } from '../src/audit.js';
 import { type EventRecord, readEvents, startSession } from '../src/events.js';
 import type { EventContext } from '../src/findings.js';
+import { SPECS_ACTIVE_DIR } from '../src/paths.js';
+import type { PlanFile, TaskSpecRecord } from '../src/plan.js';
 import { assertExited, git, runProcess } from './helpers/process.js';
 
 // ---------------------------------------------------------------------------
@@ -502,6 +504,24 @@ describe('the audit verbs', () => {
   describe('audit resolve', () => {
     const input = { epicId: 'proj-audit-1', title: 'Close the audit findings' };
 
+    /** A minimal one-task plan whose task claims the given globs. */
+    function planClaiming(...claims: string[]): PlanFile {
+      return {
+        epic_id: input.epicId,
+        version: 1,
+        status: 'active',
+        tasks: [
+          {
+            task_id: `${input.epicId}/task-1`,
+            plan_version: 1,
+            task_status: 'todo',
+            claims,
+          } as TaskSpecRecord,
+        ],
+        edges: [],
+      };
+    }
+
     it('refuses an epic no finding was cut into', async () => {
       await raiseOne();
       await expect(resolveAudit(project, 'nope', ctx, opts())).rejects.toThrowError(
@@ -509,29 +529,127 @@ describe('the audit verbs', () => {
       );
     });
 
-    it("marks the epic's findings fixed once, and says so the second time", async () => {
+    it('refuses when no plan can be found for the epic, and appends nothing', async () => {
       const fingerprint = await raiseOne();
       await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
       await cutAudit(project, input, ctx, opts());
 
-      const resolved = await resolveAudit(project, input.epicId, ctx, opts());
-      expect(resolved).toMatchObject({ epic: input.epicId, fixed: [fingerprint], already: [] });
+      // The message must name the directory it searched -- the default,
+      // work-root-relative one, since this call passes no --plan / --specs-dir
+      // -- and tell the operator the two ways out, so a project whose plans
+      // live elsewhere is not left guessing why `audit resolve` refused.
+      await expect(resolveAudit(project, input.epicId, ctx, opts())).rejects.toThrowError(
+        expect.objectContaining({
+          code: 'audit.no-plan',
+          message: expect.stringContaining(path.join(SPECS_ACTIVE_DIR, input.epicId)),
+        }),
+      );
+      await expect(resolveAudit(project, input.epicId, ctx, opts())).rejects.toThrowError(
+        expect.objectContaining({
+          message: expect.stringMatching(/--specs-dir.*--plan/s),
+        }),
+      );
+      expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
+      expect(await eventTypes()).not.toContain('audit-resolved');
+    });
+
+    it('discovers the newest plan on disk from planOpts.specsDir, not just --plan', async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+      await cutAudit(project, input, ctx, opts());
+
+      // Two real versions on disk, in a specs dir that is NOT the default
+      // SPECS_ACTIVE_DIR -- v1 claims the finding's file, v2 (the newer one)
+      // does not, so which one `resolveEpicPlan` actually consults is
+      // observable from the verdict rather than asserted directly.
+      const specsDir = path.join(root, 'elsewhere-specs');
+      const epicDir = path.join(specsDir, input.epicId);
+      mkdirSync(epicDir, { recursive: true });
+      const v1: PlanFile = { ...planClaiming('src/foo.ts'), version: 1 };
+      const v2: PlanFile = { ...planClaiming('src/unrelated/**'), version: 2 };
+      writeFileSync(path.join(epicDir, 'plan-v1.json'), JSON.stringify(v1, null, 2));
+      writeFileSync(path.join(epicDir, 'plan-v2.json'), JSON.stringify(v2, null, 2));
+
+      const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+        planOpts: { specsDir },
+      });
+      expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      const folded = only(foldAuditStore(readAuditStore(project)));
+      expect(folded.status).toBe('accepted');
+    });
+
+    it("marks the epic's findings fixed once, and says so the second time", async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+      await cutAudit(project, input, ctx, opts());
+      const resolveOpts = { plan: planClaiming('src/foo.ts') };
+
+      const resolved = await resolveAudit(project, input.epicId, ctx, opts(), resolveOpts);
+      expect(resolved).toMatchObject({
+        epic: input.epicId,
+        fixed: [fingerprint],
+        already: [],
+        deferred: [],
+      });
       const folded = only(foldAuditStore(readAuditStore(project)));
       expect(folded.status).toBe('fixed');
       expect(folded.epic).toBe(input.epicId);
       expect(await eventTypes()).toContain('audit-resolved');
 
       const before = readAuditStore(project).length;
-      const again = await resolveAudit(project, input.epicId, ctx, opts());
-      expect(again).toMatchObject({ fixed: [], already: [fingerprint] });
+      const again = await resolveAudit(project, input.epicId, ctx, opts(), resolveOpts);
+      expect(again).toMatchObject({ fixed: [], already: [fingerprint], deferred: [] });
       expect(readAuditStore(project)).toHaveLength(before);
+    });
+
+    it('leaves a finding no plan task claims as deferred rather than fixed', async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+      await cutAudit(project, input, ctx, opts());
+
+      const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+        plan: planClaiming('src/unrelated/**'),
+      });
+      expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      const folded = only(foldAuditStore(readAuditStore(project)));
+      expect(folded.status).toBe('accepted');
+      expect(folded.epic).toBe(input.epicId);
+      const event = await recordOf('audit-resolved');
+      expect(event.payload).toMatchObject({ fixed: [], deferred: [fingerprint] });
+    });
+
+    it('--except forces a claimed finding into deferred', async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+      await cutAudit(project, input, ctx, opts());
+
+      const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+        plan: planClaiming('src/foo.ts'),
+        except: [fingerprint],
+      });
+      expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
+    });
+
+    it('refuses an --except value that matches no finding the epic carries', async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+      await cutAudit(project, input, ctx, opts());
+
+      await expect(
+        resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: planClaiming('src/foo.ts'),
+          except: ['not-a-real-fingerprint'],
+        }),
+      ).rejects.toThrowError(expect.objectContaining({ code: 'audit.unknown-finding' }));
+      expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
     });
 
     it('lets a fixed finding come back as a regression rather than swallowing it', async () => {
       const fingerprint = await raiseOne();
       await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
       await cutAudit(project, input, ctx, opts());
-      await resolveAudit(project, input.epicId, ctx, opts());
+      await resolveAudit(project, input.epicId, ctx, opts(), { plan: planClaiming('src/foo.ts') });
       await closeAudit(project, {}, ctx, opts());
 
       const reopened = await openAudit(project, ctx, opts());
@@ -729,9 +847,36 @@ describe('the audit verbs through the built binary', () => {
     expect(cutJson.milestone).toContain('- id: proj-audit-1');
     expect(cutJson.spec).toContain('# Epic spec — `proj-audit-1`');
 
-    const resolved = smith('audit', 'resolve', project, '--epic', 'proj-audit-1', ...envelope);
+    const planPath = path.join(root, 'plan.json');
+    const plan: PlanFile = {
+      epic_id: 'proj-audit-1',
+      version: 1,
+      status: 'active',
+      tasks: [
+        {
+          task_id: 'proj-audit-1/task-1',
+          plan_version: 1,
+          task_status: 'todo',
+          claims: ['src/foo.ts'],
+        } as TaskSpecRecord,
+      ],
+      edges: [],
+    };
+    writeFileSync(planPath, `${JSON.stringify(plan)}\n`);
+
+    const resolved = smith(
+      'audit',
+      'resolve',
+      project,
+      '--epic',
+      'proj-audit-1',
+      '--plan',
+      planPath,
+      ...envelope,
+    );
     expect(resolved.status).toBe(0);
-    expect((resolved.json as { fixed: string[] }).fixed).toEqual([fingerprint]);
+    expect((resolved.json as { fixed: string[]; deferred: string[] }).fixed).toEqual([fingerprint]);
+    expect((resolved.json as { fixed: string[]; deferred: string[] }).deferred).toEqual([]);
 
     // The axis dirtied the tree: a bare close refuses, `--force` closes and says so.
     writeFileSync(path.join(worktree, 'scratch.txt'), 'left behind\n');

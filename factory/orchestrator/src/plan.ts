@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { type TaskBudget, unreadTaskBudgetFields } from './budgets.js';
-import { claimCoversPath } from './claims.js';
+import { type ClaimedTask, claimCoversPath } from './claims.js';
 import { SmithError } from './errors.js';
 import { topoSort } from './graph.js';
 import { SPECS_ACTIVE_DIR } from './paths.js';
@@ -787,6 +787,20 @@ export function livePlanTasks(plan: PlanFile): TaskSpecRecord[] {
     if (spec !== undefined) live.push(spec);
   }
   return live;
+}
+
+/**
+ * The plan's tasks in the shape `resolveFindingOwner` reads: only the live
+ * (D-126) ones, and only the `claims` field ownership resolution needs. This
+ * is `livePlanTasks` restated as claims rather than full specs, so a caller
+ * asking "does some task in this plan still claim that file?" (`audit
+ * resolve`) gets the same live/superseded rule `epic verdict` does, not the
+ * raw `plan.tasks` array that also holds every amendment left behind.
+ */
+export function planClaimedTasks(plan: PlanFile): ClaimedTask[] {
+  return livePlanTasks(plan)
+    .filter((task) => Array.isArray(task.claims))
+    .map((task) => ({ task_id: task.task_id, claims: task.claims as string[] }));
 }
 
 /**

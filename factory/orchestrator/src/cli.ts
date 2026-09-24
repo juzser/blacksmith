@@ -1227,12 +1227,26 @@ async function main(): Promise<number> {
 
   if (namespace === 'audit' && action === 'resolve') {
     const [projectDir] = requirePositionals(positional, usageFor('audit resolve')) as [string];
+    // Comma-split, not repeated: a fingerprint has no commas, and deferring
+    // more than one at a time is the common case (D-33's precedent, `plan
+    // amend --findings`).
+    const except = flags.except
+      ? flags.except
+          .split(',')
+          .map((fp) => fp.trim())
+          .filter((fp) => fp !== '')
+      : undefined;
     printJson(
       await resolveAudit(
         projectDir,
         requireFlag(flags, 'epic'),
         eventContextFromFlags(flags),
         eventOptsFromFlags(flags),
+        {
+          ...(except ? { except } : {}),
+          ...(flags.plan ? { plan: readJsonFile<PlanFile>(flags.plan) } : {}),
+          planOpts: planOptsFromFlags(flags),
+        },
       ),
     );
     return 0;
