@@ -36,6 +36,7 @@ import {
   SpecError,
   type SpecReviewStatus,
   specReviewBlockers,
+  taskSuccessors,
 } from '../src/spec.js';
 
 // ---------------------------------------------------------------------------
@@ -576,6 +577,64 @@ describe('spec-scoped findings (P9-9)', () => {
       const after = await listFindings(ctx.sessionId, {}, { stateDir });
       expect(after[0]?.finding_status).toBe('amend-pending');
       expect(after[0]?.amends_task_ids).toEqual(['envkit/task-1b-quote-errors']);
+    });
+
+    // epic.ts's resolveSupersededRow/summarizeEpic is the reader of this pairing
+    // — a *later*, unrelated amendment superseding a task an *earlier* finding
+    // already obligated on (amends_task_ids is never rewritten after the fact,
+    // see the previous test's comment). This is the write side: does amendPlan
+    // actually record the pairing on the event, and does taskSuccessors actually
+    // fold it back out.
+    it('records old id -> replacement id as a successor pairing when a supersede renames a task', async () => {
+      const finding = await raiseSpecFinding();
+      const task = planFixture().tasks[0];
+      if (task === undefined) throw new Error('unreachable');
+
+      await amendPlan(
+        {
+          plan: planFixture(),
+          findingIds: [finding.finding_id],
+          rationale: 'criterion 3 moved to a task that owns the error path alone',
+          sites: ['src/parse.ts'],
+          changes: {
+            supersede: {
+              'envkit/task-1b-parse-quotes': {
+                ...task,
+                task_id: 'envkit/task-1b-quote-errors',
+                acceptance_criteria: ['an unterminated double quote is a parse error'],
+              },
+            },
+          },
+        },
+        rootCtx(),
+        { stateDir, specsDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.get('envkit/task-1b-parse-quotes')).toBe('envkit/task-1b-quote-errors');
+    });
+
+    it('records no successor pairing when a supersede keeps the same task id', async () => {
+      const finding = await raiseSpecFinding();
+
+      await amendPlan(
+        {
+          plan: planFixture(),
+          findingIds: [finding.finding_id],
+          rationale: 'criterion 3 tightened in place, same task',
+          sites: ['src/parse.ts'],
+          changes: supersedeQuotes(),
+        },
+        rootCtx(),
+        { stateDir, specsDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      // The fold's own row already carries the work forward under the id
+      // everyone has -- no pairing needed, so none is recorded.
+      expect(successors.size).toBe(0);
     });
 
     it('refuses an amendment that moves no task — it would discharge the finding on the spot (D-127)', async () => {

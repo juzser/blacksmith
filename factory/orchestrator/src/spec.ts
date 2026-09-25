@@ -121,6 +121,37 @@ export function latestSpecReview(
 }
 
 /**
+ * Old task id -> the replacement that superseded it, folded across every
+ * `plan-version-created` event this epic has (D-<successor-chain>). Not a
+ * last-wins fold like `latestSpecReview`: a task superseded in v2 and its own
+ * successor superseded again in v4 contributes two independent entries to
+ * the same map, and epic.ts's `resolveSupersededRow` walks the chain — each
+ * amendment only ever needs to know its own one hop.
+ *
+ * Only the rename-supersede case is ever present here: `amendPlan` records a
+ * pairing only when the replacement's `task_id` differs from the id it
+ * replaces (the same-id case needs no successor — the fold's own row already
+ * carries the work forward under the id everyone already has).
+ */
+export function taskSuccessors(
+  events: readonly StoredEvent[],
+  epicId: string,
+): Map<string, string> {
+  const successors = new Map<string, string>();
+  for (const event of events) {
+    if (event.record.event_type !== PLAN_AMENDED_EVENT) continue;
+    const payload = event.record.payload as Record<string, unknown>;
+    if (payload.epic_id !== epicId) continue;
+    const entries = payload.successors;
+    if (entries === null || typeof entries !== 'object') continue;
+    for (const [oldId, newId] of Object.entries(entries as Record<string, unknown>)) {
+      if (typeof newId === 'string') successors.set(oldId, newId);
+    }
+  }
+  return successors;
+}
+
+/**
  * The epic gate refusing to certify a spec nobody re-read once the code
  * existed. Mirrors integrationBlockers exactly, including the fail-closed
  * unknown-head case: a review pinned to a sha nobody can compare against is
@@ -509,6 +540,16 @@ export async function amendPlan(
   // function in this codebase that puts a plan version on disk.
   const amended = nextVersion(plan, input.changes ?? {}, opts);
 
+  // Old id -> replacement id, for the rename-supersede case only: a same-id
+  // supersede needs no pairing (the row already carries the work forward
+  // under the id everyone has). epic.ts's resolveSupersededRow/summarizeEpic
+  // is the reader — this is the one place an old task_id and its replacement
+  // are ever paired (PlanChanges.supersede), so it is recorded here or lost.
+  const successors: Record<string, string> = {};
+  for (const [oldId, replacement] of Object.entries(input.changes?.supersede ?? {})) {
+    if (replacement.task_id !== oldId) successors[oldId] = replacement.task_id;
+  }
+
   await appendEvent(
     {
       session_id: ctx.sessionId,
@@ -529,6 +570,7 @@ export async function amendPlan(
         sites: namedSites,
         sites_unclaimed: unclaimedSites,
         diff,
+        successors,
       },
     },
     opts,
