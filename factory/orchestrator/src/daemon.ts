@@ -39,7 +39,6 @@ import {
   mergeSessionLogs,
   parseEventId,
   readEvents,
-  type SessionLog,
   type StoredEvent,
 } from './events.js';
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
@@ -234,6 +233,20 @@ function staleSubject(agent: AgentRecord): string {
 }
 
 /**
+ * The session an event id names, for a finding that has nothing better to key
+ * on than the id of the event that raised it. `null` on anything that is not
+ * a well-formed event id, rather than throwing — a proposal's origin is a
+ * nicety, not a fact `inspectSession` should die over.
+ */
+function originSessionId(eventId: string): string | null {
+  try {
+    return parseEventId(eventId).sessionId;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Everything one session's lineage says about itself: spend against the epic
  * cap, dispatches nobody can be billed for, agents that never came back, and
  * completed work the recheck policy says is due another look.
@@ -293,10 +306,23 @@ export function inspectSession(
   }
 
   for (const agent of detectStale(foldAgents(events), now.toISOString(), staleHours)) {
+    // Same rule as the budget check above, and the same reason: a closed
+    // epic's dispatch cannot still be live, so flagging it would raise the
+    // same line every tick until the log is archived. `foldAgents`'s own
+    // epic-closed handling only closes an entry against the session that
+    // closed it (D-234) — a dispatch and the epic's close can sit in
+    // different sessions of one lineage, which is exactly the shape this
+    // tick's merged log hands here, so the same-session fold alone would
+    // miss it.
+    if (agent.epicId !== null && closedEpics.has(agent.epicId)) continue;
     findings.push({
       kind: 'stale-agent',
       severity: 'attention',
-      sessionId,
+      // The dispatch's own session, not the tree's primary leaf: a fork
+      // asks inspectSession once for the whole tree, and the agent that
+      // never came back belongs to whichever session actually dispatched
+      // it.
+      sessionId: agent.sessionId,
       subject: staleSubject(agent),
       detail:
         `${agent.agentRole} (${agent.provider}/${agent.modelTier}) has been live for ` +
@@ -318,7 +344,10 @@ export function inspectSession(
     findings.push({
       kind: 'spec-change',
       severity: proposal.blocking ? 'attention' : 'info',
-      sessionId,
+      // `proposalId` is the `spec-change-proposed` event's own id, so this is
+      // the session that actually raised the proposal — not the tree's
+      // primary leaf, which a fork may have picked for an unrelated sibling.
+      sessionId: originSessionId(proposal.proposalId) ?? sessionId,
       subject: proposal.taskId,
       detail:
         `${proposal.proposedBy} proposes amending ${proposal.criterionRef}: ${proposal.assumption} ` +
@@ -340,13 +369,17 @@ export function inspectSession(
       : { selfFallbackForTaskRef: opts.selfFallbackForTaskRef }),
   });
   const admissions = admitFor(proposals, events, opts.admission);
+  // `TaskFoldRow.sessionId` is stamped once, the first time `touch()` builds
+  // the row, and never overwritten by a later touch — the task's origin
+  // session, not whichever one most recently merged or dispatched against it.
+  const taskSession = new Map(foldTasks(events).map((row) => [row.taskId, row.sessionId]));
   for (const [index, proposal] of proposals.entries()) {
     const admission = admissions[index];
     if (proposal.kind === 'recheck') {
       findings.push({
         kind: 'recheck',
         severity: 'info',
-        sessionId,
+        sessionId: taskSession.get(proposal.taskId) ?? sessionId,
         subject: proposal.taskId,
         detail:
           `Recheck due (${proposal.reasons.join(', ')}): ${proposal.mergeCount} later overlapping ` +
@@ -371,7 +404,9 @@ export function inspectSession(
       findings.push({
         kind: 'unreported-error',
         severity: 'info',
-        sessionId,
+        // `report.session_id` — the session the error actually lives in, and
+        // the same one the detail text below already sends the operator to.
+        sessionId: proposal.sessionId,
         subject: `error ${proposal.fingerprint}${project}`,
         detail:
           `Error ${proposal.fingerprint} in ${projectPhrase} ` +
@@ -559,7 +594,13 @@ function unwatchedRepos(opts: InspectOptions): readonly ProjectRef[] {
 
 export interface TickReport {
   at: string;
-  /** Lineage leaves inspected, sorted. An ancestor session is covered by its leaf. */
+  /**
+   * Lineage leaves this tick found, sorted. An ancestor session is covered by
+   * its leaf — or, when a session forked into several leaves, by all of them
+   * together: the tree is inspected once, not once per leaf, so a forked
+   * lineage's findings are attributed to whichever leaf sorts first among its
+   * siblings rather than duplicated across every one of them.
+   */
   sessions: string[];
   /** Each finding, dated against what the previous tick remembered. */
   findings: AgedFinding[];
@@ -612,12 +653,14 @@ function errorMessage(err: unknown): string {
 /**
  * One pass over the state directory.
  *
- * Two rules hold it together. It reads every log ONCE and folds lineages in
- * memory, so a five-session lineage reports one budget alarm rather than five
- * (D-119's argument, read from the other end). And no single unreadable log or
- * failed projection ends the tick: both become findings, because a watchdog
- * that dies on the first corrupt line is a watchdog that is silent exactly
- * when something is wrong.
+ * Two rules hold it together. It reads every log ONCE and folds each lineage
+ * TREE in memory — not once per leaf — so a five-session chain reports one
+ * budget alarm rather than five (D-119's argument, read from the other end),
+ * and a base session that forked into several wave children reports it once
+ * rather than once per sibling. And no single unreadable log or failed
+ * projection ends the tick: both become findings, because a watchdog that
+ * dies on the first corrupt line is a watchdog that is silent exactly when
+ * something is wrong.
  */
 export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
   const now = opts.now ?? new Date();
@@ -660,17 +703,52 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
   }
   const leaves = [...logs.keys()].filter((id) => !ancestors.has(id)).sort();
 
-  const lineageOf = (leaf: string): SessionLog[] => {
-    const chain: string[] = [];
+  // parentOf inverted: a session's immediate children among the sessions this
+  // tick loaded. Lets a shared ancestor's descendants be walked forward once,
+  // instead of re-walked backward once per leaf below it.
+  const childrenOf = new Map<string, string[]>();
+  for (const [childId, parent] of parentOf) {
+    if (parent === null || !logs.has(parent)) continue;
+    const siblings = childrenOf.get(parent) ?? [];
+    siblings.push(childId);
+    childrenOf.set(parent, siblings);
+  }
+
+  // The furthest ancestor of `id` that this tick still holds a log for — the
+  // root of the tree `id` belongs to, and the same root for every session in
+  // that tree regardless of which leaf asks.
+  const rootOf = (id: string): string => {
+    let current = id;
     const seen = new Set<string>();
-    let current: string | null = leaf;
-    while (current !== null && logs.has(current) && !seen.has(current)) {
+    while (true) {
+      const parent = parentOf.get(current) ?? null;
+      if (parent === null || !logs.has(parent) || seen.has(current)) return current;
       seen.add(current);
-      chain.unshift(current);
-      current = parentOf.get(current) ?? null;
+      current = parent;
     }
-    return chain.map((sessionId) => ({ sessionId, events: logs.get(sessionId) ?? [] }));
   };
+
+  // Every session reachable from `root` by walking children — the whole tree
+  // a lineage forks into, not just the one leaf that happened to ask for it.
+  const treeSessions = (root: string): string[] => {
+    const all = [root];
+    for (let i = 0; i < all.length; i += 1) {
+      for (const child of childrenOf.get(all[i] as string) ?? []) all.push(child);
+    }
+    return all;
+  };
+
+  // Leaves grouped by the tree they fork from. A base session with several
+  // wave children is one tree with several leaves — inspected once, not once
+  // per sibling, so the shared ancestor's findings are not re-emitted once
+  // per fork (the D-119 argument, which a single chain never forks to break).
+  const leavesByRoot = new Map<string, string[]>();
+  for (const leaf of leaves) {
+    const root = rootOf(leaf);
+    const group = leavesByRoot.get(root) ?? [];
+    group.push(leaf);
+    leavesByRoot.set(root, group);
+  }
 
   // A tick reports the admission line by default, where `inspectSession` and
   // `inspectFactory` stay silent unless asked. The asymmetry is deliberate: a
@@ -719,14 +797,25 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
       'it is the UI and `smith status` that are now stale.',
   });
 
-  for (const leaf of leaves) {
-    findings.push(...inspectSession(leaf, mergeSessionLogs(lineageOf(leaf)), inspectOpts));
-    if (!projectDb) continue;
-    try {
-      await apply(dbPath, leaf, dbOpts);
-      projected += 1;
-    } catch (err) {
-      findings.push(projectionFailed(leaf, err));
+  for (const [root, group] of leavesByRoot) {
+    // Sorted, so a forked tree attributes its shared findings to the same
+    // leaf on every tick, rather than whichever one Map iteration hands back
+    // first — the same determinism `leaves` itself already sorts for.
+    const primary = [...group].sort()[0] as string;
+    const merged = mergeSessionLogs(
+      treeSessions(root).map((sessionId) => ({ sessionId, events: logs.get(sessionId) ?? [] })),
+    );
+    findings.push(...inspectSession(primary, merged, inspectOpts));
+  }
+
+  if (projectDb) {
+    for (const leaf of leaves) {
+      try {
+        await apply(dbPath, leaf, dbOpts);
+        projected += 1;
+      } catch (err) {
+        findings.push(projectionFailed(leaf, err));
+      }
     }
   }
 
