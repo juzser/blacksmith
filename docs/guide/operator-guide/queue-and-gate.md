@@ -155,6 +155,61 @@ invents the command: a `--select-test-cmd` without a `{files}` placeholder is
 refused before the queue starts (`test-select.no-files-placeholder`) rather
 than silently running your full suite and reporting it as a selective run.
 
+### 4c. `--batch` — testing several tasks at once (roadmap `merge-lanes`)
+
+The serial loop above pays for the whole suite once per task, and on a
+CPU-bound suite that is the honest cost, not a wasted one: measured on this
+repo's own root suite (10 CPUs), one run alone is ~268s green, two concurrent
+runs are ~331s green, and four concurrent runs are ~475s and all four come
+back flaky on timing. Parallel *lanes* make the machine do more work at once
+and get less total work done for it — so `--batch` does not add lanes, it
+shrinks the number of suite runs:
+
+```bash
+smith queue run epic-1 \
+  --project ../my-project \
+  --test-cmd "pnpm test" \
+  --tasks tasks.json \
+  --plan plans/epic-1.json \
+  --batch
+```
+
+It groups the admitted tasks into runs of claim-disjoint work — nothing in
+one task's claims overlaps another's, nothing in the group touches a
+`serialize_always_globs` path (`worktree.yml`, §5 above), and no task in the
+group `depends_on` another one in it — stacks each group into a single
+candidate commit (`git merge-tree` + `commit-tree`, the same plumbing §4
+uses for a lone merge), and tests the *group* once instead of testing every
+task in it separately. A green group lands every task in it — one suite run
+for however many tasks it holds. `--batch` needs `--plan`: grouping reads
+its dependency edges and, for a `--tasks` entry that omits its own `claims`,
+the plan's claim list, the same way `--session` needs `--plan` to mint an id
+(§4 above). Without `--batch`, `queue run`'s behaviour, output shape and
+event log are unchanged — you have to opt in.
+
+A red group does not fail every task in it. The queue bisects: split the
+group in half, retest each half's own candidate, and recurse into whichever
+half is still red, so a lone bad task inside a group of otherwise-good ones
+costs extra suite runs rather than blocking its innocent neighbours. Worst
+case — one bad task in a group of *n* — costs `1 + 2⌈log₂ n⌉` suite runs
+instead of `n`; still fewer than the serial loop's `n` once the group is
+larger than a handful of tasks, and always fewer suite runs than the same
+group run one task at a time when more than one task is actually green. The
+JSON output gains a `batches` summary alongside the usual outcome array —
+`{"task_ids": [...], "suite_runs": N, "landed": bool}` per group, in
+admission order — so you can see which groups cost one run and which paid
+the bisection tax. The run still stops at the first group that does not
+land whole, same as the serial loop stops at the first non-`merged` outcome.
+
+This is the same shape as two prior-art gating systems, cited here because
+neither is this project: [Zuul](https://zuul-ci.org/docs/zuul/latest/gating.html)
+speculatively tests a whole queued window at once, and
+[Mergify's batch/bisect merge queue](https://docs.mergify.com/merge-queue/batches/)
+bisects a failed batch to find the culprit rather than discarding the batch
+whole. `--batch` combines both ideas for a single-machine CPU-bound suite: a
+batch is a group of claim-disjoint tasks rather than everything queued, and
+bisection narrows a red group down to the task that is actually guilty of it.
+
 ## 5. `smith gate run`
 
 The composed gate pipeline for one task: **schema check → artifact check →

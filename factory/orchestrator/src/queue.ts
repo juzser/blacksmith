@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { collectCommittedChanges } from './claims.js';
+import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { claimsOverlap, collectCommittedChanges, touchesSerializeAlways } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
 import type { EventOpts } from './events.js';
@@ -35,6 +37,80 @@ export function admit(tasks: QueueTaskRef[], edges: DependencyEdge[] = []): stri
     );
   }
   return result.order;
+}
+
+/** A task as the grouping function needs to see it — nothing about how it runs. */
+export interface BatchGroupableTask {
+  taskId: string;
+  /** Undefined or empty means "claims unknown" — the task is grouped alone. */
+  claims?: string[];
+}
+
+/**
+ * Split an admitted order into maximal runs of consecutive tasks a batch
+ * step can stack into one candidate and test once (roadmap `merge-lanes`;
+ * the batching idea is Zuul's shared-queue gating and Mergify's batch/bisect,
+ * https://zuul-ci.org/docs/zuul/latest/gating.html,
+ * https://docs.mergify.com/merge-queue/batches/).
+ *
+ * Greedy, left to right, one open group at a time: a task joins the open
+ * group when its claims are disjoint from every member already in it and it
+ * does not depend_on one of them; otherwise the open group closes and the
+ * task starts the next one. Three conditions never even get a chance to
+ * join a group — they close whatever is open and are appended as a group of
+ * one, closed immediately, so a task after them starts fresh rather than
+ * silently inheriting their neighbours:
+ *   - no claims at all (nothing to prove disjoint, so nothing to batch with);
+ *   - a claim a serialize-always glob covers (worktree.yml already refuses to
+ *     run these concurrently; batching would silently defeat that refusal);
+ *   - depends_on a task that is anywhere in the walk before it — conservative
+ *     on purpose: batching a dependency chain has not been proven safe here,
+ *     even though the chain would still test together inside one group.
+ */
+export function groupForBatch(
+  tasks: BatchGroupableTask[],
+  edges: DependencyEdge[] = [],
+  serializeAlwaysGlobs: string[] = [],
+): string[][] {
+  const dependsOn = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (!dependsOn.has(edge.task)) dependsOn.set(edge.task, new Set());
+    (dependsOn.get(edge.task) as Set<string>).add(edge.dependsOn);
+  }
+  const byId = new Map(tasks.map((t) => [t.taskId, t]));
+
+  const groups: string[][] = [];
+  let current: string[] = [];
+
+  for (const task of tasks) {
+    const claims = task.claims ?? [];
+    const hasClaims = claims.length > 0;
+    const isSerializeAlways = hasClaims && touchesSerializeAlways({ claims }, serializeAlwaysGlobs).length > 0;
+
+    if (!hasClaims || isSerializeAlways) {
+      if (current.length > 0) groups.push(current);
+      groups.push([task.taskId]);
+      current = [];
+      continue;
+    }
+
+    const deps = dependsOn.get(task.taskId);
+    const dependsOnGroupMember = deps !== undefined && current.some((id) => deps.has(id));
+    const overlapsGroupMember = current.some((id) => {
+      const member = byId.get(id);
+      const memberClaims = member?.claims ?? [];
+      return memberClaims.length > 0 && claimsOverlap({ claims }, { claims: memberClaims }).overlaps;
+    });
+
+    if (dependsOnGroupMember || overlapsGroupMember) {
+      groups.push(current);
+      current = [task.taskId];
+    } else {
+      current.push(task.taskId);
+    }
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
 }
 
 export interface QueueTask {
@@ -110,7 +186,20 @@ export type StepOutcome =
       worktree: string;
       dirty: string[];
       tests?: TestRunReport;
-    };
+    }
+  /**
+   * Batch-only (`batchStep`): the candidate's suite passed, but
+   * `smith/<epic>/integration` had moved to a different commit by the time
+   * the batch tried to land it — the same compare-and-swap race
+   * `mergeWithoutWorktree` guards against for a single task (a `branch` that
+   * moved during the merge throws there), now reachable with a whole group
+   * under test at once instead of one task. Reusing `rebase-conflict` or
+   * `nothing-to-merge` here would misreport the cause — the branch was fine
+   * and the tests passed — so this gets its own outcome rather than an
+   * uncaught throw: the caller can re-admit the group and it rebases onto
+   * wherever the branch actually is.
+   */
+  | { outcome: 'integration-moved'; taskId: string; tests?: undefined };
 
 const OUTPUT_TAIL_LINES = 50;
 
@@ -125,6 +214,57 @@ function conflictingFiles(worktreeDir: string): string[] {
     .split('\n')
     .map((f) => f.trim())
     .filter((f) => f.length > 0);
+}
+
+/** The two ways `certifyAndRebase` can refuse a task before any test runs. */
+type EarlyOutcome = Extract<StepOutcome, { outcome: 'nothing-to-merge' | 'rebase-conflict' }>;
+
+/**
+ * Certify there is a commit to merge (D-30/P9-8) and rebase the task's
+ * branch onto the current integration head. Returns the blocked outcome when
+ * either refuses, or null when the branch is ready to test — shared by
+ * `step` and the batch path (`runGroup`) so a task that cannot even be
+ * rebased fails exactly the same way whether it is running alone or as part
+ * of a group.
+ */
+async function certifyAndRebase(
+  task: QueueTask,
+  integrationBranch: string,
+  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+): Promise<EarlyOutcome | null> {
+  // Before the rebase, because a rebase, a test run and a merge all "succeed"
+  // against a branch that carries nothing: certify that there is a commit to
+  // merge at all (D-30/P9-8). A task that merges nothing is a bug, not a pass.
+  const commit = certifyCommit(task.worktreeDir, { baseRef: integrationBranch });
+  if (!commit.certified) {
+    const reason = commit.reason as CommitBlockReason;
+    await logBlocked(
+      task.taskId,
+      reason === 'not-a-git-worktree' ? 'execution.env-failure' : UNCOMMITTED_WORK_CODE,
+      commit.dirty.length > 0
+        ? `${task.branch} has uncommitted work: ${commit.dirty.join(', ')}`
+        : `${task.branch} has nothing to merge into ${integrationBranch} (${reason}).`,
+    );
+    return { outcome: 'nothing-to-merge', taskId: task.taskId, reason, dirty: commit.dirty };
+  }
+
+  try {
+    execFileSync('git', ['rebase', integrationBranch], {
+      cwd: task.worktreeDir,
+      stdio: 'pipe',
+    });
+  } catch {
+    const files = conflictingFiles(task.worktreeDir);
+    execFileSync('git', ['rebase', '--abort'], { cwd: task.worktreeDir, stdio: 'pipe' });
+    await logBlocked(
+      task.taskId,
+      'integration.merge-conflict-textual',
+      `Rebase onto ${integrationBranch} conflicted in: ${files.join(', ')}`,
+    );
+    return { outcome: 'rebase-conflict', taskId: task.taskId, conflictingFiles: files };
+  }
+
+  return null;
 }
 
 /**
@@ -144,47 +284,20 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
    * ahead of it: an event written before the merge that the merge then
    * falsifies is exactly the phantom row D-46 is about.
    */
-  const logBlocked = async (error: string, detail: string): Promise<void> => {
+  const logBlocked = async (taskId: string, error: string, detail: string): Promise<void> => {
     if (!events) return;
     const { ctx, ...opt } = events;
-    await emitTaskBlocked(task.taskId, { error, severity: 'S2-major', detail }, ctx, opt);
+    await emitTaskBlocked(taskId, { error, severity: 'S2-major', detail }, ctx, opt);
   };
 
-  // Before the rebase, because a rebase, a test run and a merge all "succeed"
-  // against a branch that carries nothing: certify that there is a commit to
-  // merge at all (D-30/P9-8). A task that merges nothing is a bug, not a pass.
-  const commit = certifyCommit(task.worktreeDir, { baseRef: integrationBranch });
-  if (!commit.certified) {
-    const reason = commit.reason as CommitBlockReason;
-    await logBlocked(
-      reason === 'not-a-git-worktree' ? 'execution.env-failure' : UNCOMMITTED_WORK_CODE,
-      commit.dirty.length > 0
-        ? `${task.branch} has uncommitted work: ${commit.dirty.join(', ')}`
-        : `${task.branch} has nothing to merge into ${integrationBranch} (${reason}).`,
-    );
-    return { outcome: 'nothing-to-merge', taskId: task.taskId, reason, dirty: commit.dirty };
-  }
-
-  try {
-    execFileSync('git', ['rebase', integrationBranch], {
-      cwd: task.worktreeDir,
-      stdio: 'pipe',
-    });
-  } catch {
-    const files = conflictingFiles(task.worktreeDir);
-    execFileSync('git', ['rebase', '--abort'], { cwd: task.worktreeDir, stdio: 'pipe' });
-    await logBlocked(
-      'integration.merge-conflict-textual',
-      `Rebase onto ${integrationBranch} conflicted in: ${files.join(', ')}`,
-    );
-    return { outcome: 'rebase-conflict', taskId: task.taskId, conflictingFiles: files };
-  }
+  const early = await certifyAndRebase(task, integrationBranch, logBlocked);
+  if (early) return early;
 
   const plan = planTestRun(task.worktreeDir, opts);
   const testOutcome = runTestCmd(plan.cmd, task.worktreeDir);
   if (!testOutcome.passed) {
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
-    await logBlocked('execution.test-failure', outputTail);
+    await logBlocked(task.taskId, 'execution.test-failure', outputTail);
     return {
       outcome: 'tests-failed',
       taskId: task.taskId,
@@ -206,6 +319,7 @@ export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutc
     const dirty = trackedChanges(holder);
     if (dirty.length > 0) {
       await logBlocked(
+        task.taskId,
         'execution.env-failure',
         `${integrationBranch} is checked out in ${holder}, which has uncommitted changes: ${dirty.join(', ')}`,
       );
@@ -285,6 +399,15 @@ function trackedChanges(worktreeDir: string): string[] {
  * A conflict throws, and so does a `branch` that moved during the merge;
  * either way `branch` is left where it was.
  */
+/** `merge-tree --write-tree` + `commit-tree`, the two-parent merge commit
+ * alone — no ref touched. Shared by `mergeWithoutWorktree` (one task, lands
+ * immediately) and `attemptCandidate` (N tasks, chained, lands only once at
+ * the end). */
+function buildMergeCommit(projectDir: string, base: string, head: string, message: string): string {
+  const tree = writeMergeTree(projectDir, base, head);
+  return runGit(projectDir, ['commit-tree', tree, '-p', base, '-p', head, '-m', message]);
+}
+
 function mergeWithoutWorktree(
   projectDir: string,
   branch: string,
@@ -293,9 +416,191 @@ function mergeWithoutWorktree(
 ): void {
   const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`]);
   const head = runGit(projectDir, ['rev-parse', '--verify', `${source}^{commit}`]);
-  const tree = writeMergeTree(projectDir, base, head);
-  const commit = runGit(projectDir, ['commit-tree', tree, '-p', base, '-p', head, '-m', message]);
+  const commit = buildMergeCommit(projectDir, base, head, message);
   runGit(projectDir, ['update-ref', '-m', message, `refs/heads/${branch}`, commit, base]);
+}
+
+/**
+ * A scratch worktree for testing a batch candidate before anything lands —
+ * a sibling of the project, the same convention `taskWorktreeDir` uses, but
+ * named so it can never collide with a real task id or the reserved
+ * `integration` one: nothing outside this function should ever address it.
+ */
+function batchCandidateWorktreeDir(projectDir: string): string {
+  const project = path.resolve(projectDir);
+  return path.join(path.dirname(project), '.wt', path.basename(project), `batch-${randomUUID()}`);
+}
+
+/**
+ * Fold `readyTasks` onto the current integration head with git plumbing
+ * alone (no worktree, no branch touched until the very end), test the result
+ * once in a throwaway detached worktree, and either land it with one
+ * compare-and-swap or bisect it. `readyTasks` have already been certified and
+ * rebased by the caller (`runGroup`) — this only builds, tests and lands.
+ */
+async function attemptCandidate(
+  readyTasks: QueueTask[],
+  opts: StepOptions,
+  integrationBranch: string,
+  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
+  const projectDir = opts.projectDir;
+  const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${integrationBranch}^{commit}`]);
+
+  // Chain each task's merge onto the last, exactly like `mergeWithoutWorktree`
+  // does for one task — `merge-tree` computes its own merge-base from the two
+  // commits it is given, and since every task was rebased onto `base` (not
+  // onto each other), that merge-base is `base` at every step. Claim-disjoint
+  // tasks (groupForBatch's contract) fold without conflict; a fold that does
+  // conflict anyway throws, same as a single-task merge conflict would.
+  let head = base;
+  const foldCommits = new Map<string, string>();
+  for (const task of readyTasks) {
+    const source = runGit(projectDir, ['rev-parse', '--verify', `${task.branch}^{commit}`]);
+    const message = `Merge ${task.taskId} into ${integrationBranch}`;
+    head = buildMergeCommit(projectDir, head, source, message);
+    foldCommits.set(task.taskId, head);
+  }
+  const candidate = head;
+
+  const worktreeDir = batchCandidateWorktreeDir(projectDir);
+  runGit(projectDir, ['worktree', 'add', '--detach', worktreeDir, candidate]);
+  let testOutcome: { passed: boolean; output: string };
+  try {
+    testOutcome = runTestCmd(opts.testCmd, worktreeDir);
+  } finally {
+    // Always removed, including on error — this worktree exists only to run
+    // one suite once and has no meaning once that suite has an answer.
+    runGit(projectDir, ['worktree', 'remove', '--force', worktreeDir]);
+  }
+
+  if (testOutcome.passed) {
+    try {
+      runGit(projectDir, [
+        'update-ref',
+        '-m',
+        `Batch-merge ${readyTasks.map((t) => t.taskId).join(', ')} into ${integrationBranch}`,
+        `refs/heads/${integrationBranch}`,
+        candidate,
+        base,
+      ]);
+    } catch {
+      // The ref moved under the batch between the candidate's build and its
+      // land — D-46's compare-and-swap race, the same one a single task's
+      // `mergeWithoutWorktree` throws on, just reachable here with a whole
+      // group under test at once. Nothing landed, so every ready task
+      // reports it rather than one throw swallowing the rest of the group.
+      const outcomes: StepOutcome[] = [];
+      for (const task of readyTasks) {
+        await logBlocked(
+          task.taskId,
+          'execution.env-failure',
+          `${integrationBranch} moved to a different commit while this batch was testing; nothing landed.`,
+        );
+        outcomes.push({ outcome: 'integration-moved', taskId: task.taskId });
+      }
+      return { outcomes, suiteRuns: 1 };
+    }
+
+    const outcomes: StepOutcome[] = [];
+    for (const task of readyTasks) {
+      const commit = foldCommits.get(task.taskId) as string;
+      if (opts.events) {
+        const { ctx, ...opt } = opts.events;
+        // This task's own merge commit against its own first parent — not
+        // the integration tip, which by now carries every task in the batch.
+        await emitWaveMerged(task.taskId, ctx, opt, mergedFiles(projectDir, commit));
+      }
+      outcomes.push({ outcome: 'merged', taskId: task.taskId });
+    }
+    return { outcomes, suiteRuns: 1 };
+  }
+
+  // Red. A lone task's failure is a genuine test failure, reported exactly as
+  // `step` reports one. Two or more: bisect — Zuul's shared-queue gating and
+  // Mergify's batch/bisect (cited at groupForBatch) — rather than fail every
+  // task in the group for one task's sake: split, recurse on the left half,
+  // then recurse on the right half. `runGroup` re-certifies and re-rebases
+  // each half against whatever the integration head is when its turn comes,
+  // which is what makes "land the innocent half, then retest the guilty one
+  // rebuilt on the new head" and "the left half was itself red, so it
+  // recursed, and only then did the right half get its own turn" the same
+  // code path: the right half's `runGroup` call sees the left half's result
+  // simply because it starts after the left half's `await` returns.
+  if (readyTasks.length === 1) {
+    const task = readyTasks[0] as QueueTask;
+    const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
+    await logBlocked(task.taskId, 'execution.test-failure', outputTail);
+    return { outcomes: [{ outcome: 'tests-failed', taskId: task.taskId, outputTail }], suiteRuns: 1 };
+  }
+
+  const mid = Math.ceil(readyTasks.length / 2);
+  const left = await runGroup(readyTasks.slice(0, mid), opts, integrationBranch, logBlocked);
+  const right = await runGroup(readyTasks.slice(mid), opts, integrationBranch, logBlocked);
+  return {
+    outcomes: [...left.outcomes, ...right.outcomes],
+    suiteRuns: 1 + left.suiteRuns + right.suiteRuns,
+  };
+}
+
+/**
+ * Certify and rebase every task in the group, then fold whatever survives
+ * into one candidate via `attemptCandidate` — recursing through
+ * `attemptCandidate` on a red candidate. Order-preserving: a task's outcome
+ * lands at its own position in the returned array no matter which half of a
+ * bisection (or neither — a certify/rebase refusal) produced it, so the
+ * caller can print outcomes in admitted order the same way `step` does.
+ */
+async function runGroup(
+  tasks: QueueTask[],
+  opts: StepOptions,
+  integrationBranch: string,
+  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
+  if (tasks.length === 0) return { outcomes: [], suiteRuns: 0 };
+
+  const byTaskId = new Map<string, StepOutcome>();
+  const ready: QueueTask[] = [];
+  for (const task of tasks) {
+    const early = await certifyAndRebase(task, integrationBranch, logBlocked);
+    if (early) byTaskId.set(task.taskId, early);
+    else ready.push(task);
+  }
+
+  let suiteRuns = 0;
+  if (ready.length > 0) {
+    const result = await attemptCandidate(ready, opts, integrationBranch, logBlocked);
+    suiteRuns = result.suiteRuns;
+    for (const outcome of result.outcomes) byTaskId.set(outcome.taskId, outcome);
+  }
+
+  return { outcomes: tasks.map((t) => byTaskId.get(t.taskId) as StepOutcome), suiteRuns };
+}
+
+export interface BatchStepResult {
+  outcomes: StepOutcome[];
+  suiteRuns: number;
+}
+
+/**
+ * The batch equivalent of `step`, for a group of two or more claim-disjoint
+ * tasks (`groupForBatch` decides the grouping; a group of one should just
+ * call `step`). Rebases each task in its own worktree exactly as `step`
+ * does, stacks the survivors into one candidate with git plumbing alone (no
+ * worktree touches the project checkout, no branch moves until the end), and
+ * runs the test command once against it. Green lands the whole candidate
+ * with one compare-and-swap; red bisects (see `attemptCandidate`) instead of
+ * failing every task in the group for one task's sake.
+ */
+export async function batchStep(tasks: QueueTask[], opts: StepOptions): Promise<BatchStepResult> {
+  const integrationBranch = integrationBranchName(opts.epic);
+  const events = opts.events;
+  const logBlocked = async (taskId: string, error: string, detail: string): Promise<void> => {
+    if (!events) return;
+    const { ctx, ...opt } = events;
+    await emitTaskBlocked(taskId, { error, severity: 'S2-major', detail }, ctx, opt);
+  };
+  return runGroup(tasks, opts, integrationBranch, logBlocked);
 }
 
 export type AdoptTask = Omit<QueueTask, 'worktreeDir'>;
