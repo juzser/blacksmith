@@ -383,6 +383,76 @@ describe('what one tick notices', () => {
     expect(findings.length).toBeGreaterThan(0);
     for (const finding of findings) expect(finding.sessionId).toBe('sess-9');
   });
+
+  // A tree with a fork calls inspectSession once for the whole tree, under a
+  // deterministic "primary" leaf — so a finding whose underlying object has a
+  // real origin (an agent's own dispatching session, a proposal's own event)
+  // must say so itself rather than inherit whichever leaf happened to ask.
+  it('attributes a stale agent to the session that actually dispatched it', () => {
+    const findings = inspectSession('sess-primary', [longLiveAgent('sess-real', 9)], {
+      ...OPTS,
+      staleHours: 4,
+    });
+    const stale = findings.filter((f) => f.kind === 'stale-agent');
+    expect(stale).toHaveLength(1);
+    expect(stale[0]?.sessionId).toBe('sess-real');
+  });
+
+  it('attributes a spec-change proposal to the session that raised it', () => {
+    const findings = inspectSession('sess-primary', [proposal('sess-real')], OPTS);
+    const specChanges = findings.filter((f) => f.kind === 'spec-change');
+    expect(specChanges).toHaveLength(1);
+    expect(specChanges[0]?.sessionId).toBe('sess-real');
+  });
+
+  // Same rule the budget check above already lives by: a closed epic's
+  // dispatch cannot still be live, so flagging it would raise the same line
+  // every tick until the log is archived. The dispatch and the close sit in
+  // different sessions of one lineage — the shape a fork actually produces,
+  // and the one agents-registry.ts's own epic-closed handling deliberately
+  // leaves alone (D-234: "another session's agents are not this verdict's to
+  // speak for"), so this has to be caught here rather than in detectStale.
+  it('says nothing about a stale agent dispatched into an epic the log has already closed', () => {
+    const ts = new Date(NOW.getTime() - 9 * 60 * 60 * 1000).toISOString();
+    const events = [
+      stored(
+        'sess-a',
+        'dispatch_decision',
+        { agent_role: 'coder', provider: 'claude', model_tier: 'sonnet' },
+        { task_id: 'epic-1/task-7', ts },
+      ),
+      stored('sess-b', 'epic-closed', {
+        epic_id: 'epic-1',
+        closed_by: 'machine',
+        machine_verdict: 'go',
+        machine_reason: 'go',
+      }),
+    ];
+    const findings = inspectSession('sess-b', events, { ...OPTS, staleHours: 4 });
+    expect(findings.filter((f) => f.kind === 'stale-agent')).toEqual([]);
+  });
+
+  it('still raises a stale agent whose epic is open beside a closed one', () => {
+    const ts = new Date(NOW.getTime() - 9 * 60 * 60 * 1000).toISOString();
+    const events = [
+      stored(
+        'sess-a',
+        'dispatch_decision',
+        { agent_role: 'coder', provider: 'claude', model_tier: 'sonnet' },
+        { task_id: 'epic-2/task-9', ts },
+      ),
+      stored('sess-b', 'epic-closed', {
+        epic_id: 'epic-1',
+        closed_by: 'machine',
+        machine_verdict: 'go',
+        machine_reason: 'go',
+      }),
+    ];
+    const stale = inspectSession('sess-b', events, { ...OPTS, staleHours: 4 }).filter(
+      (f) => f.kind === 'stale-agent',
+    );
+    expect(stale.map((f) => f.subject)).toEqual(['epic-2/task-9']);
+  });
 });
 
 describe('what the factory-wide pass notices', () => {
@@ -567,6 +637,34 @@ describe('the tick that reads the disk', () => {
     const report = await runTick({ ...OPTS, stateDir });
     expect(report.sessions).toEqual(['sess-b']);
     expect(report.findings.filter((f) => f.kind === 'budget')).toHaveLength(1);
+  });
+
+  it('inspects a fork once, not once per sibling leaf', async () => {
+    // Two waves continuing the same base session are still one factory run.
+    // Each sibling independently walking its own ancestor chain re-folds the
+    // shared base session's events once per sibling, which is exactly the
+    // fan-out D-119's single-chain argument never anticipated: a base session
+    // with two wave children reported its overspend twice, not once.
+    writeLog('sess-a', [
+      record('sess-a', 'session-start', {}),
+      ...overspentEpic('sess-a').map((e) => e.record),
+    ]);
+    writeLog('sess-b1', [record('sess-b1', 'session-start', {}, { causal_parent: 'sess-a#0' })]);
+    writeLog('sess-b2', [record('sess-b2', 'session-start', {}, { causal_parent: 'sess-a#0' })]);
+    const report = await runTick({ ...OPTS, stateDir });
+    expect(report.sessions).toEqual(['sess-b1', 'sess-b2']);
+    expect(report.findings.filter((f) => f.kind === 'budget')).toHaveLength(1);
+  });
+
+  it('finishes a tick over a lineage whose parents form a cycle', async () => {
+    // A hand-edited or mis-stamped log can make two sessions each other's
+    // parent. Walking up already stops at a repeat; walking down must too, or
+    // one corrupt pair hangs the daemon instead of costing one tick.
+    writeLog('sess-a', [record('sess-a', 'session-start', {}, { causal_parent: 'sess-b#0' })]);
+    writeLog('sess-b', [record('sess-b', 'session-start', {}, { causal_parent: 'sess-a#0' })]);
+    writeLog('sess-c', [record('sess-c', 'session-start', {}, { causal_parent: 'sess-a#0' })]);
+    const report = await runTick({ ...OPTS, stateDir });
+    expect(report.sessions).toEqual(['sess-c']);
   });
 
   it('counts attention findings apart from the informational ones', async () => {
@@ -1139,6 +1237,37 @@ describe('the rechecks a tick surfaces', () => {
     expect(recheck[0]?.subject).toBe('epic-1/task-1');
     expect(recheck[0]?.detail).toContain('time-elapsed');
     expect(recheck[0]?.detail).toContain('19 day(s) elapsed');
+  });
+
+  it('attributes a recheck to the session that added the task, not the one asked', () => {
+    const events = [
+      stored(
+        'sess-real',
+        'task-added',
+        {
+          epic_id: 'epic-1',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          claims: ['src/a.ts'],
+        },
+        { task_id: 'epic-1/task-1' },
+      ),
+      stored(
+        'sess-real',
+        'wave-merged',
+        { epic_id: 'epic-1', task_ids: ['epic-1/task-1'] },
+        { ts: '2026-08-01T00:00:00.000Z' },
+      ),
+    ];
+    const findings = inspectSession('sess-primary', events, {
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+    });
+    const recheck = findings.filter((f) => f.kind === 'recheck');
+    expect(recheck).toHaveLength(1);
+    expect(recheck[0]?.sessionId).toBe('sess-real');
   });
 });
 
@@ -1988,5 +2117,12 @@ describe('an error nobody has reported', () => {
   it('is reported by the session pass only, never again by the factory pass', () => {
     const events = [loggedError('sess-1')];
     expect(unreported(inspectFactory(events, OPTS))).toHaveLength(0);
+  });
+
+  it('attributes an unreported error to the session that logged it, not the one asked', () => {
+    const events = [loggedError('sess-real')];
+    const findings = unreported(inspectSession('sess-primary', events, OPTS));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.sessionId).toBe('sess-real');
   });
 });
