@@ -36,6 +36,7 @@ import { roadmapPage } from '../src/db/queries.js';
 import { foldErrorEvents } from '../src/errorIssues.js';
 import type { EventRecord, StoredEvent } from '../src/events.js';
 import { findingIdentity } from '../src/findingAge.js';
+import { LogCache } from '../src/logCache.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { factoryProjects, resolveProjectDirs } from '../src/projects.js';
 import { FACTORY_PROJECT } from '../src/roadmap.js';
@@ -685,6 +686,28 @@ describe('the tick that reads the disk', () => {
     expect(bad).toHaveLength(1);
     expect(bad[0]?.severity).toBe('attention');
     expect(bad[0]?.sessionId).toBe('sess-bad');
+  });
+
+  it('a shared cache across ticks reads an unchanged session for zero bytes on the second tick', async () => {
+    // 50acc356's bounded-cost fix, exercised at the runTick seam rather than
+    // logCache.ts's own unit tests: a cache shared across two ticks must
+    // answer the second tick's unchanged session from memory, not re-read
+    // and re-JSON.parse the log's bytes again.
+    writeLog('sess-a', [record('sess-a', 'session-start', {})]);
+    const logCache = new LogCache();
+
+    const first = await runTick({ ...OPTS, stateDir, logCache });
+    expect(first.sessions).toEqual(['sess-a']);
+    const bytesAfterFirst = logCache.counters.bytesRead;
+    const reparsesAfterFirst = logCache.counters.fullReparses;
+    expect(bytesAfterFirst).toBeGreaterThan(0);
+
+    const second = await runTick({ ...OPTS, stateDir, logCache });
+    expect(second.sessions).toEqual(['sess-a']);
+    // Nothing changed on disk between ticks: the second tick's read of
+    // sess-a must cost zero further bytes and zero further full reparses.
+    expect(logCache.counters.bytesRead).toBe(bytesAfterFirst);
+    expect(logCache.counters.fullReparses).toBe(reparsesAfterFirst);
   });
 
   it('has an empty tick for an empty state dir', async () => {
