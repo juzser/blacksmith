@@ -320,6 +320,45 @@ describe('criterion 2: equivalence with readEvents, step by step', () => {
     expect(fullText.slice(anchorTextNoNewline.length)).not.toBe(appended); // ...but the delta is wrong
   });
 
+  it('genuine append with several prior lines reads only the anchor plus the appended bytes', async () => {
+    // The single-prior-line variant above cannot tell a byte-precise anchor
+    // apart from a whole-file re-read: with one line, the anchor's length
+    // and the whole file's length are the same number. Here the log has
+    // three prior lines before the append, so `anchor.length` (one line)
+    // is strictly smaller than the whole prior file's size — a whole-file
+    // implementation would report a bytesRead delta of
+    // `priorFileSize + appended.length`, not `anchor.length + appended.length`,
+    // and this assertion would fail for it.
+    const sessionId = 'sess-append-multi';
+    const e0 = event(sessionId);
+    const e1 = event(sessionId);
+    const e2 = event(sessionId);
+    const priorText = `${JSON.stringify(e0)}\n${JSON.stringify(e1)}\n${JSON.stringify(e2)}\n`;
+    writeFileSync(logFile(sessionId), priorText, 'utf8');
+
+    const cache = new LogCache();
+    await cache.read(sessionId, { stateDir: dir });
+    const anchorBytes = Buffer.byteLength(`${JSON.stringify(e2)}\n`, 'utf8');
+    expect(anchorBytes).toBeLessThan(Buffer.byteLength(priorText, 'utf8'));
+
+    const e3 = event(sessionId);
+    const appended = `${JSON.stringify(e3)}\n`;
+    const { appendFileSync } = require('node:fs') as typeof import('node:fs');
+    appendFileSync(logFile(sessionId), appended, 'utf8');
+
+    const reparsesBefore = cache.counters.fullReparses;
+    const bytesReadBefore = cache.counters.bytesRead;
+    const cacheEvents = await cache.read(sessionId, { stateDir: dir });
+    const trueEvents = await readEvents(sessionId, { stateDir: dir });
+
+    expect(cacheEvents).toEqual(trueEvents);
+    expect(cache.counters.fullReparses).toBe(reparsesBefore); // no full reparse
+    expect(cache.counters.readEventsCalls).toBe(0);
+    expect(cache.counters.bytesRead - bytesReadBefore).toBe(
+      anchorBytes + Buffer.byteLength(appended, 'utf8'),
+    );
+  });
+
   it('read permission revoked after a warm cache: both throw', async () => {
     if (process.getuid?.() === 0) {
       // root bypasses filesystem permission bits — nothing to prove here.
