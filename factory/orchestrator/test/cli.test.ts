@@ -5237,6 +5237,240 @@ describe('cli.ts (built binary)', () => {
       ]);
     });
 
+    // merge-lanes: without --plan there is nowhere to read edges or claims
+    // from, so grouping would be guesswork — same refusal shape as the
+    // --session guard above, checked here for --batch's own message.
+    it('queue run --batch: refuses without --plan', async () => {
+      const tasksPath = path.join(scratchDir, `batch-noplan-tasks-${Date.now()}.json`);
+      await writeFile(
+        tasksPath,
+        JSON.stringify([{ taskId: 'task-1', branch: 'b', worktreeDir: scratchDir }]),
+      );
+      const result = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        scratchDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+        '--batch',
+      ]);
+      expect(result.status).toBe(1);
+      const error = JSON.parse(result.stdout).error;
+      expect(error.message).toContain('--batch');
+      expect(error.message).toContain('--plan');
+    });
+
+    // A batch candidate is tested whole, with no per-task file set to narrow
+    // a `--select-test-cmd` template to — silently running the full suite
+    // while the outcome claimed it was selected would be the D-260 lie this
+    // combination must refuse instead.
+    it('queue run --batch: refuses with --select-test-cmd', async () => {
+      const planPath = path.join(scratchDir, `batch-selecttest-plan-${Date.now()}.json`);
+      await writeFile(planPath, JSON.stringify(PLAN));
+      const tasksPath = path.join(scratchDir, `batch-selecttest-tasks-${Date.now()}.json`);
+      await writeFile(
+        tasksPath,
+        JSON.stringify([{ taskId: 'task-1', branch: 'b', worktreeDir: scratchDir }]),
+      );
+      const result = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        scratchDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+        '--plan',
+        planPath,
+        '--batch',
+        '--select-test-cmd',
+        'pnpm test {files}',
+      ]);
+      expect(result.status).toBe(1);
+      const error = JSON.parse(result.stdout).error;
+      expect(error.message).toContain('--batch');
+      expect(error.message).toContain('--select-test-cmd');
+    });
+
+    // merge-lanes: two claim-disjoint tasks (PLAN's task-1 touches
+    // src/foo/*.ts, task-2 touches src/bar/*.ts — neither globs onto a
+    // serialize-always path) fold into one candidate and cost one suite run,
+    // and the JSON shape gains a `batches` summary instead of staying a bare
+    // outcomes array.
+    it('queue run --batch: groups claim-disjoint tasks into one suite run', async () => {
+      const { sessionId } = await session();
+      const planPath = path.join(scratchDir, `${sessionId}-batch-plan.json`);
+      await writeFile(planPath, JSON.stringify(PLAN));
+
+      const originDir = path.join(scratchDir, `${sessionId}-batch-origin.git`);
+      const projectDir = path.join(scratchDir, `${sessionId}-batch-project`);
+      runOrThrow('git', ['init', '-q', '--bare', '-b', 'main', originDir]);
+      runOrThrow('git', ['clone', '-q', originDir, projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'seed.txt'), 'seed\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+      runOrThrow('git', ['push', '-q', 'origin', 'main'], { cwd: projectDir });
+
+      const made: Array<{ taskId: string; branch: string; worktreeDir: string }> = [];
+      for (const id of ['task-1', 'task-2']) {
+        const created = runCli(['worktree', 'create', projectDir, 'epic-1', id]);
+        expect(created.status).toBe(0);
+        const { worktreeDir, branch } = JSON.parse(created.stdout);
+        await writeFile(path.join(worktreeDir, `${id}.txt`), `${id}\n`);
+        runOrThrow('git', ['add', '.'], { cwd: worktreeDir });
+        runOrThrow('git', ['commit', '-q', '-m', `add ${id}`], { cwd: worktreeDir });
+        made.push({ taskId: id, branch, worktreeDir });
+      }
+
+      const tasksPath = path.join(scratchDir, `${sessionId}-batch-tasks.json`);
+      await writeFile(tasksPath, JSON.stringify(made));
+
+      const queued = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        projectDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+        '--plan',
+        planPath,
+        '--batch',
+      ]);
+      expect(queued.status).toBe(0);
+      const body = JSON.parse(queued.stdout);
+      expect(body.outcomes.map((o: { taskId: string }) => o.taskId)).toEqual([
+        'epic-1/task-1',
+        'epic-1/task-2',
+      ]);
+      expect(body.outcomes.every((o: { outcome: string }) => o.outcome === 'merged')).toBe(true);
+      expect(body.batches).toEqual([
+        { task_ids: ['epic-1/task-1', 'epic-1/task-2'], suite_runs: 1, landed: true },
+      ]);
+    });
+
+    // A singleton "group" (groupForBatch gave the task no claim-disjoint
+    // sibling to stack with) runs through plain `step`, which refuses
+    // before any test runs when the branch carries nothing to merge (D-30).
+    // `suite_runs` must say 0, not the 1 it used to claim unconditionally.
+    it('queue run --batch: a singleton group reports 0 suite runs when step refuses before testing', async () => {
+      const { sessionId } = await session();
+      const planPath = path.join(scratchDir, `${sessionId}-batch-noop-plan.json`);
+      await writeFile(planPath, JSON.stringify(PLAN));
+
+      const originDir = path.join(scratchDir, `${sessionId}-batch-noop-origin.git`);
+      const projectDir = path.join(scratchDir, `${sessionId}-batch-noop-project`);
+      runOrThrow('git', ['init', '-q', '--bare', '-b', 'main', originDir]);
+      runOrThrow('git', ['clone', '-q', originDir, projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'seed.txt'), 'seed\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+      runOrThrow('git', ['push', '-q', 'origin', 'main'], { cwd: projectDir });
+
+      // task-1's own claims (src/foo/*.ts) overlap nothing else in PLAN, so
+      // groupForBatch gives it a singleton — but it never commits anything
+      // on its branch, so `step` reports `nothing-to-merge` before any test.
+      const created = runCli(['worktree', 'create', projectDir, 'epic-1', 'task-1']);
+      expect(created.status).toBe(0);
+      const { worktreeDir, branch } = JSON.parse(created.stdout);
+
+      const tasksPath = path.join(scratchDir, `${sessionId}-batch-noop-tasks.json`);
+      await writeFile(tasksPath, JSON.stringify([{ taskId: 'task-1', branch, worktreeDir }]));
+
+      const queued = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        projectDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+        '--plan',
+        planPath,
+        '--batch',
+      ]);
+      expect(queued.status).toBe(1);
+      const body = JSON.parse(queued.stdout);
+      expect(body.outcomes).toEqual([
+        expect.objectContaining({ outcome: 'nothing-to-merge', taskId: 'epic-1/task-1' }),
+      ]);
+      expect(body.batches).toEqual([{ task_ids: ['epic-1/task-1'], suite_runs: 0, landed: false }]);
+    });
+
+    // merge-lanes: a group's candidate can fail the suite — bisection still
+    // lands the innocent task and reports the guilty one, and the run stops
+    // at the first batch that did not fully land (`allMerged` false), same
+    // as the non-batch loop stopping at the first non-merged outcome.
+    it('queue run --batch: bisects a failing group and stops the run there', async () => {
+      const { sessionId } = await session();
+      const planPath = path.join(scratchDir, `${sessionId}-batch-bad-plan.json`);
+      await writeFile(planPath, JSON.stringify(PLAN));
+
+      const originDir = path.join(scratchDir, `${sessionId}-batch-bad-origin.git`);
+      const projectDir = path.join(scratchDir, `${sessionId}-batch-bad-project`);
+      runOrThrow('git', ['init', '-q', '--bare', '-b', 'main', originDir]);
+      runOrThrow('git', ['clone', '-q', originDir, projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'seed.txt'), 'seed\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+      runOrThrow('git', ['push', '-q', 'origin', 'main'], { cwd: projectDir });
+
+      const contents = { 'task-1': 'task-1\n', 'task-2': 'BAD\n' } as const;
+      const made: Array<{ taskId: string; branch: string; worktreeDir: string }> = [];
+      for (const id of ['task-1', 'task-2'] as const) {
+        const created = runCli(['worktree', 'create', projectDir, 'epic-1', id]);
+        expect(created.status).toBe(0);
+        const { worktreeDir, branch } = JSON.parse(created.stdout);
+        await writeFile(path.join(worktreeDir, `${id}.txt`), contents[id]);
+        runOrThrow('git', ['add', '.'], { cwd: worktreeDir });
+        runOrThrow('git', ['commit', '-q', '-m', `add ${id}`], { cwd: worktreeDir });
+        made.push({ taskId: id, branch, worktreeDir });
+      }
+
+      const tasksPath = path.join(scratchDir, `${sessionId}-batch-bad-tasks.json`);
+      await writeFile(tasksPath, JSON.stringify(made));
+
+      const queued = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        projectDir,
+        '--test-cmd',
+        '! grep -q BAD task-2.txt',
+        '--tasks',
+        tasksPath,
+        '--plan',
+        planPath,
+        '--batch',
+      ]);
+      expect(queued.status).toBe(1);
+      const body = JSON.parse(queued.stdout);
+      expect(body.outcomes).toEqual([
+        { outcome: 'merged', taskId: 'epic-1/task-1' },
+        { outcome: 'tests-failed', taskId: 'epic-1/task-2', outputTail: expect.any(String) },
+      ]);
+      expect(body.batches).toHaveLength(1);
+      expect(body.batches[0].task_ids).toEqual(['epic-1/task-1', 'epic-1/task-2']);
+      expect(body.batches[0].landed).toBe(false);
+    });
+
     /**
      * D-137: the other side of the guard above. Refusing to log a merge the
      * queue did not make is right; leaving no way to record one is what turned

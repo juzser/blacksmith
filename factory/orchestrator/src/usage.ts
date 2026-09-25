@@ -331,8 +331,11 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--select-test-cmd <cmd>] [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
-    summary: 'Serially rebase, test, and merge task branches into the integration branch.',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--select-test-cmd <cmd>] [--batch] [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
+    summary:
+      'Serially rebase, test, and merge task branches into the integration branch. ' +
+      '--batch (roadmap merge-lanes) groups claim-disjoint tasks with groupForBatch and ' +
+      'tests each group once instead of once per task — see queue.ts and the operator guide.',
   },
   {
     command: 'queue adopt',

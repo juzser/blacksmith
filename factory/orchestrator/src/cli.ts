@@ -150,7 +150,7 @@ import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
-import { admit, adopt, step } from './queue.js';
+import { admit, adopt, type BatchGroupableTask, batchStep, groupForBatch, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { FACTORY_PROJECT, isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
 import { checkRuntime } from './runtime.js';
@@ -2293,6 +2293,36 @@ async function main(): Promise<number> {
         { epic },
       );
     }
+    // --batch (roadmap merge-lanes) groups tasks with groupForBatch before
+    // any of them run, and that grouping needs two things `--tasks` alone
+    // does not carry: the plan's `edges`, so a task never stacks with
+    // something it depends_on, and — for a tasks-file entry that omits its
+    // own `claims` — the plan's claim list, so a hand-typed batch run is not
+    // blind to a disjointness `wave admit` already knows. Same shape as the
+    // `--session` guard just above, and for the same reason: refuse the run
+    // whole rather than group some tasks correctly and others by guesswork.
+    if (flags.batch === 'true' && !flags.plan) {
+      throw new SmithError(
+        'cli.missing-flag',
+        'queue run --batch also needs --plan <plan.json>: grouping reads its dependency edges and claim lists from there.',
+        { epic },
+      );
+    }
+    // `attemptCandidate` runs the epic's test command directly against the
+    // whole batch candidate — there is no per-task file set to narrow it to,
+    // so a `--select-test-cmd` template would either render nonsensically or
+    // silently run the full suite while the outcome claimed it was selected
+    // (the same lie D-260 refuses above). Refuse the combination instead of
+    // ignoring the flag.
+    if (flags.batch === 'true' && selectTestCmd !== undefined) {
+      throw new SmithError(
+        'cli.incompatible-flags',
+        'queue run --batch does not support --select-test-cmd: a batch candidate has no single task to narrow the test command to.',
+        { epic },
+      );
+    }
+    let edges: Array<{ task: string; dependsOn: string }> = [];
+    let claimsById = new Map<string, string[]>();
     if (flags.plan) {
       const plan = readJsonFile<PlanFile>(flags.plan as string);
       // …and the plan is not the only register: a follow-up minted by
@@ -2303,6 +2333,13 @@ async function main(): Promise<number> {
         : [];
       const loggedIds = logged.map((t) => t.taskId);
       for (const task of tasks) task.taskId = resolveTaskId(plan, task.taskId, loggedIds);
+      edges = plan.edges.map((e) => ({ task: e.task, dependsOn: e.dependsOn }));
+      claimsById = new Map(
+        plan.tasks.map((t) => [
+          t.task_id,
+          Array.isArray(t.claims) ? t.claims.filter((c): c is string => typeof c === 'string') : [],
+        ]),
+      );
       // D-186: the ids are the plan's now, so the order can be too. `--tasks`
       // is hand-written, and merging in the order someone typed lets a task
       // land before the task it declares `depends_on` — the epic's cumulative
@@ -2312,22 +2349,90 @@ async function main(): Promise<number> {
       // declared carries no edges, so it just sorts by id among its peers.
       const order = admit(
         tasks.map((t) => ({ task_id: t.taskId })),
-        plan.edges.map((e) => ({ task: e.task, dependsOn: e.dependsOn })),
+        edges,
       );
       // Stable: two tasks the plan does not order keep the order admit gave
       // them, and a duplicated id is still run twice rather than dropped.
       tasks.sort((a, b) => order.indexOf(a.taskId) - order.indexOf(b.taskId));
     }
+
+    const stepOpts = {
+      projectDir,
+      epic,
+      testCmd,
+      ...(selectTestCmd !== undefined ? { selectTestCmd } : {}),
+      ...(events ? { events } : {}),
+    };
     const outcomes = [];
     let allMerged = true;
+
+    if (flags.batch === 'true') {
+      const byId = new Map(tasks.map((t) => [t.taskId, t]));
+      // A tasks-file entry's own `claims` wins over the plan's — the plan
+      // describes what the task was authored to touch, the tasks file is
+      // what actually ran, and the two can disagree the same way a diff can
+      // outgrow the claim it was cut from.
+      const groupable: BatchGroupableTask[] = tasks.map((t) => ({
+        taskId: t.taskId,
+        claims: (t as { claims?: string[] }).claims ?? claimsById.get(t.taskId),
+      }));
+      const groups = groupForBatch(groupable, edges, loadWorktreePolicy().serializeAlwaysGlobs);
+      const batches: Array<{ task_ids: string[]; suite_runs: number; landed: boolean }> = [];
+
+      for (const group of groups) {
+        const groupTasks = group.map((id) => {
+          const t = byId.get(id);
+          if (!t) {
+            // groupForBatch only ever returns ids it was handed, so this
+            // would mean the group and --tasks have drifted apart — a wrong
+            // candidate is worse than a refusal.
+            throw new SmithError(
+              'queue.batch-unknown-task',
+              `--batch grouped task "${id}" but no task by that id was in --tasks.`,
+              { epic, taskId: id },
+            );
+          }
+          return t;
+        });
+        // groupForBatch's own contract (see its doc comment): a group of one
+        // is not a batch, it's a task that closed the open group before it —
+        // no candidate to stack, so it runs through the plain step it would
+        // have taken without --batch at all, rather than through batchStep's
+        // fold/candidate-worktree machinery for a "stack" of one.
+        if (groupTasks.length === 1) {
+          const [only] = groupTasks as [(typeof tasks)[number]];
+          const outcome = await step(only, stepOpts);
+          outcomes.push(outcome);
+          const landed = outcome.outcome === 'merged';
+          // `step` refuses before any test runs on `nothing-to-merge` (D-30's
+          // uncommitted-work guard) and `rebase-conflict` — 0 suites ran, not
+          // 1, for either. Every other outcome it can return (`merged`,
+          // `tests-failed`, `integration-dirty`) only happens after
+          // `runTestCmd`.
+          const suiteRuns =
+            outcome.outcome === 'nothing-to-merge' || outcome.outcome === 'rebase-conflict' ? 0 : 1;
+          batches.push({ task_ids: group, suite_runs: suiteRuns, landed });
+          if (!landed) {
+            allMerged = false;
+            break;
+          }
+        } else {
+          const result = await batchStep(groupTasks, stepOpts);
+          outcomes.push(...result.outcomes);
+          const landed = result.outcomes.every((o) => o.outcome === 'merged');
+          batches.push({ task_ids: group, suite_runs: result.suiteRuns, landed });
+          if (!landed) {
+            allMerged = false;
+            break;
+          }
+        }
+      }
+      printJson({ outcomes, batches });
+      return allMerged ? 0 : 1;
+    }
+
     for (const task of tasks) {
-      const outcome = await step(task, {
-        projectDir,
-        epic,
-        testCmd,
-        ...(selectTestCmd !== undefined ? { selectTestCmd } : {}),
-        ...(events ? { events } : {}),
-      });
+      const outcome = await step(task, stepOpts);
       outcomes.push(outcome);
       if (outcome.outcome !== 'merged') {
         allMerged = false;

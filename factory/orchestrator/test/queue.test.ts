@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { appendEvent, readEvents } from '../src/events.js';
-import { admit, adopt, QueueError, step } from '../src/queue.js';
+import { admit, adopt, batchStep, groupForBatch, QueueError, step } from '../src/queue.js';
 import type { TaskEventContext } from '../src/taskEvents.js';
 import { createTaskWorktree } from '../src/worktree.js';
 import { git as runGitFixture } from './helpers/process.js';
@@ -33,6 +33,76 @@ describe('admit', () => {
         ],
       ),
     ).toThrow(QueueError);
+  });
+});
+
+describe('groupForBatch', () => {
+  it('groups consecutive tasks whose claims are pairwise disjoint', () => {
+    const groups = groupForBatch(
+      [
+        { taskId: 'a', claims: ['src/a.ts'] },
+        { taskId: 'b', claims: ['src/b.ts'] },
+        { taskId: 'c', claims: ['src/c.ts'] },
+      ],
+      [],
+      [],
+    );
+    expect(groups).toEqual([['a', 'b', 'c']]);
+  });
+
+  it('splits the group where a claim overlaps an earlier member', () => {
+    const groups = groupForBatch(
+      [
+        { taskId: 'a', claims: ['src/shared.ts'] },
+        { taskId: 'b', claims: ['src/shared.ts'] },
+        { taskId: 'c', claims: ['src/c.ts'] },
+      ],
+      [],
+      [],
+    );
+    // b overlaps a, so it starts a fresh group; c is disjoint from b and joins it.
+    expect(groups).toEqual([['a'], ['b', 'c']]);
+  });
+
+  it('gives a task with no claims its own singleton, isolated on both sides', () => {
+    const groups = groupForBatch(
+      [
+        { taskId: 'a', claims: ['src/a.ts'] },
+        { taskId: 'b' },
+        { taskId: 'c', claims: ['src/c.ts'] },
+      ],
+      [],
+      [],
+    );
+    expect(groups).toEqual([['a'], ['b'], ['c']]);
+  });
+
+  it('gives a task touching a serialize-always glob its own singleton', () => {
+    const groups = groupForBatch(
+      [
+        { taskId: 'a', claims: ['src/a.ts'] },
+        { taskId: 'b', claims: ['pnpm-lock.yaml'] },
+        { taskId: 'c', claims: ['src/c.ts'] },
+      ],
+      [],
+      ['pnpm-lock.yaml'],
+    );
+    expect(groups).toEqual([['a'], ['b'], ['c']]);
+  });
+
+  it('splits the group where a task depends_on a member of the current group', () => {
+    const groups = groupForBatch(
+      [
+        { taskId: 'a', claims: ['src/a.ts'] },
+        { taskId: 'b', claims: ['src/b.ts'] },
+        { taskId: 'c', claims: ['src/c.ts'] },
+      ],
+      [{ task: 'b', dependsOn: 'a' }],
+      [],
+    );
+    // b's claims don't overlap a's, but the dependency edge still splits the
+    // group; c has no such edge and is disjoint from b, so it joins b.
+    expect(groups).toEqual([['a'], ['b', 'c']]);
   });
 });
 
@@ -575,6 +645,296 @@ describe('step', () => {
 
       expect(await logged()).toEqual([]);
     });
+  });
+});
+
+describe('batchStep', () => {
+  let root: string;
+  let originDir: string;
+  let projectDir: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'smith-queue-batch-'));
+    originDir = path.join(root, 'origin.git');
+    projectDir = path.join(root, 'project');
+
+    git(root, ['init', '-q', '--bare', '-b', 'main', originDir]);
+    git(root, ['clone', '-q', originDir, projectDir]);
+    git(projectDir, ['config', 'user.email', 'test@example.com']);
+    git(projectDir, ['config', 'user.name', 'Test']);
+    await writeFile(path.join(projectDir, 'a.txt'), 'a\n');
+    await writeFile(path.join(projectDir, 'b.txt'), 'b\n');
+    await writeFile(path.join(projectDir, 'c.txt'), 'c\n');
+    git(projectDir, ['add', '.']);
+    git(projectDir, ['commit', '-q', '-m', 'init']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function makeTask(taskId: string, file: string, content: string) {
+    const worktree = createTaskWorktree(projectDir, 'epic-1', taskId);
+    writeFileSync(path.join(worktree.worktreeDir, file), content);
+    git(worktree.worktreeDir, ['commit', '-q', '-am', `edit ${file}`]);
+    return {
+      taskId: `epic-1/${taskId}`,
+      branch: worktree.branch,
+      worktreeDir: worktree.worktreeDir,
+    };
+  }
+
+  it('lands three claim-disjoint tasks in admitted order with a single suite run', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    const c = makeTask('task-c', 'c.txt', 'c-edited\n');
+
+    const result = await batchStep([a, b, c], { projectDir, epic: 'epic-1', testCmd: 'true' });
+
+    expect(result.suiteRuns).toBe(1);
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-a' },
+      { outcome: 'merged', taskId: 'epic-1/task-b' },
+      { outcome: 'merged', taskId: 'epic-1/task-c' },
+    ]);
+
+    // The first-parent chain is the mainline the batch built: three no-ff
+    // merge commits, oldest (first admitted) closest to init.
+    const subjects = git(projectDir, [
+      'log',
+      '--first-parent',
+      '--format=%s',
+      'smith/epic-1/integration',
+    ])
+      .split('\n')
+      .reverse();
+    expect(subjects).toEqual([
+      'init',
+      'Merge epic-1/task-a into smith/epic-1/integration',
+      'Merge epic-1/task-b into smith/epic-1/integration',
+      'Merge epic-1/task-c into smith/epic-1/integration',
+    ]);
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:b.txt'])).toBe('b-edited');
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
+    // No trace of the throwaway candidate worktree survives a green landing.
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(
+      /\.wt[\\/]project[\\/]batch-/,
+    );
+  });
+
+  it('logs one wave-merged per task, each carrying only that task’s own files', async () => {
+    const stateDir = path.join(root, 'state');
+    const sessionId = 'sess-batch';
+    const rootEvent = await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const events = {
+      ctx: { sessionId, planVersion: 1, causalParent: rootEvent.event_id, actor: 'system' },
+      stateDir,
+    };
+
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+
+    await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true', events });
+
+    const all = await readEvents(sessionId, { stateDir });
+    const logged = all
+      .filter((e) => e.record.event_type !== 'session-start')
+      .map((e) => ({
+        type: e.record.event_type,
+        taskId: e.record.task_id,
+        payload: e.record.payload,
+      }));
+    expect(logged).toEqual([
+      {
+        type: 'wave-merged',
+        taskId: 'epic-1/task-a',
+        payload: { task_ids: ['epic-1/task-a'], files_changed: ['a.txt'] },
+      },
+      {
+        type: 'wave-merged',
+        taskId: 'epic-1/task-b',
+        payload: { task_ids: ['epic-1/task-b'], files_changed: ['b.txt'] },
+      },
+    ]);
+  });
+
+  // B's file always fails the epic test command, whichever candidate it rides
+  // in on. Zuul/Mergify's bisect (cited at groupForBatch): split, land the
+  // innocent half, chase the guilty one down — rather than failing all three
+  // for one task's sake. This is the spec's own worked example: suite_runs
+  // must land exactly on 1 + 2*ceil(log2 3) = 5, not just under some bound.
+  it('bisects a red candidate: lands the innocent tasks and fails only the guilty one', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'BAD\n');
+    const c = makeTask('task-c', 'c.txt', 'c-edited\n');
+
+    const result = await batchStep([a, b, c], {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: '! grep -q BAD b.txt',
+    });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-a' },
+      { outcome: 'tests-failed', taskId: 'epic-1/task-b', outputTail: expect.any(String) },
+      { outcome: 'merged', taskId: 'epic-1/task-c' },
+    ]);
+    expect(result.suiteRuns).toBe(1 + 2 * Math.ceil(Math.log2(3)));
+
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
+    // task-b never landed — integration still has the original file.
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:b.txt'])).toBe('b');
+  });
+
+  // Once the left half of a bisection comes back fully merged, the right
+  // half cannot be innocent — the parent was red and the left half just
+  // proved it isn't the left half's fault. Retesting the right half's own
+  // candidate before splitting it further would relearn nothing; skipping
+  // that run is the fix this test pins: 8 tasks, only task-5 guilty, costs
+  // 6 suite runs now, not 7.
+  it('skips the suite run for a right half already known red from a clean left half', async () => {
+    for (let i = 1; i <= 8; i++) {
+      await writeFile(path.join(projectDir, `f${i}.txt`), `f${i}\n`);
+    }
+    git(projectDir, ['add', '.']);
+    git(projectDir, ['commit', '-q', '-m', 'seed f1..f8']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+
+    const tasks = [];
+    for (let i = 1; i <= 8; i++) {
+      tasks.push(makeTask(`task-${i}`, `f${i}.txt`, i === 5 ? 'BAD\n' : `f${i}-edited\n`));
+    }
+
+    const result = await batchStep(tasks, {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: '! grep -rq BAD .',
+    });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-1' },
+      { outcome: 'merged', taskId: 'epic-1/task-2' },
+      { outcome: 'merged', taskId: 'epic-1/task-3' },
+      { outcome: 'merged', taskId: 'epic-1/task-4' },
+      { outcome: 'tests-failed', taskId: 'epic-1/task-5', outputTail: expect.any(String) },
+      { outcome: 'merged', taskId: 'epic-1/task-6' },
+      { outcome: 'merged', taskId: 'epic-1/task-7' },
+      { outcome: 'merged', taskId: 'epic-1/task-8' },
+    ]);
+    expect(result.suiteRuns).toBe(6);
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:f5.txt'])).toBe('f5');
+  });
+
+  // The rebase leaves every task's branch on top of the base the batch
+  // started from, so a CAS failure at land time means integration moved
+  // underneath the whole batch while the one shared suite run was in
+  // flight — here the test command itself moves it, the same race
+  // `step`'s "throws on a tree-less merge conflict" test drives for a single
+  // task. A batch must not let that throw swallow the group: every ready
+  // task reports `integration-moved` and nothing lands.
+  it('reports integration-moved for every task when the ref moves mid-suite, without throwing', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    const integration = 'refs/heads/smith/epic-1/integration';
+    const script = path.join(root, 'move-integration.sh');
+    await writeFile(
+      script,
+      [
+        'set -e',
+        `cd ${JSON.stringify(projectDir)}`,
+        `export GIT_INDEX_FILE=${JSON.stringify(path.join(root, 'side.index'))}`,
+        `git read-tree ${integration}`,
+        "blob=$(printf 'c-other\\n' | git hash-object -w --stdin)",
+        'git update-index --cacheinfo 100644,$blob,c.txt',
+        `c=$(git commit-tree $(git write-tree) -p ${integration} -m side)`,
+        `git update-ref ${integration} $c`,
+        '',
+      ].join('\n'),
+    );
+    const before = git(projectDir, ['rev-parse', integration]);
+
+    const result = await batchStep([a, b], {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: `sh ${JSON.stringify(script)}`,
+    });
+
+    const movedTo = git(projectDir, ['rev-parse', integration]);
+    expect(result.outcomes).toEqual([
+      { outcome: 'integration-moved', taskId: 'epic-1/task-a' },
+      { outcome: 'integration-moved', taskId: 'epic-1/task-b' },
+    ]);
+    expect(result.suiteRuns).toBe(1);
+    expect(movedTo).not.toBe(before);
+    expect(git(projectDir, ['log', '-1', '--format=%s', movedTo])).toBe('side');
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(
+      /\.wt[\\/]project[\\/]batch-/,
+    );
+  });
+
+  // A worktree holding the integration branch used to be invisible to the
+  // batch land — a bare CAS `update-ref` moved the ref under it regardless.
+  // A dirty holder must refuse the whole batch instead, the same as `step`.
+  it('refuses to land a batch into a worktree whose integration checkout has uncommitted changes', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    await writeFile(path.join(projectDir, 'c.txt'), 'operator is editing\n');
+    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+
+    const result = await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true' });
+
+    expect(result.outcomes).toEqual([
+      {
+        outcome: 'integration-dirty',
+        taskId: 'epic-1/task-a',
+        worktree: await realpath(projectDir),
+        dirty: ['c.txt'],
+      },
+      {
+        outcome: 'integration-dirty',
+        taskId: 'epic-1/task-b',
+        worktree: await realpath(projectDir),
+        dirty: ['c.txt'],
+      },
+    ]);
+    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
+    expect(await readFile(path.join(projectDir, 'c.txt'), 'utf8')).toBe('operator is editing\n');
+  });
+
+  // A clean holder must land through it, exactly as `step` does, so its
+  // working tree follows the ref instead of drifting from under whoever has
+  // it checked out.
+  it('lands a batch in the project directory when it already has the integration branch out', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+
+    const result = await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true' });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-a' },
+      { outcome: 'merged', taskId: 'epic-1/task-b' },
+    ]);
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('smith/epic-1/integration');
+    expect(git(projectDir, ['status', '--porcelain'])).toBe('');
+    const tip = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    expect(git(projectDir, ['rev-parse', 'HEAD'])).toBe(tip);
+    expect(await readFile(path.join(projectDir, 'a.txt'), 'utf8')).toBe('a-edited\n');
+    expect(await readFile(path.join(projectDir, 'b.txt'), 'utf8')).toBe('b-edited\n');
   });
 });
 
