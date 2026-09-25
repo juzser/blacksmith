@@ -9,11 +9,15 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
-import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
-import { buildFixture, EPIC_ID, SESSION_ID } from '../../../factory/orchestrator/test/db/fixtures.js';
 import type { LogCacheSeam } from '../../../factory/orchestrator/dist/logCache.js';
 import { createLogCache } from '../../../factory/orchestrator/dist/logCache.js';
+import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
+import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
+import {
+  buildFixture,
+  EPIC_ID,
+  SESSION_ID,
+} from '../../../factory/orchestrator/test/db/fixtures.js';
 import { closeApp, createApp } from '../src/app.js';
 
 const ROADMAP_MD = `## Phase A
@@ -82,7 +86,10 @@ describe('ui/server app.ts: writes read the last event id through the cache', ()
     await rebuild(dbPath, 'all', { stateDir, roadmapPath });
   }
 
-  async function approve(handle: ReturnType<typeof createApp>, lessonId: string): Promise<Response> {
+  async function approve(
+    handle: ReturnType<typeof createApp>,
+    lessonId: string,
+  ): Promise<Response> {
     return handle.app.request(`/api/lessons/${lessonId}/approve`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -94,7 +101,13 @@ describe('ui/server app.ts: writes read the last event id through the cache', ()
     await seedCandidate('lesson-ui-1', 'Approve the first candidate.');
     await seedCandidate('lesson-ui-2', 'Approve the second candidate.');
 
-    const seam: LogCacheSeam = { opens: 0, fstats: 0, bytesRead: 0, readEventsCalls: 0, fullReparses: 0 };
+    const seam: LogCacheSeam = {
+      opens: 0,
+      fstats: 0,
+      bytesRead: 0,
+      readEventsCalls: 0,
+      fullReparses: 0,
+    };
     const logCache = createLogCache(seam);
     const handle = createApp({ dbPath, stateDir, roadmapPath, logCache });
     try {
