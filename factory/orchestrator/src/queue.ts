@@ -497,7 +497,20 @@ async function attemptCandidate(
   opts: StepOptions,
   integrationBranch: string,
   logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  /**
+   * Set by the caller when it already knows this exact set is guilty of a
+   * red parent — the sibling half of a bisection whose other half landed
+   * clean. Skips the group's own suite run for 2+ tasks (there is nothing
+   * left to learn from testing a candidate already known red) and goes
+   * straight to splitting it further. A single task still runs, because its
+   * own failure output tail is the thing the caller reports.
+   */
+  knownRed = false,
 ): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
+  if (knownRed && readyTasks.length >= 2) {
+    return bisectGroup(readyTasks, opts, integrationBranch, logBlocked);
+  }
+
   const projectDir = opts.projectDir;
   const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${integrationBranch}^{commit}`]);
 
@@ -604,12 +617,38 @@ async function attemptCandidate(
     return { outcomes: [{ outcome: 'tests-failed', taskId: task.taskId, outputTail }], suiteRuns: 1 };
   }
 
+  const bisected = await bisectGroup(readyTasks, opts, integrationBranch, logBlocked);
+  return { outcomes: bisected.outcomes, suiteRuns: 1 + bisected.suiteRuns };
+}
+
+/**
+ * Split a red (or known-red) group in half and recurse on each — the shared
+ * tail of `attemptCandidate`'s red path, factored out so a known-red group
+ * can jump straight here without spending a suite run to relearn what the
+ * caller already knows. `left` runs with no assumption of its own; when it
+ * comes back fully merged, the failure cannot be in it, so `right` is
+ * dispatched already known red (`runGroup`, ready.length >= 2 skips its own
+ * test the same way).
+ */
+async function bisectGroup(
+  readyTasks: QueueTask[],
+  opts: StepOptions,
+  integrationBranch: string,
+  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
   const mid = Math.ceil(readyTasks.length / 2);
   const left = await runGroup(readyTasks.slice(0, mid), opts, integrationBranch, logBlocked);
-  const right = await runGroup(readyTasks.slice(mid), opts, integrationBranch, logBlocked);
+  const rightKnownRed = left.outcomes.every((o) => o.outcome === 'merged');
+  const right = await runGroup(
+    readyTasks.slice(mid),
+    opts,
+    integrationBranch,
+    logBlocked,
+    rightKnownRed,
+  );
   return {
     outcomes: [...left.outcomes, ...right.outcomes],
-    suiteRuns: 1 + left.suiteRuns + right.suiteRuns,
+    suiteRuns: left.suiteRuns + right.suiteRuns,
   };
 }
 
@@ -626,6 +665,7 @@ async function runGroup(
   opts: StepOptions,
   integrationBranch: string,
   logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+  knownRed = false,
 ): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
   if (tasks.length === 0) return { outcomes: [], suiteRuns: 0 };
 
@@ -639,7 +679,7 @@ async function runGroup(
 
   let suiteRuns = 0;
   if (ready.length > 0) {
-    const result = await attemptCandidate(ready, opts, integrationBranch, logBlocked);
+    const result = await attemptCandidate(ready, opts, integrationBranch, logBlocked, knownRed);
     suiteRuns = result.suiteRuns;
     for (const outcome of result.outcomes) byTaskId.set(outcome.taskId, outcome);
   }

@@ -2401,7 +2401,14 @@ async function main(): Promise<number> {
           const outcome = await step(only, stepOpts);
           outcomes.push(outcome);
           const landed = outcome.outcome === 'merged';
-          batches.push({ task_ids: group, suite_runs: 1, landed });
+          // `step` refuses before any test runs on `nothing-to-merge` (D-30's
+          // uncommitted-work guard) and `rebase-conflict` — 0 suites ran, not
+          // 1, for either. Every other outcome it can return (`merged`,
+          // `tests-failed`, `integration-dirty`) only happens after
+          // `runTestCmd`.
+          const suiteRuns =
+            outcome.outcome === 'nothing-to-merge' || outcome.outcome === 'rebase-conflict' ? 0 : 1;
+          batches.push({ task_ids: group, suite_runs: suiteRuns, landed });
           if (!landed) {
             allMerged = false;
             break;

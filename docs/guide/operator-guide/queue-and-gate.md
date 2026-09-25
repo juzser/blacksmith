@@ -193,8 +193,11 @@ half is still red, so a lone bad task inside a group of otherwise-good ones
 costs extra suite runs rather than blocking its innocent neighbours. Worst
 case — one bad task in a group of *n* — costs `1 + 2⌈log₂ n⌉` suite runs
 instead of `n`; still fewer than the serial loop's `n` once the group is
-larger than a handful of tasks, and always fewer suite runs than the same
-group run one task at a time when more than one task is actually green. The
+larger than a handful of tasks. With *k* guilty tasks the worst-case bound
+is about `1 + 2k⌈log₂ n⌉` suite runs — batch is not always cheaper than the
+serial loop (a group with several failures can cost more runs than testing
+each task one at a time), but it wins whenever failures are rare, which is
+the common case. The
 JSON output gains a `batches` summary alongside the usual outcome array —
 `{"task_ids": [...], "suite_runs": N, "landed": bool}` per group, in
 admission order — so you can see which groups cost one run and which paid

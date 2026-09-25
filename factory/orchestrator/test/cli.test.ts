@@ -5359,6 +5359,60 @@ describe('cli.ts (built binary)', () => {
       ]);
     });
 
+    // A singleton "group" (groupForBatch gave the task no claim-disjoint
+    // sibling to stack with) runs through plain `step`, which refuses
+    // before any test runs when the branch carries nothing to merge (D-30).
+    // `suite_runs` must say 0, not the 1 it used to claim unconditionally.
+    it('queue run --batch: a singleton group reports 0 suite runs when step refuses before testing', async () => {
+      const { sessionId } = await session();
+      const planPath = path.join(scratchDir, `${sessionId}-batch-noop-plan.json`);
+      await writeFile(planPath, JSON.stringify(PLAN));
+
+      const originDir = path.join(scratchDir, `${sessionId}-batch-noop-origin.git`);
+      const projectDir = path.join(scratchDir, `${sessionId}-batch-noop-project`);
+      runOrThrow('git', ['init', '-q', '--bare', '-b', 'main', originDir]);
+      runOrThrow('git', ['clone', '-q', originDir, projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'seed.txt'), 'seed\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+      runOrThrow('git', ['push', '-q', 'origin', 'main'], { cwd: projectDir });
+
+      // task-1's own claims (src/foo/*.ts) overlap nothing else in PLAN, so
+      // groupForBatch gives it a singleton — but it never commits anything
+      // on its branch, so `step` reports `nothing-to-merge` before any test.
+      const created = runCli(['worktree', 'create', projectDir, 'epic-1', 'task-1']);
+      expect(created.status).toBe(0);
+      const { worktreeDir, branch } = JSON.parse(created.stdout);
+
+      const tasksPath = path.join(scratchDir, `${sessionId}-batch-noop-tasks.json`);
+      await writeFile(tasksPath, JSON.stringify([{ taskId: 'task-1', branch, worktreeDir }]));
+
+      const queued = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        projectDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+        '--plan',
+        planPath,
+        '--batch',
+      ]);
+      expect(queued.status).toBe(1);
+      const body = JSON.parse(queued.stdout);
+      expect(body.outcomes).toEqual([
+        expect.objectContaining({ outcome: 'nothing-to-merge', taskId: 'epic-1/task-1' }),
+      ]);
+      expect(body.batches).toEqual([
+        { task_ids: ['epic-1/task-1'], suite_runs: 0, landed: false },
+      ]);
+    });
+
     // merge-lanes: a group's candidate can fail the suite — bisection still
     // lands the innocent task and reports the guilty one, and the run stops
     // at the first batch that did not fully land (`allMerged` false), same

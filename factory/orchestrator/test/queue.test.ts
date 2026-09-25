@@ -793,6 +793,45 @@ describe('batchStep', () => {
     expect(git(projectDir, ['show', 'smith/epic-1/integration:b.txt'])).toBe('b');
   });
 
+  // Once the left half of a bisection comes back fully merged, the right
+  // half cannot be innocent — the parent was red and the left half just
+  // proved it isn't the left half's fault. Retesting the right half's own
+  // candidate before splitting it further would relearn nothing; skipping
+  // that run is the fix this test pins: 8 tasks, only task-5 guilty, costs
+  // 6 suite runs now, not 7.
+  it('skips the suite run for a right half already known red from a clean left half', async () => {
+    for (let i = 1; i <= 8; i++) {
+      await writeFile(path.join(projectDir, `f${i}.txt`), `f${i}\n`);
+    }
+    git(projectDir, ['add', '.']);
+    git(projectDir, ['commit', '-q', '-m', 'seed f1..f8']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+
+    const tasks = [];
+    for (let i = 1; i <= 8; i++) {
+      tasks.push(makeTask(`task-${i}`, `f${i}.txt`, i === 5 ? 'BAD\n' : `f${i}-edited\n`));
+    }
+
+    const result = await batchStep(tasks, {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: '! grep -rq BAD .',
+    });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-1' },
+      { outcome: 'merged', taskId: 'epic-1/task-2' },
+      { outcome: 'merged', taskId: 'epic-1/task-3' },
+      { outcome: 'merged', taskId: 'epic-1/task-4' },
+      { outcome: 'tests-failed', taskId: 'epic-1/task-5', outputTail: expect.any(String) },
+      { outcome: 'merged', taskId: 'epic-1/task-6' },
+      { outcome: 'merged', taskId: 'epic-1/task-7' },
+      { outcome: 'merged', taskId: 'epic-1/task-8' },
+    ]);
+    expect(result.suiteRuns).toBe(6);
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:f5.txt'])).toBe('f5');
+  });
+
   // The rebase leaves every task's branch on top of the base the batch
   // started from, so a CAS failure at land time means integration moved
   // underneath the whole batch while the one shared suite run was in
