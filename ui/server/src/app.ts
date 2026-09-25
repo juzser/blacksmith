@@ -57,6 +57,7 @@ import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/schedul
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
+import { writeGuard } from './middleware.js';
 
 /**
  * How often the change stream re-scans `state/events/` while at least one
@@ -654,6 +655,11 @@ export function createApp(opts: AppOpts): AppHandle {
     await next();
   });
 
+  // One guard, mounted once on the method, ahead of every POST under
+  // /api/* -- including one added later. No individual write route below
+  // restates any of writeGuard()'s rules.
+  app.on('POST', '/api/*', writeGuard());
+
   /**
    * The change stream: "these sessions' logs advanced, and to how many
    * events". It carries facts, never a rendered status (architecture §18
@@ -835,6 +841,10 @@ export function createApp(opts: AppOpts): AppHandle {
   });
 
   // --- Writes: waiver apply-batch + lesson approve/edit/reject only ----
+  // writeGuard() is mounted once, above, on every POST under /api/* — a
+  // request that did not originate from the dashboard itself (foreign
+  // Origin, rebound Host, cross-site fetch, or a non-JSON body) never
+  // reaches these handlers, and none of them restates the check.
   app.post('/api/waivers/apply-batch', async (c) => {
     const body = await c.req.json<WriteEnvelope & { decisions?: WaiverBatchDecision[] }>();
     const decisions = body.decisions ?? [];
@@ -874,16 +884,16 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.post('/api/lessons/:lessonId/approve', async (c) => {
     const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId'), 'approved', body, {}));
+    return c.json(await transition(c.req.param('lessonId') as string, 'approved', body, {}));
   });
 
   app.post('/api/lessons/:lessonId/reject', async (c) => {
     const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId'), 'invalidated', body, {}));
+    return c.json(await transition(c.req.param('lessonId') as string, 'invalidated', body, {}));
   });
 
   app.post('/api/lessons/:lessonId/edit', async (c) => {
-    const lessonId = c.req.param('lessonId');
+    const lessonId = c.req.param('lessonId') as string;
     const body = await c.req.json<LessonWriteBody>();
     if (!body.statement && !body.lessonType && !body.lessonScope) {
       throw new BadRequestError(
