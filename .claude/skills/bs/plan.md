@@ -191,10 +191,10 @@ there means "not looked at", not "looked at and clean".
    Read `parallelism.widest` back from that same output, too. `parallel_with`
    underneath it is claims-and-edges only -- import-graph crossings stay
    `wave schedule --repo`'s job, not this key's -- so it can only ever name
-   a width that job would not contradict. A `widest` of 1 on a plan of two
-   or more tasks means every task the wave loop will ever run sits behind
-   some claim or edge that serializes it: flag that to the operator now,
-   before a run discovers it as a stalled wave.
+   a width that job would not contradict. A `widest` of 1 on a
+   plan of two or more tasks means every task the wave loop will ever run
+   sits behind some claim or edge that serializes it: flag that to the
+   operator now, before a run discovers it as a stalled wave.
 8. If this epic opens a new roadmap milestone, add it to
    `factory/specs/roadmap.md` (planner-maintained, architecture §12) — a
    roadmap change is itself a scope change and needs the same operator nod.
