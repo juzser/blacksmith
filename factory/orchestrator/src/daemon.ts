@@ -38,10 +38,10 @@ import {
   listSessionIds,
   mergeSessionLogs,
   parseEventId,
-  readEvents,
   type StoredEvent,
 } from './events.js';
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
+import { LogCache } from './logCache.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
 import { type ProjectRef, unwatchedProjects } from './projects.js';
 import { FACTORY_PROJECT } from './roadmap.js';
@@ -644,6 +644,18 @@ export interface TickOptions extends InspectOptions {
   projectDb?: boolean;
   dbPath?: string;
   dbOpts?: DbOpts;
+  /**
+   * The log cache a tick reads sessions through. Omitted, a fresh (cold) one
+   * is used for this call alone — every session reads as a cache miss, so a
+   * one-off tick costs exactly what reading every log with `readEvents`
+   * always cost. Shared across calls (the daemon's own run loop passes one
+   * instance to every tick it makes), a session whose log has not changed
+   * since the last tick is answered from memory, and the projector is not
+   * re-applied for a lineage leaf whose tree did not change either.
+   */
+  logCache?: LogCache;
+  /** Injection seam: the projector call a tick makes per changed leaf. */
+  applyFn?: typeof apply;
 }
 
 function errorMessage(err: unknown): string {
@@ -667,10 +679,15 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
   const stateDir = opts.stateDir ?? STATE_EVENTS_DIR;
   const findings: DaemonFinding[] = [];
 
+  // No shared cache passed in: a fresh one is cold for every session, so this
+  // reads identically to the old `readEvents`-per-session loop — one full
+  // read per log, this call only.
+  const cache = opts.logCache ?? new LogCache();
+
   const logs = new Map<string, StoredEvent[]>();
   for (const sessionId of listSessionIds(stateDir)) {
     try {
-      logs.set(sessionId, await readEvents(sessionId, { stateDir }));
+      logs.set(sessionId, await cache.read(sessionId, { stateDir }));
     } catch (err) {
       findings.push({
         kind: 'unreadable-log',
@@ -815,11 +832,44 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     findings.push(...inspectSession(primary, merged, inspectOpts));
   }
 
+  // The signature a leaf's projection was last applied against: every
+  // session in its own upward chain, keyed by the fingerprint the cache read
+  // it at. Two ticks that see the same fingerprints for the same chain saw
+  // no change anywhere that leaf's own projection or lineage-scoped folds
+  // depend on, so re-applying would write the same rows a second time.
+  // `opts.logCache === undefined` opts a caller all the way out: with no
+  // cache to remember a signature against, every leaf is applied every tick,
+  // unchanged from before this cache existed.
+  const leafSignature = (leaf: string): string => {
+    const chain: string[] = [];
+    const seen = new Set<string>();
+    let current: string | null = leaf;
+    while (current !== null && !seen.has(current)) {
+      seen.add(current);
+      chain.push(current);
+      const parent: string | null = parentOf.get(current) ?? null;
+      current = parent !== null && logs.has(parent) ? parent : null;
+    }
+    return chain
+      .map((id) => {
+        const fp = cache.fingerprintOf(id);
+        return fp === undefined ? `${id}:?` : `${id}:${fp.dev}.${fp.ino}.${fp.size}.${fp.mtimeMs}`;
+      })
+      .join('|');
+  };
+
+  const applyFn = opts.applyFn ?? apply;
+
   if (projectDb) {
     for (const leaf of leaves) {
+      const signature = opts.logCache === undefined ? undefined : leafSignature(leaf);
+      if (signature !== undefined && opts.logCache?.getAppliedSignature(leaf) === signature) {
+        continue;
+      }
       try {
-        await apply(dbPath, leaf, dbOpts);
+        await applyFn(dbPath, leaf, dbOpts);
         projected += 1;
+        if (signature !== undefined) opts.logCache?.setAppliedSignature(leaf, signature);
       } catch (err) {
         findings.push(projectionFailed(leaf, err));
       }
@@ -1162,6 +1212,10 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<DaemonRun> {
   const tick = opts.tick ?? runTick;
   const sleep = opts.sleep ?? defaultSleep;
   const shouldContinue = opts.shouldContinue ?? ((): boolean => true);
+  // One cache for the whole run: this is the loop finding 50acc356 is about
+  // — the process that survives long enough for "every tick re-reads every
+  // byte ever written" to matter.
+  const logCache = opts.logCache ?? new LogCache();
 
   acquireLock(
     opts.dir,
@@ -1180,6 +1234,8 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<DaemonRun> {
     ...(opts.projectDb === undefined ? {} : { projectDb: opts.projectDb }),
     ...(opts.dbPath === undefined ? {} : { dbPath: opts.dbPath }),
     ...(opts.dbOpts === undefined ? {} : { dbOpts: opts.dbOpts }),
+    ...(opts.applyFn === undefined ? {} : { applyFn: opts.applyFn }),
+    logCache,
   };
 
   // Read from disk rather than held in a variable, so a daemon restarted by
