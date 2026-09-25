@@ -147,6 +147,25 @@ one thing this playbook never asks you to.
    carries `keeps_exports`, restate the promise in the dispatch in one line:
    the file list, and "keep every existing export's name and declaration;
    adding is fine".
+
+   Once every coder of the wave has been dispatched — this fan-out has gone
+   out for every admitted task — audit the wave's own parallelism while it
+   can still be corrected: `smith wave audit --session <id> --epic <epic>`.
+   It is a read, so it costs nothing against "No lockstep barrier" above and
+   waits for no task. Read the `verdict` field (`WAVE_VERDICTS`,
+   `waveConcurrency.ts`), not only the exit code — `partial` also exits 0:
+   - `serialized` or `partial` — the wave is not running the width it was
+     admitted at, and steps 5–7 have not gone out yet, so it can still be
+     fixed: dispatch every remaining phase of this wave as one message of
+     parallel calls, per "One message, many dispatches" above, and record
+     the verdict as an operator-visible event — `error-logged` with error
+     `contract.constraint-decay` (`taxonomy.yml`): the wave-runner stopped
+     honoring that section's standing constraint.
+   - `unobserved` — the log holds no dispatch for any task this wave
+     admitted. That is a defect in the log, not in how the wave ran; record
+     it the same way, as `error-logged` with error `execution.env-failure`.
+   - `parallel` or `single` — nothing further; the wave ran as wide as it
+     was admitted.
 5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
    coverage and epic-level e2e/screenshots.
    - Then the **uiux visual pass**, but only when all three hold: the task
@@ -238,8 +257,18 @@ one thing this playbook never asks you to.
    — see "Round counting and escalation" above. Then have the log check
    you: `smith escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
-10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting,
-    ask what the diff did to everyone outside the claims, and whether it
+10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting, audit
+    the wave's own parallelism: `smith wave audit --session <id> --epic
+    <epic>`. It reads the log back and says whether the tasks admitted
+    together actually ran together — `parallel` when every admitted task was
+    in flight at once, `partial` when two or more overlapped but never all,
+    `serialized` when work is recorded but no two tasks ever overlapped,
+    `single` when the wave admitted one task (nothing to be parallel about),
+    and `unobserved` when the wave was admitted and the log shows no work for
+    any of its tasks. Exit 1 on `serialized`, exit 2 on `unobserved` — either
+    is a fact for the wave-loop's hand-back, not a reason to hold the merge:
+    report the verdict and keep going to admission. Then ask what the diff
+    did to everyone outside the claims, and whether it
     kept what the spec promised:
     `smith claims impact <worktree-dir> <spec.json>`. Exit 1 means a
     `proven` break — this task removed an export a file outside its claims
