@@ -20,6 +20,8 @@ import { runOrThrow } from './helpers/process.js';
 let scratch: string;
 let mainRepo: string;
 let sideRepo: string;
+// A worktree on no named branch — `detectCurrentBranch` reads it as `HEAD`.
+let detachedRepo: string;
 // Leases go to a scratch directory, never the live state/sandboxes: a lease
 // a crashed run left there would sandbox a real worktree.
 let leaseDir: string;
@@ -52,6 +54,8 @@ beforeAll(async () => {
   mainRepo = initRepoOnBranch(path.join(scratch, 'main-clone'), 'main');
   sideRepo = path.join(scratch, 'side-worktree');
   runOrThrow('git', ['worktree', 'add', '-q', '-b', 'feat/side', sideRepo], { cwd: mainRepo });
+  detachedRepo = path.join(scratch, 'detached-worktree');
+  runOrThrow('git', ['worktree', 'add', '-q', '--detach', detachedRepo], { cwd: mainRepo });
   leaseDir = path.join(scratch, 'leases');
   mkdirSync(path.join(mainRepo, 'factory'));
   // `link/..` is the side worktree lexically and the main clone physically.
@@ -62,6 +66,9 @@ beforeAll(async () => {
   // Exists, is a directory, and cannot be entered.
   mkdirSync(path.join(sideRepo, 'locked'));
   chmodSync(path.join(sideRepo, 'locked'), 0o000);
+  // `<side> ` — a real entry a shell would cd into, distinct from
+  // `sideRepo` itself, that a naive `.trim()` reads as the same word.
+  symlinkSync(mainRepo, `${sideRepo} `);
 });
 
 afterAll(async () => {
@@ -208,6 +215,42 @@ describe('decideHookPayload — the shortcut forfeits any shape it cannot read w
     ['a CDPATH-dependent relative target', () => `cd side-worktree && ${merge}`],
     ['a newline', () => `cd ${sideRepo} &&\n${merge}`],
     ['a redirection', () => `cd ${sideRepo} && ${merge} > out`],
+    // A word after the target can be a shell alias (zsh's autopushd defines
+    // `-` and `1`..`9` as `cd -`/`cd -N`), and any plain word could be one —
+    // a denylist of mover words is unsound, so only a literal `git` segment
+    // may follow.
+    ['an autopushd `-` alias segment', () => `cd ${sideRepo} && - && ${merge}`],
+    ['an autopushd numbered alias segment', () => `cd ${sideRepo} && 1 && ${merge}`],
+    // A naive `.trim()` reads NBSP/BOM/form-feed as whitespace and drops
+    // them, so the parser sees a clean target while the shell — which does
+    // not treat them as IFS — keeps them as part of the word.
+    ['a trailing NBSP a naive trim swallows', () => `cd ${sideRepo} && ${merge}`],
+    ['a trailing BOM a naive trim swallows', () => `cd ${sideRepo}﻿&& ${merge}`],
+    ['a trailing form feed a naive trim swallows', () => `cd ${sideRepo}\f&& ${merge}`],
+    // Indirect executors are plain words too: they run a git command in
+    // another repo entirely, in both shortcut forms.
+    [
+      'git for-each-repo, cd form',
+      () => `cd ${sideRepo} && git for-each-repo --config=x.repos merge feat/side`,
+    ],
+    [
+      'git for-each-repo, -C form',
+      () => `git -C ${sideRepo} for-each-repo --config=x.repos merge feat/side`,
+    ],
+    [
+      'git submodule foreach, cd form',
+      () => `cd ${sideRepo} && git submodule foreach git merge feat/side`,
+    ],
+    [
+      'git submodule foreach, -C form',
+      () => `git -C ${sideRepo} submodule foreach git merge feat/side`,
+    ],
+    // A detached target has no named branch to judge.
+    ['a detached target', () => `cd ${detachedRepo} && ${merge}`],
+    // `-x`/`--exec` runs an arbitrary command as part of the rebase.
+    ['rebase -x, cd form', () => `cd ${sideRepo} && git rebase -x id main`],
+    ['rebase -x, -C form', () => `git -C ${sideRepo} rebase -x id main`],
+    ['rebase --exec=', () => `cd ${sideRepo} && git rebase --exec=id main`],
   ];
 
   it.each(cases)('keeps the session-cwd denial through %s', (_label, command) => {

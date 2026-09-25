@@ -110,8 +110,11 @@ export function decideHookPayload(
     repoRoot: detectRepoRoot(dir),
   });
   const certain = MOVES_RE.test(command) ? shortcutDirectories(command, cwd)?.map(locate) : null;
+  // `HEAD` is what a detached worktree's branch reads as — not a name a
+  // protected-branch rule can ever match, and guardrails.md requires the
+  // shortcut's target to sit on a named branch.
   const places =
-    certain?.every((p) => p.branch !== '' && p.repoRoot !== null) === true
+    certain?.every((p) => p.branch !== '' && p.branch !== 'HEAD' && p.repoRoot !== null) === true
       ? certain
       : fallbackDirectories(command, cwd).map(locate);
   let reason: string | null = null;
@@ -173,13 +176,25 @@ export function decideHookPayload(
  * A plain word is unquoted and uses only `PLAIN_WORD_RE`'s characters: no
  * `;`, `|`, `&`, newline, backslash, `$`, backtick, quote, parens, glob or
  * redirection. The target may also be one whole single- or double-quoted
- * span. After the target, a word that moves the shell or the command
- * (`MOVER_WORDS`, `MOVER_FLAG_RE`) forfeits, and so does a git location
+ * span. Every `&&`-joined command after the target must be a `git`
+ * invocation whose subcommand sits in `GIT_SUBCOMMAND_ALLOWLIST` —
+ * positively, not a denylist of mover words: any plain word could be a shell
+ * alias or function (zsh's autopushd defines `-` and `1`..`9` as `cd`
+ * shortcuts), so nothing short of "must be a git builtin that cannot run a
+ * command in another repo" is sound. Git builtins cannot be shadowed by a git
+ * alias; a shell alias named `git` itself is out of scope. A mover flag
+ * (`MOVER_FLAG_RE`) or a rebase `-x`/`--exec` (which runs an arbitrary
+ * command as part of the rebase) still forfeits, and so does a git location
  * override anywhere. Returns the target lexically and physically when the two
  * differ (a cd is logical, git's chdir physical), and the caller falls back
  * too if any of them is not on a named branch of a repo.
  */
 function shortcutDirectories(command: string, cwd: string): string[] | null {
+  // No `.trim()`/split reliance below this line for a security decision: both
+  // read NBSP, BOM and form-feed as whitespace and drop them, while a shell's
+  // IFS does not — so a target's trailing NBSP would parse away to a clean,
+  // different directory than the one the shell actually enters.
+  if (NON_ASCII_RE.test(command)) return null;
   if (GIT_LOCATION_RE.test(command) || /[\r\n]/.test(command.trim())) return null;
   const segments = command
     .trim()
@@ -192,15 +207,19 @@ function shortcutDirectories(command: string, cwd: string): string[] | null {
     target = first[1] ?? '';
     after = rest.flat();
     if (!/^\.{1,2}(?:\/|$)|^\//.test(unquote(target) ?? '')) return null;
+    if (!rest.every((segment) => segment[0] === 'git' && GIT_SUBCOMMAND_ALLOWLIST.has(segment[1] ?? '')))
+      return null;
   } else if (segments.length === 1 && first[0] === 'git' && first[1] === '-C' && first.length > 3) {
     target = first[2] ?? '';
     after = first.slice(3);
+    if (!GIT_SUBCOMMAND_ALLOWLIST.has(after[0] ?? '')) return null;
   } else {
     return null;
   }
   const plain = (word: string) =>
     PLAIN_WORD_RE.test(word) && !MOVER_WORDS.has(word) && !MOVER_FLAG_RE.test(word);
   if (!after.every(plain)) return null;
+  if (after.some((word) => word === '-x' || word.startsWith('--exec'))) return null;
   if (!PLAIN_WORD_RE.test(target) && !/^'[^']*'$|^"[^"]*"$/.test(target)) return null;
   return literalDirectories(target, cwd);
 }
@@ -230,6 +249,44 @@ const MOVES_RE = /(?:^|[\s;&|(])(?:cd|pushd|popd)(?=$|[\s;&|)])|\s-C(?:\s|$)|[()
 
 /** A word the shortcut reads as itself: nothing the shell would expand, split or redirect. */
 const PLAIN_WORD_RE = /^[A-Za-z0-9_./:@%+,=-]+$/;
+
+/**
+ * Anything outside printable ASCII (tab allowed as a separator), forfeiting
+ * the shortcut before any `.trim()`/split touches the command — see
+ * `shortcutDirectories`'s note on why those cannot be trusted past this
+ * point.
+ */
+const NON_ASCII_RE = /[^\t\x20-\x7E]/;
+
+/**
+ * Git builtins the shortcut may follow a `cd`/`-C` target with: read-only or
+ * ordinary write commands that act on the repo they are invoked in, never on
+ * another one. Deliberately excludes indirect executors that run a git
+ * command somewhere else (`for-each-repo`, `submodule`), and anything that
+ * rewrites history destructively outside a plain invocation (`filter-branch`,
+ * `filter-repo`, `worktree`, `bisect`). A git builtin cannot be shadowed by a
+ * git alias, which is what makes this allowlist sound.
+ */
+const GIT_SUBCOMMAND_ALLOWLIST = new Set([
+  'status',
+  'log',
+  'diff',
+  'show',
+  'add',
+  'commit',
+  'merge',
+  'rebase',
+  'push',
+  'fetch',
+  'pull',
+  'checkout',
+  'switch',
+  'branch',
+  'reset',
+  'rev-parse',
+  'tag',
+  'stash',
+]);
 
 /** Commands that can move the shell, or run a command string somewhere else. */
 const MOVER_WORDS = new Set([

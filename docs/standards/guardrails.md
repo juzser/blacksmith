@@ -49,15 +49,31 @@
 > - `cd <target> && <cmd> && …` — commands joined by nothing but `&&`, and
 > - a lone `git -C <target> …` with nothing chained to it,
 >
-> where every word after the target is unquoted and plain — no `;`, `|`,
-> `||`, lone `&`, newline, backslash, `$`, backtick, quote, parens, glob or
-> redirection — and names no command that moves or re-parses (`cd`, `pushd`,
-> `popd`, `eval`, `source`, `.`, `exec`, `command`, `builtin`, `env`, `sudo`,
-> `xargs`, `find`, `sh`/`bash`/`zsh`/`dash`/`ksh`) and no `-C`, `-c`,
-> `--chdir`, `--directory`. The target is one plain word or one whole quoted
-> span, names an existing directory the hook can enter, and sits on a named
-> branch of a repo; a relative `cd` target must start with `./` or `../`. When
-> a symlink makes the lexical and physical path differ, both are judged.
+> the whole command must be printable ASCII — anything outside `0x20`-`0x7E`
+> (tab aside, allowed as a separator) forfeits before any parsing happens, so
+> an NBSP, BOM or form-feed a naive `.trim()` would silently drop cannot pass
+> for whitespace and shift what a word means. Every word after the target is
+> unquoted and plain — no `;`, `|`, `||`, lone `&`, newline, backslash, `$`,
+> backtick, quote, parens, glob or redirection — and every `&&`-joined
+> command after the target is literally the word `git`, followed by a
+> subcommand from an explicit, positive allowlist (`status`, `log`, `diff`,
+> `show`, `add`, `commit`, `merge`, `rebase`, `push`, `fetch`, `pull`,
+> `checkout`, `switch`, `branch`, `reset`, `rev-parse`, `tag`, `stash`) —
+> never a denylist of mover words, because any plain word could be a shell
+> alias or function (zsh's autopushd, for instance, defines `-` and `1`..`9`
+> as `cd` shortcuts) and nothing short of "must be a git builtin that cannot
+> run a command in another repo" is sound. Excluded on purpose: indirect
+> executors that run a git command somewhere else (`for-each-repo`,
+> `submodule foreach`), and anything that rewrites history outside a plain
+> invocation (`filter-branch`, `filter-repo`, `worktree`, `bisect`). A git
+> builtin cannot be shadowed by a git alias, which is what makes this
+> allowlist sound; a shell alias named `git` itself is out of scope. No `-C`,
+> `-c`, `--chdir`, `--directory` anywhere, and no `-x` or `--exec`/`--exec=…`
+> on a rebase, since that runs an arbitrary command as part of it. The target
+> is one plain word or one whole quoted span, names an existing directory the
+> hook can enter, and sits on a named branch of a repo — a detached `HEAD` is
+> not one; a relative `cd` target must start with `./` or `../`. When a
+> symlink makes the lexical and physical path differ, both are judged.
 > `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `--git-dir` or `--work-tree`
 > anywhere in the command forfeits the shape.
 >
