@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { chmodSync, mkdirSync, symlinkSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -20,6 +20,9 @@ import { runOrThrow } from './helpers/process.js';
 let scratch: string;
 let mainRepo: string;
 let sideRepo: string;
+// Leases go to a scratch directory, never the live state/sandboxes: a lease
+// a crashed run left there would sandbox a real worktree.
+let leaseDir: string;
 
 function initRepoOnBranch(dir: string, branch: string): string {
   mkdirSync(dir, { recursive: true });
@@ -36,6 +39,7 @@ function decide(command: string, cwd: string): ReturnType<typeof decideHookPaylo
   return decideHookPayload(
     JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd }),
     cwd,
+    leaseDir,
   );
 }
 
@@ -48,9 +52,20 @@ beforeAll(async () => {
   mainRepo = initRepoOnBranch(path.join(scratch, 'main-clone'), 'main');
   sideRepo = path.join(scratch, 'side-worktree');
   runOrThrow('git', ['worktree', 'add', '-q', '-b', 'feat/side', sideRepo], { cwd: mainRepo });
+  leaseDir = path.join(scratch, 'leases');
+  mkdirSync(path.join(mainRepo, 'factory'));
+  // `link/..` is the side worktree lexically and the main clone physically.
+  symlinkSync(path.join(mainRepo, 'factory'), path.join(sideRepo, 'link'));
+  // A directory literally named `q"/"r`, which is what a naive unquote makes
+  // of the double-quoted splice `"<side>/q"/"r"`.
+  mkdirSync(path.join(sideRepo, 'q"', '"r'), { recursive: true });
+  // Exists, is a directory, and cannot be entered.
+  mkdirSync(path.join(sideRepo, 'locked'));
+  chmodSync(path.join(sideRepo, 'locked'), 0o000);
 });
 
 afterAll(async () => {
+  chmodSync(path.join(sideRepo, 'locked'), 0o755);
   await rm(scratch, { recursive: true, force: true });
 });
 
@@ -112,19 +127,97 @@ describe('decideHookPayload — where the command runs, not where the session st
     // The lease binds the session that was handed the worktree. Reading it
     // only from the cd target would let `cd <elsewhere> && curl …` walk out
     // of the sandbox with one hop.
-    openSandbox({
-      worktreeDir: sideRepo,
-      role: 'reviewer',
-      taskId: 'epic-1/task-1',
-      sessionId: 'sess-hook-decision',
-      openedAt: new Date().toISOString(),
-    });
+    openSandbox(
+      {
+        worktreeDir: sideRepo,
+        role: 'reviewer',
+        taskId: 'epic-1/task-1',
+        sessionId: 'sess-hook-decision',
+        openedAt: new Date().toISOString(),
+      },
+      leaseDir,
+    );
     try {
       expect(decide('curl https://example.com', sideRepo)).not.toBeNull();
       expect(decide(`cd ${mainRepo} && curl https://example.com`, sideRepo)).not.toBeNull();
       expect(decide(`git -C ${mainRepo} fetch`, sideRepo)).not.toBeNull();
     } finally {
-      closeSandbox(sideRepo);
+      closeSandbox(sideRepo, leaseDir);
     }
+  });
+
+  it('binds a command by the lease over the directory it moves into', () => {
+    openSandbox(
+      {
+        worktreeDir: sideRepo,
+        role: 'reviewer',
+        taskId: 'epic-1/task-1',
+        sessionId: 'sess-hook-decision',
+        openedAt: new Date().toISOString(),
+      },
+      leaseDir,
+    );
+    try {
+      expect(decide('curl https://example.com', mainRepo)).toBeNull();
+      expect(decide(`cd ${sideRepo} && curl https://example.com`, mainRepo)).not.toBeNull();
+      expect(decide(`git -C ${sideRepo} fetch`, mainRepo)).not.toBeNull();
+    } finally {
+      closeSandbox(sideRepo, leaseDir);
+    }
+  });
+
+  it('judges the rm rule on the repo the shortcut resolves to', () => {
+    const rm = `rm -${'rf'}`;
+    expect(decide(`${rm} workspaces/x`, mainRepo)).toBeNull();
+    expect(reasonOf(decide(`cd ${sideRepo} && ${rm} src`, mainRepo))).toMatch(/rm -rf/);
+    // Outside any repo there is no root to bound the removal by.
+    expect(reasonOf(decide(`cd ${scratch} && ${rm} workspaces`, mainRepo))).toMatch(/rm -rf/);
+  });
+});
+
+// Every shape below is denied when judged where the session stands (the main
+// clone), and must stay denied: the shortcut may only take away a denial it
+// can prove wrong, never one it cannot parse.
+describe('decideHookPayload — the shortcut forfeits any shape it cannot read with certainty', () => {
+  const merge = 'git merge feat/side';
+  const cases: [string, () => string][] = [
+    ['a lone & after the cd', () => `cd ${sideRepo} && true & ${merge}`],
+    ['a backslashed cd', () => `cd ${sideRepo} && \\cd ${mainRepo} && ${merge}`],
+    ['eval of a string', () => `cd ${sideRepo} && eval "cd ${mainRepo}; ${merge}"`],
+    ['eval of plain words', () => `cd ${sideRepo} && eval cd ${mainRepo} && ${merge}`],
+    ['sh -c', () => `cd ${sideRepo} && sh -c 'cd ${mainRepo} && ${merge}'`],
+    ['bash -c', () => `cd ${sideRepo} && bash -c 'cd ${mainRepo} && ${merge}'`],
+    ['a git -c alias', () => `cd ${sideRepo} && git -c alias.m='!cd ${mainRepo} && ${merge}' m`],
+    ['a quoted cd', () => `cd ${sideRepo} && "cd" ${mainRepo} && ${merge}`],
+    ['builtin cd', () => `cd ${sideRepo} && builtin cd ${mainRepo} && ${merge}`],
+    ['|| after an unenterable cd', () => `cd ${sideRepo}/locked && : || ${merge}`],
+    ['an unenterable cd target', () => `cd ${sideRepo}/locked && ${merge}`],
+    ['a target outside any repo', () => `cd ${scratch} && ${merge}`],
+    [
+      'GIT_DIR and GIT_WORK_TREE',
+      () => `cd ${sideRepo} && GIT_DIR=${mainRepo}/.git GIT_WORK_TREE=${mainRepo} ${merge}`,
+    ],
+    [
+      '--git-dir and --work-tree',
+      () => `cd ${sideRepo} && git --git-dir=${mainRepo}/.git --work-tree=${mainRepo} merge x`,
+    ],
+    ['git -C with --git-dir', () => `git -C ${sideRepo} --git-dir=${mainRepo}/.git merge x`],
+    ['a spliced quoted target', () => `cd "${sideRepo}/q"/"r" && ${merge}`],
+    ['cd -', () => `cd - && ${merge}`],
+    ['a bare cd', () => `cd && ${merge}`],
+    ['a CDPATH-dependent relative target', () => `cd side-worktree && ${merge}`],
+    ['a newline', () => `cd ${sideRepo} &&\n${merge}`],
+    ['a redirection', () => `cd ${sideRepo} && ${merge} > out`],
+  ];
+
+  it.each(cases)('keeps the session-cwd denial through %s', (_label, command) => {
+    expect(decide(command(), mainRepo)).not.toBeNull();
+  });
+
+  it('judges a move on the physical directory as well as the lexical one', () => {
+    // `link/..` is the side worktree to a lexical resolver, but git chdir()s
+    // physically — into the main clone.
+    expect(reasonOf(decide('git -C link/.. merge feat/side', sideRepo))).toMatch(/on main/);
+    expect(reasonOf(decide('cd ./link/.. && git merge feat/side', sideRepo))).toMatch(/on main/);
   });
 });

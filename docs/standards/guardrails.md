@@ -42,16 +42,33 @@
 > inside a quoted string splits anyway — over-refusing again, on purpose.
 >
 > The branch-dependent rules read the branch (and repo root) of the directory
-> the command runs in, which is not always the session's `cwd`. A command that
-> is exactly `cd <literal path> && …`, or a lone `git -C <literal path> …`,
-> with no further directory change, is judged in that directory alone — so
-> `cd <worktree> && git merge main` from the main clone is judged on the
-> worktree's branch. Any other directory change (a second `cd`, `pushd`, a
-> subshell, `cd $X`, `;` instead of `&&`) is judged in the session's `cwd`
-> *and* every literal directory the command names, and refused if any of them
-> refuses. A judge's lease follows the session, not the `cd`.
+> the command runs in, which is not always the session's `cwd`. Exactly two
+> shapes are judged in their target alone, so `cd <worktree> && git merge
+> main` from the main clone is judged on the worktree's branch:
 >
-> Two spans are exempt from that looseness, because neither is a command the
+> - `cd <target> && <cmd> && …` — commands joined by nothing but `&&`, and
+> - a lone `git -C <target> …` with nothing chained to it,
+>
+> where every word after the target is unquoted and plain — no `;`, `|`,
+> `||`, lone `&`, newline, backslash, `$`, backtick, quote, parens, glob or
+> redirection — and names no command that moves or re-parses (`cd`, `pushd`,
+> `popd`, `eval`, `source`, `.`, `exec`, `command`, `builtin`, `env`, `sudo`,
+> `xargs`, `find`, `sh`/`bash`/`zsh`/`dash`/`ksh`) and no `-C`, `-c`,
+> `--chdir`, `--directory`. The target is one plain word or one whole quoted
+> span, names an existing directory the hook can enter, and sits on a named
+> branch of a repo; a relative `cd` target must start with `./` or `../`. When
+> a symlink makes the lexical and physical path differ, both are judged.
+> `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `--git-dir` or `--work-tree`
+> anywhere in the command forfeits the shape.
+>
+> Everything else that changes directory — `cd -`, a bare `cd`, a bare-name
+> target (CDPATH could send it anywhere), `cd $X` or `~`, a second hop,
+> `pushd`, a subshell — is judged in the session's `cwd` *and* every literal
+> directory the command names, and refused if any of them refuses: never more
+> lenient than judging `cwd` alone. A judge's lease follows the session, and a
+> lease over a target binds the command too.
+>
+> Two spans are exempt from the splitting looseness above, because neither is a command the
 > tool call runs.
 >
 > The first is the payload of `-m`/`--message` on the git subcommands that

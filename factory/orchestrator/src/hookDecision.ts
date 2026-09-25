@@ -11,7 +11,7 @@
 // `policyHook.ts` be an entry point whose imports are only what deciding
 // actually needs, while `cli.ts` keeps `smith policy hook` by calling the
 // same function rather than a second copy of it.
-import { statSync } from 'node:fs';
+import { accessSync, constants, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import {
   detectCurrentBranch,
@@ -50,7 +50,12 @@ export interface HookDecisionOutput {
  * again: the first is failure, the second is a real allow, and only guard.sh's
  * fail-closed handling of a non-zero exit may turn "failure" into a denial.
  */
-export function decideHookPayload(raw: string, fallbackCwd: string): HookDecisionOutput | null {
+export function decideHookPayload(
+  raw: string,
+  fallbackCwd: string,
+  /** Where judge leases live; the live `state/sandboxes` unless a test points elsewhere. */
+  leaseDir?: string,
+): HookDecisionOutput | null {
   const payload = JSON.parse(raw) as {
     tool_name?: unknown;
     tool_input?: { command?: unknown; file_path?: unknown };
@@ -83,12 +88,14 @@ export function decideHookPayload(raw: string, fallbackCwd: string): HookDecisio
   // move before it acts. `cd <worktree> && git merge main` from a session in
   // the main clone runs on the worktree's side branch, so judging it on `main`
   // is a false deny; `cd <main clone> && git merge x` from a worktree session
-  // is the matching false allow. `commandDirectories` answers where the
-  // command can run — one directory only when that is statically certain,
-  // otherwise every directory it names plus `cwd` — and the command is denied
-  // if ANY of them denies it, so confused parsing can only add denials, never
-  // remove one. A command naming no directory change is judged on `cwd`
-  // alone, exactly as before.
+  // is the matching false allow. So one narrow shape — `shortcutDirectories`
+  // — is judged in its target alone, dropping `cwd`; that is the ONLY way this
+  // function can ever be more lenient than judging `cwd`, so the shape is an
+  // allowlist and anything it cannot read with certainty (including a target
+  // that is not on a named branch of a repo) falls back. The fallback judges
+  // `cwd` plus every directory the command names, and the command is denied
+  // if ANY of them denies it, so it is never more lenient than `cwd` alone.
+  // A command naming no directory change is judged on `cwd` alone, as before.
   const cwd = typeof payload.cwd === 'string' && payload.cwd !== '' ? payload.cwd : fallbackCwd;
   const policy = loadGuardrailPolicy();
   // The lease binds the session a judge was handed, so it is read from `cwd`
@@ -96,19 +103,22 @@ export function decideHookPayload(raw: string, fallbackCwd: string): HookDecisio
   // let `cd <elsewhere> && curl …` leave the sandbox in one hop. A lease over
   // a target is checked too, so moving INTO a leased worktree is bound by it.
   // No lease is the ordinary case and costs one directory read.
-  const sessionLease = activeSandboxFor(cwd);
+  const sessionLease = activeSandboxFor(cwd, leaseDir);
+  const locate = (dir: string) => ({
+    dir,
+    branch: detectCurrentBranch(dir),
+    repoRoot: detectRepoRoot(dir),
+  });
+  const certain = MOVES_RE.test(command) ? shortcutDirectories(command, cwd)?.map(locate) : null;
+  const places =
+    certain?.every((p) => p.branch !== '' && p.repoRoot !== null) === true
+      ? certain
+      : fallbackDirectories(command, cwd).map(locate);
   let reason: string | null = null;
-  for (const dir of commandDirectories(command, cwd)) {
-    const targetLease = dir === cwd ? null : activeSandboxFor(dir);
+  for (const { dir, branch, repoRoot } of places) {
+    const targetLease = dir === cwd ? null : activeSandboxFor(dir, leaseDir);
     for (const sandbox of distinctLeases(sessionLease, targetLease)) {
-      const context: PolicyContext = {
-        toolName,
-        command,
-        branch: detectCurrentBranch(dir),
-        repoRoot: detectRepoRoot(dir),
-        sandbox,
-        filePath,
-      };
+      const context: PolicyContext = { toolName, command, branch, repoRoot, sandbox, filePath };
       const decision = evaluateCommand(context, policy);
       // guard.sh only ever surfaced one reason: each rule block()ed and exited
       // immediately on its own match, sequentially, so the first rule in
@@ -150,44 +160,62 @@ export function decideHookPayload(raw: string, fallbackCwd: string): HookDecisio
 }
 
 /**
- * The directories `command` can run in, for the branch/repo-root/lease
- * lookups that decide it. Fail-closed by construction: the result always
- * contains `cwd` unless ONE directory is statically certain, and the caller
- * denies if any entry denies, so a form this cannot read costs at most a
- * denial the old cwd-only reading would also have made.
+ * The one shape judged in its target alone, or `null` to fall back. An
+ * allowlist, because this is the only path that drops `cwd` and so the only
+ * one that can allow what `cwd` alone would deny:
  *
- *   - No directory change anywhere (no cd/pushd/popd, `git -C`, subshell,
- *     substitution): `[cwd]`, i.e. exactly the pre-existing behaviour.
- *   - `cd <literal> && <rest>`, where the target is an existing directory
- *     and `<rest>` moves nowhere: `[target]`. Everything after a successful
- *     `&&` runs there, and a failed cd runs nothing after it.
- *   - A single `git -C <literal> …` and nothing chained to it: `[target]`.
- *     `-C` moves only its own invocation, so a chained second command would
- *     still run in `cwd` — which is why chaining sends it to the next case.
- *   - Anything else that moves: `cwd` plus every existing literal target the
- *     command names. A target this cannot read (`$X`, `~`, a glob, a
- *     substitution) is simply not added; `cwd` is still judged.
+ *   - `cd <target> && <cmd> && <cmd> …`: a cd, then plain words joined by
+ *     nothing but `&&` — so everything after runs in the target or not at
+ *     all. A relative target must start with `./` or `../` (or be `.`/`..`),
+ *     since a bare name is looked up on CDPATH first.
+ *   - `git -C <target> <plain words>`, alone.
+ *
+ * A plain word is unquoted and uses only `PLAIN_WORD_RE`'s characters: no
+ * `;`, `|`, `&`, newline, backslash, `$`, backtick, quote, parens, glob or
+ * redirection. The target may also be one whole single- or double-quoted
+ * span. After the target, a word that moves the shell or the command
+ * (`MOVER_WORDS`, `MOVER_FLAG_RE`) forfeits, and so does a git location
+ * override anywhere. Returns the target lexically and physically when the two
+ * differ (a cd is logical, git's chdir physical), and the caller falls back
+ * too if any of them is not on a named branch of a repo.
  */
-function commandDirectories(command: string, cwd: string): string[] {
-  if (!MOVES_RE.test(command)) return [cwd];
-  const [, cdWord = '', cdRest = ''] = LEADING_CD_RE.exec(command) ?? [];
-  if (cdWord !== '' && !MOVES_RE.test(cdRest)) {
-    const target = literalDirectory(cdWord, cwd);
-    if (target !== null) return [target];
+function shortcutDirectories(command: string, cwd: string): string[] | null {
+  if (GIT_LOCATION_RE.test(command) || /[\r\n]/.test(command.trim())) return null;
+  const segments = command
+    .trim()
+    .split('&&')
+    .map((segment) => segment.trim().split(/[ \t]+/));
+  const [first = [], ...rest] = segments;
+  let target: string;
+  let after: string[];
+  if (first.length === 2 && first[0] === 'cd' && rest.length > 0) {
+    target = first[1] ?? '';
+    after = rest.flat();
+    if (!/^\.{1,2}(?:\/|$)|^\//.test(unquote(target) ?? '')) return null;
+  } else if (segments.length === 1 && first[0] === 'git' && first[1] === '-C' && first.length > 3) {
+    target = first[2] ?? '';
+    after = first.slice(3);
+  } else {
+    return null;
   }
-  const [, gitWord = '', gitRest = ''] = LONE_GIT_C_RE.exec(command) ?? [];
-  if (gitWord !== '' && !/[;&|\n]/.test(command) && !MOVES_RE.test(gitRest)) {
-    const target = literalDirectory(gitWord, cwd);
-    if (target !== null) return [target];
-  }
+  const plain = (word: string) =>
+    PLAIN_WORD_RE.test(word) && !MOVER_WORDS.has(word) && !MOVER_FLAG_RE.test(word);
+  if (!after.every(plain)) return null;
+  if (!PLAIN_WORD_RE.test(target) && !/^'[^']*'$|^"[^"]*"$/.test(target)) return null;
+  return literalDirectories(target, cwd);
+}
+
+/** Every directory a command names, plus `cwd` — the fail-closed fallback. */
+function fallbackDirectories(command: string, cwd: string): string[] {
   const dirs = [cwd];
   for (const [, word = ''] of command.matchAll(TARGET_RE)) {
     // A relative hop is resolved against every directory found so far, so
     // `cd a && cd b` still reaches `a/b`: an extra candidate costs nothing
     // but a possible denial, and a missed one is a hole.
     for (const base of [...dirs]) {
-      const target = literalDirectory(word, base);
-      if (target !== null && !dirs.includes(target)) dirs.push(target);
+      for (const target of literalDirectories(word, base) ?? []) {
+        if (!dirs.includes(target)) dirs.push(target);
+      }
     }
   }
   return dirs;
@@ -196,38 +224,89 @@ function commandDirectories(command: string, cwd: string): string[] {
 /**
  * Anything that could put a command somewhere other than where it started.
  * Deliberately loose — `echo cd` or `git commit -C HEAD` match too — because
- * a match only forfeits the single-directory fast path, never a check.
+ * a match only forfeits the no-move path, never a check.
  */
 const MOVES_RE = /(?:^|[\s;&|(])(?:cd|pushd|popd)(?=$|[\s;&|)])|\s-C(?:\s|$)|[()`]/;
 
+/** A word the shortcut reads as itself: nothing the shell would expand, split or redirect. */
+const PLAIN_WORD_RE = /^[A-Za-z0-9_./:@%+,=-]+$/;
+
+/** Commands that can move the shell, or run a command string somewhere else. */
+const MOVER_WORDS = new Set([
+  'cd',
+  'pushd',
+  'popd',
+  'eval',
+  'source',
+  '.',
+  'exec',
+  'command',
+  'builtin',
+  'env',
+  'sudo',
+  'xargs',
+  'find',
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+]);
+
+/** Flags that move a command (`-C`, `--chdir`, `--directory`) or configure git (`-c`). */
+const MOVER_FLAG_RE = /^(?:-C|-c$|--chdir|--directory)/;
+
+/** Git location overrides: they point git at another repo whatever the cwd. */
+const GIT_LOCATION_RE = /GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR|--git-dir|--work-tree/;
+
 /** One word: double-quoted, single-quoted, or bare up to a separator. */
 const WORD = `("[^"]*"|'[^']*'|[^\\s;&|<>()]+)`;
-
-/** `cd <word> && <rest>` as the whole command, leading whitespace aside. */
-const LEADING_CD_RE = new RegExp(`^\\s*cd\\s+${WORD}\\s*&&([\\s\\S]*)$`);
-
-/** `git -C <word> <rest>` as the whole command — `-C` straight after `git`. */
-const LONE_GIT_C_RE = new RegExp(`^\\s*git\\s+-C\\s+${WORD}([\\s\\S]*)$`);
 
 /** Every `cd`/`pushd <word>` and every `-C <word>`, wherever it sits. */
 const TARGET_RE = new RegExp(`(?:(?:^|[\\s;&|(])(?:cd|pushd)|\\s-C)\\s+${WORD}`, 'g');
 
 /**
- * `word` as an existing directory, resolved against `base`, or `null` when it
- * is not a literal path: an expansion (`$`, backtick, `~`), a glob, a flag or
- * `-`, or an escape this does not interpret. `null` also for a path that does
- * not exist or is not a directory — a cd there fails and runs nothing after
- * its `&&`, and this is not the place to guess what it meant.
+ * `word` with its quotes removed, or `null` when it is quoted any other way
+ * than one whole span: `"a"/"b"` is two spans the shell splices, and reading
+ * it as one quoted `a"/"b` names a different directory.
  */
-function literalDirectory(word: string, base: string): string | null {
-  const quoted = /^(["']).*\1$/s.test(word);
-  const bare = quoted ? word.slice(1, -1) : word;
-  if (bare === '' || bare.startsWith('-') || /[$`~*?[\]\\]/.test(bare)) return null;
-  const resolved = path.resolve(base, bare);
+function unquote(word: string): string | null {
+  if (/^'[^']*'$/.test(word) || /^"[^"]*"$/.test(word)) return word.slice(1, -1);
+  return /["'\\]/.test(word) ? null : word;
+}
+
+/**
+ * `word` as an existing, enterable directory resolved against `base` —
+ * lexically (where a logical `cd` lands) and physically (where git's chdir
+ * lands, `..` after a symlink included), both when they differ — or `null`
+ * when it is not a literal path: an expansion (`$`, backtick, `~`), a glob, a
+ * flag or `-`, an escape, a quote this does not read, or a path that does not
+ * resolve. A cd there fails and runs nothing after its `&&`, and this is not
+ * the place to guess what it meant.
+ */
+function literalDirectories(word: string, base: string): string[] | null {
+  const bare = unquote(word);
+  if (bare === null || bare === '' || bare.startsWith('-') || /[$`~*?[\]\\]/.test(bare)) {
+    return null;
+  }
+  const lexical = path.resolve(base, bare);
   try {
-    return statSync(resolved).isDirectory() ? resolved : null;
+    // `native` is realpath(3); the JS realpathSync resolves `..` lexically first.
+    const physical = realpathSync.native(path.isAbsolute(bare) ? bare : `${base}/${bare}`);
+    if (!statSync(physical).isDirectory()) return null;
+    accessSync(physical, constants.X_OK);
+    if (lexical === physical || !isDirectory(lexical)) return [physical];
+    return [lexical, physical];
   } catch {
     return null;
+  }
+}
+
+function isDirectory(dir: string): boolean {
+  try {
+    return statSync(dir).isDirectory();
+  } catch {
+    return false;
   }
 }
 
