@@ -5264,6 +5264,40 @@ describe('cli.ts (built binary)', () => {
       expect(error.message).toContain('--plan');
     });
 
+    // A batch candidate is tested whole, with no per-task file set to narrow
+    // a `--select-test-cmd` template to — silently running the full suite
+    // while the outcome claimed it was selected would be the D-260 lie this
+    // combination must refuse instead.
+    it('queue run --batch: refuses with --select-test-cmd', async () => {
+      const planPath = path.join(scratchDir, `batch-selecttest-plan-${Date.now()}.json`);
+      await writeFile(planPath, JSON.stringify(PLAN));
+      const tasksPath = path.join(scratchDir, `batch-selecttest-tasks-${Date.now()}.json`);
+      await writeFile(
+        tasksPath,
+        JSON.stringify([{ taskId: 'task-1', branch: 'b', worktreeDir: scratchDir }]),
+      );
+      const result = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        scratchDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+        '--plan',
+        planPath,
+        '--batch',
+        '--select-test-cmd',
+        'pnpm test {files}',
+      ]);
+      expect(result.status).toBe(1);
+      const error = JSON.parse(result.stdout).error;
+      expect(error.message).toContain('--batch');
+      expect(error.message).toContain('--select-test-cmd');
+    });
+
     // merge-lanes: two claim-disjoint tasks (PLAN's task-1 touches
     // src/foo/*.ts, task-2 touches src/bar/*.ts — neither globs onto a
     // serialize-always path) fold into one candidate and cost one suite run,

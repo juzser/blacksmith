@@ -421,6 +421,60 @@ function mergeWithoutWorktree(
 }
 
 /**
+ * Land an already-built candidate commit onto `integrationBranch`, the same
+ * way `step` decides where to merge (worktreeHolding), reused here so a
+ * batch candidate never bypasses that check the way the bare `update-ref`
+ * CAS used to. No worktree holds the branch: land with the CAS `update-ref`
+ * plumbing alone, exactly as before. A worktree holds it and carries
+ * uncommitted tracked changes: land nothing, the same `integration-dirty`
+ * refusal `step` reports. A clean holder: fast-forward its checkout onto
+ * `candidate` — safe because every caller built `candidate` with `base` as
+ * an ancestor — so the working tree follows the ref instead of drifting
+ * from under whoever has it checked out.
+ */
+type LandOutcome =
+  | { outcome: 'landed' }
+  | { outcome: 'integration-dirty'; worktree: string; dirty: string[] }
+  | { outcome: 'integration-moved' };
+
+function landCandidate(
+  projectDir: string,
+  integrationBranch: string,
+  base: string,
+  candidate: string,
+  message: string,
+): LandOutcome {
+  const holder = worktreeHolding(projectDir, integrationBranch);
+  if (holder === null) {
+    try {
+      runGit(projectDir, [
+        'update-ref',
+        '-m',
+        message,
+        `refs/heads/${integrationBranch}`,
+        candidate,
+        base,
+      ]);
+    } catch {
+      return { outcome: 'integration-moved' };
+    }
+    return { outcome: 'landed' };
+  }
+
+  const dirty = trackedChanges(holder);
+  if (dirty.length > 0) {
+    return { outcome: 'integration-dirty', worktree: holder, dirty };
+  }
+
+  try {
+    execFileSync('git', ['merge', '--ff-only', candidate], { cwd: holder, stdio: 'pipe' });
+  } catch {
+    return { outcome: 'integration-moved' };
+  }
+  return { outcome: 'landed' };
+}
+
+/**
  * A scratch worktree for testing a batch candidate before anything lands —
  * a sibling of the project, the same convention `taskWorktreeDir` uses, but
  * named so it can never collide with a real task id or the reserved
@@ -475,16 +529,32 @@ async function attemptCandidate(
   }
 
   if (testOutcome.passed) {
-    try {
-      runGit(projectDir, [
-        'update-ref',
-        '-m',
-        `Batch-merge ${readyTasks.map((t) => t.taskId).join(', ')} into ${integrationBranch}`,
-        `refs/heads/${integrationBranch}`,
-        candidate,
-        base,
-      ]);
-    } catch {
+    const message = `Batch-merge ${readyTasks.map((t) => t.taskId).join(', ')} into ${integrationBranch}`;
+    const landing = landCandidate(projectDir, integrationBranch, base, candidate, message);
+
+    if (landing.outcome === 'integration-dirty') {
+      // Mirrors `step`'s own refusal: a worktree holds the integration
+      // branch and carries uncommitted tracked changes, so merging into it
+      // either stops half-way or folds someone's unfinished work in. The
+      // tests already ran and passed; nothing landed.
+      const outcomes: StepOutcome[] = [];
+      for (const task of readyTasks) {
+        await logBlocked(
+          task.taskId,
+          'execution.env-failure',
+          `${integrationBranch} is checked out in ${landing.worktree}, which has uncommitted changes: ${landing.dirty.join(', ')}`,
+        );
+        outcomes.push({
+          outcome: 'integration-dirty',
+          taskId: task.taskId,
+          worktree: landing.worktree,
+          dirty: landing.dirty,
+        });
+      }
+      return { outcomes, suiteRuns: 1 };
+    }
+
+    if (landing.outcome === 'integration-moved') {
       // The ref moved under the batch between the candidate's build and its
       // land — D-46's compare-and-swap race, the same one a single task's
       // `mergeWithoutWorktree` throws on, just reachable here with a whole

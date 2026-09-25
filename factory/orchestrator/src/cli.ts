@@ -2308,6 +2308,19 @@ async function main(): Promise<number> {
         { epic },
       );
     }
+    // `attemptCandidate` runs the epic's test command directly against the
+    // whole batch candidate — there is no per-task file set to narrow it to,
+    // so a `--select-test-cmd` template would either render nonsensically or
+    // silently run the full suite while the outcome claimed it was selected
+    // (the same lie D-260 refuses above). Refuse the combination instead of
+    // ignoring the flag.
+    if (flags.batch === 'true' && selectTestCmd !== undefined) {
+      throw new SmithError(
+        'cli.incompatible-flags',
+        'queue run --batch does not support --select-test-cmd: a batch candidate has no single task to narrow the test command to.',
+        { epic },
+      );
+    }
     let edges: Array<{ task: string; dependsOn: string }> = [];
     let claimsById = new Map<string, string[]>();
     if (flags.plan) {

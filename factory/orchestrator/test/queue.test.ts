@@ -837,6 +837,58 @@ describe('batchStep', () => {
     expect(git(projectDir, ['log', '-1', '--format=%s', movedTo])).toBe('side');
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(/\.wt[\\/]project[\\/]batch-/);
   });
+
+  // A worktree holding the integration branch used to be invisible to the
+  // batch land — a bare CAS `update-ref` moved the ref under it regardless.
+  // A dirty holder must refuse the whole batch instead, the same as `step`.
+  it('refuses to land a batch into a worktree whose integration checkout has uncommitted changes', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    await writeFile(path.join(projectDir, 'c.txt'), 'operator is editing\n');
+    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+
+    const result = await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true' });
+
+    expect(result.outcomes).toEqual([
+      {
+        outcome: 'integration-dirty',
+        taskId: 'epic-1/task-a',
+        worktree: await realpath(projectDir),
+        dirty: ['c.txt'],
+      },
+      {
+        outcome: 'integration-dirty',
+        taskId: 'epic-1/task-b',
+        worktree: await realpath(projectDir),
+        dirty: ['c.txt'],
+      },
+    ]);
+    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
+    expect(await readFile(path.join(projectDir, 'c.txt'), 'utf8')).toBe('operator is editing\n');
+  });
+
+  // A clean holder must land through it, exactly as `step` does, so its
+  // working tree follows the ref instead of drifting from under whoever has
+  // it checked out.
+  it('lands a batch in the project directory when it already has the integration branch out', async () => {
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+
+    const result = await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true' });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-a' },
+      { outcome: 'merged', taskId: 'epic-1/task-b' },
+    ]);
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('smith/epic-1/integration');
+    expect(git(projectDir, ['status', '--porcelain'])).toBe('');
+    const tip = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    expect(git(projectDir, ['rev-parse', 'HEAD'])).toBe(tip);
+    expect(await readFile(path.join(projectDir, 'a.txt'), 'utf8')).toBe('a-edited\n');
+    expect(await readFile(path.join(projectDir, 'b.txt'), 'utf8')).toBe('b-edited\n');
+  });
 });
 
 // D-137: `queue run` refuses to log a merge it did not make, which is right —

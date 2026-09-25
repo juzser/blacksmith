@@ -200,6 +200,10 @@ JSON output gains a `batches` summary alongside the usual outcome array —
 admission order — so you can see which groups cost one run and which paid
 the bisection tax. The run still stops at the first group that does not
 land whole, same as the serial loop stops at the first non-`merged` outcome.
+`--batch` and `--select-test-cmd` (§4b) refuse to combine: a batch candidate
+is tested whole, with no single task's file set to narrow the command to, so
+`queue run` rejects the pair up front rather than silently running the full
+suite while claiming a narrowed one.
 
 This is the same shape as two prior-art gating systems, cited here because
 neither is this project: [Zuul](https://zuul-ci.org/docs/zuul/latest/gating.html)
