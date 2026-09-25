@@ -48,7 +48,7 @@ import {
 } from '../src/goalCheck.js';
 import type { IntegrationCheckRecord } from '../src/integration.js';
 import { MCP_SURFACE_NOT_REQUIRED, type McpSurfaceStatus } from '../src/mcp.js';
-import { SPEC_REVIEW_EVENT, type SpecReviewStatus } from '../src/spec.js';
+import { PLAN_AMENDED_EVENT, SPEC_REVIEW_EVENT, type SpecReviewStatus } from '../src/spec.js';
 import type { WaveConcurrency } from '../src/waveConcurrency.js';
 import { crosscheckDefaults } from './helpers/crosscheckPolicy.js';
 
@@ -873,6 +873,201 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
     ]);
     expect(summary.openFindings.map((f) => f.findingId)).toEqual(['finding-b']);
     expect(summary.blockers.some((b) => b.includes('finding-b'))).toBe(true);
+  });
+});
+
+// A re-plan (`plan amend`) can supersede a task with a successor task cut
+// under the new plan version. run.md says a superseded task counts as done
+// "Repeat until every task in the live plan version is completed/superseded/
+// waived" -- but a superseded task is not terminal-OK by itself (D-120's
+// TERMINAL_OK_TASK_STATUSES is only completed/waived): it reads terminal-OK
+// only when the successor that superseded it is itself terminal-OK,
+// recursively. `successors` is the event-derived old-id -> new-id map
+// (spec.ts's taskSuccessors(), folded off plan-version-created's `successors`
+// payload field) threaded as summarizeEpic's 11th argument.
+describe('epic.ts summarizeEpic — superseded successor chains', () => {
+  it('blocks a superseded task with no recorded successor', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow({ taskId: 'epic-1/task-1', taskStatus: 'superseded' })],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.nonTerminalTaskCount).toBe(1);
+    expect(
+      summary.blockers.some((b) => b.includes('epic-1/task-1') && b.includes('no successor')),
+    ).toBe(true);
+  });
+
+  it('is mechanically ready when a superseded task’s successor landed terminal-OK', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [
+        taskRow({ taskId: 'epic-1/task-1', taskStatus: 'superseded' }),
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'completed' }),
+      ],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      null,
+      [],
+      null,
+      new Map([['epic-1/task-1', 'epic-1/task-2']]),
+    );
+    expect(summary.mechanicallyReady).toBe(true);
+    expect(summary.nonTerminalTaskCount).toBe(0);
+  });
+
+  it('blocks and names the successor when it is not terminal-OK', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [
+        taskRow({ taskId: 'epic-1/task-1', taskStatus: 'superseded' }),
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'todo' }),
+      ],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      null,
+      [],
+      null,
+      new Map([['epic-1/task-1', 'epic-1/task-2']]),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(
+      summary.blockers.some(
+        (b) => b.includes('epic-1/task-1') && b.includes('epic-1/task-2') && b.includes('todo'),
+      ),
+    ).toBe(true);
+  });
+
+  it('walks a two-hop successor chain to a terminal-OK task', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [
+        taskRow({ taskId: 'epic-1/task-1', taskStatus: 'superseded' }),
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'superseded' }),
+        taskRow({ taskId: 'epic-1/task-3', taskStatus: 'completed' }),
+      ],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      null,
+      [],
+      null,
+      new Map([
+        ['epic-1/task-1', 'epic-1/task-2'],
+        ['epic-1/task-2', 'epic-1/task-3'],
+      ]),
+    );
+    expect(summary.mechanicallyReady).toBe(true);
+  });
+
+  it('blocks rather than looping when a successor chain cycles', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [
+        taskRow({ taskId: 'epic-1/task-1', taskStatus: 'superseded' }),
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'superseded' }),
+      ],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      null,
+      [],
+      null,
+      new Map([
+        ['epic-1/task-1', 'epic-1/task-2'],
+        ['epic-1/task-2', 'epic-1/task-1'],
+      ]),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+  });
+
+  // D-127 Part B meets the successor chain: an amend-pending finding's
+  // amends_task_ids can name a task that a LATER, separate amendment goes on
+  // to supersede. findings.ts's repairObligation refuses to renegotiate a
+  // well-formed obligation, so the only way to reach `amended` at all is to
+  // resolve the named id through its successor at evaluation time — the
+  // stored obligation is never rewritten.
+  it('discharges an amend-pending finding through a successor chain when the named task was itself superseded', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'superseded', planVersion: 2 }),
+        taskRow({ taskId: 'epic-1/task-4', taskStatus: 'completed', planVersion: 3 }),
+      ],
+      [
+        findingFixture({
+          finding_status: 'amend-pending',
+          finding_scope: 'spec',
+          amends_task_ids: ['epic-1/task-2'],
+          amends_plan_version: 2,
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      null,
+      [],
+      null,
+      new Map([['epic-1/task-2', 'epic-1/task-4']]),
+    );
+    expect(summary.mechanicallyReady).toBe(true);
+    expect(summary.satisfiedAmendments).toHaveLength(1);
+    // The proof-of-landing plan version comes from the successor (task-4,
+    // v3), but the taskId offered as evidence stays the originally-named
+    // obligation id (task-2): findings.ts's outstandingObligations bare-
+    // compares AmendmentDischarge.taskId against the finding's own,
+    // never-rewritten amends_task_ids, so evidence keyed to the successor's
+    // id would never match and closeEpic's transition() would refuse the
+    // discharge.
+    expect(summary.satisfiedAmendments[0]?.satisfiedBy).toEqual([
+      { taskId: 'epic-1/task-2', planVersion: 3 },
+    ]);
+  });
+
+  it('keeps an amend-pending finding open when a superseded obligation’s successor has not landed terminal-OK', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'superseded', planVersion: 2 }),
+        taskRow({ taskId: 'epic-1/task-4', taskStatus: 'todo', planVersion: 3 }),
+      ],
+      [
+        findingFixture({
+          finding_status: 'amend-pending',
+          finding_scope: 'spec',
+          amends_task_ids: ['epic-1/task-2'],
+          amends_plan_version: 2,
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      null,
+      [],
+      null,
+      new Map([['epic-1/task-2', 'epic-1/task-4']]),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.satisfiedAmendments).toHaveLength(0);
+    expect(summary.openFindings).toHaveLength(1);
+    expect(summary.blockers.some((b) => b.includes('epic-1/task-2'))).toBe(true);
   });
 });
 
@@ -2268,6 +2463,68 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
           satisfied_by: [{ task_id: 'epic-1/task-2', plan_version: 2 }],
         },
       ]);
+    });
+
+    // The end-to-end version of the superseded-successor-chain unit tests
+    // above: an obligation named a task (task-2) that a LATER, unrelated
+    // amendment went on to supersede with task-4. summarizeEpic resolves
+    // that through the chain and says "satisfied" -- but closeEpic does not
+    // stop at summarizeEpic's opinion, it re-proves the discharge by handing
+    // the evidence to transition()'s own outstandingObligations check
+    // (findings.ts), which bare-compares evidence.taskId against the
+    // ORIGINALLY NAMED amends_task_ids. Evidence keyed to the successor's id
+    // (task-4) would never match the obligation (task-2) and transition()
+    // would refuse the close with findings.amendment-not-discharged --
+    // exactly the D-127 "no path" gap #2 describes. This is the seam that
+    // pure summarizeEpic unit tests cannot see.
+    it('discharges an amend-pending finding at closeEpic when its obligation task was later superseded by a successor', async () => {
+      await addTask('epic-1/task-1', 'completed');
+      await addTask('epic-1/task-2', 'superseded', 2);
+      await addTask('epic-1/task-4', 'completed', 3);
+      await addIntegrationCheck();
+      await addSpecReview();
+      await addGoalCheck();
+      // The real shape spec.ts's amendPlan() writes on a rename-supersede.
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 3,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            epic_id: epicId,
+            version: 3,
+            previous_version: 2,
+            amends: [],
+            rationale: 'task-2 renamed to task-4 by a later, unrelated amendment',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {},
+            successors: { 'epic-1/task-2': 'epic-1/task-4' },
+          },
+        },
+        { stateDir },
+      );
+      await raiseAmendPending(['epic-1/task-2']);
+
+      const record = await closeEpic(
+        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        ctx(),
+        { stateDir },
+      );
+
+      expect(record.closedBy).toBe('verdict');
+      expect(record.machineVerdict).toBe('go');
+
+      const events = await readEvents(sessionId, { stateDir });
+      const discharged = events.some(
+        (e) =>
+          e.record.event_type === 'finding-transitioned' &&
+          (e.record.payload as Record<string, unknown>).finding_id === 'finding-spec' &&
+          (e.record.payload as Record<string, unknown>).to_status === AMENDED_STATUS,
+      );
+      expect(discharged).toBe(true);
     });
 
     // D-21 Part 4. The PERSISTED epic-closed record is what outlives the
