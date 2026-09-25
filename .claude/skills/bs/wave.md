@@ -238,8 +238,18 @@ one thing this playbook never asks you to.
    — see "Round counting and escalation" above. Then have the log check
    you: `smith escalation check <session-id> --task <task-id>`, which
    exits 1 if the rung you just climbed is not evidenced.
-10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting,
-    ask what the diff did to everyone outside the claims, and whether it
+10. Gate outcome `pass`/`pass-with-waivers-pending` → before admitting, audit
+    the wave's own parallelism: `smith wave audit --session <id> --epic
+    <epic>`. It reads the log back and says whether the tasks admitted
+    together actually ran together — `parallel` when every admitted task was
+    in flight at once, `partial` when two or more overlapped but never all,
+    `serialized` when work is recorded but no two tasks ever overlapped,
+    `single` when the wave admitted one task (nothing to be parallel about),
+    and `unobserved` when the wave was admitted and the log shows no work for
+    any of its tasks. Exit 1 on `serialized`, exit 2 on `unobserved` — either
+    is a fact for the wave-loop's hand-back, not a reason to hold the merge:
+    report the verdict and keep going to admission. Then ask what the diff
+    did to everyone outside the claims, and whether it
     kept what the spec promised:
     `smith claims impact <worktree-dir> <spec.json>`. Exit 1 means a
     `proven` break — this task removed an export a file outside its claims
