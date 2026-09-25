@@ -215,7 +215,11 @@ function shortcutDirectories(command: string, cwd: string): string[] | null {
     target = first[1] ?? '';
     after = rest.flat();
     if (!/^\.{1,2}(?:\/|$)|^\//.test(unquote(target) ?? '')) return null;
-    if (!rest.every((segment) => segment[0] === 'git' && GIT_SUBCOMMAND_ALLOWLIST.has(segment[1] ?? '')))
+    if (
+      !rest.every(
+        (segment) => segment[0] === 'git' && GIT_SUBCOMMAND_ALLOWLIST.has(segment[1] ?? ''),
+      )
+    )
       return null;
   } else if (segments.length === 1 && first[0] === 'git' && first[1] === '-C' && first.length > 3) {
     target = first[2] ?? '';
@@ -227,7 +231,8 @@ function shortcutDirectories(command: string, cwd: string): string[] | null {
   const plain = (word: string) =>
     PLAIN_WORD_RE.test(word) && !MOVER_WORDS.has(word) && !MOVER_FLAG_RE.test(word);
   if (!after.every(plain)) return null;
-  if (after.some((word) => hasDangerousShortOption(word) || hasDangerousLongOption(word))) return null;
+  if (after.some((word) => hasDangerousShortOption(word) || hasDangerousLongOption(word)))
+    return null;
   if (!PLAIN_WORD_RE.test(target) && !/^'[^']*'$|^"[^"]*"$/.test(target)) return null;
   return literalDirectories(target, cwd);
 }
