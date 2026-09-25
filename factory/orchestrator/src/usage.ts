@@ -429,6 +429,13 @@ export const COMMANDS: readonly CommandDoc[] = [
       'Assert crosscheck.yml’s role asymmetry against the log. Exit 1 on a violation OR an unverifiable answer.',
   },
   {
+    command: 'dispatch lint',
+    positionals: '<prompt-file>',
+    flags: '--role <role> --task <id> --session <id> [--agents-dir <dir>] [--state-dir <dir>]',
+    summary:
+      "Check a composed dispatch prompt's stated turn budget against the role template's maxTurns, and a judge prompt's declared-artifact line against the ledger. Exit 1 on a violation OR an unverifiable answer. `-` reads stdin.",
+  },
+  {
     command: 'tester check',
     positionals: '<session-id>',
     flags: '[--task <id>] [--policy <path>] [--state-dir <dir>]',

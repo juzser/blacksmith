@@ -58,6 +58,7 @@ import type { TickOptions } from './daemon.js';
 import type { DbOpts } from './db/projector.js';
 import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from './delegation.js';
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
+import { lintDispatchPrompt } from './dispatchLint.js';
 import { loadDotEnv } from './dotenv.js';
 import { loadEffortPolicy, resolveEffort } from './effort.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from './errorIssues.js';
@@ -2687,6 +2688,26 @@ async function main(): Promise<number> {
     });
     printJson(report);
     return report.ok ? 0 : 1;
+  }
+
+  if (namespace === 'dispatch' && action === 'lint') {
+    // dispatch.md "Carry into the prompt" / "Declare each judge's artifact":
+    // catches a stated turn budget over the template's `maxTurns` and a judge
+    // prompt missing (or mismatching) its declared-artifact line, before the
+    // agent ever runs. See dispatchLint.ts for why each status means what it
+    // means. `-` reads stdin, same convention as `prompt wrap`/`prompt record`.
+    const [file] = requirePositionals(positional, usageFor('dispatch lint'), 1) as [string];
+    const prompt = file === '-' ? readFileSync(0, 'utf8') : readFileSync(file, 'utf8');
+    const report = await lintDispatchPrompt({
+      prompt,
+      role: requireFlag(flags, 'role'),
+      taskId: requireFlag(flags, 'task'),
+      sessionId: requireFlag(flags, 'session'),
+      ...(flags['agents-dir'] ? { agentsDir: flags['agents-dir'] } : {}),
+      eventOpts: eventOptsFromFlags(flags),
+    });
+    printJson(report);
+    return report.exitCode;
   }
 
   if (namespace === 'tester' && action === 'check') {
