@@ -28,3 +28,6 @@ blob-report/
 # Per-project canvas state for a local editor: viewport, sticky notes, node
 # coordinates. One developer's window, not a fact about the repo.
 .nodeterm/
+
+# Per-clone audit store (smith audit), never committed
+.blacksmith/
