@@ -41,7 +41,63 @@
 > the bare command does. Splitting stays naive about quoting, so a separator
 > inside a quoted string splits anyway — over-refusing again, on purpose.
 >
-> Two spans are exempt from that looseness, because neither is a command the
+> The branch-dependent rules read the branch (and repo root) of the directory
+> the command runs in, which is not always the session's `cwd`. Exactly two
+> shapes are judged in their target alone, so `cd <worktree> && git merge
+> main` from the main clone is judged on the worktree's branch:
+>
+> - `cd <target> && <cmd> && …` — commands joined by nothing but `&&`, and
+> - a lone `git -C <target> …` with nothing chained to it,
+>
+> the whole command must be printable ASCII — anything outside `0x20`-`0x7E`
+> (tab aside, allowed as a separator) forfeits before any parsing happens, so
+> an NBSP, BOM or form-feed a naive `.trim()` would silently drop cannot pass
+> for whitespace and shift what a word means. Every word after the target is
+> unquoted and plain — no `;`, `|`, `||`, lone `&`, newline, backslash, `$`,
+> backtick, quote, parens, glob or redirection — and every `&&`-joined
+> command after the target is literally the word `git`, followed by a
+> subcommand from an explicit, positive allowlist (`status`, `log`, `diff`,
+> `show`, `add`, `commit`, `merge`, `rebase`, `push`, `fetch`, `pull`,
+> `branch`, `reset`, `rev-parse`, `tag`, `stash`) —
+> never a denylist of mover words, because any plain word could be a shell
+> alias or function (zsh's autopushd, for instance, defines `-` and `1`..`9`
+> as `cd` shortcuts) and nothing short of "must be a git builtin that cannot
+> run a command in another repo" is sound. Excluded on purpose: indirect
+> executors that run a git command somewhere else (`for-each-repo`,
+> `submodule foreach`), anything that rewrites history outside a plain
+> invocation (`filter-branch`, `filter-repo`, `worktree`, `bisect`), and
+> `checkout`/`switch` — either can move the target onto a different branch
+> mid-command, which invalidates the branch the shortcut already read: `cd
+> <worktree> && git checkout main && git merge x` reads the worktree's branch
+> once, before the checkout moves it onto `main`, so a merge that actually
+> lands on `main` is judged against the branch the worktree just left. A git
+> builtin cannot be shadowed by a git alias, which is what makes this
+> allowlist sound; a shell alias named `git` itself is out of scope. No `-C`,
+> `-c`, `--chdir`, `--directory` anywhere. Also forfeited, at the word level
+> and regardless of subcommand: any single-dash word (other than a plain
+> number) whose option letters include `x` or `s` — stuck argument or bundled
+> flags included, so `-x./s`, `-kx./s` and `-s` all forfeit — and any word
+> starting with `--e` or `--s`. This is deliberately broader than the two
+> flags it exists to catch — `-x`/`--exec`/`--exec=…` on a rebase runs an
+> arbitrary command as part of it, and `-s`/`--strategy`/`--strategy=…` on a
+> merge or rebase runs `git-<name>` off `PATH` — because over-forfeiting only
+> falls back to the full check and never widens what the shortcut allows. The
+> target
+> is one plain word or one whole quoted span, names an existing directory the
+> hook can enter, and sits on a named branch of a repo — a detached `HEAD` is
+> not one; a relative `cd` target must start with `./` or `../`. When a
+> symlink makes the lexical and physical path differ, both are judged.
+> `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `--git-dir` or `--work-tree`
+> anywhere in the command forfeits the shape.
+>
+> Everything else that changes directory — `cd -`, a bare `cd`, a bare-name
+> target (CDPATH could send it anywhere), `cd $X` or `~`, a second hop,
+> `pushd`, a subshell — is judged in the session's `cwd` *and* every literal
+> directory the command names, and refused if any of them refuses: never more
+> lenient than judging `cwd` alone. A judge's lease follows the session, and a
+> lease over a target binds the command too.
+>
+> Two spans are exempt from the splitting looseness above, because neither is a command the
 > tool call runs.
 >
 > The first is the payload of `-m`/`--message` on the git subcommands that
