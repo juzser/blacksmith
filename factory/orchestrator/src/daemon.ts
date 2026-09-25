@@ -730,10 +730,17 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
 
   // Every session reachable from `root` by walking children — the whole tree
   // a lineage forks into, not just the one leaf that happened to ask for it.
+  // Guarded like rootOf: a cycle in causal parents must cost a tick nothing,
+  // not grow this list until the process dies.
   const treeSessions = (root: string): string[] => {
     const all = [root];
+    const seen = new Set(all);
     for (let i = 0; i < all.length; i += 1) {
-      for (const child of childrenOf.get(all[i] as string) ?? []) all.push(child);
+      for (const child of childrenOf.get(all[i] as string) ?? []) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        all.push(child);
+      }
     }
     return all;
   };

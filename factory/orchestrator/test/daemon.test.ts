@@ -656,6 +656,17 @@ describe('the tick that reads the disk', () => {
     expect(report.findings.filter((f) => f.kind === 'budget')).toHaveLength(1);
   });
 
+  it('finishes a tick over a lineage whose parents form a cycle', async () => {
+    // A hand-edited or mis-stamped log can make two sessions each other's
+    // parent. Walking up already stops at a repeat; walking down must too, or
+    // one corrupt pair hangs the daemon instead of costing one tick.
+    writeLog('sess-a', [record('sess-a', 'session-start', {}, { causal_parent: 'sess-b#0' })]);
+    writeLog('sess-b', [record('sess-b', 'session-start', {}, { causal_parent: 'sess-a#0' })]);
+    writeLog('sess-c', [record('sess-c', 'session-start', {}, { causal_parent: 'sess-a#0' })]);
+    const report = await runTick({ ...OPTS, stateDir });
+    expect(report.sessions).toEqual(['sess-c']);
+  });
+
   it('counts attention findings apart from the informational ones', async () => {
     writeLog('sess-a', [
       record('sess-a', 'session-start', {}),
