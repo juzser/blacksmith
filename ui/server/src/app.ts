@@ -57,6 +57,7 @@ import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/schedul
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
+import { writeOriginGuard } from './middleware.js';
 
 /**
  * How often the change stream re-scans `state/events/` while at least one
@@ -835,7 +836,11 @@ export function createApp(opts: AppOpts): AppHandle {
   });
 
   // --- Writes: waiver apply-batch + lesson approve/edit/reject only ----
-  app.post('/api/waivers/apply-batch', async (c) => {
+  // Every write route carries writeOriginGuard() (middleware.ts) so a
+  // request that did not originate from the dashboard itself — foreign
+  // Origin, rebound Host, cross-site fetch, or a non-JSON body — never
+  // reaches transitionLesson()/applyBatch().
+  app.post('/api/waivers/apply-batch', writeOriginGuard(), async (c) => {
     const body = await c.req.json<WriteEnvelope & { decisions?: WaiverBatchDecision[] }>();
     const decisions = body.decisions ?? [];
     if (decisions.length === 0) {
@@ -872,18 +877,18 @@ export function createApp(opts: AppOpts): AppHandle {
     return { lessonId, status: result.lessonStatus, novelty: result.novelty };
   }
 
-  app.post('/api/lessons/:lessonId/approve', async (c) => {
+  app.post('/api/lessons/:lessonId/approve', writeOriginGuard(), async (c) => {
     const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId'), 'approved', body, {}));
+    return c.json(await transition(c.req.param('lessonId') as string, 'approved', body, {}));
   });
 
-  app.post('/api/lessons/:lessonId/reject', async (c) => {
+  app.post('/api/lessons/:lessonId/reject', writeOriginGuard(), async (c) => {
     const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId'), 'invalidated', body, {}));
+    return c.json(await transition(c.req.param('lessonId') as string, 'invalidated', body, {}));
   });
 
-  app.post('/api/lessons/:lessonId/edit', async (c) => {
-    const lessonId = c.req.param('lessonId');
+  app.post('/api/lessons/:lessonId/edit', writeOriginGuard(), async (c) => {
+    const lessonId = c.req.param('lessonId') as string;
     const body = await c.req.json<LessonWriteBody>();
     if (!body.statement && !body.lessonType && !body.lessonScope) {
       throw new BadRequestError(
