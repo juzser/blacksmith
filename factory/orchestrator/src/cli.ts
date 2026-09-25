@@ -1010,8 +1010,19 @@ async function nextWaveInputFrom(
     ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
     : [];
   const planIds = new Set(planOnDisk.tasks.map((t) => t.task_id));
+  // A lineage is not one epic. `readAddedTasks` reads the WHOLE lineage
+  // (D-119), so a resumed session that ever ran a different, earlier epic
+  // carries that epic's `task-added` rows too — and a row an operator
+  // abandoned non-terminal (never merged, waived, or superseded) reads back
+  // here exactly like a genuine follow-up of THIS plan. Unfiltered, it was
+  // spliced into `plan.tasks` below and reached `computeNextWave` as a
+  // candidate or an occupied claim-holder: proposed as this epic's own work,
+  // and able to defer this epic's tasks on a claim overlap that has nothing
+  // to do with them. `wave check` never has this problem because it only
+  // ever looks at the ids an operator names — matching that, a follow-up
+  // only counts here when its own `task-added` named this plan's epic.
   const followUps: TaskSpecRecord[] = logged
-    .filter((t) => !planIds.has(t.taskId))
+    .filter((t) => !planIds.has(t.taskId) && t.epicId === planOnDisk.epic_id)
     .map((t) => ({
       task_id: t.taskId,
       // The log is the only register that holds this task's status, so a

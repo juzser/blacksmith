@@ -5014,6 +5014,95 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // A lineage carries every epic that ever ran a session in it, not just
+    // the one the plan in hand belongs to. `wave next` reads `--session`
+    // lineage-wide (D-119) so a resumed session still sees its own follow-up
+    // tasks and live statuses -- but that read must not hand a DIFFERENT
+    // epic's rows to THIS plan's proposal. An older epic's task, left
+    // non-terminal in the log (never merged, abandoned, or superseded), is
+    // exactly the row `wave check` never sees either: it only ever looks at
+    // the ids an operator names, which is why bypassing the stall with `wave
+    // check <plan> <task-id>` alone admitted the task `wave next` refused.
+    describe("wave next: scoped to the plan's own epic", () => {
+      it('never proposes, defers, or occupies a task logged under a different epic', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        // Simulates epic-0's leftover row: a `task-added` for another epic,
+        // in the same session lineage, whose claim overlaps task-1's -- and
+        // which never advanced past `todo`, so it is exactly the "abandoned,
+        // never merged, never superseded" row the bug report describes.
+        const leak = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-added',
+            task_id: 'epic-0/task-9',
+            plan_version: 1,
+            causal_parent: `${sessionId}#0`,
+            payload: { epic_id: 'epic-0', claims: ['src/foo/*.ts'] },
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(leak.status).toBe(0);
+        // A genuine follow-up of THIS epic, log-only the way `findings raise`
+        // mints one: the filter must keep adopting it.
+        const own = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-added',
+            task_id: 'epic-1/followup-cd34',
+            plan_version: 1,
+            causal_parent: `${sessionId}#0`,
+            payload: { epic_id: 'epic-1', claims: ['src/qux/*.ts'] },
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(own.status).toBe(0);
+
+        const result = runCli([
+          'wave',
+          'next',
+          planPath,
+          '--repo',
+          scratchDir,
+          '--session',
+          sessionId,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        const proposal = JSON.parse(result.stdout);
+        expect(proposal.epicId).toBe('epic-1');
+
+        // The other epic's row must not appear anywhere in the answer --
+        // not admitted, not deferred, not counted as done or occupied.
+        const seen = [
+          ...proposal.wave,
+          ...proposal.deferred.map((d: { taskId: string }) => d.taskId),
+          ...proposal.done,
+          ...proposal.occupied,
+        ];
+        expect(seen).not.toContain('epic-0/task-9');
+
+        // And its claim on `src/foo/*.ts` must not have cost task-1 its
+        // admission: all of this epic's tasks run, the log-only one included, claim-disjoint from each
+        // other, exactly as `wave check` already treats a stale foreign row
+        // -- it never once compares against it.
+        expect(proposal.wave.sort()).toEqual([
+          'epic-1/followup-cd34',
+          'epic-1/task-1',
+          'epic-1/task-2',
+        ]);
+        expect(proposal.deferred).toEqual([]);
+      });
+    });
+
     // The last id-minting hole: `--tasks` is a hand-written file, so a bare
     // id in it would have made queue.ts write `wave-merged` under a spelling
     // the plan never used — the exact divergence (D-14) that left the epic

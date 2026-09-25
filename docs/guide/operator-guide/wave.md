@@ -127,7 +127,15 @@ the task's *initial* status, and a plan read from disk hours into a run still
 says `todo` about work that finished. `--session` reads the live status from
 the lineage log, and picks up follow-up tasks that `findings raise` minted
 into the log and into no plan file — a task that exists, is admissible, and
-would otherwise be offered to nobody.
+would otherwise be offered to nobody. A resumed session's lineage can span
+more than one epic (a continuation reads the parent's whole history, not just
+its own), so this only ever adopts a logged task whose own `epic_id` matches
+the plan passed on the command line — a different epic's task, left
+non-terminal in the same lineage, never enters the wave, the deferred list,
+or the claim-overlap check, exactly as if it had never been logged. A
+`task-added` whose payload names no `epic_id` at all is treated the same way,
+so a follow-up you append by hand must carry the plan's `epic_id` for `wave
+next` to offer it.
 
 Exit 1 means work remains and none of it can start: a stall worth reporting,
 distinguished from the epic simply being finished, which is an empty `wave`
