@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   AUDIT_AXES,
   AUDIT_STATUSES,
-  auditedProjectKind,
-  auditedProjectName,
   AuditError,
   type AuditLine,
+  auditedProjectKind,
+  auditedProjectName,
   auditStorePath,
   clusterByPath,
   DECLINE_EXPIRY_DAYS,
