@@ -7,6 +7,8 @@ import {
   AUDIT_STATUSES,
   AuditError,
   type AuditLine,
+  auditedProjectKind,
+  auditedProjectName,
   auditStorePath,
   clusterByPath,
   DECLINE_EXPIRY_DAYS,
@@ -18,6 +20,8 @@ import {
   suppressedFingerprints,
 } from '../src/audit.js';
 import { computeFingerprint } from '../src/findings.js';
+import { REPO_ROOT } from '../src/paths.js';
+import { FACTORY_PROJECT } from '../src/roadmap.js';
 
 const NOW = new Date('2026-09-10T00:00:00.000Z');
 
@@ -63,6 +67,49 @@ describe('the four axes', () => {
 
   it('carries the five statuses of the spec table, and only those', () => {
     expect([...AUDIT_STATUSES]).toEqual(['raised', 'merged', 'accepted', 'declined', 'fixed']);
+  });
+});
+
+// A self-audit's cut named its milestone, its events and its spec
+// `path.basename(project)` -- correct for every OTHER project, but this
+// clone's own directory is not always named FACTORY_PROJECT (`black-smith`;
+// roadmap.ts documents the `black-smith`/`blacksmith` siblings), so a
+// self-audit wrote a name `collectProjects()` (projects.ts) had never seen
+// and that resolved back to this very clone under it. `auditedProjectName`
+// is the one place that naming decision is made, shared by the milestone's
+// `- project:` line, the goal sentence, the spec's Project line and the
+// event's `project` field.
+describe('auditedProjectName', () => {
+  it('names an ordinary project by its directory basename', () => {
+    expect(auditedProjectName('/repo/envkit')).toBe('envkit');
+  });
+
+  it('names REPO_ROOT FACTORY_PROJECT, whatever this clone’s own directory is called', () => {
+    expect(auditedProjectName(REPO_ROOT)).toBe(FACTORY_PROJECT);
+  });
+
+  it('compares resolved paths, so an unresolved path to REPO_ROOT still names FACTORY_PROJECT', () => {
+    expect(auditedProjectName(path.join(REPO_ROOT, '.'))).toBe(FACTORY_PROJECT);
+  });
+});
+
+// renderMilestone's `- kind:` line used to hard-code 'product', correct for
+// every OTHER project but wrong for a self-audit: roadmap.ts's own parser
+// enforces that a milestone naming FACTORY_PROJECT is always kind "factory"
+// (`roadmap.factory-kind-fixed`), so a self-audit cut that named its project
+// FACTORY_PROJECT (auditedProjectName, above) while still writing 'product'
+// would stamp a milestone that fails to parse the moment it lands in
+// roadmap.md. auditedProjectKind is the kind counterpart of
+// auditedProjectName: it feeds the same REPO_ROOT-resolved name through
+// roadmap.ts's own defaultKindFor, so the two bullets a cut writes can never
+// again disagree with the parser that reads them back.
+describe('auditedProjectKind', () => {
+  it('kinds an ordinary project product, like defaultKindFor does for any non-factory name', () => {
+    expect(auditedProjectKind('/repo/envkit')).toBe('product');
+  });
+
+  it('kinds REPO_ROOT factory, whatever this clone’s own directory is called', () => {
+    expect(auditedProjectKind(REPO_ROOT)).toBe('factory');
   });
 });
 

@@ -89,6 +89,16 @@ function collectProjects(opts: FactoryProjectsOptions): CollectedProjects {
       missing.push({ name, roots });
       continue;
     }
+    // Dedupe by name alone is not enough: a self-audit's cut can stamp this
+    // clone's OWN directory name onto a milestone rather than FACTORY_PROJECT
+    // (audit.ts's `auditedProjectName`), and that name is never in `seen`.
+    // Left unchecked, `firstCheckout` resolves it to REPO_ROOT -- PROJECTS_DIR
+    // is this clone's own parent -- and this clone gets registered a second
+    // time as a foreign, non-self ref that `--no-self` cannot filter
+    // (`resolveProjectDirs` only ever drops the entry at index 0). Self
+    // already leads `refs`; a checkout that resolves to REPO_ROOT is that
+    // entry under another name, so it is skipped rather than pushed again.
+    if (path.resolve(dir) === path.resolve(REPO_ROOT)) continue;
     refs.push({ name, dir, self: false });
   }
   return { refs, missing };

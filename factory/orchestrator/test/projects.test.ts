@@ -100,6 +100,20 @@ describe('factoryProjects', () => {
     expect(factoryProjects({ roadmapPath, roots: [root] })).toHaveLength(1);
   });
 
+  // A self-audit's `audit cut` used to name this milestone's project
+  // `path.basename(project)`, and for a self-audit that is this clone's own
+  // directory name, not FACTORY_PROJECT -- `blacksmith`, not `black-smith`.
+  // That name is not in `seen`, so the loop went looking for a `blacksmith`
+  // checkout under PROJECTS_DIR, this clone's own parent -- and found this
+  // very clone. Dedupe-by-name alone cannot catch this: the fix is to also
+  // refuse a ref whose *checkout* resolves to REPO_ROOT, however it is named.
+  it('does not re-register this clone under another name whose checkout is REPO_ROOT', () => {
+    const aliasRoots = [path.dirname(REPO_ROOT)];
+    write(milestone('self-audit-1', path.basename(REPO_ROOT)));
+    const refs = factoryProjects({ roadmapPath, roots: aliasRoots });
+    expect(refs).toEqual([{ name: FACTORY_PROJECT, dir: REPO_ROOT, self: true }]);
+  });
+
   it('searches roots in order and takes the first that answers', () => {
     const legacy = path.join(scratch, 'workspaces');
     mkdirSync(legacy);

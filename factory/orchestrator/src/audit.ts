@@ -51,7 +51,7 @@ import {
   type WorktreeDrift,
   type WorktreeFingerprint,
 } from './immutability.js';
-import { SPECS_ACTIVE_DIR } from './paths.js';
+import { REPO_ROOT, SPECS_ACTIVE_DIR } from './paths.js';
 import {
   latestPlanVersion,
   loadPlan,
@@ -59,6 +59,7 @@ import {
   type PlanOpts,
   planClaimedTasks,
 } from './plan.js';
+import { defaultKindFor, FACTORY_PROJECT, type MilestoneKind } from './roadmap.js';
 import { loadTaxonomy } from './taxonomy.js';
 
 export class AuditError extends SmithError {}
@@ -631,6 +632,43 @@ function mintAuditId(now: Date): string {
 }
 
 /**
+ * The name an audit calls `project` by, everywhere one is needed: the
+ * event's `project` field, the cut milestone's `- project:` line and goal
+ * sentence, and the cut spec's Project line.
+ *
+ * `path.basename(project)` names every OTHER project correctly, but this
+ * clone's own directory is not always named FACTORY_PROJECT
+ * (`black-smith`) -- roadmap.ts's own note documents the real `black-smith`/
+ * `blacksmith` siblings this factory was built beside -- so a self-audit that
+ * used the basename wrote a name `collectProjects()` (projects.ts) had never
+ * seen, sent it looking for a checkout under this clone's own parent, and it
+ * found this very clone: registered a second time as a foreign, non-self ref
+ * that `--no-self` could not filter. Comparing against REPO_ROOT, resolved
+ * the same way `unwatchedProjects` (projects.ts) already does, is what tells
+ * "this clone, filed under its own directory name" from "a project that is
+ * genuinely named that".
+ */
+export function auditedProjectName(project: string): string {
+  return path.resolve(project) === path.resolve(REPO_ROOT)
+    ? FACTORY_PROJECT
+    : path.basename(project);
+}
+
+/**
+ * The `- kind:` a cut milestone declares alongside auditedProjectName's
+ * `- project:` line. roadmap.ts's own parser fixes the two together
+ * (`roadmap.factory-kind-fixed`): a milestone naming FACTORY_PROJECT must be
+ * kind "factory", never "product". A cut that named a self-audit
+ * FACTORY_PROJECT but still wrote a hard-coded "product" kind would stamp a
+ * milestone that fails to parse the moment `loadRoadmap()` reads it back, so
+ * this feeds auditedProjectName's own answer through roadmap.ts's
+ * defaultKindFor rather than re-deriving it separately.
+ */
+export function auditedProjectKind(project: string): MilestoneKind {
+  return defaultKindFor(auditedProjectName(project));
+}
+
+/**
  * The audit's events are ordinary events on the operator's session, stamped
  * with the project's name so the multi-project timeline can tell whose audit
  * this was (events.ts `project`). The actor defaults to `operator` for the
@@ -651,7 +689,7 @@ function emit(
       event_type: eventType,
       plan_version: ctx.planVersion,
       causal_parent: ctx.causalParent,
-      project: path.basename(project),
+      project: auditedProjectName(project),
       payload,
     },
     opts,
@@ -1020,7 +1058,7 @@ function renderMilestone(
 ): string {
   const audits = auditIdsOf(findings);
   const goal = [
-    `Cut from audit ${audits.join(', ')} of \`${path.basename(project)}\` (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}).`,
+    `Cut from audit ${audits.join(', ')} of \`${auditedProjectName(project)}\` (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}).`,
     'Each finding below is one acceptance criterion; the plan decides the tasks.',
     ...findings.map((finding) => `${cite(finding)}.`),
   ].join(' ');
@@ -1029,8 +1067,8 @@ function renderMilestone(
     `- id: ${input.epicId}`,
     '- status: planned',
     `- epics: [${input.epicId}]`,
-    `- project: ${path.basename(project)}`,
-    '- kind: product',
+    `- project: ${auditedProjectName(project)}`,
+    `- kind: ${auditedProjectKind(project)}`,
     `- goal: ${goal}`,
     '',
   ].join('\n');
@@ -1066,7 +1104,7 @@ function renderSpec(
     `# Epic spec — \`${input.epicId}\``,
     '',
     `- **Epic id** — \`${input.epicId}\``,
-    `- **Project** — \`${path.basename(project)}\` at \`${project}\`, and every worktree is placed beside that clone (\`AGENTS.md\` "Worktrees").`,
+    `- **Project** — \`${auditedProjectName(project)}\` at \`${project}\`, and every worktree is placed beside that clone (\`AGENTS.md\` "Worktrees").`,
     `- **Roadmap milestone** — \`${input.epicId}\` in \`factory/specs/roadmap.md\`.`,
     `- **Provenance** — cut by \`smith audit cut\` from audit ${audits.join(', ')} (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}). Each finding carries this epic id in \`.blacksmith/findings.jsonl\`; \`smith audit resolve\` marks fixed only the ones a task in this plan still claims, and leaves the rest \`deferred\`.`,
     '',
