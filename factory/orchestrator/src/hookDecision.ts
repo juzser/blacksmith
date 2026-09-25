@@ -181,13 +181,21 @@ export function decideHookPayload(
  * positively, not a denylist of mover words: any plain word could be a shell
  * alias or function (zsh's autopushd defines `-` and `1`..`9` as `cd`
  * shortcuts), so nothing short of "must be a git builtin that cannot run a
- * command in another repo" is sound. Git builtins cannot be shadowed by a git
- * alias; a shell alias named `git` itself is out of scope. A mover flag
- * (`MOVER_FLAG_RE`) or a rebase `-x`/`--exec` (which runs an arbitrary
- * command as part of the rebase) still forfeits, and so does a git location
- * override anywhere. Returns the target lexically and physically when the two
- * differ (a cd is logical, git's chdir physical), and the caller falls back
- * too if any of them is not on a named branch of a repo.
+ * command in another repo" is sound. `checkout` and `switch` are excluded
+ * even though they only ever touch the repo they run in: either can move the
+ * target onto a different branch mid-command, and the branch judged is read
+ * once, before the command runs — `cd <W> && git checkout main && git merge
+ * x` would be judged on W's branch before the checkout, not the `main` it
+ * actually merges onto. Git builtins cannot be shadowed by a git alias; a
+ * shell alias named `git` itself is out of scope. A mover flag
+ * (`MOVER_FLAG_RE`), a short option bundling `x` or `s`
+ * (`hasDangerousShortOption` — rebase `-x`/`-kx`, an arbitrary command; merge
+ * or checkout `-s`, a strategy or search run off PATH as `git-<name>`), or a
+ * long option starting `--e`/`--s` (`hasDangerousLongOption` — `--exec`,
+ * `--strategy`, and their `=value` forms) still forfeits, and so does a git
+ * location override anywhere. Returns the target lexically and physically
+ * when the two differ (a cd is logical, git's chdir physical), and the
+ * caller falls back too if any of them is not on a named branch of a repo.
  */
 function shortcutDirectories(command: string, cwd: string): string[] | null {
   // No `.trim()`/split reliance below this line for a security decision: both
@@ -219,7 +227,7 @@ function shortcutDirectories(command: string, cwd: string): string[] | null {
   const plain = (word: string) =>
     PLAIN_WORD_RE.test(word) && !MOVER_WORDS.has(word) && !MOVER_FLAG_RE.test(word);
   if (!after.every(plain)) return null;
-  if (after.some((word) => word === '-x' || word.startsWith('--exec'))) return null;
+  if (after.some((word) => hasDangerousShortOption(word) || hasDangerousLongOption(word))) return null;
   if (!PLAIN_WORD_RE.test(target) && !/^'[^']*'$|^"[^"]*"$/.test(target)) return null;
   return literalDirectories(target, cwd);
 }
@@ -261,11 +269,16 @@ const NON_ASCII_RE = /[^\t\x20-\x7E]/;
 /**
  * Git builtins the shortcut may follow a `cd`/`-C` target with: read-only or
  * ordinary write commands that act on the repo they are invoked in, never on
- * another one. Deliberately excludes indirect executors that run a git
- * command somewhere else (`for-each-repo`, `submodule`), and anything that
- * rewrites history destructively outside a plain invocation (`filter-branch`,
- * `filter-repo`, `worktree`, `bisect`). A git builtin cannot be shadowed by a
- * git alias, which is what makes this allowlist sound.
+ * another one, and that cannot themselves move the target onto a different
+ * branch than the one just read. Deliberately excludes indirect executors
+ * that run a git command somewhere else (`for-each-repo`, `submodule`),
+ * anything that rewrites history destructively outside a plain invocation
+ * (`filter-branch`, `filter-repo`, `worktree`, `bisect`), and `checkout`/
+ * `switch` — either can move the target's branch mid-command, after
+ * `shortcutDirectories`' caller has already read it once, so a later command
+ * in the same chain would be judged on the branch the target left rather
+ * than the one it moved to. A git builtin cannot be shadowed by a git alias,
+ * which is what makes this allowlist sound.
  */
 const GIT_SUBCOMMAND_ALLOWLIST = new Set([
   'status',
@@ -279,14 +292,38 @@ const GIT_SUBCOMMAND_ALLOWLIST = new Set([
   'push',
   'fetch',
   'pull',
-  'checkout',
-  'switch',
   'branch',
   'reset',
   'rev-parse',
   'tag',
   'stash',
 ]);
+
+/**
+ * A short option (`-x`, `-kx`, `-x./s`) that bundles `x` or `s` among its
+ * option letters, read up to the first non-letter (a stuck argument, `=`, or
+ * end of word) — `git rebase -x <cmd>`/`-kx<cmd>` runs an arbitrary command,
+ * and `git merge -s <strategy>`/`git checkout -s` (`-s` is a bundlable short
+ * flag on several subcommands) can run `git-<strategy>` off PATH. A plain
+ * number (`-5`) is exempt, since `git log -5` is common and harmless.
+ */
+function hasDangerousShortOption(word: string): boolean {
+  if (!word.startsWith('-') || word.startsWith('--')) return false;
+  if (/^-\d+$/.test(word)) return false;
+  const letters = /^-([A-Za-z]+)/.exec(word)?.[1] ?? '';
+  return letters.includes('x') || letters.includes('s');
+}
+
+/**
+ * A long option that could be `--exec`/`--exec=…` (rebase, arbitrary command)
+ * or `--strategy`/`--strategy-option=…` (merge/rebase, runs `git-<name>` off
+ * PATH) by prefix rather than exact match, since either can carry `=value`.
+ * Over-forfeits `--edit`, `--squash`, and the like on purpose: forfeiting
+ * only falls back to the full check, never widens what the shortcut allows.
+ */
+function hasDangerousLongOption(word: string): boolean {
+  return word.startsWith('--e') || word.startsWith('--s');
+}
 
 /** Commands that can move the shell, or run a command string somewhere else. */
 const MOVER_WORDS = new Set([

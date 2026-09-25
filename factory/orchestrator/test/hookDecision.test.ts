@@ -251,6 +251,25 @@ describe('decideHookPayload — the shortcut forfeits any shape it cannot read w
     ['rebase -x, cd form', () => `cd ${sideRepo} && git rebase -x id main`],
     ['rebase -x, -C form', () => `git -C ${sideRepo} rebase -x id main`],
     ['rebase --exec=', () => `cd ${sideRepo} && git rebase --exec=id main`],
+    // -x stuck to a value, or bundled with another short flag: still runs an
+    // arbitrary command as part of the rebase.
+    ['rebase -x stuck to a value', () => `cd ${sideRepo} && git rebase -x./s main`],
+    ['rebase -x bundled with another flag', () => `cd ${sideRepo} && git rebase -kx./s main`],
+    ['rebase --exe= (a long-option prefix)', () => `cd ${sideRepo} && git rebase --exe=./s main`],
+    // `-s`/`--strategy` runs `git-<name>` off PATH.
+    ['merge -s (a strategy flag)', () => `cd ${sideRepo} && git merge -s foo main`],
+    ['merge --strategy=', () => `cd ${sideRepo} && git merge --strategy=foo main`],
+    // `checkout`/`switch` can move the target onto a different branch than
+    // the one the shortcut just read, so a merge later in the same chain is
+    // judged on the branch the target left, not the one it moved to.
+    [
+      'checkout moves the target onto the branch a later merge lands on',
+      () => `cd ${sideRepo} && git checkout --ignore-other-worktrees main && ${merge}`,
+    ],
+    [
+      'switch moves the target onto the branch a later merge lands on',
+      () => `cd ${sideRepo} && git switch --ignore-other-worktrees main && ${merge}`,
+    ],
   ];
 
   it.each(cases)('keeps the session-cwd denial through %s', (_label, command) => {
