@@ -41,6 +41,16 @@
 > the bare command does. Splitting stays naive about quoting, so a separator
 > inside a quoted string splits anyway — over-refusing again, on purpose.
 >
+> The branch-dependent rules read the branch (and repo root) of the directory
+> the command runs in, which is not always the session's `cwd`. A command that
+> is exactly `cd <literal path> && …`, or a lone `git -C <literal path> …`,
+> with no further directory change, is judged in that directory alone — so
+> `cd <worktree> && git merge main` from the main clone is judged on the
+> worktree's branch. Any other directory change (a second `cd`, `pushd`, a
+> subshell, `cd $X`, `;` instead of `&&`) is judged in the session's `cwd`
+> *and* every literal directory the command names, and refused if any of them
+> refuses. A judge's lease follows the session, not the `cd`.
+>
 > Two spans are exempt from that looseness, because neither is a command the
 > tool call runs.
 >
