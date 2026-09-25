@@ -477,6 +477,39 @@ function landCandidate(
   return { outcome: 'landed' };
 }
 
+type DirtyLanding = Extract<LandOutcome, { outcome: 'integration-dirty' }>;
+
+/**
+ * Report `tasks` as blocked by an `integration-dirty` refusal already
+ * observed elsewhere — the dirty holder's own outcome (`attemptCandidate`'s
+ * landing) or a sibling half's (`bisectGroup`, once one half has found
+ * nothing can land). Shared so every task the batch touches gets the same
+ * outcome shape and log line regardless of which call site saw the dirty
+ * worktree first.
+ */
+async function dirtyOutcomes(
+  tasks: QueueTask[],
+  landing: DirtyLanding,
+  integrationBranch: string,
+  logBlocked: (taskId: string, error: string, detail: string) => Promise<void>,
+): Promise<StepOutcome[]> {
+  const outcomes: StepOutcome[] = [];
+  for (const task of tasks) {
+    await logBlocked(
+      task.taskId,
+      'execution.env-failure',
+      `${integrationBranch} is checked out in ${landing.worktree}, which has uncommitted changes: ${landing.dirty.join(', ')}`,
+    );
+    outcomes.push({
+      outcome: 'integration-dirty',
+      taskId: task.taskId,
+      worktree: landing.worktree,
+      dirty: landing.dirty,
+    });
+  }
+  return outcomes;
+}
+
 /**
  * A scratch worktree for testing a batch candidate before anything lands —
  * a sibling of the project, the same convention `taskWorktreeDir` uses, but
@@ -557,20 +590,7 @@ async function attemptCandidate(
       // branch and carries uncommitted tracked changes, so merging into it
       // either stops half-way or folds someone's unfinished work in. The
       // tests already ran and passed; nothing landed.
-      const outcomes: StepOutcome[] = [];
-      for (const task of readyTasks) {
-        await logBlocked(
-          task.taskId,
-          'execution.env-failure',
-          `${integrationBranch} is checked out in ${landing.worktree}, which has uncommitted changes: ${landing.dirty.join(', ')}`,
-        );
-        outcomes.push({
-          outcome: 'integration-dirty',
-          taskId: task.taskId,
-          worktree: landing.worktree,
-          dirty: landing.dirty,
-        });
-      }
+      const outcomes = await dirtyOutcomes(readyTasks, landing, integrationBranch, logBlocked);
       return { outcomes, suiteRuns: 1 };
     }
 
@@ -648,6 +668,25 @@ async function bisectGroup(
 ): Promise<{ outcomes: StepOutcome[]; suiteRuns: number }> {
   const mid = Math.ceil(readyTasks.length / 2);
   const left = await runGroup(readyTasks.slice(0, mid), opts, integrationBranch, logBlocked);
+
+  // Once anything has hit integration-dirty, nothing can land regardless of
+  // what the right half's suite says — the checkout stays dirty until an
+  // operator clears it — so report the right half the same way instead of
+  // spending a suite run (or more bisection) to learn that.
+  const dirty = left.outcomes.find(
+    (o): o is Extract<StepOutcome, { outcome: 'integration-dirty' }> =>
+      o.outcome === 'integration-dirty',
+  );
+  if (dirty) {
+    const rightOutcomes = await dirtyOutcomes(
+      readyTasks.slice(mid),
+      dirty,
+      integrationBranch,
+      logBlocked,
+    );
+    return { outcomes: [...left.outcomes, ...rightOutcomes], suiteRuns: left.suiteRuns };
+  }
+
   const rightKnownRed = left.outcomes.every((o) => o.outcome === 'merged');
   const right = await runGroup(
     readyTasks.slice(mid),

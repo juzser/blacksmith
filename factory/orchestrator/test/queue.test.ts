@@ -838,6 +838,98 @@ describe('batchStep', () => {
     expect(git(projectDir, ['show', 'smith/epic-1/integration:f5.txt'])).toBe('f5');
   });
 
+  // A left half is only "known red" when it landed completely. Part guilty,
+  // part clean: the right half must not inherit the shortcut — its suite has
+  // to actually run, and its own innocent tasks still land.
+  it('does not skip the suite for a right half when the left half is only partly merged', async () => {
+    await writeFile(path.join(projectDir, 'd.txt'), 'd\n');
+    git(projectDir, ['add', 'd.txt']);
+    git(projectDir, ['commit', '-q', '-m', 'seed d.txt']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'BAD\n');
+    const c = makeTask('task-c', 'c.txt', 'c-edited\n');
+    const d = makeTask('task-d', 'd.txt', 'd-edited\n');
+
+    const result = await batchStep([a, b, c, d], {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: '! grep -q BAD b.txt',
+    });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-a' },
+      { outcome: 'tests-failed', taskId: 'epic-1/task-b', outputTail: expect.any(String) },
+      { outcome: 'merged', taskId: 'epic-1/task-c' },
+      { outcome: 'merged', taskId: 'epic-1/task-d' },
+    ]);
+    // top(1) + left[a,b](1) + [a](1) + [b](1) + right[c,d] actually tested (1).
+    expect(result.suiteRuns).toBe(5);
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:d.txt'])).toBe('d-edited');
+  });
+
+  // A right half's ready set can shrink after it has already been marked
+  // known red — a member drops via a genuine rebase conflict against work
+  // that only exists once the left half has landed. Below two survivors, the
+  // survivor is not innocent by assumption: it still gets a real suite run.
+  it('tests a right-half singleton for real when it shrinks below two ready tasks', async () => {
+    await writeFile(path.join(projectDir, 'shared.txt'), 'shared\n');
+    git(projectDir, ['add', 'shared.txt']);
+    git(projectDir, ['commit', '-q', '-m', 'seed shared.txt']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    const c = makeTask('task-c', 'c.txt', 'c-edited\n');
+    const d = makeTask('task-d', 'shared.txt', 'd-edited\n');
+
+    // The four-task candidate is the only one that ever carries d's edit.
+    // While it is under test, simulate a concurrent commit landing directly
+    // on integration — the trigger for d's later rebase conflict — and fail
+    // that candidate so the batch bisects.
+    const script = path.join(root, 'inject-conflict.sh');
+    await writeFile(
+      script,
+      [
+        'set -e',
+        'if grep -q d-edited shared.txt 2>/dev/null; then',
+        `  cd ${JSON.stringify(projectDir)}`,
+        `  export GIT_INDEX_FILE=${JSON.stringify(path.join(root, 'side.index'))}`,
+        '  git read-tree refs/heads/smith/epic-1/integration',
+        "  blob=$(printf 'concurrent-edit\\n' | git hash-object -w --stdin)",
+        '  git update-index --cacheinfo 100644,$blob,shared.txt',
+        '  c=$(git commit-tree $(git write-tree) -p refs/heads/smith/epic-1/integration -m concurrent)',
+        '  git update-ref refs/heads/smith/epic-1/integration $c',
+        '  exit 1',
+        'fi',
+        'exit 0',
+        '',
+      ].join('\n'),
+    );
+
+    const result = await batchStep([a, b, c, d], {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: `sh ${JSON.stringify(script)}`,
+    });
+
+    expect(result.outcomes).toEqual([
+      { outcome: 'merged', taskId: 'epic-1/task-a' },
+      { outcome: 'merged', taskId: 'epic-1/task-b' },
+      { outcome: 'merged', taskId: 'epic-1/task-c' },
+      { outcome: 'rebase-conflict', taskId: 'epic-1/task-d', conflictingFiles: ['shared.txt'] },
+    ]);
+    // top(1, red) + left[a,b](1, lands) + right: only c actually runs (1) —
+    // d dropped at certify, before any test, not a phantom red assumed for it.
+    expect(result.suiteRuns).toBe(3);
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:shared.txt'])).toBe(
+      'concurrent-edit',
+    );
+  });
+
   // The rebase leaves every task's branch on top of the base the batch
   // started from, so a CAS failure at land time means integration moved
   // underneath the whole batch while the one shared suite run was in
@@ -913,6 +1005,42 @@ describe('batchStep', () => {
     ]);
     expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
     expect(await readFile(path.join(projectDir, 'c.txt'), 'utf8')).toBe('operator is editing\n');
+  });
+
+  // The first integration-dirty stops the whole batch: once one landing
+  // finds the checkout dirty, nothing can land, so no further suite runs or
+  // landing attempts are worth spending on the rest of the tree.
+  it('stops the batch at the first integration-dirty instead of still testing every half', async () => {
+    await writeFile(path.join(projectDir, 'd.txt'), 'd\n');
+    git(projectDir, ['add', 'd.txt']);
+    git(projectDir, ['commit', '-q', '-m', 'seed d.txt']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    const c = makeTask('task-c', 'c.txt', 'BAD\n');
+    const d = makeTask('task-d', 'd.txt', 'd-edited\n');
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    await writeFile(path.join(projectDir, 'a.txt'), 'operator is editing\n');
+    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+
+    const result = await batchStep([a, b, c, d], {
+      projectDir,
+      epic: 'epic-1',
+      testCmd: '! grep -rq BAD .',
+    });
+
+    const worktree = await realpath(projectDir);
+    expect(result.outcomes).toEqual([
+      { outcome: 'integration-dirty', taskId: 'epic-1/task-a', worktree, dirty: ['a.txt'] },
+      { outcome: 'integration-dirty', taskId: 'epic-1/task-b', worktree, dirty: ['a.txt'] },
+      { outcome: 'integration-dirty', taskId: 'epic-1/task-c', worktree, dirty: ['a.txt'] },
+      { outcome: 'integration-dirty', taskId: 'epic-1/task-d', worktree, dirty: ['a.txt'] },
+    ]);
+    // top (red, 1) + left [a,b] (green, then finds the checkout dirty, 1).
+    // The right half [c,d] never gets a suite run of its own.
+    expect(result.suiteRuns).toBe(2);
+    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
   });
 
   // A clean holder must land through it, exactly as `step` does, so its
