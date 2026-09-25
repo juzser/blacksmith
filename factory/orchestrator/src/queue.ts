@@ -85,7 +85,8 @@ export function groupForBatch(
   for (const task of tasks) {
     const claims = task.claims ?? [];
     const hasClaims = claims.length > 0;
-    const isSerializeAlways = hasClaims && touchesSerializeAlways({ claims }, serializeAlwaysGlobs).length > 0;
+    const isSerializeAlways =
+      hasClaims && touchesSerializeAlways({ claims }, serializeAlwaysGlobs).length > 0;
 
     if (!hasClaims || isSerializeAlways) {
       if (current.length > 0) groups.push(current);
@@ -99,7 +100,9 @@ export function groupForBatch(
     const overlapsGroupMember = current.some((id) => {
       const member = byId.get(id);
       const memberClaims = member?.claims ?? [];
-      return memberClaims.length > 0 && claimsOverlap({ claims }, { claims: memberClaims }).overlaps;
+      return (
+        memberClaims.length > 0 && claimsOverlap({ claims }, { claims: memberClaims }).overlaps
+      );
     });
 
     if (dependsOnGroupMember || overlapsGroupMember) {
@@ -512,7 +515,11 @@ async function attemptCandidate(
   }
 
   const projectDir = opts.projectDir;
-  const base = runGit(projectDir, ['rev-parse', '--verify', `refs/heads/${integrationBranch}^{commit}`]);
+  const base = runGit(projectDir, [
+    'rev-parse',
+    '--verify',
+    `refs/heads/${integrationBranch}^{commit}`,
+  ]);
 
   // Chain each task's merge onto the last, exactly like `mergeWithoutWorktree`
   // does for one task — `merge-tree` computes its own merge-base from the two
@@ -614,7 +621,10 @@ async function attemptCandidate(
     const task = readyTasks[0] as QueueTask;
     const outputTail = tailLines(testOutcome.output, OUTPUT_TAIL_LINES);
     await logBlocked(task.taskId, 'execution.test-failure', outputTail);
-    return { outcomes: [{ outcome: 'tests-failed', taskId: task.taskId, outputTail }], suiteRuns: 1 };
+    return {
+      outcomes: [{ outcome: 'tests-failed', taskId: task.taskId, outputTail }],
+      suiteRuns: 1,
+    };
   }
 
   const bisected = await bisectGroup(readyTasks, opts, integrationBranch, logBlocked);

@@ -150,7 +150,7 @@ import { recordUserPrompt } from './prompts.js';
 import { checkBrief, type IngestKind, wrapIngested } from './provenance.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeRequest } from './providers/types.js';
-import { admit, adopt, batchStep, type BatchGroupableTask, groupForBatch, step } from './queue.js';
+import { admit, adopt, type BatchGroupableTask, batchStep, groupForBatch, step } from './queue.js';
 import { stampResultEnvelope } from './results.js';
 import { FACTORY_PROJECT, isErrorTrackerWritable, loadRoadmap } from './roadmap.js';
 import { checkRuntime } from './runtime.js';
@@ -2347,7 +2347,10 @@ async function main(): Promise<number> {
       // and blames the wrong branch when it goes red. `admit()` exists for
       // exactly this and had no caller until here; a follow-up the plan never
       // declared carries no edges, so it just sorts by id among its peers.
-      const order = admit(tasks.map((t) => ({ task_id: t.taskId })), edges);
+      const order = admit(
+        tasks.map((t) => ({ task_id: t.taskId })),
+        edges,
+      );
       // Stable: two tasks the plan does not order keep the order admit gave
       // them, and a duplicated id is still run twice rather than dropped.
       tasks.sort((a, b) => order.indexOf(a.taskId) - order.indexOf(b.taskId));

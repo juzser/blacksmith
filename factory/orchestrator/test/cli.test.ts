@@ -5408,9 +5408,7 @@ describe('cli.ts (built binary)', () => {
       expect(body.outcomes).toEqual([
         expect.objectContaining({ outcome: 'nothing-to-merge', taskId: 'epic-1/task-1' }),
       ]);
-      expect(body.batches).toEqual([
-        { task_ids: ['epic-1/task-1'], suite_runs: 0, landed: false },
-      ]);
+      expect(body.batches).toEqual([{ task_ids: ['epic-1/task-1'], suite_runs: 0, landed: false }]);
     });
 
     // merge-lanes: a group's candidate can fail the suite — bisection still

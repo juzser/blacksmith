@@ -678,7 +678,11 @@ describe('batchStep', () => {
     const worktree = createTaskWorktree(projectDir, 'epic-1', taskId);
     writeFileSync(path.join(worktree.worktreeDir, file), content);
     git(worktree.worktreeDir, ['commit', '-q', '-am', `edit ${file}`]);
-    return { taskId: `epic-1/${taskId}`, branch: worktree.branch, worktreeDir: worktree.worktreeDir };
+    return {
+      taskId: `epic-1/${taskId}`,
+      branch: worktree.branch,
+      worktreeDir: worktree.worktreeDir,
+    };
   }
 
   it('lands three claim-disjoint tasks in admitted order with a single suite run', async () => {
@@ -715,7 +719,9 @@ describe('batchStep', () => {
     expect(git(projectDir, ['show', 'smith/epic-1/integration:b.txt'])).toBe('b-edited');
     expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
     // No trace of the throwaway candidate worktree survives a green landing.
-    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(/\.wt[\\/]project[\\/]batch-/);
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(
+      /\.wt[\\/]project[\\/]batch-/,
+    );
   });
 
   it('logs one wave-merged per task, each carrying only that task’s own files', async () => {
@@ -874,7 +880,9 @@ describe('batchStep', () => {
     expect(result.suiteRuns).toBe(1);
     expect(movedTo).not.toBe(before);
     expect(git(projectDir, ['log', '-1', '--format=%s', movedTo])).toBe('side');
-    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(/\.wt[\\/]project[\\/]batch-/);
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(
+      /\.wt[\\/]project[\\/]batch-/,
+    );
   });
 
   // A worktree holding the integration branch used to be invisible to the
