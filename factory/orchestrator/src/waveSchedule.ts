@@ -311,7 +311,9 @@ const SMALL_MAX_CLAIMS = 10;
  * filter needed here.
  */
 export function computePlanParallelism(plan: PlanFile, policy: WorktreePolicy): PlanParallelism {
-  const claimedTasks: ClaimedTask[] = planClaimedTasks(plan);
+  const claimedTasks: (ClaimedTask & { task_id: string })[] = planClaimedTasks(plan).filter(
+    (t): t is ClaimedTask & { task_id: string } => t.task_id !== undefined,
+  );
   const ids = new Set(claimedTasks.map((t) => t.task_id));
   const edges = readEdgeList(plan.edges);
   const connected = connectedTaskIds(ids, edges);
