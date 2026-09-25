@@ -34,12 +34,7 @@ import { apply, foldTasks, rebuild } from './db/projector.js';
 import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
 import type { ResolveProjectForTaskRef } from './errorIssues.js';
 import { SmithError } from './errors.js';
-import {
-  listSessionIds,
-  mergeSessionLogs,
-  parseEventId,
-  type StoredEvent,
-} from './events.js';
+import { listSessionIds, mergeSessionLogs, parseEventId, type StoredEvent } from './events.js';
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
 import { LogCache } from './logCache.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';

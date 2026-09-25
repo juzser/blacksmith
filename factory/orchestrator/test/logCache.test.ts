@@ -1,9 +1,9 @@
-import { chmodSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, renameSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EventError, readEvents, type EventRecord } from '../src/events.js';
+import { EventError, type EventRecord, readEvents } from '../src/events.js';
 import { LogCache } from '../src/logCache.js';
 
 // ---------------------------------------------------------------------------
@@ -48,13 +48,6 @@ function line(record: EventRecord): string {
   return `${JSON.stringify(record)}\n`;
 }
 
-function appendEventLine(sessionId: string, record: EventRecord): void {
-  const { appendFileSync, existsSync } = require('node:fs') as typeof import('node:fs');
-  const target = logFile(sessionId);
-  if (!existsSync(target)) writeFileSync(target, '', 'utf8');
-  appendFileSync(target, line(record), 'utf8');
-}
-
 describe('the module import (TDD watch-it-fail step)', () => {
   it('exposes a LogCache class', () => {
     // This assertion is trivial once the module exists; the failing form of
@@ -89,12 +82,6 @@ describe('criterion 1: a second read of an unchanged log costs nothing', () => {
 });
 
 describe('criterion 2: equivalence with readEvents, step by step', () => {
-  async function bothRead(sessionId: string) {
-    const cache = new LogCache();
-    // Warm read before assertions below reuse `cache` across steps.
-    return cache;
-  }
-
   it('well-formed unterminated tail: N events, lastEventId names the last one', async () => {
     const sessionId = 'sess-tail-ok';
     const e0 = event(sessionId);
