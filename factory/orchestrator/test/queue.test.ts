@@ -874,6 +874,10 @@ describe('batchStep', () => {
   // known red — a member drops via a genuine rebase conflict against work
   // that only exists once the left half has landed. Below two survivors, the
   // survivor is not innocent by assumption: it still gets a real suite run.
+  // Behavioural coverage only — it does not pin `attemptCandidate`'s
+  // `readyTasks.length >= 2` clause: without it a known-red singleton goes
+  // through `bisectGroup`, whose one-task left half is tested unassumed, so
+  // the outcome is the same and the clause only saves a recursion frame.
   it('tests a right-half singleton for real when it shrinks below two ready tasks', async () => {
     await writeFile(path.join(projectDir, 'shared.txt'), 'shared\n');
     git(projectDir, ['add', 'shared.txt']);
