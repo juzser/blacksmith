@@ -5,9 +5,11 @@ import { REPO_ROOT } from '../src/paths.js';
 import { WAVE_VERDICTS } from '../src/waveConcurrency.js';
 
 // wave.md must instruct the wave to audit its own parallelism (`smith wave
-// audit --session ... --epic ...`) before merge-queue admission
-// (`smith queue run`), and name every WAVE_VERDICTS outcome somewhere in that
-// instruction so a reader knows what the audit can come back saying.
+// audit --session ... --epic ...`) at two call points -- once at the end of
+// step 4's coder fan-out, before step 5's tester dispatch, and again before
+// merge-queue admission (`smith queue run`) -- and name every WAVE_VERDICTS
+// outcome somewhere in that instruction so a reader knows what the audit can
+// come back saying.
 
 const WAVE_MD_PATH = path.join(REPO_ROOT, '.claude/skills/bs/wave.md');
 
@@ -35,7 +37,10 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
 
   it('names a `smith wave audit --session ... --epic ...` invocation in the steps section', () => {
     const matches = steps.match(WAVE_AUDIT_INVOCATION);
-    expect(matches, 'expected at least one smith wave audit --session ... --epic ... invocation').not.toBeNull();
+    expect(
+      matches,
+      'expected at least one smith wave audit --session ... --epic ... invocation',
+    ).not.toBeNull();
     expect((matches ?? []).length).toBeGreaterThan(0);
   });
 
@@ -49,6 +54,18 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
     expect(auditIndex).toBeLessThan(queueRunIndex);
   });
 
+  it("runs `smith wave audit` a second time, at the end of step 4's fan-out, before step 5's tester dispatch", () => {
+    // Anchor on step 5's own numbered marker: stable across reflow of step 4's
+    // prose, and the spec's call point (a) is "the end of step 4's fan-out",
+    // i.e. anywhere before step 5 begins.
+    const step5Index = steps.indexOf('\n5. Dispatch');
+    expect(step5Index).toBeGreaterThan(0);
+    const beforeStep5 = steps.slice(0, step5Index);
+    const matches = beforeStep5.match(WAVE_AUDIT_INVOCATION);
+    expect(matches, 'expected a smith wave audit invocation before step 5').not.toBeNull();
+    expect((matches ?? []).length).toBeGreaterThan(0);
+  });
+
   it('does not count a prose mention of "wave audit" lacking both flags as satisfying the requirement', () => {
     // A bare mention of "wave audit" in prose (no `smith`, no flags) must not
     // match the invocation pattern used above.
@@ -58,7 +75,10 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
 
   it('names every WAVE_VERDICTS value in the steps section', () => {
     for (const verdict of WAVE_VERDICTS) {
-      expect(steps.includes(verdict), `expected steps section to mention verdict "${verdict}"`).toBe(true);
+      expect(
+        steps.includes(verdict),
+        `expected steps section to mention verdict "${verdict}"`,
+      ).toBe(true);
     }
   });
 });
