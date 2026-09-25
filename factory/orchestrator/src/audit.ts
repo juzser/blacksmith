@@ -51,7 +51,7 @@ import {
   type WorktreeDrift,
   type WorktreeFingerprint,
 } from './immutability.js';
-import { REPO_ROOT, SPECS_ACTIVE_DIR } from './paths.js';
+import { isFactoryCheckout, SPECS_ACTIVE_DIR } from './paths.js';
 import {
   latestPlanVersion,
   loadPlan,
@@ -649,9 +649,7 @@ function mintAuditId(now: Date): string {
  * genuinely named that".
  */
 export function auditedProjectName(project: string): string {
-  return path.resolve(project) === path.resolve(REPO_ROOT)
-    ? FACTORY_PROJECT
-    : path.basename(project);
+  return isFactoryCheckout(project) ? FACTORY_PROJECT : path.basename(project);
 }
 
 /**

@@ -14,6 +14,17 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(here, '..', '..', '..');
 
 /**
+ * Is `dir` this factory's own checkout, resolved rather than compared raw so
+ * a trailing slash or a relative path names the same answer. `audit.ts`
+ * (`auditedProjectName`) and `projects.ts` (`unwatchedProjects`) both need to
+ * tell "this clone, filed under its own directory name" from "a project that
+ * is genuinely named that" and used to each spell the comparison themselves.
+ */
+export function isFactoryCheckout(dir: string): boolean {
+  return path.resolve(dir) === path.resolve(REPO_ROOT);
+}
+
+/**
  * Is this module running out of the blacksmith clone, or out of an installed
  * copy of the package?
  *

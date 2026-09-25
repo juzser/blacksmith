@@ -32,7 +32,7 @@
 // silent exactly when somebody is editing (D-21).
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { PROJECTS_DIR, REPO_ROOT, WORKSPACES_DIR } from './paths.js';
+import { isFactoryCheckout, PROJECTS_DIR, REPO_ROOT, WORKSPACES_DIR } from './paths.js';
 import { FACTORY_PROJECT, loadRoadmap } from './roadmap.js';
 
 /** One repository the factory is answerable for, and where it actually is. */
@@ -98,7 +98,7 @@ function collectProjects(opts: FactoryProjectsOptions): CollectedProjects {
     // (`resolveProjectDirs` only ever drops the entry at index 0). Self
     // already leads `refs`; a checkout that resolves to REPO_ROOT is that
     // entry under another name, so it is skipped rather than pushed again.
-    if (path.resolve(dir) === path.resolve(REPO_ROOT)) continue;
+    if (isFactoryCheckout(dir)) continue;
     refs.push({ name, dir, self: false });
   }
   return { refs, missing };
