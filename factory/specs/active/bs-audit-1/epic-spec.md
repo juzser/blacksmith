@@ -1,7 +1,7 @@
 # Epic spec — `bs-audit-1`
 
 - **Epic id** — `bs-audit-1`
-- **Project** — `blacksmith` at `/Users/ser/scatola/jobs/projects/blacksmith`, and every worktree is placed beside that clone (`AGENTS.md` "Worktrees").
+- **Project** — `black-smith` at `/Users/ser/scatola/jobs/projects/blacksmith`, and every worktree is placed beside that clone (`AGENTS.md` "Worktrees").
 - **Roadmap milestone** — `bs-audit-1` in `factory/specs/roadmap.md`.
 - **Provenance** — cut by `smith audit cut` from audit 20260925-f336f5e4 (7 accepted findings: 3 S2-major, 3 S3-minor, 1 S4-nit). Each finding carries this epic id in `.blacksmith/findings.jsonl`; `smith audit resolve` marks fixed only the ones a task in this plan still claims, and leaves the rest `deferred`.
 
