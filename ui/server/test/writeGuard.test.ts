@@ -1,18 +1,22 @@
 // The dashboard's write routes (/api/lessons/:id/approve|reject|edit,
-// /api/waivers/apply-batch) sit behind writeOriginGuard() (middleware.ts).
-// This file proves the guard's exactly-four rules, differentially: each
-// case names the response AND the state the finding's own attack would
-// otherwise have changed.
+// /api/waivers/apply-batch) sit behind writeGuard() (middleware.ts), mounted
+// once on every POST under /api/*. This file proves the guard's exactly-four
+// rules, differentially: each case names the response AND the state the
+// finding's own attack would otherwise have changed.
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { lessonsPage } from '../../../factory/orchestrator/src/db/queries.js';
 import { rebuild } from '../../../factory/orchestrator/src/db/projector.js';
+import { lessonsPage } from '../../../factory/orchestrator/src/db/queries.js';
 import { appendEvent, readEvents } from '../../../factory/orchestrator/src/events.js';
-import { EPIC_ID, SESSION_ID, buildFixture } from '../../../factory/orchestrator/test/db/fixtures.js';
-import { closeApp, createApp } from '../src/app.js';
+import {
+  buildFixture,
+  EPIC_ID,
+  SESSION_ID,
+} from '../../../factory/orchestrator/test/db/fixtures.js';
 import type { AppHandle } from '../src/app.js';
+import { closeApp, createApp } from '../src/app.js';
 
 const ROADMAP_MD = `## Phase A
 - id: phase-a
@@ -24,7 +28,7 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-describe('ui/server writeOriginGuard', () => {
+describe('ui/server writeGuard', () => {
   let stateDir: string;
   let dbDir: string;
   let dbPath: string;
@@ -87,7 +91,7 @@ describe('ui/server writeOriginGuard', () => {
     return row?.lessonStatus;
   }
 
-  it('blocks the finding\'s exact attack: text/plain + foreign Origin on approve leaves the lesson untouched', async () => {
+  it("blocks the finding's exact attack: text/plain + foreign Origin on approve leaves the lesson untouched", async () => {
     await seedCandidate('lesson-guard-1', 'A statement the attack must not approve.');
     const handle = app();
     try {
@@ -190,6 +194,42 @@ describe('ui/server writeOriginGuard', () => {
             headers: {
               'content-type': 'application/json',
               origin: 'http://127.0.0.1:4680',
+              host: 'evil.example:4680',
+            },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, Origin localhost:5173, Host 127.0.0.1:4680 (both loopback, parsed hosts differ) -> 403', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: 'http://localhost:5173',
+              host: '127.0.0.1:4680',
+            },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, Origin and Host both evil.example:4680 (matching origin/host, non-loopback DNS rebinding) -> 403', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: 'http://evil.example:4680',
               host: 'evil.example:4680',
             },
             body: JSON.stringify(body),
