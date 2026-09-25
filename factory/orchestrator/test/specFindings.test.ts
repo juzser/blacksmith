@@ -637,6 +637,115 @@ describe('spec-scoped findings (P9-9)', () => {
       expect(successors.size).toBe(0);
     });
 
+    // Every plan-version-created event written before the `successors` field
+    // shipped carries no such field at all -- only the plan `diff` amendPlan
+    // always wrote. These three pin the legacy fallback: infer a pairing from
+    // diff.superseded/diff.added, but ONLY when the shape is unambiguous.
+    // amendPlan() itself never produces this shape any more (it always writes
+    // an explicit `successors`, even when empty) -- these hand-write the raw
+    // event to stand in for one already on an old log.
+    it('infers a successor pairing from a legacy event with exactly one superseded id and one added id', async () => {
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 2,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale: 'legacy event predating the successors field',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['envkit/task-1b-quote-errors'],
+              removed: [],
+              superseded: ['envkit/task-1b-parse-quotes'],
+              carried: [],
+            },
+            // deliberately no `successors` field -- this is the legacy shape.
+          },
+        },
+        { stateDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.get('envkit/task-1b-parse-quotes')).toBe('envkit/task-1b-quote-errors');
+    });
+
+    it('infers nothing from a legacy event with two added ids (or two superseded ids) — fails closed', async () => {
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 2,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale: 'legacy event, ambiguous split -- two tasks landed in its place',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['envkit/task-1b-quote-errors', 'envkit/task-1b-quote-errors-2'],
+              removed: [],
+              superseded: ['envkit/task-1b-parse-quotes'],
+              carried: [],
+            },
+          },
+        },
+        { stateDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.size).toBe(0);
+    });
+
+    it('ignores diff.superseded/diff.added inference when successors is explicitly present', async () => {
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 2,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale:
+              'current-shape event -- explicit successors wins even though the diff alone would look inferable',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['envkit/task-1b-quote-errors'],
+              removed: [],
+              superseded: ['envkit/task-1b-parse-quotes'],
+              carried: [],
+            },
+            // Explicit and empty: a real same-id supersede writes exactly
+            // this. If inference ran anyway it would find the 1+1 diff shape
+            // above and wrongly report a pairing that was never intended.
+            successors: {},
+          },
+        },
+        { stateDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.size).toBe(0);
+    });
+
     it('refuses an amendment that moves no task — it would discharge the finding on the spot (D-127)', async () => {
       const finding = await raiseSpecFinding();
       const err = await amendPlan(

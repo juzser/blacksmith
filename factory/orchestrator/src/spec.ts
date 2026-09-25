@@ -132,6 +132,16 @@ export function latestSpecReview(
  * pairing only when the replacement's `task_id` differs from the id it
  * replaces (the same-id case needs no successor — the fold's own row already
  * carries the work forward under the id everyone already has).
+ *
+ * Events on the log from before this field shipped carry no `successors` key
+ * at all — only the plan `diff` `amendPlan` has always written. For exactly
+ * that shape (no `successors` key, present or absent notwithstanding), fall
+ * back to inferring the pairing from `diff.superseded`/`diff.added`, but only
+ * when it is completely unambiguous: one id on each side, and they differ.
+ * Any other shape (0 or ≥2 ids on either side, a missing/malformed diff)
+ * infers nothing — the same fail-closed answer an unreadable `successors`
+ * gets. A present `successors` — even an explicit `{}` — always wins over
+ * inference; the fallback only ever runs when the key is absent entirely.
  */
 export function taskSuccessors(
   events: readonly StoredEvent[],
@@ -143,9 +153,24 @@ export function taskSuccessors(
     const payload = event.record.payload as Record<string, unknown>;
     if (payload.epic_id !== epicId) continue;
     const entries = payload.successors;
-    if (entries === null || typeof entries !== 'object') continue;
-    for (const [oldId, newId] of Object.entries(entries as Record<string, unknown>)) {
-      if (typeof newId === 'string') successors.set(oldId, newId);
+    if (entries !== undefined) {
+      if (entries === null || typeof entries !== 'object') continue;
+      for (const [oldId, newId] of Object.entries(entries as Record<string, unknown>)) {
+        if (typeof newId === 'string') successors.set(oldId, newId);
+      }
+      continue;
+    }
+    // Legacy fallback (no `successors` key at all) — see doc comment above.
+    const diff = payload.diff;
+    if (diff === null || typeof diff !== 'object') continue;
+    const supersededIds = (diff as Record<string, unknown>).superseded;
+    const addedIds = (diff as Record<string, unknown>).added;
+    if (!Array.isArray(supersededIds) || !Array.isArray(addedIds)) continue;
+    if (supersededIds.length !== 1 || addedIds.length !== 1) continue;
+    const [oldId] = supersededIds;
+    const [newId] = addedIds;
+    if (typeof oldId === 'string' && typeof newId === 'string' && oldId !== newId) {
+      successors.set(oldId, newId);
     }
   }
   return successors;

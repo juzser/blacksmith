@@ -2527,6 +2527,68 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       expect(discharged).toBe(true);
     });
 
+    // The same wiring, but against an event already on the log from before
+    // the `successors` field shipped: only the plan `diff` amendPlan always
+    // wrote, no explicit pairing at all. taskSuccessors' legacy fallback
+    // infers the pairing from diff.superseded/diff.added (exactly one on
+    // each side, unambiguous) rather than leaving every pre-existing
+    // amendment's chain permanently unresolvable.
+    it('discharges an amend-pending finding at closeEpic when the successor pairing must be inferred from a legacy event with no successors field', async () => {
+      await addTask('epic-1/task-1', 'completed');
+      await addTask('epic-1/task-2', 'superseded', 2);
+      await addTask('epic-1/task-4', 'completed', 3);
+      await addIntegrationCheck();
+      await addSpecReview();
+      await addGoalCheck();
+      // The shape amendPlan() wrote before the successors field existed:
+      // diff.superseded/diff.added carry the pairing, nothing else does.
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 3,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            epic_id: epicId,
+            version: 3,
+            previous_version: 2,
+            amends: [],
+            rationale: 'task-2 renamed to task-4 by a later, unrelated amendment (legacy event)',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['epic-1/task-4'],
+              removed: [],
+              superseded: ['epic-1/task-2'],
+              carried: [],
+            },
+            // deliberately no `successors` field.
+          },
+        },
+        { stateDir },
+      );
+      await raiseAmendPending(['epic-1/task-2']);
+
+      const record = await closeEpic(
+        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        ctx(),
+        { stateDir },
+      );
+
+      expect(record.closedBy).toBe('verdict');
+      expect(record.machineVerdict).toBe('go');
+
+      const events = await readEvents(sessionId, { stateDir });
+      const discharged = events.some(
+        (e) =>
+          e.record.event_type === 'finding-transitioned' &&
+          (e.record.payload as Record<string, unknown>).finding_id === 'finding-spec' &&
+          (e.record.payload as Record<string, unknown>).to_status === AMENDED_STATUS,
+      );
+      expect(discharged).toBe(true);
+    });
+
     // D-21 Part 4. The PERSISTED epic-closed record is what outlives the
     // session -- what anyone auditing the close months later actually reads
     // -- so the honesty requirement has to reach it, not only the live
