@@ -123,8 +123,9 @@ under it, which is the wrong `--state-dir`, or a wave session opened without
 done; a green gate on serialized work is exactly the outcome the two
 playbooks are written to prevent.
 
-11. Repeat until every task in the live plan version is
-    `completed`/`superseded`/`waived`. Dispatch the **`planner`** again for
+11. Repeat until every task in the live plan version is `completed`/`waived`,
+    or `superseded` by a successor that is itself terminal-OK (recursively —
+    a successor chain counts too). Dispatch the **`planner`** again for
     the epic verdict against acceptance criteria — gaps found → a NEW
     `plan-v(n+1)` with inferred tasks (never a live-graph mutation,
     architecture §12), auto-scheduled at confidence ≥0.8 else parked for an
