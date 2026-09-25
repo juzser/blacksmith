@@ -40,6 +40,8 @@
  * Pure, and it writes nothing. Like `waveNext`, admission stays where it was:
  * a round simulated here has been admitted by nobody.
  */
+import { claimsOverlap, readEdgeList, type ClaimedTask, type WorktreePolicy } from './claims.js';
+import { planClaimedTasks, type PlanFile } from './plan.js';
 import {
   computeNextWave,
   type DeferralReason,
@@ -228,5 +230,116 @@ export function scheduleWaves(input: NextWaveInput): PlanSchedule {
     constraints,
     hint,
     exitCode: stalled.length > 0 ? 1 : constraints.length > 0 ? 2 : 0,
+  };
+}
+
+/** `{ tasks, claims, small }` from `computePlanParallelism` — how big the plan reads. */
+export interface PlanParallelismSize {
+  /** Live tasks in the plan. */
+  tasks: number;
+  /** Distinct claim glob paths across every live task. */
+  claims: number;
+  /** True at or under 3 live tasks and 10 distinct claim paths. */
+  small: boolean;
+}
+
+/**
+ * How wide a plan can ever run, answered at `plan ingest` time rather than
+ * discovered by watching `/bs run` serialize. `widest` is `scheduleWaves`'s
+ * own number, not a second opinion about it. `parallelWith` is claims-and-
+ * edges only, matching what a producer can actually widen without an
+ * import-graph analysis (`wave schedule --repo`'s job, not this one's).
+ */
+export interface PlanParallelism {
+  /** The widest admissible wave this plan ever reaches (from `scheduleWaves`). */
+  widest: number;
+  /** Per live task id, the other live task ids it could run beside. */
+  parallel_with: Record<string, string[]>;
+  size: PlanParallelismSize;
+}
+
+/**
+ * Directed reachability over the plan's `depends_on` edges, both ways: the
+ * tasks reachable by walking forward (its descendants) and the tasks
+ * reachable by walking backward (its ancestors). Two tasks are connected —
+ * "a dependency path between them in either direction" — when either set
+ * contains the other, which a chain like C -> B -> A catches for A and C
+ * even though no edge names that pair directly.
+ */
+function connectedTaskIds(
+  ids: ReadonlySet<string>,
+  edges: readonly { task: string; dependsOn: string }[],
+): Map<string, Set<string>> {
+  const descendantsOf = new Map<string, string[]>();
+  const ancestorsOf = new Map<string, string[]>();
+  for (const id of ids) {
+    descendantsOf.set(id, []);
+    ancestorsOf.set(id, []);
+  }
+  for (const edge of edges) {
+    if (!ids.has(edge.task) || !ids.has(edge.dependsOn)) continue;
+    descendantsOf.get(edge.dependsOn)?.push(edge.task);
+    ancestorsOf.get(edge.task)?.push(edge.dependsOn);
+  }
+  const reachable = (start: string, adjacency: Map<string, string[]>): Set<string> => {
+    const seen = new Set<string>();
+    const stack = [...(adjacency.get(start) ?? [])];
+    while (stack.length > 0) {
+      const next = stack.pop() as string;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      for (const n of adjacency.get(next) ?? []) if (!seen.has(n)) stack.push(n);
+    }
+    return seen;
+  };
+  const connected = new Map<string, Set<string>>();
+  for (const id of ids) {
+    connected.set(
+      id,
+      new Set([...reachable(id, descendantsOf), ...reachable(id, ancestorsOf)]),
+    );
+  }
+  return connected;
+}
+
+const SMALL_MAX_TASKS = 3;
+const SMALL_MAX_CLAIMS = 10;
+
+/**
+ * Pure. Superseded tasks are absent from `planClaimedTasks` already (D-126),
+ * so they never enter `widest`, `parallelWith`, or `size` — no separate
+ * filter needed here.
+ */
+export function computePlanParallelism(plan: PlanFile, policy: WorktreePolicy): PlanParallelism {
+  const claimedTasks: ClaimedTask[] = planClaimedTasks(plan);
+  const ids = new Set(claimedTasks.map((t) => t.task_id));
+  const edges = readEdgeList(plan.edges);
+  const connected = connectedTaskIds(ids, edges);
+
+  const parallelWith: Record<string, string[]> = {};
+  for (const a of claimedTasks) {
+    const withIds: string[] = [];
+    for (const b of claimedTasks) {
+      if (a.task_id === b.task_id) continue;
+      if (connected.get(a.task_id)?.has(b.task_id)) continue;
+      if (claimsOverlap(a, b).overlaps) continue;
+      withIds.push(b.task_id);
+    }
+    parallelWith[a.task_id] = withIds.sort();
+  }
+
+  const { widest } = scheduleWaves({ plan, policy });
+
+  const claimPaths = new Set<string>();
+  for (const t of claimedTasks) for (const c of t.claims) claimPaths.add(c);
+
+  return {
+    widest,
+    parallel_with: parallelWith,
+    size: {
+      tasks: claimedTasks.length,
+      claims: claimPaths.size,
+      small: claimedTasks.length <= SMALL_MAX_TASKS && claimPaths.size <= SMALL_MAX_CLAIMS,
+    },
   };
 }
