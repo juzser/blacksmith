@@ -188,6 +188,13 @@ async function addedPlanVersions(
 export interface AddedTask {
   taskId: string;
   claims: unknown;
+  /**
+   * The epic the `task-added` payload named, read the same `typeof` way
+   * `addedPayload` writes it. `undefined` only for an event that predates
+   * D-232's `epic_id` field — a caller matching this against a plan's own
+   * `epic_id` must treat that absence as "unknown epic", not as a match.
+   */
+  epicId: string | undefined;
 }
 
 /**
@@ -222,7 +229,12 @@ export async function readAddedTasks(
   const byId = new Map<string, AddedTask>();
   for (const { record } of events) {
     if (record.event_type !== 'task-added' || !record.task_id) continue;
-    byId.set(record.task_id, { taskId: record.task_id, claims: record.payload?.claims });
+    const epicId = record.payload?.epic_id;
+    byId.set(record.task_id, {
+      taskId: record.task_id,
+      claims: record.payload?.claims,
+      epicId: typeof epicId === 'string' ? epicId : undefined,
+    });
   }
   return [...byId.values()];
 }

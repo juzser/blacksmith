@@ -541,8 +541,12 @@ describe('taskEvents', () => {
       await emitFollowUpTask(followUp(), ctx, { stateDir });
 
       expect(await readAddedTasks(ctx, { stateDir })).toEqual([
-        { taskId: 'epic-1/task-1', claims: ['src/foo/**'] },
-        { taskId: 'epic-1/followup-4b70d608', claims: ['src/parse.ts', 'test/parse.test.ts'] },
+        { taskId: 'epic-1/task-1', claims: ['src/foo/**'], epicId: 'epic-1' },
+        {
+          taskId: 'epic-1/followup-4b70d608',
+          claims: ['src/parse.ts', 'test/parse.test.ts'],
+          epicId: 'epic-1',
+        },
       ]);
     });
 
