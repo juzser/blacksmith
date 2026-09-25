@@ -5046,6 +5046,24 @@ describe('cli.ts (built binary)', () => {
           eventsDir,
         ]);
         expect(leak.status).toBe(0);
+        // A genuine follow-up of THIS epic, log-only the way `findings raise`
+        // mints one: the filter must keep adopting it.
+        const own = runCli([
+          'event',
+          'append',
+          JSON.stringify({
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'task-added',
+            task_id: 'epic-1/followup-cd34',
+            plan_version: 1,
+            causal_parent: `${sessionId}#0`,
+            payload: { epic_id: 'epic-1', claims: ['src/qux/*.ts'] },
+          }),
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(own.status).toBe(0);
 
         const result = runCli([
           'wave',
@@ -5073,10 +5091,14 @@ describe('cli.ts (built binary)', () => {
         expect(seen).not.toContain('epic-0/task-9');
 
         // And its claim on `src/foo/*.ts` must not have cost task-1 its
-        // admission: both of this epic's tasks run, claim-disjoint from each
+        // admission: all of this epic's tasks run, the log-only one included, claim-disjoint from each
         // other, exactly as `wave check` already treats a stale foreign row
         // -- it never once compares against it.
-        expect(proposal.wave.sort()).toEqual(['epic-1/task-1', 'epic-1/task-2']);
+        expect(proposal.wave.sort()).toEqual([
+          'epic-1/followup-cd34',
+          'epic-1/task-1',
+          'epic-1/task-2',
+        ]);
         expect(proposal.deferred).toEqual([]);
       });
     });

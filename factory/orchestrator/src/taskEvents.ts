@@ -190,9 +190,10 @@ export interface AddedTask {
   claims: unknown;
   /**
    * The epic the `task-added` payload named, read the same `typeof` way
-   * `addedPayload` writes it. `undefined` only for an event that predates
-   * D-232's `epic_id` field — a caller matching this against a plan's own
-   * `epic_id` must treat that absence as "unknown epic", not as a match.
+   * `addedPayload` writes it. `undefined` for an event whose payload carries
+   * no string `epic_id` (a hand-appended row, say) — a caller matching this
+   * against a plan's own `epic_id` must treat that absence as "unknown
+   * epic", not as a match.
    */
   epicId: string | undefined;
 }

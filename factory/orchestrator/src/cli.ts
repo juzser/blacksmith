@@ -1010,7 +1010,7 @@ async function nextWaveInputFrom(
     ? await readAddedTasks({ sessionId: flags.session as string }, eventOptsFromFlags(flags))
     : [];
   const planIds = new Set(planOnDisk.tasks.map((t) => t.task_id));
-  // Bug: a lineage is not one epic. `readAddedTasks` reads the WHOLE lineage
+  // A lineage is not one epic. `readAddedTasks` reads the WHOLE lineage
   // (D-119), so a resumed session that ever ran a different, earlier epic
   // carries that epic's `task-added` rows too — and a row an operator
   // abandoned non-terminal (never merged, waived, or superseded) reads back
