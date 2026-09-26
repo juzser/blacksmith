@@ -1391,6 +1391,14 @@ async function main(): Promise<number> {
     // what went unnoticed.
     const edges = await emitEdgesRecorded(plan, ctx, opts);
     const added = written.filter((e) => e.record.event_type === 'task-added').length;
+    // Criterion 7: a plan that serializes by claim geometry alone used to be
+    // invisible until `/bs run` actually hit the ceiling. Dynamic for the
+    // same reason `wave schedule` imports it dynamically -- nothing an
+    // ingest that never schedules needs should be on the boot path every
+    // `smith --help` walks. No repo scan here: `parallel_with` is
+    // claims-and-edges only, so the input carries no crossings.
+    const { computePlanParallelism } = await import('./waveSchedule.js');
+    const parallelism = computePlanParallelism(plan, loadWorktreePolicy());
     printJson({
       epic: plan.epic_id,
       version: plan.version,
@@ -1398,6 +1406,7 @@ async function main(): Promise<number> {
       superseded: written.length - added,
       skipped: plan.tasks.length - added,
       edges: edges.length,
+      parallelism,
     });
     return 0;
   }
@@ -1726,9 +1735,13 @@ async function main(): Promise<number> {
     // Static would be fine — waveSchedule.js reaches nothing waveNext.js has
     // not already put on the boot path — but the input assembly it is handed
     // may dynamically import `db/projector.js`, so the await is here anyway.
-    const { scheduleWaves } = await import('./waveSchedule.js');
-    const schedule = scheduleWaves(await nextWaveInputFrom(planFile, flags));
-    printJson(schedule);
+    const { computePlanParallelism, scheduleWaves } = await import('./waveSchedule.js');
+    const input = await nextWaveInputFrom(planFile, flags);
+    const schedule = scheduleWaves(input);
+    // Same `size` block `plan ingest` prints under `parallelism`, so the
+    // operator sees the small-epic bound from either command.
+    const { size } = computePlanParallelism(input.plan, input.policy);
+    printJson({ ...schedule, size });
     // Writes nothing, for the reason `wave next` writes nothing and one more:
     // every round after the first is a simulation. The tasks it marks complete
     // were completed by nobody, and a log that recorded them would be claiming

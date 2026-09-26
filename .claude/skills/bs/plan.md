@@ -44,7 +44,26 @@ there means "not looked at", not "looked at and clean".
    — a *different model* than the planner's, per its own frontmatter — to
    hunt spec gaps/ambiguities/missing-nonfunctional clauses
    (`docs/standards/agent-constraints.md` "planner"; `severity.yml`: most
-   spec gaps land S2, blocking sign-off).
+   spec gaps land S2, blocking sign-off). Name the review focus in the
+   dispatch itself, as a short list of at most six items, so findings come
+   back tagged to one of them:
+
+   1. Claims and dependency edges, cross-checked against
+      `smith claims impact`.
+   2. TDD-ability -- a named failing test per task, before its code.
+   3. Nonfunctional and security clauses.
+   4. Budget and diff-cap fit.
+   5. Acceptance-criterion coverage -- every epic criterion maps to a task.
+   6. From round 2 on, only the previous round's findings plus any task
+      that changed since then.
+
+   When `size.small` reads true on the draft (`smith wave schedule` or
+   `smith plan ingest`'s `parallelism.size`, run against the draft plan
+   file), recommend effort tier `small` -- single-pass spec review -- to
+   the operator unless a security trigger floors it first, and say why in
+   the same message: a plan that cannot spread past a few tasks and a
+   handful of claim paths does not need a second review round to find what
+   one pass already covers.
 4. Planner fixes flagged issues; repeat 2–3 until the spec-reviewer has
    nothing S1/S2 left — or exactly once when `profile.specReviewRounds` is
    `single-pass` (`small`), where the planner fixes what came back and
@@ -127,6 +146,11 @@ there means "not looked at", not "looked at and clean".
    decide whether to re-slice, and say which you chose when you present the
    plan.
 
+   The same JSON also carries `size` -- `{tasks, claims, small}` over live
+   tasks only -- the block `plan ingest` prints again under `parallelism`
+   at step 7; `small` is true at or under 3 live tasks and 10 distinct
+   claim paths, and this is where the step 3 tier read gets confirmed.
+
    Beside the schedule, the read that names what it only counts:
 
    ```bash
@@ -163,6 +187,14 @@ there means "not looked at", not "looked at and clean".
    UI check found behind two epics. It is idempotent, so run it again on a
    resumed session; read `added` and `edges` back, and say so when either is
    0 on a plan that has tasks or edges.
+
+   Read `parallelism.widest` back from that same output, too. `parallel_with`
+   underneath it is claims-and-edges only -- import-graph crossings stay
+   `wave schedule --repo`'s job, not this key's -- so it can only ever name
+   a width that job would not contradict. A `widest` of 1 on a
+   plan of two or more tasks means every task the wave loop will ever run
+   sits behind some claim or edge that serializes it: flag that to the
+   operator now, before a run discovers it as a stalled wave.
 8. If this epic opens a new roadmap milestone, add it to
    `factory/specs/roadmap.md` (planner-maintained, architecture §12) — a
    roadmap change is itself a scope change and needs the same operator nod.
