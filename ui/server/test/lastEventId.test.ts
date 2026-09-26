@@ -17,6 +17,7 @@ import {
   buildFixture,
   EPIC_ID,
   SESSION_ID,
+  TASK_2,
 } from '../../../factory/orchestrator/test/db/fixtures.js';
 import { closeApp, createApp } from '../src/app.js';
 
@@ -178,6 +179,86 @@ describe('ui/server app.ts: writes read the last event id through the cache', ()
       expect(res2.status).toBe(200);
       const events = await readEvents(SESSION_ID, { stateDir });
       expect(events.at(-1)?.record.causal_parent).toBe(other.event_id);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('the waiver apply-batch route chains through the same cache as the lesson routes', async () => {
+    // resolveContext() (waivers) and lessonContext() (lessons) are two call
+    // sites over the same `logCache` param — the first test file only
+    // exercises the lesson routes' site. A regression scoped to just the
+    // waiver route (e.g. a stray readEvents() re-added to resolveContext())
+    // would pass every test above and still reintroduce the full-log read
+    // this task removed.
+    const seam: LogCacheSeam = {
+      opens: 0,
+      fstats: 0,
+      bytesRead: 0,
+      readEventsCalls: 0,
+      fullReparses: 0,
+    };
+    const logCache = createLogCache(seam);
+    const handle = createApp({ dbPath, stateDir, roadmapPath, logCache });
+    try {
+      const taskDetailRes = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_2)}`);
+      const detail = (await taskDetailRes.json()) as {
+        findings: Array<{ fingerprint: string }>;
+      };
+      const fingerprint = detail.findings[0]?.fingerprint;
+      if (!fingerprint) throw new Error('fixture: expected task-2 to have at least one finding');
+
+      const parentBeforeWrite = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.event_id;
+      const res = await handle.app.request('/api/waivers/apply-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: SESSION_ID,
+          decisions: [{ fingerprint, decision: 'granted', operatorNote: 'ok now' }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const events = await readEvents(SESSION_ID, { stateDir });
+      expect(events.at(-1)?.record.causal_parent).toBe(parentBeforeWrite);
+
+      // The regression this guards against: a re-added readEvents() call
+      // would leave this seam untouched, since only the injected cache is
+      // wired to it.
+      expect(seam.opens).toBeGreaterThanOrEqual(1);
+      expect(seam.bytesRead).toBeGreaterThan(0);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
+  it('an explicit causalParent in the request body skips the cache read entirely', async () => {
+    await seedCandidate('lesson-ui-1', 'Approve with an explicit causal_parent.');
+    const explicitParent = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.event_id;
+
+    const seam: LogCacheSeam = {
+      opens: 0,
+      fstats: 0,
+      bytesRead: 0,
+      readEventsCalls: 0,
+      fullReparses: 0,
+    };
+    const logCache = createLogCache(seam);
+    const handle = createApp({ dbPath, stateDir, roadmapPath, logCache });
+    try {
+      const res = await handle.app.request('/api/lessons/lesson-ui-1/approve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sessionId: SESSION_ID, causalParent: explicitParent }),
+      });
+      expect(res.status).toBe(200);
+      const events = await readEvents(SESSION_ID, { stateDir });
+      expect(events.at(-1)?.record.causal_parent).toBe(explicitParent);
+
+      // `causalParent !== undefined` short-circuits both resolveContext() and
+      // lessonContext() before either calls logCache.lastEventId() — an
+      // explicit body value must never trigger a cache (or log) read at all.
+      expect(seam.opens).toBe(0);
+      expect(seam.bytesRead).toBe(0);
     } finally {
       closeApp(handle);
     }
