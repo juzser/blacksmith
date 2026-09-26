@@ -293,7 +293,11 @@ describe('lintDispatchPrompt — declared artifact', () => {
       agentsDir,
       eventOpts: eventOpts(),
     });
-    expect(report.artifact).toEqual({ status: 'not-applicable', expected_line: null, declared_line: null });
+    expect(report.artifact).toEqual({
+      status: 'not-applicable',
+      expected_line: null,
+      declared_line: null,
+    });
     expect(report.exitCode).toBe(0);
   });
 
@@ -350,10 +354,7 @@ describe('drift guard — dispatch.md example lines parse', () => {
     const turnMatch = /Turn budget: \d+/.exec(doc);
     const artifactMatch = /Declared artifact: \S+/.exec(doc);
     expect(turnMatch, 'dispatch.md names no example "Turn budget:" line').not.toBeNull();
-    expect(
-      artifactMatch,
-      'dispatch.md names no example "Declared artifact:" line',
-    ).not.toBeNull();
+    expect(artifactMatch, 'dispatch.md names no example "Declared artifact:" line').not.toBeNull();
     expect(parseStatedTurns(turnMatch?.[0] as string)).not.toBeNull();
     expect(parseDeclaredArtifactLine(artifactMatch?.[0] as string)).not.toBeNull();
   });
