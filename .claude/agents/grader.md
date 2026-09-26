@@ -5,6 +5,11 @@ model: sonnet
 effort: low
 tools: Read, Grep, Glob, Bash
 maxTurns: 15
+hooks:
+  Stop:
+    - hooks:
+        - type: command
+          command: "\"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\""
 ---
 
 # Grader
