@@ -78,7 +78,7 @@ describe('decideJudgeStop (pure decision)', () => {
     expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({ decision: 'allow' });
   });
 
-  it('allows when the declared artifact exists but is empty -- existence is the whole question, parse validity stays judge report\'s', () => {
+  it("allows when the declared artifact exists but is empty -- existence is the whole question, parse validity stays judge report's", () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     writeFileSync(artifactPath, '');
     const prompt = `Declared artifact: ${artifactPath}\n`;
@@ -103,18 +103,21 @@ describe('decideJudgeStop (pure decision)', () => {
     it('allows + notes when the prompt has no declared-artifact line at all -- covered upstream by dispatch lint (missing line) and downstream by judge report judges.artifact-missing', () => {
       const decision = decideJudgeStop(stdinFixture(), 'Role: reviewer.\nno such line here\n');
       expect(decision.decision).toBe('allow');
+      if (decision.decision !== 'allow') throw new Error('unreachable');
       expect(decision.note).toMatch(/no.*declared artifact/i);
     });
 
     it('allows + notes when the declared path is relative -- covered upstream by dispatch lint (relative-path refusal) and downstream by judge report judges.artifact-missing', () => {
       const decision = decideJudgeStop(stdinFixture(), 'Declared artifact: relative/path.json\n');
       expect(decision.decision).toBe('allow');
+      if (decision.decision !== 'allow') throw new Error('unreachable');
       expect(decision.note).toMatch(/not an absolute path/i);
     });
 
     it('allows + notes when the prompt text could not be read at all -- covered downstream by judge report judges.artifact-missing', () => {
       const decision = decideJudgeStop(stdinFixture(), null);
       expect(decision.decision).toBe('allow');
+      if (decision.decision !== 'allow') throw new Error('unreachable');
       expect(decision.note).toMatch(/could not read/i);
     });
   });
@@ -149,9 +152,7 @@ describe('runJudgeStopHook (stdin JSON in, decision out)', () => {
   });
 
   it('allows + notes when the transcript path is unreadable -- covered downstream by judge report judges.artifact-missing', () => {
-    const raw = JSON.stringify(
-      stdinFixture({ transcript_path: path.join(root, 'missing.jsonl') }),
-    );
+    const raw = JSON.stringify(stdinFixture({ transcript_path: path.join(root, 'missing.jsonl') }));
     const result = runJudgeStopHook(raw);
     expect(result.stdout).toBe('');
     expect(result.stderr).toMatch(/could not read/i);
@@ -159,7 +160,7 @@ describe('runJudgeStopHook (stdin JSON in, decision out)', () => {
 });
 
 describe('parser identity', () => {
-  it('imports dispatchLint.ts\'s parser rather than defining a second copy', () => {
+  it("imports dispatchLint.ts's parser rather than defining a second copy", () => {
     // Reaching into the compiled module and asserting reference identity
     // against dispatchLint.ts's own export -- not a re-implemented regex.
     const prompt = 'Declared artifact: /abs/x.json\n';

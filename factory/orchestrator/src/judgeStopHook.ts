@@ -82,7 +82,7 @@ export function decideJudgeStop(
       decision: 'allow',
       note:
         "judge-stop: could not read this agent's prompt (transcript missing or " +
-        'unreadable); allowing the stop. judge report\'s judges.artifact-missing ' +
+        "unreadable); allowing the stop. judge report's judges.artifact-missing " +
         'remains the backstop.',
     };
   }
@@ -103,7 +103,7 @@ export function decideJudgeStop(
       decision: 'allow',
       note:
         `judge-stop: declared artifact "${declared}" is not an absolute path; ` +
-        "allowing the stop. dispatch lint refuses this before dispatch, and judge " +
+        'allowing the stop. dispatch lint refuses this before dispatch, and judge ' +
         "report's judges.artifact-missing catches it downstream.",
     };
   }
@@ -160,7 +160,9 @@ function userTextOf(entry: unknown): string | null {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     const parts = content
-      .filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null)
+      .filter(
+        (block): block is Record<string, unknown> => typeof block === 'object' && block !== null,
+      )
       .filter((block) => block.type === 'text' && typeof block.text === 'string')
       .map((block) => block.text as string);
     if (parts.length > 0) return parts.join('\n');
@@ -195,10 +197,15 @@ export function runJudgeStopHook(rawStdin: string): JudgeStopHookResult {
     };
   }
 
-  const promptText = input.transcript_path ? extractLastUserPromptText(input.transcript_path) : null;
+  const promptText = input.transcript_path
+    ? extractLastUserPromptText(input.transcript_path)
+    : null;
   const result = decideJudgeStop(input, promptText);
   if (result.decision === 'block') {
-    return { stdout: `${JSON.stringify({ decision: 'block', reason: result.reason })}\n`, stderr: '' };
+    return {
+      stdout: `${JSON.stringify({ decision: 'block', reason: result.reason })}\n`,
+      stderr: '',
+    };
   }
   return { stdout: '', stderr: result.note ? `${result.note}\n` : '' };
 }
