@@ -10109,6 +10109,114 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  // A successor task's whole point is to keep the predecessor's commits, so
+  // reusing them has to be tied to the logged amendment that actually paired
+  // the two ids -- not to an operator's bare say-so on the command line.
+  describe('worktree create --from (successor re-scope)', () => {
+    let projectDir: string;
+
+    beforeAll(async () => {
+      projectDir = path.join(scratchDir, 'from-project');
+      await mkdir(projectDir, { recursive: true });
+      runOrThrow('git', ['init', '-q', '-b', 'main', projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'README.md'), '# from\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+    });
+
+    function append(eventsDir: string, event: Record<string, unknown>): string {
+      const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+      expect(run.status, run.stdout).toBe(0);
+      return JSON.parse(run.stdout).event_id as string;
+    }
+
+    it('is refused without a logged successors entry pairing the two ids', () => {
+      const sessionId = `cli-from-refuse-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-refuse-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      void parent;
+
+      const worktreeDir = path.join(scratchDir, 'wt', `from-refuse-${Date.now()}`);
+      runOrThrow('git', ['worktree', 'add', '-b', 'smith/epic-from/task-1', worktreeDir, 'main'], {
+        cwd: projectDir,
+      });
+
+      const { stdout, status } = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from',
+        'task-1-v2',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('worktree.not-a-successor');
+    });
+
+    it('is accepted once a plan amendment records the successors pairing', () => {
+      const sessionId = `cli-from-accept-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-accept-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 2,
+        causal_parent: parent,
+        payload: {
+          epic_id: 'epic-from2',
+          version: 2,
+          previous_version: 1,
+          successors: { 'epic-from2/task-1': 'epic-from2/task-1-v2' },
+        },
+      });
+
+      runOrThrow(
+        'git',
+        ['worktree', 'add', '-b', 'smith/epic-from2/task-1', path.join(scratchDir, 'wt', 'from2-pred'), 'main'],
+        { cwd: projectDir },
+      );
+
+      const { stdout, status } = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from2',
+        'task-1-v2',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status, stdout).toBe(0);
+      const result = JSON.parse(stdout);
+      expect(result.branch).toBe('smith/epic-from2/task-1-v2');
+    });
+  });
+
   // D-40/P9-25: the gate's coverage evidence, reachable without staging a
   // whole gate run — which is how an operator checks the thing D-40 cost a
   // full investigation to establish.
