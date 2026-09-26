@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Bash
 maxTurns: 15
 hooks:
   Stop:
-    - hooks: [{type: command, command: "\"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\""}]
+    - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]
 ---
 
 # Spec Reviewer
