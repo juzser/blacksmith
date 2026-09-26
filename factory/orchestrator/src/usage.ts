@@ -300,8 +300,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'worktree create',
     positionals: '<project-dir> <epic> <task-id>',
-    flags: '',
-    summary: 'Cut the isolated worktree and task branch one task is allowed to write in.',
+    flags: '[--from <predecessor-task-id> --session <id> [--state-dir <dir>]]',
+    summary:
+      'Cut the isolated worktree and task branch one task is allowed to write in. --from cuts it from a predecessor branch instead of integration, and requires --session (which supplies the log --from is checked against): refused unless that session records <epic>/<task-id> as the logged successor of <epic>/<predecessor-task-id>.',
   },
   {
     command: 'worktree rm',

@@ -164,7 +164,8 @@ one thing this playbook never asks you to.
    runs; it never decides pass/fail itself. At one round the grader scores
    once and a failed criterion is the coder's bounce, not a re-grade. Its result file is an **input to
    step 7**, not a note to the operator: pass it as `--grader` or the rubric
-   gates nothing (D-34).
+   gates nothing (D-34). A round-2 `fail` re-scopes via dispatch.md's "Round
+   counting and escalation", not a round 3 on this id.
 7. Run the gate pipeline:
    `smith gate run <task-id> --worktree <dir> --checks checks.json --result
    result.json --grader state/results/<task-id>.grader-r<round>.json

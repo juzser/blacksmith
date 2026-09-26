@@ -43,7 +43,9 @@ edit does not save a round-trip, it costs the whole one.
   rubric — nothing broader.
 - Bounce back to the worker with specific, itemized gaps (not vibes).
 - **Max 2 rounds.** After that, pass whatever exists through to the gates —
-  the gates, not the grader, decide final pass/fail.
+  the gates, not the grader, decide final pass/fail. The re-scope path after a
+  round-2 `fail` is `.claude/skills/bs/dispatch.md`'s "Round counting and
+  escalation" — read it there rather than here.
 - Grader never edits code and never talks to the operator.
 - **Never compact your context** (`budgets.yml` `context_window`,
   `narrowing_roles`). You grade evidence rather than build on it; a
@@ -101,10 +103,12 @@ harness counts the tokens; the dispatcher stamps them.
 {"status": "done", "overall": "fail", "round": 2, "artifact_path": "state/results/<task-id>.grader-r2.json"}
 ```
 
-Two rounds is a hard stop, not a suggestion. A `fail` at round 2 goes back to
-the planner for re-scoping; you do not open round 3, and you do not soften the
-verdict to avoid the stop. The schema caps `round` at 2, so a round-3 file
-does not quietly pass the gate — it blocks it as invalid.
+Two rounds is a hard stop, not a suggestion. A `fail` at round 2 is re-scoped
+through dispatch.md's "Round counting and escalation" (plan propose/approve a
+successor task id, then `worktree create --from`); you do not open round 3 on
+this id, and you do not soften the verdict to avoid the stop. The schema caps
+`round` at 2, so a round-3 file does not quietly pass the gate — it blocks it
+as invalid.
 
 ## What the gate does with this file
 

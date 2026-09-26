@@ -127,6 +127,7 @@ import {
   STATE_DB_PATH,
 } from './paths.js';
 import {
+  bareTaskId,
   diffPlans,
   livePlanTasks,
   type PlanChanges,
@@ -169,7 +170,7 @@ import {
   securityTriggers,
 } from './security.js';
 import { parseLessons } from './severity.js';
-import { amendPlan, recordSpecReview } from './spec.js';
+import { amendPlan, recordSpecReview, taskSuccessors } from './spec.js';
 import {
   approveSpecChange,
   listSpecChanges,
@@ -2153,6 +2154,29 @@ async function main(): Promise<number> {
       positional,
       usageFor('worktree create'),
     ) as [string, string, string];
+    if (flags.from !== undefined) {
+      // `--from` reuses a predecessor's commits, so it may only be spent on a
+      // task the log actually names as that predecessor's successor — never
+      // on a bare "I want the same branch history" request. `--session` is
+      // what supplies the log to check against; without it there is nothing
+      // to refuse against, so demand it explicitly rather than silently
+      // trusting an unauthenticated `--from`.
+      const sessionId = requireFlag(flags, 'session');
+      const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+      const successors = taskSuccessors(events, epic);
+      const from = flags.from;
+      const expected = bareTaskId(epic, taskId);
+      const actual = successors.get(from) ?? successors.get(`${epic}/${from}`);
+      if (actual === undefined || bareTaskId(epic, actual) !== expected) {
+        throw new SmithError(
+          'worktree.not-a-successor',
+          `${epic}/${taskId} is not logged as the successor of ${epic}/${from}; run \`plan propose\`/\`plan approve\` with a supersede pairing them first.`,
+          { epic, taskId, from },
+        );
+      }
+      printJson(createTaskWorktree(projectDir, epic, taskId, { from }));
+      return 0;
+    }
     printJson(createTaskWorktree(projectDir, epic, taskId));
     return 0;
   }
