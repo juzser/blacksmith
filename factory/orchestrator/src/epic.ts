@@ -39,7 +39,12 @@ import {
   type QuorumResult,
   runQuorumCase,
 } from './quorum.js';
-import { latestSpecReview, type SpecReviewStatus, specReviewBlockers } from './spec.js';
+import {
+  latestSpecReview,
+  type SpecReviewStatus,
+  specReviewBlockers,
+  taskSuccessors,
+} from './spec.js';
 import { TERMINAL_OK_TASK_STATUSES } from './taskStatus.js';
 import {
   auditWaveConcurrency,
@@ -85,6 +90,52 @@ import { RESERVED_TASK_ID } from './worktree.js';
 
 /** The terminal-OK status that is a decision rather than a completion (D-120). */
 const WAIVED_TASK_STATUS = 'waived';
+
+/**
+ * A task a re-plan (`plan amend`) replaced with a successor task cut under a
+ * later plan version. `TERMINAL_TASK_STATUSES` (taskStatus.ts) already counts
+ * this as over; it is deliberately NOT in `TERMINAL_OK_TASK_STATUSES`, because
+ * "over" is not the same as "well" — the work only actually landed if the
+ * successor did. `resolveSupersededRow` below is what asks that question.
+ */
+const SUPERSEDED_TASK_STATUS = 'superseded';
+
+/**
+ * Follows a superseded task to whatever eventually carries its work, walking
+ * a possibly multi-hop chain (a successor can itself be superseded by a
+ * later amendment). Returns the first row in the chain that is not itself
+ * superseded, or `undefined` when the chain is missing a hop, names a task
+ * with no fold record, or cycles back on itself — every one of those reads
+ * as "no successor to vouch for this", the fail-closed answer.
+ *
+ * `successors` is folded off the event log (spec.ts's `taskSuccessors`), so
+ * its keys and values are whatever `plan-version-created` recorded — not
+ * necessarily bare (D-46/P9-29) — hence comparing through `bareTaskId` at
+ * every hop rather than assuming the map is pre-normalized.
+ */
+function resolveSupersededRow(
+  epicId: string,
+  taskId: string,
+  tasks: readonly EpicTaskRow[],
+  successors: ReadonlyMap<string, string>,
+): EpicTaskRow | undefined {
+  const bareSuccessors = new Map(
+    [...successors].map(([from, to]) => [bareTaskId(epicId, from), to] as const),
+  );
+  const visited = new Set<string>([bareTaskId(epicId, taskId)]);
+  let currentId = bareTaskId(epicId, taskId);
+  for (;;) {
+    const nextId = bareSuccessors.get(currentId);
+    if (nextId === undefined) return undefined;
+    const nextBare = bareTaskId(epicId, nextId);
+    if (visited.has(nextBare)) return undefined;
+    visited.add(nextBare);
+    const row = tasks.find((t) => bareTaskId(epicId, t.taskId) === nextBare);
+    if (row === undefined) return undefined;
+    if (row.taskStatus !== SUPERSEDED_TASK_STATUS) return row;
+    currentId = nextBare;
+  }
+}
 
 export interface EpicTaskSummary {
   taskId: string;
@@ -481,12 +532,29 @@ export function summarizeEpic(
   plan: EpicPlanRoster | null = null,
   quarantined: readonly SkippedFindingRecord[] = [],
   concurrency: EpicConcurrency | null = null,
+  /**
+   * Old task id -> the successor that superseded it (spec.ts's
+   * `taskSuccessors`, folded off every `plan-version-created` event this
+   * epic has). Defaults to empty: a caller that never threads it gets
+   * exactly today's behavior — every superseded task blocks, same as before
+   * this parameter existed.
+   */
+  successors: ReadonlyMap<string, string> = new Map(),
 ): EpicSummary {
   const taskSummaries: EpicTaskSummary[] = tasks.map((t) => ({
     taskId: t.taskId,
     taskStatus: t.taskStatus,
   }));
-  const nonTerminal = taskSummaries.filter((t) => !TERMINAL_OK_TASK_STATUSES.has(t.taskStatus));
+  // A superseded task is terminal (taskStatus.ts's TERMINAL_TASK_STATUSES)
+  // but not terminal-OK by itself — it reads terminal-OK only when the
+  // successor that replaced it does, recursively (run.md's "completed/
+  // superseded/waived" is this rule, not a second one).
+  const nonTerminal = taskSummaries.filter((t) => {
+    if (TERMINAL_OK_TASK_STATUSES.has(t.taskStatus)) return false;
+    if (t.taskStatus !== SUPERSEDED_TASK_STATUS) return true;
+    const successor = resolveSupersededRow(epicId, t.taskId, tasks, successors);
+    return successor === undefined || !TERMINAL_OK_TASK_STATUSES.has(successor.taskStatus);
+  });
 
   // D-138: only tasks claimed done are asked for evidence. One still in flight
   // has not been gated yet and already blocks for not being terminal-OK —
@@ -580,14 +648,37 @@ export function summarizeEpic(
         : wellFormedObligationIds.filter((id) => {
             const bare = bareTaskId(epicId, id);
             const row = tasks.find((t) => bareTaskId(epicId, t.taskId) === bare);
+            // An obligation named a task a LATER, separate amendment went on
+            // to supersede: the stored amends_task_ids is never rewritten
+            // (repairObligation refuses to renegotiate a well-formed
+            // obligation), so the id is resolved through its successor here,
+            // at evaluation time, instead. Only the LANDED-AT version comes
+            // from the successor row; the evidence transition() eventually
+            // re-checks (outstandingObligations, findings.ts) bare-compares
+            // AmendmentDischarge.taskId against the obligation's own
+            // amends_task_ids, so the taskId offered as proof has to stay the
+            // originally-named id (`row.taskId`) or that revalidation would
+            // never find a match and would refuse the discharge outright —
+            // the id is resolved for landing-status purposes only, never for
+            // the identity the obligation is matched by. The original row
+            // stands in unchanged (byte-identical to before this existed)
+            // whenever it was never superseded, or its chain does not
+            // resolve.
+            const evidenceRow =
+              row !== undefined && row.taskStatus === SUPERSEDED_TASK_STATUS
+                ? (resolveSupersededRow(epicId, row.taskId, tasks, successors) ?? row)
+                : row;
             const landed =
-              row !== undefined &&
-              TERMINAL_OK_TASK_STATUSES.has(row.taskStatus) &&
+              evidenceRow !== undefined &&
+              TERMINAL_OK_TASK_STATUSES.has(evidenceRow.taskStatus) &&
               version !== undefined &&
-              row.planVersion !== null &&
-              row.planVersion >= version;
-            if (landed && row.planVersion !== null)
-              satisfiedBy.push({ taskId: row.taskId, planVersion: row.planVersion });
+              evidenceRow.planVersion !== null &&
+              evidenceRow.planVersion >= version;
+            if (landed && evidenceRow.planVersion !== null && row !== undefined)
+              satisfiedBy.push({
+                taskId: row.taskId,
+                planVersion: evidenceRow.planVersion,
+              });
             return !landed;
           });
 
@@ -633,7 +724,14 @@ export function summarizeEpic(
     ...(taskSummaries.length === 0
       ? [`Epic "${epicId}" has no tasks in the event log — nothing to integrate.`]
       : []),
-    ...nonTerminal.map((t) => `Task "${t.taskId}" is not terminal-OK (status: ${t.taskStatus}).`),
+    ...nonTerminal.map((t) => {
+      if (t.taskStatus !== SUPERSEDED_TASK_STATUS)
+        return `Task "${t.taskId}" is not terminal-OK (status: ${t.taskStatus}).`;
+      const successor = resolveSupersededRow(epicId, t.taskId, tasks, successors);
+      return successor === undefined
+        ? `Task "${t.taskId}" is superseded but has no successor recorded in the log — it cannot be counted terminal-OK.`
+        : `Task "${t.taskId}" is superseded by "${successor.taskId}", which is not terminal-OK (status: ${successor.taskStatus}).`;
+    }),
     ...undispatchedTasks.map(
       (t) =>
         `Task "${t.taskId}" is in plan v${plan?.version} but has no events in the log — nothing records it as dispatched, let alone done (plan status: ${t.taskStatus}).`,
@@ -1129,6 +1227,10 @@ export async function runEpicVerdict(
     // wave record is in that log already, so measuring width costs this call
     // no second read and no second command anyone has to remember to type.
     readEpicConcurrency(events, input.epicId),
+    // Same lineage read again, no second I/O: which superseded task ids this
+    // epic's amendments paired with a replacement, so a chain of them can
+    // resolve to whatever is actually carrying the work now.
+    taskSuccessors(events, input.epicId),
   );
 
   // Step 1 — mechanical_oracles_first, literally: a deterministic blocker is
