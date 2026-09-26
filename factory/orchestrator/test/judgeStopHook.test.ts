@@ -2,11 +2,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-// TDD red step, observed and recorded verbatim before this module existed
-// (judgeStopHook.ts moved aside, this file run against the empty spot):
-//   Error: Cannot find module '.../factory/orchestrator/src/judgeStopHook.js'
-//   imported from '.../factory/orchestrator/test/judgeStopHook.test.ts'
-// Everything below is the green step, against the module written to satisfy it.
+// TDD red step (recorded before judgeStopHook.ts existed): "Cannot find
+// module '.../src/judgeStopHook.js'". Everything below is the green step.
 import { parseDeclaredArtifactLine as dispatchLintParser } from '../src/dispatchLint.js';
 import {
   decideJudgeStop,
@@ -78,11 +75,14 @@ describe('decideJudgeStop (pure decision)', () => {
     expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({ decision: 'allow' });
   });
 
-  it("allows when the declared artifact exists but is empty -- existence is the whole question, parse validity stays judge report's", () => {
+  it('blocks when the declared artifact exists but is empty', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
-    writeFileSync(artifactPath, '');
+    writeFileSync(artifactPath, '   \n');
     const prompt = `Declared artifact: ${artifactPath}\n`;
-    expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({ decision: 'allow' });
+    expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({
+      decision: 'block',
+      reason: expect.stringContaining('is empty'),
+    });
   });
 
   it('allows a non-judge agent type such as coder, regardless of the prompt', () => {
