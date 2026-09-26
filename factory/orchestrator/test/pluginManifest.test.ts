@@ -108,6 +108,25 @@ describe('plugin payload', () => {
     }
   });
 
+  it('no non-judge template declares the judge-stop.sh Stop hook -- exactly JUDGE_ROLES, never a superset', () => {
+    // The positive assertion above only ever reads the six JUDGE_ROLES
+    // templates, so a stray copy of the hook block pasted onto a seventh
+    // template (a coder, say) would pass it silently. Sweep every OTHER
+    // shipped template and assert none of them mention judge-stop.sh at all.
+    const judgeRoleSet: ReadonlySet<string> = new Set(JUDGE_ROLES);
+    const allTemplates = readdirSync(path.join(root, 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.replace(/\.md$/, ''));
+    const nonJudgeTemplates = allTemplates.filter((role) => !judgeRoleSet.has(role));
+    expect(nonJudgeTemplates.length).toBeGreaterThan(0);
+    for (const role of nonJudgeTemplates) {
+      const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
+      expect(body, `${role}.md should not declare the judge-stop.sh hook`).not.toMatch(
+        /judge-stop\.sh/,
+      );
+    }
+  });
+
   // Widened invariant (was "activates no hooks"): a plugin install activates
   // no hook that ACTS outside a clone. The judge templates above still carry
   // a frontmatter Stop hook when shipped through the plugin -- that payload

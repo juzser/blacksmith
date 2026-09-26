@@ -200,4 +200,49 @@ describe('the shipped templates', () => {
       expect(text.split('---')[1]).toMatch(/\nmaxTurns: \d+\n/);
     }
   });
+
+  it('a real (non-dry-run) sync on a template carrying the judge-stop.sh hook block rewrites only the maxTurns: line', () => {
+    // `reviewer.md` is one of the six templates whose frontmatter carries a
+    // multi-line `hooks:\n  Stop:\n    - hooks: [...]` block (task 6). Copy
+    // the real shipped template into a scratch agentsDir, actually write
+    // (not dry-run) a new maxTurns value, and assert the diff is exactly
+    // that one line -- the hooks block, and everything else, unchanged.
+    const before = readFileSync(path.join(AGENTS_DIR, 'reviewer.md'), 'utf8');
+    const scratchDir = mkdtempSync(path.join(tmpdir(), 'smith-agents-sync-hooks-'));
+    try {
+      const scratchAgentsDir = path.join(scratchDir, '.claude', 'agents');
+      mkdirSync(scratchAgentsDir, { recursive: true });
+      writeFileSync(path.join(scratchAgentsDir, 'reviewer.md'), before);
+      const beforeMaxTurns = /\nmaxTurns: (\d+)\n/.exec(before)?.[1];
+      expect(beforeMaxTurns).toBeDefined();
+      const newValue = String(Number(beforeMaxTurns) + 1);
+
+      const report = syncAgentMaxTurns({
+        agentsDir: scratchAgentsDir,
+        env: { SMITH_MAXTURNS_REVIEWER: newValue },
+      });
+      expect(report.dryRun).toBe(false);
+      expect(report.changes).toEqual([
+        {
+          role: 'reviewer',
+          env: 'SMITH_MAXTURNS_REVIEWER',
+          from: Number(beforeMaxTurns),
+          to: Number(newValue),
+          changed: true,
+        },
+      ]);
+
+      const after = readFileSync(path.join(scratchAgentsDir, 'reviewer.md'), 'utf8');
+      expect(after).toBe(
+        before.replace(`maxTurns: ${beforeMaxTurns}\n`, `maxTurns: ${newValue}\n`),
+      );
+      // The hooks block survives verbatim -- the rewrite touched nothing else.
+      expect(after).toContain('hooks:');
+      expect(after).toContain('judge-stop.sh');
+      const hooksLine = (text: string) => text.split('\n').find((l) => l.includes('judge-stop.sh'));
+      expect(hooksLine(after)).toBe(hooksLine(before));
+    } finally {
+      rmSync(scratchDir, { recursive: true, force: true });
+    }
+  });
 });
