@@ -264,6 +264,61 @@ describe('ui/server app.ts: writes read the last event id through the cache', ()
     }
   });
 
+  it('shares one process-wide cache entry across the waiver route and the lesson route', async () => {
+    // createApp() builds exactly one `logCache` and threads it into BOTH
+    // resolveContext() (waivers) and lessonContext() (lessons) call sites.
+    // Every test above exercises only one route family per app instance, so
+    // a regression that gave each route family its own cache (e.g. a stray
+    // `createLogCache()` reintroduced at one call site) would still pass all
+    // of them — it would only show up as a second full re-read here, when a
+    // waiver write and a lesson write on the SAME session interleave on the
+    // SAME app instance.
+    await seedCandidate('lesson-ui-1', 'Approve the first candidate.');
+    await seedCandidate('lesson-ui-2', 'Approve the second candidate.');
+
+    const seam: LogCacheSeam = {
+      opens: 0,
+      fstats: 0,
+      bytesRead: 0,
+      readEventsCalls: 0,
+      fullReparses: 0,
+    };
+    const logCache = createLogCache(seam);
+    const handle = createApp({ dbPath, stateDir, roadmapPath, logCache });
+    try {
+      expect((await approve(handle, 'lesson-ui-1')).status).toBe(200);
+      expect(seam.fullReparses).toBe(1);
+
+      const taskDetailRes = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_2)}`);
+      const detail = (await taskDetailRes.json()) as {
+        findings: Array<{ fingerprint: string }>;
+      };
+      const fingerprint = detail.findings[0]?.fingerprint;
+      if (!fingerprint) throw new Error('fixture: expected task-2 to have at least one finding');
+
+      const waiverRes = await handle.app.request('/api/waivers/apply-batch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: SESSION_ID,
+          decisions: [{ fingerprint, decision: 'granted', operatorNote: 'ok now' }],
+        }),
+      });
+      expect(waiverRes.status).toBe(200);
+      // Still one full reparse total: the waiver route reused the same
+      // cache entry the lesson route had already warmed, rather than
+      // re-reading the log from byte 0 through a second, route-local cache.
+      expect(seam.fullReparses).toBe(1);
+
+      expect((await approve(handle, 'lesson-ui-2')).status).toBe(200);
+      expect(seam.fullReparses).toBe(1);
+      expect(seam.opens).toBeGreaterThanOrEqual(3);
+      expect(seam.bytesRead).toBeGreaterThan(0);
+    } finally {
+      closeApp(handle);
+    }
+  });
+
   it('answers a missing session log the same way with the cache injected', async () => {
     const other = 'sess-archived';
     await appendEvent(
