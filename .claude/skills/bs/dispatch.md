@@ -151,10 +151,30 @@ memory of its previous attempt and will happily report round 1 forever.
   reason). An unlogged escalation is a cost you cannot attribute later — and
   `model_tier` alone cannot even tell you *which* frontier model you escalated
   to, since opus and fable share the tier.
-- **The grader's 2-round cap is a hard stop, not a ladder rung.** At a round-2
-  `fail` the task goes back to the planner for re-scoping. Do not re-dispatch
-  the grader, and do not escalate the *grader* — the gates decide pass/fail,
-  and a third grading round only buys a more expensive opinion.
+- **The grader's 2-round cap is a hard stop, not a ladder rung.** At a
+  round-2 `fail` the operator re-scopes through a concrete, logged path, not
+  a bare re-dispatch:
+  1. `smith plan propose` with a `supersede` pairing the failing task id to a
+     new one (`PlanChanges.supersede`, spec.ts's `amendPlan`) — the operator
+     approves the re-scoping, this command only records the proposal.
+  2. `smith plan approve` the proposed version. This is what writes the
+     `successors{old->new}` pairing (spec.ts's `taskSuccessors`) that
+     everything below checks against.
+  3. `smith worktree create --from <old-task-id> --session <id> ...` to cut
+     the successor's branch from the predecessor's HEAD instead of
+     integration — refused as `worktree.not-a-successor` unless step 2 logged
+     that exact pairing.
+  4. Rerun wave steps 5-7 (dispatch, review, gate) under the new task id. The
+     grader starts that id at round 1 — the ledger's round counter is per
+     `(task_id, role)`, and a new id has never opened a round.
+  5. Gate with `--plan` naming the new plan version.
+
+  A same-id re-dispatch of round 3 is never legal, superseded or not: the cap
+  binds the id, and a kept-id supersede (same task_id, new claims/criteria)
+  does not reset the round either — only a **new** task id starts a fresh
+  ledger. Do not re-dispatch the grader on the old id, and do not escalate the
+  *grader* — the gates decide pass/fail, and a third grading round on the same
+  id only buys a more expensive opinion.
 - **Never escalate a judge to break a tie with another judge.** That is what
   the cross-check quorum is for (`crosscheck.yml`); a bigger critic is still
   one critic.
