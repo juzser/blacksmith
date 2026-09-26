@@ -10194,7 +10194,14 @@ describe('cli.ts (built binary)', () => {
 
       runOrThrow(
         'git',
-        ['worktree', 'add', '-b', 'smith/epic-from2/task-1', path.join(scratchDir, 'wt', 'from2-pred'), 'main'],
+        [
+          'worktree',
+          'add',
+          '-b',
+          'smith/epic-from2/task-1',
+          path.join(scratchDir, 'wt', 'from2-pred'),
+          'main',
+        ],
         { cwd: projectDir },
       );
 
