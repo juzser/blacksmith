@@ -92,20 +92,11 @@ describe('plugin payload', () => {
   });
 
   it('every judge agent template declares judge-stop.sh as its Stop hook', () => {
-    // Each judge-class template registers `.claude/hooks/judge-stop.sh` as a
-    // `Stop` hook in its own frontmatter (Claude Code converts that to
-    // `SubagentStop` for a subagent) rather than through `.claude/settings.json`
-    // or a plugin `hooks/hooks.json` -- so a project-local checkout, not a
-    // plugin install, is what actually runs it (see judge-stop.sh's own header).
-    // This pins the reference against a future rename of the hook script.
-    const judgeTemplates = [
-      'reviewer',
-      'verifier',
-      'grader',
-      'spec-reviewer',
-      'security-reviewer',
-      'auditor',
-    ];
+    // Registered in each judge-class template's own frontmatter as a `Stop`
+    // hook (Claude Code converts that to `SubagentStop` for a subagent), not
+    // via settings.json or a plugin hooks.json -- pins the reference against
+    // a future rename of the hook script.
+    const judgeTemplates = ['reviewer', 'verifier', 'grader', 'spec-reviewer', 'security-reviewer', 'auditor'];
     for (const role of judgeTemplates) {
       const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
       expect(body, `${role}.md frontmatter is missing the judge-stop.sh Stop hook`).toMatch(
