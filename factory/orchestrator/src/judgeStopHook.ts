@@ -1,38 +1,31 @@
 #!/usr/bin/env node
 /**
  * `.claude/hooks/judge-stop.sh` — the SubagentStop decision for a judge-class
- * agent (dispatch.md "Fingerprint the worktree around every judge": reviewer,
- * verifier, grader, spec-reviewer, security-reviewer, uiux).
+ * agent (reviewer, verifier, grader, spec-reviewer, security-reviewer,
+ * auditor; `JUDGE_ROLES` in dispatchLint.ts is the authoritative set).
  *
  * A judge can end its turn without ever writing the artifact its dispatch
  * declared, and today that gap is found only downstream, when `smith judge
  * report` answers `judges.artifact-missing` — after the agent is gone. This
- * hook closes the loop at the one moment it can still act: it blocks the stop
- * while the declared path does not exist, and allows it once it does. A
- * harness `maxTurns` cap is out of scope; this hook cannot override it.
+ * hook closes the loop at the one moment it can still act: block the stop
+ * while the declared path does not exist, allow it once it does. A harness
+ * `maxTurns` cap is out of scope; this hook cannot override it.
  *
- * The declared-artifact line and its parser are imported from
- * `dispatchLint.ts`, never redefined — that module's `dispatch lint` already
- * refuses, fail-closed and before dispatch, any judge prompt whose line is
- * missing, relative, or different from the ledger's `declared_artifact`, so
- * this hook only has to ask "does the file exist yet", never "is the line
- * well-formed" (that question, and everything about *parse* validity once
- * the file exists, stays `judge report`'s).
+ * The declared-artifact line and its parser come from `dispatchLint.ts`,
+ * never redefined — `dispatch lint` already refuses, before dispatch, any
+ * judge prompt whose line is missing, relative, or mismatched, so this hook
+ * only asks "does the file exist yet", never "is the line well-formed".
  *
  * Fail open on anything this hook cannot read: a non-judge `agent_type`, a
  * prompt with no declared-artifact line, a relative path, unparseable stdin,
- * an unreadable transcript. Blocking on any of those would trap the agent
- * until `maxTurns` with no way out to discharge an obligation the hook could
- * never even state. Every fail-open path prints a stderr note; every one of
- * them is covered upstream by `dispatch lint` (missing/relative line) or
- * downstream by `judge outstanding` / `judge report`'s
- * `judges.artifact-missing` (all four).
+ * an unreadable transcript — blocking on those would trap the agent until
+ * `maxTurns` for an obligation the hook could never state. Every fail-open
+ * path prints a stderr note and is covered upstream by `dispatch lint` or
+ * downstream by `judge report`'s `judges.artifact-missing`.
  *
  * Fail closed ONLY on a readable absolute declared path that does not exist.
  *
- * SubagentStop stdin fields (session_id, prompt_id, transcript_path, cwd,
- * scratchpad_dir, permission_mode, hook_event_name, agent_id, agent_type):
- * https://code.claude.com/docs/en/hooks
+ * SubagentStop stdin fields: https://code.claude.com/docs/en/hooks
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -120,12 +113,10 @@ export function decideJudgeStop(
 
 /**
  * The last user-role message's text in a Claude Code JSONL transcript --
- * where a dispatch prompt, and its "Declared artifact:" line, lives. Reads
- * from the end since a subagent's transcript can carry many turns; the
- * dispatch prompt is the first user turn, not necessarily the only one, so
- * this walks backward past assistant turns rather than assuming line 0.
- * Returns `null` on any read or parse failure -- unreadable is unreadable,
- * not a parse error to surface differently.
+ * where a dispatch prompt and its "Declared artifact:" line live. Walks
+ * backward from the end, since a subagent's transcript can carry many turns
+ * and the dispatch prompt need not be the only user turn. Returns `null` on
+ * any read or parse failure.
  */
 export function extractLastUserPromptText(transcriptPath: string): string | null {
   let raw: string;
@@ -178,11 +169,10 @@ export interface JudgeStopHookResult {
 }
 
 /**
- * The whole hook, minus process I/O: parse stdin, locate and read the
- * prompt, decide, and format the two output streams Claude Code and an
- * operator each read. Exercised directly by tests (unparseable stdin,
- * unreadable transcript) without spawning a process; `main` below is the
- * only piece that touches fd 0 and process.exit.
+ * The whole hook, minus process I/O: parse stdin, read the prompt, decide,
+ * and format the two output streams Claude Code and an operator each read.
+ * Exercised directly by tests without spawning a process; `main` below is
+ * the only piece that touches fd 0 and process.exit.
  */
 export function runJudgeStopHook(rawStdin: string): JudgeStopHookResult {
   let input: SubagentStopHookInput;

@@ -1,25 +1,22 @@
 #!/usr/bin/env bash
-# Blacksmith — SubagentStop hook for the six judge roles (reviewer, verifier,
-# grader, spec-reviewer, security-reviewer, uiux).
+# Blacksmith — SubagentStop hook for the judge-class roles (reviewer,
+# verifier, grader, spec-reviewer, security-reviewer, auditor).
 #
-# Declared in each judge template's frontmatter as a `Stop` hook, which
-# Claude Code converts to `SubagentStop` for that subagent. It reads the
-# SubagentStop payload from stdin, hands it to `node dist/judgeStopHook.js`
-# unchanged, and relays that command's decision -- same shape as
-# `.claude/hooks/guard.sh`'s relationship to `dist/policyHook.js`.
+# Declared in each judge template's frontmatter as a `Stop` hook, which Claude
+# Code converts to `SubagentStop` for that subagent. Reads the SubagentStop
+# payload from stdin, hands it to `node dist/judgeStopHook.js` unchanged, and
+# relays that command's decision -- same shape as guard.sh's relationship to
+# dist/policyHook.js.
 #
-# Clone-only, deliberately. The hook needs a checkout's built `dist/`, so a
-# plugin-loaded copy of this same template must be inert wherever it runs --
-# `factory/orchestrator/test/pluginManifest.test.ts` pins that. This script
-# resolves itself via `$CLAUDE_PROJECT_DIR`, exactly as `.claude/settings.json`
-# resolves guard.sh, and exits 0 with empty stdout the moment either the
-# script or the built hook is not where a clone would put it. It never falls
-# back to `smith` on PATH or to a plugin-root script -- there is nothing to
-# fall back to outside a clone.
+# Clone-only, deliberately: the hook needs a checkout's built dist/, so a
+# plugin-loaded copy of this template must stay inert wherever it runs
+# (pluginManifest.test.ts pins that). Resolves itself via `$CLAUDE_PROJECT_DIR`
+# and exits 0 with empty stdout the moment the script or the built hook is not
+# where a clone would put it -- no fallback to `smith` on PATH or a
+# plugin-root script.
 #
-# Point `JUDGE_STOP_HOOK_ROOT` at a different repo root to run this against a
-# built hook elsewhere (used by pluginManifest.test.ts's inert-outside-clone
-# assertion, which needs a script rooted outside any real checkout).
+# `JUDGE_STOP_HOOK_ROOT` points this at a different repo root (used by
+# pluginManifest.test.ts's inert-outside-clone assertion).
 
 set -u
 set -o pipefail
