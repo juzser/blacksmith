@@ -104,14 +104,7 @@ describe('parseDeclaredArtifactLine', () => {
 describe('JUDGE_ROLES', () => {
   it('equals the epic criterion’s six judge roles exactly', () => {
     expect([...JUDGE_ROLES].sort()).toEqual(
-      [
-        'reviewer',
-        'verifier',
-        'grader',
-        'spec-reviewer',
-        'security-reviewer',
-        'uiux',
-      ].sort(),
+      ['reviewer', 'verifier', 'grader', 'spec-reviewer', 'security-reviewer', 'auditor'].sort(),
     );
   });
 });

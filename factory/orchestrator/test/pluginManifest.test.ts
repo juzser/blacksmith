@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { JUDGE_ROLES } from '../src/dispatchLint.js';
 import { REPO_ROOT } from '../src/paths.js';
 import { runProcess } from './helpers/process.js';
 
@@ -99,8 +100,7 @@ describe('plugin payload', () => {
     // hook (Claude Code converts that to `SubagentStop` for a subagent), not
     // via settings.json or a plugin hooks.json -- pins the reference against
     // a future rename of the hook script.
-    const judgeTemplates = ['reviewer', 'verifier', 'grader', 'spec-reviewer', 'security-reviewer', 'auditor'];
-    for (const role of judgeTemplates) {
+    for (const role of JUDGE_ROLES) {
       const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
       expect(body, `${role}.md frontmatter is missing the judge-stop.sh Stop hook`).toMatch(
         /hooks:\s*\n\s*Stop:\s*\n[\s\S]*?\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\/judge-stop\.sh/,
@@ -143,9 +143,8 @@ describe('plugin payload', () => {
 
   describe('judge templates are inert outside a clone (executed, not just matched)', () => {
     let emptyProjectDir: string;
-    const judgeTemplates = ['reviewer', 'verifier', 'grader', 'spec-reviewer', 'security-reviewer', 'auditor'];
 
-    for (const role of judgeTemplates) {
+    for (const role of JUDGE_ROLES) {
       it(`${role}.md's frontmatter hook command exits 0 with empty stdout under an empty CLAUDE_PROJECT_DIR`, () => {
         emptyProjectDir = mkdtempSync(path.join(tmpdir(), 'smith-plugin-inert-'));
         try {
