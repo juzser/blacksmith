@@ -108,25 +108,9 @@ export function decideJudgeStop(
     };
   }
 
-  // Empty or whitespace-only counts as not written yet -- a judge that
-  // touched the path without putting a result in it has not discharged the
-  // obligation this hook exists to check.
-  let content: string;
-  try {
-    content = readFileSync(declared, 'utf8');
-  } catch {
-    return {
-      decision: 'block',
-      reason: `Declared artifact ${declared} could not be read. Write it before ending this turn.`,
-    };
-  }
-  if (content.trim() === '') {
-    return {
-      decision: 'block',
-      reason: `Declared artifact ${declared} is empty. Write it before ending this turn.`,
-    };
-  }
-
+  // Existence is this hook's whole question -- an empty or unparseable file
+  // is `judge report`'s to refuse (`judges.artifact-unparseable`, `judges.
+  // artifact-not-a-list`), not this hook's to trap the agent over.
   return { decision: 'allow' };
 }
 

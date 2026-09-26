@@ -75,14 +75,11 @@ describe('decideJudgeStop (pure decision)', () => {
     expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({ decision: 'allow' });
   });
 
-  it('blocks when the declared artifact exists but is empty', () => {
+  it('allows when the declared artifact exists but is empty -- existence is this hook\'s whole question; parse validity stays judge report\'s', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     writeFileSync(artifactPath, '   \n');
     const prompt = `Declared artifact: ${artifactPath}\n`;
-    expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({
-      decision: 'block',
-      reason: expect.stringContaining('is empty'),
-    });
+    expect(decideJudgeStop(stdinFixture(), prompt)).toEqual({ decision: 'allow' });
   });
 
   it('allows a non-judge agent type such as coder, regardless of the prompt', () => {
