@@ -246,12 +246,12 @@ describe('.claude/skills/bs/plan.md — parallelism guidance', () => {
     expect(body).toMatch(/plan of two or more tasks/);
   });
 
-  it('says import-graph crossings stay wave schedule --repo\'s job, once', () => {
+  it("says import-graph crossings stay wave schedule --repo's job, once", () => {
     const matches = planMd.match(/wave schedule --repo/g) ?? [];
     expect(matches.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('step 3\'s review-focus list has at most six items, counted by position', () => {
+  it("step 3's review-focus list has at most six items, counted by position", () => {
     // "By position" rather than by text search: find item 3's line, then walk
     // forward counting a contiguous run of nested `N. ` list lines (indented,
     // so they read as item 3's own sub-list) until the first blank line that

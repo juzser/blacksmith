@@ -40,8 +40,8 @@
  * Pure, and it writes nothing. Like `waveNext`, admission stays where it was:
  * a round simulated here has been admitted by nobody.
  */
-import { claimsOverlap, readEdgeList, type ClaimedTask, type WorktreePolicy } from './claims.js';
-import { planClaimedTasks, type PlanFile } from './plan.js';
+import { type ClaimedTask, claimsOverlap, readEdgeList, type WorktreePolicy } from './claims.js';
+import { type PlanFile, planClaimedTasks } from './plan.js';
 import {
   computeNextWave,
   type DeferralReason,
@@ -294,10 +294,7 @@ function connectedTaskIds(
   };
   const connected = new Map<string, Set<string>>();
   for (const id of ids) {
-    connected.set(
-      id,
-      new Set([...reachable(id, descendantsOf), ...reachable(id, ancestorsOf)]),
-    );
+    connected.set(id, new Set([...reachable(id, descendantsOf), ...reachable(id, ancestorsOf)]));
   }
   return connected;
 }
