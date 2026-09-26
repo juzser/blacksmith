@@ -95,6 +95,57 @@ describe('computePlanParallelism — how wide this plan can ever run, per task',
     expect(result.parallel_with.C).not.toContain('A');
   });
 
+  it('excludes a superseded task from widest, parallel_with, and size', async () => {
+    const { computePlanParallelism } = await import('../src/waveSchedule.js');
+    const plan: PlanFile = {
+      epic_id: 'e1',
+      version: 2,
+      status: 'active',
+      tasks: [
+        // Only record for 'A' is dead: liveSpec(plan, 'A') is undefined, so
+        // planClaimedTasks drops it entirely (D-126) rather than treating
+        // it as a live task with no claims.
+        { task_id: 'A', task_status: 'superseded', plan_version: 1, claims: ['src/a/**'] },
+        { task_id: 'B', task_status: 'todo', plan_version: 2, claims: ['src/b/**'] },
+      ],
+      edges: [],
+    };
+    const result = computePlanParallelism(plan, POLICY);
+    expect(result.widest).toBe(1);
+    expect(Object.keys(result.parallel_with)).toEqual(['B']);
+    expect(result.parallel_with.B).toEqual([]);
+    expect(result.size).toEqual({ tasks: 1, claims: 1, small: true });
+  });
+
+  it('reports widest 0 and an empty parallel_with/size for a plan with no live tasks', async () => {
+    const { computePlanParallelism } = await import('../src/waveSchedule.js');
+    const plan = planOf([]);
+    const result = computePlanParallelism(plan, POLICY);
+    expect(result.widest).toBe(0);
+    expect(result.parallel_with).toEqual({});
+    expect(result.size).toEqual({ tasks: 0, claims: 0, small: true });
+  });
+
+  it('reports widest 1 and an empty parallel_with for a single live task', async () => {
+    const { computePlanParallelism } = await import('../src/waveSchedule.js');
+    const plan = planOf([{ id: 'A', claims: ['src/a/**'] }]);
+    const result = computePlanParallelism(plan, POLICY);
+    expect(result.widest).toBe(1);
+    expect(result.parallel_with).toEqual({ A: [] });
+    expect(result.size).toEqual({ tasks: 1, claims: 1, small: true });
+  });
+
+  it('counts a claim path shared by two tasks once toward size.claims, not twice', async () => {
+    const { computePlanParallelism } = await import('../src/waveSchedule.js');
+    const plan = planOf([
+      { id: 'A', claims: ['src/shared/**', 'src/a-only/**'] },
+      { id: 'B', claims: ['src/shared/**', 'src/b-only/**'] },
+    ]);
+    const result = computePlanParallelism(plan, POLICY);
+    // 3 distinct paths across 4 claim entries: src/shared/** counted once.
+    expect(result.size).toEqual({ tasks: 2, claims: 3, small: true });
+  });
+
   it('reads size.small true at 3 tasks / 10 claims, false at 4 tasks / 11 claims', async () => {
     const { computePlanParallelism } = await import('../src/waveSchedule.js');
     const threeTasksTenClaims = computePlanParallelism(
