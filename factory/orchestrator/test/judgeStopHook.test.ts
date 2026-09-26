@@ -89,6 +89,14 @@ describe('decideJudgeStop (pure decision)', () => {
     });
   });
 
+  it('allows when agent_type is entirely absent from stdin, not just non-judge', () => {
+    const artifactPath = path.join(root, 't.reviewer.json');
+    const prompt = `Declared artifact: ${artifactPath}\n`;
+    expect(decideJudgeStop(stdinFixture({ agent_type: undefined }), prompt)).toEqual({
+      decision: 'allow',
+    });
+  });
+
   it('blocks again on re-entry (stop_hook_active) while the file is still absent -- maxTurns is the only bound', () => {
     const artifactPath = path.join(root, 't.reviewer.json');
     const prompt = `Declared artifact: ${artifactPath}\n`;
@@ -128,6 +136,68 @@ describe('extractLastUserPromptText', () => {
 
   it('returns null for an unreadable transcript -- covered downstream by judge report judges.artifact-missing', () => {
     expect(extractLastUserPromptText(path.join(root, 'no-such-file.jsonl'))).toBeNull();
+  });
+
+  it('reads content given as an array of text blocks, joining them', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const entry = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Role: reviewer.' },
+          { type: 'tool_result', text: 'ignored, not a text block by type' },
+          { type: 'text', text: 'Declared artifact: /abs/t.json' },
+        ],
+      },
+    };
+    writeFileSync(transcriptPath, `${JSON.stringify(entry)}\n`);
+    const text = extractLastUserPromptText(transcriptPath);
+    expect(text).toContain('Role: reviewer.');
+    expect(text).toContain('Declared artifact: /abs/t.json');
+  });
+
+  it('walks backward past a later assistant turn to find the last USER message, not just the last line', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'Declared artifact: /abs/stale.json\n' },
+      }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: 'mid turn' } }),
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'Declared artifact: /abs/fresh.json\n' },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { role: 'assistant', content: 'final turn, no declared line here' },
+      }),
+    ];
+    writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
+    expect(extractLastUserPromptText(transcriptPath)).toContain('/abs/fresh.json');
+  });
+
+  it('skips blank lines and unparseable JSON lines while walking backward', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 'Declared artifact: /abs/x.json\n' },
+      }),
+      '',
+      'not json at all',
+      '   ',
+    ];
+    writeFileSync(transcriptPath, `${lines.join('\n')}\n`);
+    expect(extractLastUserPromptText(transcriptPath)).toContain('/abs/x.json');
+  });
+
+  it('returns null when the last user message has content that is neither a string nor an array', () => {
+    const transcriptPath = path.join(root, 'transcript.jsonl');
+    const entry = { type: 'user', message: { role: 'user', content: { unexpected: 'shape' } } };
+    writeFileSync(transcriptPath, `${JSON.stringify(entry)}\n`);
+    expect(extractLastUserPromptText(transcriptPath)).toBeNull();
   });
 });
 
@@ -183,6 +253,15 @@ describe('.claude/hooks/judge-stop.sh (end to end)', () => {
   it('is built', () => {
     // A missing dist entry point would make the case above vacuous.
     expect(existsSync(DIST_HOOK)).toBe(true);
+  });
+
+  it('allows silently and exits 0 when CLAUDE_PROJECT_DIR is unset entirely', () => {
+    const stdin = JSON.stringify(stdinFixture());
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR;
+    const run = runProcess('bash', [SCRIPT_PATH], { input: stdin, env });
+    expect(run.status).toBe(0);
+    expect(run.stdout).toBe('');
   });
 
   it('allows silently and exits 0 when dist/judgeStopHook.js is not built', () => {
