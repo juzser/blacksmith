@@ -60,7 +60,8 @@ that too: an unknown `--causal-parent` is refused (`events.unknown-causal-parent
 before the rebase, the test run or the merge ever starts — not only once the
 queue tries and fails to log the merge afterwards, by which point the merge
 has already landed for real with nothing in the log to show for it. The same
-holds for `--batch`, one check per call rather than per task.
+holds for `--batch`, one check per batch group rather than per task, and
+for `integration check`, whose envelope is checked before any check runs.
 
 The queue never changes which branch `--project` has checked out. The merge
 runs in whichever worktree already has `smith/<epic>/integration` out — the

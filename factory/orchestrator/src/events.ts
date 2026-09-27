@@ -700,6 +700,10 @@ function requireCausalParentPresence(eventType: string, causalParent: string | n
  * show for it. A retry then found the branch already advanced and reported it
  * as stuck. Calling this first, before any of that work starts, means a bad
  * envelope is refused with nothing done yet to undo.
+ *
+ * Only the causal_parent rules and the session-id shape are checked here. The
+ * event schema, the taxonomy and typed payloads are not: a caller whose payload
+ * could fail those must not treat a pass as "the append will succeed".
  */
 export async function validateEventEnvelope(
   input: Pick<EventInput, 'session_id' | 'event_type' | 'causal_parent'>,
