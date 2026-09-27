@@ -4,7 +4,7 @@ import path from 'node:path';
 import { claimsOverlap, collectCommittedChanges, touchesSerializeAlways } from './claims.js';
 import { type CommitBlockReason, certifyCommit, UNCOMMITTED_WORK_CODE } from './commit.js';
 import { SmithError } from './errors.js';
-import type { EventOpts } from './events.js';
+import { type EventOpts, validateEventEnvelope } from './events.js';
 import { runGit, runGitRaw, writeMergeTree } from './git.js';
 import { type DependencyEdge, topoSort } from './graph.js';
 import { buildSymbolGraph, collectSources } from './symbols.js';
@@ -280,6 +280,19 @@ async function certifyAndRebase(
 export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutcome> {
   const integrationBranch = integrationBranchName(opts.epic);
   const events = opts.events;
+
+  // Refused before certifyAndRebase's real `git rebase` or the merge below
+  // ever runs: both mutate git for real, and used to be discovered only by
+  // the append at the far end (emitWaveMerged/emitTaskBlocked). A merge that
+  // already landed by the time that append throws is a merge the log cannot
+  // see — a real incident, not a hypothetical one.
+  if (events) {
+    const { ctx, ...opt } = events;
+    await validateEventEnvelope(
+      { session_id: ctx.sessionId, event_type: 'wave-merged', causal_parent: ctx.causalParent },
+      opt,
+    );
+  }
 
   /**
    * Log the outcome the queue just observed — a refusal it has already decided
@@ -754,6 +767,19 @@ export interface BatchStepResult {
 export async function batchStep(tasks: QueueTask[], opts: StepOptions): Promise<BatchStepResult> {
   const integrationBranch = integrationBranchName(opts.epic);
   const events = opts.events;
+
+  // Same envelope check as step(), and for the same reason: runGroup below
+  // rebases and merges real git state for every task in the group before its
+  // first append. The causal_parent is one value for the whole batch call, so
+  // one check here, before runGroup starts, covers it.
+  if (events) {
+    const { ctx, ...opt } = events;
+    await validateEventEnvelope(
+      { session_id: ctx.sessionId, event_type: 'wave-merged', causal_parent: ctx.causalParent },
+      opt,
+    );
+  }
+
   const logBlocked = async (taskId: string, error: string, detail: string): Promise<void> => {
     if (!events) return;
     const { ctx, ...opt } = events;

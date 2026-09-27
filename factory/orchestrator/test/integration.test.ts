@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -177,6 +178,29 @@ describe('integration.ts', () => {
         { stateDir },
       ),
     ).rejects.toThrow(IntegrationCheckError);
+  });
+
+  // The check suite (D-42's whole point) is real CPU time; a bad
+  // --causal-parent must be refused before any of it runs, not discovered
+  // only at the append this function makes once the suite is done.
+  it('refuses an unknown causal_parent before running any check', async () => {
+    const markerPath = path.join(root, 'marker');
+
+    await expect(
+      runIntegrationCheck(
+        {
+          epicId,
+          projectDir,
+          checks: [{ name: 'lint', cmd: `touch ${JSON.stringify(markerPath)}` }],
+        },
+        { ...ctx(), causalParent: `${sessionId}#99` },
+        { stateDir },
+      ),
+    ).rejects.toMatchObject({ code: 'events.unknown-causal-parent' });
+
+    expect(existsSync(markerPath)).toBe(false);
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.filter((e) => e.record.event_type === 'integration-check')).toHaveLength(0);
   });
 
   it('integrationHeadSha returns the branch head, or null when the branch is absent', () => {
