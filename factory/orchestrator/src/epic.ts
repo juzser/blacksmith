@@ -137,6 +137,49 @@ function resolveSupersededRow(
   }
 }
 
+/**
+ * The `origin` taskEvents.ts's `emitFollowUpTask` stamps on a follow-up task:
+ * one minted for a finding no open task could own, rather than one a plan cut.
+ */
+const FOLLOW_UP_TASK_ORIGIN = 'escalation';
+
+/** The finding status that is the operator's decision not to fix (D-120). */
+const WAIVED_FINDING_STATUS = 'waived';
+
+/**
+ * Whether a follow-up task's whole reason to exist has been waived away. A
+ * follow-up is minted `todo` to own findings, and no event ever moves it to
+ * `waived` — the projector has no such write — so without this the operator
+ * waiving the only finding it owns (bs-audit-2's `followup-9a8f6ac7`) left the
+ * task holding the epic verdict forever, with nothing left to do and no verb
+ * that could say so.
+ *
+ * Deliberately narrow, the same reader-side shape as the superseded-successor
+ * rule above:
+ *   - only origin `escalation`: a planned task's `todo` is a claim about work
+ *     its spec still owes, which waiving a finding raised against it does not
+ *     discharge;
+ *   - at least one attributed finding: a follow-up that owns nothing is not
+ *     "all waived", it is unexplained, and absence must not vote yes (D-126);
+ *   - every attributed finding `waived`: one still open, or closed any other
+ *     way (a fix verified by a gate the task never ran), still blocks.
+ *
+ * Attribution is `finding.task_id`. A finding routed to a follow-up is raised
+ * under it (attribution.ts's `reattributeFinding` re-mints the id before the
+ * raise), so `finding-reattributed` needs no second reading here. Ids compare
+ * bare (D-46/P9-29).
+ */
+function followUpWaivedAway(
+  epicId: string,
+  row: EpicTaskRow,
+  findings: readonly Finding[],
+): boolean {
+  if (row.origin !== FOLLOW_UP_TASK_ORIGIN) return false;
+  const bare = bareTaskId(epicId, row.taskId);
+  const owned = findings.filter((f) => bareTaskId(epicId, f.task_id) === bare);
+  return owned.length > 0 && owned.every((f) => f.finding_status === WAIVED_FINDING_STATUS);
+}
+
 export interface EpicTaskSummary {
   taskId: string;
   taskStatus: string;
@@ -548,10 +591,12 @@ export function summarizeEpic(
   // A superseded task is terminal (taskStatus.ts's TERMINAL_TASK_STATUSES)
   // but not terminal-OK by itself — it reads terminal-OK only when the
   // successor that replaced it does, recursively (run.md's "completed/
-  // superseded/waived" is this rule, not a second one).
-  const nonTerminal = taskSummaries.filter((t) => {
+  // superseded/waived" is this rule, not a second one). A follow-up task whose
+  // every finding was waived reads terminal-OK too — followUpWaivedAway().
+  const nonTerminal = taskSummaries.filter((t, i) => {
     if (TERMINAL_OK_TASK_STATUSES.has(t.taskStatus)) return false;
-    if (t.taskStatus !== SUPERSEDED_TASK_STATUS) return true;
+    if (t.taskStatus !== SUPERSEDED_TASK_STATUS)
+      return !followUpWaivedAway(epicId, tasks[i] as EpicTaskRow, findings);
     const successor = resolveSupersededRow(epicId, t.taskId, tasks, successors);
     return successor === undefined || !TERMINAL_OK_TASK_STATUSES.has(successor.taskStatus);
   });
@@ -725,6 +770,9 @@ export function summarizeEpic(
       ? [`Epic "${epicId}" has no tasks in the event log — nothing to integrate.`]
       : []),
     ...nonTerminal.map((t) => {
+      const row = tasks.find((r) => r.taskId === t.taskId);
+      if (row?.origin === FOLLOW_UP_TASK_ORIGIN && t.taskStatus !== SUPERSEDED_TASK_STATUS)
+        return `Task "${t.taskId}" is a follow-up (origin: escalation) and is not terminal-OK (status: ${t.taskStatus}). Complete it, or waive every finding attributed to it — it clears once it owns at least one finding and all of them are waived.`;
       if (t.taskStatus !== SUPERSEDED_TASK_STATUS)
         return `Task "${t.taskId}" is not terminal-OK (status: ${t.taskStatus}).`;
       const successor = resolveSupersededRow(epicId, t.taskId, tasks, successors);

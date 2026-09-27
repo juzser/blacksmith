@@ -564,9 +564,13 @@ export interface FollowUpTaskInput {
  *
  * Returns null when the session already carries this task, so a re-run is a
  * no-op rather than a duplicate. The task is `todo`, which is not terminal-OK,
- * so epic.ts's `summarizeEpic` blocks the epic verdict on it until an operator
- * plans or waives it — the "blocks the epic verdict instead of an unrelated
- * diff" half of P9-24, using the machinery that was already there.
+ * so epic.ts's `summarizeEpic` blocks the epic verdict on it — the "blocks the
+ * epic verdict instead of an unrelated diff" half of P9-24, using the
+ * machinery that was already there. Nothing writes a task to `waived`, so the
+ * two ways out are completing it (plan it, gate it) or waiving the findings
+ * it owns: summarizeEpic reads a follow-up terminal-OK once at least one
+ * finding is attributed to it and every one of them is `waived`
+ * (epic.ts's followUpWaivedAway).
  */
 export async function emitFollowUpTask(
   input: FollowUpTaskInput,
