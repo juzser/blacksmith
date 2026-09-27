@@ -7380,6 +7380,75 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // A per-check `timeout_ms` in checks.json is read straight into a
+    // `setTimeout` call downstream; a bogus value there does not fail loudly,
+    // it fails as either an instant "timed out after 0ms" false red or a
+    // timeout that silently never fires. Refused here, at the point the file
+    // is read — before the worktree, the result file or the session context
+    // are even touched — rather than let a gate run act on either.
+    describe('gate run --checks timeout_ms validation', () => {
+      async function gateInvocation(
+        checksBody: unknown,
+      ): Promise<{ status: number; stdout: string }> {
+        const { sessionId, eventsDir, planPath } = await session();
+        const worktreeDir = await committedWorktree(`checks-timeout-${sessionId}`);
+        const checksPath = path.join(scratchDir, `${sessionId}-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-result.json`);
+        await writeFile(checksPath, JSON.stringify(checksBody));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        return runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+      }
+
+      it('refuses a non-positive timeout_ms instead of running the check', async () => {
+        const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 0 }]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.message).toContain('timeout_ms');
+        expect(JSON.parse(result.stdout).error.message).toContain('test');
+      });
+
+      it('refuses a non-integer timeout_ms instead of running the check', async () => {
+        const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 12.5 }]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.message).toContain('timeout_ms');
+      });
+
+      it('still runs a checks.json with a valid timeout_ms', async () => {
+        const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 1000 }]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).outcome).not.toBe('blocked');
+      });
+    });
+
     // The ownership split reached the way the factory reaches it. Without these
     // flags wired through, `stampResultEnvelope` exists only in the library and
     // every real gate run still takes the agent's word for its own token count.

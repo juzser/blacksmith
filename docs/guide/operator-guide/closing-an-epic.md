@@ -119,10 +119,11 @@ smith integration check --epic epic-1 --project ../my-project \
   --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
-`checks.json` is the same `[{"name":..., "cmd":...}]` shape `smith gate run
---checks` takes. Unlike the task gate, every check runs even after one fails
-(`--run-all false` opts back into short-circuiting) — closing an epic, you
-want the whole picture in one pass.
+`checks.json` is the same `[{"name":..., "cmd":..., "timeout_ms":...}]` shape
+`smith gate run --checks` takes, `timeout_ms` included (optional, per check,
+overrides the shared five-minute default). Unlike the task gate, every check
+runs even after one fails (`--run-all false` opts back into
+short-circuiting) — closing an epic, you want the whole picture in one pass.
 
 It **refuses** rather than guesses in four cases, all of which would
 otherwise write down a pass nothing earned: an empty check list, an epic with

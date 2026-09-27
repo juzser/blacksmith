@@ -228,6 +228,31 @@ function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, 'utf8')) as T;
 }
 
+/**
+ * `--checks <file>`'s intake, both places it's read (`gate run`,
+ * `integration check`). Same fail-closed shape as `boundedIntFlag`, moved
+ * from a flag to a JSON field: a check's own `timeout_ms` goes straight into
+ * a `setTimeout` call in testgate.ts, and a non-positive or non-integer value
+ * there does not fail loudly — it fails as either an instant, unexplained
+ * timeout or one that silently never fires. Refused here, at the point the
+ * file is read, rather than let a gate run act on either.
+ */
+function readChecksFile(filePath: string): CheckCommand[] {
+  const checks = readJsonFile<CheckCommand[]>(filePath);
+  for (const check of checks) {
+    const timeoutMs = check.timeout_ms;
+    if (timeoutMs === undefined) continue;
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+      throw new SmithError(
+        'gate.invalid-check-timeout',
+        `"${check.name}" in ${filePath} has timeout_ms ${JSON.stringify(timeoutMs)}; it must be a positive whole number of milliseconds.`,
+        { name: check.name, timeout_ms: timeoutMs, file: filePath },
+      );
+    }
+  }
+  return checks;
+}
+
 /** A task spec's `budget.tokens` when it is a usable positive number, else null. */
 function declaredTokens(budget: unknown): number | null {
   if (typeof budget !== 'object' || budget === null) return null;
@@ -3142,7 +3167,7 @@ async function main(): Promise<number> {
     const { runGate } = await import('./gate.js');
     const [taskId] = requirePositionals(positional, usageFor('gate run')) as [string];
     const worktreeDir = requireFlag(flags, 'worktree');
-    const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'));
     // The result file has the same two intake shapes as findings below, and for
     // the same reason. With `--agent`, `--result` is the worker's half —
     // run_status/structured_output/artifacts — and the dispatcher stamps the
@@ -3358,7 +3383,7 @@ async function main(): Promise<number> {
   if (namespace === 'integration' && action === 'check') {
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
-    const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'));
     const ctx = eventContextFromFlags(flags);
     const record = await runIntegrationCheck(
       {

@@ -8,6 +8,17 @@ import { constants as osConstants } from 'node:os';
 export interface CheckCommand {
   name: string;
   cmd: string;
+  /**
+   * Per-check override for the timeout every other check in the file shares
+   * (`RunOptions.timeoutMs`, defaulting to `DEFAULT_TIMEOUT_MS`), in
+   * milliseconds. A single check known to run long — this repo's own full
+   * suite takes ~350s on a loaded machine, past the 5-minute default — used to
+   * force every check in the same file onto a bigger shared number, or fail
+   * closed with no way to say "just this one." Validated fail-closed at the
+   * point the checks file is read (cli.ts's `readChecksFile`): a non-positive
+   * or non-integer value is refused before it ever reaches `setTimeout`.
+   */
+  timeout_ms?: number;
 }
 
 export interface CheckResult {
@@ -136,8 +147,9 @@ export function projectCommandEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * jobs, long-lived children) running as orphans after the parent shell
  * dies — a real leak in a 24/7 factory (reproduced: manual kill -9 needed).
  */
-function runOne(check: CheckCommand, cwd: string, timeoutMs: number): Promise<CheckResult> {
+function runOne(check: CheckCommand, cwd: string, defaultTimeoutMs: number): Promise<CheckResult> {
   return new Promise((resolve) => {
+    const timeoutMs = check.timeout_ms ?? defaultTimeoutMs;
     const child = spawn(check.cmd, {
       cwd,
       shell: true,
@@ -225,11 +237,11 @@ function runOne(check: CheckCommand, cwd: string, timeoutMs: number): Promise<Ch
  * no test-output parsing beyond the process exit code.
  */
 export async function run(checks: CheckCommand[], opts: RunOptions): Promise<RunResult> {
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const defaultTimeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const results: CheckResult[] = [];
 
   for (const check of checks) {
-    const result = await runOne(check, opts.cwd, timeoutMs);
+    const result = await runOne(check, opts.cwd, defaultTimeoutMs);
     results.push(result);
     if (!result.pass && !opts.runAll) break;
   }
