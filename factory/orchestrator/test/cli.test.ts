@@ -7442,6 +7442,16 @@ describe('cli.ts (built binary)', () => {
         expect(JSON.parse(result.stdout).error.message).toContain('timeout_ms');
       });
 
+      // Node clamps a setTimeout delay above 2^31-1 to 1ms: an oversized
+      // timeout_ms would time the check out instantly, not wait longer.
+      it('refuses a timeout_ms above the setTimeout ceiling', async () => {
+        const result = await gateInvocation([
+          { name: 'test', cmd: 'true', timeout_ms: 2_147_483_648 },
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.message).toContain('2147483647');
+      });
+
       it('still runs a checks.json with a valid timeout_ms', async () => {
         const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 1000 }]);
         expect(result.status).toBe(0);

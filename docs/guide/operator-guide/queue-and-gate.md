@@ -287,7 +287,8 @@ smith gate run epic-1/task-1 \
   Every check gets the same five-minute timeout unless its own entry sets
   `timeout_ms`, which overrides it for that check alone; refused at read time,
   before any check runs, if it is not a positive whole number of
-  milliseconds.
+  milliseconds at most 2147483647 (Node's `setTimeout` ceiling — above it
+  the delay clamps to 1ms and the check would time out instantly).
 - `--grader` — the grader's own result file for this task
   (`state/results/<task-id>.grader-r<round>.json`). Its `structured_output` is
   validated against `grader-verdict.schema.json`, and the rubric gates: any

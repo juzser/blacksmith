@@ -234,18 +234,21 @@ function readJsonFile<T>(filePath: string): T {
  * from a flag to a JSON field: a check's own `timeout_ms` goes straight into
  * a `setTimeout` call in testgate.ts, and a non-positive or non-integer value
  * there does not fail loudly — it fails as either an instant, unexplained
- * timeout or one that silently never fires. Refused here, at the point the
- * file is read, rather than let a gate run act on either.
+ * timeout or one that silently never fires. Above 2^31-1 Node clamps the
+ * delay to 1ms, so an oversized value is the instant kind too. Refused here,
+ * at the point the file is read, rather than let a gate run act on either.
  */
+const MAX_CHECK_TIMEOUT_MS = 2_147_483_647;
+
 function readChecksFile(filePath: string): CheckCommand[] {
   const checks = readJsonFile<CheckCommand[]>(filePath);
   for (const check of checks) {
     const timeoutMs = check.timeout_ms;
     if (timeoutMs === undefined) continue;
-    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_CHECK_TIMEOUT_MS) {
       throw new SmithError(
         'gate.invalid-check-timeout',
-        `"${check.name}" in ${filePath} has timeout_ms ${JSON.stringify(timeoutMs)}; it must be a positive whole number of milliseconds.`,
+        `"${check.name}" in ${filePath} has timeout_ms ${JSON.stringify(timeoutMs)}; it must be a positive whole number of milliseconds, at most ${MAX_CHECK_TIMEOUT_MS}.`,
         { name: check.name, timeout_ms: timeoutMs, file: filePath },
       );
     }

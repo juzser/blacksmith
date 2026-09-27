@@ -121,7 +121,7 @@ smith integration check --epic epic-1 --project ../my-project \
 
 `checks.json` is the same `[{"name":..., "cmd":..., "timeout_ms":...}]` shape
 `smith gate run --checks` takes, `timeout_ms` included (optional, per check,
-overrides the shared five-minute default). Unlike the task gate, every check
+overrides the shared five-minute default, at most 2147483647). Unlike the task gate, every check
 runs even after one fails (`--run-all false` opts back into
 short-circuiting) — closing an epic, you want the whole picture in one pass.
 
