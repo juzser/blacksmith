@@ -855,3 +855,74 @@ describe('foldTasks — an error logged against the epic itself (D-251)', () => 
     ]);
   });
 });
+
+// A producer that ran one flaky check against two tasks at once has logged a
+// single error-logged with both real ids joined by a comma in `task_ref`
+// ("epic-1/task-1,epic-1/task-2") -- the append-time guard (events.ts /
+// taxonomy.ts) now refuses to write that shape going forward, but a log
+// written before the guard existed still carries it, and foldTasks() replays
+// every log ever written. Before this fix, assertedTaskIds() and touch()'s
+// walk both read the comma-joined string as ONE id, so the fold minted a
+// third row -- `taskId: "epic-1/task-1,epic-1/task-2"` -- that stayed `todo`
+// forever because nothing else in the log ever asserted it by that name.
+describe('foldTasks — an error-logged task_ref that joins more than one task with a comma', () => {
+  it('touches every real id and mints no comma-joined row', () => {
+    const events = [
+      event({
+        event_id: 'e1',
+        event_type: 'task-added',
+        task_id: 'epic-1/task-1',
+        payload: { epic_id: 'epic-1' },
+        ts: '2026-08-01T00:00:00.000Z',
+      }),
+      event({
+        event_id: 'e2',
+        event_type: 'task-added',
+        task_id: 'epic-1/task-2',
+        payload: { epic_id: 'epic-1' },
+        ts: '2026-08-01T00:00:01.000Z',
+      }),
+      event({
+        event_id: 'e3',
+        event_type: 'wave-merged',
+        payload: { task_ids: ['epic-1/task-1', 'epic-1/task-2'] },
+        ts: '2026-08-01T00:01:00.000Z',
+      }),
+      event({
+        event_id: 'e4',
+        event_type: 'error-logged',
+        payload: {
+          task_ref: 'epic-1/task-1,epic-1/task-2',
+          error: 'execution.flaky-test',
+          severity: 'S3-minor',
+        },
+        ts: '2026-08-01T00:02:00.000Z',
+      }),
+    ];
+
+    const rows = foldTasks(events);
+    expect(rows.map((r) => r.taskId)).toEqual(['epic-1/task-1', 'epic-1/task-2']);
+    expect(rows.every((r) => !r.taskId.includes(','))).toBe(true);
+    expect(rows.map((r) => r.taskStatus)).toEqual(['completed', 'completed']);
+  });
+
+  it('still keeps a genuinely unknown single ref visible as its own orphan row (D-251)', () => {
+    // The comma split must not swallow the existing single-ref orphan
+    // behaviour: an error against one ref nothing else declares still keeps
+    // its row, on purpose (touch()'s header comment).
+    const events = [
+      event({
+        event_id: 'e1',
+        event_type: 'error-logged',
+        payload: {
+          task_ref: 'epic-1/task-9-nobody-declared',
+          error: 'execution.flaky-test',
+          severity: 'S3-minor',
+        },
+        ts: '2026-08-01T00:00:00.000Z',
+      }),
+    ];
+
+    expect(foldTasks(events).map((r) => r.taskId)).toEqual(['epic-1/task-9-nobody-declared']);
+  });
+});

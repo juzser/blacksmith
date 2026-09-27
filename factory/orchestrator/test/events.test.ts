@@ -900,6 +900,88 @@ describe('events.ts', () => {
     expect(events).toHaveLength(1);
   });
 
+  // db/projector.ts's touch() keys a task row on the raw id string, so a
+  // comma-joined task_ref or task_id ("epic-1/task-1,epic-1/task-2") used to
+  // mint one phantom row that stayed `todo` forever and held epic verdict.
+  // The fold now splits a comma-joined task_ref it finds in an already-written
+  // log, but that is a read-time safety net for history, not the normal way
+  // to log an error against two tasks — reject the shape here so the log
+  // never grows another one.
+  it('rejects an error-logged event whose task_ref joins more than one task id with a comma', async () => {
+    await appendEvent(
+      {
+        session_id: 'sess-8b',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+
+    await expect(
+      appendEvent(
+        {
+          session_id: 'sess-8b',
+          actor: 'coder',
+          event_type: 'error-logged',
+          plan_version: 1,
+          causal_parent: 'sess-8b#0',
+          payload: {
+            error: 'execution.test-failure',
+            severity: 'S3-minor',
+            task_ref: 'epic-1/task-1,epic-1/task-2',
+          },
+        },
+        { stateDir },
+      ),
+    ).rejects.toThrow(EventError);
+
+    const events = await readEvents('sess-8b', { stateDir });
+    expect(events).toHaveLength(1);
+  });
+
+  // D-245: the envelope task_id wins over payload.task_ref when both are set,
+  // so eventTaskId(record) — not the payload field — is what a comma slips
+  // through here. A valid single task_ref is still present so this fails for
+  // the envelope field alone, not for a missing one.
+  it('rejects an error-logged event whose envelope task_id joins more than one task id with a comma', async () => {
+    await appendEvent(
+      {
+        session_id: 'sess-8c',
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+
+    await expect(
+      appendEvent(
+        {
+          session_id: 'sess-8c',
+          actor: 'system',
+          event_type: 'error-logged',
+          task_id: 'epic-1/task-1,epic-1/task-2',
+          plan_version: 1,
+          causal_parent: 'sess-8c#0',
+          payload: {
+            error: 'execution.test-failure',
+            severity: 'S3-minor',
+            task_ref: 'epic-1/task-1',
+          },
+        },
+        { stateDir },
+      ),
+    ).rejects.toThrow(EventError);
+
+    const events = await readEvents('sess-8c', { stateDir });
+    expect(events).toHaveLength(1);
+  });
+
   it('rejects a dispatch_decision that names no model and writes nothing (P9-23)', async () => {
     await appendEvent(
       {
