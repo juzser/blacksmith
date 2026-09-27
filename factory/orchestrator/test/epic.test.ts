@@ -3655,7 +3655,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
 
   // Both external judges (codex, deepseek) refuted a verdict where the roster
   // printed `bs-audit-2/followup-9a8f6ac7: todo` with `nonTerminalTaskCount: 0`
-  // beside it and no explanation — followUpWaivedAway() (summarizeEpic) counts
+  // beside it and no explanation — clearedFollowUpFindings() (summarizeEpic) counts
   // the task terminal-OK, but never rewrites its raw status, so the roster line
   // alone reads as an open task contradicting the count. This section is what
   // shows the judge the same rule the mechanical check already applied.

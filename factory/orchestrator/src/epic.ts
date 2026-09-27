@@ -168,12 +168,10 @@ const WAIVED_FINDING_STATUS = 'waived';
  * under it (attribution.ts's `reattributeFinding` re-mints the id before the
  * raise), so `finding-reattributed` needs no second reading here. Ids compare
  * bare (D-46/P9-29).
- */
-/**
- * The findings that discharge a follow-up under the rule above, or null on
- * every branch that rule refuses. Split out so the quorum prompt can NAME the
- * findings a waived-away follow-up owns instead of re-deriving the same rule
- * a second way — followUpWaivedAway() below is now just this rule's boolean.
+ *
+ * Returns the findings that discharge the follow-up, or null on every branch
+ * the rule refuses, so the quorum prompt can NAME them instead of re-deriving
+ * the rule a second way.
  */
 function clearedFollowUpFindings(
   epicId: string,
@@ -186,14 +184,6 @@ function clearedFollowUpFindings(
   return owned.length > 0 && owned.every((f) => f.finding_status === WAIVED_FINDING_STATUS)
     ? owned
     : null;
-}
-
-function followUpWaivedAway(
-  epicId: string,
-  row: EpicTaskRow,
-  findings: readonly Finding[],
-): boolean {
-  return clearedFollowUpFindings(epicId, row, findings) !== null;
 }
 
 export interface EpicTaskSummary {
@@ -293,7 +283,7 @@ export interface SatisfiedAmendment extends EpicFindingSummary {
 }
 
 /**
- * A follow-up task followUpWaivedAway() counted terminal-OK, carried so the
+ * A follow-up task clearedFollowUpFindings() counted terminal-OK, carried so the
  * quorum prompt can say so on the roster line itself rather than leave the
  * raw `todo` row to contradict `nonTerminalTaskCount` with no explanation —
  * the exact shape both external judges (codex, deepseek) refuted in bs-audit-2.
@@ -301,7 +291,7 @@ export interface SatisfiedAmendment extends EpicFindingSummary {
 export interface ClearedFollowUp {
   /** The follow-up's id, same spelling as EpicTaskSummary.taskId. */
   taskId: string;
-  /** Its raw status in the log — never rewritten; see followUpWaivedAway's doc. */
+  /** Its raw status in the log — never rewritten; see clearedFollowUpFindings's doc. */
   taskStatus: string;
   /** Every finding it owns, all waived — the rule's own evidence, named. */
   waivedFindingIds: string[];
@@ -434,7 +424,7 @@ export interface EpicSummary {
    */
   waivedTasks: EpicTaskSummary[];
   /**
-   * Follow-up tasks (origin escalation) followUpWaivedAway() counted
+   * Follow-up tasks (origin escalation) clearedFollowUpFindings() counted
    * terminal-OK by waiving every finding they own (D-120's discretionary
    * closures, extended): never rewritten to a terminal status, so a reader of
    * `tasks` alone would still see them `todo`. Named here so both the roster
