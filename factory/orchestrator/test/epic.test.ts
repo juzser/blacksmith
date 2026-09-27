@@ -1071,6 +1071,142 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
   });
 });
 
+// A follow-up task (taskEvents.ts's emitFollowUpTask, `origin: escalation`)
+// exists only to own findings no open task could. It is minted `todo` and no
+// event ever moves it to `waived`, so when the operator waives the findings it
+// owns, the task itself is the only thing left holding the epic. It reads
+// terminal-OK exactly when it owns at least one finding and every one it owns
+// is waived — and only for origin `escalation`: a planned task's todo status
+// is its own claim about work still owed, which a waived finding does not
+// discharge.
+describe('epic.ts summarizeEpic — follow-up tasks discharged by waived findings', () => {
+  const followUp = (overrides: Partial<EpicTaskRow> = {}): EpicTaskRow =>
+    taskRow({
+      taskId: 'epic-1/followup-9a8f6ac7',
+      origin: 'escalation',
+      taskStatus: 'todo',
+      gate: { gateOutcome: false, resultRecorded: false },
+      ...overrides,
+    });
+
+  it('is mechanically ready when every finding a follow-up owns is waived', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), followUp()],
+      [
+        findingFixture({
+          finding_id: 'f-epic-1/followup-9a8f6ac7-9a8f6ac7',
+          task_id: 'epic-1/followup-9a8f6ac7',
+          severity: 'S3-minor',
+          finding_status: 'waived',
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+    );
+    expect(summary.blockers).toEqual([]);
+    expect(summary.mechanicallyReady).toBe(true);
+    expect(summary.nonTerminalTaskCount).toBe(0);
+  });
+
+  it('matches the follow-up’s findings on the bare id when the registers disagree', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), followUp()],
+      [
+        findingFixture({
+          finding_id: 'f-followup-9a8f6ac7-9a8f6ac7',
+          task_id: 'followup-9a8f6ac7',
+          severity: 'S3-minor',
+          finding_status: 'waived',
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+    );
+    expect(summary.mechanicallyReady).toBe(true);
+  });
+
+  it('still blocks a follow-up with one waived and one open finding', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), followUp()],
+      [
+        findingFixture({
+          finding_id: 'f-a',
+          task_id: 'epic-1/followup-9a8f6ac7',
+          severity: 'S3-minor',
+          finding_status: 'waived',
+        }),
+        findingFixture({
+          finding_id: 'f-b',
+          task_id: 'epic-1/followup-9a8f6ac7',
+          fingerprint: 'fp-2',
+          severity: 'S3-minor',
+          finding_status: 'raised',
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.nonTerminalTaskCount).toBe(1);
+    expect(
+      summary.blockers.some((b) => b.includes('epic-1/followup-9a8f6ac7') && b.includes('todo')),
+    ).toBe(true);
+  });
+
+  it('still blocks a follow-up that owns no findings at all', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), followUp()],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.nonTerminalTaskCount).toBe(1);
+    // The blocker names the way out, since no verb writes a task to `waived`.
+    expect(
+      summary.blockers.some(
+        (b) => b.includes('epic-1/followup-9a8f6ac7') && b.includes('waive every finding'),
+      ),
+    ).toBe(true);
+  });
+
+  it('still blocks a planned (non-escalation) todo task whose findings are all waived', () => {
+    const summary = summarizeEpic(
+      'epic-1',
+      [taskRow(), taskRow({ taskId: 'epic-1/task-2', origin: 'planned', taskStatus: 'todo' })],
+      [
+        findingFixture({
+          finding_id: 'f-epic-1/task-2-aa',
+          task_id: 'epic-1/task-2',
+          severity: 'S3-minor',
+          finding_status: 'waived',
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.nonTerminalTaskCount).toBe(1);
+    expect(summary.blockers.some((b) => b.includes('epic-1/task-2') && b.includes('todo'))).toBe(
+      true,
+    );
+  });
+});
+
 // D-42/P9-26: an epic whose six per-task gates are all green has demonstrated
 // six things about six worktrees and nothing at all about the branch that
 // actually ships. These four blockers are the difference.
