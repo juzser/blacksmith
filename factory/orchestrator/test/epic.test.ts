@@ -3653,6 +3653,61 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
     });
   });
 
+  // Both external judges (codex, deepseek) refuted a verdict where the roster
+  // printed `bs-audit-2/followup-9a8f6ac7: todo` with `nonTerminalTaskCount: 0`
+  // beside it and no explanation — followUpWaivedAway() (summarizeEpic) counts
+  // the task terminal-OK, but never rewrites its raw status, so the roster line
+  // alone reads as an open task contradicting the count. This section is what
+  // shows the judge the same rule the mechanical check already applied.
+  describe('a follow-up cleared by waiving every finding it owns', () => {
+    const followUp = (overrides: Partial<EpicTaskRow> = {}): EpicTaskRow =>
+      taskRow({
+        taskId: 'epic-1/followup-9a8f6ac7',
+        origin: 'escalation',
+        taskStatus: 'todo',
+        gate: { gateOutcome: false, resultRecorded: false },
+        ...overrides,
+      });
+
+    it('marks the roster line and lists it under discretionary closures, naming the waived findings', () => {
+      const prompt = promptFor(
+        [doneTask(), followUp()],
+        [
+          findingFixture({
+            finding_id: 'f-epic-1/followup-9a8f6ac7-9a8f6ac7',
+            task_id: 'epic-1/followup-9a8f6ac7',
+            severity: 'S3-minor',
+            finding_status: 'waived',
+          }),
+        ],
+      );
+      expect(prompt).toContain(
+        '  epic-1/followup-9a8f6ac7: todo — follow-up (origin: escalation) cleared by rule: ' +
+          'every attributed finding waived (f-epic-1/followup-9a8f6ac7-9a8f6ac7); counted terminal-OK',
+      );
+      expect(prompt).toMatch(/Discretionary closures/i);
+      const discretionarySection = prompt.slice(prompt.indexOf('Discretionary closures'));
+      expect(discretionarySection).toContain('epic-1/followup-9a8f6ac7');
+      expect(discretionarySection).toContain('f-epic-1/followup-9a8f6ac7-9a8f6ac7');
+    });
+
+    it('still renders plainly as todo, with no note, when a follow-up has an open finding left', () => {
+      const prompt = promptFor(
+        [doneTask(), followUp()],
+        [
+          findingFixture({
+            finding_id: 'f-a',
+            task_id: 'epic-1/followup-9a8f6ac7',
+            severity: 'S3-minor',
+            finding_status: 'raised',
+          }),
+        ],
+      );
+      expect(prompt).toMatch(/^ {2}epic-1\/followup-9a8f6ac7: todo$/m);
+      expect(prompt).not.toContain('cleared by rule');
+    });
+  });
+
   describe('the mandate', () => {
     it('inventories what the judge has and has not, instead of only the absence', () => {
       const prompt = promptFor([doneTask()]);
