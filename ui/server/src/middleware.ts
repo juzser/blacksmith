@@ -6,7 +6,9 @@
 // — no individual route handler restates any of these rules.
 import type { Context, Next } from 'hono';
 
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '::1']);
+// The WHATWG URL parser always returns an IPv6 hostname in bracketed form
+// (`[::1]`, never bare `::1`), so that is the form this set must carry.
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 /**
  * `host:port` normalized through the WHATWG URL parser, which strips a port
