@@ -620,7 +620,7 @@ function validateTypedPayload(
  * would buy nothing the root edge does not already express.
  */
 async function validateCausalParent(
-  input: EventInput,
+  input: Pick<EventInput, 'session_id' | 'event_type' | 'causal_parent'>,
   opts: EventOpts,
   existing: StoredEvent[],
 ): Promise<void> {
@@ -671,28 +671,60 @@ async function validateCausalParent(
   }
 }
 
+// EventInput requires causal_parent, so inside the orchestrator undefined is
+// unreachable. It is reachable from outside: every event appended through the
+// CLI crosses a JSON boundary where the type guarantees nothing, and omitting
+// a field is the likeliest way a hand-written event is malformed. This used
+// to compare against `null` alone, so an omitted parent fell through into
+// parseEventId(undefined) and reached the caller as a raw TypeError with no
+// `code` — the one shape produced by accident was the one shape with nothing
+// to branch on. Normalise once so every caller reads the same guard.
+function requireCausalParentPresence(eventType: string, causalParent: string | null): void {
+  if (causalParent === null && eventType !== ROOT_EVENT_TYPE) {
+    throw new EventError(
+      'events.missing-causal-parent',
+      `causal_parent may only be null for "${ROOT_EVENT_TYPE}" events (got event_type "${eventType}").`,
+      { event_type: eventType },
+    );
+  }
+}
+
+/**
+ * Validate an event's envelope — the same causal_parent checks `appendEvent`
+ * runs immediately before it writes — without appending anything.
+ *
+ * `queue.ts`'s `step`/`batchStep` and `integration.ts`'s check suite each do
+ * real work of their own (a rebase and a no-ff merge; a full check run) ahead
+ * of their own first append, so a bad `--causal-parent` used to surface only
+ * there — after the git work had already landed for real, with no event to
+ * show for it. A retry then found the branch already advanced and reported it
+ * as stuck. Calling this first, before any of that work starts, means a bad
+ * envelope is refused with nothing done yet to undo.
+ *
+ * Only the causal_parent rules and the session-id shape are checked here. The
+ * event schema, the taxonomy and typed payloads are not: a caller whose payload
+ * could fail those must not treat a pass as "the append will succeed".
+ */
+export async function validateEventEnvelope(
+  input: Pick<EventInput, 'session_id' | 'event_type' | 'causal_parent'>,
+  opts: EventOpts = {},
+): Promise<void> {
+  const causalParent = input.causal_parent ?? null;
+  requireCausalParentPresence(input.event_type, causalParent);
+  if (causalParent === null) return;
+
+  const filePath = logPath(input.session_id, opts);
+  const existing = await readEventsAtPath(filePath, input.session_id);
+  await validateCausalParent(input, opts, existing);
+}
+
 async function appendEventLocked(
   input: EventInput,
   opts: EventOpts,
   filePath: string,
 ): Promise<StoredEvent> {
-  // EventInput requires causal_parent, so inside the orchestrator undefined is
-  // unreachable. It is reachable from outside: every event appended through the
-  // CLI crosses a JSON boundary where the type guarantees nothing, and omitting
-  // a field is the likeliest way a hand-written event is malformed. Both guards
-  // below used to compare against `null` alone, so an omitted parent fell
-  // through them into parseEventId(undefined) and reached the caller as a raw
-  // TypeError with no `code` — the one shape produced by accident was the one
-  // shape with nothing to branch on. Normalise once so both guards read it.
   const causalParent = input.causal_parent ?? null;
-
-  if (causalParent === null && input.event_type !== ROOT_EVENT_TYPE) {
-    throw new EventError(
-      'events.missing-causal-parent',
-      `causal_parent may only be null for "${ROOT_EVENT_TYPE}" events (got event_type "${input.event_type}").`,
-      { event_type: input.event_type },
-    );
-  }
+  requireCausalParentPresence(input.event_type, causalParent);
 
   await mkdir(path.dirname(filePath), { recursive: true });
   const existing = await readEventsAtPath(filePath, input.session_id);

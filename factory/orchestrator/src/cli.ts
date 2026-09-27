@@ -128,6 +128,7 @@ import {
   STATE_DB_PATH,
 } from './paths.js';
 import {
+  bareTaskId,
   diffPlans,
   livePlanTasks,
   type PlanChanges,
@@ -170,7 +171,7 @@ import {
   securityTriggers,
 } from './security.js';
 import { parseLessons } from './severity.js';
-import { amendPlan, recordSpecReview } from './spec.js';
+import { amendPlan, recordSpecReview, taskSuccessors } from './spec.js';
 import {
   approveSpecChange,
   listSpecChanges,
@@ -226,6 +227,34 @@ function printJson(value: unknown): void {
 
 function readJsonFile<T>(filePath: string): T {
   return JSON.parse(readFileSync(filePath, 'utf8')) as T;
+}
+
+/**
+ * `--checks <file>`'s intake, both places it's read (`gate run`,
+ * `integration check`). Same fail-closed shape as `boundedIntFlag`, moved
+ * from a flag to a JSON field: a check's own `timeout_ms` goes straight into
+ * a `setTimeout` call in testgate.ts, and a non-positive or non-integer value
+ * there does not fail loudly — it fails as either an instant, unexplained
+ * timeout or one that silently never fires. Above 2^31-1 Node clamps the
+ * delay to 1ms, so an oversized value is the instant kind too. Refused here,
+ * at the point the file is read, rather than let a gate run act on either.
+ */
+const MAX_CHECK_TIMEOUT_MS = 2_147_483_647;
+
+function readChecksFile(filePath: string): CheckCommand[] {
+  const checks = readJsonFile<CheckCommand[]>(filePath);
+  for (const check of checks) {
+    const timeoutMs = check.timeout_ms;
+    if (timeoutMs === undefined) continue;
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_CHECK_TIMEOUT_MS) {
+      throw new SmithError(
+        'gate.invalid-check-timeout',
+        `"${check.name}" in ${filePath} has timeout_ms ${JSON.stringify(timeoutMs)}; it must be a positive whole number of milliseconds, at most ${MAX_CHECK_TIMEOUT_MS}.`,
+        { name: check.name, timeout_ms: timeoutMs, file: filePath },
+      );
+    }
+  }
+  return checks;
 }
 
 /** A task spec's `budget.tokens` when it is a usable positive number, else null. */
@@ -2167,6 +2196,29 @@ async function main(): Promise<number> {
       positional,
       usageFor('worktree create'),
     ) as [string, string, string];
+    if (flags.from !== undefined) {
+      // `--from` reuses a predecessor's commits, so it may only be spent on a
+      // task the log actually names as that predecessor's successor — never
+      // on a bare "I want the same branch history" request. `--session` is
+      // what supplies the log to check against; without it there is nothing
+      // to refuse against, so demand it explicitly rather than silently
+      // trusting an unauthenticated `--from`.
+      const sessionId = requireFlag(flags, 'session');
+      const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+      const successors = taskSuccessors(events, epic);
+      const from = flags.from;
+      const expected = bareTaskId(epic, taskId);
+      const actual = successors.get(from) ?? successors.get(`${epic}/${from}`);
+      if (actual === undefined || bareTaskId(epic, actual) !== expected) {
+        throw new SmithError(
+          'worktree.not-a-successor',
+          `${epic}/${taskId} is not logged as the successor of ${epic}/${from}; run \`plan propose\`/\`plan approve\` with a supersede pairing them first.`,
+          { epic, taskId, from },
+        );
+      }
+      printJson(createTaskWorktree(projectDir, epic, taskId, { from }));
+      return 0;
+    }
     printJson(createTaskWorktree(projectDir, epic, taskId));
     return 0;
   }
@@ -3152,7 +3204,7 @@ async function main(): Promise<number> {
     const { runGate } = await import('./gate.js');
     const [taskId] = requirePositionals(positional, usageFor('gate run')) as [string];
     const worktreeDir = requireFlag(flags, 'worktree');
-    const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'));
     // The result file has the same two intake shapes as findings below, and for
     // the same reason. With `--agent`, `--result` is the worker's half —
     // run_status/structured_output/artifacts — and the dispatcher stamps the
@@ -3368,7 +3420,7 @@ async function main(): Promise<number> {
   if (namespace === 'integration' && action === 'check') {
     const epicId = requireFlag(flags, 'epic');
     const projectDir = requireFlag(flags, 'project');
-    const checks = readJsonFile<CheckCommand[]>(requireFlag(flags, 'checks'));
+    const checks = readChecksFile(requireFlag(flags, 'checks'));
     const ctx = eventContextFromFlags(flags);
     const record = await runIntegrationCheck(
       {

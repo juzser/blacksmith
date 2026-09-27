@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // loader the binary uses cannot drift away from the file when the cap is
 // retuned. FOLLOW_TICK_MS is the same move for a clock: a test that waits out
 // two polls has to wait out the poll the binary actually uses.
-import { loadBudgetPolicy } from '../src/budgets.js';
+import { BUDGET_ENV_VARS, loadBudgetPolicy } from '../src/budgets.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from '../src/errorIssues.js';
 import { FOLLOW_TICK_MS } from '../src/events.js';
 import { resolveRepoAtDir } from '../src/gh.js';
@@ -37,8 +37,17 @@ function runCli(
   envOverrides?: Record<string, string>,
   stdin?: string,
 ): { stdout: string; stderr: string; status: number } {
+  // The CLI loads the repo-root `.env` (src/cli.ts's `loadDotEnv`) and fills
+  // in any budget var not already set in the child's env. An operator `.env`
+  // pinning e.g. SMITH_EPIC_CAP_TOKENS beats a test's own `--budget-policy`
+  // file (env wins over policy in budgets.ts's `envValue`), and the gate
+  // itself strips SMITH_* before running checks (src/testgate.ts), so this
+  // harness has to be the one place that stays hermetic. Blank every budget
+  // var first, then let explicit overrides win, same order the CLI resolves
+  // them in.
+  const blankBudgetEnv = Object.fromEntries(BUDGET_ENV_VARS.map((name) => [name, '']));
   const run = runProcess('node', [CLI_PATH, ...args], {
-    ...(envOverrides ? { env: { ...process.env, ...envOverrides } } : {}),
+    env: { ...process.env, ...blankBudgetEnv, ...envOverrides },
     ...(stdin === undefined ? {} : { input: stdin }),
   });
   assertExited(run, `smith ${args.join(' ')}`);
@@ -7380,6 +7389,85 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // A per-check `timeout_ms` in checks.json is read straight into a
+    // `setTimeout` call downstream; a bogus value there does not fail loudly,
+    // it fails as either an instant "timed out after 0ms" false red or a
+    // timeout that silently never fires. Refused here, at the point the file
+    // is read — before the worktree, the result file or the session context
+    // are even touched — rather than let a gate run act on either.
+    describe('gate run --checks timeout_ms validation', () => {
+      async function gateInvocation(
+        checksBody: unknown,
+      ): Promise<{ status: number; stdout: string }> {
+        const { sessionId, eventsDir, planPath } = await session();
+        const worktreeDir = await committedWorktree(`checks-timeout-${sessionId}`);
+        const checksPath = path.join(scratchDir, `${sessionId}-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-result.json`);
+        await writeFile(checksPath, JSON.stringify(checksBody));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        return runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+      }
+
+      it('refuses a non-positive timeout_ms instead of running the check', async () => {
+        const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 0 }]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.message).toContain('timeout_ms');
+        expect(JSON.parse(result.stdout).error.message).toContain('test');
+      });
+
+      it('refuses a non-integer timeout_ms instead of running the check', async () => {
+        const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 12.5 }]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.message).toContain('timeout_ms');
+      });
+
+      // Node clamps a setTimeout delay above 2^31-1 to 1ms: an oversized
+      // timeout_ms would time the check out instantly, not wait longer.
+      it('refuses a timeout_ms above the setTimeout ceiling', async () => {
+        const result = await gateInvocation([
+          { name: 'test', cmd: 'true', timeout_ms: 2_147_483_648 },
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.message).toContain('2147483647');
+      });
+
+      it('still runs a checks.json with a valid timeout_ms', async () => {
+        const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 1000 }]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).outcome).not.toBe('blocked');
+      });
+    });
+
     // The ownership split reached the way the factory reaches it. Without these
     // flags wired through, `stampResultEnvelope` exists only in the library and
     // every real gate run still takes the agent's word for its own token count.
@@ -10106,6 +10194,121 @@ describe('cli.ts (built binary)', () => {
       expect(status).toBe(1);
       expect(stderr).toBe('');
       expect(JSON.parse(stdout).error.message).toContain('is not a working tree');
+    });
+  });
+
+  // A successor task's whole point is to keep the predecessor's commits, so
+  // reusing them has to be tied to the logged amendment that actually paired
+  // the two ids -- not to an operator's bare say-so on the command line.
+  describe('worktree create --from (successor re-scope)', () => {
+    let projectDir: string;
+
+    beforeAll(async () => {
+      projectDir = path.join(scratchDir, 'from-project');
+      await mkdir(projectDir, { recursive: true });
+      runOrThrow('git', ['init', '-q', '-b', 'main', projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'README.md'), '# from\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+    });
+
+    function append(eventsDir: string, event: Record<string, unknown>): string {
+      const run = runCli(['event', 'append', JSON.stringify(event), '--state-dir', eventsDir]);
+      expect(run.status, run.stdout).toBe(0);
+      return JSON.parse(run.stdout).event_id as string;
+    }
+
+    it('is refused without a logged successors entry pairing the two ids', () => {
+      const sessionId = `cli-from-refuse-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-refuse-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      void parent;
+
+      const worktreeDir = path.join(scratchDir, 'wt', `from-refuse-${Date.now()}`);
+      runOrThrow('git', ['worktree', 'add', '-b', 'smith/epic-from/task-1', worktreeDir, 'main'], {
+        cwd: projectDir,
+      });
+
+      const { stdout, status } = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from',
+        'task-1-v2',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('worktree.not-a-successor');
+    });
+
+    it('is accepted once a plan amendment records the successors pairing', () => {
+      const sessionId = `cli-from-accept-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-accept-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 2,
+        causal_parent: parent,
+        payload: {
+          epic_id: 'epic-from2',
+          version: 2,
+          previous_version: 1,
+          successors: { 'epic-from2/task-1': 'epic-from2/task-1-v2' },
+        },
+      });
+
+      runOrThrow(
+        'git',
+        [
+          'worktree',
+          'add',
+          '-b',
+          'smith/epic-from2/task-1',
+          path.join(scratchDir, 'wt', 'from2-pred'),
+          'main',
+        ],
+        { cwd: projectDir },
+      );
+
+      const { stdout, status } = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from2',
+        'task-1-v2',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status, stdout).toBe(0);
+      const result = JSON.parse(stdout);
+      expect(result.branch).toBe('smith/epic-from2/task-1-v2');
     });
   });
 

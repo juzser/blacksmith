@@ -36,6 +36,7 @@ import {
   SpecError,
   type SpecReviewStatus,
   specReviewBlockers,
+  taskSuccessors,
 } from '../src/spec.js';
 
 // ---------------------------------------------------------------------------
@@ -576,6 +577,173 @@ describe('spec-scoped findings (P9-9)', () => {
       const after = await listFindings(ctx.sessionId, {}, { stateDir });
       expect(after[0]?.finding_status).toBe('amend-pending');
       expect(after[0]?.amends_task_ids).toEqual(['envkit/task-1b-quote-errors']);
+    });
+
+    // epic.ts's resolveSupersededRow/summarizeEpic is the reader of this pairing
+    // — a *later*, unrelated amendment superseding a task an *earlier* finding
+    // already obligated on (amends_task_ids is never rewritten after the fact,
+    // see the previous test's comment). This is the write side: does amendPlan
+    // actually record the pairing on the event, and does taskSuccessors actually
+    // fold it back out.
+    it('records old id -> replacement id as a successor pairing when a supersede renames a task', async () => {
+      const finding = await raiseSpecFinding();
+      const task = planFixture().tasks[0];
+      if (task === undefined) throw new Error('unreachable');
+
+      await amendPlan(
+        {
+          plan: planFixture(),
+          findingIds: [finding.finding_id],
+          rationale: 'criterion 3 moved to a task that owns the error path alone',
+          sites: ['src/parse.ts'],
+          changes: {
+            supersede: {
+              'envkit/task-1b-parse-quotes': {
+                ...task,
+                task_id: 'envkit/task-1b-quote-errors',
+                acceptance_criteria: ['an unterminated double quote is a parse error'],
+              },
+            },
+          },
+        },
+        rootCtx(),
+        { stateDir, specsDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.get('envkit/task-1b-parse-quotes')).toBe('envkit/task-1b-quote-errors');
+    });
+
+    it('records no successor pairing when a supersede keeps the same task id', async () => {
+      const finding = await raiseSpecFinding();
+
+      await amendPlan(
+        {
+          plan: planFixture(),
+          findingIds: [finding.finding_id],
+          rationale: 'criterion 3 tightened in place, same task',
+          sites: ['src/parse.ts'],
+          changes: supersedeQuotes(),
+        },
+        rootCtx(),
+        { stateDir, specsDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      // The fold's own row already carries the work forward under the id
+      // everyone has -- no pairing needed, so none is recorded.
+      expect(successors.size).toBe(0);
+    });
+
+    // Every plan-version-created event written before the `successors` field
+    // shipped carries no such field at all -- only the plan `diff` amendPlan
+    // always wrote. These three pin the legacy fallback: infer a pairing from
+    // diff.superseded/diff.added, but ONLY when the shape is unambiguous.
+    // amendPlan() itself never produces this shape any more (it always writes
+    // an explicit `successors`, even when empty) -- these hand-write the raw
+    // event to stand in for one already on an old log.
+    it('infers a successor pairing from a legacy event with exactly one superseded id and one added id', async () => {
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 2,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale: 'legacy event predating the successors field',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['envkit/task-1b-quote-errors'],
+              removed: [],
+              superseded: ['envkit/task-1b-parse-quotes'],
+              carried: [],
+            },
+            // deliberately no `successors` field -- this is the legacy shape.
+          },
+        },
+        { stateDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.get('envkit/task-1b-parse-quotes')).toBe('envkit/task-1b-quote-errors');
+    });
+
+    it('infers nothing from a legacy event with two added ids (or two superseded ids) — fails closed', async () => {
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 2,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale: 'legacy event, ambiguous split -- two tasks landed in its place',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['envkit/task-1b-quote-errors', 'envkit/task-1b-quote-errors-2'],
+              removed: [],
+              superseded: ['envkit/task-1b-parse-quotes'],
+              carried: [],
+            },
+          },
+        },
+        { stateDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.size).toBe(0);
+    });
+
+    it('ignores diff.superseded/diff.added inference when successors is explicitly present', async () => {
+      await appendEvent(
+        {
+          session_id: ctx.sessionId,
+          actor: 'planner',
+          event_type: PLAN_AMENDED_EVENT,
+          plan_version: 2,
+          causal_parent: `${ctx.sessionId}#0`,
+          payload: {
+            epic_id: 'envkit',
+            version: 2,
+            previous_version: 1,
+            amends: [],
+            rationale:
+              'current-shape event -- explicit successors wins even though the diff alone would look inferable',
+            sites: [],
+            sites_unclaimed: [],
+            diff: {
+              added: ['envkit/task-1b-quote-errors'],
+              removed: [],
+              superseded: ['envkit/task-1b-parse-quotes'],
+              carried: [],
+            },
+            // Explicit and empty: a real same-id supersede writes exactly
+            // this. If inference ran anyway it would find the 1+1 diff shape
+            // above and wrongly report a pairing that was never intended.
+            successors: {},
+          },
+        },
+        { stateDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const successors = taskSuccessors(events, 'envkit');
+      expect(successors.size).toBe(0);
     });
 
     it('refuses an amendment that moves no task — it would discharge the finding on the spot (D-127)', async () => {

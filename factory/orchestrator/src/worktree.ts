@@ -139,16 +139,38 @@ export interface TaskWorktree {
   taskId: string;
 }
 
+export interface CreateTaskWorktreeOpts {
+  /**
+   * A predecessor task id to branch from instead of the integration branch's
+   * current head. Set only for a successor task minted by a re-scope
+   * (`plan propose` -> `plan approve` recording `successors{old->new}`,
+   * spec.ts's `taskSuccessors`): the whole point is that the successor keeps
+   * the predecessor's commits rather than starting over from integration.
+   * cli.ts is what checks the id is an actual logged successor before this
+   * ever runs — this module just needs the branch to exist.
+   */
+  from?: string;
+}
+
 /**
  * Create a task worktree at `<projects root>/.wt/<project>/<task-id>` — a
  * sibling of whatever directory the project was handed as, never a path of
  * this module's own choosing, so a project outside this clone keeps its
  * worktrees outside it too (see taskWorktreeDir)
- * on branch smith/<epic>/<task-id>, cut from the CURRENT head of
- * smith/<epic>/integration (creating the integration branch from the default
- * branch first if it doesn't exist yet).
+ * on branch smith/<epic>/<task-id>.
+ *
+ * Without `opts.from`, cut from the CURRENT head of smith/<epic>/integration
+ * (creating the integration branch from the default branch first if it
+ * doesn't exist yet). With `opts.from`, cut from smith/<epic>/<from> instead
+ * — the predecessor's branch, commits and all — and integration is never
+ * consulted.
  */
-export function createTaskWorktree(projectDir: string, epic: string, taskId: string): TaskWorktree {
+export function createTaskWorktree(
+  projectDir: string,
+  epic: string,
+  taskId: string,
+  opts: CreateTaskWorktreeOpts = {},
+): TaskWorktree {
   if (taskId === RESERVED_TASK_ID) {
     throw new WorktreeError(
       'worktree.reserved-task-id',
@@ -157,11 +179,24 @@ export function createTaskWorktree(projectDir: string, epic: string, taskId: str
     );
   }
 
-  const integrationBranch = ensureIntegrationBranch(projectDir, epic);
   const branch = taskBranchName(epic, taskId);
   const worktreeDir = taskWorktreeDir(projectDir, epic, taskId);
 
-  git(projectDir, ['worktree', 'add', '-b', branch, worktreeDir, integrationBranch]);
+  let sourceBranch: string;
+  if (opts.from !== undefined) {
+    sourceBranch = taskBranchName(epic, opts.from);
+    if (!localBranchExists(projectDir, sourceBranch)) {
+      throw new WorktreeError(
+        'worktree.from-missing',
+        `Predecessor branch ${sourceBranch} does not exist; cannot cut ${taskId} from it.`,
+        { epic, taskId, from: opts.from, branch: sourceBranch },
+      );
+    }
+  } else {
+    sourceBranch = ensureIntegrationBranch(projectDir, epic);
+  }
+
+  git(projectDir, ['worktree', 'add', '-b', branch, worktreeDir, sourceBranch]);
 
   return { worktreeDir, branch, epic, taskId };
 }

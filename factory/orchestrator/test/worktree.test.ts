@@ -91,6 +91,48 @@ describe('worktree.ts', () => {
     expect(existsSync(path.join(second.worktreeDir, 'advance.txt'))).toBe(true);
   });
 
+  it('with `from`, cuts the successor branch at the predecessor HEAD, commits and all', async () => {
+    const predecessor = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+
+    // Commit work on the predecessor's branch that integration never saw.
+    await writeFile(path.join(predecessor.worktreeDir, 'work.txt'), 'predecessor work\n');
+    git(predecessor.worktreeDir, ['add', '.']);
+    git(predecessor.worktreeDir, ['commit', '-q', '-m', 'predecessor work']);
+
+    const successor = createTaskWorktree(projectDir, 'epic-1', 'task-1-v2', { from: 'task-1' });
+
+    expect(successor.branch).toBe('smith/epic-1/task-1-v2');
+    expect(existsSync(path.join(successor.worktreeDir, 'work.txt'))).toBe(true);
+
+    // Ahead of integration: the predecessor's commit rode along.
+    const integrationOut = git(projectDir, [
+      'merge-base',
+      '--is-ancestor',
+      'smith/epic-1/integration',
+      'smith/epic-1/task-1-v2',
+    ]);
+    expect(integrationOut).toBe('');
+    expect(() =>
+      git(projectDir, [
+        'merge-base',
+        '--is-ancestor',
+        'smith/epic-1/task-1-v2',
+        'smith/epic-1/integration',
+      ]),
+    ).toThrow();
+  });
+
+  it('throws worktree.from-missing when the predecessor branch does not exist', () => {
+    let error: unknown;
+    try {
+      createTaskWorktree(projectDir, 'epic-1', 'task-2', { from: 'no-such-task' });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(WorktreeError);
+    expect((error as WorktreeError).code).toBe('worktree.from-missing');
+  });
+
   it('removeTaskWorktree removes the worktree and the merged task branch', () => {
     const result = createTaskWorktree(projectDir, 'epic-1', 'task-1');
 
