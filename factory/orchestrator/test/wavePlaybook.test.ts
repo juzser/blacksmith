@@ -98,9 +98,11 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
     // at the closing backtick of one span and end at the opening backtick of
     // an unrelated later span, letting plain prose in between (which is not
     // inside any code span at all) satisfy the check.
-    const codeSpans = (s: string): string[] => [...s.matchAll(/`([^`]*)`/g)].map((m) => m[1]);
-    const hasWaveCheckSpan = (s: string) => codeSpans(s).some((span) => /\bwave check\b/.test(span));
-    const hasWaveAuditSpan = (s: string) => codeSpans(s).some((span) => /\bwave audit\b/.test(span));
+    const codeSpans = (s: string): string[] => [...s.matchAll(/`([^`]*)`/g)].map((m) => m[1] ?? '');
+    const hasWaveCheckSpan = (s: string) =>
+      codeSpans(s).some((span) => /\bwave check\b/.test(span));
+    const hasWaveAuditSpan = (s: string) =>
+      codeSpans(s).some((span) => /\bwave audit\b/.test(span));
 
     const contrastSentences = sentenceList.filter(
       (s) => hasWaveCheckSpan(s) && hasWaveAuditSpan(s),
