@@ -22,12 +22,22 @@ import { readJudgeTurns } from './judges.js';
 import { AGENTS_DIR } from './paths.js';
 
 /**
- * The six roles dispatch.md's "Fingerprint the worktree around every judge"
- * names as judges. Kept as its own list rather than read out of judges.ts:
- * `foldJudgeTurns` folds any role with a `declared_artifact` on its dispatch
- * into a turn, but this module is stricter on purpose — only these six get
- * an artifact check, so a coder's dispatch (never carries one) reads
- * `not-applicable` rather than a false `undeclared`.
+ * The epic criterion's six judge roles (task 5 and task 6 objectives both
+ * name this exact set: spec-reviewer, reviewer, verifier, grader,
+ * security-reviewer, auditor) -- the roles whose dispatch declares an
+ * artifact and whose SubagentStop is guarded by judge-stop.sh. Kept as its
+ * own list rather than read out of judges.ts: `foldJudgeTurns` folds any
+ * role with a `declared_artifact` on its dispatch into a turn, but this
+ * module is stricter on purpose — only these six get an artifact check, so
+ * a coder's dispatch (never carries one) reads `not-applicable` rather than
+ * a false `undeclared`.
+ *
+ * Not the same six as dispatch.md's "Fingerprint the worktree around every
+ * judge" list, which swaps `auditor` for `uiux`: that section is about
+ * which judges run inside a task's worktree (auditor runs over a whole
+ * project at HEAD, never per-task, so a worktree fingerprint does not apply
+ * to it; uiux does run per-task). This list is about which roles owe a
+ * declared artifact and a blocked Stop, and `auditor` is one of them.
  */
 export const JUDGE_ROLES = [
   'reviewer',
@@ -35,7 +45,7 @@ export const JUDGE_ROLES = [
   'grader',
   'spec-reviewer',
   'security-reviewer',
-  'uiux',
+  'auditor',
 ] as const;
 export type JudgeRole = (typeof JUDGE_ROLES)[number];
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
