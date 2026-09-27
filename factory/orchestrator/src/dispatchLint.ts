@@ -158,7 +158,12 @@ async function checkArtifact(
   return { status: 'mismatch', expected_line: expectedLine, declared_line: declaredLine };
 }
 
-const TURNS_FAIL: ReadonlySet<TurnsStatus> = new Set(['over', 'missing']);
+// Fail closed: every status but "ok" exits non-zero, including "under" (a
+// prompt that understates the template's budget still disagrees with it) and
+// "unverifiable" (an unreadable template is not a pass, exactly like `dispatch
+// check`, `tester check`, `delegation check`, and `escalation check` already
+// treat "cannot tell" as a failure, never a maybe).
+const TURNS_FAIL: ReadonlySet<TurnsStatus> = new Set(['under', 'over', 'missing', 'unverifiable']);
 const ARTIFACT_FAIL: ReadonlySet<ArtifactStatus> = new Set([
   'missing',
   'relative',

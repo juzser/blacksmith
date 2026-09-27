@@ -136,7 +136,11 @@ describe('lintDispatchPrompt — turn budget', () => {
     expect(report.exitCode).toBe(0);
   });
 
-  it('is "under" and exits 0 when the prompt states fewer turns than the template', async () => {
+  it('is "under" and exits 1 when the prompt states fewer turns than the template', async () => {
+    // Fail closed like every other applicable status but "ok": understating
+    // the budget is still a prompt that disagrees with its own template, not
+    // a safe direction to let slide (task-5 spec: "Fail closed: any
+    // applicable status but `ok` exits non-zero").
     const report = await lintDispatchPrompt({
       prompt: 'Turn budget: 10',
       role: 'planner',
@@ -146,7 +150,7 @@ describe('lintDispatchPrompt — turn budget', () => {
       eventOpts: eventOpts(),
     });
     expect(report.turns).toEqual({ status: 'under', stated: 10, template: 20 });
-    expect(report.exitCode).toBe(0);
+    expect(report.exitCode).toBe(1);
   });
 
   it('is "missing" and exits 1 with no turn-budget line', async () => {
@@ -175,7 +179,10 @@ describe('lintDispatchPrompt — turn budget', () => {
     expect(report.exitCode).toBe(1);
   });
 
-  it('is "unverifiable" and exits 0 for an unknown role', async () => {
+  it('is "unverifiable" and exits 1 for an unknown role', async () => {
+    // Fail closed: an unverifiable answer is not a pass, exactly like
+    // `dispatch check`, `tester check`, `delegation check`, and `escalation
+    // check` all already treat "cannot tell" as a failure, never a maybe.
     const report = await lintDispatchPrompt({
       prompt: 'Turn budget: 40',
       role: 'ghost-role',
@@ -185,10 +192,10 @@ describe('lintDispatchPrompt — turn budget', () => {
       eventOpts: eventOpts(),
     });
     expect(report.turns).toEqual({ status: 'unverifiable', stated: 40, template: null });
-    expect(report.exitCode).toBe(0);
+    expect(report.exitCode).toBe(1);
   });
 
-  it('is "unverifiable" when the template has no maxTurns line', async () => {
+  it('is "unverifiable" and exits 1 when the template has no maxTurns line', async () => {
     const report = await lintDispatchPrompt({
       prompt: 'Turn budget: 40',
       role: 'no-max-turns',
@@ -198,7 +205,7 @@ describe('lintDispatchPrompt — turn budget', () => {
       eventOpts: eventOpts(),
     });
     expect(report.turns.status).toBe('unverifiable');
-    expect(report.exitCode).toBe(0);
+    expect(report.exitCode).toBe(1);
   });
 
   it('reads the template file fresh, not cached across calls', async () => {

@@ -29,8 +29,11 @@ State it on its own line, verbatim — `Turn budget: 40` — and, on a judge
 dispatch, the declared-artifact line below verbatim too. `smith dispatch
 lint <prompt-file> --role <role> --task <id> --session <id>` reads a
 composed prompt back and checks both against the template and the ledger,
-catching the promise-more-than-the-template mistake above, and a judge
-prompt missing its artifact line, before the agent ever runs.
+before the agent ever runs. It fails closed: a number that does not match
+the template — higher (the promise-more-than-the-template mistake above) or
+lower — a missing turn-budget line, a template it cannot read at all, and a
+judge prompt missing or mismatching its artifact line are each a lint
+failure, not a maybe.
 
 ## Splice the compiled lessons into every prompt (agent-interviews.md N-9, P9-2)
 
