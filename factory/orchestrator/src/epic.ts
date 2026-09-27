@@ -168,16 +168,22 @@ const WAIVED_FINDING_STATUS = 'waived';
  * under it (attribution.ts's `reattributeFinding` re-mints the id before the
  * raise), so `finding-reattributed` needs no second reading here. Ids compare
  * bare (D-46/P9-29).
+ *
+ * Returns the findings that discharge the follow-up, or null on every branch
+ * the rule refuses, so the quorum prompt can NAME them instead of re-deriving
+ * the rule a second way.
  */
-function followUpWaivedAway(
+function clearedFollowUpFindings(
   epicId: string,
   row: EpicTaskRow,
   findings: readonly Finding[],
-): boolean {
-  if (row.origin !== FOLLOW_UP_TASK_ORIGIN) return false;
+): readonly Finding[] | null {
+  if (row.origin !== FOLLOW_UP_TASK_ORIGIN) return null;
   const bare = bareTaskId(epicId, row.taskId);
   const owned = findings.filter((f) => bareTaskId(epicId, f.task_id) === bare);
-  return owned.length > 0 && owned.every((f) => f.finding_status === WAIVED_FINDING_STATUS);
+  return owned.length > 0 && owned.every((f) => f.finding_status === WAIVED_FINDING_STATUS)
+    ? owned
+    : null;
 }
 
 export interface EpicTaskSummary {
@@ -274,6 +280,21 @@ export interface SatisfiedAmendment extends EpicFindingSummary {
    * waived. Absent when the finding's obligation was never repaired.
    */
   repairedObligationReason?: string;
+}
+
+/**
+ * A follow-up task clearedFollowUpFindings() counted terminal-OK, carried so the
+ * quorum prompt can say so on the roster line itself rather than leave the
+ * raw `todo` row to contradict `nonTerminalTaskCount` with no explanation —
+ * the exact shape both external judges (codex, deepseek) refuted in bs-audit-2.
+ */
+export interface ClearedFollowUp {
+  /** The follow-up's id, same spelling as EpicTaskSummary.taskId. */
+  taskId: string;
+  /** Its raw status in the log — never rewritten; see clearedFollowUpFindings's doc. */
+  taskStatus: string;
+  /** Every finding it owns, all waived — the rule's own evidence, named. */
+  waivedFindingIds: string[];
 }
 
 /**
@@ -402,6 +423,15 @@ export interface EpicSummary {
    * separately rather than as another `waived` row in the status table.
    */
   waivedTasks: EpicTaskSummary[];
+  /**
+   * Follow-up tasks (origin escalation) clearedFollowUpFindings() counted
+   * terminal-OK by waiving every finding they own (D-120's discretionary
+   * closures, extended): never rewritten to a terminal status, so a reader of
+   * `tasks` alone would still see them `todo`. Named here so both the roster
+   * and the discretionary section can explain the same row instead of one of
+   * them leaving it to look like an open task.
+   */
+  clearedFollowUps: ClearedFollowUp[];
   openFindings: EpicFindingSummary[];
   /**
    * Findings closed by waiver or amendment (D-120): the closures a person
@@ -592,11 +622,21 @@ export function summarizeEpic(
   // but not terminal-OK by itself — it reads terminal-OK only when the
   // successor that replaced it does, recursively (run.md's "completed/
   // superseded/waived" is this rule, not a second one). A follow-up task whose
-  // every finding was waived reads terminal-OK too — followUpWaivedAway().
+  // every finding was waived reads terminal-OK too — clearedFollowUpFindings()
+  // — and is collected below so the prompt can explain the row it clears.
+  const clearedFollowUps: ClearedFollowUp[] = [];
   const nonTerminal = taskSummaries.filter((t, i) => {
     if (TERMINAL_OK_TASK_STATUSES.has(t.taskStatus)) return false;
-    if (t.taskStatus !== SUPERSEDED_TASK_STATUS)
-      return !followUpWaivedAway(epicId, tasks[i] as EpicTaskRow, findings);
+    if (t.taskStatus !== SUPERSEDED_TASK_STATUS) {
+      const cleared = clearedFollowUpFindings(epicId, tasks[i] as EpicTaskRow, findings);
+      if (cleared === null) return true;
+      clearedFollowUps.push({
+        taskId: t.taskId,
+        taskStatus: t.taskStatus,
+        waivedFindingIds: cleared.map((f) => f.finding_id),
+      });
+      return false;
+    }
     const successor = resolveSupersededRow(epicId, t.taskId, tasks, successors);
     return successor === undefined || !TERMINAL_OK_TASK_STATUSES.has(successor.taskStatus);
   });
@@ -823,6 +863,7 @@ export function summarizeEpic(
     undispatchedTasks,
     ungatedTasks,
     waivedTasks: taskSummaries.filter((t) => t.taskStatus === WAIVED_TASK_STATUS),
+    clearedFollowUps,
     openFindings,
     discretionaryFindings,
     satisfiedAmendments,
@@ -904,9 +945,22 @@ function mcpVerdict(mcp: McpSurfaceStatus): string {
  * and the exit code are the refutable part; the output is not.
  */
 export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudget): JudgeRequest {
+  // Keyed by taskId: a row in here is one clearedFollowUpFindings() cleared,
+  // so the roster line below can say so instead of printing the raw `todo`
+  // beside `Tasks not yet terminal-OK: 0` with nothing to explain the gap —
+  // the exact contradiction both external judges refuted in bs-audit-2.
+  const clearedFollowUpsByTaskId = new Map(summary.clearedFollowUps.map((c) => [c.taskId, c]));
   const taskLines =
     summary.tasks.length > 0
-      ? summary.tasks.map((t) => `  ${t.taskId}: ${t.taskStatus}`).join('\n')
+      ? summary.tasks
+          .map((t) => {
+            const cleared = clearedFollowUpsByTaskId.get(t.taskId);
+            return cleared === undefined
+              ? `  ${t.taskId}: ${t.taskStatus}`
+              : `  ${t.taskId}: ${t.taskStatus} — follow-up (origin: escalation) cleared by rule: ` +
+                  `every attributed finding waived (${cleared.waivedFindingIds.join(', ')}); counted terminal-OK`;
+          })
+          .join('\n')
       : '  (no tasks)';
   // The plan's side of the roster, stated separately: these ids have no events
   // at all, so their status is what the plan claims, not what happened (D-126).
@@ -1055,6 +1109,12 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     'Discretionary closures — decided by a person, not shown by the machine:',
     `Tasks waived rather than completed: ${summary.waivedTasks.length}`,
     ...listOr(summary.waivedTasks.map((t) => `  ${t.taskId}`)),
+    `Follow-ups cleared by waiving every finding they own: ${summary.clearedFollowUps.length}`,
+    ...listOr(
+      summary.clearedFollowUps.map(
+        (c) => `  ${c.taskId} — waived findings: ${c.waivedFindingIds.join(', ')}`,
+      ),
+    ),
     `Findings closed by waiver or amendment: ${summary.discretionaryFindings.length}`,
     ...listOr(summary.discretionaryFindings.map(findingLine)),
     `Amendments this close will discharge: ${summary.satisfiedAmendments.length}`,

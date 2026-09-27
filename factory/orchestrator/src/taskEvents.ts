@@ -570,7 +570,7 @@ export interface FollowUpTaskInput {
  * two ways out are completing it (plan it, gate it) or waiving the findings
  * it owns: summarizeEpic reads a follow-up terminal-OK once at least one
  * finding is attributed to it and every one of them is `waived`
- * (epic.ts's followUpWaivedAway).
+ * (epic.ts's clearedFollowUpFindings).
  */
 export async function emitFollowUpTask(
   input: FollowUpTaskInput,
