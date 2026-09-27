@@ -81,4 +81,39 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
       ).toBe(true);
     }
   });
+
+  it('has one sentence naming both `wave check` and `wave audit` and contrasting them', () => {
+    // Join wrapped lines (single newlines) into spaces first, so a sentence
+    // that wraps across a markdown line break still counts as one sentence.
+    const joined = steps.replace(/\n(?!\n)/g, ' ').replace(/[ \t]+/g, ' ');
+    // Split into sentences on a period followed by whitespace and the start
+    // of the next sentence (capital letter, backtick, quote, or paren).
+    const sentenceList = joined
+      .split(/(?<=\.)\s+(?=[A-Z`"(])/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    // Extract each backtick-delimited code span as its own capture, rather
+    // than matching backtick...backtick loosely -- the loose form can start
+    // at the closing backtick of one span and end at the opening backtick of
+    // an unrelated later span, letting plain prose in between (which is not
+    // inside any code span at all) satisfy the check.
+    const codeSpans = (s: string): string[] => [...s.matchAll(/`([^`]*)`/g)].map((m) => m[1] ?? '');
+    const hasWaveCheckSpan = (s: string) =>
+      codeSpans(s).some((span) => /\bwave check\b/.test(span));
+    const hasWaveAuditSpan = (s: string) =>
+      codeSpans(s).some((span) => /\bwave audit\b/.test(span));
+
+    const contrastSentences = sentenceList.filter(
+      (s) => hasWaveCheckSpan(s) && hasWaveAuditSpan(s),
+    );
+
+    expect(
+      contrastSentences.length,
+      'expected a single sentence in "## The steps" naming both ' +
+        '`wave check` and `wave audit` and stating the difference between ' +
+        'them; sentences mentioning only one of the two: ' +
+        JSON.stringify(sentenceList.filter((s) => hasWaveCheckSpan(s) || hasWaveAuditSpan(s))),
+    ).toBeGreaterThan(0);
+  });
 });
