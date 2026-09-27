@@ -377,6 +377,27 @@ export class LogCache {
   setAppliedSignature(leaf: string, signature: string): void {
     this.appliedSignatures.set(leaf, signature);
   }
+
+  /**
+   * Evicts every key not in `liveSessionIds` from both `entries` and
+   * `appliedSignatures`, so the cache's memory is bounded by live logs, not
+   * by history. `runTick` calls this once per tick with the session ids
+   * `listSessionIds` just returned -- the LISTED set, not the set of
+   * sessions whose read succeeded this tick -- so a session that is listed
+   * but unreadable keeps its entry (a read that throws leaves the entry
+   * untouched; eviction is the tick's decision, driven by the listing, not
+   * the read). A session that vanishes and later reappears loses both its
+   * fingerprint and its applied signature, so it is read cold and its leaf
+   * is re-applied. One pass over each map's own keys; no file I/O.
+   */
+  retainOnly(liveSessionIds: ReadonlySet<string>): void {
+    for (const sessionId of this.entries.keys()) {
+      if (!liveSessionIds.has(sessionId)) this.entries.delete(sessionId);
+    }
+    for (const leaf of this.appliedSignatures.keys()) {
+      if (!liveSessionIds.has(leaf)) this.appliedSignatures.delete(leaf);
+    }
+  }
 }
 
 /**

@@ -381,6 +381,33 @@ describe('criterion 2: equivalence with readEvents, step by step', () => {
   });
 });
 
+describe('finding b4f9452c: eviction of vanished sessions', () => {
+  it('retainOnly drops a session outside the live set from both maps, leaving the live one untouched', async () => {
+    const aId = 'sess-a';
+    const bId = 'sess-b';
+    writeFileSync(logFile(aId), line(event(aId)));
+    writeFileSync(logFile(bId), line(event(bId)));
+
+    const cache = new LogCache();
+    await cache.read(aId, { stateDir: dir });
+    await cache.read(bId, { stateDir: dir });
+    cache.setAppliedSignature(aId, 'sig-a');
+    cache.setAppliedSignature(bId, 'sig-b');
+
+    const fpABefore = cache.fingerprintOf(aId);
+    const sigABefore = cache.getAppliedSignature(aId);
+
+    // Watch it fail: under the null (no `retainOnly` method) this line is a
+    // TypeError, `cache.retainOnly is not a function`.
+    cache.retainOnly(new Set([aId]));
+
+    expect(cache.fingerprintOf(bId)).toBeUndefined();
+    expect(cache.getAppliedSignature(bId)).toBeUndefined();
+    expect(cache.fingerprintOf(aId)).toEqual(fpABefore);
+    expect(cache.getAppliedSignature(aId)).toBe(sigABefore);
+  });
+});
+
 describe('lastEventId', () => {
   it('is null for an absent log', async () => {
     const cache = new LogCache();
