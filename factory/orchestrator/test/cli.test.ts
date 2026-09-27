@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // loader the binary uses cannot drift away from the file when the cap is
 // retuned. FOLLOW_TICK_MS is the same move for a clock: a test that waits out
 // two polls has to wait out the poll the binary actually uses.
-import { loadBudgetPolicy } from '../src/budgets.js';
+import { BUDGET_ENV_VARS, loadBudgetPolicy } from '../src/budgets.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from '../src/errorIssues.js';
 import { FOLLOW_TICK_MS } from '../src/events.js';
 import { resolveRepoAtDir } from '../src/gh.js';
@@ -37,8 +37,17 @@ function runCli(
   envOverrides?: Record<string, string>,
   stdin?: string,
 ): { stdout: string; stderr: string; status: number } {
+  // The CLI loads the repo-root `.env` (src/cli.ts's `loadDotEnv`) and fills
+  // in any budget var not already set in the child's env. An operator `.env`
+  // pinning e.g. SMITH_EPIC_CAP_TOKENS beats a test's own `--budget-policy`
+  // file (env wins over policy in budgets.ts's `envValue`), and the gate
+  // itself strips SMITH_* before running checks (src/testgate.ts), so this
+  // harness has to be the one place that stays hermetic. Blank every budget
+  // var first, then let explicit overrides win, same order the CLI resolves
+  // them in.
+  const blankBudgetEnv = Object.fromEntries(BUDGET_ENV_VARS.map((name) => [name, '']));
   const run = runProcess('node', [CLI_PATH, ...args], {
-    ...(envOverrides ? { env: { ...process.env, ...envOverrides } } : {}),
+    env: { ...process.env, ...blankBudgetEnv, ...envOverrides },
     ...(stdin === undefined ? {} : { input: stdin }),
   });
   assertExited(run, `smith ${args.join(' ')}`);
