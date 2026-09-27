@@ -55,6 +55,13 @@ not ahead of `smith/<epic>/integration` returns `nothing-to-merge` and is
 never rebased, so the uncommitted work is still sitting exactly where the
 agent left it when you go look.
 
+When `--session` is passed, the event envelope is checked before any of
+that too: an unknown `--causal-parent` is refused (`events.unknown-causal-parent`)
+before the rebase, the test run or the merge ever starts — not only once the
+queue tries and fails to log the merge afterwards, by which point the merge
+has already landed for real with nothing in the log to show for it. The same
+holds for `--batch`, one check per call rather than per task.
+
 The queue never changes which branch `--project` has checked out. The merge
 runs in whichever worktree already has `smith/<epic>/integration` out — the
 project directory itself or a linked worktree — and, when none does, with no

@@ -645,6 +645,35 @@ describe('step', () => {
 
       expect(await logged()).toEqual([]);
     });
+
+    // A wrong --causal-parent used to surface only at emitWaveMerged, after
+    // certifyAndRebase's real `git rebase` and the merge had both already
+    // landed: the merge was real, the log never heard about it, and a retry
+    // then reported the branch as not advanced. The envelope is checked
+    // before any of that runs, so a bad parent leaves nothing to undo.
+    it('refuses an unknown causal_parent before any git work, and logs nothing', async () => {
+      const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+      await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+      git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+      const integrationBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+      const taskHeadBefore = git(task.worktreeDir, ['rev-parse', 'HEAD']);
+
+      await expect(
+        step(
+          { taskId: 'epic-1/task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+          {
+            projectDir,
+            epic: 'epic-1',
+            testCmd: 'true',
+            events: { ...events, ctx: { ...events.ctx, causalParent: `${sessionId}#99` } },
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'events.unknown-causal-parent' });
+
+      expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(integrationBefore);
+      expect(git(task.worktreeDir, ['rev-parse', 'HEAD'])).toBe(taskHeadBefore);
+      expect(await logged()).toEqual([]);
+    });
   });
 });
 
@@ -768,6 +797,46 @@ describe('batchStep', () => {
         payload: { task_ids: ['epic-1/task-b'], files_changed: ['b.txt'] },
       },
     ]);
+  });
+
+  // batchStep's shape is the same one step() has: a bad --causal-parent must
+  // not be discovered only after runGroup has rebased and merged every task
+  // in the group. One check up front, before the group runs at all, covers
+  // the whole batch — the causal_parent is a single value for the call.
+  it('refuses an unknown causal_parent before landing any task, and logs nothing', async () => {
+    const stateDir = path.join(root, 'state');
+    const sessionId = 'sess-batch-bad-parent';
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const events = {
+      ctx: { sessionId, planVersion: 1, causalParent: `${sessionId}#99`, actor: 'system' },
+      stateDir,
+    };
+
+    const a = makeTask('task-a', 'a.txt', 'a-edited\n');
+    const b = makeTask('task-b', 'b.txt', 'b-edited\n');
+    const integrationBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+
+    await expect(
+      batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true', events }),
+    ).rejects.toMatchObject({ code: 'events.unknown-causal-parent' });
+
+    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(integrationBefore);
+    const all = await readEvents(sessionId, { stateDir });
+    expect(all.filter((e) => e.record.event_type !== 'session-start')).toEqual([]);
+    // No trace of a throwaway candidate worktree either.
+    expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(
+      /\.wt[\\/]project[\\/]batch-/,
+    );
   });
 
   // B's file always fails the epic test command, whichever candidate it rides

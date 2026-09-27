@@ -1,5 +1,5 @@
 import { SmithError } from './errors.js';
-import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
+import { appendEvent, type EventOpts, type StoredEvent, validateEventEnvelope } from './events.js';
 import type { EventContext } from './findings.js';
 import { runGit as git } from './git.js';
 import { type CheckCommand, type CheckResult, run } from './testgate.js';
@@ -111,6 +111,20 @@ export async function runIntegrationCheck(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<IntegrationCheckRecord> {
+  // Refused before the check suite below spends a full run on it: a bad
+  // --causal-parent used to surface only at the append this function makes
+  // once the suite has already finished (D-42's shape, one level up — the
+  // waste here is CPU time, not a git mutation, but the same envelope
+  // `appendEvent` would refuse anyway, so refuse it first).
+  await validateEventEnvelope(
+    {
+      session_id: ctx.sessionId,
+      event_type: INTEGRATION_CHECK_EVENT,
+      causal_parent: ctx.causalParent,
+    },
+    opts,
+  );
+
   const { epicId, projectDir } = input;
   const branch = integrationBranchName(epicId);
 
