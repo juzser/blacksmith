@@ -89,6 +89,28 @@ function withMaxTurns(text: string, site: MaxTurnsSite, value: number): string {
   return `${text.slice(0, site.from)}${value}${text.slice(site.to)}`;
 }
 
+/**
+ * The template's current `maxTurns:`, read fresh from disk — never cached,
+ * because `smith agents sync` may have rewritten the file since the caller
+ * last looked. Unlike `findMaxTurns`, this never throws: a role with no
+ * template, or a template with no `maxTurns:` line, is "cannot verify" for a
+ * caller like dispatchLint.ts, not a hard failure.
+ */
+export function readTemplateMaxTurns(agentsDir: string, role: string): number | undefined {
+  const file = path.join(agentsDir, `${role}.md`);
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    return undefined;
+  }
+  try {
+    return findMaxTurns(text, file).value;
+  } catch {
+    return undefined;
+  }
+}
+
 function positiveInt(name: string, raw: string): number {
   const value = /^[0-9]+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!Number.isSafeInteger(value) || value <= 0) {

@@ -1,7 +1,11 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
+import { JUDGE_ROLES } from '../src/dispatchLint.js';
 import { REPO_ROOT } from '../src/paths.js';
+import { runProcess } from './helpers/process.js';
 
 // ---------------------------------------------------------------------------
 // `/bs` is a Claude Code skill, and Claude Code loads skills from a project's
@@ -89,5 +93,117 @@ describe('plugin payload', () => {
     // loads hooks only from `hooks/hooks.json`, so the absence of that file is
     // what keeps the payload inert. It is a decision, not an oversight.
     expect(existsSync(path.join(root, 'hooks/hooks.json'))).toBe(false);
+  });
+
+  it('every judge agent template declares judge-stop.sh as its Stop hook', () => {
+    // Registered in each judge-class template's own frontmatter as a `Stop`
+    // hook (Claude Code converts that to `SubagentStop` for a subagent), not
+    // via settings.json or a plugin hooks.json -- pins the reference against
+    // a future rename of the hook script.
+    for (const role of JUDGE_ROLES) {
+      const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
+      expect(body, `${role}.md frontmatter is missing the judge-stop.sh Stop hook`).toMatch(
+        /hooks:\s*\n\s*Stop:\s*\n[\s\S]*?\$CLAUDE_PROJECT_DIR\/\.claude\/hooks\/judge-stop\.sh/,
+      );
+    }
+  });
+
+  it('no non-judge template declares the judge-stop.sh Stop hook -- exactly JUDGE_ROLES, never a superset', () => {
+    // The positive assertion above only ever reads the six JUDGE_ROLES
+    // templates, so a stray copy of the hook block pasted onto a seventh
+    // template (a coder, say) would pass it silently. Sweep every OTHER
+    // shipped template and assert none of them mention judge-stop.sh at all.
+    const judgeRoleSet: ReadonlySet<string> = new Set(JUDGE_ROLES);
+    const allTemplates = readdirSync(path.join(root, 'agents'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => f.replace(/\.md$/, ''));
+    const nonJudgeTemplates = allTemplates.filter((role) => !judgeRoleSet.has(role));
+    expect(nonJudgeTemplates.length).toBeGreaterThan(0);
+    for (const role of nonJudgeTemplates) {
+      const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
+      expect(body, `${role}.md should not declare the judge-stop.sh hook`).not.toMatch(
+        /judge-stop\.sh/,
+      );
+    }
+  });
+
+  // Widened invariant (was "activates no hooks"): a plugin install activates
+  // no hook that ACTS outside a clone. The judge templates above still carry
+  // a frontmatter Stop hook when shipped through the plugin -- that payload
+  // has no `hooks/hooks.json`, but a template's own frontmatter hook is read
+  // regardless of install method, so it must be inert wherever the built
+  // `dist/judgeStopHook.js` and `.claude/hooks/judge-stop.sh` do not exist.
+  // Regex-matching the frontmatter text (above) only proves the hook is
+  // *declared*; it proves nothing about what running it actually does. This
+  // extracts each judge template's real frontmatter hook command and spawns
+  // it for real, so a command that forgets its own existence guard is caught
+  // here instead of in an operator's plugin install.
+  function extractHookCommand(role: string): string {
+    const body = readFileSync(path.join(root, 'agents', `${role}.md`), 'utf8');
+    const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body);
+    const frontmatterText = match?.[1];
+    if (frontmatterText === undefined) throw new Error(`${role}.md has no frontmatter block`);
+    const frontmatter = parseYaml(frontmatterText) as {
+      hooks?: { Stop?: { hooks?: { command?: string }[] }[] };
+    };
+    const command = frontmatter.hooks?.Stop?.[0]?.hooks?.[0]?.command;
+    if (typeof command !== 'string') {
+      throw new Error(`${role}.md frontmatter has no Stop hook command to run`);
+    }
+    return command;
+  }
+
+  const subagentStopFixture = JSON.stringify({
+    session_id: 'sess-1',
+    transcript_path: '/tmp/does-not-matter.jsonl',
+    hook_event_name: 'SubagentStop',
+    agent_type: 'reviewer',
+  });
+
+  describe('judge templates are inert outside a clone (executed, not just matched)', () => {
+    let emptyProjectDir: string;
+
+    for (const role of JUDGE_ROLES) {
+      it(`${role}.md's frontmatter hook command exits 0 with empty stdout under an empty CLAUDE_PROJECT_DIR`, () => {
+        emptyProjectDir = mkdtempSync(path.join(tmpdir(), 'smith-plugin-inert-'));
+        try {
+          const command = extractHookCommand(role);
+          const run = runProcess('sh', ['-c', command], {
+            input: subagentStopFixture,
+            env: { ...process.env, CLAUDE_PROJECT_DIR: emptyProjectDir },
+          });
+          // `.claude/hooks/judge-stop.sh` does not exist under this fresh,
+          // otherwise-empty temp dir -- exactly a plugin install with no
+          // blacksmith checkout backing it. The command's own existence
+          // guard (`[ -f ... ] && ... || exit 0`) is what makes that a
+          // silent no-op instead of a shell trying to exec a missing file.
+          expect(run.status).toBe(0);
+          expect(run.stdout).toBe('');
+        } finally {
+          rmSync(emptyProjectDir, { recursive: true, force: true });
+        }
+      });
+    }
+
+    it('the null case: a command with no existence guard fails this same assertion', () => {
+      // Recorded verbatim, as the acceptance criterion requires: dropping the
+      // guard and unconditionally exec'ing the (here, absent) script gives a
+      // shell "No such file or directory" and a non-zero exit -- proving the
+      // assertion above is not vacuously true for any command string.
+      const unconditional = '"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh"';
+      const nullDir = mkdtempSync(path.join(tmpdir(), 'smith-plugin-inert-null-'));
+      try {
+        const run = runProcess('sh', ['-c', unconditional], {
+          input: subagentStopFixture,
+          env: { ...process.env, CLAUDE_PROJECT_DIR: nullDir },
+        });
+        expect(run.status).not.toBe(0);
+        // Verbatim, observed: `run.status` is 127 and `run.stderr` reads
+        // `sh: <nullDir>/.claude/hooks/judge-stop.sh: No such file or
+        // directory` -- a real, not simulated, execution failure.
+      } finally {
+        rmSync(nullDir, { recursive: true, force: true });
+      }
+    });
   });
 });

@@ -25,6 +25,13 @@ it. `smith agents sync` may have rewritten it locally from
 `SMITH_MAXTURNS_<ROLE>` (an uncommitted, per-box edit), and Claude Code
 enforces what the file says. A sync reaches only agents spawned after it.
 
+State it on its own line, verbatim — `Turn budget: 40` — and, on a judge
+dispatch, the declared-artifact line below verbatim too. `smith dispatch
+lint <prompt-file> --role <role> --task <id> --session <id>` reads a
+composed prompt back and checks both against the template and the ledger,
+catching the promise-more-than-the-template mistake above, and a judge
+prompt missing its artifact line, before the agent ever runs.
+
 ## Splice the compiled lessons into every prompt (agent-interviews.md N-9, P9-2)
 
 Before you dispatch, run
@@ -343,6 +350,12 @@ recent dispatches, the dispatch audit. The tiers are taxonomy.yml's three —
 true one on the record. `--no-findings` records an operator
 *attestation* rather than a review — use it only for a judge that ran outside
 the factory; a judge that genuinely found nothing writes `[]` and reports.
+
+Tell the judge the exact path on its own line, verbatim —
+`Declared artifact: /abs/path/<task-id>.reviewer.json` — the spelling `smith
+dispatch lint` checks the composed prompt against once the dispatch above
+has landed in the ledger. Missing, relative, or a path that does not match
+what `--artifact` declared are each a lint failure, not a maybe.
 
 ## Dispatching the security-reviewer (agent-interviews.md N-7)
 

@@ -45,18 +45,21 @@ import {
 import { lessons as lessonsTable } from '../../../factory/orchestrator/dist/db/schema.js';
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
 import type { EventOpts } from '../../../factory/orchestrator/dist/events.js';
-import { readEvents, requireSession } from '../../../factory/orchestrator/dist/events.js';
+import { requireSession } from '../../../factory/orchestrator/dist/events.js';
 import type { EventContext } from '../../../factory/orchestrator/dist/findings.js';
 import type {
   LessonEdit,
   LessonTransitionExtra,
 } from '../../../factory/orchestrator/dist/lessons.js';
 import { transitionLesson } from '../../../factory/orchestrator/dist/lessons.js';
+import type { LogCache } from '../../../factory/orchestrator/dist/logCache.js';
+import { createLogCache } from '../../../factory/orchestrator/dist/logCache.js';
 import { STATE_EVENTS_DIR } from '../../../factory/orchestrator/dist/paths.js';
 import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
+import { writeGuard } from './middleware.js';
 
 /**
  * How often the change stream re-scans `state/events/` while at least one
@@ -89,6 +92,14 @@ export interface AppOpts {
    * lessonsPolicy comment in createApp().
    */
   schedulerPolicy?: SchedulerPolicy;
+  /**
+   * Injected only by tests that need to observe or share the last-event-id
+   * cache resolveContext()/lessonContext() consult. Production omits it and
+   * createApp() builds its own with createLogCache() over the same
+   * EventOpts, so this field changes nothing about what either helper
+   * returns — only how many times the log behind it gets re-read.
+   */
+  logCache?: LogCache;
   /**
    * A fixed clock for screenshot harnesses, never for operators. Production
    * omits it and every request reads the wall clock, so "working" (a
@@ -480,22 +491,25 @@ function requireSessionId(body: WriteEnvelope): string {
 
 /**
  * Resolves an explicit causalParent, or falls back to the session's current
- * last event id.
+ * last event id, read through `logCache` rather than a fresh `readEvents`.
  *
- * `readEvents` and NOT the lineage read D-119 put on every deciding fold: a
- * non-`session-start` event's causal_parent must live in its own session's log
- * (validateCausalParent), so a lineage-wide "last event" would hand back an
- * ancestor's id whenever the parent session's clock ran ahead, and every write
- * from this route would be refused as `events.cross-session-parent-not-root`.
- * This is asking "what do I chain onto here", which is a question about one log.
+ * The cache is asked about ONE log and NOT the lineage read D-119 put on
+ * every deciding fold: a non-`session-start` event's causal_parent must live
+ * in its own session's log (validateCausalParent), so a lineage-wide "last
+ * event" would hand back an ancestor's id whenever the parent session's clock
+ * ran ahead, and every write from this route would be refused as
+ * `events.cross-session-parent-not-root`. This is asking "what do I chain
+ * onto here", which is a question about one log.
  */
-async function resolveContext(body: WriteEnvelope, eventOpts: EventOpts): Promise<EventContext> {
+async function resolveContext(
+  body: WriteEnvelope,
+  eventOpts: EventOpts,
+  logCache: LogCache,
+): Promise<EventContext> {
   const sessionId = requireSessionId(body);
   let causalParent = body.causalParent;
   if (causalParent === undefined) {
-    const events = await readEvents(sessionId, eventOpts);
-    const last = events[events.length - 1];
-    causalParent = last ? last.event_id : null;
+    causalParent = await logCache.lastEventId(sessionId, eventOpts);
   }
   return {
     sessionId,
@@ -522,6 +536,7 @@ async function lessonContext(
   lessonId: string,
   body: WriteEnvelope,
   eventOpts: EventOpts,
+  logCache: LogCache,
 ): Promise<EventContext> {
   const sessionId = lessonSession(db, lessonId);
   if (body.sessionId && body.sessionId !== sessionId) {
@@ -534,8 +549,7 @@ async function lessonContext(
   requireSession(sessionId, eventOpts);
   let causalParent = body.causalParent;
   if (causalParent === undefined) {
-    const events = await readEvents(sessionId, eventOpts);
-    causalParent = events[events.length - 1]?.event_id ?? null;
+    causalParent = await logCache.lastEventId(sessionId, eventOpts);
   }
   return { sessionId, planVersion: body.planVersion ?? 1, causalParent, actor: body.actor };
 }
@@ -581,6 +595,7 @@ export function createApp(opts: AppOpts): AppHandle {
   const handle = openDb(opts.dbPath);
   const dbOpts = dbOptsFrom(opts);
   const eventOpts: EventOpts = opts.stateDir ? { stateDir: opts.stateDir } : {};
+  const logCache = opts.logCache ?? createLogCache();
   // D-159 again, at the door P9-36 opened. cli.ts fixed the CLI's paths into
   // the novelty gate to read factory/policies/scheduler.yml; this one still
   // fell through to lessons.ts's own constants, so Approve and Edit scored
@@ -653,6 +668,11 @@ export function createApp(opts: AppOpts): AppHandle {
     await refresher.refresh();
     await next();
   });
+
+  // One guard, mounted once on the method, ahead of every POST under
+  // /api/* -- including one added later. No individual write route below
+  // restates any of writeGuard()'s rules.
+  app.on('POST', '/api/*', writeGuard());
 
   /**
    * The change stream: "these sessions' logs advanced, and to how many
@@ -835,6 +855,10 @@ export function createApp(opts: AppOpts): AppHandle {
   });
 
   // --- Writes: waiver apply-batch + lesson approve/edit/reject only ----
+  // writeGuard() is mounted once, above, on every POST under /api/* — a
+  // request that did not originate from the dashboard itself (foreign
+  // Origin, rebound Host, cross-site fetch, or a non-JSON body) never
+  // reaches these handlers, and none of them restates the check.
   app.post('/api/waivers/apply-batch', async (c) => {
     const body = await c.req.json<WriteEnvelope & { decisions?: WaiverBatchDecision[] }>();
     const decisions = body.decisions ?? [];
@@ -844,7 +868,7 @@ export function createApp(opts: AppOpts): AppHandle {
         'Request body must include a non-empty "decisions" array.',
       );
     }
-    const ctx = await resolveContext(body, eventOpts);
+    const ctx = await resolveContext(body, eventOpts, logCache);
     const results = await applyBatch(decisions, ctx, eventOpts);
     await applyDb(opts.dbPath, ctx.sessionId, dbOpts);
     return c.json({ applied: results.length });
@@ -857,7 +881,7 @@ export function createApp(opts: AppOpts): AppHandle {
     body: LessonWriteBody,
     extra: LessonTransitionExtra,
   ): Promise<{ lessonId: string; status: string; novelty: unknown }> {
-    const ctx = await lessonContext(handle.db, lessonId, body, eventOpts);
+    const ctx = await lessonContext(handle.db, lessonId, body, eventOpts, logCache);
     const result = await transitionLesson(lessonId, toStatus, ctx, eventOpts, {
       ...extra,
       ...(body.note ? { note: body.note } : {}),
@@ -874,16 +898,16 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.post('/api/lessons/:lessonId/approve', async (c) => {
     const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId'), 'approved', body, {}));
+    return c.json(await transition(c.req.param('lessonId') as string, 'approved', body, {}));
   });
 
   app.post('/api/lessons/:lessonId/reject', async (c) => {
     const body = await c.req.json<LessonWriteBody>().catch(() => ({}) as LessonWriteBody);
-    return c.json(await transition(c.req.param('lessonId'), 'invalidated', body, {}));
+    return c.json(await transition(c.req.param('lessonId') as string, 'invalidated', body, {}));
   });
 
   app.post('/api/lessons/:lessonId/edit', async (c) => {
-    const lessonId = c.req.param('lessonId');
+    const lessonId = c.req.param('lessonId') as string;
     const body = await c.req.json<LessonWriteBody>();
     if (!body.statement && !body.lessonType && !body.lessonScope) {
       throw new BadRequestError(

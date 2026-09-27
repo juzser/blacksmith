@@ -1,0 +1,541 @@
+{
+  "epic_id": "bs-audit-2",
+  "version": 3,
+  "status": "active",
+  "tasks": [
+    {
+      "task_id": "bs-audit-2/task-1-daemon-skips-unchanged-logs",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 1, finding 50acc356. `runTick` in `factory/orchestrator/src/daemon.ts` calls `readEvents` for every session in `listSessionIds(stateDir)` on every tick, and then calls the projector's `apply(dbPath, leaf, dbOpts)` for every leaf, so a long-running `smith daemon run` pays read, JSON.parse and projection for every byte ever written on every tick. Build one reusable, package-internal log cache in a NEW module `factory/orchestrator/src/logCache.ts` and wire the daemon to it. The cache keys each session log by a fingerprint `{dev, ino, size, mtimeMs}` taken from an OPEN handle: every read opens the log for reading and then fstats that descriptor, never a bare `stat` on the path. `{size, mtimeMs}` is the rule `ui/server/src/app.ts` `createRefresher` already uses; mirror it and do not import from ui/server, because the orchestrator never depends on the ui package. `dev`+`ino` is added so a log replaced by a different file is never mistaken for the same one. An unchanged fingerprint returns the cached `StoredEvent[]` without reading any content bytes. The open and the fstat still happen, because chmod changes none of dev, ino, size or mtimeMs: a path-stat fast path would keep serving cached events after read permission was revoked, and the `unreadable-log` finding would go silent. An error on open surfaces exactly as readEvents would surface it. EACCES throws, and the daemon reports `unreadable-log` as today. ENOENT yields readEvents' absent-log result (`[]`, `lastEventId` null), because readEvents answers `[]` for a missing log. Residual: `readEventsAtPath` checks `existsSync` and then calls `readFile`, so a deletion inside that window throws a raw ENOENT there. The cache's single `open()` maps ENOENT to `[]` uniformly. That race is outside criterion 2's step list and is deliberately not reproduced; the cache's behaviour is the intended one. In both cases the previous cache entry is left untouched. The anchor read and the incremental read reuse that same descriptor, and the descriptor is closed in a `finally`. ctime is deliberately NOT in the fingerprint, because the open probe already covers permission changes. A larger size is NOT proof of an append: a log truncated and rewritten to a larger size also looks grown. So the incremental path runs only after an append-only check. Per log, the cache keeps `offset`, the byte offset just past the last consumed newline, and the ANCHOR: the bytes of the last complete line INCLUDING its terminating `\\n`, occupying exactly `[offset - anchor.length, offset)`. Worked example: for the log `AAA\\nBBB\\n` the anchor is `BBB\\n` (4 bytes), offset is 8, and the compare window is bytes [4,8). An anchor that leaves out the newline (`BBB`) would compare window [5,8) = `BB\\n` and never match, so every real append would fall back to a full re-read and the incremental path would be dead code; the definition exists to prevent exactly that. On growth with the same dev+ino, it reads once from `offset - anchor.length` to the new end and compares the leading `anchor.length` bytes, the window `[offset - anchor.length, offset)`, with the cached anchor. Only on an exact match does it parse the complete lines after the offset (with readEvents' own split, blank-line filter and parse rules), cache them as consumed, and continue event ids from the cached count. `offset` and the anchor advance only past newline-terminated lines. Tail detection works on the RAW, untrimmed bytes: (1) locate the last `\\n` in the raw file; (2) the segment after it is the candidate tail; (3) if `candidate.trim()` is empty there is no pending tail; (4) otherwise the candidate is the PENDING TAIL and is parsed with JSON.parse. A log ending in `\\n` therefore has no pending tail. Worked example: `AAA\\nBBB\\n` has no pending tail (offset 8); `AAA\\nBBB\\nCC` has pending tail `CC` (offset stays 8). readEvents' whole-text `trimEnd().split('\\n')` is NOT the detection mechanism. It is only the reference the equivalence check in criterion 2 compares against. The pending tail's returned result matches what `readEventsAtPath` (events.ts) returns for it, in the same call: it is JSON.parsed and included in the returned events and in `lastEventId`, but it is NOT cached as consumed. `offset` and the anchor never move past it, so the next read re-reads it from the unchanged offset. A malformed pending tail throws the same `events.unreadable-session-log` error code, with the same line number, that readEvents would throw. Any mismatch goes to a full `readEvents` re-read that replaces the entry, and so does each of these: a changed dev or ino; a shrink; a size unchanged while mtime moved; a cached offset of 0 with no anchor, which is simply a full read. RESIDUAL CONTRACT, stated in the module docblock: session logs are append-only by design (`appendEvent` only appends). The cache detects truncation, replacement, and any rewrite that changes the anchor's bytes or offset. It does NOT detect an in-place rewrite on the same inode that keeps the anchor's bytes, terminating newline included, in the same window, nor a same-size rewrite inside one mtime tick. Both are out of scope, because nothing in this repo writes a session log that way; the docblock says so rather than implying full change detection. The cache also answers `lastEventId(sessionId)` from the same state, because task 3 consumes it for the dashboard's write routes. `runDaemon` creates one cache and passes it to every `runTick` through a new optional `TickOptions` field; a `runTick` called without one (`--once`, every existing test) behaves exactly as today. The projector call is gated the same way: `apply()` for a leaf is skipped when no session in that leaf's lineage changed fingerprint since the last successful apply, and the fingerprint is taken before apply and recorded only after apply succeeds (createRefresher's docblock gives the reason). Findings are still recomputed every tick from the cached events, because staleness depends on `now`, not on the log.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential. First add `factory/orchestrator/test/logCache.test.ts` with a case that writes a session log, reads it through the cache twice with no append in between, and asserts that the second read read zero content bytes. Here \"zero reads\" means zero content bytes read: the one open plus one fstat per session per tick is allowed, and the injected seam the module exposes counts it separately (opens, fstats and content bytes read are separate counts; the second read asserts opens=1, fstats=1, bytes=0). Watch it fail -- under the null the module does not exist (import error) -- and record the failure text verbatim in structured output; after the fix the second read reports zero content bytes read.",
+        "Equivalence is the correctness bar, measured by a differential test in `logCache.test.ts`: for a sequence of appends made through `appendEvent` (including two torn-write steps: `well-formed unterminated tail`, a final complete JSON event without its trailing newline, where the cache must equal readEvents with N events and `lastEventId` must name that event; and `malformed unterminated tail`, a final half-written line, where both the cache and readEvents throw `events.unreadable-session-log` with the same line number. After these, a completing `\\n` plus one further append must still take the incremental path with no `readEvents` call, and the cache must equal readEvents. The step `well-formed unterminated tail` fails by name under the null `withhold unterminated tail`, where the cache returns N-1 events; prove it by mutation and record the failure verbatim. Also a whitespace-only tail step, where both return the same events; a log truncated and rewritten SMALLER; and a step named `truncated and rewritten larger with different content`, where the file is truncated and rewritten to a size above the cached size with different events, same inode), after every step `cache.read(id)` deep-equals `readEvents(id)` on the same file, and `cache.lastEventId(id)` equals the `event_id` of the last element of `readEvents(id)` (null for an empty or absent log). The test names which step diverged. Under the size-only-growth null (anchor comparison removed), the `truncated and rewritten larger with different content` step must fail by name, showing cached stale events where `readEvents` returns the new ones. Prove it by mutation: disable the anchor comparison locally, run, and record the failing step name verbatim in structured output. A further step replaces the log by rename (new inode, larger size) and asserts equality, proving the dev+ino key; it must also fail under a mutation that drops dev+ino from the fingerprint. Direct incremental-path assertion, a step named `genuine append takes the incremental path`: after a cached read, append one event through `appendEvent` and read again. Through counting seams, assert that the full re-read (`readEvents`) is NOT called, and that the bytes read equal exactly `anchor.length` plus the appended length (the log has no pending tail at this step). This step fails by name under the null of an off-by-one or newline-excluded anchor, where the window mismatches, a full re-read fires, and `readEvents` is called once. Prove it by mutation: drop the terminating newline from the stored anchor locally, run the test, and record the failing step name verbatim in structured output.",
+        "Bounded per-tick cost, asserted in `factory/orchestrator/test/daemon.test.ts`: two consecutive `runTick` calls sharing one cache over N unchanged sessions read zero log bytes and call the projector's `apply` zero times on the second tick; appending one event to one session makes the next tick read only that session's anchor line, plus its pending tail if one exists, plus its appended bytes, and apply only that session's lineage leaf. The test counts reads and applies through injected seams, not timing.",
+        "Behaviour preserved: every existing `factory/orchestrator/test/daemon.test.ts` case passes unchanged, the `unreadable-log` finding still fires for a log that cannot be read (with a cache present or absent), and `runTick()` with no cache is byte-for-byte today's behaviour. Differential step in `logCache.test.ts`, named `read permission revoked after warm cache`: warm the cache with one read, `chmod` the log to `000`, then read again. Both `cache.read(id)` and `readEvents(id)` must throw. Under the null of a path-stat fast path the cache returns the stale events, so the step fails by name. Restore the mode afterwards so temp-dir cleanup works. The step is skipped when `process.getuid?.() === 0`, with a skip reason saying root bypasses mode bits, so the chmod cannot revoke read access.",
+        "Prove the regression test discriminates: with the cache wiring in `runTick` reverted locally, the bounded-cost test fails by name; state the observed failure line in structured output."
+      ],
+      "claims": [
+        "factory/orchestrator/src/logCache.ts",
+        "factory/orchestrator/src/daemon.ts",
+        "factory/orchestrator/test/logCache.test.ts",
+        "factory/orchestrator/test/daemon.test.ts"
+      ],
+      "budget": {
+        "tokens": 170000,
+        "diff_lines": 470
+      },
+      "contract": {
+        "functional_clauses": [
+          "`logCache.ts` exports a factory (the task names it) returning an object with at least `read(sessionId)` and `lastEventId(sessionId)`; it takes `EventOpts` so it resolves log paths exactly as `readEvents` does. The module also exports the cache's type and the type of its optional injected I/O seam, which counts opens, fstats and content bytes read and is accepted by the factory. Task 3 imports all three, the factory and both types, from `dist/logCache.js` to inject a counting cache into the dashboard's `createApp`.",
+          "Append-only is verified, never inferred from size: the tail is parsed only after the cached anchor (the bytes of the last complete line INCLUDING its terminating `\\n`, occupying exactly `[offset - anchor.length, offset)`; for the log `AAA\\nBBB\\n` the anchor is `BBB\\n` (4 bytes), offset is 8, and the compare window is bytes [4,8)) matches the file's bytes in that window under the same dev+ino. Every other outcome is a full `readEvents` re-read. The anchor check shares the tail read's single I/O call.",
+          "Only newline-terminated lines are CACHED as consumed: the stored offset always sits just after a newline, and the anchor always ends with that newline. Pending-tail rule, applied to the RAW, untrimmed bytes: locate the last `\\n`; the segment after it is the candidate tail; if `candidate.trim()` is empty there is no pending tail, otherwise it is the pending tail and is JSON.parsed. A log ending in `\\n` has no pending tail: `AAA\\nBBB\\n` has none (offset 8); `AAA\\nBBB\\nCC` has pending tail `CC` (offset stays 8). readEvents' whole-text trimEnd is the equivalence reference only, never the detection mechanism. The pending tail is still RETURNED in the same call, exactly as readEvents returns it. It is parsed, included in the events and in `lastEventId`, and never cached, so the next read re-reads it from the unchanged offset. A malformed pending tail throws `events.unreadable-session-log` with the same line number readEvents reports. A whitespace-only candidate is no pending tail.",
+          "The fingerprint comes from an open handle: `read` opens the log for reading and fstats the descriptor, never a bare path `stat`. An unchanged fingerprint reads zero content bytes, but the open still runs, so a revoked read permission is caught on the fast path. EACCES on open throws as readEvents would, and the daemon reports `unreadable-log`. ENOENT yields readEvents' absent-log `[]`. The previous entry is left untouched in both cases. The anchor read and the incremental read reuse that descriptor, which is closed in a `finally`. ctime is deliberately not in the fingerprint, because the open probe covers permission changes.",
+          "A fingerprint is recorded only after the read it describes succeeded; a read that throws leaves the previous cache entry untouched and surfaces the error to the caller (the daemon turns it into `unreadable-log` as today).",
+          "Sessions that disappear from `listSessionIds` are evicted from the cache on the next tick, so memory is bounded by live logs, not by history.",
+          "`runDaemon` owns one cache for its lifetime; `TickOptions` gains one optional field for it and no existing field changes meaning.",
+          "The residual contract (same-inode in-place rewrites that preserve the anchor's bytes, terminating newline included, in the window `[offset - anchor.length, offset)` and same-size rewrites inside one mtime tick are undetected; logs are append-only by design) is written in the module docblock in plain words."
+        ],
+        "nonfunctional_clauses": [
+          "Performance: steady-state tick I/O is proportional to bytes appended since the previous tick plus one anchor line per grown log, and JSON.parse cost to the appended bytes only -- not to total log volume.",
+          "The daemon never throws on a corrupt or torn log (D-21 watcher rule); a cache fault degrades to a full `readEvents` of that one log, never to a skipped session.",
+          "No change to `factory/orchestrator/src/events.ts`: epic bs-audit-1 owns that file's append path (finding d7c644db), and this task reads through its exported API only.",
+          "The daemon's exported functions keep their signatures; `daemon.ts` is imported by `cli.ts` and `findingAge.ts`.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith",
+      "keeps_exports": [
+        "factory/orchestrator/src/daemon.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-2/task-2-dashboard-write-origin-guard",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 3, finding 4c610e7c (S2-major, security). The dashboard server (`smith ui serve`, bound to 127.0.0.1:4680, local-first with no auth) accepts its four state-changing routes -- `POST /api/waivers/apply-batch`, `POST /api/lessons/:lessonId/approve`, `/reject`, `/edit` -- from any origin, because `c.req.json()` parses a `text/plain` body and nothing inspects Origin, Referer or Host. A cross-origin page can therefore auto-submit a CORS-simple form and approve a lesson or apply waivers on the operator's behalf. Add one request guard, exported as `writeGuard` from a NEW module `ui/server/src/middleware.ts` (the file name is load-bearing: it is what makes `smith security triggers` fire on this task under sensitive-paths.yml, whose globs match case-sensitively, so `writeGuard.ts` would not), registered in `ui/server/src/app.ts` in front of every POST route (all of them, including any added later, by mounting it on the method rather than per handler), that refuses a write unless all of these hold: the `Content-Type` media type is `application/json` (parameters such as charset allowed), which forces a browser to preflight any cross-origin attempt and the server answers no CORS headers; when an `Origin` header is present its host equals the request's `Host` header; the `Host` header names a loopback address (`127.0.0.1`, `localhost`, `[::1]`, any port), which closes DNS rebinding where an attacker's hostname resolves to 127.0.0.1 and Origin equals Host; and a `Sec-Fetch-Site` of `cross-site` is refused outright. A request without `Origin` (curl, the CLI, a test) passes the origin rule but still needs the JSON content type. The shipped client (`ui/src/lib/api.ts` `postJson`) already sends `Content-Type: application/json` same-origin, and the Vite dev proxy (`ui/vite.config.ts`, no `changeOrigin`) forwards Host and Origin as localhost:5173, so neither needs a change; verify both by reading them, do not edit them. Refusals answer 403 (origin, host, fetch-site) or 415 (content type) with the server's existing JSON error envelope and an error code in the `ui.` or a new code the task justifies against `factory/policies/taxonomy.yml` (read it; do not edit it -- if no code fits, report error.spec.spec-gap). Hono ships a `csrf` middleware (https://hono.dev/docs/middleware/builtin/csrf); the task may use it only if it provides every rule above, and must say which rules it covers in structured output.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential. First add `ui/server/test/writeGuard.test.ts` with the finding's exact attack: `POST /api/lessons/<id>/approve` with `Content-Type: text/plain`, `Origin: http://evil.example` and body `{\"note\":\"x\",\"pad\":\"=\"}` against an app built with `createApp`. Watch it fail -- under the null the response is not 403/415 and the lesson's status becomes `approved` -- and record the failing assertion verbatim in structured output. After the fix the response is 403 or 415 AND the lesson row is unchanged (assert the state, not only the status code).",
+        "The same test file covers each rule in isolation for all four routes (a table-driven loop over the four paths): text/plain same-origin -> 415; missing Content-Type -> 415; application/json with foreign Origin -> 403; application/json with `Host: evil.example:4680` and matching Origin (rebinding) -> 403; `Sec-Fetch-Site: cross-site` -> 403; application/json with no Origin and loopback Host -> reaches the handler; application/json with Origin `http://127.0.0.1:4680` and Host `127.0.0.1:4680` -> reaches the handler; Origin `http://localhost:5173` with Host `localhost:5173` (the Vite proxy shape) -> reaches the handler.",
+        "No read route is affected: a `GET /api/health` and one other GET with a foreign Origin still answer 200, asserted in the same file.",
+        "Every existing ui/server test still passes: run `pnpm run test:server` from the repo root (it builds the orchestrator and server first; the root `pnpm run test` does NOT cover ui/server) and `pnpm run typecheck:server`, and quote both tails in structured output. Existing tests that POST without `Content-Type: application/json` are fixed by adding the header, never by loosening the guard; list each such edit.",
+        "Prove the guard discriminates by mutation: remove each rule in turn locally and name the test that fails for each; record the four rule/test pairs in structured output, one per rule: (1) Content-Type not `application/json`, missing included -> 415; (2) foreign or `null` Origin -> 403; (3) non-loopback Host (rebinding) -> 403; (4) `Sec-Fetch-Site: cross-site` -> 403. The contract has exactly four rules; a missing Content-Type is rule 1, not a fifth."
+      ],
+      "claims": [
+        "ui/server/src/middleware.ts",
+        "ui/server/src/app.ts",
+        "ui/server/test/writeGuard.test.ts",
+        "ui/server/test/app.test.ts"
+      ],
+      "budget": {
+        "tokens": 130000,
+        "diff_lines": 350
+      },
+      "contract": {
+        "functional_clauses": [
+          "One guard, mounted once for every POST under `/api/`; no route handler restates any rule.",
+          "The origin rule compares parsed hosts (scheme-insensitive host and port), not raw strings, and treats `Origin: null` as foreign.",
+          "The loopback check reads the `Host` header, not the socket address, and accepts exactly `127.0.0.1`, `localhost` and `[::1]` with any port.",
+          "Refusals use the app's existing error envelope (`{error:{code,message}}`) so `ui/src/lib/api.ts` shows them without change."
+        ],
+        "nonfunctional_clauses": [
+          "Security: this closes a CSRF and DNS-rebinding path to state-changing routes; the security-reviewer is dispatched for this task (`smith security triggers --task` fires on the `ui/server/src/middleware.ts` claim; do not rename it).",
+          "Fail closed: a malformed Origin, Host or Content-Type header is refused, never passed.",
+          "No CORS headers are added anywhere; the fix must not make a cross-origin preflight succeed.",
+          "The guard performs no I/O and no event-log read; it runs before any body parsing.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith",
+      "keeps_exports": [
+        "ui/server/src/app.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-2/task-3-dashboard-writes-chain-from-cached-tail",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 2, finding d50d4c1f. `resolveContext` and `lessonContext` in `ui/server/src/app.ts` call `readEvents(sessionId, eventOpts)` and keep only `events[events.length - 1]?.event_id` whenever a write omits `causalParent`, so every dashboard click re-reads and re-parses the whole session log. Replace both reads with the log cache task 1 added (`factory/orchestrator/src/logCache.ts`, imported from `../../../factory/orchestrator/dist/logCache.js` the way app.ts already imports `events.js`): `createApp` holds one cache for the app's lifetime and both helpers ask it for `lastEventId(sessionId)`. The cache is injectable: `AppOpts` gains one optional field, `logCache`, typed with the cache type task 1 exports. `createApp` uses the injected cache when one is given and builds its own with task 1's factory otherwise, so production, which never passes the field, is unchanged. The test observes reads this way: `lastEventId.test.ts` builds the cache with task 1's factory and its exported counting I/O seam, passes it as `AppOpts.logCache`, and asserts on the seam's content-byte count. The single-session rule in resolveContext's docblock stays true -- the cache answers about one log, never the lineage -- and `requireSession` still runs first in `lessonContext`. Depends on task 1 (the export) and task 2 (both claim `app.ts`).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential, in NEW file `ui/server/test/lastEventId.test.ts`: build the cache with task 1's factory and its counting I/O seam, pass it as `AppOpts.logCache`, and build an app over a session log of K events. Perform two `POST /api/lessons/:id/approve` writes without `causalParent`, each with `Content-Type: application/json`, which task 2 requires. Take the seam's counter deltas across the second write and assert both of these: opens >= 1, AND content bytes read == exactly the byte length of the K-th event's line, terminating `\\n` included (the last line when the first write read the log, i.e. task 1's anchor), plus the bytes the first write appended. Compute both lengths from the fixture file's bytes before and after the first write, never from a constant. The null (today's `readEvents` path) never consults the injected cache, so its seam sees zero opens and zero bytes. The null therefore fails by construction on `opens >= 1`; record that failing assertion verbatim in structured output.",
+        "Correctness unchanged: each write's event carries `causal_parent` equal to the id of the log's previous last event, asserted by reading the log back after each write; a session whose log does not exist still answers the same error it answers today (`requireSession`'s), asserted in the same file.",
+        "A write made to the log by another process between two dashboard writes (simulate with a direct `appendEvent` call) is chained onto correctly: the next dashboard write's `causal_parent` is that event's id.",
+        "`pnpm run test:server` and `pnpm run typecheck:server` pass from the repo root; quote both tails in structured output."
+      ],
+      "claims": [
+        "ui/server/src/app.ts",
+        "ui/server/test/lastEventId.test.ts",
+        "ui/server/test/app.test.ts"
+      ],
+      "budget": {
+        "tokens": 100000,
+        "diff_lines": 220
+      },
+      "contract": {
+        "functional_clauses": [
+          "`resolveContext` and `lessonContext` no longer call `readEvents`; both obtain the last event id from the one cache instance `createApp` holds (built or injected).",
+          "`AppOpts` gains exactly one optional field, `logCache`, typed with task 1's exported cache type and documented like `schedulerPolicy` as injected only by tests. `createApp` uses it when given and otherwise builds its own cache with task 1's factory over the same `EventOpts`, so an app created without it behaves as production does. Criterion 1's byte count is read from task 1's I/O seam on the injected cache, never from timing or a module mock.",
+          "An explicit `causalParent` in the body is still used as given and costs no log read.",
+          "`closeApp` releases, with the rest of the handle, the cache `createApp` built itself, and never an injected one, which belongs to its caller."
+        ],
+        "nonfunctional_clauses": [
+          "Performance: the write path's log read is proportional to bytes appended since that session's previous lookup.",
+          "No change to the write guard task 2 added, and no route loses it.",
+          "ui/server never imports orchestrator `src/`; it imports the built `dist/` module as the file already does.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith",
+      "keeps_exports": [
+        "ui/server/src/app.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-2/task-4-wave-loop-audits-its-own-parallelism",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 4, finding 1b8fe398. The instrument the finding means is `smith wave audit` (cli.ts `namespace === 'wave' && action === 'audit'`, `factory/orchestrator/src/waveConcurrency.ts`), which reads the log and says whether a wave DID run in parallel -- not `smith wave check`, which certifies at admission that it could. `.claude/skills/bs/wave.md` steps 2-10 never run it, so a wave whose coders went out one message at a time is only discovered at epic close, when the lost parallelism cannot be recovered. Add the check to the wave loop at two points: (a) once every coder of the wave has been dispatched (the end of step 4's fan-out), run `smith wave audit --session <session-id> --epic <epic>` and read the admitted wave's `verdict`; and (b) again immediately before step 10's merge-queue admission. The verdict vocabulary is waveConcurrency.ts `WAVE_VERDICTS`: `parallel`, `partial`, `serialized`, `single`, `unobserved`; the command exits 1 on any `serialized` wave, 2 on `unobserved`, 0 otherwise -- so `partial` exits 0 and the playbook must read the field, not only the exit code. State what each verdict obliges the wave-runner to do while the wave can still be corrected: `serialized` or `partial` means every remaining phase of this wave (steps 5-7) goes out as one message of parallel dispatches and the verdict is recorded on the log as an operator-visible event using an event type and error code that already exist in `factory/policies/taxonomy.yml` (read it; name them; do not invent one); `unobserved` at point (a) means the dispatch records are missing, which is itself a log defect to record; `parallel` and `single` need nothing. The playbook's existing 'One message, many dispatches' section links to the new step instead of restating it.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD. First add NEW test `factory/orchestrator/test/wavePlaybook.test.ts` that reads `.claude/skills/bs/wave.md`, isolates the text from the `## The steps` heading to the end of the file, and asserts (1) it contains a `smith wave audit` invocation carrying `--session` and `--epic`, and (2) at least one such invocation appears before the first `smith queue run` in that section. Watch it fail -- under the null assertion (1) fails with zero invocations found -- and record the failure text verbatim in structured output.",
+        "The same test asserts all five `WAVE_VERDICTS` values appear in the steps section, importing the constant from `../src/waveConcurrency.js` rather than listing them by hand, so a verdict added later fails this test until the playbook says what it means.",
+        "The search in the test is robust to formatting: it matches the command across a line break and inside a fenced block, and a check that finds `wave audit` only in prose quoting (for example this finding's own `wave check` confusion) does not satisfy it -- state in structured output which test the count used.",
+        "`factory/orchestrator/test/docCommands.test.ts` passes with the new text (every flag the playbook quotes for `wave audit` resolves against usage.ts), and the full root suite `pnpm run test` passes."
+      ],
+      "claims": [
+        ".claude/skills/bs/wave.md",
+        "factory/orchestrator/test/wavePlaybook.test.ts"
+      ],
+      "budget": {
+        "tokens": 70000,
+        "diff_lines": 160
+      },
+      "contract": {
+        "functional_clauses": [
+          "Two call points, (a) after the coder fan-out and (b) before merge admission, each with the exact command line and what each verdict requires.",
+          "The playbook names `wave audit` and never calls it `wave check`; the difference between the two is stated in one sentence.",
+          "No new smith verb, flag or event type is introduced; the step uses only what exists."
+        ],
+        "nonfunctional_clauses": [
+          "The step adds no serial barrier: running the audit is a read that does not wait for slow tasks, and the playbook says so.",
+          "Only `wave.md` and the new test file change; `dispatch.md`, `run.md` and `report.md` are read, not edited.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "bs-audit-2/task-5-dispatch-prompt-lint",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 5, finding 7ef3cd2f (S2-major), and the mechanical half of criterion 6. dispatch.md tells the dispatcher to copy each role's turn budget verbatim from `.claude/agents/<role>.md` `maxTurns`, and nothing checks that it did: a prompt stating 40 under a template enforcing 20 is caught only when the agent is cut off with nothing written. Criterion 6's stop hook (task 6) has the same shape of dependency on a hand-copied prompt line naming the judge's declared artifact. Add ONE pre-dispatch verb that reads the composed prompt and refuses it unless both prose contracts hold: `smith dispatch lint --role <role> --prompt <file|-> [--session <id> --task <task-id>]` (the task reports the final spelling if usage.ts conventions demand a change; it must not collide with the existing `dispatch check`). A NEW module `factory/orchestrator/src/dispatchLint.ts` is the only place both canonical line spellings and their parsers are defined: `Turn budget: <n>` and `Declared artifact: <absolute path>` (case-insensitive keys). Check 1, every role: exactly one turn-budget line whose integer equals the template's `maxTurns` as the file stands now (reuse the frontmatter reading in `factory/orchestrator/src/agentsSync.ts`; add an export there if needed without changing existing ones). Check 2, judge roles only (spec-reviewer, reviewer, verifier, grader, security-reviewer, auditor -- the epic criterion's six; `judges.ts` has no role list and guardrails.yml `judge_sandbox.roles` is a different set, so this set is exported from dispatchLint.ts as the single definition task 6's hook and template drift guard import): exactly one declared-artifact line holding an absolute path; and when `--session` and `--task` are given, that path must equal the `declared_artifact` of the latest `judge dispatch` recorded for that task and role in the session's ledger (read through `judges.ts`'s existing exports; `judges.ts` is not edited). Output `{role, turns:{stated, template, status}, artifact:{stated, declared, status, expected_line}}` where turns status is `ok`, `over`, `under`, `missing` (zero or several lines) or `unverifiable` (no template or no maxTurns), and artifact status is `ok`, `missing`, `relative`, `mismatch`, `undeclared` (judge role, session and task given, no ledger dispatch) or `not-applicable` (non-judge role). `expected_line` is the exact canonical line built from the ledger's path whenever it is known, so a failing dispatcher pastes it verbatim instead of retyping it. Exit 0 only when every applicable status is `ok`; anything else exits 1, fail-closed like `smith dispatch check`. Register it in `cli.ts` (dynamic import per test/cliBoot.test.ts P9-2 if the module reaches anything heavy) and `usage.ts`. Update `.claude/skills/bs/dispatch.md`: 'Carry into the prompt' carries the turn budget as the canonical line, the judge-artifact section ('Declare each judge's artifact before you dispatch it') requires the declared-artifact line equal to `judge dispatch --artifact`, and both sections replace read-more-carefully prose with running `dispatch lint --session --task` on the composed prompt before every Agent-tool dispatch.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential. First add NEW test `factory/orchestrator/test/dispatchLint.test.ts` with the finding's own case: a temp agents dir whose `planner.md` says `maxTurns: 20` and a prompt containing `Turn budget: 40`; assert turns status `over` and exit code 1. Under the null the verb does not exist (the CLI answers unknown command, or the import fails) -- record that text verbatim in structured output; after the fix the output carries `turns:{status:\"over\", stated:40, template:20}`.",
+        "Turn-budget coverage in the same file: `ok`, `under`, `missing` (no line; two lines), `unverifiable` (unknown role; template without maxTurns), each asserting printed status and exit code; one case rewrites the template's maxTurns on disk between two calls and proves the verb reads the file as it stands now.",
+        "Declared-artifact coverage in the same file, against a temp state dir whose ledger holds a `judge dispatch` for task T, role reviewer, artifact `/abs/T.reviewer.json`: a reviewer prompt without the line -> `missing`, exit 1, and `expected_line` equals `Declared artifact: /abs/T.reviewer.json`; with a relative path -> `relative`, exit 1; with a different absolute path -> `mismatch`, exit 1; with the exact line -> `ok`, exit 0; a `coder` prompt with no artifact line -> `not-applicable`, exit 0; a reviewer prompt with `--session`/`--task` naming a task with no ledger dispatch -> `undeclared`, exit 1. Under the null (no check) a judge prompt missing the line is accepted silently -- that is the hole task 6's fail-open depends on this verb to close.",
+        "Drift guards in the same file: each example line dispatch.md shows (turn budget and declared artifact) parses with the module's own parser; and the exported judge-role set equals the epic criterion's six exactly, so a change to it is a visible, tested decision.",
+        "`factory/orchestrator/test/docCommands.test.ts`, `usage.test.ts`, `cliBoot.test.ts`, `agentsSync.test.ts` and the full root suite `pnpm run test` pass; quote the tail. Prove each check discriminates by mutation (disable the turn comparison, then the artifact comparison) and name the test that fails for each."
+      ],
+      "claims": [
+        "factory/orchestrator/src/dispatchLint.ts",
+        "factory/orchestrator/src/agentsSync.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/src/usage.ts",
+        "factory/orchestrator/test/dispatchLint.test.ts",
+        ".claude/skills/bs/dispatch.md"
+      ],
+      "budget": {
+        "tokens": 190000,
+        "diff_lines": 500
+      },
+      "contract": {
+        "functional_clauses": [
+          "Both canonical line spellings and their parsers are defined once, in dispatchLint.ts, and exported for task 6's hook; dispatch.md shows them and the drift guard ties the two.",
+          "The template is read at call time from `--agents-dir` (default `.claude/agents` under REPO_ROOT), never cached.",
+          "`missing` covers both zero and several canonical lines, because two stated values is no stated value.",
+          "The ledger is read, never written: the verb appends no event and edits no file.",
+          "`expected_line` is printed whenever the ledger names the path, whatever the status, so the correct line is always one copy away."
+        ],
+        "nonfunctional_clauses": [
+          "Fail closed: any applicable status but `ok` exits non-zero.",
+          "No `.claude/agents/` template is edited, and the maxTurns values are not changed.",
+          "`agentsSync.ts`'s existing exports keep their signatures; `judges.ts` is not edited.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith",
+      "keeps_exports": [
+        "factory/orchestrator/src/agentsSync.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-2/task-6-judge-stop-hook-blocks-missing-artifact",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 6 (operator-added). A judge-class agent -- spec-reviewer, reviewer, verifier, grader, security-reviewer, auditor -- can today end its turn voluntarily without writing the artifact its dispatch declared, and the gap is found only when `smith judge report` answers `judges.artifact-missing`. Add a SubagentStop hook, declared in each of those six templates' frontmatter, that returns `decision: \"block\"` with a reason naming the missing absolute path while that file does not exist, and allows the stop once it does. A harness `maxTurns` cap is out of scope: the hook cannot override it (that is agent-resume's). The hook learns the path from the one `Declared artifact: <absolute path>` line in the dispatch prompt, parsed with the constant and parser task 5 exports from `factory/orchestrator/src/dispatchLint.ts` (imported, never redefined). The line is not hand-trusted: task 5's `dispatch lint` refuses, fail-closed and before dispatch, any judge prompt whose line is missing, relative or different from the ledger's `declared_artifact`, and prints the exact line to paste. A NEW module `factory/orchestrator/src/judgeStopHook.ts` holds the pure decision function (input: the hook's stdin JSON and the prompt text; output: allow or block with reason). A NEW script `.claude/hooks/judge-stop.sh`, shaped like `.claude/hooks/guard.sh`, reads stdin, locates the subagent's prompt, calls the built `dist/judgeStopHook.js`, and prints the decision. FAIL-OPEN DECISION (explicit, tested): a prompt with no parseable declared-artifact line allows the stop with a stderr note. The hook cannot discharge an obligation it cannot read, and blocking would trap the agent until maxTurns with no way out. That case is closed upstream by task 5's lint and downstream by `judge outstanding` and `judge report`'s `judges.artifact-missing`. PLUGIN DECISION (explicit, pinned): the hook is CLONE-ONLY, for the same reason `factory/orchestrator/test/pluginManifest.test.ts` gives for the policy hook -- it needs a checkout's built `dist/`. The six templates also ship in the `blacksmith` plugin, so the frontmatter command must be inert outside a clone: it runs `$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh` only when that file exists, and otherwise exits 0 with empty stdout. It never falls back to `smith` on PATH or to a plugin-root script. The plugin still ships no `hooks/hooks.json`. The test's invariant widens from 'activates no hooks' to 'activates no hook that acts outside a clone', with its docstring rewritten to say why. PRE-CODE RESEARCH IS REQUIRED (wave.md step 3, researcher dispatch). The coder codes against the brief's cited answers from https://code.claude.com/docs/en/hooks and https://code.claude.com/docs/en/sub-agents, never from memory: (R1) the exact SubagentStop stdin fields -- is the subagent's own transcript path and its agent type/name provided, and under which names; (R2) the exact block output shape, and whether `stop_hook_active` is set on re-entry; (R3) whether `hooks:` in a `.claude/agents/*.md` frontmatter is honoured, and whether a `Stop` hook there is converted to `SubagentStop`; (R4) whether plugin-loaded agents honour frontmatter hooks at all. If R4 says no, the clone-only guard is still written and still tested, because the invariant must not depend on a harness detail. If R1 shows the prompt cannot be located from the hook input, or R3 shows frontmatter hooks are not honoured, the coder stops and reports error.spec.spec-gap to the planner rather than choosing another mechanism. Depends on task 5 (the canonical line export and the lint that makes it mechanical).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential. First add NEW test `factory/orchestrator/test/judgeStopHook.test.ts` that feeds the decision function a SubagentStop input (fields as the research brief documents them, cited in a comment by URL) for agent type `reviewer` whose prompt carries `Declared artifact: <tmp>/t.reviewer.json` with that file absent, and asserts `{decision:\"block\"}` with a reason containing the absolute path. Under the null the module does not exist; record the failure text verbatim in structured output.",
+        "The same file asserts: file present -> allow; file present but empty -> allow (existence is this hook's whole question; parse validity stays `judge report`'s); a non-judge agent type such as `coder` -> allow; a re-entry with `stop_hook_active: true` and the file still absent -> block again (maxTurns is the only bound, per the epic criterion).",
+        "Fail-open is a tested decision, not a fallthrough: separate named cases assert allow + a stderr note for (i) a judge prompt with no declared-artifact line, (ii) a relative path, (iii) unparseable stdin, (iv) an unreadable transcript. Each test's comment states the upstream or downstream control that covers it (task 5's `dispatch lint` for i and ii; `judge report` `judges.artifact-missing` for all four).",
+        "End-to-end in the same file: spawn `.claude/hooks/judge-stop.sh` with a JSON stdin fixture and assert its stdout is the block JSON; with `dist/judgeStopHook.js` absent (point the script at a temp root through an environment variable the script documents), assert it allows and exits 0.",
+        "Plugin invariant, in the claimed `factory/orchestrator/test/pluginManifest.test.ts`: the existing `hooks/hooks.json`-absent assertion stays. A new assertion extracts each shipped agent template's frontmatter hook command and runs it with `CLAUDE_PROJECT_DIR` set to an empty temp dir and a SubagentStop stdin fixture, then asserts exit 0 and empty stdout -- inert outside a clone. The test title and docstring state the widened invariant and the clone-only decision. Under the null (a command that runs the script unconditionally) the assertion fails with a non-zero exit; record that verbatim.",
+        "Drift guards in the same file: exactly the templates named by the judge-role set exported from `dispatchLint.ts` declare the hook (no other template does), and the parser used is the one imported from `dispatchLint.ts` (assert identity of the export, not a copied regex). `factory/orchestrator/test/agentsSync.test.ts` still passes, `smith agents sync` on a template carrying the hook block still rewrites only the `maxTurns:` line, and the full root suite `pnpm run test` passes."
+      ],
+      "claims": [
+        ".claude/agents/spec-reviewer.md",
+        ".claude/agents/reviewer.md",
+        ".claude/agents/verifier.md",
+        ".claude/agents/grader.md",
+        ".claude/agents/security-reviewer.md",
+        ".claude/agents/auditor.md",
+        ".claude/hooks/judge-stop.sh",
+        "factory/orchestrator/src/judgeStopHook.ts",
+        "factory/orchestrator/test/judgeStopHook.test.ts",
+        "factory/orchestrator/test/pluginManifest.test.ts"
+      ],
+      "budget": {
+        "tokens": 170000,
+        "diff_lines": 450
+      },
+      "contract": {
+        "functional_clauses": [
+          "Frontmatter edits add the hook declaration only; no other frontmatter key (maxTurns, tools, model, effort) and no body text of the six templates changes.",
+          "The frontmatter command resolves the script via `$CLAUDE_PROJECT_DIR` the way `.claude/settings.json` resolves guard.sh, and is a silent exit 0 when the script is absent (clone-only, plugin-inert).",
+          "The declared-artifact line spelling and parser are imported from task 5's `dispatchLint.ts`; judgeStopHook.ts defines no second copy.",
+          "`dispatch.md` is not edited by this task; task 5 owns the rule that judge prompts carry the line."
+        ],
+        "nonfunctional_clauses": [
+          "The hook is read-only: it stats one file and reads the prompt; it writes nothing, appends no event, and spawns nothing but node.",
+          "Fail open on anything the hook cannot read (no line, relative path, bad stdin, unreadable transcript, unbuilt dist): allow with a stderr note, each case tested. Fail closed only on a readable absolute declared path that does not exist.",
+          "The hook finishes well inside Claude Code's hook timeout; no network access.",
+          "`.claude/settings.json` and `guard.sh` are not edited.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "superseded",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "bs-audit-2/task-7-plan-ingest-reports-parallel-width",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 7 (operator-added). `smith plan ingest` (cli.ts `namespace === 'plan' && action === 'ingest'`) writes task-added and edges-recorded events and prints `{epic, version, added, superseded, skipped, edges}`, but says nothing about how wide the plan can run, so a plan that serialises by accident is invisible until `/bs run`. Add a pure function in `factory/orchestrator/src/waveSchedule.ts` (the task names it) that takes a plan and returns: `widest` (the widest admissible wave, reusing `scheduleWaves` -- do not write a second scheduler); for every live task, `parallel_with`, the ids of live tasks whose claims are disjoint from it and with no dependency path between them in either direction; and `size`, `{tasks, claims, small}` where `small` is true when the plan has at most 3 live tasks and at most 10 distinct claim paths (the threshold this plan proposes, recorded in the epic spec's Plan notes). `plan ingest` prints it under a new `parallelism` key, and `smith wave schedule` prints the same `size` block beside its existing output, so the planner sees it before spec review. Then update `.claude/skills/bs/plan.md`: (a) a small-epic path -- when `size.small` is true on the draft, the playbook recommends effort tier `small` (single-pass spec review, `effort.yml`) unless a security trigger floors it, and says why; (b) every spec-review round (step 3) is dispatched with a short, named review-focus list of at most six items -- claims and dependency edges against `smith claims impact`; TDD-ability with a named failing test per task; nonfunctional and security clauses; budget and diff-cap fit; acceptance-criterion coverage (every epic criterion maps to a task); and, from round 2 on, only the previous round's findings and the tasks the planner changed -- and the reviewer's findings each name the focus item they fall under; (c) step 7's ingest paragraph tells the operator to read `parallelism.widest` back and say so when it is 1 on a plan of two or more tasks. Depends on task 5 (both claim cli.ts).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential. First add NEW test `factory/orchestrator/test/planParallelism.test.ts`: a three-task plan where A and B have disjoint claims and no edge and C depends on A asserts `widest: 2`, `parallel_with` of A is `[B]`, of B is `[A, C]`, of C is `[B]`; and a two-task plan whose tasks share one claim path and have no edge asserts `widest: 1` with both `parallel_with` empty. Under the null the function does not exist; record the failure text verbatim in structured output.",
+        "Transitivity is covered: with edges C->B->A, A and C are not parallel even though they share no direct edge, asserted in the same file. The `small` threshold is asserted at both sides of each bound (3 vs 4 tasks, 10 vs 11 distinct claim paths).",
+        "The CLI prints it: a test in the same file runs `plan ingest` on a fixture plan against a temp state dir and asserts the printed JSON has `parallelism.widest` equal to `smith wave schedule`'s `widest` for the same plan, so the two numbers cannot drift; and `wave schedule`'s output carries the same `size`.",
+        "`factory/orchestrator/test/waveSchedule.test.ts`, `factory/orchestrator/test/cli.test.ts` and `factory/orchestrator/test/docCommands.test.ts` pass (plan.md's new text quotes only flags usage.ts knows); the full root suite `pnpm run test` passes.",
+        "plan.md's review-focus list is a numbered list of at most six items, asserted by a test in the same file that counts the list items under the step-3 heading by position, not by text search, and states which test the count used."
+      ],
+      "claims": [
+        "factory/orchestrator/src/waveSchedule.ts",
+        "factory/orchestrator/src/cli.ts",
+        "factory/orchestrator/test/planParallelism.test.ts",
+        "factory/orchestrator/test/cli.test.ts",
+        ".claude/skills/bs/plan.md"
+      ],
+      "budget": {
+        "tokens": 150000,
+        "diff_lines": 420
+      },
+      "contract": {
+        "functional_clauses": [
+          "One width computation: ingest's `widest` comes from `scheduleWaves`, not from a parallel implementation.",
+          "`parallel_with` is claims-and-edges only, as the criterion states; import-graph crossings stay `wave schedule --repo`'s job and plan.md says so in one sentence.",
+          "Ingest's existing keys keep their names and meanings; `parallelism` is added, never substituted.",
+          "Superseded tasks are excluded from `parallel_with`, `widest` and `size`."
+        ],
+        "nonfunctional_clauses": [
+          "`waveSchedule.ts` keeps every existing export's declaration; the new function is an addition (epic bs-audit-1 also touches this file for finding ad9ea9ba -- keep the diff additive).",
+          "`claims.ts` is not edited (14 importers); claim overlap is read through its existing exports.",
+          "The spec-reviewer template `.claude/agents/spec-reviewer.md` is not edited; the focus list travels in the dispatch prompt plan.md describes.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith",
+      "keeps_exports": [
+        "factory/orchestrator/src/waveSchedule.ts"
+      ]
+    },
+    {
+      "task_id": "bs-audit-2/task-6b-judge-stop-hook-blocks-missing-artifact",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Epic criterion 6 (operator-added). A judge-class agent -- spec-reviewer, reviewer, verifier, grader, security-reviewer, auditor -- can today end its turn voluntarily without writing the artifact its dispatch declared, and the gap is found only when `smith judge report` answers `judges.artifact-missing`. Add a SubagentStop hook, declared in each of those six templates' frontmatter, that returns `decision: \"block\"` with a reason naming the missing absolute path while that file does not exist, and allows the stop once it does. A harness `maxTurns` cap is out of scope: the hook cannot override it (that is agent-resume's). The hook learns the path from the one `Declared artifact: <absolute path>` line in the dispatch prompt, parsed with the constant and parser task 5 exports from `factory/orchestrator/src/dispatchLint.ts` (imported, never redefined). The line is not hand-trusted: task 5's `dispatch lint` refuses, fail-closed and before dispatch, any judge prompt whose line is missing, relative or different from the ledger's `declared_artifact`, and prints the exact line to paste. A NEW module `factory/orchestrator/src/judgeStopHook.ts` holds the pure decision function (input: the hook's stdin JSON and the prompt text; output: allow or block with reason). A NEW script `.claude/hooks/judge-stop.sh`, shaped like `.claude/hooks/guard.sh`, reads stdin, locates the subagent's prompt, calls the built `dist/judgeStopHook.js`, and prints the decision. FAIL-OPEN DECISION (explicit, tested): a prompt with no parseable declared-artifact line allows the stop with a stderr note. The hook cannot discharge an obligation it cannot read, and blocking would trap the agent until maxTurns with no way out. That case is closed upstream by task 5's lint and downstream by `judge outstanding` and `judge report`'s `judges.artifact-missing`. PLUGIN DECISION (explicit, pinned): the hook is CLONE-ONLY, for the same reason `factory/orchestrator/test/pluginManifest.test.ts` gives for the policy hook -- it needs a checkout's built `dist/`. The six templates also ship in the `blacksmith` plugin, so the frontmatter command must be inert outside a clone: it runs `$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh` only when that file exists, and otherwise exits 0 with empty stdout. It never falls back to `smith` on PATH or to a plugin-root script. The plugin still ships no `hooks/hooks.json`. The test's invariant widens from 'activates no hooks' to 'activates no hook that acts outside a clone', with its docstring rewritten to say why. PRE-CODE RESEARCH IS REQUIRED (wave.md step 3, researcher dispatch). The coder codes against the brief's cited answers from https://code.claude.com/docs/en/hooks and https://code.claude.com/docs/en/sub-agents, never from memory: (R1) the exact SubagentStop stdin fields -- is the subagent's own transcript path and its agent type/name provided, and under which names; (R2) the exact block output shape, and whether `stop_hook_active` is set on re-entry; (R3) whether `hooks:` in a `.claude/agents/*.md` frontmatter is honoured, and whether a `Stop` hook there is converted to `SubagentStop`; (R4) whether plugin-loaded agents honour frontmatter hooks at all. If R4 says no, the clone-only guard is still written and still tested, because the invariant must not depend on a harness detail. If R1 shows the prompt cannot be located from the hook input, or R3 shows frontmatter hooks are not honoured, the coder stops and reports error.spec.spec-gap to the planner rather than choosing another mechanism. Depends on task 5 (the canonical line export and the lint that makes it mechanical).",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD, differential. First add NEW test `factory/orchestrator/test/judgeStopHook.test.ts` that feeds the decision function a SubagentStop input (fields as the research brief documents them, cited in a comment by URL) for agent type `reviewer` whose prompt carries `Declared artifact: <tmp>/t.reviewer.json` with that file absent, and asserts `{decision:\"block\"}` with a reason containing the absolute path. Under the null the module does not exist; record the failure text verbatim in structured output.",
+        "The same file asserts: file present -> allow; file present but empty -> allow (existence is this hook's whole question; parse validity stays `judge report`'s); a non-judge agent type such as `coder` -> allow; a re-entry with `stop_hook_active: true` and the file still absent -> block again (maxTurns is the only bound, per the epic criterion).",
+        "Fail-open is a tested decision, not a fallthrough: separate named cases assert allow + a stderr note for (i) a judge prompt with no declared-artifact line, (ii) a relative path, (iii) unparseable stdin, (iv) an unreadable transcript. Each test's comment states the upstream or downstream control that covers it (task 5's `dispatch lint` for i and ii; `judge report` `judges.artifact-missing` for all four).",
+        "End-to-end in the same file: spawn `.claude/hooks/judge-stop.sh` with a JSON stdin fixture and assert its stdout is the block JSON; with `dist/judgeStopHook.js` absent (point the script at a temp root through an environment variable the script documents), assert it allows and exits 0.",
+        "Plugin invariant, in the claimed `factory/orchestrator/test/pluginManifest.test.ts`: the existing `hooks/hooks.json`-absent assertion stays. A new assertion extracts each shipped agent template's frontmatter hook command and runs it with `CLAUDE_PROJECT_DIR` set to an empty temp dir and a SubagentStop stdin fixture, then asserts exit 0 and empty stdout -- inert outside a clone. The test title and docstring state the widened invariant and the clone-only decision. Under the null (a command that runs the script unconditionally) the assertion fails with a non-zero exit; record that verbatim.",
+        "Drift guards in the same file: exactly the templates named by the judge-role set exported from `dispatchLint.ts` declare the hook (no other template does), and the parser used is the one imported from `dispatchLint.ts` (assert identity of the export, not a copied regex). `factory/orchestrator/test/agentsSync.test.ts` still passes, `smith agents sync` on a template carrying the hook block still rewrites only the `maxTurns:` line, and the full root suite `pnpm run test` passes."
+      ],
+      "claims": [
+        ".claude/agents/spec-reviewer.md",
+        ".claude/agents/reviewer.md",
+        ".claude/agents/verifier.md",
+        ".claude/agents/grader.md",
+        ".claude/agents/security-reviewer.md",
+        ".claude/agents/auditor.md",
+        ".claude/hooks/judge-stop.sh",
+        "factory/orchestrator/src/judgeStopHook.ts",
+        "factory/orchestrator/test/judgeStopHook.test.ts",
+        "factory/orchestrator/test/pluginManifest.test.ts",
+        "factory/orchestrator/src/dispatchLint.ts",
+        "factory/orchestrator/test/dispatchLint.test.ts"
+      ],
+      "budget": {
+        "tokens": 170000,
+        "diff_lines": 750
+      },
+      "contract": {
+        "functional_clauses": [
+          "Frontmatter edits add the hook declaration only; no other frontmatter key (maxTurns, tools, model, effort) and no body text of the six templates changes.",
+          "The frontmatter command resolves the script via `$CLAUDE_PROJECT_DIR` the way `.claude/settings.json` resolves guard.sh, and is a silent exit 0 when the script is absent (clone-only, plugin-inert).",
+          "The declared-artifact line spelling and parser are imported from task 5's `dispatchLint.ts`; judgeStopHook.ts defines no second copy.",
+          "`dispatch.md` is not edited by this task; task 5 owns the rule that judge prompts carry the line.",
+          "Correcting the judge-role set exported from `dispatchLint.ts` (it named `uiux` where the six hook-carrying judge templates include `auditor`) is in scope, with its test in `dispatchLint.test.ts`; the operator authorized this cross-claim edit on task 6 (wave-2 #119, recorded #125)."
+        ],
+        "nonfunctional_clauses": [
+          "The hook is read-only: it stats one file and reads the prompt; it writes nothing, appends no event, and spawns nothing but node.",
+          "Fail open on anything the hook cannot read (no line, relative path, bad stdin, unreadable transcript, unbuilt dist): allow with a stderr note, each case tested. Fail closed only on a readable absolute declared path that does not exist.",
+          "The hook finishes well inside Claude Code's hook timeout; no network access.",
+          "`.claude/settings.json` and `guard.sh` are not edited.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "feature",
+      "origin": "user",
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "bs-audit-2/task-8-log-cache-evicts-vanished-sessions",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Repair task for the confirmed S2 finding f-bs-audit-2/integration-b4f9452c (closing spec review of plan v2, task-1 criterion 3). Task-1's contract clause reads: 'Sessions that disappear from `listSessionIds` are evicted from the cache on the next tick, so memory is bounded by live logs, not by history.' `factory/orchestrator/src/logCache.ts` never evicts: `LogCache.entries` (keyed by session id) and `LogCache.appliedSignatures` (keyed by leaf session id) are plain Maps that only grow, and `runTick` in `factory/orchestrator/src/daemon.ts` never removes anything from the shared cache `runDaemon` hands it. Implement the clause. (1) Add one additive public method to `LogCache` that takes the set of live session ids and deletes every key NOT in that set from BOTH maps (`entries` and `appliedSignatures`); pick a name that says what it does (for example `retainOnly(liveSessionIds)`), and document it in the class. No existing method, export or signature changes. (2) In `runTick`, call it once per tick with the ids `listSessionIds(stateDir)` returned -- the LISTED set, not the set of sessions whose read succeeded -- so a session that is listed but unreadable this tick (the existing unreadable-log finding path) keeps its entry, consistent with the module's rule that a read that throws leaves the previous entry untouched. Call it only on the cache the tick actually uses; with no shared cache (`opts.logCache` undefined) the tick builds a fresh cache and the call is a no-op, so a caller that opted out of caching sees no behaviour change. (3) A session that vanishes and later reappears is read cold (full read) and its leaf is re-applied, because both its fingerprint and its applied signature were evicted. `read`'s own ENOENT behaviour (return `[]`, leave the entry) is unchanged: eviction is the tick's decision, driven by the listing, not the read's.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD. First add to `factory/orchestrator/test/logCache.test.ts` a describe block named for this clause with a case that reads two sessions A and B through one `LogCache`, calls the eviction method with only A live, and asserts `fingerprintOf(B)` and `getAppliedSignature(B)` are `undefined` while A's fingerprint and applied signature are unchanged. Watch it fail -- under the null the method does not exist (TypeError / typecheck error) -- and record the failure text verbatim in structured output.",
+        "`factory/orchestrator/test/daemon.test.ts`, beside the existing shared-cache case (the one that runs `runTick` twice with one `LogCache` and asserts zero new bytes read): with a shared cache, tick once over sessions A and B, remove B's log file, tick again, and assert that after the second tick `logCache.fingerprintOf(B)` and `logCache.getAppliedSignature(B)` are `undefined`, while A is still warm (its fingerprint is defined and the tick read zero new content bytes for it). Prove the wiring by mutation: remove the `runTick` call locally, run, and record the failing test name verbatim in structured output -- the logCache.test.ts case alone does not prove the daemon evicts.",
+        "Reappearance: in the same daemon test (or a sibling case), restore B's log and tick again; assert B is read cold (the cache's `fullReparses` or `bytesRead` counter moves for it) and its leaf is applied again (an injected `applyFn` is called for B).",
+        "A listed-but-unreadable session is retained: with a shared cache warm for B, make B's log unreadable while it stays listed (for example `chmod 000`), tick, and assert B's fingerprint is still defined. Skip this case when running as root (`process.getuid?.() === 0`), as the existing permission case in logCache.test.ts does, and say in structured output whether it ran.",
+        "The existing suites still pass unchanged: `factory/orchestrator/test/logCache.test.ts`, `factory/orchestrator/test/daemon.test.ts` and the full root suite `pnpm run test`."
+      ],
+      "claims": [
+        "factory/orchestrator/src/logCache.ts",
+        "factory/orchestrator/src/daemon.ts",
+        "factory/orchestrator/test/logCache.test.ts",
+        "factory/orchestrator/test/daemon.test.ts"
+      ],
+      "keeps_exports": [
+        "factory/orchestrator/src/logCache.ts",
+        "factory/orchestrator/src/daemon.ts"
+      ],
+      "budget": {
+        "tokens": 90000,
+        "diff_lines": 220
+      },
+      "contract": {
+        "functional_clauses": [
+          "After every tick that ran with a shared `LogCache`, the cache holds entries and applied signatures only for session ids that tick's `listSessionIds(stateDir)` returned; every other key is deleted from both maps.",
+          "Eviction is keyed on the listing, not on read success: a session that is listed but whose read threw this tick keeps its cached entry.",
+          "A tick with no shared cache behaves exactly as before; a vanished-then-restored session is read cold and re-applied."
+        ],
+        "nonfunctional_clauses": [
+          "Performance: eviction is one pass over the cache's keys per tick, with no file I/O of its own; steady-state tick I/O stays as task-1 left it.",
+          "The daemon never throws on a corrupt or torn log (D-21 watcher rule); eviction adds no new throw path.",
+          "No change to `factory/orchestrator/src/events.ts`: epic bs-audit-1 owns that file's append path (finding d7c644db), and this task reads through its exported API only.",
+          "The daemon's exported functions keep their signatures (`daemon.ts` is imported by `cli.ts` and `findingAge.ts`); `logCache.ts` only gains a method, and `ui/server/src/app.ts`, which imports it, is not edited.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "confidence": 1,
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    },
+    {
+      "task_id": "bs-audit-2/task-9-wave-playbook-contrasts-check-and-audit",
+      "epic_id": "bs-audit-2",
+      "plan_version": 3,
+      "objective": "Repair task for the confirmed S2 finding f-bs-audit-2/integration-aac9ba07 (closing spec review of plan v2, task-4 criterion 3). Task-4's contract clause reads: 'The playbook names `wave audit` and never calls it `wave check`; the difference between the two is stated in one sentence.' `.claude/skills/bs/wave.md` runs `smith wave audit` at step 4 and step 10 and mentions `wave check` once (the 'One message, many dispatches' bullet, as what step 1 certified), but no sentence contrasts the two. Add ONE sentence to `wave.md`, at the first `wave audit` call point (end of step 4's fan-out), that names both verbs and states the difference: `wave check` is the step-1 admission gate that certifies before dispatch that the tasks COULD run together, and `wave audit` reads the log back after dispatch and says whether they DID. Keep the wording in line with the surfaces that already draw this contrast (`.claude/skills/bs/run.md`, `.claude/skills/bs/report.md`, `docs/guide/operator-guide/wave.md`) -- read them, do not edit them. Add a `factory/orchestrator/test/wavePlaybook.test.ts` case that pins the sentence.",
+      "output_schema_ref": "factory/specs/schema/result.schema.json",
+      "acceptance_criteria": [
+        "TDD. First add to `factory/orchestrator/test/wavePlaybook.test.ts` a case that splits `.claude/skills/bs/wave.md` into sentences (joining wrapped lines first, so a sentence that crosses a line break still counts) and asserts at least one sentence contains both a `` `wave check` `` code span and a `` `wave audit` `` code span. Watch it fail -- under the null no sentence holds both -- and record the failure text verbatim in structured output.",
+        "The same case asserts that sentence sits inside the `## The steps` section (reuse the file's existing `stepsSection` helper), so the contrast is where the wave-runner meets the verb, not only in the preamble.",
+        "The five existing `wavePlaybook.test.ts` cases still pass unchanged, `factory/orchestrator/test/docCommands.test.ts` passes (any `smith …` span the new sentence quotes resolves against usage.ts), and the full root suite `pnpm run test` passes."
+      ],
+      "claims": [
+        ".claude/skills/bs/wave.md",
+        "factory/orchestrator/test/wavePlaybook.test.ts"
+      ],
+      "budget": {
+        "tokens": 40000,
+        "diff_lines": 80
+      },
+      "contract": {
+        "functional_clauses": [
+          "`wave.md` contains one sentence, inside `## The steps`, that names `wave check` and `wave audit` and states that the first certifies at admission what could run together and the second reads back what did.",
+          "A test in `wavePlaybook.test.ts` fails if that sentence is removed or split so that no single sentence names both verbs.",
+          "No new smith verb, flag or event type is introduced."
+        ],
+        "nonfunctional_clauses": [
+          "Only `wave.md` and `wavePlaybook.test.ts` change; `run.md`, `report.md`, `dispatch.md` and `docs/guide/operator-guide/wave.md` are read, not edited.",
+          "English only in every artifact; markdown prose wraps at 80 characters or less; docs use the em dash and in-code comments use the double hyphen.",
+          "No edit outside `claims`. An out-of-claim need is reported as error.spec.spec-gap to the planner and not taken.",
+          "No file under `factory/policies/` is touched and no `.env` is read or written.",
+          "Blacksmith is open source: no code, identifier or wording from another project is copied in; an outside idea is cited by URL only.",
+          "Run `pnpm run typecheck:test` and `pnpm biome check` from the repo root before reporting done; vitest green is not typecheck green."
+        ]
+      },
+      "case": "bugfix",
+      "origin": "inferred",
+      "confidence": 1,
+      "task_status": "todo",
+      "agent_role": "coder",
+      "project": "black-smith"
+    }
+  ],
+  "edges": [
+    {
+      "task": "bs-audit-2/task-3-dashboard-writes-chain-from-cached-tail",
+      "dependsOn": "bs-audit-2/task-1-daemon-skips-unchanged-logs",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-2/task-3-dashboard-writes-chain-from-cached-tail",
+      "dependsOn": "bs-audit-2/task-2-dashboard-write-origin-guard",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-2/task-6-judge-stop-hook-blocks-missing-artifact",
+      "dependsOn": "bs-audit-2/task-5-dispatch-prompt-lint",
+      "edge_type": "artifact",
+      "edge_provenance": "declared"
+    },
+    {
+      "task": "bs-audit-2/task-7-plan-ingest-reports-parallel-width",
+      "dependsOn": "bs-audit-2/task-5-dispatch-prompt-lint",
+      "edge_type": "claim-order",
+      "edge_provenance": "declared"
+    }
+  ],
+  "project": "black-smith",
+  "effort": "medium"
+}

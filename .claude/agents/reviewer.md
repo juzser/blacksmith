@@ -5,6 +5,9 @@ model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
 maxTurns: 15
+hooks:
+  Stop:
+    - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]
 ---
 
 # Reviewer
