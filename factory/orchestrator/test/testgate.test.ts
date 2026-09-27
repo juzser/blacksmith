@@ -212,6 +212,31 @@ describe('testgate.ts', () => {
     expect(result.results[0]?.tail.length).toBeLessThan(200_000);
   });
 
+  it("honors a check's own timeout_ms over the run-level default, naming it in the note", async () => {
+    // This repo's own full suite runs long enough on a loaded machine to trip
+    // the shared 5-minute default (the bug this field exists to work around),
+    // so a single slow check needs a bigger number without moving every other
+    // check in the same file.
+    const result = await run([{ name: 'slow', cmd: 'sleep 5', timeout_ms: 200 }], { cwd });
+    expect(result.pass).toBe(false);
+    expect(result.results[0]?.exitCode).toBe(-1);
+    expect(result.results[0]?.tail).toContain('timed out after 200ms');
+  });
+
+  it('leaves a sibling check with no timeout_ms on the shared run-level default', async () => {
+    const result = await run(
+      [
+        { name: 'short-timeout', cmd: 'sleep 5', timeout_ms: 150 },
+        { name: 'no-override', cmd: 'sleep 0.3' },
+      ],
+      { cwd, timeoutMs: 5000, runAll: true },
+    );
+    expect(result.results[0]?.pass).toBe(false);
+    expect(result.results[0]?.tail).toContain('timed out after 150ms');
+    expect(result.results[1]?.pass).toBe(true);
+    expect(result.results[1]?.exitCode).toBe(0);
+  });
+
   it('an empty check list trivially passes', async () => {
     const result = await run([], { cwd });
     expect(result.pass).toBe(true);

@@ -281,9 +281,14 @@ smith gate run epic-1/task-1 \
   verdict (D-19).
   `--artifacts-dir <dir>` moves the root, which is for tests and replays; the
   default is the repo's `state/artifacts`.
-- `checks.json` — `Array<{ name, cmd }>`, run sequentially in the worktree
-  (first failure short-circuits unless `--run-all`, which the task gate takes
-  bare — its value would be read as the `<task-id>` positional).
+- `checks.json` — `Array<{ name, cmd, timeout_ms? }>`, run sequentially in the
+  worktree (first failure short-circuits unless `--run-all`, which the task
+  gate takes bare — its value would be read as the `<task-id>` positional).
+  Every check gets the same five-minute timeout unless its own entry sets
+  `timeout_ms`, which overrides it for that check alone; refused at read time,
+  before any check runs, if it is not a positive whole number of
+  milliseconds at most 2147483647 (Node's `setTimeout` ceiling — above it
+  the delay clamps to 1ms and the check would time out instantly).
 - `--grader` — the grader's own result file for this task
   (`state/results/<task-id>.grader-r<round>.json`). Its `structured_output` is
   validated against `grader-verdict.schema.json`, and the rubric gates: any
