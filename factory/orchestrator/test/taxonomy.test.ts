@@ -147,6 +147,21 @@ describe('validateRequiredDimensions', () => {
     ).toThrow(TaxonomyError);
   });
 
+  // A comma-joined task_ref used to pass here silently: task_ref is
+  // presence-only (below), so any non-empty string cleared this check, and
+  // db/projector.ts's touch() minted a task row whose id was the literal
+  // "epic-1/task-1,epic-1/task-2" string. task_ref names ONE task; two ids
+  // need two error-logged events.
+  it('rejects a task_ref that joins more than one task id with a comma', () => {
+    expect(() =>
+      validateRequiredDimensions(tx, 'error', {
+        error: 'spec.spec-gap',
+        severity: 'S1-stop-the-line',
+        task_ref: 'epic-1/task-1,epic-1/task-2',
+      }),
+    ).toThrow(TaxonomyError);
+  });
+
   it('treats provenance_event_ids and task_ref as presence-only (not taxonomy dims)', () => {
     expect(() =>
       validateRequiredDimensions(tx, 'lesson', {

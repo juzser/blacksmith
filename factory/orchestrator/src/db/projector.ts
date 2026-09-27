@@ -584,22 +584,44 @@ function waveTaskIds(record: EventRecord): string[] {
 }
 
 /**
+ * The tasks one error-logged event names: the envelope/payload `task_id`
+ * (D-245) when the producer set one, else `payload.task_ref` split on `,`
+ * and each part trimmed. A comma joins several real ids into one string
+ * when a producer logged a single check's failure against more than one
+ * task at once — events.ts's append-time guard now refuses to write that
+ * shape, but a log written before the guard existed still carries it, and
+ * foldTasks() replays every log ever written. Splitting here, not only in
+ * assertedTaskIds()'s pre-pass, is what keeps the two agreeing on what the
+ * event names (see that function's own comment) — a fix that touched one
+ * and not the other used to mint a card whose id was the literal
+ * "epic-1/task-1,epic-1/task-2" string.
+ */
+function errorTaskRefIds(record: EventRecord): string[] {
+  const envelopeId = eventTaskId(record);
+  if (envelopeId) return [envelopeId];
+  const ref = (record.payload as ErrorPayload).task_ref;
+  if (!ref) return [];
+  return ref
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+}
+
+/**
  * The task ids one event asserts something about, spelled the way foldTasks()'s
  * switch reads them: the envelope or payload `task_id` (D-245) for the
  * single-task events, `payload.task_ids` for a wave's admission or merge, and
- * `error-logged`'s own `payload.task_ref`. Kept beside the switch on purpose —
- * the two must agree on what names a task, or the walk touches an id the
- * pre-pass never saw.
+ * `error-logged`'s own `payload.task_ref` (or its comma-joined list — see
+ * errorTaskRefIds()). Kept beside the switch on purpose — the two must agree
+ * on what names a task, or the walk touches an id the pre-pass never saw.
  */
 function assertedTaskIds(record: EventRecord): string[] {
   switch (record.event_type) {
     case 'wave-admitted':
     case 'wave-merged':
       return waveTaskIds(record);
-    case 'error-logged': {
-      const id = eventTaskId(record) ?? (record.payload as ErrorPayload).task_ref;
-      return id ? [id] : [];
-    }
+    case 'error-logged':
+      return errorTaskRefIds(record);
     case 'task-added':
     case 'gate-outcome':
     case 'task-superseded': {
@@ -786,23 +808,25 @@ export function foldTasks(
       }
       case 'error-logged': {
         const p = record.payload as ErrorPayload;
-        // `task_ref` is this event's own spelling; eventTaskId covers the two
-        // the rest of the log uses (D-245).
-        const taskId = eventTask ?? p.task_ref;
-        if (!taskId) break;
-        const row = touch(taskId, record.ts, record.session_id);
-        row.project = record.project ?? row.project;
-        if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) break;
-        // Severity decides whether the task moves; the error class decides
-        // where. taxonomy.yml: S3 is "real but waivable; batched to operator
-        // at epic end", S4 is "logged, never asked" — a budget note or a
-        // tool hiccup at that level is on the record but the task carries on,
-        // and showing it as blocked is what the board did for 43 of the 55
-        // errors logged so far. A record with no severity is treated as
-        // major: the write path requires the field, so its absence means a
-        // log this reader does not own.
-        if (NOTE_ONLY_SEVERITIES.has(p.severity ?? '')) break;
-        row.taskStatus = p.error?.startsWith('coordination.') ? 'escalated' : 'blocked';
+        // errorTaskRefIds() is this event's own spelling (D-245's envelope
+        // reader, or a comma-joined `task_ref` split into its real ids) —
+        // shared with assertedTaskIds()'s pre-pass so the two agree.
+        const taskIds = errorTaskRefIds(record);
+        for (const taskId of taskIds) {
+          const row = touch(taskId, record.ts, record.session_id);
+          row.project = record.project ?? row.project;
+          if (TERMINAL_TASK_STATUSES.has(row.taskStatus)) continue;
+          // Severity decides whether the task moves; the error class decides
+          // where. taxonomy.yml: S3 is "real but waivable; batched to operator
+          // at epic end", S4 is "logged, never asked" — a budget note or a
+          // tool hiccup at that level is on the record but the task carries on,
+          // and showing it as blocked is what the board did for 43 of the 55
+          // errors logged so far. A record with no severity is treated as
+          // major: the write path requires the field, so its absence means a
+          // log this reader does not own.
+          if (NOTE_ONLY_SEVERITIES.has(p.severity ?? '')) continue;
+          row.taskStatus = p.error?.startsWith('coordination.') ? 'escalated' : 'blocked';
+        }
         break;
       }
       default:

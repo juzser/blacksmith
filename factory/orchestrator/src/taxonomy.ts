@@ -29,6 +29,15 @@ const PRESENCE_ONLY_FIELDS = new Set(['task_ref', 'provenance_event_ids', 'model
 /** The `error` dimension is validated as a `group.class` pair, not a flat tag. */
 const ERROR_CLASS_FIELD = 'error';
 
+// `task_ref` names exactly one task; it is otherwise presence-only (above),
+// which let a comma-joined "epic-1/task-1,epic-1/task-2" through as one
+// non-empty string. db/projector.ts's fold read that string as a single task
+// id and minted a phantom row for it that stayed `todo` forever, holding
+// epic verdict on a task that was never real. Reject the shape here so the
+// log never grows another one — a producer with two failing tasks logs two
+// error-logged events, not one with two ids stitched together.
+const TASK_REF_FIELD = 'task_ref';
+
 export function parseTaxonomy(yamlText: string): Taxonomy {
   const doc = parseYaml(yamlText) as Record<string, unknown>;
   if (!doc || typeof doc !== 'object') {
@@ -166,6 +175,14 @@ export function validateRequiredDimensions(
         'taxonomy.missing-required-dimension',
         `Record type "${recordType}" is missing required field "${field}".`,
         { recordType, field },
+      );
+    }
+
+    if (field === TASK_REF_FIELD && String(value).includes(',')) {
+      throw new TaxonomyError(
+        'taxonomy.multi-value-task-ref',
+        `Record type "${recordType}" field "task_ref" names more than one task ("${String(value)}"). Log one error-logged event per task instead.`,
+        { recordType, field, value },
       );
     }
 

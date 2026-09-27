@@ -584,12 +584,35 @@ function validateResultArtifactsShape(record: EventRecord): void {
   );
 }
 
+/**
+ * `error-logged`'s task_id (D-245: envelope or payload, envelope wins) names
+ * exactly one task, the same rule taxonomy.ts enforces for `task_ref` — but
+ * `task_id` is schema-typed as a plain string, so no taxonomy rule ever sees
+ * it, and a comma-joined "epic-1/task-1,epic-1/task-2" passed straight
+ * through. db/projector.ts's fold read that string as a single task id and
+ * minted a phantom row for it that stayed `todo` forever. Checked here,
+ * beside validateResultArtifactsShape, for the same reason: the shape a
+ * later reader assumes is not one the event schema or taxonomy already rule
+ * out.
+ */
+function validateErrorLoggedTaskIdShape(record: EventRecord): void {
+  if (record.event_type !== 'error-logged') return;
+  const taskId = eventTaskId(record);
+  if (taskId === null || !taskId.includes(',')) return;
+  throw new EventError(
+    'events.multi-value-task-id',
+    `Event "error-logged" names more than one task in its task_id ("${taskId}"). Log one error-logged event per task instead.`,
+    { event_type: record.event_type, task_id: taskId },
+  );
+}
+
 function validateTypedPayload(
   schemas: CompiledSchemaSet,
   taxonomy: Taxonomy,
   record: EventRecord,
 ): void {
   validateResultArtifactsShape(record);
+  validateErrorLoggedTaskIdShape(record);
   const schemaName = TYPED_PAYLOAD_SCHEMAS[record.event_type];
   if (schemaName === undefined) return;
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1669,6 +1669,66 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     const { quorum, verdicts } = await quorumEvents();
     expect(quorum).toHaveLength(0);
     expect(verdicts).toHaveLength(0);
+  });
+
+  // The bug this guards: a producer logged one error-logged against two tasks
+  // at once, joining their ids with a comma in `task_ref`
+  // ("epic-1/task-1,epic-1/task-2"). foldTasks() used to read that whole
+  // string as a single task id, mint a third, phantom row for it, and leave
+  // that row `todo` forever — which held epic verdict on `Task
+  // "epic-1/task-1,epic-1/task-2" is not terminal-OK (status: todo)` even
+  // though both real tasks had completed. The append-time guard now refuses
+  // to write that shape at all, so this reaches the fold as history would
+  // carry it: an event already on disk from before the guard existed.
+  it('is not held by a comma-joined error-logged task_ref once every real task named in it has completed', async () => {
+    await addTask('epic-1/task-1', 'completed');
+    await addTask('epic-1/task-2', 'completed');
+    await addIntegrationCheck();
+    await addSpecReview();
+    await addGoalCheck();
+
+    // appendEvent() now refuses to write this shape (events.ts's
+    // events.invalid-payload-dimensions guard) — this test is about a log
+    // that already carries it from before the guard existed, so the line is
+    // written straight to the log file, past appendEvent(), the way history
+    // actually got here.
+    const priorEvents = await readEvents(sessionId, { stateDir });
+    const lastEventId = priorEvents[priorEvents.length - 1]?.event_id ?? `${sessionId}#0`;
+    await appendFile(
+      path.join(stateDir, `${sessionId}.jsonl`),
+      `${JSON.stringify({
+        session_id: sessionId,
+        actor: 'coder',
+        event_type: 'error-logged',
+        plan_version: 1,
+        causal_parent: lastEventId,
+        payload: {
+          error: 'execution.flaky-test',
+          severity: 'S3-minor',
+          task_ref: 'epic-1/task-1,epic-1/task-2',
+        },
+        ts: new Date().toISOString(),
+      })}\n`,
+      'utf8',
+    );
+
+    const outcome = await runEpicVerdict(
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        crosscheck: { policy: policyWith() },
+      },
+      ctx(),
+      { stateDir },
+    );
+
+    expect(outcome.summary.tasks.map((t) => t.taskId).sort()).toEqual([
+      'epic-1/task-1',
+      'epic-1/task-2',
+    ]);
+    expect(outcome.outcome).toBe('go');
   });
 
   // D-126, end to end: this is `envkit-mcp-surface` in miniature. Plan v2 adds
