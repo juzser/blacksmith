@@ -272,6 +272,117 @@ describe('ui/server writeGuard', () => {
         }
       });
 
+      it('application/json, no Origin, bracketed IPv6 loopback Host [::1]:4680 -> reaches the handler', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', host: '[::1]:4680' },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).not.toBe(403);
+          expect(res.status).not.toBe(415);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, no Origin, bracketed IPv6 loopback Host [::1] (no port) -> reaches the handler', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', host: '[::1]' },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).not.toBe(403);
+          expect(res.status).not.toBe(415);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, Origin http://[::1]:4680, Host [::1]:4680 -> reaches the handler', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              origin: 'http://[::1]:4680',
+              host: '[::1]:4680',
+            },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).not.toBe(403);
+          expect(res.status).not.toBe(415);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, no Origin, non-loopback IPv6 Host [::2]:4680 -> 403', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', host: '[::2]:4680' },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, no Origin, IPv4-mapped IPv6 Host [::ffff:127.0.0.1]:4680 (not ::1) -> 403', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              host: '[::ffff:127.0.0.1]:4680',
+            },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, no Origin, bracket-lookalike Host [::1].evil.example:4680 -> 403', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              host: '[::1].evil.example:4680',
+            },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
+      it('application/json, no Origin, unbracketed IPv6 Host ::1:4680 (port-ambiguous) -> 403', async () => {
+        const handle = app();
+        try {
+          const res = await handle.app.request(route, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', host: '::1:4680' },
+            body: JSON.stringify(body),
+          });
+          expect(res.status).toBe(403);
+        } finally {
+          closeApp(handle);
+        }
+      });
+
       it('application/json, Origin 127.0.0.1:4680, Host 127.0.0.1:4680 -> reaches the handler', async () => {
         const handle = app();
         try {
