@@ -233,6 +233,35 @@ describe('parser identity', () => {
     const prompt = 'Declared artifact: /abs/x.json\n';
     expect(dispatchLintParser(prompt)).toBe('/abs/x.json');
   });
+
+  // The test above only proves the import resolves -- it never calls
+  // anything IN judgeStopHook.ts, so a future edit that kept the import but
+  // stopped calling it (a hand-rolled regex living beside it, invoked
+  // instead) would leave it green. These cases drive `decideJudgeStop`
+  // itself on prompts where a plausible look-alike regex -- case-insensitive
+  // key, no start-of-line anchor, no end-of-line anchor -- would answer
+  // differently than dispatchLint.ts's own parser, proving the hook's
+  // block/allow is actually driven by that exact parser, not a copy of it.
+  it.each([
+    ['prefixed mid-line, never at true line start', 'Notes: Declared artifact: /abs/mid.json\n'],
+    ['a lower-cased key', 'declared artifact: /abs/lower.json\n'],
+    [
+      'trailing prose after the path on the same line',
+      'Declared artifact: /abs/trail.json and more\n',
+    ],
+  ])("decideJudgeStop agrees with dispatchLint.ts's own parser on %s", (_label, prompt) => {
+    const parsed = dispatchLintParser(prompt);
+    const decision = decideJudgeStop(stdinFixture({ agent_type: 'reviewer' }), prompt);
+    if (parsed === null) {
+      // dispatchLint.ts read no declared-artifact line here -- the hook must
+      // fail open, exactly like the "no such line" case above.
+      expect(decision.decision).toBe('allow');
+    } else {
+      // A path dispatchLint.ts *did* parse, that does not exist on disk --
+      // the hook must block on it, naming that exact path.
+      expect(decision).toEqual({ decision: 'block', reason: expect.stringContaining(parsed) });
+    }
+  });
 });
 
 describe('.claude/hooks/judge-stop.sh (end to end)', () => {

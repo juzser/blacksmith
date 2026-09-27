@@ -2757,9 +2757,11 @@ async function main(): Promise<number> {
 
   if (namespace === 'dispatch' && action === 'lint') {
     // dispatch.md "Carry into the prompt" / "Declare each judge's artifact":
-    // catches a stated turn budget over the template's `maxTurns` and a judge
-    // prompt missing (or mismatching) its declared-artifact line, before the
-    // agent ever runs. See dispatchLint.ts for why each status means what it
+    // catches a stated turn budget that disagrees with the template's
+    // `maxTurns` in either direction, a template it cannot read at all, and a
+    // judge prompt missing (or mismatching) its declared-artifact line,
+    // before the agent ever runs. Fails closed: any applicable status but
+    // `ok` exits 1. See dispatchLint.ts for why each status means what it
     // means. `-` reads stdin, same convention as `prompt wrap`/`prompt record`.
     const [file] = requirePositionals(positional, usageFor('dispatch lint'), 1) as [string];
     const prompt = file === '-' ? readFileSync(0, 'utf8') : readFileSync(file, 'utf8');

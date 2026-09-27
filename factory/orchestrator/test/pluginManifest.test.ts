@@ -86,12 +86,18 @@ describe('plugin payload', () => {
     expect(agents.length).toBeGreaterThanOrEqual(14);
   });
 
-  it('activates no hooks, because the policy hook is clone-shaped', () => {
+  it('ships no top-level hooks.json, because the policy hook is clone-shaped', () => {
     // `.claude/hooks/guard.sh` resolves its policy binary relative to a
     // checkout and degrades to `ask` when it cannot find one -- which in an
     // install means a confirmation prompt in front of every command. A plugin
-    // loads hooks only from `hooks/hooks.json`, so the absence of that file is
-    // what keeps the payload inert. It is a decision, not an oversight.
+    // loads hooks registered THIS way only from `hooks/hooks.json`, so the
+    // absence of that file keeps guard.sh's payload inert. It is a decision,
+    // not an oversight.
+    //
+    // This says nothing about a template's own frontmatter Stop hook, which
+    // Claude Code reads regardless of `hooks/hooks.json` -- see "judge
+    // templates are inert outside a clone" below for that mechanism's own,
+    // separately-proved invariant.
     expect(existsSync(path.join(root, 'hooks/hooks.json'))).toBe(false);
   });
 
@@ -127,10 +133,11 @@ describe('plugin payload', () => {
     }
   });
 
-  // Widened invariant (was "activates no hooks"): a plugin install activates
-  // no hook that ACTS outside a clone. The judge templates above still carry
-  // a frontmatter Stop hook when shipped through the plugin -- that payload
-  // has no `hooks/hooks.json`, but a template's own frontmatter hook is read
+  // The invariant this file actually needs is wider than "ships no top-level
+  // hooks.json" above: a plugin install must activate no hook that ACTS
+  // outside a clone. The judge templates above still carry a frontmatter Stop
+  // hook when shipped through the plugin -- that payload has no
+  // `hooks/hooks.json`, but a template's own frontmatter hook is read
   // regardless of install method, so it must be inert wherever the built
   // `dist/judgeStopHook.js` and `.claude/hooks/judge-stop.sh` do not exist.
   // Regex-matching the frontmatter text (above) only proves the hook is
