@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { BudgetPolicy } from '../src/budgets.js';
-import type { AdmissionLens, DaemonFinding, TickReport } from '../src/daemon.js';
+import type { AdmissionLens, DaemonFinding, TickOptions, TickReport } from '../src/daemon.js';
 import {
   acquireLock,
   DaemonError,
@@ -713,6 +713,115 @@ describe('the tick that reads the disk', () => {
   it('has an empty tick for an empty state dir', async () => {
     const report = await runTick({ ...OPTS, stateDir });
     expect(report).toMatchObject({ sessions: [], findings: [], attention: 0 });
+  });
+
+  // Repair for finding f-bs-audit-2/integration-b4f9452c: task-1's contract
+  // clause promised eviction on the next tick, but nothing ever called it.
+  // These tests key on the *daemon's* wiring, not `logCache.test.ts`'s unit
+  // test of `retainOnly` alone -- a green unit test there proves the method
+  // works, never that a tick calls it.
+  describe('eviction of vanished sessions (b4f9452c)', () => {
+    it('a session removed between ticks is evicted from the shared cache, while a still-live one stays warm', async () => {
+      writeLog('sess-a', [record('sess-a', 'session-start', {})]);
+      writeLog('sess-b', [record('sess-b', 'session-start', {})]);
+      const logCache = new LogCache();
+      const applied: string[] = [];
+      const applyFn: TickOptions['applyFn'] = async (_dbPath, leaf) => {
+        applied.push(leaf);
+        return {
+          sessionsProcessed: 1,
+          eventsApplied: 0,
+          skippedFindings: [],
+          skippedArtifacts: [],
+          unreadableSessions: [],
+        };
+      };
+      const runOpts = { ...OPTS, stateDir, logCache, projectDb: true, applyFn };
+
+      const first = await runTick(runOpts);
+      expect(first.sessions.sort()).toEqual(['sess-a', 'sess-b']);
+      expect(applied.sort()).toEqual(['sess-a', 'sess-b']);
+      const fpABeforeRemoval = logCache.fingerprintOf('sess-a');
+      const bytesAfterFirst = logCache.counters.bytesRead;
+
+      rmSync(path.join(stateDir, 'sess-b.jsonl'));
+      const second = await runTick(runOpts);
+
+      expect(second.sessions).toEqual(['sess-a']);
+      expect(logCache.fingerprintOf('sess-b')).toBeUndefined();
+      expect(logCache.getAppliedSignature('sess-b')).toBeUndefined();
+      // sess-a is still warm: same fingerprint, and the second tick read it
+      // for zero new content bytes (nothing on disk changed for it).
+      expect(logCache.fingerprintOf('sess-a')).toEqual(fpABeforeRemoval);
+      expect(logCache.counters.bytesRead).toBe(bytesAfterFirst);
+    });
+
+    // Mutation proof: with the `cache.retainOnly(liveSessionIds)` call in
+    // `runTick` commented out, this test failed by name --
+    // "a session removed between ticks is evicted from the shared cache,
+    // while a still-live one stays warm" -- with `logCache.fingerprintOf('sess-b')`
+    // still defined instead of `undefined`. Recorded verbatim in
+    // structured_output; the local mutation was reverted before commit.
+
+    it('reappearance after eviction is a cold read and a re-applied leaf', async () => {
+      writeLog('sess-a', [record('sess-a', 'session-start', {})]);
+      writeLog('sess-b', [record('sess-b', 'session-start', {})]);
+      const logCache = new LogCache();
+      const applied: string[] = [];
+      const applyFn: TickOptions['applyFn'] = async (_dbPath, leaf) => {
+        applied.push(leaf);
+        return {
+          sessionsProcessed: 1,
+          eventsApplied: 0,
+          skippedFindings: [],
+          skippedArtifacts: [],
+          unreadableSessions: [],
+        };
+      };
+      const runOpts = { ...OPTS, stateDir, logCache, projectDb: true, applyFn };
+
+      await runTick(runOpts);
+      rmSync(path.join(stateDir, 'sess-b.jsonl'));
+      await runTick(runOpts);
+      applied.length = 0;
+      const reparsesBeforeReappearance = logCache.counters.fullReparses;
+
+      writeLog('sess-b', [record('sess-b', 'session-start', {})]);
+      await runTick(runOpts);
+
+      expect(logCache.counters.fullReparses).toBeGreaterThan(reparsesBeforeReappearance);
+      expect(applied).toContain('sess-b');
+    });
+
+    it('a listed session that is unreadable this tick keeps its warm entry instead of being evicted', async () => {
+      if (process.getuid?.() === 0) {
+        // root bypasses filesystem permission bits -- nothing to prove here,
+        // same as logCache.test.ts's own permission-revoked case.
+        return;
+      }
+      writeLog('sess-a', [record('sess-a', 'session-start', {})]);
+      writeLog('sess-b', [record('sess-b', 'session-start', {})]);
+      const logCache = new LogCache();
+      const runOpts = { ...OPTS, stateDir, logCache };
+
+      await runTick(runOpts);
+      const fpBBeforeUnreadable = logCache.fingerprintOf('sess-b');
+      expect(fpBBeforeUnreadable).toBeDefined();
+
+      const bLogPath = path.join(stateDir, 'sess-b.jsonl');
+      chmodSync(bLogPath, 0o000);
+      try {
+        const report = await runTick(runOpts);
+        const badFindings = report.findings.filter(
+          (f) => f.kind === 'unreadable-log' && f.sessionId === 'sess-b',
+        );
+        expect(badFindings).toHaveLength(1);
+        // Listed but unreadable: the entry is retained, not evicted.
+        expect(logCache.fingerprintOf('sess-b')).toEqual(fpBBeforeUnreadable);
+      } finally {
+        chmodSync(bLogPath, 0o644);
+      }
+    });
   });
 });
 

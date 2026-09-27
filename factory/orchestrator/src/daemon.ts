@@ -680,7 +680,9 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
   const cache = opts.logCache ?? new LogCache();
 
   const logs = new Map<string, StoredEvent[]>();
+  const liveSessionIds = new Set<string>();
   for (const sessionId of listSessionIds(stateDir)) {
+    liveSessionIds.add(sessionId);
     try {
       logs.set(sessionId, await cache.read(sessionId, { stateDir }));
     } catch (err) {
@@ -693,6 +695,14 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
       });
     }
   }
+
+  // Sessions that disappear from `listSessionIds` are evicted here, on the
+  // next tick, so the cache's memory is bounded by live logs, not by
+  // history. Driven by the LISTED set, not the read-succeeded set: a session
+  // that is listed but unreadable this tick keeps its entry. On a fresh,
+  // unshared cache (`opts.logCache` undefined) this is a no-op -- nothing
+  // was cached to evict.
+  cache.retainOnly(liveSessionIds);
 
   const parentOf = new Map<string, string | null>();
   for (const [sessionId, events] of logs) {
