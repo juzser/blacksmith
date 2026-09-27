@@ -81,4 +81,31 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
       ).toBe(true);
     }
   });
+
+  it('has one sentence naming both `wave check` and `wave audit` and contrasting them', () => {
+    // Join wrapped lines (single newlines) into spaces first, so a sentence
+    // that wraps across a markdown line break still counts as one sentence.
+    const joined = steps.replace(/\n(?!\n)/g, ' ').replace(/[ \t]+/g, ' ');
+    // Split into sentences on a period followed by whitespace and the start
+    // of the next sentence (capital letter, backtick, quote, or paren).
+    const sentenceList = joined
+      .split(/(?<=\.)\s+(?=[A-Z`"(])/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const hasWaveCheckSpan = (s: string) => /`[^`]*\bwave check\b[^`]*`/.test(s);
+    const hasWaveAuditSpan = (s: string) => /`[^`]*\bwave audit\b[^`]*`/.test(s);
+
+    const contrastSentences = sentenceList.filter(
+      (s) => hasWaveCheckSpan(s) && hasWaveAuditSpan(s),
+    );
+
+    expect(
+      contrastSentences.length,
+      'expected a single sentence in "## The steps" naming both ' +
+        '`wave check` and `wave audit` and stating the difference between ' +
+        'them; sentences mentioning only one of the two: ' +
+        JSON.stringify(sentenceList.filter((s) => hasWaveCheckSpan(s) || hasWaveAuditSpan(s))),
+    ).toBeGreaterThan(0);
+  });
 });

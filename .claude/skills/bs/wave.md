@@ -151,6 +151,9 @@ one thing this playbook never asks you to.
    Once every coder of the wave has been dispatched — this fan-out has gone
    out for every admitted task — audit the wave's own parallelism while it
    can still be corrected: `smith wave audit --session <id> --epic <epic>`.
+   `wave check` is the step-1 gate that certified, before any dispatch, that
+   these tasks could run together; `wave audit` reads the log back after
+   dispatch and says whether they did.
    It is a read, so it costs nothing against "No lockstep barrier" above and
    waits for no task. Read the `verdict` field (`WAVE_VERDICTS`,
    `waveConcurrency.ts`), not only the exit code — `partial` also exits 0:
