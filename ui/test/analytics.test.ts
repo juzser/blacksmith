@@ -92,13 +92,16 @@ function bucket(
   provider: string,
   taskCount: number,
   totalTokens: number,
+  unmeasuredTaskCount = 0,
 ): CostBucket {
+  const measuredTaskCount = taskCount - unmeasuredTaskCount;
   return {
     modelTier,
     provider,
     taskCount,
     totalTokens,
-    avgTokensPerTask: taskCount > 0 ? totalTokens / taskCount : 0,
+    unmeasuredTaskCount,
+    avgTokensPerTask: measuredTaskCount > 0 ? totalTokens / measuredTaskCount : 0,
   };
 }
 
@@ -180,6 +183,28 @@ describe('lib/analytics.ts — costPerTaskBy', () => {
     expect(costPerTaskBy([], 'modelTier')).toEqual([]);
     expect(costPerTaskBy([], 'provider')).toEqual([]);
   });
+
+  /**
+   * Issue #220 follow-up. A bucket can now hold results whose token_usage
+   * was `{ measured: false }` — `unmeasuredTaskCount` says how many.
+   * A group where EVERY task went unmeasured has a real taskCount but no
+   * denominator to divide by, so it must not plot a fabricated 0 bar
+   * (indistinguishable from "this group truly cost nothing").
+   */
+  it('omits a label whose every task went unmeasured, rather than plotting a fabricated 0', () => {
+    const series = costPerTaskBy([bucket('mid', 'claude', 3, 0, 3)], 'modelTier');
+    expect(series).toEqual([]);
+  });
+
+  it('does not dilute a label’s cost per task by the tasks nobody measured', () => {
+    const series = costPerTaskBy(
+      [bucket('mid', 'claude', 2, 4000, 0), bucket('mid', 'codex', 1, 0, 1)],
+      'modelTier',
+    );
+    // 4000 tokens over the 2 MEASURED tasks, not diluted by the third task
+    // that ran but reported no usage.
+    expect(series).toEqual([{ label: 'mid', value: 2000 }]);
+  });
 });
 
 describe('lib/analytics.ts — costPerTask', () => {
@@ -197,6 +222,10 @@ describe('lib/analytics.ts — costPerTask', () => {
   it('returns null when no task has reported usage, rather than zero', () => {
     expect(costPerTask([])).toBeNull();
     expect(costPerTask([bucket('mid', 'claude', 0, 0)])).toBeNull();
+  });
+
+  it('returns null when every task in scope went unmeasured, even though taskCount is positive', () => {
+    expect(costPerTask([bucket('mid', 'claude', 3, 0, 3)])).toBeNull();
   });
 });
 

@@ -94,6 +94,8 @@ export interface EpicTokenSpend {
   epicId: string;
   tokensSpent: number;
   tokensBudget: number | null;
+  /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
+  unmeasured: number;
 }
 export interface MilestoneTaskRef {
   taskId: string;
@@ -113,6 +115,8 @@ export interface MilestoneProgress {
   tasksCompleted: number;
   tokensSpent: number;
   tokensBudget: number | null;
+  /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
+  unmeasured: number;
   project: string;
   /** 'factory' | 'dogfood' | 'product' — roadmap.ts's MilestoneKind. */
   kind: string;
@@ -136,6 +140,8 @@ export interface ProjectOverviewSummary {
   epicsInFlight: string[];
   tokensSpent: number;
   tokensBudget: number | null;
+  /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
+  unmeasured: number;
   alerts: { escalations: number; pendingWaivers: number };
 }
 export interface ClosedEpic {
@@ -359,6 +365,8 @@ export interface CostBucket {
   taskCount: number;
   totalTokens: number;
   avgTokensPerTask: number;
+  /** Of taskCount, the results whose `token_usage` was `{ measured: false }` — excluded from avgTokensPerTask's denominator. */
+  unmeasuredTaskCount: number;
 }
 export interface SameMistakeDay {
   day: string;

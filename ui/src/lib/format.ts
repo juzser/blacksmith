@@ -139,3 +139,18 @@ export function pluralize(
 ): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/**
+ * "2000 tok" — or, when one or more of the summed results has
+ * `token_usage: { measured: false }` (issue #220), a floor rather than an
+ * exact total: "≥2000 tok · 3 not measured". `tokensSpent` must already be
+ * the sum over the results that DID report usage; this only decides how to
+ * caption it. A sum of nothing but unmeasured results renders "not measured"
+ * — never "0 tok", which would read as "we spent nothing" rather than
+ * "nobody counted".
+ */
+export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): string {
+  if (unmeasured === 0) return `${tokensSpent} tok`;
+  if (tokensSpent === 0) return 'not measured';
+  return `≥${tokensSpent} tok · ${unmeasured} not measured`;
+}

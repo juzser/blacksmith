@@ -378,6 +378,8 @@ export interface EpicTokenSpend {
   epicId: string;
   tokensSpent: number;
   tokensBudget: number | null;
+  /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
+  unmeasured: number;
 }
 
 export interface MilestoneProgress {
@@ -391,6 +393,8 @@ export interface MilestoneProgress {
   tasksCompleted: number;
   tokensSpent: number;
   tokensBudget: number | null;
+  /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
+  unmeasured: number;
   /** Phase 6b — the milestone's own project (roadmap.md's `- project:` bullet, defaults 'black-smith'). */
   project: string;
   /**
@@ -455,6 +459,8 @@ export interface ProjectOverviewSummary {
   epicsInFlight: string[];
   tokensSpent: number;
   tokensBudget: number | null;
+  /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
+  unmeasured: number;
   alerts: { escalations: number; pendingWaivers: number };
 }
 
@@ -642,7 +648,12 @@ function epicTokenMaps(
   db: SmithDb,
   scope: Scope,
   taskRows: (typeof tasks.$inferSelect)[],
-): { budgetByEpic: Map<string, number>; spentByEpic: Map<string, number> } {
+): {
+  budgetByEpic: Map<string, number>;
+  spentByEpic: Map<string, number>;
+  /** Results whose `token_usage` was `{ measured: false }` (issue #220) — spentByEpic's sum is a floor, not exact, for any epic with a nonzero count here. */
+  unmeasuredByEpic: Map<string, number>;
+} {
   const budgetByEpic = new Map<string, number>();
   const epicByTask = new Map<string, string>();
   for (const t of taskRows) {
@@ -655,14 +666,20 @@ function epicTokenMaps(
 
   const epicOf = epicResolver(epicByTask);
   const spentByEpic = new Map<string, number>();
+  const unmeasuredByEpic = new Map<string, number>();
   for (const row of taskResultRows(db, scope)) {
     const epicId = epicOf(resultTaskId(row));
     if (!epicId) continue;
-    const total = row.payload.token_usage?.total_tokens ?? 0;
-    spentByEpic.set(epicId, (spentByEpic.get(epicId) ?? 0) + total);
+    const total = row.payload.token_usage?.total_tokens;
+    if (typeof total === 'number') {
+      spentByEpic.set(epicId, (spentByEpic.get(epicId) ?? 0) + total);
+    } else {
+      spentByEpic.set(epicId, spentByEpic.get(epicId) ?? 0);
+      unmeasuredByEpic.set(epicId, (unmeasuredByEpic.get(epicId) ?? 0) + 1);
+    }
   }
 
-  return { budgetByEpic, spentByEpic };
+  return { budgetByEpic, spentByEpic, unmeasuredByEpic };
 }
 
 /**
@@ -764,7 +781,7 @@ function milestoneProgressRows(
   if (milestoneRows.length === 0) return [];
 
   const taskRows = allTasksForScope(db, scope);
-  const { budgetByEpic, spentByEpic } = epicTokenMaps(db, scope, taskRows);
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
   const edgeSessionCond = scopedToSessions(edges.sessionId, scope);
   const edgeRows = opts.includeTaskRefs
     ? edgeSessionCond
@@ -783,8 +800,10 @@ function milestoneProgressRows(
     let tokensSpent = 0;
     let tokensBudget = 0;
     let hasBudget = false;
+    let unmeasured = 0;
     for (const epicId of epicIds) {
       tokensSpent += spentByEpic.get(epicId) ?? 0;
+      unmeasured += unmeasuredByEpic.get(epicId) ?? 0;
       const budget = budgetByEpic.get(epicId);
       if (budget !== undefined) {
         tokensBudget += budget;
@@ -807,6 +826,7 @@ function milestoneProgressRows(
       tasksCompleted,
       tokensSpent,
       tokensBudget: hasBudget ? tokensBudget : null,
+      unmeasured,
       project: m.project,
       kind: m.kind,
       errorIssuesEnabled: m.errorIssues,
@@ -1056,10 +1076,11 @@ function projectSummary(
   const liveRows = allAgentsForScope(db, scope);
   const taskRows = allTasksForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpicsForScope(db, scope));
-  const { budgetByEpic, spentByEpic } = epicTokenMaps(db, scope, taskRows);
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
   const tokensBudget =
     budgetByEpic.size > 0 ? [...budgetByEpic.values()].reduce((s, v) => s + v, 0) : null;
+  const unmeasured = [...unmeasuredByEpic.values()].reduce((s, v) => s + v, 0);
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
   const findingRows = allFindingsForScope(db, scope).filter(awaitsWaiverDecision);
   const pendingWaivers = findingRows.filter((f) => f.waiverId === null).length;
@@ -1071,6 +1092,7 @@ function projectSummary(
     epicsInFlight,
     tokensSpent,
     tokensBudget,
+    unmeasured,
     alerts: { escalations, pendingWaivers },
   };
 }
@@ -1182,7 +1204,8 @@ function tokensSpentAt(
   for (const r of rows) {
     const payload = JSON.parse(r.payload) as TaskResultPayload;
     if (!epicOf(resultTaskId({ payload, envelopeTaskId: r.taskId }))) continue;
-    total += payload.token_usage?.total_tokens ?? 0;
+    const tokens = payload.token_usage?.total_tokens;
+    if (typeof tokens === 'number') total += tokens;
   }
   return total;
 }
@@ -1268,13 +1291,14 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
 
-  const { budgetByEpic, spentByEpic } = epicTokenMaps(db, scope, taskRows);
+  const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
 
   const epicIds = new Set([...budgetByEpic.keys(), ...spentByEpic.keys()]);
   const tokensByEpic: EpicTokenSpend[] = [...epicIds].sort().map((epicId) => ({
     epicId,
     tokensSpent: spentByEpic.get(epicId) ?? 0,
     tokensBudget: budgetByEpic.get(epicId) ?? null,
+    unmeasured: unmeasuredByEpic.get(epicId) ?? 0,
   }));
 
   const escalations = taskRows.filter((t) => t.taskStatus === 'escalated').length;
@@ -2098,6 +2122,8 @@ export interface CostBucket {
   taskCount: number;
   totalTokens: number;
   avgTokensPerTask: number;
+  /** Of taskCount, the results whose `token_usage` was `{ measured: false }` (issue #220) — excluded from avgTokensPerTask's denominator. */
+  unmeasuredTaskCount: number;
 }
 
 export interface SameMistakeDay {
@@ -2180,7 +2206,10 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
         .where(eq(eventsRaw.eventType, 'task-result-recorded'))
         .all();
 
-  const costBuckets = new Map<string, { taskCount: number; totalTokens: number }>();
+  const costBuckets = new Map<
+    string,
+    { taskCount: number; totalTokens: number; unmeasuredTaskCount: number }
+  >();
   for (const row of resultRows) {
     const p = JSON.parse(row.payload) as ResultPayloadForCost;
     // Column first, payload second: both spellings occur, and one real row
@@ -2188,19 +2217,26 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
     if (!inScope(row.taskId ?? p.task_id)) continue;
     if (!p.model_tier || !p.provider) continue;
     const key = `${p.model_tier}|${p.provider}`;
-    const bucket = costBuckets.get(key) ?? { taskCount: 0, totalTokens: 0 };
+    const bucket = costBuckets.get(key) ?? { taskCount: 0, totalTokens: 0, unmeasuredTaskCount: 0 };
     bucket.taskCount += 1;
-    bucket.totalTokens += p.token_usage?.total_tokens ?? 0;
+    const tokens = p.token_usage?.total_tokens;
+    if (typeof tokens === 'number') {
+      bucket.totalTokens += tokens;
+    } else {
+      bucket.unmeasuredTaskCount += 1;
+    }
     costBuckets.set(key, bucket);
   }
   const costByModelTierAndProvider: CostBucket[] = [...costBuckets.entries()].map(([key, v]) => {
     const [modelTier, provider] = key.split('|') as [string, string];
+    const measuredTaskCount = v.taskCount - v.unmeasuredTaskCount;
     return {
       modelTier,
       provider,
       taskCount: v.taskCount,
       totalTokens: v.totalTokens,
-      avgTokensPerTask: v.taskCount > 0 ? v.totalTokens / v.taskCount : 0,
+      avgTokensPerTask: measuredTaskCount > 0 ? v.totalTokens / measuredTaskCount : 0,
+      unmeasuredTaskCount: v.unmeasuredTaskCount,
     };
   });
 

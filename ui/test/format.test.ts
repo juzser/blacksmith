@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatElapsed, formatRelative, pluralize, summarize } from '../src/lib/format.js';
+import {
+  formatElapsed,
+  formatMeasuredTokens,
+  formatRelative,
+  pluralize,
+  summarize,
+} from '../src/lib/format.js';
 
 describe('lib/format.ts formatRelative()', () => {
   const now = '2026-08-04T12:00:00.000Z';
@@ -131,5 +137,22 @@ describe('lib/format.ts formatElapsed()', () => {
 
   it('returns an empty string for an unparseable timestamp', () => {
     expect(formatElapsed('not-a-date', now)).toBe('');
+  });
+});
+
+// Issue #220 follow-up: {measured:false} is now a valid token_usage, so a
+// spend total that includes one or more unmeasured results is a floor, not
+// an exact figure — it must never read the same as a fully-measured total.
+describe('lib/format.ts formatMeasuredTokens()', () => {
+  it('renders a plain count when every result was measured', () => {
+    expect(formatMeasuredTokens(2000, 0)).toBe('2000 tok');
+  });
+
+  it('renders a floor plus the unmeasured count when spend is a mix', () => {
+    expect(formatMeasuredTokens(2000, 3)).toBe('≥2000 tok · 3 not measured');
+  });
+
+  it('renders "not measured" rather than "0 tok" when nothing was measured', () => {
+    expect(formatMeasuredTokens(0, 3)).toBe('not measured');
   });
 });

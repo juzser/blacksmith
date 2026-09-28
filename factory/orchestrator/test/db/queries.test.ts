@@ -176,9 +176,61 @@ describe('db/queries.ts', () => {
       ]);
       expect(result.epicsInFlight).toEqual([EPIC_ID]); // task-2 "reviewing", task-4 "in-progress"
       expect(result.tokensByEpic).toEqual([
-        { epicId: EPIC_ID, tokensSpent: 2000, tokensBudget: 4300 },
+        { epicId: EPIC_ID, tokensSpent: 2000, tokensBudget: 4300, unmeasured: 0 },
       ]);
       expect(result.alerts).toEqual({ escalations: 1, pendingWaivers: 0 });
+    });
+
+    it('sums a measured result exactly and counts an unmeasured one instead of folding it in as zero spend (issue #220)', async () => {
+      // A Result the orchestrator could not measure arrives as
+      // `token_usage: { measured: false }` (result.schema.json since #220),
+      // not as an absent field. epicTokenMaps() must add that Result to
+      // `unmeasuredByEpic` rather than `?? 0`-ing it into spentByEpic, or the
+      // epic's total silently reads as a smaller, fabricated number instead of
+      // an honest floor.
+      const session = 'sess-unmeasured';
+      const epicId = 'epic-unmeasured';
+      const taskMeasured = `${epicId}/task-measured`;
+      const taskUnmeasured = `${epicId}/task-unmeasured`;
+      const ts = '2029-06-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', ts, { task_id: taskMeasured, budget_tokens: 1000 }, session) +
+          tiedLine('task-added', ts, { task_id: taskUnmeasured, budget_tokens: 500 }, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: taskMeasured,
+              run_status: 'done',
+              token_usage: { input_tokens: 700, output_tokens: 300, total_tokens: 1000 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            { task_id: taskUnmeasured, run_status: 'done', token_usage: { measured: false } },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'unmeasured.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const unmeasured = openDb(dbPath);
+      try {
+        const result = overview(unmeasured.db);
+        expect(result.tokensByEpic).toContainEqual({
+          epicId,
+          tokensSpent: 1000,
+          tokensBudget: 1500,
+          unmeasured: 1,
+        });
+      } finally {
+        unmeasured.sqlite.close();
+      }
     });
 
     it('scopes to one session when a sessionId is given', () => {
@@ -1159,6 +1211,7 @@ describe('db/queries.ts', () => {
           taskCount: 1,
           totalTokens: 2000,
           avgTokensPerTask: 2000,
+          unmeasuredTaskCount: 0,
         },
       ]);
 
@@ -1177,6 +1230,61 @@ describe('db/queries.ts', () => {
       expect(result.recheckOutcomes).toEqual([]); // fixture has no origin:recheck tasks
       // Every fixture intake decided something, so every day has a denominator.
       expect(result.sameMistakeRateByDay.every((d) => d.rate !== null)).toBe(true);
+    });
+
+    it('excludes an unmeasured result from avgTokensPerTask instead of diluting it toward zero (issue #220)', async () => {
+      // Same bug, analytics()'s own bucket: a Result with
+      // `token_usage: { measured: false }` must grow taskCount and
+      // unmeasuredTaskCount without a `?? 0` folding it into totalTokens, and
+      // avgTokensPerTask must divide by the measured tasks only.
+      const session = 'sess-cost-unmeasured';
+      const ts = '2029-06-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'cost-epic/task-measured',
+              run_status: 'done',
+              provider: 'claude',
+              model_tier: 'small',
+              token_usage: { input_tokens: 400, output_tokens: 200, total_tokens: 600 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'cost-epic/task-unmeasured',
+              run_status: 'done',
+              provider: 'claude',
+              model_tier: 'small',
+              token_usage: { measured: false },
+            },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'cost-unmeasured.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const costUnmeasured = openDb(dbPath);
+      try {
+        const result = analytics(costUnmeasured.db);
+        expect(result.costByModelTierAndProvider).toContainEqual({
+          modelTier: 'small',
+          provider: 'claude',
+          taskCount: 2,
+          totalTokens: 600,
+          avgTokensPerTask: 600,
+          unmeasuredTaskCount: 1,
+        });
+      } finally {
+        costUnmeasured.sqlite.close();
+      }
     });
 
     it('reports no rate at all — not zero — for a day whose intakes decided nothing', async () => {

@@ -360,6 +360,7 @@ describe('project dimension (Phase 6b)', () => {
         taskCount: 1,
         totalTokens: 1000,
         avgTokensPerTask: 1000,
+        unmeasuredTaskCount: 0,
       },
     ]);
     expect(analytics(db, { project: 'demo-hub' }).costByModelTierAndProvider).toEqual([
@@ -369,6 +370,7 @@ describe('project dimension (Phase 6b)', () => {
         taskCount: 1,
         totalTokens: 2000,
         avgTokensPerTask: 2000,
+        unmeasuredTaskCount: 0,
       },
     ]);
   });
