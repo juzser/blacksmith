@@ -48,8 +48,16 @@ providers:
     # extractor generations diverge exactly as D-118 claimed: first-parseable
     # returns `[]`, first-validating returns the verdict. If you change these
     # args, re-run that comparison rather than reasoning about it.
-    args: ["exec", "--color", "never"]
-    model_tier: mid          # taxonomy.yml model_tier — judge tier, architecture §4
+    #
+    # Model and effort are pinned here, not inherited. Without `-m` the judge
+    # runs whatever `~/.codex/config.toml` defaults to — an interactive-use
+    # choice, often the frontier model at high effort — so a confirm/refute
+    # call billed at `model_tier: mid` spent frontier quota. `model` below must
+    # name the same id as `-m`: it is what the event log records (without it a
+    # cli judge is logged as `codex:default`), and nothing checks the two agree.
+    args: ["exec", "--color", "never", "-m", "gpt-6-sol", "-c", "model_reasoning_effort=\"medium\""]
+    model: gpt-6-sol
+    model_tier: mid         # taxonomy.yml model_tier — judge tier, architecture §4
     # PRECONDITION: `codex` on PATH, and `codex login` run on every machine
     # that dispatches a quorum trigger. Without either the CLI transport still
     # spawns, fails, and quorum.ts records a provider error per trigger —
