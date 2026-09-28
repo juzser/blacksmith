@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
+import { sessionOwnerRole } from './delegation.js';
 import { SmithError } from './errors.js';
 import {
   appendEvent,
@@ -291,6 +292,28 @@ async function emit(
 }
 
 /**
+ * Who dispatched this session, read off the event graph -- the answer a
+ * `dispatch_decision` written with no explicit `--actor` wants before it
+ * falls back to `system` (issue #218).
+ *
+ * `smith judge dispatch` runs inside a wave-runner's own delegated session,
+ * and the CLI does not thread an `--actor` through that call. Defaulting to
+ * `system` was a placeholder, not a real writer, and `delegation.ts`'s rule 3
+ * reads every `dispatch_decision` in a delegated session as a second author
+ * unless its `actor` names the role that session belongs to. `sessionOwnerRole`
+ * is the same lookup rule 3 already does when it decides whose session this
+ * is, so a judge dispatch recorded through this default and a dispatch a
+ * wave-runner writes itself land under the same actor -- there is nothing
+ * left for rule 3 to flag. A session nothing dispatched (or a P9-7
+ * continuation, which is not delegation) still falls through to `system`
+ * unchanged, exactly as before.
+ */
+async function delegatedActor(sessionId: string, opts: EventOpts): Promise<string | undefined> {
+  const events = await readLineageEvents(sessionId, opts);
+  return sessionOwnerRole(events, sessionId) ?? undefined;
+}
+
+/**
  * Record that a judge was dispatched and what file it owes. Emitted by the
  * dispatcher BEFORE the agent runs — a dispatch recorded afterwards could only
  * ever describe judges that came back, which is the set that was never the
@@ -326,6 +349,10 @@ export async function recordJudgeDispatch(
     );
   }
 
+  // Explicit `--actor` is authoritative and skips this lookup entirely; only
+  // an absent actor reaches for the delegated session's owner.
+  const actor = ctx.actor ?? (await delegatedActor(ctx.sessionId, opts));
+
   return emit(
     JUDGE_DISPATCH_EVENT_TYPE,
     {
@@ -337,7 +364,7 @@ export async function recordJudgeDispatch(
       declared_artifact: input.artifactPath,
     },
     input.taskId,
-    ctx,
+    { ...ctx, actor },
     opts,
   );
 }

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { foldAgents, liveAgents } from '../src/agents-registry.js';
 import type { CrosscheckPolicy } from '../src/crosscheck.js';
-import { appendEvent, readEvents } from '../src/events.js';
+import { checkDelegationLog, type DelegationPolicy } from '../src/delegation.js';
+import { appendEvent, readEvents, readLineageEvents } from '../src/events.js';
 import type { JudgeResult } from '../src/providers/types.js';
 import {
   computeQuorum,
@@ -586,5 +587,110 @@ describe('quorum.ts recordJudgeRun / runQuorumCase (integration)', () => {
     });
     const events = await readEvents(sessionId, { stateDir });
     expect(events.some((e) => e.record.event_type === 'judge-verdict')).toBe(false);
+  });
+});
+
+// recordJudgeRun writes a dispatch_decision under the same `ctx.actor ??
+// 'system'` default as judges.ts's recordJudgeDispatch, reachable via
+// crossFinding.ts's runIndependentFinder inside a wave-runner's delegated
+// session. Same bug, same fix (issue #218).
+describe('quorum.ts recordJudgeRun inside a delegated session (issue #218)', () => {
+  let stateDir: string;
+  const JUDGE_POLICY: DelegationPolicy = {
+    version: 1,
+    grants: [
+      { role: 'wave-runner', mayDispatch: ['coder', 'tester', 'verifier'], mustOpenSession: true },
+    ],
+  };
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-quorum-delegated-'));
+    await appendEvent(
+      {
+        session_id: 'epic-1',
+        actor: 'operator',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const waveDispatch = await appendEvent(
+      {
+        session_id: 'epic-1',
+        actor: 'operator',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-1/task-1',
+        plan_version: 1,
+        causal_parent: 'epic-1#0',
+        payload: {
+          agent_role: 'wave-runner',
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+        },
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: 'wave-1',
+        actor: 'operator',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: waveDispatch.event_id,
+        payload: {},
+      },
+      { stateDir },
+    );
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('records the delegated session owner as actor, so delegation check passes it', async () => {
+    await recordJudgeRun(
+      {
+        taskId: 'epic-1/task-1',
+        modelTier: 'mid',
+        model: 'codex:default',
+        kind: 'verify',
+        run: externalOk('codex', 'shadow', 'confirm'),
+        native: native(),
+      },
+      { sessionId: 'wave-1', planVersion: 1, causalParent: 'wave-1#0' },
+      { stateDir },
+    );
+
+    const events = await readLineageEvents('wave-1', { stateDir });
+    const dispatch = events.find(
+      (e) => e.record.event_type === 'dispatch_decision' && e.record.session_id === 'wave-1',
+    );
+    expect(dispatch?.record.actor).toBe('wave-runner');
+
+    const report = checkDelegationLog(events, JUDGE_POLICY, { sessionId: 'epic-1' });
+    expect(report.ok, report.checks.map((c) => c.detail).join(' | ')).toBe(true);
+  });
+
+  it('still flags a genuinely foreign actor even when a delegated owner exists', async () => {
+    await recordJudgeRun(
+      {
+        taskId: 'epic-1/task-1',
+        modelTier: 'mid',
+        model: 'codex:default',
+        kind: 'verify',
+        run: externalOk('codex', 'shadow', 'confirm'),
+        native: native(),
+      },
+      { sessionId: 'wave-1', planVersion: 1, causalParent: 'wave-1#0', actor: 'operator' },
+      { stateDir },
+    );
+
+    const events = await readLineageEvents('wave-1', { stateDir });
+    const report = checkDelegationLog(events, JUDGE_POLICY, { sessionId: 'epic-1' });
+    expect(report.ok).toBe(false);
+    expect(report.checks.map((c) => c.detail).join(' | ')).toMatch(/wave-1#1/);
   });
 });
