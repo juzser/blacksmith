@@ -467,6 +467,16 @@ describe('the audit verbs', () => {
       expect(await eventTypes()).toContain('audit-cut');
     });
 
+    it('names the project in the spec without leaking its absolute filesystem path', async () => {
+      const fingerprint = await raiseOne();
+      await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+
+      const cut = await cutAudit(project, input, ctx, opts());
+
+      expect(cut.spec).not.toContain(project);
+      expect(cut.spec).toContain('- **Project** — `project`;');
+    });
+
     it('offers the same epic its findings again without a second stamp', async () => {
       const fingerprint = await raiseOne();
       await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
