@@ -3821,7 +3821,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       expect(prompt).toContain('race in the cache warmer');
     });
 
-    it('names an amendment this close will discharge, and what discharges it', () => {
+    it('names a landed amendment this close marks amended, and the task that landed it', () => {
       const prompt = promptFor(
         [taskRow({ taskId: 'epic-1/task-2', taskStatus: 'completed', planVersion: 2 })],
         [
@@ -3835,6 +3835,37 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       );
       expect(prompt).toMatch(/finding-1/);
       expect(prompt).toMatch(/epic-1\/task-2 at plan v2/);
+    });
+
+    // bs #222: a cross-provider judge read "Open findings: 0" beside
+    // "Amendments this close will discharge: 3" as three open blockers and
+    // refuted an otherwise mechanically-clean verdict -- the three were
+    // already satisfied (every amending task had landed at the amended plan
+    // version) and summarizeEpic had already kept them out of openFindings.
+    // The digest has to say the discharge is a done fact, not a debt, and
+    // keep the line out of anything a judge could read as outstanding.
+    it('states a satisfied amendment as already landed, not as outstanding work this close still owes', () => {
+      const prompt = promptFor(
+        [taskRow({ taskId: 'epic-1/task-2', taskStatus: 'completed', planVersion: 2 })],
+        [
+          findingFixture({
+            finding_status: AMEND_PENDING_STATUS,
+            finding_scope: 'spec',
+            amends_task_ids: ['epic-1/task-2'],
+            amends_plan_version: 2,
+          }),
+        ],
+      );
+      // The header count line must say the obligation is already satisfied,
+      // not merely that the close "will discharge" it with nothing to
+      // distinguish that from unfinished work.
+      expect(prompt).toMatch(/already landed/i);
+      expect(prompt).toMatch(/not open, not a blocker/i);
+      expect(prompt).not.toMatch(/Amendments this close will discharge/);
+      // The per-finding line must say the amending task already landed at
+      // the required plan version, not just "discharged by" with no tense
+      // that marks the work as done.
+      expect(prompt).toMatch(/already landed \(epic-1\/task-2 at plan v2\)/);
     });
 
     // D-21 Part 4: the judge is the reader this honesty requirement is
