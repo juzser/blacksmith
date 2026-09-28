@@ -1689,20 +1689,24 @@ export async function staleFindings(
     // dereferenced: the claims branch used to throw on it.
     const filePath = finding.file_path;
     if (filePath === undefined) continue;
+    // #217: the finding's OWN task merging its file is not a rewrite — it is
+    // exactly the diff the reviewer read when raising the finding, so
+    // treating it as staleness meant a waiver batch refused to grant over
+    // evidence a merge had not touched at all. But a re-cut does not always
+    // get a new task_id: a same-id supersede (spec.ts's "a same-id supersede
+    // needs no pairing") keeps the original id, so the same task_id CAN
+    // appear in `merges` twice — once for the diff already read, once for a
+    // genuine later rewrite. Only the first self-merge after `freshUntil` is
+    // excluded here; a second one is real evidence of a rewrite and must
+    // still be able to mark the finding stale, so the flag below is scoped
+    // per finding, not a blanket skip of every self-merge.
+    let skippedOwnFirstMerge = false;
     for (const merge of merges) {
       if (merge.index <= freshUntil) continue;
-      // #217: the finding's OWN task merging its file is not a rewrite — it
-      // is exactly the diff the reviewer read when raising the finding, so
-      // treating it as staleness meant a waiver batch refused to grant over
-      // evidence a merge had not touched at all. A DIFFERENT task's merge
-      // must still count (D-143 two-spelling compare, taskIdsMatch), and so
-      // must this same task merging again LATER under a genuine re-cut — but
-      // that second case cannot arise here: a re-cut task is assigned a new
-      // task_id of its own (spec.ts's successor chain), so one task_id
-      // appears at most once in `merges` for any given lineage, and this
-      // exclusion can only ever remove that one, original, self-reviewed
-      // merge.
-      if (taskIdsMatch(merge.taskId, finding.task_id)) continue;
+      if (taskIdsMatch(merge.taskId, finding.task_id) && !skippedOwnFirstMerge) {
+        skippedOwnFirstMerge = true;
+        continue;
+      }
       if (merge.filesChanged) {
         const hit = merge.filesChanged.find((changed) => normalizeFilePath(changed) === filePath);
         if (hit === undefined) continue;

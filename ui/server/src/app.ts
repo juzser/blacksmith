@@ -866,7 +866,11 @@ export function createApp(opts: AppOpts): AppHandle {
     const ctx = await resolveContext(body, eventOpts, logCache);
     const results = await applyBatch(decisions, ctx, eventOpts);
     await applyDb(opts.dbPath, ctx.sessionId, dbOpts);
-    return c.json({ applied: results.events.length });
+    // #221 review finding: findingIdsToCarry (every finding a denial in this
+    // batch left open, with no further move of its own) was computed by
+    // applyBatch() and then dropped on the floor here — the one caller who
+    // could read it back never got it. Forwarded the same way `applied` is.
+    return c.json({ applied: results.events.length, findingIdsToCarry: results.findingIdsToCarry });
   });
 
   /** The one write path all three lesson routes share (P9-36). */

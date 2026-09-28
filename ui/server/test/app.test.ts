@@ -624,12 +624,50 @@ describe('ui/server app.ts', () => {
       }),
     });
     expect(res.status).toBe(200);
-    expect(await json<{ applied: number }>(res)).toEqual({ applied: 1 });
+    // A grant closes the finding outright, so findingIdsToCarry is empty —
+    // contrast the denial case below, which leaves its finding open.
+    expect(await json<{ applied: number; findingIdsToCarry: string[] }>(res)).toEqual({
+      applied: 1,
+      findingIdsToCarry: [],
+    });
 
     // Projection was refreshed synchronously — a fresh GET sees it without a
     // separate `db apply` call.
     const events = await readEvents(SESSION_ID, { stateDir });
     expect(events.some((e) => e.record.event_type === 'waiver-granted')).toBe(true);
+    closeApp(handle);
+  });
+
+  // #221 review finding: applyBatch()'s WaiverBatchResult carries
+  // findingIdsToCarry (every finding id a denial leaves open with no
+  // further move of its own — the fact `smith plan amend --findings` must
+  // later name to close it) but the route only forwarded `applied`,
+  // silently dropping it on the floor for a caller with no other way to
+  // read it back.
+  it('POST /api/waivers/apply-batch returns findingIdsToCarry alongside applied on a denial', async () => {
+    const handle = app();
+    const taskDetailRes = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_4)}`);
+    const detail = await json<{ findings: Array<{ findingId: string; fingerprint: string }> }>(
+      taskDetailRes,
+    );
+    const finding = detail.findings[0];
+    if (!finding) throw new Error('fixture: expected task-4 to have at least one finding');
+
+    const res = await handle.app.request('/api/waivers/apply-batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: SESSION_ID,
+        decisions: [
+          { fingerprint: finding.fingerprint, decision: 'denied', operatorNote: 'not now' },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await json<{ applied: number; findingIdsToCarry: string[] }>(res)).toEqual({
+      applied: 1,
+      findingIdsToCarry: [finding.findingId],
+    });
     closeApp(handle);
   });
 

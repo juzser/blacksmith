@@ -1517,6 +1517,20 @@ describe('findings.ts', () => {
       expect(stale.has(findingId)).toBe(false);
     });
 
+    // #217 review finding: a same-id supersede (spec.ts's "a same-id
+    // supersede needs no pairing") keeps the original task_id on a re-cut,
+    // so one task_id CAN merge twice — once for the diff the reviewer read,
+    // and again later for a genuine rewrite. Only the first self-merge is
+    // excluded; a second merge of the same task_id must still count.
+    it('still marks a finding stale on a SECOND merge of its own task id (same-id re-cut)', async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // the diff the reviewer read
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // a later same-id re-cut rewrites it again
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(true);
+    });
+
     // #217: the exclusion is scoped to the finding's OWN task — a different
     // task merging over the same file must still mark it stale.
     it('still marks a finding stale when a DIFFERENT task merges over its file', async () => {
