@@ -262,13 +262,20 @@ about the commit it read and nothing else. With no such branch it **refuses**
 (`cli.no-integration-branch`), because a review pinned to a head nobody could
 read is a review nothing can be shown to cover.
 
-The event is written even when the evidence is empty. "Ran and was clean" and
-"never ran" are different facts, and `smith epic verdict` distinguishes them:
-an epic with no closing spec review on record is **held**, and one whose review
-read an older head is held as stale. There is deliberately no
-`not-required` escape hatch here — an epic can legitimately owe no MCP
-surface, but every epic has a plan, and every plan can be wrong in a way only
-the finished code reveals.
+The event is written even when the evidence is empty. "Ran and was clean,"
+"never ran," and "the tier waived it" are three different facts, and `smith
+epic verdict` keeps them apart: an epic with no closing spec review on
+record is **held**, unless its effort tier is `small` (§0a) and the live
+plan is still v1 — never amended, so never shown a defect a review would
+have caught (`.claude/skills/bs/run.md` step 13). That waiver is narrow: a
+plan at v2+, or one whose version this check cannot read, still holds
+regardless of tier, and the verdict records a waived review as a skip of
+its own rather than staying silent about it. A review that IS on record is
+still held as stale under every tier, `small` included — the tier only
+ever waives an *absent* review, never a stale one. Beyond that one
+tier-scoped waiver there is deliberately no `not-required` escape hatch
+here — an epic can legitimately owe no MCP surface, but every epic has a
+plan, and every plan can be wrong in a way only the finished code reveals.
 
 A review reads two things, and goes stale two ways (D-125). The head it read is
 one; the plan version it read is the other, checked against the live

@@ -65,9 +65,13 @@ line the daemon is allowed to cross. See
 
 **2. Some checks only run when you run them.** `smith integration check` is
 the only check that sees the *assembled* integration branch, and it is
-operator-invoked. Same for the closing spec review. Skipping them no longer
-buys a green epic — `smith epic verdict` holds without them — but nothing
-runs them on your behalf.
+operator-invoked. Same for the closing spec review, with one carve-out: at
+effort tier `small` (§0a), a plan still at v1 — never amended — waives it
+outright, and the verdict records that as a skip rather than a hold (see
+[operator-guide §7c](operator-guide/closing-an-epic.md#7c-smith-epic-spec-review--reading-the-plan-against-the-code-that-exists)).
+Skipping either check when the tier didn't waive it no longer buys a green
+epic — `smith epic verdict` holds without them — but nothing runs them on
+your behalf.
 
 **3. Two cross-provider judges run, and both of them vote.**
 [`crosscheck.yml`](../../factory/policies/crosscheck.yml) ships

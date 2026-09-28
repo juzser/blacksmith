@@ -187,8 +187,13 @@ describe('resolveEffort', () => {
     expect(resolved.securityTriggers).toHaveLength(1);
     expect(resolved.securityTriggers[0]?.matchType).toBe('case');
     expect(resolved.reason).toMatch(/security/i);
-    // ...and the profile it returns is the floor's, not the request's.
+    // ...and the profile it returns is the floor's, not the request's: a
+    // `small` epic waives the closing spec review, `medium` never does, so a
+    // caller building a `ClosingReviewEffort` from `{ effective, profile }`
+    // (`cli.ts`'s `epic verdict`/`epic close`) cannot end up with the request
+    // it was just floored past.
     expect(resolved.profile.verifierSeverities).toEqual(['S1-stop-the-line', 'S2-major']);
+    expect(resolved.profile.closingSpecReview).toBe('always');
   });
 
   it('fires the floor on a security keyword in a nonfunctional clause too', () => {

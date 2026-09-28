@@ -86,6 +86,20 @@ export interface EffortProfile {
   closingSpecReview: (typeof CLOSING_SPEC_REVIEW)[number];
 }
 
+/**
+ * The one fact `specReviewBlockers`/`summarizeEpic` need out of a resolved
+ * tier: whether the closing spec review may be absent, and which tier said
+ * so (for the record the epic verdict keeps when it exercises that skip).
+ * Deliberately narrower than `EffortResolution` — spec.ts and epic.ts must
+ * not gain a reason to import `loadEffortPolicy`/`resolveEffort` themselves;
+ * only cli.ts resolves policy, the same division `effort show` already
+ * relies on.
+ */
+export interface ClosingReviewEffort {
+  tier: EffortTier;
+  closingSpecReview: EffortProfile['closingSpecReview'];
+}
+
 export interface EffortPolicy {
   version: number;
   /** The tier an epic gets when its plan file names none. */

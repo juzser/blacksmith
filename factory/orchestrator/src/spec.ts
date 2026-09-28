@@ -1,4 +1,5 @@
 import { claimCoversPath } from './claims.js';
+import type { ClosingReviewEffort } from './effort.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
 import {
@@ -203,16 +204,33 @@ export function taskSuccessors(
  * a required parameter for the reason `integration` and `mcp` are required on
  * summarizeEpic — a defaulted one is a forgotten argument that manufactures a
  * green.
+ *
+ * `effort` is the one legal way an epic reaches this gate with no review on
+ * record at all: `.claude/skills/bs/run.md` step 13 lets tier `small` skip
+ * the closing review while the plan is still v1 — never amended, so never
+ * shown a defect a review would have caught. That is not a second escape
+ * hatch grown here; it is that rule, read. The skip is narrow on purpose: it
+ * only ever waives an *absent* review. A plan at v2+, or a plan version this
+ * function cannot read, still blocks regardless of tier, and a review that
+ * IS on record is still walked through every staleness check below even
+ * under `small` — the tier says "you may have skipped it," never "you may
+ * trust it once stale." Like `planVersion`, `effort` is a required parameter
+ * for the same reason: a defaulted one would silently reinstate the escape
+ * hatch this function has never had.
  */
 export function specReviewBlockers(
   epicId: string,
   status: SpecReviewStatus,
   planVersion: number | null,
+  effort: ClosingReviewEffort,
 ): string[] {
   const branch = `smith/${epicId}/${RESERVED_TASK_ID}`;
   const { review, headSha } = status;
 
   if (review === null) {
+    if (effort.closingSpecReview === 'when-plan-amended' && planVersion === 1) {
+      return [];
+    }
     return [
       `Epic "${epicId}" has no closing spec review on record: nothing re-read the plan against the code that now exists. A spec review run before the code was written cannot see the defects the code reveals (D-33).`,
     ];

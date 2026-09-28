@@ -10,6 +10,7 @@ import type {
   ProviderConfig,
 } from '../src/crosscheck.js';
 import type { TaskFoldRow } from '../src/db/projector.js';
+import type { ClosingReviewEffort } from '../src/effort.js';
 import type {
   EpicConcurrency,
   EpicPlanRoster,
@@ -236,6 +237,17 @@ function okGoalCheck(planVersion = 1): GoalCheckStatus {
   };
 }
 
+/**
+ * Every test in this file predates the closing-review tier: they all want the
+ * pre-existing "the review always runs" behavior, not tier `small`'s waiver.
+ * `.claude/skills/bs/run.md` step 13/specFindings.test.ts's `alwaysEffort()`
+ * fixture is the same shape; kept local here rather than shared since the two
+ * files' fixtures don't otherwise share an import.
+ */
+function alwaysEffort(): ClosingReviewEffort {
+  return { tier: 'huge', closingSpecReview: 'always' };
+}
+
 /** The statuses that mean "done" to the epic gate, and so demand a gate run. */
 const TERMINAL_OK = new Set(['completed', 'waived']);
 
@@ -287,6 +299,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.nonTerminalTaskCount).toBe(1);
@@ -338,6 +351,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.openFindings).toHaveLength(1);
@@ -386,6 +400,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
         okGoalCheck(),
+        alwaysEffort(),
       );
       expect(summary.openFindings).toHaveLength(0);
       expect(summary.discretionaryFindings).toHaveLength(
@@ -403,6 +418,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.includes('no tasks'))).toBe(true);
@@ -422,6 +438,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [{ event_id: 'sess-1#7', reason: 'missing required string field(s): task_id' }],
     );
@@ -438,6 +455,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
     );
@@ -456,6 +474,7 @@ describe('epic.ts summarizeEpic (pure)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(true);
     expect(summary.blockers).toHaveLength(0);
@@ -483,6 +502,7 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     const blocker = summary.blockers.find((b) => b.includes('epic-1/task-1'));
@@ -498,6 +518,7 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     const blocker = summary.blockers.find((b) => b.includes('epic-1/task-1'));
@@ -517,6 +538,7 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.ungatedTasks.map((t) => t.taskId)).toEqual(['epic-1/task-1', 'epic-1/task-3']);
     expect(summary.blockers.some((b) => b.includes('epic-1/task-2'))).toBe(false);
@@ -539,6 +561,7 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.ungatedTasks).toHaveLength(0);
     expect(summary.blockers).toHaveLength(1);
@@ -554,6 +577,7 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.ungatedTasks).toHaveLength(0);
     expect(summary.mechanicallyReady).toBe(true);
@@ -647,6 +671,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.openFindings).toHaveLength(1);
@@ -663,6 +688,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(true);
     expect(summary.openFindings).toHaveLength(0);
@@ -692,6 +718,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.satisfiedAmendments).toHaveLength(1);
     expect(summary.satisfiedAmendments[0]?.repairedObligationReason).toBe(
@@ -711,6 +738,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.satisfiedAmendments).toHaveLength(1);
     expect(summary.satisfiedAmendments[0]).not.toHaveProperty('repairedObligationReason');
@@ -728,6 +756,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.satisfiedAmendments).toHaveLength(0);
@@ -745,6 +774,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(true);
     expect(summary.satisfiedAmendments).toHaveLength(1);
@@ -759,6 +789,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.satisfiedAmendments).toHaveLength(0);
@@ -784,6 +815,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     // Never silently discharged: the well-formed id in the same list landed,
@@ -810,6 +842,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.satisfiedAmendments).toHaveLength(0);
@@ -833,6 +866,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.satisfiedAmendments).toHaveLength(0);
@@ -865,6 +899,7 @@ describe('epic.ts summarizeEpic — the amendment path (D-127 Part B)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.tasks.map((t) => t.taskId)).toEqual([
       'epic-1/task-1',
@@ -895,6 +930,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.nonTerminalTaskCount).toBe(1);
@@ -915,6 +951,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
       null,
@@ -936,6 +973,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
       null,
@@ -962,6 +1000,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
       null,
@@ -985,6 +1024,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
       null,
@@ -1021,6 +1061,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
       null,
@@ -1059,6 +1100,7 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
       [],
       null,
@@ -1105,6 +1147,7 @@ describe('epic.ts summarizeEpic — follow-up tasks discharged by waived finding
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.blockers).toEqual([]);
     expect(summary.mechanicallyReady).toBe(true);
@@ -1127,6 +1170,7 @@ describe('epic.ts summarizeEpic — follow-up tasks discharged by waived finding
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(true);
   });
@@ -1154,6 +1198,7 @@ describe('epic.ts summarizeEpic — follow-up tasks discharged by waived finding
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.nonTerminalTaskCount).toBe(1);
@@ -1171,6 +1216,7 @@ describe('epic.ts summarizeEpic — follow-up tasks discharged by waived finding
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.nonTerminalTaskCount).toBe(1);
@@ -1198,6 +1244,7 @@ describe('epic.ts summarizeEpic — follow-up tasks discharged by waived finding
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.nonTerminalTaskCount).toBe(1);
@@ -1222,6 +1269,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.includes('no integration-root check'))).toBe(true);
@@ -1245,6 +1293,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.includes('lint'))).toBe(true);
@@ -1264,6 +1313,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.toLowerCase().includes('stale'))).toBe(true);
@@ -1282,6 +1332,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.includes('smith/epic-1/integration'))).toBe(true);
@@ -1307,6 +1358,7 @@ describe('epic.ts summarizeEpic — the plan roster (D-126)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       roster(
         [
           { taskId: 'epic-1/task-1', taskStatus: 'todo' },
@@ -1339,6 +1391,7 @@ describe('epic.ts summarizeEpic — the plan roster (D-126)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       roster([
         { taskId: 'epic-1/task-1', taskStatus: 'completed' },
         { taskId: 'epic-1/task-2', taskStatus: 'completed' },
@@ -1361,6 +1414,7 @@ describe('epic.ts summarizeEpic — the plan roster (D-126)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       roster([{ taskId: 'epic-1/task-1', taskStatus: 'todo' }]),
     );
 
@@ -1380,6 +1434,7 @@ describe('epic.ts summarizeEpic — the plan roster (D-126)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       roster([
         { taskId: 'epic-1/task-1', taskStatus: 'todo' },
         { taskId: 'epic-1/task-2', taskStatus: 'todo' },
@@ -1403,6 +1458,7 @@ describe('epic.ts summarizeEpic — the plan roster (D-126)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
       null,
     );
 
@@ -1556,7 +1612,13 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     const before = await readEvents(sessionId, { stateDir });
 
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       {
         stateDir,
@@ -1605,7 +1667,13 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     const before = await readEvents(sessionId, { stateDir });
 
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -1632,6 +1700,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1655,6 +1724,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1714,6 +1784,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1763,6 +1834,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
       const outcome = await runEpicVerdict(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1799,6 +1871,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
       const outcome = await runEpicVerdict(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1827,6 +1900,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1860,6 +1934,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1889,6 +1964,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1917,6 +1993,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
 
     const outcome = await runEpicVerdict(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -1943,7 +2020,13 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     await addGoalCheck();
 
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       {
         stateDir,
@@ -1968,7 +2051,13 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     await addGoalCheck();
 
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       {
         stateDir,
@@ -1987,7 +2076,13 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     await addGoalCheck();
 
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       {
         stateDir,
@@ -2215,7 +2310,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await addGoalCheck();
 
     const record = await closeEpic(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -2269,7 +2370,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await addGoalCheck();
 
     const record = await closeEpic(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -2311,7 +2418,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await addGoalCheck();
 
     await closeEpic(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -2340,7 +2453,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await addGoalCheck();
 
     const record = await closeEpic(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -2378,7 +2497,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await addGoalCheck();
 
     const record = await closeEpic(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -2430,7 +2555,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await transition('finding-minor', 'waived', ctx(), { stateDir });
 
     const record = await closeEpic(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctx(),
       { stateDir },
     );
@@ -2471,7 +2602,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
 
     await expect(
       closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         {
           stateDir,
@@ -2491,7 +2628,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
 
     await expect(
       closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         {
           stateDir,
@@ -2511,6 +2654,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
 
     const record = await closeEpic(
       {
+        effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
         mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -2549,6 +2693,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await expect(
       closeEpic(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -2569,6 +2714,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
     await expect(
       closeEpic(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -2626,7 +2772,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       await raiseAmendPending();
 
       const record = await closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -2705,7 +2857,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       await raiseAmendPending(['epic-1/task-2']);
 
       const record = await closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -2767,7 +2925,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       await raiseAmendPending(['epic-1/task-2']);
 
       const record = await closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -2809,7 +2973,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       );
 
       const record = await closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -2872,7 +3042,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       );
 
       const record = await closeEpic(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -2910,6 +3086,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       await expect(
         closeEpic(
           {
+            effort: alwaysEffort(),
             epicId,
             integrationHeadSha: HEAD_SHA,
             mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -2941,6 +3118,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
 
       const record = await closeEpic(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: MCP_SURFACE_NOT_REQUIRED,
@@ -2981,7 +3159,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       const before = await readEvents(sessionId, { stateDir });
 
       const outcome = await runEpicVerdict(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -2991,7 +3175,13 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       expect(outcome.summary.satisfiedAmendments.map((a) => a.findingId)).toEqual(['finding-spec']);
       // Asked twice, answered twice, wrote nothing either time.
       await runEpicVerdict(
-        { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+        {
+          epicId,
+          integrationHeadSha: HEAD_SHA,
+          mcp: MCP_SURFACE_NOT_REQUIRED,
+          goal: goalStatus(),
+          effort: alwaysEffort(),
+        },
         ctx(),
         { stateDir },
       );
@@ -3042,6 +3232,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
       },
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(true);
   });
@@ -3055,6 +3246,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
       redSurface(),
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.includes('MCP-P1'))).toBe(true);
@@ -3075,6 +3267,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
       },
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
     expect(summary.blockers.some((b) => b.includes('mcp.manifest.json'))).toBe(true);
@@ -3095,6 +3288,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
       },
       okSpecReview(),
       okGoalCheck(),
+      alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(true);
     expect(summary.blockers).toHaveLength(0);
@@ -3159,7 +3353,13 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
     it('refuses without a rationale, naming the rule it refused over', async () => {
       await expect(
         closeEpic(
-          { epicId, integrationHeadSha: HEAD_SHA, mcp: redSurface(), goal: goalStatus() },
+          {
+            epicId,
+            integrationHeadSha: HEAD_SHA,
+            mcp: redSurface(),
+            goal: goalStatus(),
+            effort: alwaysEffort(),
+          },
           ctx(),
           {
             stateDir,
@@ -3173,6 +3373,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
     it('records the overridden mcp rule in the epic-closed event', async () => {
       const record = await closeEpic(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: redSurface(),
@@ -3205,6 +3406,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
     it('records what the surface verdict actually was, not just the rule it broke', async () => {
       await closeEpic(
         {
+          effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
           mcp: redSurface(),
@@ -3273,6 +3475,7 @@ describe('epic.ts — the spec-vs-goal gate (B3)', () => {
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       goalCheck,
+      alwaysEffort(),
       plan,
     );
   }
@@ -3419,7 +3622,16 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
     specReview: SpecReviewStatus = okSpecReview(),
     goalCheck: GoalCheckStatus = okGoalCheck(),
   ) {
-    return summarizeEpic('epic-1', tasks, findings, integration, mcp, specReview, goalCheck);
+    return summarizeEpic(
+      'epic-1',
+      tasks,
+      findings,
+      integration,
+      mcp,
+      specReview,
+      goalCheck,
+      alwaysEffort(),
+    );
   }
 
   function promptFor(...args: Parameters<typeof summaryFor>): string {
@@ -3829,6 +4041,7 @@ describe('epic.ts — how wide the epic ran', () => {
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
         okGoalCheck(),
+        alwaysEffort(),
       );
 
       // Null is "nobody looked", and it must not read as "it ran fine".
@@ -3848,6 +4061,7 @@ describe('epic.ts — how wide the epic ran', () => {
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
         okGoalCheck(),
+        alwaysEffort(),
         null,
         [],
         summariseEpicConcurrency([
@@ -3875,6 +4089,7 @@ describe('epic.ts — how wide the epic ran', () => {
           MCP_SURFACE_NOT_REQUIRED,
           okSpecReview(),
           okGoalCheck(),
+          alwaysEffort(),
           null,
           [],
           concurrency,

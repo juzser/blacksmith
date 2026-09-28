@@ -265,12 +265,17 @@ playbooks are written to prevent.
     ```
 
     Mechanical oracles first: non-terminal tasks, open blocking findings, a
-    missing/failed/stale integration-root check, a missing/stale closing spec
-    review, or a missing/stale spec-vs-goal check return `hold` (exit 1)
-    without spending a judge call. `--project` is required — the verdict
-    reads the integration branch head to decide whether the records from
-    steps 12, 13 and 14 still cover it. On `hold`, do not open the PR — report
-    the `blockers` to the operator and go back to step 11.
+    missing/failed/stale integration-root check, a closing spec review that's
+    stale or missing when the tier required one, or a missing/stale
+    spec-vs-goal check return `hold` (exit 1) without spending a judge call.
+    A tier that waived the review (step 13: `when-plan-amended` on a plan
+    still at v1) is not a hold on that ground — the verdict records the skip
+    as a fact instead of staying silent about it, same as step 13 asks. A
+    review that IS on record is still walked through every staleness check
+    regardless of tier. `--project` is required — the verdict reads the
+    integration branch head to decide whether the records from steps 12, 13
+    and 14 still cover it. On `hold`, do not open the PR — report the
+    `blockers` to the operator and go back to step 11.
 
     Once the oracles pass, the judge call is real money when an external
     provider is `active` in `crosscheck.yml`: codex spends the operator's
