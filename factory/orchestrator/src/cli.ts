@@ -15,7 +15,7 @@
 // nothing at runtime. `test/cliBoot.test.ts` reads the built graph and fails if
 // the database layer creeps back into it.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
@@ -130,6 +130,7 @@ import {
 import {
   bareTaskId,
   diffPlans,
+  impliedSpecsDir,
   latestPlanVersion,
   livePlanTasks,
   loadPlan,
@@ -612,6 +613,52 @@ async function issueInputs(flags: Record<string, string>) {
  */
 function planOptsFromFlags(flags: Record<string, string>): PlanOpts {
   return flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {};
+}
+
+/** `realpathSync`, falling back to the resolved lexical path when it fails. */
+function realOrResolved(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
+ * `plan amend`'s own specs-dir default (#219) -- deliberately not
+ * `planOptsFromFlags`, whose silent fallback to `SPECS_ACTIVE_DIR` is a
+ * documented contract several other commands rely on for a READ (see its
+ * own doc comment, and `issueInputs`'s). Amend is a WRITE: the version it
+ * cuts is filed at `<specsDir>/<epicId>/plan-vN.json`, so silently
+ * defaulting to this checkout's own specs tree when `--plan` already lives
+ * somewhere else does not merely read the wrong file, it plants the new
+ * version in the wrong one -- beside no other version of the plan it just
+ * amended.
+ *
+ * Derived from `--plan`'s own directory instead (`impliedSpecsDir`), when
+ * that path already sits in the shape a plan file lives in. An explicit
+ * `--specs-dir` still wins outright when it agrees with that; when it does
+ * not, the two flags are answering a question this command cannot silently
+ * referee, so it refuses rather than guessing which one the caller meant.
+ */
+function amendSpecsDirOpts(
+  planPath: string,
+  plan: PlanFile,
+  flags: Record<string, string>,
+): PlanOpts {
+  const explicit = flags['specs-dir'];
+  const implied = impliedSpecsDir(planPath, plan.epic_id);
+  if (explicit === undefined) return implied === null ? {} : { specsDir: implied };
+  // Compared on disk, not lexically: the same tree reached through a
+  // symlink (macOS /tmp -> /private/tmp) is agreement, not a mismatch.
+  if (implied !== null && realOrResolved(explicit) !== realOrResolved(implied)) {
+    throw new SmithError(
+      'cli.specs-dir-mismatch',
+      `--specs-dir "${explicit}" disagrees with the directory --plan "${planPath}" already lives in: that plan's own layout says its specs dir is "${implied}". Drop --specs-dir to amend in place, point it at "${implied}", or move --plan under the tree --specs-dir names.`,
+      { plan: planPath, epicId: plan.epic_id, specsDir: explicit, impliedSpecsDir: implied },
+    );
+  }
+  return { specsDir: explicit };
 }
 
 /**
@@ -1472,7 +1519,8 @@ async function main(): Promise<number> {
   // to cut a version that cites no spec finding, so "the plan changed" is
   // always answerable with "which finding said it was wrong".
   if (namespace === 'plan' && action === 'amend') {
-    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const planPath = requireFlag(flags, 'plan');
+    const plan = readJsonFile<PlanFile>(planPath);
     // Comma-split, not repeated: a finding id has no commas, and an amendment
     // routinely cites several at once.
     const findingIds = requireFlag(flags, 'findings')
@@ -1495,7 +1543,7 @@ async function main(): Promise<number> {
         ...(changes ? { changes } : {}),
       },
       eventContextFromFlags(flags),
-      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+      { ...eventOptsFromFlags(flags), ...amendSpecsDirOpts(planPath, plan, flags) },
     );
     // No no-op warning here any more. A pure carry-forward used to be legal
     // and merely suspicious — the shape a forgotten --changes takes — so the

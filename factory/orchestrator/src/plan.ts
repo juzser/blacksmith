@@ -213,6 +213,25 @@ function planFilePath(epicId: string, version: number, opts: PlanOpts): string {
   return path.join(dir, epicId, `plan-v${version}.json`);
 }
 
+/**
+ * The specs dir implied by a plan file's own location on disk -- the inverse
+ * of `planFilePath`: `<specsDir>/<epicId>/plan-vN.json` names `<specsDir>` as
+ * its grandparent, when the plan sits in that shape at all. `null` when it
+ * does not (a flat fixture, or a directory that merely happens to share the
+ * epic's version number), because a plan filed anywhere else names no specs
+ * dir a caller should guess at.
+ *
+ * `cli.ts`'s `plan amend` handler is the only caller (#219): unlike every
+ * other reader of `--specs-dir`, amend WRITES the version it derives a path
+ * for, so falling back to `SPECS_ACTIVE_DIR` when the plan being amended
+ * already lives somewhere else plants the new version in the wrong tree
+ * entirely -- beside no other version of the plan it just amended.
+ */
+export function impliedSpecsDir(planPath: string, epicId: string): string | null {
+  const dir = path.dirname(path.resolve(planPath));
+  return path.basename(dir) === epicId ? path.dirname(dir) : null;
+}
+
 const PLAN_FILE_PATTERN = /^plan-v(\d+)\.json$/;
 
 /**

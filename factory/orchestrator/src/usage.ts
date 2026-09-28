@@ -136,7 +136,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--plan <plan.json> --findings <id[,id...]> --rationale <text> --sites <path[,path...]> [--changes <changes.json>] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary:
-      'Cut a new plan version against the spec findings that forced it. No finding, no amendment. --sites is every place the shape occurs, not only where it was reported.',
+      'Cut a new plan version against the spec findings that forced it. No finding, no amendment. --sites is every place the shape occurs, not only where it was reported. --specs-dir defaults to the directory --plan already lives in (#219), not factory/specs/active; an explicit --specs-dir that disagrees with it is refused rather than silently preferred.',
   },
   {
     command: 'plan propose',

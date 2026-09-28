@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -6411,6 +6411,177 @@ describe('cli.ts (built binary)', () => {
         expect(result.status).toBe(1);
         expect(JSON.parse(result.stdout).error.code).toBe('plan.amendment-not-spec-scoped');
         expect(existsSync(path.join(specsDir, 'epic-1', 'plan-v2.json'))).toBe(false);
+      });
+
+      it('defaults --specs-dir to the directory --plan already lives in, not the work root (#219)', async () => {
+        const { sessionId, eventsDir } = await session();
+        // A plan filed in the `<specsDir>/<epicId>/plan-vN.json` shape
+        // `planFilePath` itself writes, but nowhere near this session's own
+        // scratch plan or the work root's specs/active -- the two trees a
+        // pre-#219 default could plant the new version in instead.
+        const ownSpecsDir = path.join(scratchDir, `${sessionId}-own-specs`);
+        const planPath = path.join(ownSpecsDir, 'epic-1', 'plan-v1.json');
+        await mkdir(path.dirname(planPath), { recursive: true });
+        await writeFile(planPath, JSON.stringify(PLAN));
+        const findingId = await raiseSpec('spec-default-dir', sessionId, eventsDir, planPath);
+        // D-127: an amendment must add or supersede a task, or `amendPlan`
+        // refuses it as a no-op before it reaches the specs-dir question at
+        // all -- so name one, the same way the specs-dir-agrees test above
+        // does.
+        const changesPath = path.join(scratchDir, `${sessionId}-default-dir-changes.json`);
+        await writeFile(
+          changesPath,
+          JSON.stringify({
+            supersede: {
+              'epic-1/task-2': {
+                ...PLAN.tasks[1],
+                acceptance_criteria: ['parses `A="x\\ny"` into a single entry'],
+              },
+            },
+          }),
+        );
+        // A work root of its own, so the pre-fix default (the work root's
+        // specs/active) is provably distinct from `ownSpecsDir` rather than
+        // coinciding with it by accident of where this suite runs from.
+        const smithHome = path.join(scratchDir, `${sessionId}-smith-home`);
+
+        const result = runCli(
+          [
+            'plan',
+            'amend',
+            '--plan',
+            planPath,
+            '--findings',
+            findingId,
+            '--rationale',
+            'no --specs-dir: the new version must land beside --plan',
+            '--sites',
+            'src/bar/thing.ts',
+            '--changes',
+            changesPath,
+            '--session',
+            sessionId,
+            '--causal-parent',
+            `${sessionId}#0`,
+            '--state-dir',
+            eventsDir,
+          ],
+          { SMITH_HOME: smithHome },
+        );
+
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({ epic: 'epic-1', version: 2 });
+        expect(existsSync(path.join(ownSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(true);
+        expect(
+          existsSync(path.join(smithHome, 'factory', 'specs', 'active', 'epic-1', 'plan-v2.json')),
+        ).toBe(false);
+      });
+
+      it('refuses an explicit --specs-dir that disagrees with where --plan already lives (#219)', async () => {
+        const { sessionId, eventsDir } = await session();
+        const ownSpecsDir = path.join(scratchDir, `${sessionId}-mismatch-own-specs`);
+        const planPath = path.join(ownSpecsDir, 'epic-1', 'plan-v1.json');
+        await mkdir(path.dirname(planPath), { recursive: true });
+        await writeFile(planPath, JSON.stringify(PLAN));
+        const findingId = await raiseSpec('spec-mismatch-dir', sessionId, eventsDir, planPath);
+        const wrongSpecsDir = path.join(scratchDir, `${sessionId}-mismatch-wrong-specs`);
+        // Names a real change (D-127), so the only thing standing between
+        // this call and a wrongly-placed v2 is the mismatch check itself.
+        const changesPath = path.join(scratchDir, `${sessionId}-mismatch-changes.json`);
+        await writeFile(
+          changesPath,
+          JSON.stringify({
+            supersede: {
+              'epic-1/task-2': {
+                ...PLAN.tasks[1],
+                acceptance_criteria: ['parses `A="x\\ny"` into a single entry'],
+              },
+            },
+          }),
+        );
+
+        const result = runCli([
+          'plan',
+          'amend',
+          '--plan',
+          planPath,
+          '--findings',
+          findingId,
+          '--rationale',
+          'a disagreeing --specs-dir must refuse, not silently pick one',
+          '--sites',
+          'src/bar/thing.ts',
+          '--changes',
+          changesPath,
+          '--specs-dir',
+          wrongSpecsDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('cli.specs-dir-mismatch');
+        expect(existsSync(path.join(ownSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(false);
+        expect(existsSync(path.join(wrongSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(false);
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === 'plan-version-created'),
+        ).toEqual([]);
+      });
+
+      it("accepts a --specs-dir that reaches the plan's own directory through a symlink (#219)", async () => {
+        const { sessionId, eventsDir } = await session();
+        const ownSpecsDir = path.join(scratchDir, `${sessionId}-alias-own-specs`);
+        const planPath = path.join(ownSpecsDir, 'epic-1', 'plan-v1.json');
+        await mkdir(path.dirname(planPath), { recursive: true });
+        await writeFile(planPath, JSON.stringify(PLAN));
+        const findingId = await raiseSpec('spec-alias-dir', sessionId, eventsDir, planPath);
+        // Same directory on disk, different lexical path -- the macOS
+        // /tmp -> /private/tmp shape. It names the plan's own tree, so it
+        // must not be refused as a disagreement.
+        const aliasSpecsDir = path.join(scratchDir, `${sessionId}-alias-link-specs`);
+        await symlink(ownSpecsDir, aliasSpecsDir, 'dir');
+        const changesPath = path.join(scratchDir, `${sessionId}-alias-changes.json`);
+        await writeFile(
+          changesPath,
+          JSON.stringify({
+            supersede: {
+              'epic-1/task-2': {
+                ...PLAN.tasks[1],
+                acceptance_criteria: ['parses `A="x\\ny"` into a single entry'],
+              },
+            },
+          }),
+        );
+
+        const result = runCli([
+          'plan',
+          'amend',
+          '--plan',
+          planPath,
+          '--findings',
+          findingId,
+          '--rationale',
+          'a symlinked --specs-dir naming the same tree is agreement, not a mismatch',
+          '--sites',
+          'src/bar/thing.ts',
+          '--changes',
+          changesPath,
+          '--specs-dir',
+          aliasSpecsDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+
+        expect(result.status).toBe(0);
+        expect(existsSync(path.join(ownSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(true);
       });
 
       it('refuses a closing spec review it cannot pin to an integration head', async () => {
