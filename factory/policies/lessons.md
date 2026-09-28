@@ -124,6 +124,26 @@ nothing.
 - agent_role: planner
 - statement: An acceptance criterion that probes a script running under 'set -e' must name the outer exit status it expects, never an echo the script prints afterwards: errexit ends the script at the first failing command, so a line printed after it is unreachable and the grader can only mark the wording, not the property.
 
+### lesson-raised-3aaf982e84ac: A file-length delta criterion must state whether the doc comments att...
+
+- lesson_id: lesson-raised-3aaf982e84ac
+- finding_category: correctness
+- agent_role: planner
+- statement: A file-length delta criterion must state whether the doc comments attached to the moved symbols move with them, and its window must be calibrated on that same choice; a window measured with comments included and silent about it fails a coder who leaves the comments behind.
+
+### lesson-raised-d478f9d6ea0b: Name an extraction task's scope as a symbol list, not a line range, a...
+
+- lesson_id: lesson-raised-d478f9d6ea0b
+- finding_category: correctness
+- agent_role: planner
+- statement: Name an extraction task's scope as a symbol list, not a line range, and derive its length window from the symbols that move; a window calibrated on a span that is wider than the enumerated symbols rewards the over-broad move and rejects the correct one, and a text-preserving destructure hides the difference from every other criterion.
+
+### bs-audit-3-scribe-cites-event-ids: A PR body or timeline summary cites events by event id (<session>#<n>...
+
+- lesson_id: bs-audit-3-scribe-cites-event-ids
+- agent_role: scribe
+- statement: A PR body or timeline summary cites events by event id (<session>#<n>, where n is the zero-based line index of the log), never by a line number of the log file, and states no number the event log does not carry: coverage percentages, turn caps, round reasons and provider counts included. The orchestrator checks every cited id against the log before the body is published.
+
 ## claim-path
 
 ### lesson-raised-3b5746704cfc: A function that computes a filesystem path and hands it to a child pr...
@@ -653,6 +673,32 @@ _(none yet)_
 
 - lesson_id: lesson-raised-3a400ca69b5e
 - statement: When two verbs are compared for cost, check when each one runs before concluding: the cheaper one may run after the very gate it was meant to save.
+
+### lesson-raised-44a58c2a7c7a: When checking a length-delta criterion, classify every line in the mo...
+
+- lesson_id: lesson-raised-44a58c2a7c7a
+- finding_category: correctness
+- statement: When checking a length-delta criterion, classify every line in the moved region as code, comment or blank and count them; never derive a line count by subtracting line numbers, because the span between two anchors includes whatever else lives there.
+
+### lesson-raised-394329488a2d: SMITH_EPIC_CAP_TOKENS in the gitignored .env overrides the epic cap i...
+
+- lesson_id: lesson-raised-394329488a2d
+- statement: SMITH_EPIC_CAP_TOKENS in the gitignored .env overrides the epic cap in budgets.yml, so the committed cap is not the enforced one; read budget alarm's capTokens and budgetEnvOverrides for the live cap, never budgets.yml.
+
+### lesson-raised-add2171a83a1: On a plan whose tasks are all origin user, the plan-quorum triggers a...
+
+- lesson_id: lesson-raised-add2171a83a1
+- statement: On a plan whose tasks are all origin user, the plan-quorum triggers are mechanically silent - trigger 1 sums declared budgets, not measured spend, and trigger 3's per-task arm only reads non-user origins - so the only live trigger is the orchestrator's own --confidence self-report; report it honestly below 0.8 when the draft needed repair rounds.
+
+### lesson-raised-be27b49f1d19: budget alarm reports unverifiable when dispatches for roles without a...
+
+- lesson_id: lesson-raised-be27b49f1d19
+- statement: budget alarm reports unverifiable when dispatches for roles without an attribution path (auditor, security-reviewer) are in the log, and the planner role has no per-role cap, so a planner overrun is only visible against the epic cap.
+
+### bs-audit-3-gate-timeout-under-load: Size a test-gate check's timeout for a loaded machine, not a quiet on...
+
+- lesson_id: bs-audit-3-gate-timeout-under-load
+- statement: Size a test-gate check's timeout for a loaded machine, not a quiet one: a suite that runs in about 200 s bare can be killed at a 300 s default with no output while another build shares the CPUs. When a check dies at its timeout with no test output, read machine load before blaming the code, log it as an env failure, and raise that check's timeout_ms through the per-check override; never drop or narrow the check to get it under the limit.
 
 ## security
 
