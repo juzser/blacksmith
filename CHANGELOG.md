@@ -37,6 +37,97 @@ than appearing in it.
 
 ### Added
 
+- **0.4.0 — the merge queue stops moving your checkout, an epic can close
+  past a superseded or waived-away task, and three self-audits land.**
+  Twenty-eight pull requests since 0.3.0 (#177–#206; seventy-six commits
+  counting the bs-audit-2 integration branch's own), grouped by theme rather
+  than by order.
+
+  *The merge queue (#184, #191, #194, #197, #198).* The headline for an
+  operator. `smith queue run` used to land a task with `git checkout
+  <integration>` in the project directory, switching the operator's own
+  clone off the branch they were on. It now merges in the worktree that
+  already holds the integration branch, or, with none, tree-less through
+  plumbing (`merge-tree --write-tree`, `commit-tree`, a compare-and-swap
+  `update-ref`) — which raises the git floor in INSTALL.md from 2.17 to
+  2.38 — and refuses a dirty integration checkout with a new
+  `integration-dirty` outcome (#184). `--batch` groups claim-disjoint tasks
+  into one candidate, tests the group once, and bisects a red group so one
+  bad task costs extra suite runs rather than blocking its neighbours; the
+  output gains a `batches` summary, and without the flag nothing changes
+  (#191). Bisection stops at the first `integration-dirty` rather than
+  testing halves that can never land (#194). `queue run` and `integration
+  check` now validate `--causal-parent` before any git work or check runs,
+  so a bad parent mutates nothing (#198). A `checks.json` entry may carry
+  its own `timeout_ms`, validated fail-closed and capped at the
+  `setTimeout` ceiling (#197).
+
+  *Closing an epic.* A superseded task counts terminal-OK when the
+  successor chain a re-plan recorded resolves to a terminal-OK row, and an
+  amend-pending finding whose named task was superseded discharges through
+  the same chain; a legacy `plan-version-created` without `successors`
+  infers the pairing only when it is unambiguous (#195). `smith worktree
+  create --from <predecessor>` cuts a logged successor's branch off its
+  predecessor's, refused unless the session records the pairing, and
+  dispatch.md's round counting names the re-scope path end to end (#196).
+  A follow-up task whose findings are all waived is terminal-OK (#199), and
+  the quorum prompt now says why such a row still reads `todo` (#202). An
+  `error-logged` event whose task ref joins several ids with a comma no
+  longer mints a phantom task that holds the verdict forever: the fold
+  splits it, and append refuses the shape (#201). `wave next` never adopts
+  another epic's logged follow-up tasks from a shared session lineage
+  (#185).
+
+  *Errors are filed against the project they came from (#177, #180,
+  #181).* An unstamped error row used to default to this factory's own
+  project, so `smith issues report` could file a foreign project's error
+  against this repository. Rows now resolve their project from the plan
+  behind their task ref, then from a unanimous stamp elsewhere in the same
+  session, and fail closed to `skipped-unresolved-project` otherwise; the
+  self-fallback applies only to this checkout's own specs. `scheduler
+  run`/`admit`, `issues report`/`preview` and the daemon share one
+  resolver, so their fingerprints agree. `gh search` is asked for `--json`,
+  and an unparseable answer reports `search-unparseable` (#180).
+
+  *Audit.* The finding fingerprint ignores line spans and ranges, so a
+  decline outlives line drift; stored fingerprints are aliased with their
+  recomputed form in audit suppression, waivers and cross-finding
+  reconciliation, with no store migration (#179). `audit resolve` marks
+  fixed only the findings a task in the epic's newest plan still claims and
+  reports the rest as `deferred`, with `--except` and an `audit.no-plan`
+  refusal that names the directory it searched (#183). A self-audit names
+  its project `black-smith`, and `--no-self` no longer re-registers the
+  clone (#190). Three self-audits were cut into epics: `bs-audit-1`
+  (#186), `bs-audit-2` (#188) and `bs-audit-3` (#206).
+
+  *bs-audit-2, delivered (#203, #204, #205).* The daemon caches session
+  log reads across ticks and evicts sessions that vanish. Dashboard write
+  routes gain an origin/CSRF guard — JSON content type, no foreign or null
+  `Origin`, a loopback `Host` that matches it, no cross-site
+  `Sec-Fetch-Site` — and chain their writes from the cached log tail;
+  bracketed IPv6 loopback (`[::1]`) is accepted (#204). The wave loop
+  audits its own parallelism at fan-out and before merge-queue admission,
+  and plan ingest and the wave schedule report the plan's widest parallel
+  width. `smith dispatch lint` checks a composed prompt's turn budget
+  against the role template's `maxTurns` and a judge prompt's declared
+  artifact against the ledger, failing closed on every status but `ok`
+  (#205). Each judge template registers `judge-stop.sh` as a Stop hook,
+  which blocks the judge from stopping until its declared artifact exists
+  and is inert outside a clone.
+
+  *Daemon and guard hook.* The daemon dedupes findings once per lineage
+  tree rather than once per leaf, attributes each to the session that owns
+  it, and stops at a causal-parent cycle (#187). The guard hook judges an
+  allowlisted `cd <dir> && …` or `git -C <dir> …` where it runs rather than
+  at the session's cwd, and forfeits the shortcut for any shape it cannot
+  read with certainty (#189); two formatting fixes follow it (#192, #193).
+  The CLI test harness no longer reads budget caps from the operator's
+  `.env` (#200).
+
+  *Packaging and migrations.* `package.json` changes only its version:
+  same bins (`smith`, `smith-run`), same `files`, same `engines`, same
+  dependencies. No migration lands.
+
 - **0.3.0 — caps move per box, errors file themselves, and hand-typed
   rosters give way to the tables they copied.** Thirty-nine commits since
   0.2.0 (#136–#174), grouped by theme rather than by order.
