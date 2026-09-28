@@ -6,6 +6,7 @@ import {
   bareTaskId,
   diffPlans,
   draftNextVersion,
+  impliedSpecsDir,
   latestPlanVersion,
   livePlanTasks,
   loadPlan,
@@ -1158,5 +1159,25 @@ describe('draftNextVersion still works for the correct supersede map shape (D-21
       'Do the thing better.',
     );
     expect(copies.every((t) => t.plan_version === 2)).toBe(true);
+  });
+});
+
+describe('impliedSpecsDir (#219)', () => {
+  it('names the grandparent dir when the plan sits at <specsDir>/<epicId>/plan-vN.json', () => {
+    const planPath = path.join('/tmp/somewhere/specs/active', 'epic-1', 'plan-v3.json');
+
+    expect(impliedSpecsDir(planPath, 'epic-1')).toBe(path.join('/tmp/somewhere/specs/active'));
+  });
+
+  it('resolves a relative plan path before comparing', () => {
+    const planPath = path.join('.', 'epic-1', 'plan-v1.json');
+
+    expect(impliedSpecsDir(planPath, 'epic-1')).toBe(path.resolve('.'));
+  });
+
+  it('answers null when the plan file does not sit in an epic-named directory', () => {
+    const planPath = path.join('/tmp/somewhere/scratch', 'epic-1-plan.json');
+
+    expect(impliedSpecsDir(planPath, 'epic-1')).toBeNull();
   });
 });

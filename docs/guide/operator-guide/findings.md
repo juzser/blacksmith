@@ -71,6 +71,11 @@ smith plan amend --plan factory/specs/active/epic-1/plan-v1.json \
   --session <session-id> --causal-parent <event-id>
 ```
 
+`--specs-dir` defaults to the directory `--plan` already lives in, not to
+`factory/specs/active` — v2 lands beside v1, wherever v1 was read from. An
+explicit `--specs-dir` that disagrees with where `--plan` lives is refused
+(`cli.specs-dir-mismatch`) rather than silently preferred.
+
 This is the **only** legitimate way to change an immutable plan, and it
 refuses three times. An amendment that cites no spec finding is rejected: "the
 plan changed" with no recorded cause makes the immutability decorative. An
