@@ -3821,7 +3821,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       expect(prompt).toContain('race in the cache warmer');
     });
 
-    it('names an amendment this close will discharge, and what discharges it', () => {
+    it('names a landed amendment this close marks amended, and the task that landed it', () => {
       const prompt = promptFor(
         [taskRow({ taskId: 'epic-1/task-2', taskStatus: 'completed', planVersion: 2 })],
         [
