@@ -278,6 +278,14 @@ smith gate run epic-1/task-1 \
   Drop the five flags and `--result` is read as a complete
   `result.schema.json` document instead — the shape a replay or a fixture
   hands over.
+- `--input-tokens`/`--output-tokens` are optional, both-or-neither (#220): a
+  harness that ran the worker as a subprocess and parsed its own usage always
+  has both, but a dispatcher with no API onto a subagent's token spend — one
+  running inside Claude Code, say — has neither. Omit both and the gate stamps
+  `token_usage: {measured: false}` instead of an invented count; every
+  consumer (budget checks, reports) reads that as "not measured", never as
+  zero. Giving exactly one of the two flags is refused
+  (`results.partial-token-count`).
 - Every `artifacts[].path` must resolve inside the task's artifact home,
   `state/artifacts/<task-id>/`, and exist there — relative paths resolve
   against that home (a path that already begins with the home's own spelling

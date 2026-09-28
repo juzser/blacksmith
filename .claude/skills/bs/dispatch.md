@@ -130,7 +130,18 @@ smith gate run <task-id> --result <agent-half.json> \
 `token_usage` left the agent's half in P9-17 for the same reason the other
 four never belonged there: an agent cannot read its own meter, so what it
 writes is invented. `stampResultEnvelope` throws
-`results.agent-wrote-owned-field` if the file carries any of the five. Without
+`results.agent-wrote-owned-field` if the file carries any of the five.
+
+`--input-tokens`/`--output-tokens` are optional, both-or-neither (#220): a
+harness that ran the worker as a subprocess and parsed its usage always has
+both, but you — a dispatcher running inside Claude Code — have no API onto a
+subagent's token spend, so you have neither. Omit both flags rather than
+invent a count; `stampResultEnvelope` then stamps `token_usage: {measured:
+false}`, which the schema accepts as readily as a real count and every
+consumer (budget checks, reports) reads as "not measured", never as zero.
+Passing exactly one of the two flags is refused
+(`results.partial-token-count`) — half a measurement is not an honest "not
+measured" and not a count either. Without
 `--agent`, `--result` is taken as a complete document, which is the shape a
 replay or a fixture hands over. A judge returns *evidence* — no
 `finding_id`, no `fingerprint`, no `found_by` — and you mint the findings with

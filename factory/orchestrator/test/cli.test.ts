@@ -894,7 +894,8 @@ describe('cli.ts (built binary)', () => {
   // Of every flag usage.ts documents as a number, this was the only one with
   // nothing behind it. `--plan-version` is caught by the event schema
   // (`/plan_version must be integer`), `--round` by judges.invalid-round, and
-  // `--input-tokens`/`--output-tokens` go through requireIntFlag.
+  // `--input-tokens`/`--output-tokens` go through boundedIntFlag (#220: they
+  // are optional and both-or-neither, unlike --n).
   describe('event tail --n is a count, not whatever parseInt salvages (D-210)', () => {
     function seedSession(sessionId: string, eventsDir: string, count: number): void {
       const root = runCli([
@@ -7482,7 +7483,7 @@ describe('cli.ts (built binary)', () => {
       async function gateRunWith(
         result: Record<string, unknown>,
         extraFlags: string[],
-      ): Promise<{ stdout: string; status: number }> {
+      ): Promise<{ stdout: string; status: number; sessionId: string; eventsDir: string }> {
         const { sessionId, eventsDir } = await session();
         // A committed worktree, not the scratch dir: since P9-8 the gate
         // certifies the commit before it scores anything, so a bare directory
@@ -7492,7 +7493,7 @@ describe('cli.ts (built binary)', () => {
         const resultPath = path.join(scratchDir, `${sessionId}-result.json`);
         await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
         await writeFile(resultPath, JSON.stringify(result));
-        return runCli([
+        const cli = runCli([
           'gate',
           'run',
           'epic-1/task-1',
@@ -7512,6 +7513,7 @@ describe('cli.ts (built binary)', () => {
           '--state-dir',
           eventsDir,
         ]);
+        return { ...cli, sessionId, eventsDir };
       }
 
       const ENVELOPE_FLAGS = [
@@ -7565,6 +7567,42 @@ describe('cli.ts (built binary)', () => {
         );
         expect(result.status).toBe(0);
         expect(JSON.parse(result.stdout).outcome).not.toBe('blocked');
+      });
+
+      // #220. A dispatcher running inside an environment with no API onto a
+      // subagent's token spend has no honest number to give `--input-tokens`/
+      // `--output-tokens` — before this, `requireIntFlag` made the pair
+      // mandatory and forced one to be invented. Omitting both now stamps the
+      // envelope's own "not measured" rather than a fabricated count.
+      const NO_TOKEN_FLAGS = ['--agent', 'coder', '--provider', 'claude', '--model-tier', 'mid'];
+
+      it('stamps {measured: false} when both token flags are omitted', async () => {
+        const result = await gateRunWith(AGENT_HALF, NO_TOKEN_FLAGS);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).outcome).not.toBe('blocked');
+
+        const events = tail(result.sessionId, result.eventsDir);
+        const recorded = events.find((e) => e.event_type === 'task-result-recorded');
+        expect(recorded?.payload).toMatchObject({ token_usage: { measured: false } });
+      });
+
+      it('still stamps a real count when both token flags are given', async () => {
+        const result = await gateRunWith(AGENT_HALF, ENVELOPE_FLAGS);
+        expect(result.status).toBe(0);
+
+        const events = tail(result.sessionId, result.eventsDir);
+        const recorded = events.find((e) => e.event_type === 'task-result-recorded');
+        expect(recorded?.payload).toMatchObject({
+          token_usage: { input_tokens: 19264, output_tokens: 4118, total_tokens: 23382 },
+        });
+      });
+
+      it('refuses one token flag without the other rather than guessing the missing half', async () => {
+        const result = await gateRunWith(AGENT_HALF, [...NO_TOKEN_FLAGS, '--input-tokens', '100']);
+        expect(result.status).toBe(1);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('results.partial-token-count');
+        expect(error.message).toContain('output_tokens');
       });
     });
 

@@ -429,3 +429,52 @@ describe('result.artifacts[].path is a path, not the empty string', () => {
     expect(validateRecord(schemas, taxonomy, 'result', result('diff.patch')).valid).toBe(true);
   });
 });
+
+// #220. An orchestrator dispatching Claude Code subagents has no API to read a
+// subagent's token spend — unlike the harness's own subprocess runs, which
+// parse real usage off stdout. `token_usage` stays required either way: what
+// changes is that "I could not measure this" is now a schema-valid thing to
+// say, spelled as exactly `{measured: false}` and nothing else, rather than a
+// worker or dispatcher inventing numbers to satisfy the envelope.
+describe('result.token_usage accepts an honest "not measured" alongside a real count', () => {
+  const taxonomy = loadTaxonomy();
+  const schemas = compileSchemas(taxonomy);
+
+  const result = (tokenUsage: unknown) => ({
+    task_id: 'epic-1/task-1',
+    run_status: 'done',
+    structured_output: {},
+    artifacts: [],
+    token_usage: tokenUsage,
+    agent: 'coder',
+    provider: 'claude',
+    model_tier: 'mid',
+  });
+
+  it('still accepts the measured shape', () => {
+    const measured = { input_tokens: 100, output_tokens: 50, total_tokens: 150 };
+    expect(validateRecord(schemas, taxonomy, 'result', result(measured)).valid).toBe(true);
+  });
+
+  it('accepts {measured: false} in place of a count', () => {
+    expect(validateRecord(schemas, taxonomy, 'result', result({ measured: false })).valid).toBe(
+      true,
+    );
+  });
+
+  it('still rejects a result with no token_usage at all', () => {
+    const { token_usage: _drop, ...withoutUsage } = result({ measured: false });
+    expect(validateRecord(schemas, taxonomy, 'result', withoutUsage).valid).toBe(false);
+  });
+
+  it('rejects {measured: false} carrying a number alongside it', () => {
+    const hedged = { measured: false, total_tokens: 5 };
+    expect(validateRecord(schemas, taxonomy, 'result', result(hedged)).valid).toBe(false);
+  });
+
+  it('rejects measured: true — the branch names only the honest-absence case', () => {
+    expect(validateRecord(schemas, taxonomy, 'result', result({ measured: true })).valid).toBe(
+      false,
+    );
+  });
+});
