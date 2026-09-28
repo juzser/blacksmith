@@ -4,7 +4,7 @@ description: Implements one task spec TDD-first inside an assigned worktree. Use
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
-maxTurns: 80
+maxTurns: 100
 ---
 
 # Coder
