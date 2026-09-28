@@ -16,8 +16,9 @@
 // entire promotion step (docs/runbooks/providers.md).
 
 import { type CrosscheckPolicy, loadCrosscheckPolicy, providerModel } from './crosscheck.js';
+import { sessionOwnerRole } from './delegation.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type EventOpts } from './events.js';
+import { appendEvent, type EventOpts, readLineageEvents } from './events.js';
 import type { EventContext } from './findings.js';
 import { runJudge } from './providers/index.js';
 import type { JudgeBudget, JudgeKind, JudgeRequest, JudgeResult } from './providers/types.js';
@@ -299,10 +300,18 @@ export async function recordJudgeRun(
 ): Promise<{ dispatchEventId: string; verdictEventId: string }> {
   const agentRole = KIND_TO_AGENT[input.kind];
 
+  // Explicit --actor is authoritative and skips this lookup entirely; only an
+  // absent actor reaches for the delegated session's owner (issue #218, same
+  // shape as judges.ts's recordJudgeDispatch -- see delegatedActor there).
+  const actor =
+    ctx.actor ??
+    sessionOwnerRole(await readLineageEvents(ctx.sessionId, opts), ctx.sessionId) ??
+    undefined;
+
   const dispatch = await appendEvent(
     {
       session_id: ctx.sessionId,
-      actor: ctx.actor ?? 'system',
+      actor: actor ?? 'system',
       event_type: 'dispatch_decision',
       task_id: input.taskId,
       plan_version: ctx.planVersion,

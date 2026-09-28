@@ -11,8 +11,10 @@ import {
   type DelegationPolicy,
   loadDelegationPolicy,
   parseDelegationPolicy,
+  sessionOwnerRole,
 } from '../src/delegation.js';
-import type { StoredEvent } from '../src/events.js';
+import { appendEvent, readLineageEvents, type StoredEvent } from '../src/events.js';
+import { recordJudgeDispatch } from '../src/judges.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 
 // ---------------------------------------------------------------------------
@@ -463,5 +465,162 @@ describe('checkDelegationLog', () => {
     expect(log(events).ok).toBe(false);
     const narrowed = log(events, 'E1/t-1');
     expect(narrowed.ok, details(narrowed)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E. sessionOwnerRole -- the default a write reaches for before `system`
+// (issue #218)
+// ---------------------------------------------------------------------------
+
+describe('sessionOwnerRole', () => {
+  it('names the role a dispatch opened this session against', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      event('wave-1', 0, 'session-start', { parent: 'epic-1#1' }),
+    ];
+    expect(sessionOwnerRole(events, 'wave-1')).toBe('wave-runner');
+  });
+
+  it('answers null for a top-level session nothing dispatched', () => {
+    const events = [event('epic-1', 0, 'session-start')];
+    expect(sessionOwnerRole(events, 'epic-1')).toBeNull();
+  });
+
+  it('answers null when the entry edge is not a dispatch -- a P9-7 continuation, not delegation', () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      event('epic-1-round-2', 0, 'session-start', {
+        parent: 'epic-1#0',
+        payload: { continues: 'epic-1' },
+      }),
+    ];
+    expect(sessionOwnerRole(events, 'epic-1-round-2')).toBeNull();
+  });
+
+  it('answers null for a session id nothing in the log knows about', () => {
+    const events = [event('epic-1', 0, 'session-start')];
+    expect(sessionOwnerRole(events, 'ghost-session')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F. recordJudgeDispatch inside a delegated session (issue #218) -- the fix
+// end to end: `smith judge dispatch` run with no --actor, inside the session
+// a wave-runner's own dispatch opened, must record `actor: wave-runner` and
+// pass `checkDelegationLog`'s rule 3, not the `system` placeholder rule 3
+// exists to catch.
+// ---------------------------------------------------------------------------
+
+describe('recordJudgeDispatch inside a delegated session (issue #218)', () => {
+  const JUDGE_POLICY = policyOf([
+    { role: 'wave-runner', mayDispatch: ['coder', 'tester', 'reviewer'], mustOpenSession: true },
+  ]);
+
+  let stateDir: string;
+  let artifactDir: string;
+
+  beforeEach(() => {
+    stateDir = mkdtempSync(path.join(tmpdir(), 'smith-delegation-judges-'));
+    artifactDir = mkdtempSync(path.join(tmpdir(), 'smith-delegation-judge-art-'));
+  });
+
+  afterEach(() => {
+    rmSync(stateDir, { recursive: true, force: true });
+    rmSync(artifactDir, { recursive: true, force: true });
+  });
+
+  /** Opens an epic session and a wave session delegated off a wave-runner dispatch. */
+  async function openDelegatedSession(): Promise<void> {
+    await appendEvent(
+      {
+        session_id: 'epic-1',
+        actor: 'operator',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const waveDispatch = await appendEvent(
+      {
+        session_id: 'epic-1',
+        actor: 'operator',
+        event_type: 'dispatch_decision',
+        task_id: 'E1/t-1',
+        plan_version: 1,
+        causal_parent: 'epic-1#0',
+        payload: {
+          agent_role: 'wave-runner',
+          provider: 'claude',
+          model_tier: 'frontier',
+          model: 'claude-opus-5',
+        },
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: 'wave-1',
+        actor: 'operator',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: waveDispatch.event_id,
+        payload: {},
+      },
+      { stateDir },
+    );
+  }
+
+  it('records the delegated session owner as actor, so delegation check passes it', async () => {
+    await openDelegatedSession();
+
+    await recordJudgeDispatch(
+      {
+        taskId: 'E1/t-1',
+        role: 'reviewer',
+        round: 1,
+        artifactPath: path.join(artifactDir, 'reviewer.json'),
+        model: 'claude-opus-5',
+      },
+      { sessionId: 'wave-1', planVersion: 1, causalParent: 'wave-1#0' },
+      { stateDir },
+    );
+
+    const events = await readLineageEvents('wave-1', { stateDir });
+    const stored = events.find(
+      (e) => e.record.event_type === 'dispatch_decision' && e.record.session_id === 'wave-1',
+    );
+    expect(stored?.record.actor).toBe('wave-runner');
+
+    const report = checkDelegationLog(events, JUDGE_POLICY, { sessionId: 'epic-1' });
+    expect(report.ok, details(report)).toBe(true);
+  });
+
+  it('still flags a genuinely foreign actor even when a delegated owner exists', async () => {
+    await openDelegatedSession();
+
+    // An explicit --actor is authoritative and short-circuits the delegated
+    // lookup entirely -- so a stamped-wrong actor is still exactly what rule
+    // 3 exists to catch. This is not a fixture; it goes through the same
+    // recordJudgeDispatch the fix changed.
+    await recordJudgeDispatch(
+      {
+        taskId: 'E1/t-1',
+        role: 'reviewer',
+        round: 1,
+        artifactPath: path.join(artifactDir, 'reviewer.json'),
+        model: 'claude-opus-5',
+      },
+      { sessionId: 'wave-1', planVersion: 1, causalParent: 'wave-1#0', actor: 'operator' },
+      { stateDir },
+    );
+
+    const events = await readLineageEvents('wave-1', { stateDir });
+    const report = checkDelegationLog(events, JUDGE_POLICY, { sessionId: 'epic-1' });
+    expect(report.ok).toBe(false);
+    expect(details(report)).toMatch(/wave-1#1/);
   });
 });

@@ -412,6 +412,38 @@ function sessionsOpenedByDispatch(events: readonly StoredEvent[]): Map<string, s
 }
 
 /**
+ * The role that dispatched this session, if this session is that dispatch's
+ * own log -- the answer a write wants before it defaults its `actor` to a
+ * placeholder like `system` (issue #218). A session's `session-start` names
+ * its entry edge as `causal_parent`; when that edge is a `dispatch_decision`
+ * event elsewhere in `events`, this session was opened against it and its
+ * owner is the role that dispatch named.
+ *
+ * Returns null for every session nothing dispatched -- an operator's own
+ * top-level session, or a `--continues` split whose entry edge names some
+ * other event (P9-7's cross-session edge is not only for delegation) -- so a
+ * caller's existing `system` fallback for "no owner" is unchanged.
+ *
+ * Deliberately reads the event graph only, not delegation.yml: it answers
+ * "who dispatched this session" for a dispatch to any role, granted or not.
+ * That is wider than `checkDelegationLog`'s rule 3, which flags a mismatch
+ * only for sessions a grant opened -- but a wider *default* cannot loosen
+ * that check, because an explicit `--actor` always wins over this inference
+ * (every caller checks `ctx.actor` first) and a foreign or `system` actor
+ * stamped that way is still exactly what rule 3 flags.
+ */
+export function sessionOwnerRole(events: readonly StoredEvent[], sessionId: string): string | null {
+  const root = events.find(
+    (e) => e.record.session_id === sessionId && e.record.event_type === ROOT_EVENT_TYPE,
+  );
+  const parentId = root?.record.causal_parent;
+  if (parentId === null || parentId === undefined) return null;
+  const parent = events.find((e) => e.event_id === parentId);
+  if (parent === undefined || parent.record.event_type !== DISPATCH_EVENT_TYPE) return null;
+  return str((parent.record.payload ?? {}) as Record<string, unknown>, 'agent_role');
+}
+
+/**
  * Asserts delegation.yml against a lineage's log.
  *
  * D-181: scope is `taskIdsMatch`'s question, not `===`'s -- the log writes
