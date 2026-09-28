@@ -1102,7 +1102,7 @@ function renderSpec(
     `# Epic spec — \`${input.epicId}\``,
     '',
     `- **Epic id** — \`${input.epicId}\``,
-    `- **Project** — \`${auditedProjectName(project)}\` at \`${project}\`, and every worktree is placed beside that clone (\`AGENTS.md\` "Worktrees").`,
+    `- **Project** — \`${auditedProjectName(project)}\`; every worktree is placed beside the clone the run is handed (\`AGENTS.md\` "Worktrees").`,
     `- **Roadmap milestone** — \`${input.epicId}\` in \`factory/specs/roadmap.md\`.`,
     `- **Provenance** — cut by \`smith audit cut\` from audit ${audits.join(', ')} (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}). Each finding carries this epic id in \`.blacksmith/findings.jsonl\`; \`smith audit resolve\` marks fixed only the ones a task in this plan still claims, and leaves the rest \`deferred\`.`,
     '',
