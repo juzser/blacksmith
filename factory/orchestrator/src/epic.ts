@@ -1,6 +1,7 @@
 import { EPIC_CLOSED_EVENT_TYPE } from './agents-registry.js';
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from './crosscheck.js';
 import { foldTasks, type TaskFoldRow } from './db/projector.js';
+import type { ClosingReviewEffort } from './effort.js';
 import { SmithError } from './errors.js';
 import {
   appendEvent,
@@ -458,6 +459,16 @@ export interface EpicSummary {
    * blocker; see {@link EpicConcurrency}.
    */
   concurrency: EpicConcurrency | null;
+  /**
+   * Whether `specReviewBlockers` waived an absent closing spec review under
+   * `.claude/skills/bs/run.md` step 13's tier `small` rule — `effort` said
+   * `when-plan-amended` and the live plan was still v1. A skipped review and
+   * a clean one are not the same fact (run.md step 13), so this is recorded
+   * even though it never blocks: `false` covers both "a review is on record"
+   * and "the tier required one and none was", and a reader who needs to tell
+   * those apart already has `specReview.review` and `effort` to do it with.
+   */
+  closingSpecReviewSkippedByTier: boolean;
   blockers: string[];
   mechanicallyReady: boolean;
 }
@@ -593,6 +604,14 @@ function integrationBlockers(epicId: string, integration: IntegrationStatus): st
  * measured how wide this epic ran, and it is projected as `null` rather than
  * dropped so it can never be read as "it ran fine". It contributes nothing to
  * `blockers` — see {@link EpicConcurrency}.
+ *
+ * `effort` is required for the same "no forgotten argument" reason as
+ * `integration` and `mcp`: it is `specReviewBlockers`'s only way to know a
+ * tier waived an absent closing review (run.md step 13), and a defaulted
+ * value here would either manufacture that green for every caller or refuse
+ * it for every caller — either way, silently. Positioned before the
+ * defaulted `plan`/`quarantined`/`concurrency`/`successors` tail so it reads
+ * as required alongside `goalCheck`, not folded into the optional group.
  */
 export function summarizeEpic(
   epicId: string,
@@ -602,6 +621,7 @@ export function summarizeEpic(
   mcp: McpSurfaceStatus,
   specReview: SpecReviewStatus,
   goalCheck: GoalCheckStatus,
+  effort: ClosingReviewEffort,
   plan: EpicPlanRoster | null = null,
   quarantined: readonly SkippedFindingRecord[] = [],
   concurrency: EpicConcurrency | null = null,
@@ -844,7 +864,7 @@ export function summarizeEpic(
     ...mcpBlockers(epicId, mcp),
     // The roster is what knows the live plan version, so the review's own
     // plan_version has something to be stale against (D-125).
-    ...specReviewBlockers(epicId, specReview, plan?.version ?? null),
+    ...specReviewBlockers(epicId, specReview, plan?.version ?? null, effort),
     ...goalCheckBlockers(
       epicId,
       goalCheck,
@@ -852,6 +872,15 @@ export function summarizeEpic(
       plan?.tasks.map((t) => t.taskId) ?? [],
     ),
   ];
+
+  // Mirrors specReviewBlockers's own skip condition exactly (spec.ts): the
+  // one legal way an absent review casts no blocker. Recomputed here rather
+  // than threaded back out of specReviewBlockers because the fact is cheap
+  // and the alternative — parsing it back out of a blocker string — is not.
+  const closingSpecReviewSkippedByTier =
+    specReview.review === null &&
+    effort.closingSpecReview === 'when-plan-amended' &&
+    (plan?.version ?? null) === 1;
 
   return {
     epicId,
@@ -872,6 +901,7 @@ export function summarizeEpic(
     specReview,
     goalCheck,
     concurrency,
+    closingSpecReviewSkippedByTier,
     blockers,
     mechanicallyReady: blockers.length === 0,
   };
@@ -1206,6 +1236,16 @@ export interface EpicVerdictInput {
    */
   planOpts?: PlanOpts;
   crosscheck?: EpicCrosscheckOptions;
+  /**
+   * The effort tier this epic verdict runs at, already resolved (security
+   * floor included) the way `cli.ts`'s `effort show` resolves it. REQUIRED
+   * for the reason `mcp` and `goal` are required above: it is
+   * `summarizeEpic`'s only way to know whether an absent closing spec review
+   * is this epic's tier speaking (run.md step 13) or a hole nobody filled,
+   * and a defaulted value would answer that question the same way for every
+   * epic regardless of what its plan actually asked for.
+   */
+  effort: ClosingReviewEffort;
 }
 
 export type EpicVerdictOutcome =
@@ -1329,6 +1369,7 @@ export async function runEpicVerdict(
     // roadmap the caller resolved — a check is only evidence about the text it
     // read, so the pair is what makes "current" decidable.
     { check: latestGoalCheck(events, input.epicId), goal: input.goal },
+    input.effort,
     resolvePlanRoster(input.epicId, input.planOpts ?? {}),
     skipped,
     // Off the same lineage `events` every other fact here came from — the
@@ -1578,6 +1619,13 @@ function epicSummaryPayload(summary: EpicSummary): Record<string, unknown> {
             reviewed_by: review.reviewedBy,
             finding_count: review.findingIds.length,
           },
+    // A skipped review and a clean one are not the same fact (run.md step
+    // 13): spec_review reads identically (null) in both "nothing ran because
+    // nothing was owed" and "nothing ran because none was on record" cases,
+    // so this field is what tells them apart. Always projected, for the same
+    // reason as spec_review itself — a reader must not have to infer "was
+    // this waived by tier" from an absent key.
+    closing_spec_review_skipped_by_tier: summary.closingSpecReviewSkippedByTier,
     // Projected even at zero, and even as null, for the reason plan_version
     // gives above. This is the only record that outlives the close, and the
     // question it answers — did this epic actually run its plan in parallel,

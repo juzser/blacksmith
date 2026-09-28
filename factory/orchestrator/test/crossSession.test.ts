@@ -10,6 +10,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { apply, openDb } from '../src/db/projector.js';
 import { timeline } from '../src/db/queries.js';
+import type { ClosingReviewEffort } from '../src/effort.js';
 import { closeEpic, runEpicVerdict } from '../src/epic.js';
 import {
   appendEvent,
@@ -523,6 +524,13 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
     };
   }
 
+  // This suite is about a finding surviving a session boundary, not about the
+  // closing-review tier, so it pins the pre-existing "the review always runs"
+  // behavior the same way epic.test.ts's own alwaysEffort() fixture does.
+  function alwaysEffort(): ClosingReviewEffort {
+    return { tier: 'huge', closingSpecReview: 'always' };
+  }
+
   async function emit(
     sessionId: string,
     eventType: string,
@@ -624,7 +632,13 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
 
   it('holds the verdict on the open finding instead of reporting zero', async () => {
     const outcome = await runEpicVerdict(
-      { epicId, integrationHeadSha: HEAD_SHA, mcp: MCP_SURFACE_NOT_REQUIRED, goal: goalStatus() },
+      {
+        epicId,
+        integrationHeadSha: HEAD_SHA,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      },
       ctxOf(child),
       { stateDir },
     );
@@ -645,6 +659,7 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
             integrationHeadSha: HEAD_SHA,
             mcp: MCP_SURFACE_NOT_REQUIRED,
             goal: goalStatus(),
+            effort: alwaysEffort(),
           },
           ctxOf(child),
           { stateDir },

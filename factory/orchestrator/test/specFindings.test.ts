@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { ClosingReviewEffort } from '../src/effort.js';
 import {
   type EpicPlanRoster,
   type EpicTaskRow,
@@ -1095,6 +1096,19 @@ describe('spec-scoped findings (P9-9)', () => {
     });
   });
 
+  // `always` is every existing case in this suite's fixture: a tier that
+  // never waives the review, so the pre-existing behaviour these tests pin
+  // stays pinned regardless of which tier a call site happens to run at.
+  // `small` is the one tier `.claude/skills/bs/run.md` step 13 lets skip an
+  // absent review, and only while the plan is still v1.
+  function alwaysEffort(): ClosingReviewEffort {
+    return { tier: 'huge', closingSpecReview: 'always' };
+  }
+
+  function smallEffort(): ClosingReviewEffort {
+    return { tier: 'small', closingSpecReview: 'when-plan-amended' };
+  }
+
   describe('specReviewBlockers', () => {
     function status(overrides: Partial<SpecReviewStatus> = {}): SpecReviewStatus {
       return {
@@ -1113,23 +1127,30 @@ describe('spec-scoped findings (P9-9)', () => {
     }
 
     it('passes a current review', () => {
-      expect(specReviewBlockers('envkit', status(), 2)).toEqual([]);
+      expect(specReviewBlockers('envkit', status(), 2, alwaysEffort())).toEqual([]);
     });
 
     it('blocks when no spec review was ever recorded', () => {
-      const blockers = specReviewBlockers('envkit', status({ review: null }), 2);
+      const blockers = specReviewBlockers('envkit', status({ review: null }), 2, alwaysEffort());
       expect(blockers).toHaveLength(1);
       expect(blockers[0]).toContain('no closing spec review');
     });
 
     it('blocks when the review predates the current integration head', () => {
-      const blockers = specReviewBlockers('envkit', status({ headSha: OLD_SHA }), 2);
+      const blockers = specReviewBlockers(
+        'envkit',
+        status({ headSha: OLD_SHA }),
+        2,
+        alwaysEffort(),
+      );
       expect(blockers).toHaveLength(1);
       expect(blockers[0]).toContain('stale');
     });
 
     it('blocks when the head cannot be read at all (fail closed)', () => {
-      expect(specReviewBlockers('envkit', status({ headSha: null }), 2)).toHaveLength(1);
+      expect(
+        specReviewBlockers('envkit', status({ headSha: null }), 2, alwaysEffort()),
+      ).toHaveLength(1);
     });
 
     // -----------------------------------------------------------------------
@@ -1142,7 +1163,7 @@ describe('spec-scoped findings (P9-9)', () => {
     // -----------------------------------------------------------------------
 
     it('blocks when the plan was amended after the review read it', () => {
-      const blockers = specReviewBlockers('envkit', status(), 3);
+      const blockers = specReviewBlockers('envkit', status(), 3, alwaysEffort());
       expect(blockers).toHaveLength(1);
       expect(blockers[0]).toContain('stale');
       expect(blockers[0]).toContain('v2');
@@ -1152,7 +1173,12 @@ describe('spec-scoped findings (P9-9)', () => {
     it('blocks a plan amendment even when the review read the current head', () => {
       // The two axes are independent: an amendment can land with no commit
       // behind it yet, so a current sha must not vouch for a stale plan.
-      const blockers = specReviewBlockers('envkit', status({ headSha: HEAD_SHA }), 5);
+      const blockers = specReviewBlockers(
+        'envkit',
+        status({ headSha: HEAD_SHA }),
+        5,
+        alwaysEffort(),
+      );
       expect(blockers).toHaveLength(1);
       expect(blockers[0]).toContain('plan');
     });
@@ -1172,6 +1198,7 @@ describe('spec-scoped findings (P9-9)', () => {
           },
         }),
         3,
+        alwaysEffort(),
       );
       expect(blockers).toHaveLength(1);
       expect(blockers[0]).toContain('v4');
@@ -1194,6 +1221,7 @@ describe('spec-scoped findings (P9-9)', () => {
           },
         }),
         3,
+        alwaysEffort(),
       );
       expect(blockers).toHaveLength(1);
       expect(blockers[0]).toContain('no plan version');
@@ -1204,7 +1232,67 @@ describe('spec-scoped findings (P9-9)', () => {
       // branches with no plan directory, and making absence a blocker would
       // make them unclosable. Absence casts no vote; it does not manufacture
       // one either way.
-      expect(specReviewBlockers('envkit', status(), null)).toEqual([]);
+      expect(specReviewBlockers('envkit', status(), null, alwaysEffort())).toEqual([]);
+    });
+
+    // -----------------------------------------------------------------------
+    // run.md step 13 / tier `small`: `closing_spec_review: when-plan-amended`
+    // waives an ABSENT review, and only while the plan is still v1 — never
+    // amended, so never shown a defect a review would have caught. Every
+    // other axis above stays fail-closed regardless of tier: a review on
+    // record is still walked through every staleness check even under
+    // `small` (the tier says "you may have skipped it", never "you may trust
+    // it once stale"), and a plan at v2+ or unreadable still blocks.
+    // -----------------------------------------------------------------------
+
+    it('waives an absent review under tier small when the plan is still v1', () => {
+      expect(specReviewBlockers('envkit', status({ review: null }), 1, smallEffort())).toEqual([]);
+    });
+
+    it('still blocks an absent review under tier small once the plan moved past v1', () => {
+      const blockers = specReviewBlockers('envkit', status({ review: null }), 2, smallEffort());
+      expect(blockers).toHaveLength(1);
+      expect(blockers[0]).toContain('no closing spec review');
+    });
+
+    it('never waives an absent review under tier always, even at plan v1', () => {
+      const blockers = specReviewBlockers('envkit', status({ review: null }), 1, alwaysEffort());
+      expect(blockers).toHaveLength(1);
+      expect(blockers[0]).toContain('no closing spec review');
+    });
+
+    it('blocks an absent review under tier small when the plan version cannot be read', () => {
+      // D-126's null-casts-no-vote rule is about a review's OWN staleness
+      // check, not this waiver: with no readable plan, "the plan is still
+      // v1" cannot be shown, so the tier has nothing to waive against.
+      const blockers = specReviewBlockers('envkit', status({ review: null }), null, smallEffort());
+      expect(blockers).toHaveLength(1);
+      expect(blockers[0]).toContain('no closing spec review');
+    });
+
+    it('still walks a review on record through every staleness check under tier small', () => {
+      // The tier only ever waives an ABSENT review. A stale one on record is
+      // exactly as blocking at `small` as at `always`. planVersion is pinned
+      // to 1 on both sides so only the head-sha axis is under test here.
+      const blockers = specReviewBlockers(
+        'envkit',
+        status({
+          review: {
+            epicId: 'envkit',
+            planVersion: 1,
+            headSha: HEAD_SHA,
+            reviewedBy: 'spec-reviewer',
+            findingIds: [],
+            eventId: 'sess-spec#1',
+            ts: '2026-08-08T00:00:00.000Z',
+          },
+          headSha: OLD_SHA,
+        }),
+        1,
+        smallEffort(),
+      );
+      expect(blockers).toHaveLength(1);
+      expect(blockers[0]).toContain('stale');
     });
   });
 
@@ -1243,12 +1331,12 @@ describe('spec-scoped findings (P9-9)', () => {
     // what these cases are pinning.
     const GOAL_TEXT = 'Parse .env files the way dotenv does.';
 
-    function okGoalCheck(): GoalCheckStatus {
+    function okGoalCheck(planVersion = 2): GoalCheckStatus {
       return {
         check: {
           epicId: 'envkit',
           milestoneId: 'milestone-envkit',
-          planVersion: 2,
+          planVersion,
           goalDigest: goalDigest(GOAL_TEXT),
           checkedBy: 'spec-reviewer',
           coverage: [
@@ -1302,8 +1390,10 @@ describe('spec-scoped findings (P9-9)', () => {
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
         okGoalCheck(),
+        alwaysEffort(),
       );
       expect(summary.mechanicallyReady).toBe(true);
+      expect(summary.closingSpecReviewSkippedByTier).toBe(false);
     });
 
     it('holds when the closing spec review never ran', () => {
@@ -1318,9 +1408,11 @@ describe('spec-scoped findings (P9-9)', () => {
           headSha: HEAD_SHA,
         },
         okGoalCheck(),
+        alwaysEffort(),
       );
       expect(summary.mechanicallyReady).toBe(false);
       expect(summary.blockers.join('\n')).toContain('no closing spec review');
+      expect(summary.closingSpecReviewSkippedByTier).toBe(false);
     });
 
     // The roster the gate already resolves (D-126) is where the live plan
@@ -1340,6 +1432,7 @@ describe('spec-scoped findings (P9-9)', () => {
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
         okGoalCheck(),
+        alwaysEffort(),
         roster(2),
       );
       expect(summary.mechanicallyReady).toBe(true);
@@ -1354,10 +1447,50 @@ describe('spec-scoped findings (P9-9)', () => {
         MCP_SURFACE_NOT_REQUIRED,
         okSpecReview(),
         okGoalCheck(),
+        alwaysEffort(),
         roster(3),
       );
       expect(summary.mechanicallyReady).toBe(false);
       expect(summary.blockers.join('\n')).toContain('stale');
+    });
+
+    // run.md step 13: tier `small` may waive an ABSENT closing spec review
+    // while the plan is still v1. The verdict still reaches `go`, and
+    // it records the waiver as a fact rather than folding it into silence —
+    // a skipped review and a clean one are not the same thing to an operator
+    // reading the epic-closed payload later.
+    it('is ready under tier small with an unamended plan and no closing review, and records the skip', () => {
+      const summary = summarizeEpic(
+        'envkit',
+        tasks,
+        [],
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        { review: null, headSha: HEAD_SHA },
+        okGoalCheck(1),
+        smallEffort(),
+        roster(1),
+      );
+      expect(summary.mechanicallyReady).toBe(true);
+      expect(summary.blockers.join('\n')).not.toContain('no closing spec review');
+      expect(summary.closingSpecReviewSkippedByTier).toBe(true);
+    });
+
+    it('still holds under tier small once the plan has been amended past v1, review absent', () => {
+      const summary = summarizeEpic(
+        'envkit',
+        tasks,
+        [],
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        { review: null, headSha: HEAD_SHA },
+        okGoalCheck(),
+        smallEffort(),
+        roster(2),
+      );
+      expect(summary.mechanicallyReady).toBe(false);
+      expect(summary.blockers.join('\n')).toContain('no closing spec review');
+      expect(summary.closingSpecReviewSkippedByTier).toBe(false);
     });
   });
 });

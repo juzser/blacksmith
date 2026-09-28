@@ -60,7 +60,7 @@ import { checkDelegationGrants, checkDelegationLog, loadDelegationPolicy } from 
 import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { lintDispatchPrompt } from './dispatchLint.js';
 import { loadDotEnv } from './dotenv.js';
-import { loadEffortPolicy, resolveEffort } from './effort.js';
+import { type ClosingReviewEffort, loadEffortPolicy, resolveEffort } from './effort.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
@@ -130,7 +130,9 @@ import {
 import {
   bareTaskId,
   diffPlans,
+  latestPlanVersion,
   livePlanTasks,
+  loadPlan,
   type PlanChanges,
   type PlanFile,
   type PlanOpts,
@@ -610,6 +612,32 @@ async function issueInputs(flags: Record<string, string>) {
  */
 function planOptsFromFlags(flags: Record<string, string>): PlanOpts {
   return flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {};
+}
+
+/**
+ * The tier `epic verdict`/`epic close` actually run at, resolved the same way
+ * `effort show` resolves it (security floor included) so the two commands
+ * can never disagree about what tier an epic is on. Read-only, best-effort on
+ * the plan the way `resolvePlanRoster` (epic.ts) is: a plan that fails to
+ * load is "unreadable", not a crash, and `resolveEffort` already treats an
+ * absent plan as "floor not evaluated" rather than "floor clean" (see
+ * `EffortResolution.securityFloorEvaluated`).
+ */
+function resolveEpicEffort(epicId: string, flags: Record<string, string>): ClosingReviewEffort {
+  const planOpts = planOptsFromFlags(flags);
+  const version = latestPlanVersion(epicId, planOpts);
+  let plan: PlanFile | null = null;
+  if (version !== null) {
+    try {
+      plan = loadPlan(epicId, version, planOpts);
+    } catch {
+      plan = null;
+    }
+  }
+  const policy = loadEffortPolicy(flags.policy);
+  const securityPolicy = loadCrosscheckPolicy(flags.crosscheck).planQuorum;
+  const resolution = resolveEffort(policy, securityPolicy, plan ? { plan } : {});
+  return { tier: resolution.effective, closingSpecReview: resolution.profile.closingSpecReview };
 }
 
 /**
@@ -3458,6 +3486,11 @@ async function main(): Promise<number> {
         // event-log fold alone, and a task an amendment added but nobody
         // dispatched is invisible rather than unfinished.
         planOpts: planOptsFromFlags(flags),
+        // run.md step 13: tier `small` may waive an absent closing spec
+        // review, but only `summarizeEpic` can tell an epic's tier apart
+        // from a hole nobody filled -- resolved the same way `effort show`
+        // resolves it, security floor included.
+        effort: resolveEpicEffort(epicId, flags),
       },
       ctx,
       eventOptsFromFlags(flags),
@@ -3482,6 +3515,9 @@ async function main(): Promise<number> {
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
         planOpts: planOptsFromFlags(flags),
+        // See `epic verdict` above: same tier resolution, so a close can
+        // never waive a review its own verdict would have blocked on.
+        effort: resolveEpicEffort(epicId, flags),
         ...(flags['override-rationale'] !== undefined
           ? { overrideRationale: flags['override-rationale'] }
           : {}),
