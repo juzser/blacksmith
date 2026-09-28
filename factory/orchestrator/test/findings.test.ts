@@ -1531,6 +1531,23 @@ describe('findings.ts', () => {
       expect(stale.has(findingId)).toBe(true);
     });
 
+    // #217 review finding: the excluded self-merge must be anchored to
+    // raisedIndex, not freshUntil. A reverify between the two same-id merges
+    // moves freshUntil past the first (reviewed) merge, which used to make
+    // the loop's "first self-merge encountered after freshUntil" rule treat
+    // the SECOND merge -- the genuine post-reverify rewrite -- as if it were
+    // the reviewed diff, and skip that one too. The finding must still come
+    // out stale: the reverify only vouches for the code as of v1, not v2.
+    it('still marks a finding stale when a same-id re-cut merges again after a reverify', async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // v1: the diff the reviewer read
+      await reverifyFinding(findingId, 'still reproduces on v1', rootCtx(), { stateDir });
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // v2: same-id re-cut rewrites it again
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(true);
+    });
+
     // #217: the exclusion is scoped to the finding's OWN task — a different
     // task merging over the same file must still mark it stale.
     it('still marks a finding stale when a DIFFERENT task merges over its file', async () => {

@@ -36,6 +36,7 @@ import {
   taskStatusTone,
 } from '../lib/taxonomy.js';
 import { isWaivable } from '../lib/waivable.js';
+import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 
 const props = defineProps<{ taskId: string }>();
 const { setBreadcrumb } = useBreadcrumb();
@@ -121,14 +122,18 @@ async function decide(fingerprint: string, decision: 'granted' | 'denied') {
   saving.value = fingerprint;
   openPopover.value = null;
   try {
-    await applyWaiverBatch(detail.value.task.sessionId, [
+    const result = await applyWaiverBatch(detail.value.task.sessionId, [
       {
         fingerprint,
         decision,
         operatorNote: `${decision === 'granted' ? 'Waived' : 'Denied'} via Task detail`,
       },
     ]);
-    showToast(decision === 'granted' ? 'Waived 1 finding.' : 'Denied 1 waiver.');
+    showToast(
+      decision === 'granted'
+        ? 'Waived 1 finding.'
+        : `Denied 1 waiver.${waiverDenialNote(result.findingIdsToCarry)}`,
+    );
     await load();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
