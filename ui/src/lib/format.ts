@@ -154,3 +154,22 @@ export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): s
   if (tokensSpent === 0) return 'not measured';
   return `≥${tokensSpent} tok · ${unmeasured} not measured`;
 }
+
+/**
+ * "50%" — or, when one or more of `tokensSpent`'s results has
+ * `token_usage: { measured: false }` (issue #220), "≥50%": the true usage can
+ * only be higher, never lower, than a sum missing some of its addends. A
+ * project with no budget set renders "-" (there is no percentage to compute);
+ * one whose results are all unmeasured renders "not measured", not the
+ * fabricated "0%" that `tokensSpent / tokensBudget` would otherwise produce.
+ */
+export function formatBudgetPct(
+  tokensSpent: number,
+  tokensBudget: number | null,
+  unmeasured: number,
+): string {
+  if (!tokensBudget) return '-';
+  if (tokensSpent === 0 && unmeasured > 0) return 'not measured';
+  const pct = Math.round((tokensSpent / tokensBudget) * 100);
+  return unmeasured > 0 ? `≥${pct}%` : `${pct}%`;
+}

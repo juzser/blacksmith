@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatBudgetPct,
   formatElapsed,
   formatMeasuredTokens,
   formatRelative,
@@ -154,5 +155,34 @@ describe('lib/format.ts formatMeasuredTokens()', () => {
 
   it('renders "not measured" rather than "0 tok" when nothing was measured', () => {
     expect(formatMeasuredTokens(0, 3)).toBe('not measured');
+  });
+});
+
+// Issue #220 follow-up: ProjectsPage's budget-used stat divided tokensSpent
+// by tokensBudget inline and rendered a bare "N%" — once `tokensSpent` can be
+// a floor (one or more results carry `token_usage: { measured: false }`),
+// that percentage reads as exact when it is really a lower bound, and a
+// project whose results are all unmeasured rendered "0%" -- a fabricated
+// zero rather than "we don't know".
+describe('lib/format.ts formatBudgetPct()', () => {
+  it('renders a dash when the project has no budget', () => {
+    expect(formatBudgetPct(0, null, 0)).toBe('-');
+    expect(formatBudgetPct(500, 0, 0)).toBe('-');
+  });
+
+  it('renders a plain percentage when every result was measured', () => {
+    expect(formatBudgetPct(500, 1000, 0)).toBe('50%');
+  });
+
+  it('rounds to the nearest whole percent', () => {
+    expect(formatBudgetPct(333, 1000, 0)).toBe('33%');
+  });
+
+  it('renders a floor once one or more results are unmeasured', () => {
+    expect(formatBudgetPct(500, 1000, 2)).toBe('≥50%');
+  });
+
+  it('renders "not measured" rather than a fabricated "0%" when nothing was measured', () => {
+    expect(formatBudgetPct(0, 1000, 3)).toBe('not measured');
   });
 });
