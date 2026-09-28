@@ -1989,6 +1989,22 @@ export const LESSON_BUCKET_FOR_STATUS: Record<string, 'pending' | 'approved' | '
   invalidated: 'closed',
 };
 
+/**
+ * The owning-session lookup behind the dashboard's three lesson write routes
+ * (ui/server's `lessonSession()`) — the session whose log a lesson's
+ * transition has to fold and append to, not whichever session a request body
+ * names. Returns `null` rather than throwing when no such lesson is
+ * projected; the caller decides what a missing lesson means.
+ */
+export function lessonOwnerSession(db: SmithDb, lessonId: string): string | null {
+  const row = db
+    .select({ sessionId: lessons.sessionId })
+    .from(lessons)
+    .where(eq(lessons.lessonId, lessonId))
+    .get();
+  return row ? row.sessionId : null;
+}
+
 export function lessonsPage(db: SmithDb, scope: Scope = {}): LessonsResult {
   const sessionCond = scopedToSessions(lessons.sessionId, scope);
   const rows = sessionCond

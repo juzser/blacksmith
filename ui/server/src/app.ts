@@ -22,7 +22,6 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
-import { eq } from 'drizzle-orm';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -34,6 +33,7 @@ import {
   errorsPage,
   flowGraph,
   kanban,
+  lessonOwnerSession,
   lessonsPage,
   overview,
   projectedLineage,
@@ -42,7 +42,6 @@ import {
   taskDetail,
   timeline,
 } from '../../../factory/orchestrator/dist/db/queries.js';
-import { lessons as lessonsTable } from '../../../factory/orchestrator/dist/db/schema.js';
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
 import type { EventOpts } from '../../../factory/orchestrator/dist/events.js';
 import { requireSession } from '../../../factory/orchestrator/dist/events.js';
@@ -261,15 +260,11 @@ class BadRequestError extends SmithError {}
  * all, and `lessons.unknown-lesson` on a lesson that plainly exists.
  */
 function lessonSession(db: SmithDb, lessonId: string): string {
-  const row = db
-    .select({ sessionId: lessonsTable.sessionId })
-    .from(lessonsTable)
-    .where(eq(lessonsTable.lessonId, lessonId))
-    .get();
-  if (!row) {
+  const sessionId = lessonOwnerSession(db, lessonId);
+  if (sessionId === null) {
     throw new SmithError('lessons.not-found', `No lesson "${lessonId}".`, { lessonId });
   }
-  return row.sessionId;
+  return sessionId;
 }
 
 /**
