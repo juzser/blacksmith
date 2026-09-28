@@ -174,9 +174,9 @@ M-3).
   the agent cannot see how many turns it has left. The template's number is
   therefore a real per-role budget; the `/bs` dispatch contract restates it
   in the prompt verbatim so the agent can plan against it, and never a
-  higher figure. Read-only judges sit at 15, the planner and coder at 40,
-  the tester at 30, the wave-runner at 60 — raise the template, not the
-  prompt, when a role keeps being cut short. To raise it on one box only,
+  higher figure. Read-only judges sit at 15, the planner at 40, the coder
+  at 80, the tester at 30, the wave-runner at 60 — raise the template, not
+  the prompt, when a role keeps being cut short. To raise it on one box only,
   set `SMITH_MAXTURNS_<ROLE>` (`.env.example` lists one per role) and run
   `smith agents sync`: it rewrites the template's `maxTurns:` line in place,
   a local edit left uncommitted by design, and `--reset` puts back the value
