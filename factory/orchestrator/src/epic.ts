@@ -1147,13 +1147,21 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
     ),
     `Findings closed by waiver or amendment: ${summary.discretionaryFindings.length}`,
     ...listOr(summary.discretionaryFindings.map(findingLine)),
-    `Amendments this close will discharge: ${summary.satisfiedAmendments.length}`,
+    // bs #222: this line sits right under "Open findings: 0", and a
+    // cross-provider judge read the earlier "Amendments this close will
+    // discharge: N" wording as N open blockers -- the loop above already
+    // proved every one of these already landed (summarizeEpic keeps a
+    // still-outstanding amend-pending finding in openFindings/blockers
+    // instead, see the `outstanding.length > 0` branch), so the digest has
+    // to say the obligation is a done fact, not a debt: not open, not a
+    // blocker, only the status label this close still has to flip.
+    `Amend-pending findings already landed, not open, not a blocker — this close marks them amended: ${summary.satisfiedAmendments.length}`,
     ...listOr(
       summary.satisfiedAmendments.map(
         (f) =>
-          `${findingLine(f)} — discharged by ${f.satisfiedBy
+          `${findingLine(f)} — already landed (${f.satisfiedBy
             .map((d) => `${d.taskId} at plan v${d.planVersion}`)
-            .join(', ')}` +
+            .join(', ')})` +
           // D-21 Part 4: a clean discharge must never read as ordinary when
           // the obligation it rested on was corrected -- the judge is the
           // reader this honesty requirement exists for.
