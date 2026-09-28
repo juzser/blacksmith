@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatElapsed, formatRelative, pluralize, summarize } from '../src/lib/format.js';
+import {
+  formatBudgetPct,
+  formatElapsed,
+  formatMeasuredTokens,
+  formatRelative,
+  pluralize,
+  summarize,
+} from '../src/lib/format.js';
 
 describe('lib/format.ts formatRelative()', () => {
   const now = '2026-08-04T12:00:00.000Z';
@@ -131,5 +138,51 @@ describe('lib/format.ts formatElapsed()', () => {
 
   it('returns an empty string for an unparseable timestamp', () => {
     expect(formatElapsed('not-a-date', now)).toBe('');
+  });
+});
+
+// Issue #220 follow-up: {measured:false} is now a valid token_usage, so a
+// spend total that includes one or more unmeasured results is a floor, not
+// an exact figure — it must never read the same as a fully-measured total.
+describe('lib/format.ts formatMeasuredTokens()', () => {
+  it('renders a plain count when every result was measured', () => {
+    expect(formatMeasuredTokens(2000, 0)).toBe('2000 tok');
+  });
+
+  it('renders a floor plus the unmeasured count when spend is a mix', () => {
+    expect(formatMeasuredTokens(2000, 3)).toBe('≥2000 tok · 3 not measured');
+  });
+
+  it('renders "not measured" rather than "0 tok" when nothing was measured', () => {
+    expect(formatMeasuredTokens(0, 3)).toBe('not measured');
+  });
+});
+
+// Issue #220 follow-up: ProjectsPage's budget-used stat divided tokensSpent
+// by tokensBudget inline and rendered a bare "N%" — once `tokensSpent` can be
+// a floor (one or more results carry `token_usage: { measured: false }`),
+// that percentage reads as exact when it is really a lower bound, and a
+// project whose results are all unmeasured rendered "0%" -- a fabricated
+// zero rather than "we don't know".
+describe('lib/format.ts formatBudgetPct()', () => {
+  it('renders a dash when the project has no budget', () => {
+    expect(formatBudgetPct(0, null, 0)).toBe('-');
+    expect(formatBudgetPct(500, 0, 0)).toBe('-');
+  });
+
+  it('renders a plain percentage when every result was measured', () => {
+    expect(formatBudgetPct(500, 1000, 0)).toBe('50%');
+  });
+
+  it('rounds to the nearest whole percent', () => {
+    expect(formatBudgetPct(333, 1000, 0)).toBe('33%');
+  });
+
+  it('renders a floor once one or more results are unmeasured', () => {
+    expect(formatBudgetPct(500, 1000, 2)).toBe('≥50%');
+  });
+
+  it('renders "not measured" rather than a fabricated "0%" when nothing was measured', () => {
+    expect(formatBudgetPct(0, 1000, 3)).toBe('not measured');
   });
 });

@@ -118,6 +118,34 @@ describe('stampResultEnvelope', () => {
     });
   });
 
+  // #220. A dispatcher running inside an environment with no API onto a
+  // subagent's token spend cannot supply real numbers — and must not invent
+  // any to satisfy the envelope. Omitting both fields is how it says so.
+  describe('an orchestrator that cannot measure its subagent', () => {
+    it('stamps {measured: false} when neither token count is given', () => {
+      const { inputTokens: _in, outputTokens: _out, ...rest } = ENVELOPE;
+      const stamped = stampResultEnvelope(agentHalf(), rest);
+      expect(stamped.token_usage).toEqual({ measured: false });
+    });
+
+    it('produces a document that still satisfies result.schema.json', () => {
+      const { inputTokens: _in, outputTokens: _out, ...rest } = ENVELOPE;
+      const taxonomy = loadTaxonomy();
+      const schemas = compileSchemas(taxonomy);
+      const stamped = stampResultEnvelope(agentHalf(), rest);
+      expect(validateRecord(schemas, taxonomy, 'result', stamped)).toEqual({ valid: true });
+    });
+
+    it('refuses one token count given without the other — half a measurement is not honest either', () => {
+      const { outputTokens: _out, ...onlyInput } = ENVELOPE;
+      expect(() => stampResultEnvelope(agentHalf(), onlyInput)).toThrow(ResultError);
+      expect(() => stampResultEnvelope(agentHalf(), onlyInput)).toThrow(/output_tokens/);
+
+      const { inputTokens: _in, ...onlyOutput } = ENVELOPE;
+      expect(() => stampResultEnvelope(agentHalf(), onlyOutput)).toThrow(/input_tokens/);
+    });
+  });
+
   it('refuses a result file that is not a JSON object', () => {
     expect(() => stampResultEnvelope([1, 2, 3], ENVELOPE)).toThrow(ResultError);
     expect(() => stampResultEnvelope(null, ENVELOPE)).toThrow(/object/);

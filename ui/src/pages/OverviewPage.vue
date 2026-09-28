@@ -75,7 +75,13 @@ import {
   type OverviewResult,
   type RunningSession,
 } from '../lib/api.js';
-import { formatDateTime, formatElapsed, formatRelative, pluralize } from '../lib/format.js';
+import {
+  formatDateTime,
+  formatElapsed,
+  formatMeasuredTokens,
+  formatRelative,
+  pluralize,
+} from '../lib/format.js';
 import {
   byRuntimeDesc,
   hiddenAgentsLabel,
@@ -193,6 +199,21 @@ const attentionSentence = computed(() => attentionClauses.value.join(', '));
 function goToKanban() {
   router.push('/kanban');
 }
+
+// A tokensByEpic entry can carry `unmeasured` results (issue #220) — a
+// worker's Result the orchestrator could not price. Summing tokensSpent
+// alone would silently fold each of those in as a fabricated 0, so the
+// label runs through formatMeasuredTokens(): an exact "N tok" only once
+// every epic's spend is fully measured, "≥N tok · K not measured" once
+// some of it is a floor, and "not measured" rather than "0 tok" when none
+// of it is. .vue files are checked by neither tsc nor biome, so this stays
+// a computed rather than an inline reduce (D-221's rule, applied here).
+const budgetUsedLabel = computed(() => {
+  const epics = data.value?.tokensByEpic ?? [];
+  const spent = epics.reduce((s, e) => s + e.tokensSpent, 0);
+  const unmeasured = epics.reduce((s, e) => s + e.unmeasured, 0);
+  return formatMeasuredTokens(spent, unmeasured);
+});
 
 // Operator directive (running-only): the dashboard shows what is working
 // and says what it is not showing. A `live` registry row is not proof of
@@ -528,7 +549,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
         <router-link to="/analytics" class="ds-stat-link" aria-label="Budget used, view in Analytics">
           <StatCard
             label="Budget used"
-            :value="`${data.tokensByEpic.reduce((s, e) => s + e.tokensSpent, 0)} tok`"
+            :value="budgetUsedLabel"
             icon="coins"
             tint="amber"
             :delta="data.budgetUsedPctPointDelta1h === null ? undefined : `${signed(Math.round(data.budgetUsedPctPointDelta1h))}pp`"

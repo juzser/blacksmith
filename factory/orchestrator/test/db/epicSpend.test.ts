@@ -205,7 +205,9 @@ describe('per-epic spend attribution (D-207)', () => {
     ]);
 
     const view = overview(db, { sessionId: SESSION_ID }, { nowIso: NOW });
-    expect(view.tokensByEpic).toEqual([{ epicId: 'epic-e', tokensSpent: 500, tokensBudget: 1000 }]);
+    expect(view.tokensByEpic).toEqual([
+      { epicId: 'epic-e', tokensSpent: 500, tokensBudget: 1000, unmeasured: 0 },
+    ]);
     expect(view.budgetUsedPctPointDelta1h).toBe(20);
   });
 });

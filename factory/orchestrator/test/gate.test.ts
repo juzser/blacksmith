@@ -2313,6 +2313,30 @@ describe('gate.ts budget check (P9-18)', () => {
     expect(outcome.budgetCheck?.overruns).toEqual([{ field: 'tokens', cap: 100, measured: 150 }]);
   });
 
+  // #220. A dispatcher with no API onto a subagent's token spend stamps
+  // {measured: false} rather than invent a count. The budget check must read
+  // that the same way it reads a wholly absent token_usage: tokensUsed
+  // structurally missing, never present as 0 — a 0 would pass every token cap
+  // for a run nobody measured.
+  it('reports token spend as not measured rather than zero', async () => {
+    await commitLines(20);
+    const outcome = await runGate(
+      budgetInput({
+        result: resultFixture({ token_usage: { measured: false } }),
+        budget: { tokens: 1000, diff_lines: 400 },
+      }),
+      ctx(),
+      { stateDir },
+    );
+
+    expect(outcome.outcome).toBe('pass');
+    expect(outcome.budgetCheck).toMatchObject({ status: 'checked', overruns: [] });
+    expect(outcome.budgetCheck).not.toHaveProperty('tokensUsed');
+    const event = await budgetEvent();
+    expect(event).toMatchObject({ status: 'checked' });
+    expect(event).not.toHaveProperty('tokensUsed');
+  });
+
   it('emits the event even when no budget was declared, saying so', async () => {
     const outcome = await runGate(budgetInput(), ctx(), { stateDir });
 

@@ -16,7 +16,7 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { fetchOverview, type OverviewResult, type ProjectOverviewSummary } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { pluralize } from '../lib/format.js';
+import { formatBudgetPct, pluralize } from '../lib/format.js';
 
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
@@ -62,9 +62,8 @@ function agentStatLabel(p: ProjectOverviewSummary): string {
   return stalled > 0 ? `${label} (${stalled} stalled)` : label;
 }
 
-function budgetPct(p: ProjectOverviewSummary): number | null {
-  if (!p.tokensBudget || p.tokensBudget === 0) return null;
-  return Math.round((p.tokensSpent / p.tokensBudget) * 100);
+function budgetPct(p: ProjectOverviewSummary): string {
+  return formatBudgetPct(p.tokensSpent, p.tokensBudget, p.unmeasured);
 }
 
 function goToProject(project: string) {
@@ -140,7 +139,7 @@ const newProjectCommands: CommandHintItem[] = [
             <span class="project-card__stat-label">pending review</span>
           </div>
           <div class="project-card__stat">
-            <span class="project-card__stat-value">{{ budgetPct(p) === null ? '-' : `${budgetPct(p)}%` }}</span>
+            <span class="project-card__stat-value">{{ budgetPct(p) }}</span>
             <span class="project-card__stat-label">budget used</span>
           </div>
         </div>

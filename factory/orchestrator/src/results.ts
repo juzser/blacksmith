@@ -29,8 +29,14 @@ export interface ResultEnvelope {
   provider: string;
   /** taxonomy `model_tier`. */
   modelTier: string;
-  inputTokens: number;
-  outputTokens: number;
+  /**
+   * Both given, or both omitted (#220). A harness that ran the subprocess
+   * itself always has both; a dispatcher with no API onto a subagent's token
+   * spend — one running inside Claude Code, say — has neither, and omitting
+   * both is how it says "not measured" instead of inventing a number.
+   */
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 function requireTokenCount(name: string, value: number): number {
@@ -78,8 +84,7 @@ export function stampResultEnvelope(
     );
   }
 
-  const inputTokens = requireTokenCount('input_tokens', envelope.inputTokens);
-  const outputTokens = requireTokenCount('output_tokens', envelope.outputTokens);
+  const tokenUsage = deriveTokenUsage(envelope);
 
   return {
     ...half,
@@ -89,10 +94,37 @@ export function stampResultEnvelope(
     model_tier: envelope.modelTier,
     // Derived, not accepted: a third number that can contradict the other two
     // is a third thing to get wrong.
-    token_usage: {
-      input_tokens: inputTokens,
-      output_tokens: outputTokens,
-      total_tokens: inputTokens + outputTokens,
-    },
+    token_usage: tokenUsage,
+  };
+}
+
+/**
+ * `{input_tokens, output_tokens, total_tokens}` when the dispatcher has real
+ * numbers, or `{measured: false}` when it has neither (#220) — never one
+ * without the other, since half a measurement is not an honest "not measured"
+ * and not a count either.
+ */
+function deriveTokenUsage(
+  envelope: Pick<ResultEnvelope, 'inputTokens' | 'outputTokens'>,
+): Record<string, unknown> {
+  const { inputTokens, outputTokens } = envelope;
+  if (inputTokens === undefined && outputTokens === undefined) {
+    return { measured: false };
+  }
+  if (inputTokens === undefined || outputTokens === undefined) {
+    const missing = inputTokens === undefined ? 'input_tokens' : 'output_tokens';
+    throw new ResultError(
+      'results.partial-token-count',
+      `input_tokens and output_tokens must both be given or both omitted (an honest "not measured" is neither alone); ${missing} is missing.`,
+      { field: missing },
+    );
+  }
+
+  const input = requireTokenCount('input_tokens', inputTokens);
+  const output = requireTokenCount('output_tokens', outputTokens);
+  return {
+    input_tokens: input,
+    output_tokens: output,
+    total_tokens: input + output,
   };
 }

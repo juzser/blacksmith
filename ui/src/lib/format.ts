@@ -139,3 +139,37 @@ export function pluralize(
 ): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/**
+ * "2000 tok" — or, when one or more of the summed results has
+ * `token_usage: { measured: false }` (issue #220), a floor rather than an
+ * exact total: "≥2000 tok · 3 not measured". `tokensSpent` must already be
+ * the sum over the results that DID report usage; this only decides how to
+ * caption it. A sum of nothing but unmeasured results renders "not measured"
+ * — never "0 tok", which would read as "we spent nothing" rather than
+ * "nobody counted".
+ */
+export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): string {
+  if (unmeasured === 0) return `${tokensSpent} tok`;
+  if (tokensSpent === 0) return 'not measured';
+  return `≥${tokensSpent} tok · ${unmeasured} not measured`;
+}
+
+/**
+ * "50%" — or, when one or more of `tokensSpent`'s results has
+ * `token_usage: { measured: false }` (issue #220), "≥50%": the true usage can
+ * only be higher, never lower, than a sum missing some of its addends. A
+ * project with no budget set renders "-" (there is no percentage to compute);
+ * one whose results are all unmeasured renders "not measured", not the
+ * fabricated "0%" that `tokensSpent / tokensBudget` would otherwise produce.
+ */
+export function formatBudgetPct(
+  tokensSpent: number,
+  tokensBudget: number | null,
+  unmeasured: number,
+): string {
+  if (!tokensBudget) return '-';
+  if (tokensSpent === 0 && unmeasured > 0) return 'not measured';
+  const pct = Math.round((tokensSpent / tokensBudget) * 100);
+  return unmeasured > 0 ? `≥${pct}%` : `${pct}%`;
+}

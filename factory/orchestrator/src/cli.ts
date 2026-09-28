@@ -342,24 +342,11 @@ function requireFlag(flags: Record<string, string>, name: string): string {
 }
 
 /**
- * requireFlag for a flag that must parse as a number, so `--input-tokens abc`
- * is named here rather than travelling as NaN into a token_usage the schema
- * then rejects for the wrong reason.
- */
-function requireIntFlag(flags: Record<string, string>, name: string): number {
-  const raw = requireFlag(flags, name);
-  const value = Number(raw);
-  if (!Number.isInteger(value)) {
-    throw new SmithError('cli.non-numeric-flag', `--${name} must be an integer, got "${raw}".`, {
-      flag: name,
-      value: raw,
-    });
-  }
-  return value;
-}
-
-/**
- * requireIntFlag's optional twin, for a count that also has to be in range.
+ * A flag that must parse as a whole number in range, but may also be absent
+ * entirely — the both-or-neither shape `--input-tokens`/`--output-tokens`
+ * need (#220): a dispatcher with no API onto a subagent's token spend omits
+ * both rather than travelling a typo'd or invented number as NaN into a
+ * token_usage the schema then rejects for the wrong reason.
  *
  * D-210. `event tail --n` read its count with a bare Number.parseInt and
  * checked nothing, which fails in both directions at once: `--n abc` is NaN,
@@ -3294,6 +3281,13 @@ async function main(): Promise<number> {
     // meter, so a token count it writes is invented (D-18/P9-17). Without
     // `--agent` the file is taken as a complete document, which is what a
     // replay or a fixture hands over.
+    //
+    // `--input-tokens`/`--output-tokens` are optional, both-or-neither (#220):
+    // a harness that ran the subprocess itself has real numbers, but a
+    // dispatcher with no API onto a subagent's token spend — one running
+    // inside Claude Code, say — has neither, and stampResultEnvelope turns
+    // that absence into an honest `{measured: false}` rather than have the
+    // caller invent a count to satisfy a mandatory flag.
     const resultFile = readJsonFile<unknown>(requireFlag(flags, 'result'));
     const result = flags.agent
       ? stampResultEnvelope(resultFile, {
@@ -3301,8 +3295,8 @@ async function main(): Promise<number> {
           agent: flags.agent,
           provider: requireFlag(flags, 'provider'),
           modelTier: requireFlag(flags, 'model-tier'),
-          inputTokens: requireIntFlag(flags, 'input-tokens'),
-          outputTokens: requireIntFlag(flags, 'output-tokens'),
+          inputTokens: boundedIntFlag(flags, 'input-tokens', { min: 0 }),
+          outputTokens: boundedIntFlag(flags, 'output-tokens', { min: 0 }),
         })
       : resultFile;
     // Two intake shapes. `--evidence` is what judges actually produce

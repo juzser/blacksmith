@@ -22,6 +22,7 @@ function m(over: Partial<MilestoneProgress> & { milestoneId: string }): Mileston
     tasksCompleted: 0,
     tokensSpent: 0,
     tokensBudget: null,
+    unmeasured: 0,
     project: 'black-smith',
     kind: 'factory',
     ...over,

@@ -68,39 +68,56 @@ export function formatRate(rate: number | null): string {
  * buckets' own averages, so a provider that ran one task cannot outweigh one
  * that ran forty and the bars reconcile with the "Cost per task" StatCard.
  * Labels come out in first-seen order so a refresh cannot reshuffle the chart.
+ *
+ * A bucket's `taskCount` can include results whose `token_usage` was
+ * `{ measured: false }` (issue #220) — `unmeasuredTaskCount` says how many.
+ * Those tasks are excluded from the denominator so they cannot dilute the
+ * average, and a label whose every task went unmeasured is omitted outright
+ * rather than plotted as a fabricated 0 — the same "no denominator" case
+ * `costPerTask` returns `null` for, but BarChart's `{ label, value: number }`
+ * bars have no null slot, so here the bar itself is dropped.
  */
 export function costPerTaskBy(
   buckets: readonly CostBucket[],
   by: 'modelTier' | 'provider',
 ): { label: string; value: number }[] {
-  const totals = new Map<string, { tokens: number; tasks: number }>();
+  const totals = new Map<string, { tokens: number; tasks: number; measuredTasks: number }>();
   for (const bucket of buckets) {
     const label = bucket[by];
-    const running = totals.get(label) ?? { tokens: 0, tasks: 0 };
+    const running = totals.get(label) ?? { tokens: 0, tasks: 0, measuredTasks: 0 };
     running.tokens += bucket.totalTokens;
     running.tasks += bucket.taskCount;
+    running.measuredTasks += bucket.taskCount - bucket.unmeasuredTaskCount;
     totals.set(label, running);
   }
-  return [...totals].map(([label, { tokens, tasks }]) => ({
-    label,
-    value: tasks > 0 ? Math.round(tokens / tasks) : 0,
-  }));
+  const series: { label: string; value: number }[] = [];
+  for (const [label, { tokens, tasks, measuredTasks }] of totals) {
+    if (measuredTasks > 0) {
+      series.push({ label, value: Math.round(tokens / measuredTasks) });
+    } else if (tasks === 0) {
+      series.push({ label, value: 0 });
+    }
+  }
+  return series;
 }
 
 /**
  * Tokens per task across the whole factory, or `null` while no task has
  * reported any usage. Zero would read as "we spent nothing" on a card that
  * exists to report spend — the same claim-from-silence D-219 took off the
- * recheck card next to it.
+ * recheck card next to it. A bucket's `unmeasuredTaskCount` (issue #220,
+ * results with `token_usage: { measured: false }`) is excluded from the
+ * denominator, so a factory that ran tasks but measured none of them also
+ * reads `null` rather than a fabricated 0.
  */
 export function costPerTask(buckets: readonly CostBucket[]): number | null {
   let tokens = 0;
-  let tasks = 0;
+  let measuredTasks = 0;
   for (const bucket of buckets) {
     tokens += bucket.totalTokens;
-    tasks += bucket.taskCount;
+    measuredTasks += bucket.taskCount - bucket.unmeasuredTaskCount;
   }
-  return tasks > 0 ? Math.round(tokens / tasks) : null;
+  return measuredTasks > 0 ? Math.round(tokens / measuredTasks) : null;
 }
 
 /** "1234 tok" — or an em dash when no task reported any usage to divide. */
