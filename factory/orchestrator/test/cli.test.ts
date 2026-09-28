@@ -6294,6 +6294,80 @@ describe('cli.ts (built binary)', () => {
         });
       });
 
+      // #221: a denied waiver (or any other reason a finding sits open) is
+      // easy to lose track of once the next amendment is cut for something
+      // else entirely. When the amendment's own objective text names an open
+      // finding it did not cite, the CLI says so rather than staying silent.
+      it('warns in its output when --changes cites an open finding --findings does not name', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const findingId = await raiseSpec('spec-amend-warn-cited', sessionId, eventsDir, planPath);
+
+        const otherResult = runCli([
+          'findings',
+          'raise',
+          '--scope',
+          'spec',
+          '--evidence',
+          await specEvidenceFile('spec-amend-warn-other', [
+            { ...SPEC_EVIDENCE[0], summary: 'a second, unrelated criterion problem' },
+          ]),
+          '--found-by',
+          'spec-reviewer',
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(otherResult.status).toBe(0);
+        const otherFindingId = JSON.parse(otherResult.stdout)[0].findingId;
+
+        const specsDir = path.join(scratchDir, `${sessionId}-warn-specs`);
+        const changesPath = path.join(scratchDir, `${sessionId}-warn-changes.json`);
+        await writeFile(
+          changesPath,
+          JSON.stringify({
+            supersede: {
+              'epic-1/task-2': {
+                ...PLAN.tasks[1],
+                acceptance_criteria: ['parses `A="x\\ny"` into a single entry'],
+                objective: `Do the other thing. Also touches ${otherFindingId} in passing.`,
+              },
+            },
+          }),
+        );
+
+        const result = runCli([
+          'plan',
+          'amend',
+          '--plan',
+          planPath,
+          '--findings',
+          findingId,
+          '--rationale',
+          'criterion-1 was unfalsifiable; v2 names the input it is checked against',
+          '--sites',
+          'src/bar/thing.ts',
+          '--changes',
+          changesPath,
+          '--specs-dir',
+          specsDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).warnings).toEqual([
+          expect.stringContaining(otherFindingId),
+        ]);
+      });
+
       it('refuses an amendment that cites no finding: a version cut on request is a mutable plan', async () => {
         const { sessionId, eventsDir, planPath } = await session();
         const specsDir = path.join(scratchDir, `${sessionId}-nofinding-specs`);

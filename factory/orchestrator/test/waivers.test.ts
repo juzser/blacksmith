@@ -398,13 +398,74 @@ describe('waivers.ts', () => {
         ctx(),
         { stateDir },
       );
-      expect(results).toHaveLength(2);
+      expect(results.events).toHaveLength(2);
       await expect(isWaived(a.finding.fingerprint, { sessionId }, { stateDir })).resolves.toBe(
         true,
       );
       await expect(isWaived(b.finding.fingerprint, { sessionId }, { stateDir })).resolves.toBe(
         false,
       );
+    });
+
+    // #221: a denial refuses the waiver but discharges nothing -- the finding
+    // stays at its pre-waiver status forever unless a later `plan amend
+    // --findings` names it. applyBatch surfaces the ids a denial leaves
+    // stranded so the operator (or the playbook driving them) does not have
+    // to reconstruct that list from decisions.json by hand.
+    it('lists a denied finding id in findingIdsToCarry, and a granted one not at all', async () => {
+      const a = await raiseFinding(
+        { finding: draft({ finding_id: 'f-a' }), filePath: 'src/a.ts' },
+        ctx(),
+        { stateDir },
+      );
+      const b = await raiseFinding(
+        {
+          finding: draft({ finding_id: 'f-b', summary: 'a different finding' }),
+          filePath: 'src/b.ts',
+        },
+        ctx(),
+        { stateDir },
+      );
+      if (a.suppressed || b.suppressed) throw new Error('unreachable');
+
+      const results = await applyBatch(
+        [
+          { fingerprint: a.finding.fingerprint, decision: 'granted', operatorNote: 'ok' },
+          { fingerprint: b.finding.fingerprint, decision: 'denied', operatorNote: 'no' },
+        ],
+        ctx(),
+        { stateDir },
+      );
+
+      expect(results.findingIdsToCarry).toEqual(['f-b']);
+    });
+
+    it('lists every denied finding id when a batch denies more than one', async () => {
+      const a = await raiseFinding(
+        { finding: draft({ finding_id: 'f-a' }), filePath: 'src/a.ts' },
+        ctx(),
+        { stateDir },
+      );
+      const b = await raiseFinding(
+        {
+          finding: draft({ finding_id: 'f-b', summary: 'a different finding' }),
+          filePath: 'src/b.ts',
+        },
+        ctx(),
+        { stateDir },
+      );
+      if (a.suppressed || b.suppressed) throw new Error('unreachable');
+
+      const results = await applyBatch(
+        [
+          { fingerprint: a.finding.fingerprint, decision: 'denied', operatorNote: 'no' },
+          { fingerprint: b.finding.fingerprint, decision: 'denied', operatorNote: 'no' },
+        ],
+        ctx(),
+        { stateDir },
+      );
+
+      expect(results.findingIdsToCarry.slice().sort()).toEqual(['f-a', 'f-b']);
     });
 
     // P9-15 (b): a waiver batch answered from evidence about code a later wave
@@ -505,7 +566,7 @@ describe('waivers.ts', () => {
           ctx(),
           { stateDir },
         );
-        expect(results).toHaveLength(1);
+        expect(results.events).toHaveLength(1);
       });
 
       it('does not block a grant when the merge touched other files', async () => {

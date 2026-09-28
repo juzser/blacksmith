@@ -1505,6 +1505,28 @@ describe('findings.ts', () => {
       expect(stale.size).toBe(0);
     });
 
+    // #217: the only merge over the finding's file is the finding's OWN
+    // task's merge (draft()'s default task_id is 'epic-1/task-1', the same
+    // task raiseOn() raises under) — exactly the diff the reviewer read when
+    // raising it, not a rewrite of anything.
+    it("does not mark a finding stale from its own task's merge", async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-1', ['src/parse.ts']);
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(false);
+    });
+
+    // #217: the exclusion is scoped to the finding's OWN task — a different
+    // task merging over the same file must still mark it stale.
+    it('still marks a finding stale when a DIFFERENT task merges over its file', async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-9', ['src/parse.ts']);
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(true);
+    });
+
     // Events written before files_changed existed carry no file list at all.
     // Falling back to the merged task's claims keeps those runs answerable,
     // and the basis is reported so an operator can tell an exact answer from

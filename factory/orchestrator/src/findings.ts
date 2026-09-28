@@ -1691,6 +1691,18 @@ export async function staleFindings(
     if (filePath === undefined) continue;
     for (const merge of merges) {
       if (merge.index <= freshUntil) continue;
+      // #217: the finding's OWN task merging its file is not a rewrite — it
+      // is exactly the diff the reviewer read when raising the finding, so
+      // treating it as staleness meant a waiver batch refused to grant over
+      // evidence a merge had not touched at all. A DIFFERENT task's merge
+      // must still count (D-143 two-spelling compare, taskIdsMatch), and so
+      // must this same task merging again LATER under a genuine re-cut — but
+      // that second case cannot arise here: a re-cut task is assigned a new
+      // task_id of its own (spec.ts's successor chain), so one task_id
+      // appears at most once in `merges` for any given lineage, and this
+      // exclusion can only ever remove that one, original, self-reviewed
+      // merge.
+      if (taskIdsMatch(merge.taskId, finding.task_id)) continue;
       if (merge.filesChanged) {
         const hit = merge.filesChanged.find((changed) => normalizeFilePath(changed) === filePath);
         if (hit === undefined) continue;

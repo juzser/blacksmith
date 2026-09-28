@@ -866,7 +866,7 @@ export function createApp(opts: AppOpts): AppHandle {
     const ctx = await resolveContext(body, eventOpts, logCache);
     const results = await applyBatch(decisions, ctx, eventOpts);
     await applyDb(opts.dbPath, ctx.sessionId, dbOpts);
-    return c.json({ applied: results.length });
+    return c.json({ applied: results.events.length });
   });
 
   /** The one write path all three lesson routes share (P9-36). */
