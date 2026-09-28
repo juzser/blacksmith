@@ -607,7 +607,7 @@ export interface WaiverBatchDecision {
 export function applyWaiverBatch(
   sessionId: string,
   decisions: WaiverBatchDecision[],
-): Promise<{ applied: number }> {
+): Promise<{ applied: number; findingIdsToCarry: string[] }> {
   return postJson('/api/waivers/apply-batch', { sessionId, decisions });
 }
 

@@ -1018,6 +1018,80 @@ describe('spec-scoped findings (P9-9)', () => {
       const after = await listFindings(ctx.sessionId, {}, { stateDir });
       expect(after[0]?.finding_status).toBe('raised');
     });
+
+    // #221: a denied waiver, or any other reason a finding sits open, leaves
+    // no trail forcing the next amendment to notice it -- unless that
+    // amendment's own objective text names the finding (a coder or planner
+    // typing "also fixes finding-spec-2 while here" without actually citing
+    // it in --findings). The citation is not a guard: the amendment still
+    // lands and the finding is left exactly where it was. It is a fact
+    // surfaced for the operator to read off the result, the same way
+    // `sitesUnclaimed` surfaces an unclaimed site instead of refusing the
+    // amendment over it.
+    describe('warns when an objective cites an open finding --findings does not carry', () => {
+      it('names the finding in warnings, and leaves it untouched', async () => {
+        const finding = await raiseSpecFinding();
+        const other = await raiseFinding(
+          {
+            finding: specDraft({
+              finding_id: 'finding-spec-2',
+              summary: 'a second, unrelated defect',
+            }),
+            filePath: 'src/other.ts',
+          },
+          rootCtx(),
+          { stateDir },
+        );
+        if (other.suppressed) throw new Error('unreachable');
+        const task = planFixture().tasks[0];
+        if (task === undefined) throw new Error('unreachable');
+
+        const result = await amendPlan(
+          {
+            plan: planFixture(),
+            findingIds: [finding.finding_id],
+            rationale: 'criterion 3 moved; the new task also mentions finding-spec-2 in passing',
+            sites: ['src/parse.ts'],
+            changes: {
+              ...supersedeQuotes(),
+              added: [
+                {
+                  ...task,
+                  task_id: 'envkit/task-1c-quote-errors',
+                  claims: ['src/other.ts'],
+                  objective: `Also addresses ${other.finding.finding_id} while here.`,
+                },
+              ],
+            },
+          },
+          rootCtx(),
+          { stateDir, specsDir },
+        );
+
+        expect(result.warnings).toEqual([expect.stringContaining(other.finding.finding_id)]);
+
+        const after = await listFindings(ctx.sessionId, {}, { stateDir });
+        const untouched = after.find((f) => f.finding_id === other.finding.finding_id);
+        expect(untouched?.finding_status).toBe('raised');
+      });
+
+      it('stays empty when no open finding outside --findings is cited', async () => {
+        const finding = await raiseSpecFinding();
+        const result = await amendPlan(
+          {
+            plan: planFixture(),
+            findingIds: [finding.finding_id],
+            rationale: 'criterion 3 moved',
+            sites: ['src/parse.ts'],
+            changes: supersedeQuotes(),
+          },
+          rootCtx(),
+          { stateDir, specsDir },
+        );
+
+        expect(result.warnings).toEqual([]);
+      });
+    });
   });
 
   describe('the closing spec review', () => {

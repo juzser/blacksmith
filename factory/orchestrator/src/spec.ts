@@ -15,6 +15,11 @@ import {
   LEGAL_TRANSITIONS,
   listFindings,
   mintFindings,
+  // #221: the vocabulary for "still awaiting something" this codebase already
+  // has one of — the same set epic.ts's close gate and `smith crossfind run`
+  // read. Reused here rather than re-deriving "open" from LEGAL_TRANSITIONS a
+  // second time.
+  OPEN_FINDING_STATUSES,
   raiseFinding,
   SPEC_FINDING_SCOPE,
   transition,
@@ -29,6 +34,7 @@ import {
   type PlanFile,
   type PlanOpts,
   planRefTaskId,
+  type TaskSpecRecord,
   validatePlan,
 } from './plan.js';
 import { RESERVED_TASK_ID } from './worktree.js';
@@ -387,6 +393,17 @@ export interface AmendPlanResult {
   diff: PlanDiff;
   /** Named sites no task this version obligates claims. Not an error — see below. */
   sitesUnclaimed: readonly string[];
+  /**
+   * #221: an open finding this amendment's own objective text names, but
+   * `findingIds` does not cite. Not a guard — the same reasoning as
+   * `sitesUnclaimed`: an objective legitimately mentions a finding it is not
+   * actually discharging (a related fix landing in passing), and refusing the
+   * amendment over that would price writing an accurate objective. Surfaced
+   * so the operator reads the gap off the result instead of a denied waiver
+   * (or any other reason a finding sits open) going unnoticed until nothing
+   * ever cites it again.
+   */
+  warnings: readonly string[];
 }
 
 /**
@@ -576,6 +593,38 @@ export async function amendPlan(
     .flatMap((t) => t.claims as string[]);
   const unclaimedSites = namedSites.filter((s) => !claims.some((c) => claimCoversPath(c, s)));
 
+  // #221: every open finding this amendment does not cite, but whose id or
+  // fingerprint shows up in an added or superseded task's objective text —
+  // the tell that someone meant to carry it and did not name it in
+  // `findingIds`. `cited` is deliberately excluded: a finding already in
+  // `findingIds` is being discharged, not merely mentioned in passing, and a
+  // finding that is not open needs no warning because nothing is waiting on
+  // it. Read-only, computed off `all` (already fetched above) and the draft's
+  // own changes — nothing here can fail, so it costs nothing to compute
+  // before the guards below start writing.
+  const citedIds = new Set(findingIds);
+  const openUncited = all.filter(
+    (f) => OPEN_FINDING_STATUSES.has(f.finding_status) && !citedIds.has(f.finding_id),
+  );
+  const changedSpecs: TaskSpecRecord[] = [
+    ...(input.changes?.added ?? []),
+    ...Object.values(input.changes?.supersede ?? {}),
+  ];
+  const changedObjectives = changedSpecs
+    .map((spec) => spec.objective)
+    .filter((objective): objective is string => typeof objective === 'string');
+  const warnings = openUncited
+    .filter((finding) =>
+      changedObjectives.some(
+        (objective) =>
+          objective.includes(finding.finding_id) || objective.includes(finding.fingerprint),
+      ),
+    )
+    .map(
+      (finding) =>
+        `${finding.finding_id} is open (${finding.finding_status}) and is named in this amendment's objective text, but is not in --findings; it will stay open unless a later amendment cites it.`,
+    );
+
   // Validation is done; from here the version exists and the record has to
   // catch up to it, so nothing below is allowed to be conditional. The write
   // goes through `nextVersion` rather than from `draft`: `draftNextVersion` is
@@ -626,5 +675,5 @@ export async function amendPlan(
     });
   }
 
-  return { plan: amended, diff, sitesUnclaimed: unclaimedSites };
+  return { plan: amended, diff, sitesUnclaimed: unclaimedSites, warnings };
 }

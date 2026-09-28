@@ -265,6 +265,23 @@ export interface WaiverBatchDecision {
   operatorNote: string;
 }
 
+export interface WaiverBatchResult {
+  /** One event per decision applied, in the same order as `decisions`. */
+  events: StoredEvent[];
+  /**
+   * #221: a denial refuses the waiver but discharges nothing -- the finding
+   * stays at its pre-waiver status (raised/confirmed) forever unless a later
+   * `smith plan amend --findings` names it and carries it onto the amendment
+   * path (D-127's `amend-pending` exit is the only other way out for a
+   * spec-scoped finding, and a non-spec one has no exit at all once its
+   * waiver is refused). Surfaced here rather than left for the operator to
+   * reconstruct from decisions.json, the same way `AmendPlanResult`
+   * surfaces `sitesUnclaimed`: a fact the caller needs, not grounds to
+   * refuse the call.
+   */
+  findingIdsToCarry: string[];
+}
+
 /**
  * Apply a batch of operator waiver answers. Validates every fingerprint
  * against a real finding in this session, AND (for `granted` decisions)
@@ -299,7 +316,7 @@ export async function applyBatch(
   decisions: WaiverBatchDecision[],
   ctx: EventContext,
   opts: EventOpts = {},
-): Promise<StoredEvent[]> {
+): Promise<WaiverBatchResult> {
   const findings = await listFindings(ctx.sessionId, {}, opts);
   const findingsByFingerprint = new Map<string, Finding[]>();
   for (const f of findings) {
@@ -354,13 +371,17 @@ export async function applyBatch(
     }
   }
 
-  const results: StoredEvent[] = [];
+  const events: StoredEvent[] = [];
+  const findingIdsToCarry = new Set<string>();
   for (const decision of decisions) {
     if (decision.decision === 'granted') {
-      results.push(await grantWaiver(decision.fingerprint, decision.operatorNote, ctx, opts));
+      events.push(await grantWaiver(decision.fingerprint, decision.operatorNote, ctx, opts));
     } else {
-      results.push(await denyWaiver(decision.fingerprint, decision.operatorNote, ctx, opts));
+      events.push(await denyWaiver(decision.fingerprint, decision.operatorNote, ctx, opts));
+      for (const finding of findingsByFingerprint.get(decision.fingerprint) ?? []) {
+        findingIdsToCarry.add(finding.finding_id);
+      }
     }
   }
-  return results;
+  return { events, findingIdsToCarry: [...findingIdsToCarry] };
 }

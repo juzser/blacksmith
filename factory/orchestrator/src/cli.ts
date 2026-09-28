@@ -1565,6 +1565,10 @@ async function main(): Promise<number> {
       // no task behind it is a deliberate call or a forgotten one.
       sitesUnclaimed: result.sitesUnclaimed,
       diff: result.diff,
+      // #221: an open finding this amendment's own objective text names but
+      // --findings does not cite -- surfaced the same way sitesUnclaimed is,
+      // a fact for the operator to read off the result rather than a guard.
+      warnings: result.warnings,
     });
     return 0;
   }
@@ -3975,8 +3979,11 @@ async function main(): Promise<number> {
     const [decisionsFile] = requirePositionals(positional, usageFor('waivers apply')) as [string];
     const decisions = readJsonFile<WaiverBatchDecision[]>(decisionsFile);
     const ctx = eventContextFromFlags(flags);
-    const results = await applyBatch(decisions, ctx, eventOptsFromFlags(flags));
-    printJson(results);
+    const result = await applyBatch(decisions, ctx, eventOptsFromFlags(flags));
+    // #221: a denial's output names the finding ids a later `plan amend
+    // --findings` has to carry, or a denied finding stays open forever with
+    // no discharge path left. See .claude/skills/bs/waivers.md.
+    printJson(result);
     return 0;
   }
 

@@ -1505,6 +1505,59 @@ describe('findings.ts', () => {
       expect(stale.size).toBe(0);
     });
 
+    // #217: the only merge over the finding's file is the finding's OWN
+    // task's merge (draft()'s default task_id is 'epic-1/task-1', the same
+    // task raiseOn() raises under) — exactly the diff the reviewer read when
+    // raising it, not a rewrite of anything.
+    it("does not mark a finding stale from its own task's merge", async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-1', ['src/parse.ts']);
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(false);
+    });
+
+    // #217 review finding: a same-id supersede (spec.ts's "a same-id
+    // supersede needs no pairing") keeps the original task_id on a re-cut,
+    // so one task_id CAN merge twice — once for the diff the reviewer read,
+    // and again later for a genuine rewrite. Only the first self-merge is
+    // excluded; a second merge of the same task_id must still count.
+    it('still marks a finding stale on a SECOND merge of its own task id (same-id re-cut)', async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // the diff the reviewer read
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // a later same-id re-cut rewrites it again
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(true);
+    });
+
+    // #217 review finding: the excluded self-merge must be anchored to
+    // raisedIndex, not freshUntil. A reverify between the two same-id merges
+    // moves freshUntil past the first (reviewed) merge, which used to make
+    // the loop's "first self-merge encountered after freshUntil" rule treat
+    // the SECOND merge -- the genuine post-reverify rewrite -- as if it were
+    // the reviewed diff, and skip that one too. The finding must still come
+    // out stale: the reverify only vouches for the code as of v1, not v2.
+    it('still marks a finding stale when a same-id re-cut merges again after a reverify', async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // v1: the diff the reviewer read
+      await reverifyFinding(findingId, 'still reproduces on v1', rootCtx(), { stateDir });
+      await waveMerged('epic-1/task-1', ['src/parse.ts']); // v2: same-id re-cut rewrites it again
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(true);
+    });
+
+    // #217: the exclusion is scoped to the finding's OWN task — a different
+    // task merging over the same file must still mark it stale.
+    it('still marks a finding stale when a DIFFERENT task merges over its file', async () => {
+      const findingId = await raiseOn('src/parse.ts');
+      await waveMerged('epic-1/task-9', ['src/parse.ts']);
+
+      const stale = await staleFindings(ctx.sessionId, { stateDir });
+      expect(stale.has(findingId)).toBe(true);
+    });
+
     // Events written before files_changed existed carry no file list at all.
     // Falling back to the merged task's claims keeps those runs answerable,
     // and the basis is reported so an operator can tell an exact answer from
