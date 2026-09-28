@@ -178,6 +178,7 @@ Finding kinds, and where each one comes from:
 | `factory-width` | `attention` when the newest close ran narrow, `info` when nothing has been measured | The last epic this factory closed was admitted wide and dispatched serially — or every close here recorded no width at all. Repo-scoped. |
 | `unwatched-project` | `attention` | A repo this factory is answerable for — itself, or one it built — is not in this pass, so no maintenance proposal can name it. Itself is in the pass by default; `--no-self` drops it from both sides of the fold, so the finding can never be raised for it. Repo-scoped; the subject is the resolved directory, and `detail` carries the flag that clears it. |
 | `unreadable-log` | `attention` | A session log could not be read. |
+| `unreadable-state` | `attention` | The daemon's own `findings.json` exists but could not be read. Repo-scoped: `sessionId` is `null`, and the subject is the file's path. The tick ran with an empty memory, so every standing finding is dated as new; `detail` carries the reason. |
 | `projection-failed` | `attention` | A read-model refresh threw. `sessionId` names the lineage being folded, or is `null` when the tick had no session to fold and was refreshing the roadmap alone. |
 
 The `info` / `attention` split is the whole point of the `attention` count:
@@ -279,10 +280,10 @@ a cadence about, so an empty log reports no review due — a reminder to review
 work that has never started is noise a new operator does not need. It begins
 asking as soon as the log has anything in it and no growth review among it.
 
-The last two kinds are why a tick never aborts. One corrupt line, or one
-SQLite file the daemon cannot write, becomes a finding and the tick carries
-on — a watchdog that dies on the first corrupt log is silent exactly when
-something is wrong.
+The last three kinds are why a tick never aborts. One corrupt line, one
+unreadable `findings.json`, or one SQLite file the daemon cannot write,
+becomes a finding and the tick carries on — a watchdog that dies on the
+first corrupt log is silent exactly when something is wrong.
 
 The read-model obeys the same rule, for the same reason. Most of `state/smith.db`
 is folded out of the event log, but `milestones` is not: it is a full
@@ -364,6 +365,15 @@ alive means the new daemon refuses to start, dead means the stale lock is
 overwritten and the run proceeds. So a machine that lost power does not need a
 human to delete a file before the factory can watch itself again.
 
+A lock that exists but cannot be read — not JSON, no numeric `pid`, or a
+permission error — is not a dead incumbent. It could be a crash mid-write, or
+a live daemon's lock damaged out from under it, and the bytes cannot tell the
+two apart. So `run`, `start`, `status` and `stop` all refuse it with
+`daemon.unreadable-state`, naming the file and the reason, and none of them
+writes, signals or deletes anything. To recover, confirm that no
+`smith daemon run` process is using the directory, then delete the named file.
+A `status.json` that cannot be read is refused the same way by `status`.
+
 `status.json` is written tmp-then-rename, so a reader polling it never sees
 half a document.
 
@@ -373,8 +383,11 @@ all, because the event log records what *happened* and not what the watcher
 *noticed*, so this one fact cannot be recomputed from scratch the way every
 other fact in this factory can. It is also deliberately disposable — deleting
 it costs one tick in which every standing finding reads as new, and nothing
-else. A missing or corrupt file is read as an empty memory rather than failing
-the tick, for the same reason `unreadable-log` is a finding and not a crash.
+else. A missing file is read as an empty memory. A file that exists but
+cannot be read does not fail the tick either, for the same reason
+`unreadable-log` is a finding and not a crash — but it is not passed over in
+silence: the tick runs with an empty memory, files one `unreadable-state`
+finding naming the file (§3), and rewrites `findings.json` whole.
 
 `daemon.log` is only produced by `smith daemon start`, and **nothing rotates
 it**. Under launchd or systemd, let the service manager own the output stream
@@ -486,6 +499,12 @@ lock is not watching. A daemon wedged mid-tick answers `kill -0` exactly like
 a healthy one, so a probe that asked only "is the pid alive" passed a watcher
 that had published nothing since Tuesday — which is precisely the condition a
 watcher exists to break. It now fails the probe.
+
+A lock or `status.json` that exists but cannot be read also exits 1, and
+prints no report at all: stdout is the error object
+`{"error":{"code":"daemon.unreadable-state",...}}`, with the file in
+`error.details.path`. That keeps "no daemon" (a report with `running: false`)
+apart from "daemon state unreadable", which the exit code alone does not.
 
 The JSON keeps the two apart, for a check that does parse. This is again
 historical output, with `dogfood-envkit-1` a sample session id rather than a

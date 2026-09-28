@@ -12,7 +12,7 @@
 // already owns — budgetAlarm.ts for spend, agents-registry.ts for stalls,
 // scheduler.ts for work that is due. Nothing here re-derives them, so the
 // daemon and `smith status` can never disagree.
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   type AgentRecord,
@@ -76,7 +76,8 @@ export type FindingKind =
   | 'factory-width'
   | 'unwatched-project'
   | 'unreadable-log'
-  | 'projection-failed';
+  | 'projection-failed'
+  | 'unreadable-state';
 
 /**
  * `attention` means something is wrong now; `info` means there is work to
@@ -651,6 +652,14 @@ export interface TickOptions extends InspectOptions {
   logCache?: LogCache;
   /** Injection seam: the projector call a tick makes per changed leaf. */
   applyFn?: typeof apply;
+  /**
+   * Set by `runDaemon` when this tick's own memory file (`findings.json`)
+   * could not be read — a corrupt file, not an absent one. The tick still
+   * runs with an empty memory (every standing finding dates as new), and
+   * files one `unreadable-state` finding of its own so the loss is visible
+   * in the report rather than only in a log nobody is tailing.
+   */
+  memoryUnreadable?: { path: string; reason: string };
 }
 
 function errorMessage(err: unknown): string {
@@ -912,6 +921,23 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
   const all = [...logs.entries()].map(([sessionId, events]) => ({ sessionId, events }));
   findings.push(...inspectFactory(mergeSessionLogs(all), inspectOpts));
 
+  // The loop's own memory file failed to read this tick (see `TickOptions`).
+  // Filed as a finding, not swallowed: an operator watching the report is the
+  // one person who can tell whether "everything reads as new" is real churn
+  // or this.
+  if (opts.memoryUnreadable !== undefined) {
+    findings.push({
+      kind: 'unreadable-state',
+      severity: 'attention',
+      sessionId: null,
+      subject: opts.memoryUnreadable.path,
+      detail:
+        `${opts.memoryUnreadable.path} exists but cannot be read ` +
+        `(${opts.memoryUnreadable.reason}): memory was read as empty, so every ` +
+        'standing finding is dated as new this tick.',
+    });
+  }
+
   const aged = ageFindings(opts.memory ?? {}, findings, now);
   return {
     at: now.toISOString(),
@@ -943,19 +969,70 @@ export function statusPath(dir: string): string {
   return path.join(dir, STATUS_FILE);
 }
 
-function readJsonFile<T>(filePath: string): T | null {
-  if (!existsSync(filePath)) return null;
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf8')) as T;
-  } catch {
-    return null;
-  }
+/**
+ * Recoverable failure to read a daemon state file — a corrupt `daemon.pid`,
+ * `status.json` or `findings.json`. Always names the file and the reason, and
+ * always the same recovery: nothing here suggests `smith daemon stop`, which
+ * reads the same file and refuses it the same way.
+ */
+function unreadableState(filePath: string, reason: string): DaemonError {
+  return new DaemonError(
+    'daemon.unreadable-state',
+    `${filePath} exists but cannot be read (${reason}), so it is not treated as ` +
+      'absent. Confirm no `smith daemon run` process is using this directory, ' +
+      'then delete the file.',
+    { path: filePath, reason },
+  );
 }
 
+function isRecordShape(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isLockShape(value: unknown): value is DaemonLock {
+  return isRecordShape(value) && typeof (value as { pid?: unknown }).pid === 'number';
+}
+
+/**
+ * Read and parse one state file, or null when there was none.
+ *
+ * ABSENT and UNREADABLE are two different outcomes, not one. ABSENT is
+ * `readFileSync` throwing ENOENT — the ordinary "no daemon has run here yet"
+ * case, answered with null. Everything else — a permission error, a
+ * `JSON.parse` failure, or a parsed value the wrong shape for `T` — is
+ * UNREADABLE: the file exists, so silently treating it as absent would let a
+ * corrupt lock be taken over, a corrupt `status.json` read as "not running",
+ * or a corrupt memory read as empty, none of which is true. Reading the file
+ * directly and catching ENOENT (rather than `existsSync` then `readFileSync`)
+ * also closes the gap where the file could vanish between the two calls.
+ */
+function readJsonFile<T>(filePath: string, isValidShape: (value: unknown) => boolean): T | null {
+  let raw: string;
+  try {
+    raw = readFileSync(filePath, 'utf8');
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return null;
+    throw unreadableState(filePath, code ?? errorMessage(err));
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw unreadableState(filePath, errorMessage(err));
+  }
+  if (!isValidShape(parsed)) throw unreadableState(filePath, 'unexpected shape');
+  return parsed as T;
+}
+
+/**
+ * Null when there is no lock to read. Throws `daemon.unreadable-state` when
+ * the file exists but cannot be parsed, or parses to something without a
+ * numeric `pid` — a half-written file from a crash mid-write looks exactly
+ * like this, and it must not be mistaken for "nobody is running".
+ */
 export function readLock(dir: string): DaemonLock | null {
-  const lock = readJsonFile<DaemonLock>(lockPath(dir));
-  if (lock === null || typeof lock.pid !== 'number') return null;
-  return lock;
+  return readJsonFile<DaemonLock>(lockPath(dir), isLockShape);
 }
 
 /** `kill(pid, 0)` — EPERM means a process exists that this user may not signal. */
@@ -970,14 +1047,20 @@ export function processIsAlive(pid: number): boolean {
 
 /**
  * Claim `dir` for `lock.pid`, returning the lock this one displaced (null when
- * there was nothing to displace, or nothing readable).
+ * there was nothing to displace).
  *
  * Two daemons ticking the same state dir would double every projection write
  * and every finding, so a live incumbent is refused. A DEAD incumbent is not:
  * a crashed daemon leaves its pid file behind, and refusing to start until a
- * human runs `rm` would make the first crash permanent. Likewise an
- * unparseable file — half a JSON document is what a crash mid-write looks
- * like, and it is evidence of a dead writer, not a live one.
+ * human runs `rm` would make the first crash permanent.
+ *
+ * An UNREADABLE incumbent is refused rather than taken over: an unparseable
+ * file could be a crash mid-write, but it could also be a live daemon's lock
+ * a filesystem fault damaged out from under it, and the two are not
+ * distinguishable from the bytes alone. `readLock` throws
+ * `daemon.unreadable-state` in that case, and this function does not catch
+ * it — the throw happens before anything is written, so the file's bytes are
+ * left exactly as found.
  */
 export function acquireLock(
   dir: string,
@@ -1009,9 +1092,22 @@ export function acquireLock(
   return incumbent;
 }
 
-/** True when this call removed the lock; false when it belongs to someone else. */
+/**
+ * True when this call removed the lock; false when it belongs to someone
+ * else, or cannot be read at all.
+ *
+ * Never throws, unlike every other reader of this file: it runs from
+ * `runDaemon`'s `finally`, where a throw would replace the loop's own
+ * outcome — a tick that failed would be reported instead as "could not
+ * release the lock", losing the failure that actually mattered.
+ */
 export function releaseLock(dir: string, pid: number): boolean {
-  const lock = readLock(dir);
+  let lock: DaemonLock | null;
+  try {
+    lock = readLock(dir);
+  } catch {
+    return false;
+  }
   if (lock === null || lock.pid !== pid) return false;
   rmSync(lockPath(dir), { force: true });
   return true;
@@ -1030,8 +1126,9 @@ export function writeStatus(dir: string, report: TickReport): void {
   renameSync(tmp, target);
 }
 
+/** Throws `daemon.unreadable-state` when the file exists but cannot be parsed. */
 export function readStatus(dir: string): TickReport | null {
-  return readJsonFile<TickReport>(statusPath(dir));
+  return readJsonFile<TickReport>(statusPath(dir), isRecordShape);
 }
 
 // ---------------------------------------------------------------------------
@@ -1046,16 +1143,19 @@ export function memoryPath(dir: string): string {
  * The only state this daemon carries across ticks, and deliberately the least
  * it could carry: identity -> when it was first seen.
  *
- * Missing or corrupt reads as empty rather than throwing, for the same reason
- * `unreadable-log` is a finding and not a crash. A watchdog that dies over its
- * own scratch file is silent exactly when something is wrong, and the cost of
- * losing this one is a single tick that calls every standing finding new.
+ * Absent reads as empty — the ordinary first-tick case. Corrupt throws
+ * `daemon.unreadable-state`: `runDaemon`'s `tickWithMemory` is the one caller
+ * that catches it, and turns it into a finding of its own (`TickOptions`'s
+ * `memoryUnreadable`) rather than swallowing it, because a watchdog that
+ * dies over its own scratch file is silent exactly when something is wrong,
+ * but one that quietly reads it as empty hides the same fact from the report
+ * meant to surface it.
  */
 export function readFindingMemory(dir: string): FindingMemory {
-  return readJsonFile<FindingMemory>(memoryPath(dir)) ?? {};
+  return readJsonFile<FindingMemory>(memoryPath(dir), isRecordShape) ?? {};
 }
 
-/** tmp-then-rename, like the status file: a half-written memory reads as none. */
+/** tmp-then-rename, like the status file: a crash mid-write leaves the old file whole. */
 export function writeFindingMemory(dir: string, memory: FindingMemory): void {
   mkdirSync(dir, { recursive: true });
   const target = memoryPath(dir);
@@ -1246,8 +1346,29 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<DaemonRun> {
   // Read from disk rather than held in a variable, so a daemon restarted by
   // cron or by the operator picks up where the last process stopped. A tick
   // knows nothing about the interval it runs on; this is what joins two.
+  //
+  // `readFindingMemory` throws `daemon.unreadable-state` for a corrupt file
+  // (never for an absent one). That is the ONE failure this catches: the
+  // tick still runs, with an empty memory and `memoryUnreadable` set so the
+  // loss shows up as a finding in the very report it affected, rather than
+  // failing the loop over its own scratch file (D-21).
   const tickWithMemory = async (): Promise<TickReport> => {
-    const report = await tick({ ...tickOptions, memory: readFindingMemory(opts.dir) });
+    let memory: FindingMemory = {};
+    let memoryUnreadable: { path: string; reason: string } | undefined;
+    try {
+      memory = readFindingMemory(opts.dir);
+    } catch (err) {
+      if (!(err instanceof DaemonError) || err.code !== 'daemon.unreadable-state') throw err;
+      memoryUnreadable = {
+        path: String(err.details.path),
+        reason: String(err.details.reason),
+      };
+    }
+    const report = await tick({
+      ...tickOptions,
+      memory,
+      ...(memoryUnreadable === undefined ? {} : { memoryUnreadable }),
+    });
     writeStatus(opts.dir, report);
     writeFindingMemory(opts.dir, memoryOf(report.findings));
     return report;

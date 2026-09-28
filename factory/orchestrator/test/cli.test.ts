@@ -11305,6 +11305,22 @@ describe('cli.ts (built binary)', () => {
       expect(out.lastTick.sessions).toEqual(['sess-cli']);
     });
 
+    it('prints the unreadable-state error, not a report, over a corrupt lock', () => {
+      const { dir } = fixture();
+      const lockFile = path.join(dir, 'daemon.pid');
+      writeFileSync(lockFile, '{ not json', 'utf8');
+
+      const { stdout, status } = runCli(['daemon', 'status', '--dir', dir]);
+      // Exit 1 either way -- "no daemon" exits 1 too -- so the exit code does
+      // not tell the two apart. The output does: an error object naming the
+      // file, never a `running: false` report.
+      expect(status).toBe(1);
+      const out = JSON.parse(stdout);
+      expect(out.running).toBeUndefined();
+      expect(out.error.code).toBe('daemon.unreadable-state');
+      expect(out.error.details.path).toBe(lockFile);
+    });
+
     it('fails the health check for a daemon that holds the lock and has gone quiet', () => {
       const { dir } = fixture();
       // This test process is, definitionally, a live pid -- so `running` is
