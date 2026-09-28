@@ -10,7 +10,7 @@ on demand knows only what is in the log, never whether anyone was reading it.
 `smith daemon status [--dir <dir>]`. It prints JSON and **exits 1 whenever a
 current daemon is not watching** — that is the health check doing its job,
 not a command that failed, so never report the non-zero exit as an error.
-Three readings:
+Four readings:
 
 - `running: false` — nothing holds the lock. A fine steady state if the
   operator never started one (`smith daemon start` if they want one): say so
@@ -24,6 +24,10 @@ Three readings:
   `<dir>/daemon.log`.
 - `running: true, stale: false` — the numbers are fresh. Say how fresh
   (`reportAgeSeconds`) rather than implying "now".
+- an `error` object with `code: "daemon.unreadable-state"` — the daemon's
+  own state is unreadable, so nobody can say whether one is running. Lead
+  with it, name the file from `error.details.path`, and pass on the
+  recovery in `error.message`. Never render it as `running: false`.
 
 When there is a `lastTick`, render its triage split before the digest below,
 because it is the only record of what happened while nobody was watching:

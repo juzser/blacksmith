@@ -20,6 +20,8 @@ import {
   daemonStatus,
   inspectFactory,
   inspectSession,
+  lockPath,
+  memoryPath,
   processIsAlive,
   readFindingMemory,
   readLock,
@@ -27,6 +29,7 @@ import {
   releaseLock,
   runDaemon,
   runTick,
+  statusPath,
   stopDaemon,
   writeFindingMemory,
   writeStatus,
@@ -184,6 +187,18 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+/** The `daemon.unreadable-state` error `fn` throws; fails the test if it throws none. */
+function unreadableStateFrom(fn: () => unknown): DaemonError {
+  expect(fn).toThrow(DaemonError);
+  try {
+    fn();
+  } catch (err) {
+    expect((err as DaemonError).code).toBe('daemon.unreadable-state');
+    return err as DaemonError;
+  }
+  throw new Error('unreachable');
+}
+
 describe('holding the lock', () => {
   const LOCK = { pid: 4242, startedAt: NOW.toISOString(), intervalSeconds: 60 };
 
@@ -209,13 +224,41 @@ describe('holding the lock', () => {
     expect(readLock(dir)?.pid).toBe(99);
   });
 
-  it('takes over a lock file it cannot parse', () => {
-    // A half-written pid file is the crash case, and refusing to start
-    // because of one would need a human with `rm` to recover.
+  it('refuses to take over a lock file it cannot parse', () => {
+    // An unparseable lock could be a crash mid-write, or it could be a live
+    // daemon's lock a filesystem fault damaged out from under it — the two
+    // are not distinguishable from the bytes alone, so this is refused
+    // rather than taken over.
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, 'daemon.pid'), '{ not json', 'utf8');
-    expect(acquireLock(dir, LOCK, { isAlive: () => true })).toBeNull();
-    expect(readLock(dir)?.pid).toBe(4242);
+    const bytes = '{ not json';
+    writeFileSync(lockPath(dir), bytes, 'utf8');
+    unreadableStateFrom(() => acquireLock(dir, LOCK, { isAlive: () => true }));
+    expect(readFileSync(lockPath(dir), 'utf8')).toBe(bytes);
+  });
+
+  it('refuses to run a single tick over a lock file it cannot parse', async () => {
+    mkdirSync(dir, { recursive: true });
+    const bytes = '{ not json';
+    writeFileSync(lockPath(dir), bytes, 'utf8');
+    let ticks = 0;
+    let thrown: unknown;
+    try {
+      await runDaemon({
+        dir,
+        once: true,
+        isAlive: () => false,
+        tick: async () => {
+          ticks += 1;
+          throw new Error('must never run');
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(DaemonError);
+    expect((thrown as DaemonError).code).toBe('daemon.unreadable-state');
+    expect(ticks).toBe(0);
+    expect(readFileSync(lockPath(dir), 'utf8')).toBe(bytes);
   });
 
   it('releases only its own lock', () => {
@@ -226,10 +269,40 @@ describe('holding the lock', () => {
     expect(readLock(dir)).toBeNull();
   });
 
-  it('answers null for a directory that has never held a lock', () => {
+  it('answers null for a directory that has never held a lock (regression)', () => {
     expect(readLock(dir)).toBeNull();
     expect(releaseLock(dir, 4242)).toBe(false);
   });
+
+  it('throws daemon.unreadable-state reading a lock it cannot parse', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(lockPath(dir), '{ not json', 'utf8');
+    const thrown = unreadableStateFrom(() => readLock(dir));
+    expect(thrown.details.path).toBe(lockPath(dir));
+  });
+
+  it('throws daemon.unreadable-state reading a lock with no numeric pid', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(lockPath(dir), '{}', 'utf8');
+    const thrown = unreadableStateFrom(() => readLock(dir));
+    expect(thrown.details.path).toBe(lockPath(dir));
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    'throws daemon.unreadable-state reading a lock it may not read',
+    () => {
+      mkdirSync(dir, { recursive: true });
+      const lockFile = lockPath(dir);
+      writeFileSync(lockFile, JSON.stringify(LOCK), 'utf8');
+      chmodSync(lockFile, 0o000);
+      try {
+        const thrown = unreadableStateFrom(() => readLock(dir));
+        expect(thrown.details.reason).toBe('EACCES');
+      } finally {
+        chmodSync(lockFile, 0o600);
+      }
+    },
+  );
 });
 
 describe('what one tick notices', () => {
@@ -929,14 +1002,47 @@ describe('how long a finding has been standing', () => {
     expect(readFindingMemory(dir)).toEqual({});
   });
 
-  it('reads a corrupt memory as an empty one rather than failing the tick', () => {
-    // Same doctrine as `unreadable-log`: a watchdog that dies on a bad file is
-    // silent exactly when something is wrong. This file is disposable — losing
-    // it costs one tick of ages and nothing else — so it must never be able to
-    // stop a tick that would otherwise report a real problem.
+  it('throws daemon.unreadable-state reading a corrupt memory rather than silently emptying it', () => {
+    // Unlike `unreadable-log`, this is not read as empty by `readFindingMemory`
+    // itself: `runDaemon`'s `tickWithMemory` is the one caller that catches
+    // this and turns it into a finding of its own, so the loss shows up in the
+    // report instead of being invisible.
     mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, 'findings.json'), '{ not json', 'utf8');
-    expect(readFindingMemory(dir)).toEqual({});
+    writeFileSync(memoryPath(dir), '{ not json', 'utf8');
+    unreadableStateFrom(() => readFindingMemory(dir));
+  });
+
+  it('surfaces an unreadable memory as a finding instead of failing the tick', async () => {
+    // D-21: a watchdog must never die over its own scratch file. `runDaemon`
+    // ticks with an empty memory and files one `unreadable-state` finding of
+    // its own, through the normal aging/counting path, and still writes both
+    // status.json and a fresh, valid findings.json.
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(memoryPath(dir), '{ not json', 'utf8');
+    const events = path.join(dir, 'events');
+    mkdirSync(events, { recursive: true });
+
+    const run = await runDaemon({
+      dir,
+      once: true,
+      stateDir: events,
+      pid: 4242,
+      now: NOW,
+      budgetPolicy: BUDGET,
+      schedulerPolicy: SCHEDULER,
+      projectDb: false,
+      isAlive: () => false,
+    });
+
+    const unreadable = run.last?.findings.filter((f) => f.kind === 'unreadable-state') ?? [];
+    expect(unreadable).toHaveLength(1);
+    expect(unreadable[0]?.severity).toBe('attention');
+    expect(unreadable[0]?.sessionId).toBeNull();
+    expect(unreadable[0]?.subject).toBe(memoryPath(dir));
+    expect(run.last?.attention).toBeGreaterThanOrEqual(1);
+
+    const findingsOnDisk = JSON.parse(readFileSync(memoryPath(dir), 'utf8'));
+    expect(findingsOnDisk).toBeTypeOf('object');
   });
 
   it('round-trips a memory through the disk', () => {
@@ -1037,6 +1143,20 @@ describe('starting, reporting and stopping', () => {
     const status = daemonStatus(dir, { isAlive: () => true });
     expect(status.running).toBe(true);
     expect(status.lock?.pid).toBe(4242);
+  });
+
+  it('throws naming the lock file when the lock is unreadable', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(lockPath(dir), '{ not json', 'utf8');
+    const thrown = unreadableStateFrom(() => daemonStatus(dir, { isAlive: () => false }));
+    expect(thrown.details.path).toBe(lockPath(dir));
+  });
+
+  it('throws naming the status file when status.json is unreadable', () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(statusPath(dir), '{ not json', 'utf8');
+    const thrown = unreadableStateFrom(() => daemonStatus(dir, { isAlive: () => false }));
+    expect(thrown.details.path).toBe(statusPath(dir));
   });
 
   it('ticks until it is told to stop, then lets go of the lock', async () => {
@@ -1181,6 +1301,26 @@ describe('starting, reporting and stopping', () => {
     expect(result).toEqual({ stopped: false, pid: 4242 });
     expect(killed).toEqual([]);
     expect(readLock(dir)).toBeNull();
+  });
+
+  it('does not guess at an unreadable lock: signals nothing and leaves the file', () => {
+    mkdirSync(dir, { recursive: true });
+    const bytes = '{ not json';
+    writeFileSync(lockPath(dir), bytes, 'utf8');
+    const killed: number[] = [];
+    unreadableStateFrom(() =>
+      stopDaemon(dir, { isAlive: () => true, kill: (pid) => killed.push(pid) }),
+    );
+    expect(killed).toEqual([]);
+    expect(readFileSync(lockPath(dir), 'utf8')).toBe(bytes);
+  });
+
+  it('releaseLock never throws on an unreadable lock: returns false and leaves the file (regression)', () => {
+    mkdirSync(dir, { recursive: true });
+    const bytes = '{ not json';
+    writeFileSync(lockPath(dir), bytes, 'utf8');
+    expect(releaseLock(dir, 4242)).toBe(false);
+    expect(readFileSync(lockPath(dir), 'utf8')).toBe(bytes);
   });
 });
 
@@ -1684,7 +1824,7 @@ describe('whether the watcher is actually watching', () => {
     // D-21: a report that only states a fact must not crash over that fact. A
     // hand-edited pid file is a bad lock, not a reason to have no status.
     writeFileSync(
-      path.join(dir, 'daemon.pid'),
+      lockPath(dir),
       `${JSON.stringify({ pid: 4242, startedAt: at(3600).toISOString() })}\n`,
       'utf8',
     );
