@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -1484,5 +1485,102 @@ describe('ui/server app.ts — what the projection could not land reaches the pu
       closeApp(handle);
       restore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// read-boundary guard (finding 871ee8f7)
+//
+// app.ts's header says its read endpoints wrap factory/orchestrator's
+// db/queries.ts 1:1 — no file under ui/server/src is meant to hold its own
+// drizzle query or reach into db/schema.js directly. This guard is what
+// stops a second unaudited read path from coming back: it walks every .ts
+// file under ui/server/src from a directory listing, not a hand-maintained
+// list, so a new offender cannot simply be left off it.
+// ---------------------------------------------------------------------------
+
+const FORBIDDEN_BARE_SPECIFIER = 'drizzle-orm';
+
+function isForbiddenSpecifier(specifier: string): boolean {
+  if (
+    specifier === FORBIDDEN_BARE_SPECIFIER ||
+    specifier.startsWith(`${FORBIDDEN_BARE_SPECIFIER}/`)
+  ) {
+    return true;
+  }
+  return specifier.endsWith('/db/schema.js') || specifier.endsWith('/db/schema');
+}
+
+/**
+ * Every import specifier in a `.ts` source that names `drizzle-orm` or a
+ * `db/schema` module — static `from '...'` and dynamic `import('...')`
+ * alike, type-only imports included since `import type ... from '...'` still
+ * matches the static pattern.
+ */
+function findForbiddenSpecifiers(source: string): string[] {
+  const found: string[] = [];
+  const staticImportRe = /\bfrom\s+['"]([^'"]+)['"]/g;
+  const dynamicImportRe = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
+  for (const re of [staticImportRe, dynamicImportRe]) {
+    let match: RegExpExecArray | null = re.exec(source);
+    while (match !== null) {
+      const specifier = match[1];
+      if (specifier !== undefined && isForbiddenSpecifier(specifier)) found.push(specifier);
+      match = re.exec(source);
+    }
+  }
+  return found;
+}
+
+function listTsFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...listTsFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith('.ts')) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/** `<repo-relative file>: <specifier>` for every forbidden import found under `srcDir`. */
+function scanReadBoundary(
+  srcDir: string,
+  repoRoot: string,
+): { visited: string[]; offenders: string[] } {
+  const visited: string[] = [];
+  const offenders: string[] = [];
+  for (const file of listTsFiles(srcDir)) {
+    const relFile = path.relative(repoRoot, file);
+    visited.push(relFile);
+    const source = readFileSync(file, 'utf8');
+    for (const specifier of findForbiddenSpecifiers(source)) {
+      offenders.push(`${relFile}: ${specifier}`);
+    }
+  }
+  return { visited, offenders };
+}
+
+describe('read boundary guard (finding 871ee8f7)', () => {
+  const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
+  const SRC_DIR = path.resolve(import.meta.dirname, '..', 'src');
+
+  it('flags a drizzle-orm import and a type-only db/schema import, but not a queries.js import', () => {
+    expect(findForbiddenSpecifiers("import { eq } from 'drizzle-orm';")).toEqual(['drizzle-orm']);
+    expect(findForbiddenSpecifiers("import type { lessons } from '../x/db/schema.js';")).toEqual([
+      '../x/db/schema.js',
+    ]);
+    expect(findForbiddenSpecifiers("import { lessonsPage } from '../x/db/queries.js';")).toEqual(
+      [],
+    );
+  });
+
+  it('no file under ui/server/src imports drizzle-orm or a db/schema module', () => {
+    const { visited, offenders } = scanReadBoundary(SRC_DIR, REPO_ROOT);
+    expect(visited.length).toBeGreaterThan(0);
+    expect(visited).toContain('ui/server/src/app.ts');
+    expect(offenders).toEqual([]);
   });
 });

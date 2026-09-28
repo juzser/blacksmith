@@ -11,6 +11,7 @@ import {
   flowGraph,
   kanban,
   LESSON_BUCKET_FOR_STATUS,
+  lessonOwnerSession,
   lessonsPage,
   overview,
   pulse,
@@ -1574,5 +1575,90 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     const entries = overview(handle.db).liveAgentEntries;
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((a) => a.sessionId === SESSION_ID)).toBe(true);
+  });
+});
+
+describe('lessonOwnerSession()', () => {
+  const OTHER = 'sess-owner-later';
+  let stateDir: string;
+  let dbDir: string;
+  let handle: DbHandle;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-lesson-owner-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-lesson-owner-db-'));
+    await buildFixture({ stateDir });
+
+    // A second session that raises a lesson (lesson-owned-2) SESSION_ID never
+    // touches, then changes that lesson's status within the same session —
+    // the projection must still resolve it to OTHER, not SESSION_ID.
+    const start = await appendEvent(
+      {
+        session_id: OTHER,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    const raised = await appendEvent(
+      {
+        session_id: OTHER,
+        actor: 'scribe',
+        event_type: 'lesson-candidate-raised',
+        plan_version: 1,
+        causal_parent: start.event_id,
+        payload: {
+          lesson_id: 'lesson-owned-2',
+          lesson_type: 'rule',
+          lesson_level: 'principle',
+          lesson_status: 'candidate',
+          lesson_scope: 'claim-path',
+          statement: 'Owned by the second session, not the fixture one.',
+          valid_from: new Date().toISOString(),
+          provenance_event_ids: [start.event_id],
+          evidence: 'test fixture',
+        },
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: OTHER,
+        actor: 'user',
+        event_type: 'lesson-status-changed',
+        plan_version: 1,
+        causal_parent: raised.event_id,
+        payload: { lesson_id: 'lesson-owned-2', to_status: 'approved' },
+      },
+      { stateDir },
+    );
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    handle = openDb(dbPath);
+  });
+
+  afterEach(async () => {
+    handle.sqlite.close();
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('returns the session that owns the lesson, not any other projected session', () => {
+    expect(lessonOwnerSession(handle.db, 'lesson-owned-2')).toBe(OTHER);
+    expect(lessonOwnerSession(handle.db, 'lesson-1')).toBe(SESSION_ID);
+  });
+
+  it('returns null for an unknown lesson id', () => {
+    expect(lessonOwnerSession(handle.db, 'no-such-lesson')).toBeNull();
+  });
+
+  it('still resolves to the owning session after its status changed in that same session', () => {
+    // lesson-owned-2's status moved candidate -> approved above, both events
+    // in OTHER's own log — the owner must not shift with the status.
+    expect(lessonOwnerSession(handle.db, 'lesson-owned-2')).toBe(OTHER);
   });
 });
