@@ -15,7 +15,7 @@
 // nothing at runtime. `test/cliBoot.test.ts` reads the built graph and fails if
 // the database layer creeps back into it.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
@@ -615,6 +615,15 @@ function planOptsFromFlags(flags: Record<string, string>): PlanOpts {
   return flags['specs-dir'] ? { specsDir: flags['specs-dir'] } : {};
 }
 
+/** `realpathSync`, falling back to the resolved lexical path when it fails. */
+function realOrResolved(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
 /**
  * `plan amend`'s own specs-dir default (#219) -- deliberately not
  * `planOptsFromFlags`, whose silent fallback to `SPECS_ACTIVE_DIR` is a
@@ -640,7 +649,9 @@ function amendSpecsDirOpts(
   const explicit = flags['specs-dir'];
   const implied = impliedSpecsDir(planPath, plan.epic_id);
   if (explicit === undefined) return implied === null ? {} : { specsDir: implied };
-  if (implied !== null && path.resolve(explicit) !== implied) {
+  // Compared on disk, not lexically: the same tree reached through a
+  // symlink (macOS /tmp -> /private/tmp) is agreement, not a mismatch.
+  if (implied !== null && realOrResolved(explicit) !== realOrResolved(implied)) {
     throw new SmithError(
       'cli.specs-dir-mismatch',
       `--specs-dir "${explicit}" disagrees with the directory --plan "${planPath}" already lives in: that plan's own layout says its specs dir is "${implied}". Drop --specs-dir to amend in place, point it at "${implied}", or move --plan under the tree --specs-dir names.`,

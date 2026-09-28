@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -6530,6 +6530,58 @@ describe('cli.ts (built binary)', () => {
         expect(
           tail(sessionId, eventsDir).filter((r) => r.event_type === 'plan-version-created'),
         ).toEqual([]);
+      });
+
+      it("accepts a --specs-dir that reaches the plan's own directory through a symlink (#219)", async () => {
+        const { sessionId, eventsDir } = await session();
+        const ownSpecsDir = path.join(scratchDir, `${sessionId}-alias-own-specs`);
+        const planPath = path.join(ownSpecsDir, 'epic-1', 'plan-v1.json');
+        await mkdir(path.dirname(planPath), { recursive: true });
+        await writeFile(planPath, JSON.stringify(PLAN));
+        const findingId = await raiseSpec('spec-alias-dir', sessionId, eventsDir, planPath);
+        // Same directory on disk, different lexical path -- the macOS
+        // /tmp -> /private/tmp shape. It names the plan's own tree, so it
+        // must not be refused as a disagreement.
+        const aliasSpecsDir = path.join(scratchDir, `${sessionId}-alias-link-specs`);
+        await symlink(ownSpecsDir, aliasSpecsDir, 'dir');
+        const changesPath = path.join(scratchDir, `${sessionId}-alias-changes.json`);
+        await writeFile(
+          changesPath,
+          JSON.stringify({
+            supersede: {
+              'epic-1/task-2': {
+                ...PLAN.tasks[1],
+                acceptance_criteria: ['parses `A="x\\ny"` into a single entry'],
+              },
+            },
+          }),
+        );
+
+        const result = runCli([
+          'plan',
+          'amend',
+          '--plan',
+          planPath,
+          '--findings',
+          findingId,
+          '--rationale',
+          'a symlinked --specs-dir naming the same tree is agreement, not a mismatch',
+          '--sites',
+          'src/bar/thing.ts',
+          '--changes',
+          changesPath,
+          '--specs-dir',
+          aliasSpecsDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+
+        expect(result.status).toBe(0);
+        expect(existsSync(path.join(ownSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(true);
       });
 
       it('refuses a closing spec review it cannot pin to an integration head', async () => {
