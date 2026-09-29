@@ -130,6 +130,11 @@ export interface BudgetAlarmOptions {
  * this list and the priced worker roles is reported rather than assumed free —
  * see rolesWithoutCap. `security-reviewer` and `merger` are the live examples:
  * both appear in budgets.yml's `narrowing_roles`, neither has a declared cap.
+ *
+ * Deliberately a separate list from judgeRoles.ts's exported `JUDGE_ROLES`
+ * (which also names `security-reviewer` and `auditor`): this one is scoped to
+ * what budgets.yml prices under `task.judges`, not to who owes a
+ * declared-artifact line or opens a judge turn.
  */
 const JUDGE_ROLES: readonly string[] = ['spec-reviewer', 'reviewer', 'verifier', 'grader'];
 

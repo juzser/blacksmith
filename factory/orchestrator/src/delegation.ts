@@ -357,10 +357,15 @@ interface TerminalRow {
  *
  * `error-logged` lists both `agent` (this module's long-standing read, the
  * Result file's own spelling) and `agent_role` (the dispatch's) because a
- * hand-written error event may carry only one of the two -- symmetric with
- * agents-registry.ts's fold of the same event type, so a role named either
- * way still finds its terminal instead of falling through to whichever actor
- * happened to log the error.
+ * hand-written error event may carry only one of the two, so a role named
+ * either way still finds its terminal instead of falling through to
+ * whichever actor happened to log the error. agents-registry.ts's fold of
+ * the same event type accepts the same two keys, but tries `agent_role`
+ * first where this module tries `agent` first -- not symmetric in order,
+ * because each reader keeps its own historical key first rather than the two
+ * agreeing on one: `agent_role` was already this event type's only key in
+ * agents-registry.ts's fold before `agent` was added as a fallback there,
+ * same as `agent` was here before `agent_role` was added as this module's.
  */
 const TERMINAL_ROLE_KEYS: Record<string, readonly string[]> = {
   [TASK_RESULT_EVENT_TYPE]: ['agent'],

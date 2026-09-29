@@ -394,8 +394,11 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
       // `task_ref` is this event's own spelling; eventTaskId covers the two
       // the rest of the log uses (D-245). `agent_role` is the dispatch's own
       // key and this event's usual spelling, but a hand-written one may only
-      // carry `agent` (the Result file's spelling) -- symmetric with
-      // task-result-recorded above, so either key alone still finds the role.
+      // carry `agent` (the Result file's spelling), so either key alone still
+      // finds the role -- `agent_role` tried first because it was already
+      // this fold's only key before `agent` was added as a fallback, same
+      // reason task-result-recorded above tries `agent` first for its own
+      // history; not the same order, because each fold keeps its own.
       const taskId = eventTaskId(record) ?? payload.task_ref;
       const role = payload.agent_role ?? payload.agent ?? null;
       if (taskId) {
