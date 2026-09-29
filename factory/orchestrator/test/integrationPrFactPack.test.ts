@@ -14,7 +14,11 @@ import { REPO_ROOT } from '../src/paths.js';
 const RUN_MD = readFileSync(path.join(REPO_ROOT, '.claude/skills/bs/run.md'), 'utf8');
 const SCRIBE_MD = readFileSync(path.join(REPO_ROOT, '.claude/agents/scribe.md'), 'utf8');
 
-/** Step 17 runs from its numbered marker to the next step marker, or EOF. */
+/**
+ * Step 17 runs from its numbered marker to the next step marker, or EOF.
+ * Step 17 is run.md's last step today, so the bound only bites once a step
+ * 18 lands; until then the slice runs to EOF.
+ */
 function step17(text: string): string {
   const start = text.search(/^17\. /m);
   if (start === -1) throw new Error('run.md has no step 17');
@@ -80,14 +84,33 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
     expect(prose).toMatch(/summary\.tasks/);
   });
 
-  it('matches decisions on fingerprint aliases, scoped to the epic', () => {
-    expect(prose).toMatch(/alias/i);
+  it('matches decisions on the stored fingerprint, scoped to the epic', () => {
+    // fingerprintAliases is private and no verb exposes the recompute.
+    expect(prose).toMatch(/stored `fingerprint`/);
+    expect(prose).not.toMatch(/fingerprintAliases|recomputed/);
     expect(prose).toMatch(/earlier epic/i);
   });
 
-  it('names where screenshots come from', () => {
-    expect(prose).toMatch(/screenshot/i);
-    expect(prose).toMatch(/tester's `?artifacts`?/);
+  it('scopes audit-resolved to this epic and unions its repeats', () => {
+    // audit.ts emits { epic, fixed: [fps], deferred: [fps] }; one epic can
+    // resolve more than once and the lineage carries a parent's resolve.
+    expect(prose).toMatch(/`payload\.epic`/);
+    expect(prose).toMatch(/union/i);
+  });
+
+  it('scopes integration-check to the epic and the closed head', () => {
+    expect(prose).toMatch(/`payload\.epic_id`/);
+    expect(prose).toMatch(/summary\.integration\.check\.head_sha/);
+  });
+
+  it("takes screenshots from each task's tester result, never a local path", () => {
+    expect(prose).toMatch(/state\/results\/<task-id>\.tester\S*\.json/);
+    expect(prose).toMatch(/state\/artifacts\/<task-id>\//);
+    expect(prose).toMatch(/never a local path/i);
+  });
+
+  it('does not publish a follow-up cleared by waivers as open', () => {
+    expect(prose).toMatch(/cleared by waiving/i);
   });
 
   it('keeps the pack to filtered facts and states the word-cap rule', () => {

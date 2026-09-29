@@ -341,28 +341,38 @@ playbooks are written to prevent.
     From the `event tail` pass keep, each with its `event_id`:
     - `waiver-granted` and `waiver-denied` records whose
       `payload.fingerprint` matches one of the epic's findings, mapped to
-      that finding's id and task. Match on aliases — the stored fingerprint
-      or the one recomputed from its `file_path`, `finding_category` and
-      `summary` (`fingerprintAliases`, #178) — and drop a decision that
-      matches none: an ancestor session can carry an earlier epic's
-      decisions. Grants come from here, not from
+      that finding's id and task. Match on the stored `fingerprint` that
+      `findings list` prints, and drop a decision that matches none: an
+      ancestor session can carry an earlier epic's decisions. Grants come
+      from here, not from
       `findings list --status`, because a grant only moves a raised or
       confirmed finding to `waived`; an amended or fix-verified one keeps
       its status.
     - `wave-merged` records: `payload.task_ids` and the event id.
     - `epic-closed` from step 16: its event id, `machine_verdict`, and
       `payload.summary.tasks` — each task's `task_status`, read from the log
-      at close.
-    - `audit-resolved`, for an epic cut by `/bs audit`: its event id and the
-      `fixed` and `deferred` counts from step 16's resolve.
-    - the newest `integration-check`: each check's `name` and `pass`.
+      at close. A follow-up cleared by waiving all its findings still reads
+      `todo` there; cross-check it against the grants and never publish it
+      as an open task.
+    - `audit-resolved`, for an epic cut by `/bs audit`: every record whose
+      `payload.epic` is this epic — one epic can resolve more than once, and
+      the lineage carries a parent epic's resolve too. List each event id.
+      `fixed` and `deferred` are fingerprint arrays: fixed is the union of
+      every kept record's `fixed`; deferred is the last record's `deferred`
+      minus that union. Write the two counts into the pack yourself.
+    - `integration-check` records whose `payload.epic_id` is this epic and
+      whose `head_sha` equals the `epic-closed` record's
+      `summary.integration.check.head_sha`: each check's `name` and `pass`.
 
     `epic goal` reads this repo's roadmap by default; when the epic's
     roadmap lives elsewhere, pass `--roadmap-path` naming it, or the goal
-    you hand over is the wrong one. For a UI epic, add the screenshot paths
-    from the epic-level tester's `artifacts` (under `state/results/`);
+    you hand over is the wrong one. For a UI epic, take the screenshots
+    from each task's tester result, `state/results/<task-id>.tester*.json`,
+    field `artifacts` (the files sit under `state/artifacts/<task-id>/`);
     [`docs/standards/stack.md`](../../../docs/standards/stack.md) wants
-    them on this PR.
+    them on this PR. The pack carries a screenshot only as an image you
+    have uploaded or attached — never a local path, which no reviewer can
+    open; one you cannot attach stays out.
 
     Write only these filtered facts into one pack file — never raw command
     output, which puts the scribe back to grepping logs. Dispatch the scribe with that file as its **only source**, and the
@@ -378,8 +388,9 @@ playbooks are written to prevent.
     **Waivers** (granted and denied, each with its finding id and event id,
     or the word "none" only when both lists in the pack are empty);
     **Verification** (the verdict outcome, the `epic-closed` event id, the
-    `integration-check` results, the `audit-resolved` event id and counts
-    when there is one, the shortstat, and the commit count from the log);
+    `integration-check` results, the `audit-resolved` event ids and the
+    fixed and deferred counts when there are any, the shortstat, and the
+    commit count from the log);
     **Screenshots** (only when the pack carries them); **Timeline** (the
     dashboard link, when you put one in the pack). The scribe's 300-word
     cap binds the prose — Summary and the sentences around the lists; the
