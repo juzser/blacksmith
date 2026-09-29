@@ -30,9 +30,15 @@
      finding. If the owner has already merged, fix it in a **follow-up
      task**:
      1. Write a draft, `Array<{filePath, finding}>` (the `gate run`
-        findings shape), copying the denied finding's file, category,
-        severity and summary from `smith findings list`. Keep them
-        unchanged: the follow-up id is derived from that fingerprint.
+        findings shape). `filePath` is the denied record's `file_path`;
+        `finding` is the **whole** record `smith findings list` prints,
+        minus the three fields raise derives and overwrites —
+        `fingerprint`, `file_path` and `finding_status`. Keep the rest:
+        the schema requires `failure_scenario` and `found_by` too, and a
+        draft without them fails with `findings.invalid-record`. Leave
+        `task_id`, `finding_id` and `epic_id` as they are; routing rewrites
+        them. Do not touch `finding_category` or `summary`: the follow-up
+        id is derived from the fingerprint they make.
      2. Raise it against the plan with no `--task`:
         `smith findings raise --plan <plan.json> --findings <draft.json>
         --session <id> --plan-version <n> --causal-parent <event-id>
@@ -43,8 +49,11 @@
      3. Check its claims before dispatching. A follow-up **inherits the
         owner's whole claim set** — and when ownership of the file was
         ambiguous, the **union** of every candidate's claims — so it can
-        overlap tasks still in flight. `smith wave check` with `--session`
-        shows the conflict.
+        overlap tasks still in flight. `smith wave next <plan.json>
+        --session <id> --causal-parent <event-id>` shows it: it folds in
+        live status and logged follow-ups, and defers an overlapping task
+        with `claim-overlap`. `wave check` validates only the ids it is
+        given and cannot see the conflict.
      4. Dispatch it like any task, with these gaps filled by hand. It
         carries no acceptance criteria and no budget: **write the ACs into
         the dispatch brief** (the finding's fix, plus the test that proves
@@ -53,7 +62,8 @@
         `lessons for-dispatch`, `findings for-dispatch` and `coverage check`
         refuse it with `cli.task-not-in-plan`: splice
         `smith lessons for-dispatch <role> --case-type bugfix` without
-        `--plan`/`--task`, and replace the findings block with
+        `--plan`/`--task` — at the cost of every claim-path lesson, since
+        claims are then `[]` and those lessons drop silently — and replace the findings block with
         `smith findings list --session <id> --task <epic>/followup-<fp8>`.
         At its gate, run `gate run` **without** `--plan`. With it, a judge
         finding on the merged owner's file routes to yet another follow-up
@@ -65,5 +75,6 @@
      5. Close **both** findings by hand once the follow-up merges — nothing
         links the re-raised finding to the denied one, and neither moves on
         its own. Walk each with `smith findings transition <finding-id>
-        <status>` through `confirmed`, `fix-pending`, `fix-landed`,
+        <status> --session <id> --plan-version <n> --causal-parent
+        <event-id> --actor operator` through `confirmed`, `fix-pending`, `fix-landed`,
         `fix-verified` (start at the first edge its status allows).
