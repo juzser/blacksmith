@@ -4612,16 +4612,36 @@ async function main(): Promise<number> {
 // Multiple listeners on the same stream's `error` event all fire -- this one
 // does not replace `event tail --follow`'s or `daemon run`'s, it just also
 // catches everything they do not: whichever fires first, an EPIPE is still
-// quiet and a real write failure (ENOSPC, say) still throws.
+// quiet.
+//
+// A real write failure (ENOSPC, say) is not innocuous like EPIPE, but this
+// handler is registered before `event tail --follow`'s and `daemon run`'s
+// own `process.stdout.on('error', requestStop)` listeners (this file's other
+// two), at the top of the file's only entry point -- so if it rethrows
+// unconditionally, its throw fires first and those listeners never run at
+// all. For `daemon run` specifically, that throw becomes an uncaught
+// exception outside `runDaemon`'s own try/finally (daemon.ts's loop), which
+// skips the finally and strands the lock under a pid that is already gone --
+// exactly what the comment at this file's `daemon run` handler says the
+// listener there exists to prevent. `listenerCount` counts this listener
+// too, so `> 1` means one of those loop-owning listeners is also registered:
+// defer to it and let its own stop-the-loop handling run instead of
+// rethrowing here. Only when this is the sole listener -- a one-shot verb,
+// nothing else to stop -- does a real write failure still throw and crash,
+// same as before.
 let mainExitCode: number | null = null;
 process.stdout.on('error', (err: NodeJS.ErrnoException) => {
-  if (err.code !== 'EPIPE') throw err;
-  // The command's own resolved status when we already have one (a verb that
-  // computed its exit code before this write, the common case); 0 -- "wrote
-  // everything there was, the reader just stopped listening" -- when main()
-  // has not resolved yet, since an early EPIPE is the reader saying "enough",
-  // not this process failing to do its job.
-  process.exitCode = mainExitCode ?? 0;
+  if (err.code === 'EPIPE') {
+    // The command's own resolved status when we already have one (a verb
+    // that computed its exit code before this write, the common case); 0 --
+    // "wrote everything there was, the reader just stopped listening" --
+    // when main() has not resolved yet, since an early EPIPE is the reader
+    // saying "enough", not this process failing to do its job.
+    process.exitCode = mainExitCode ?? 0;
+    return;
+  }
+  if (process.stdout.listenerCount('error') > 1) return;
+  throw err;
 });
 
 main()
