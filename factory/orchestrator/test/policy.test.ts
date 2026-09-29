@@ -828,6 +828,44 @@ describe('evaluateCommand — rule 2: force-push', () => {
     );
     expect(ruleIds(d)).toContain('force-push');
   });
+
+  // Round 6: the plain-word gate above only runs once `isCoveredForcePushSegment`
+  // recognises the subcommand word — but a quote, a backslash or an
+  // expansion *inside* that word (not just the words after it) breaks the
+  // literal-substring match the same way, so the gate never even starts.
+  // `checkForcePushSubcommandWord` finds the subcommand by splitting the
+  // segment into real shell words instead, and refuses a subcommand word it
+  // cannot read plainly outright — whatever it turns out to name.
+  it.each([
+    ['git p\\ush -f origin feat'],
+    ['git rese""t --hard $(x)'],
+    ['git reb\\ase --onto $(x) HEAD~3'],
+    ['git "reset" --hard $(x)'],
+    ['git upd${x}ate-ref refs/heads/main $(x)'],
+    ['\\git reset --hard $(x)'],
+    ['g""it rebase --onto $(x) HEAD~1'],
+    ['git bra""nch -D main'],
+    ['git -C . rese""t --hard $(x)'],
+    ['bash -c \'git rese""t --hard $(x)\''],
+  ])('denies %s — the git subcommand word itself is not plain', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([
+    ['git status'],
+    ['git log --oneline -5'],
+    ['git commit -m "fix: reset the push counter"'],
+    ['git push origin feat'],
+    ['git reset --soft HEAD~1'],
+    ['git rebase origin/main'],
+    ['git -C /some/dir status'],
+    ["git log --format='%H {x,y}'"],
+    ['echo "git rese\\"\\"t"'],
+  ])('allows %s — no covered subcommand word is unreadable', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {

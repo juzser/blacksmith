@@ -1251,11 +1251,167 @@ const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
  * inert text, without this scanner ever parsing the nested line itself.
  * Simplest fail-closed read: a segment naming one of those wrappers
  * alongside `git` and force-push-shaped subcommand text is refused outright,
- * rather than trusted to be read correctly.
+ * rather than trusted to be read correctly. The wrapped text is dequoted
+ * first — `bash -c 'git rese""t --hard $(x)'` names `git` and a spliced
+ * `reset` only once quotes and backslashes are gone, the same read the
+ * plain-word gate gives every other word here.
  */
 function isShellWrappedForceCandidate(segment: string): boolean {
   if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return false;
-  return /\bgit\b/i.test(segment) && FORCE_GATE_WORD_RE.test(segment);
+  const dequoted = stripSpliceQuotes(segment).replace(/\\/g, '');
+  return /\bgit\b/i.test(dequoted) && FORCE_GATE_WORD_RE.test(dequoted);
+}
+
+/**
+ * One shell word of a segment, split the way a shell would: an unquoted
+ * backslash escapes the next character, a single-quoted span is fully
+ * literal, a double-quoted span lets a backslash escape the quote itself.
+ * `raw` keeps the word exactly as written, for `isPlainWord`; `text` is the
+ * same word with every quote and escaping backslash removed — what git
+ * actually receives once the shell is done. This is what lets the gate find
+ * a subcommand spelled `rese""t`, `p\ush` or `"reset"` as `reset`, where
+ * `isGitSubcommand`'s literal-substring read cannot.
+ */
+interface DequotedWord {
+  readonly raw: string;
+  readonly text: string;
+}
+
+function splitDequotedWords(segment: string): DequotedWord[] {
+  const words: DequotedWord[] = [];
+  let raw = '';
+  let text = '';
+  let inWord = false;
+  const flush = () => {
+    if (inWord) words.push({ raw, text });
+    raw = '';
+    text = '';
+    inWord = false;
+  };
+  let i = 0;
+  while (i < segment.length) {
+    const c = segment.charAt(i);
+    if (c === "'") {
+      inWord = true;
+      raw += c;
+      i += 1;
+      while (i < segment.length && segment.charAt(i) !== "'") {
+        raw += segment.charAt(i);
+        text += segment.charAt(i);
+        i += 1;
+      }
+      if (i < segment.length) {
+        raw += segment.charAt(i);
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inWord = true;
+      raw += c;
+      i += 1;
+      while (i < segment.length && segment.charAt(i) !== '"') {
+        if (segment.charAt(i) === '\\' && i + 1 < segment.length) {
+          raw += segment.charAt(i) + segment.charAt(i + 1);
+          text += segment.charAt(i + 1);
+          i += 2;
+        } else {
+          raw += segment.charAt(i);
+          text += segment.charAt(i);
+          i += 1;
+        }
+      }
+      if (i < segment.length) {
+        raw += segment.charAt(i);
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '\\' && i + 1 < segment.length) {
+      inWord = true;
+      raw += c + segment.charAt(i + 1);
+      text += segment.charAt(i + 1);
+      i += 2;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      flush();
+      i += 1;
+      continue;
+    }
+    inWord = true;
+    raw += c;
+    text += c;
+    i += 1;
+  }
+  flush();
+  return words;
+}
+
+/** `git` global options that spend the *next* word on a value rather than folding it in with `=`, enough to walk past them to the subcommand. */
+const GIT_GLOBAL_VALUE_FLAGS = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--exec-path',
+  '--config-env',
+]);
+
+/** The subcommand word of a `git` invocation found at `words[gitIndex]`, walking past global options the way `git` itself does. */
+function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): number {
+  let i = gitIndex + 1;
+  while (i < words.length) {
+    const word = words[i];
+    if (word === undefined) break;
+    if (word.text.startsWith('-')) {
+      i += GIT_GLOBAL_VALUE_FLAGS.has(word.text) ? 2 : 1;
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
+
+const SUBCOMMAND_NOT_PLAIN_REASON =
+  'the git subcommand is not written as a plain word, so the guard cannot tell what it runs — write it out plainly';
+
+/**
+ * Round 6's fix for a subcommand word the shell will glue back together
+ * before git ever sees it — quote-splicing (`rese""t`), a stray backslash
+ * (`p\ush`, `\git`) or an expansion (`upd${x}ate-ref`) — none of which
+ * `isCoveredForcePushSegment` can see, since it matches a literal substring
+ * against text that still holds the quotes and backslashes. This reads the
+ * segment as shell words instead: find the actual `git` word (whatever
+ * wrapper precedes it — this needs no wrapper list, since it is looking for
+ * `git` itself, not what comes before it), walk to its subcommand, and
+ * refuse outright if that word cannot be read plainly — not just when it
+ * happens to name a covered subcommand, since a word this unreadable could
+ * be any of them. A subcommand read plainly and found covered still needs
+ * every word after it plain, the same gate `hasUnsafeWord` already applies.
+ */
+function checkForcePushSubcommandWord(
+  segment: string,
+  rule: GuardrailRule,
+): PolicyViolation | null {
+  const words = splitDequotedWords(stripRedirections(segment));
+  const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
+  if (gitIndex === -1) return null;
+  const subcommandIndex = gitSubcommandWord(words, gitIndex);
+  if (subcommandIndex === -1) return null;
+  const subcommand = words[subcommandIndex];
+  if (subcommand === undefined) return null;
+  if (!isPlainWord(subcommand.raw)) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
+  const name = subcommand.text.toLowerCase();
+  const rest = words.slice(subcommandIndex + 1);
+  const covered =
+    FORCE_GATE_SUBCOMMANDS.includes(name) ||
+    (name === 'branch' && isForcingBranchCommand(rest.map((word) => word.text)));
+  if (covered && rest.some((word) => !isPlainWord(word.raw))) {
+    return violation(rule, PLAIN_WORD_REASON);
+  }
+  return null;
 }
 
 /**
@@ -1271,6 +1427,9 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   const rule = requireRule(policy, 'force-push');
   for (const segment of topLevelCommands(command)) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
+
+    const subcommandWordViolation = checkForcePushSubcommandWord(segment, rule);
+    if (subcommandWordViolation) return subcommandWordViolation;
 
     const decoded = decodeAnsiCQuoting(segment);
     // An unterminated `$'` span cannot be decoded with confidence — fail
