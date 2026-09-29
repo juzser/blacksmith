@@ -794,6 +794,28 @@ describe('agents-registry.ts', () => {
       ]);
     });
 
+    // A hand-written error-logged event can carry the role under either key
+    // (`agent`, the Result file's own spelling, or `agent_role`, the
+    // dispatch's) -- symmetric with the `task-result-recorded` case above, so
+    // a hand-append that only names one of them still finds and closes the
+    // agent it is about instead of leaving it open forever.
+    it('closes the epic-level agent on an error-logged that names the role only under `agent`', () => {
+      const agents = foldAgents([
+        epicDispatch('e1', '2026-08-01T00:00:00.000Z', 'scribe'),
+        event({
+          event_id: 'e2',
+          event_type: 'error-logged',
+          ts: '2026-08-01T00:05:00.000Z',
+          payload: { error: 'execution.env-failure', severity: 'S2-major', agent: 'scribe' },
+        }),
+      ]);
+      expect(agents[0]).toMatchObject({
+        status: 'error',
+        terminalType: 'error',
+        terminalEventId: 'e2',
+      });
+    });
+
     it('leaves every epic-level agent alone on an error that names no role', () => {
       // A session-level error names nobody; guessing which agent it was
       // about would be the D-244 mistake one level up.

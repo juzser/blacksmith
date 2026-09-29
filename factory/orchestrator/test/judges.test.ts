@@ -90,8 +90,23 @@ describe('judges.ts', () => {
       });
     });
 
-    it('rejects a role that is not a taxonomy agent', async () => {
-      await expect(dispatch({ role: 'code-reviewer' })).rejects.toThrow(/taxonomy/i);
+    // `code-reviewer` is not a taxonomy agent at all, so it used to surface
+    // taxonomy validation's own message; the judge-role check below now
+    // catches it first (it is not one of the six judge roles either) with a
+    // message that names the real problem instead.
+    it('rejects a role that is not a judge role', async () => {
+      await expect(dispatch({ role: 'code-reviewer' })).rejects.toBeInstanceOf(JudgeError);
+      await expect(dispatch({ role: 'code-reviewer' })).rejects.toThrow(/judge/i);
+    });
+
+    // A coder dispatch that accidentally carries `--artifact`/`round` (e.g. a
+    // copy-pasted judge dispatch command) must not open a judge turn the gate
+    // can never close — `coder` IS a real taxonomy agent, just not a judge
+    // one, so this is the case a taxonomy check alone would never catch.
+    it('refuses a role that is a real taxonomy agent but not a judge', async () => {
+      await expect(dispatch({ role: 'coder' })).rejects.toBeInstanceOf(JudgeError);
+      await expect(dispatch({ role: 'coder' })).rejects.toThrow(/judge/i);
+      expect(await turns()).toEqual([]);
     });
 
     // P9-23 made `model` a required dispatch dimension, and this is a dispatch.
@@ -107,6 +122,29 @@ describe('judges.ts', () => {
 
     it('rejects a round below 1 — rounds are 1-based, and 0 reads as "no round"', async () => {
       await expect(dispatch({ round: 0 })).rejects.toBeInstanceOf(JudgeError);
+    });
+  });
+
+  // `uiux` is a real judge in practice — wave.md's steps 5-7 bracket its
+  // visual pass with `smith judge dispatch`/`smith judge report` exactly like
+  // grader, reviewer, verifier and security-reviewer — but it is not one of
+  // JUDGE_ROLES's six (that set means "owes a declared-artifact line and a
+  // blocked Stop", and uiux's artifact is never that array shape). Dispatch
+  // and report still have to open and close a turn for it.
+  describe('uiux dispatch/report (not a JUDGE_ROLES member, still opens a turn)', () => {
+    it('a uiux dispatch opens a turn and judge report --role uiux closes it', async () => {
+      await dispatch({ role: 'uiux', artifactPath: path.join(artifactDir, 'uiux.json') });
+      const open = await turns();
+      expect(open).toHaveLength(1);
+      expect(open[0]).toMatchObject({ role: 'uiux', round: 1 });
+
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true },
+        ctx(),
+        opts(),
+      );
+      expect(report.attested).toBe(true);
+      expect(outstandingJudges(await turns())).toEqual([]);
     });
   });
 
@@ -136,6 +174,34 @@ describe('judges.ts', () => {
             provider: 'claude',
             model_tier: 'mid',
             model: 'claude-sonnet-5',
+          },
+        },
+        opts(),
+      );
+      expect(await turns()).toEqual([]);
+    });
+
+    // A hand-written or malformed event can carry `declared_artifact` and
+    // `round` on a non-judge role's dispatch (the CLI-level refusal in
+    // `recordJudgeDispatch` only stops the ordinary path). The fold has to
+    // hold the same line, or a coder dispatch that leaked an artifact line
+    // opens a turn nothing will ever close (`judges-outstanding` forever).
+    it('ignores a dispatch_decision from a non-judge role even when it carries an artifact and round', async () => {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'system',
+          event_type: 'dispatch_decision',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5',
+            round: 1,
+            declared_artifact: path.join(artifactDir, 'coder.json'),
           },
         },
         opts(),

@@ -10,6 +10,7 @@ import {
   readLineageEvents,
   type StoredEvent,
 } from './events.js';
+import { JUDGE_TURN_ROLES } from './judgeRoles.js';
 import { type CompiledSchemaSet, compileSchemas, validateEachShape } from './schemas.js';
 import { isQualifiedTaskId, taskIdsMatch } from './taskId.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
@@ -48,6 +49,26 @@ export class JudgeError extends SmithError {}
  * refuses to score a task while it is non-empty.
  */
 export const JUDGE_DISPATCH_EVENT_TYPE = 'dispatch_decision';
+/**
+ * judgeRoles.ts's `JUDGE_TURN_ROLES` — the six `JUDGE_ROLES` (reviewer,
+ * verifier, grader, spec-reviewer, security-reviewer, auditor) plus `uiux` —
+ * imported rather than copied so this module and judgeRoles.ts can never
+ * drift apart on which roles a dispatch/report pair can open and close a
+ * turn for. A `dispatch_decision` from any other role is a coder or a
+ * merger, not a judge, even when its payload accidentally carries
+ * `declared_artifact` and `round` (a copy-pasted judge dispatch command, or a
+ * hand-written event) — folding it anyway would open a turn `judge-reported`
+ * can never close, and the gate would refuse the task forever.
+ *
+ * Deliberately the wider set, not the plain `JUDGE_ROLES` six: uiux's visual
+ * pass is bracketed by `smith judge dispatch`/`smith judge report` in
+ * practice (wave.md:227-237) exactly like the six, so a real uiux dispatch
+ * must open a turn here too, even though `dispatchLint.ts`'s narrower
+ * artifact-line check and `judgeStopHook.ts`'s Stop guard stay scoped to the
+ * six (see judgeRoles.ts for why).
+ */
+const JUDGE_TURN_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_TURN_ROLES);
+
 /**
  * Re-exported, not re-declared. The registry owns the terminal-event
  * vocabulary — this one next to `task-result-recorded` and `error-logged`,
@@ -207,8 +228,12 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
     const round = numberField(record.payload, 'round');
     // No declared artifact, no report owed: this is a coder or a merger, not
     // a judge. `round` is required alongside it, so a half-formed payload is
-    // ignored rather than folded into a turn nobody can ever close.
+    // ignored rather than folded into a turn nobody can ever close. Nor does
+    // a role outside JUDGE_TURN_ROLE_SET open one — a non-judge dispatch that
+    // accidentally carries both fields is still not a judge (see the set's
+    // own comment).
     if (role === undefined || declaredArtifact === undefined || round === undefined) continue;
+    if (!JUDGE_TURN_ROLE_SET.has(role)) continue;
 
     const existing = findTurn(turns, recordTaskId, role);
     if (existing !== undefined) {
@@ -334,6 +359,18 @@ export async function recordJudgeDispatch(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<StoredEvent> {
+  // Caught here, ahead of the taxonomy check `emit` runs below, so a role
+  // that IS a valid taxonomy agent but not a judge (a coder dispatch that
+  // copy-pasted a judge dispatch command, say) gets a message that names the
+  // real problem instead of passing taxonomy validation and opening a turn
+  // `judge report` can never close.
+  if (!JUDGE_TURN_ROLE_SET.has(input.role)) {
+    throw new JudgeError(
+      'judges.non-judge-role',
+      `"${input.role}" is not a judge role; only ${JUDGE_TURN_ROLES.join(', ')} can open a judge turn.`,
+      { task_id: input.taskId, agent_role: input.role },
+    );
+  }
   if (!Number.isInteger(input.round) || input.round < 1) {
     throw new JudgeError(
       'judges.invalid-round',

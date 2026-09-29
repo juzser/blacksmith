@@ -348,19 +348,42 @@ interface TerminalRow {
 
 /**
  * How a dispatched turn is recorded as over, and which payload field names the
- * role that ended it -- testerAudit.ts's table, for its reason. The fallback to
- * `actor` is that file's too: the older half of the log names the role there
- * and nowhere else, and without it a finished wave-runner reads as one still
- * running, which is the difference between `violation` and `unverifiable`.
+ * role that ended it -- testerAudit.ts's table, for its reason. Each event type
+ * lists every key its role may be spelled under, tried in order, before the
+ * fallback to `actor`: that fallback is testerAudit.ts's too -- the older half
+ * of the log names the role there and nowhere else, and without it a finished
+ * wave-runner reads as one still running, which is the difference between
+ * `violation` and `unverifiable`.
+ *
+ * `error-logged` lists both `agent` (this module's long-standing read, the
+ * Result file's own spelling) and `agent_role` (the dispatch's) because a
+ * hand-written error event may carry only one of the two, so a role named
+ * either way still finds its terminal instead of falling through to
+ * whichever actor happened to log the error. agents-registry.ts's fold of
+ * the same event type accepts the same two keys, but tries `agent_role`
+ * first where this module tries `agent` first -- not symmetric in order,
+ * because each reader keeps its own historical key first rather than the two
+ * agreeing on one: `agent_role` was already this event type's only key in
+ * agents-registry.ts's fold before `agent` was added as a fallback there,
+ * same as `agent` was here before `agent_role` was added as this module's.
  */
-const TERMINAL_ROLE_KEY: Record<string, string> = {
-  [TASK_RESULT_EVENT_TYPE]: 'agent',
-  [ERROR_EVENT_TYPE]: 'agent',
+const TERMINAL_ROLE_KEYS: Record<string, readonly string[]> = {
+  [TASK_RESULT_EVENT_TYPE]: ['agent'],
+  [ERROR_EVENT_TYPE]: ['agent', 'agent_role'],
 };
 
 function str(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/** The first of `keys` that names a non-empty string in `payload`, or null. */
+function firstStr(payload: Record<string, unknown>, keys: readonly string[]): string | null {
+  for (const key of keys) {
+    const value = str(payload, key);
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 function readDispatches(events: readonly StoredEvent[]): DispatchRow[] {
@@ -385,10 +408,10 @@ function readDispatches(events: readonly StoredEvent[]): DispatchRow[] {
 function readTerminals(events: readonly StoredEvent[]): TerminalRow[] {
   const rows: TerminalRow[] = [];
   for (const { record } of events) {
-    const key = TERMINAL_ROLE_KEY[record.event_type];
-    if (key === undefined) continue;
+    const keys = TERMINAL_ROLE_KEYS[record.event_type];
+    if (keys === undefined) continue;
     const payload = (record.payload ?? {}) as Record<string, unknown>;
-    const role = str(payload, key) ?? record.actor;
+    const role = firstStr(payload, keys) ?? record.actor;
     if (role === null || role.length === 0) continue;
     rows.push({
       sessionId: record.session_id,

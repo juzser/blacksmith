@@ -402,6 +402,38 @@ describe('checkDelegationLog', () => {
     expect(report.checks.some((c) => c.status === 'violation')).toBe(true);
   });
 
+  // A hand-written error-logged event can carry the role under either key --
+  // `agent`, the Result file's own spelling, or `agent_role`, the dispatch's.
+  // `readTerminals` used to read only `agent`, falling back straight to
+  // `record.actor` -- so a payload naming the role solely under `agent_role`
+  // read as terminated by whatever actor logged the error (`system` here),
+  // not by the wave-runner that never opened its log. That misattribution
+  // hid a real rule-2 violation behind `unverifiable`, the status for "it may
+  // still open a session" -- exactly wrong for a role that has already
+  // reported failure.
+  it("treats an error-logged naming the role only under `agent_role` as that role's own terminal, not the actor that logged it", () => {
+    const events = [
+      event('epic-1', 0, 'session-start'),
+      dispatch('epic-1', 1, 'wave-runner'),
+      event('epic-1', 2, 'error-logged', {
+        actor: 'system',
+        taskId: 'E1/t-1',
+        parent: 'epic-1#1',
+        payload: {
+          error: 'execution.env-failure',
+          severity: 'S2-major',
+          agent_role: 'wave-runner',
+        },
+      }),
+    ];
+    const report = log(events);
+    expect(report.ok).toBe(false);
+    expect(
+      report.checks.some((c) => c.status === 'violation' && c.detail.includes('already reported')),
+    ).toBe(true);
+    expect(report.checks.some((c) => c.status === 'unverifiable')).toBe(false);
+  });
+
   it('reports a still-open wave-runner as unverifiable, and fails on it', () => {
     const events = [event('epic-1', 0, 'session-start'), dispatch('epic-1', 1, 'wave-runner')];
     const report = log(events);

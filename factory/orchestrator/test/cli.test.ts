@@ -1,4 +1,14 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import {
+  chmodSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8706,6 +8716,50 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // EPIPE on a failing command must not launder its exit code to 0. The
+    // global stdout error handler (cli.ts ~4617) answers an EPIPE with
+    // `process.exitCode = mainExitCode ?? 0` -- this verb resolves 1 (a judge
+    // turn is still owed) before that write ever happens, so a reader that
+    // goes away early has to see the same 1 an EPIPE-free run would report,
+    // not the "reader said enough" 0 that answer falls back to only when no
+    // verb has resolved a status yet.
+    it('an EPIPE on `judge outstanding` still exits 1, the real status, not 0', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      dispatchJudge(sessionId, eventsDir, 'security-reviewer', artifact);
+
+      const child = spawn(
+        'node',
+        [
+          CLI_PATH,
+          'judge',
+          'outstanding',
+          '--task',
+          'epic-1/task-1',
+          '--session',
+          sessionId,
+          '--state-dir',
+          eventsDir,
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      child.stdout.destroy();
+
+      const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>(
+        (resolve) => {
+          child.once('close', (code, sig) => resolve([code, sig]));
+        },
+      );
+
+      expect(signal).toBeNull();
+      expect(stderr).not.toMatch(/EPIPE/);
+      expect(code).toBe(1);
+    });
+
     // A judge dispatch is a dispatch, so P9-23's required `model` applies here
     // too — and it applies hardest here, because `reviewer` and `verifier` are
     // one of crosscheck.yml's finder_ne_critic pairs. Defaulting the field
@@ -12086,6 +12140,69 @@ describe('cli.ts (built binary)', () => {
       expect(status).toBe(1);
       expect(JSON.parse(stdout).error.code).toBe('cli.invalid-flag');
     });
+
+    // A non-EPIPE stdout error (ENOSPC, say) is not innocuous like EPIPE, but
+    // this process is not the only listener on it either: `daemon run`
+    // registers its own `process.stdout.on('error', requestStop)` (cli.ts
+    // ~2150) precisely so a write failure stops the loop instead of leaving
+    // the lock behind for a process that is dying anyway. The global handler
+    // (cli.ts ~4617) is registered before that one, at the top of the file's
+    // entry point -- so if it rethrows every non-EPIPE error itself, its
+    // throw fires first and `requestStop` never runs at all: an uncaught
+    // exception outside `runDaemon`'s own try/finally (daemon.ts:1385-1397),
+    // which skips the finally and strands the lock under a pid that is
+    // already gone.
+    //
+    // A regular file opened read-only reproduces the real scenario
+    // deterministically: `daemon start` (cli.ts ~2191) gives its detached
+    // child's stdout a real file fd, exactly this stream type -- `process
+    // .stdout` backed by a regular file writes through node's synchronous
+    // `SyncWriteStream`, so a write a read-only fd cannot satisfy fails with
+    // EBADF the same shape ENOSPC would, through the same code path, rather
+    // than racing real disk exhaustion.
+    it('a non-EPIPE stdout error during the loop stops it and releases the lock, instead of crashing', async () => {
+      const { dir, stateDir } = fixture();
+      const roFile = path.join(dir, 'readonly.log');
+      writeFileSync(roFile, '', 'utf8');
+      const fileFd = openSync(roFile, 'r');
+      const child = spawn(
+        'node',
+        [
+          CLI_PATH,
+          'daemon',
+          'run',
+          '--dir',
+          dir,
+          '--state-dir',
+          stateDir,
+          '--no-db',
+          '--interval',
+          '1',
+        ],
+        { stdio: ['ignore', fileFd, 'pipe'] },
+      );
+      let stderr = '';
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      try {
+        const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>(
+          (resolve) => {
+            child.once('close', (code, sig) => resolve([code, sig]));
+          },
+        );
+
+        expect(signal).toBeNull();
+        expect(stderr).not.toMatch(/Uncaught|EBADF/);
+        expect(code).toBe(0);
+        // The invariant a killed loop shares with a `--once` run: the lock is
+        // the daemon's, and a daemon that has exited does not have one.
+        expect(existsSync(path.join(dir, 'daemon.pid'))).toBe(false);
+      } finally {
+        closeSync(fileFd);
+      }
+    }, 15000);
   });
 });
 
@@ -12165,5 +12282,41 @@ describe('smith init (built binary)', () => {
     const { stdout, status } = runCli(['--help']);
     expect(status).toBe(0);
     expect(stdout).toContain('smith init [--work-root');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stdout closed early (EPIPE) -- `smith <verb> | head -c1` (or any reader
+// that goes away before draining stdout) closes the pipe out from under a
+// write that has already committed whatever the verb was reporting. Crashing
+// on it after the fact is a false failure: an uncaught EPIPE prints a stack
+// and exits non-zero, and a caller that retries a non-zero status
+// double-appends the very event the write had already recorded.
+//
+// This closes the child's own stdout read end deterministically -- the
+// instant the child is spawned, well before its Node startup even finishes,
+// let alone reaches the `--help` write -- rather than racing a real `head`
+// process over how many bytes it reads before exiting. Same condition a
+// `| true` shell pipeline creates, without the byte-count race `head -c1`
+// itself would add.
+// ---------------------------------------------------------------------------
+
+describe('cli.ts stdout closed early (EPIPE)', () => {
+  it('exits clean, with no uncaught EPIPE stack on stderr, when the reader is already gone', async () => {
+    const child = spawn('node', [CLI_PATH, '--help'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.stdout.destroy();
+
+    const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => {
+      child.once('close', (code, sig) => resolve([code, sig]));
+    });
+
+    expect(signal).toBeNull();
+    expect(stderr).not.toMatch(/EPIPE/);
+    expect(code).toBe(0);
   });
 });
