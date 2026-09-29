@@ -321,43 +321,70 @@ playbooks are written to prevent.
     caps and fills the gaps by invention — a wrong event id, a merged task
     called dead, "no waivers" over two grants. Compute every fact in your own
     session, from the epic session with `--lineage` so the waves' records
-    count, and save the outputs into one file:
+    count. Every fact comes from the log or from git, never from the SQLite
+    projection: `stats kanban` and `stats timeline` read a projection that
+    can lag the log, and `db rebuild` clears it before it re-reads, so do
+    not refresh it for this.
 
     ```bash
-    # waivers granted: each waived finding, with the granting event id in waiver_id
-    smith findings list --session <session-id> --epic <epic> --status waived
-    # waivers denied: only the log holds them; keep the waiver-denied records
-    # whose payload.fingerprint belongs to a finding the plain `findings list
-    # --session <session-id> --epic <epic>` returns (pass an --n that covers the lineage)
+    # one pass over the log (pass an --n that covers the whole lineage)
     smith event tail <session-id> --lineage --n 100000
-    # each task's task_status
-    smith stats kanban --epic <epic> --session <session-id> --lineage
-    # the merges: keep the wave-merged rows, with their eventId and taskId
-    smith stats timeline --epic <epic> --session <session-id> --lineage
+    # the fingerprint map: finding_id, task_id and fingerprint of the epic's findings
+    smith findings list --session <session-id> --epic <epic>
     # the goal the summary states
-    smith epic goal --epic <epic>
+    smith epic goal --epic <epic> [--roadmap-path <file>]
     # the branch itself
     git log --oneline <base>..smith/<epic>/integration
     git diff --shortstat <base>...smith/<epic>/integration
     ```
 
-    Add the `epic-closed` event id from step 16 and the verdict's outcome.
-    Dispatch the scribe with that file as its **only source**, and the
+    From the `event tail` pass keep, each with its `event_id`:
+    - `waiver-granted` and `waiver-denied` records whose
+      `payload.fingerprint` matches one of the epic's findings, mapped to
+      that finding's id and task. Match on aliases — the stored fingerprint
+      or the one recomputed from its `file_path`, `finding_category` and
+      `summary` (`fingerprintAliases`, #178) — and drop a decision that
+      matches none: an ancestor session can carry an earlier epic's
+      decisions. Grants come from here, not from
+      `findings list --status`, because a grant only moves a raised or
+      confirmed finding to `waived`; an amended or fix-verified one keeps
+      its status.
+    - `wave-merged` records: `payload.task_ids` and the event id.
+    - `epic-closed` from step 16: its event id, `machine_verdict`, and
+      `payload.summary.tasks` — each task's `task_status`, read from the log
+      at close.
+    - `audit-resolved`, for an epic cut by `/bs audit`: its event id and the
+      `fixed` and `deferred` counts from step 16's resolve.
+    - the newest `integration-check`: each check's `name` and `pass`.
+
+    `epic goal` reads this repo's roadmap by default; when the epic's
+    roadmap lives elsewhere, pass `--roadmap-path` naming it, or the goal
+    you hand over is the wrong one. For a UI epic, add the screenshot paths
+    from the epic-level tester's `artifacts` (under `state/results/`);
+    [`docs/standards/stack.md`](../../../docs/standards/stack.md) wants
+    them on this PR.
+
+    Write only these filtered facts into one pack file — never raw command
+    output, which puts the scribe back to grepping logs. Dispatch the scribe with that file as its **only source**, and the
     PR-body scratch file as its write root, under one rule: **omit, never
     infer**. A fact the pack does not hold stays out of the body; a count,
     a status, or an event id is copied from the pack, never worked out. If
     the pack is wrong, rebuild it and dispatch again; do not let the scribe
     reach past it into `state/events/`.
 
-    The PR body has this shape and nothing else, within the scribe's word
-    cap: **Summary** (the epic id and its goal, one paragraph); **Tasks** (one line per
-    task: id, `task_status`, and its `wave-merged` event id when it has
-    one); **Waivers** (granted and denied, each with its finding id and
-    event id, or the word "none" only when both lists in the pack are
-    empty); **Verification** (the verdict outcome, the `epic-closed` event
-    id, the shortstat, and the commit count from the log); **Timeline**
-    (the dashboard link, when you put one in the pack). Screenshots and test results go in only when the
-    pack carries them.
+    The PR body has this shape and nothing else: **Summary** (the epic id
+    and its goal, one paragraph); **Tasks** (one line per task: id,
+    `task_status`, and its `wave-merged` event id when it has one);
+    **Waivers** (granted and denied, each with its finding id and event id,
+    or the word "none" only when both lists in the pack are empty);
+    **Verification** (the verdict outcome, the `epic-closed` event id, the
+    `integration-check` results, the `audit-resolved` event id and counts
+    when there is one, the shortstat, and the commit count from the log);
+    **Screenshots** (only when the pack carries them); **Timeline** (the
+    dashboard link, when you put one in the pack). The scribe's 300-word
+    cap binds the prose — Summary and the sentences around the lists; the
+    Tasks, Waivers and check lists are artifacts and are never cut to fit
+    it, since a dropped line reads as a task or waiver that was not there.
 
     Before the first push, read the authorship the branch is about to make
     public — `git log --format=%ae <base>..HEAD | sort -u` — and stop on any

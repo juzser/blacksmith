@@ -14,11 +14,13 @@ import { REPO_ROOT } from '../src/paths.js';
 const RUN_MD = readFileSync(path.join(REPO_ROOT, '.claude/skills/bs/run.md'), 'utf8');
 const SCRIBE_MD = readFileSync(path.join(REPO_ROOT, '.claude/agents/scribe.md'), 'utf8');
 
-/** Step 17 runs from its numbered marker to the end of the file. */
+/** Step 17 runs from its numbered marker to the next step marker, or EOF. */
 function step17(text: string): string {
   const start = text.search(/^17\. /m);
   if (start === -1) throw new Error('run.md has no step 17');
-  return text.slice(start);
+  const rest = text.slice(start + 4);
+  const end = rest.search(/^\d+\. /m);
+  return end === -1 ? text.slice(start) : text.slice(start, start + 4 + end);
 }
 
 /** The scribe's "## Mission" section, up to the next heading or marker. */
@@ -44,19 +46,54 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
   });
 
   it('computes each fact with a real command', () => {
-    // waivers granted: the epic's findings, waived, carry the granting event id
-    expect(prose).toMatch(/smith findings list --session \S+ --epic \S+ --status waived/);
-    // waivers denied: only the log has them
-    expect(prose).toMatch(/smith event tail \S+ --lineage/);
-    expect(prose).toContain('waiver-denied');
-    // each task's status
-    expect(prose).toMatch(/smith stats kanban --epic \S+ --session \S+ --lineage/);
-    // the merge events
-    expect(prose).toMatch(/smith stats timeline --epic \S+ --session \S+ --lineage/);
-    expect(prose).toContain('wave-merged');
+    // one pass over the log: grants, denials, merges, the close, the resolve
+    expect(prose).toMatch(/smith event tail \S+ --lineage --n \S+/);
+    for (const type of [
+      'waiver-granted',
+      'waiver-denied',
+      'wave-merged',
+      'epic-closed',
+      'audit-resolved',
+      'integration-check',
+    ]) {
+      expect(prose).toContain(type);
+    }
+    // the fingerprint map: the epic's findings, unfiltered
+    expect(prose).toMatch(/smith findings list --session \S+ --epic \S+/);
+    // the goal, with the roadmap flag for a roadmap outside this repo
+    expect(prose).toMatch(/smith epic goal --epic \S+/);
+    expect(prose).toContain('--roadmap-path');
     // the branch itself
     expect(prose).toMatch(/git log --oneline \S+\.\.smith\/<epic>\/integration/);
     expect(prose).toMatch(/git diff --shortstat/);
+  });
+
+  it('takes grants from the log, not the waived status', () => {
+    // reconcileFindingsToWaived moves only raised/confirmed findings, so an
+    // amended or fix-verified finding's grant never shows as status waived.
+    expect(prose).not.toMatch(/--status waived/);
+  });
+
+  it('reads no SQLite projection', () => {
+    // stats kanban / stats timeline read a projection that can be stale.
+    expect(prose).not.toMatch(/smith stats (kanban|timeline)/);
+    expect(prose).toMatch(/summary\.tasks/);
+  });
+
+  it('matches decisions on fingerprint aliases, scoped to the epic', () => {
+    expect(prose).toMatch(/alias/i);
+    expect(prose).toMatch(/earlier epic/i);
+  });
+
+  it('names where screenshots come from', () => {
+    expect(prose).toMatch(/screenshot/i);
+    expect(prose).toMatch(/tester's `?artifacts`?/);
+  });
+
+  it('keeps the pack to filtered facts and states the word-cap rule', () => {
+    expect(prose).toMatch(/filtered/i);
+    expect(prose).toMatch(/raw (command )?output/i);
+    expect(prose).toMatch(/300/);
   });
 
   it('defines the PR-body shape itself instead of pointing at report.md', () => {
