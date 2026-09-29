@@ -440,6 +440,42 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(ruleIds(d)).toContain('force-push');
   });
 
+  // Only a real command boundary ends the push: a redirection, a `#` inside a
+  // word, a substitution, a brace list, a quoted separator or an escaped
+  // newline all leave the flag on the push's own command line, where git
+  // reads it. Splitting on any of them let the flag through.
+  it.each([
+    ['git push origin feat >/dev/null -f'],
+    ['git push origin feat < /dev/null --force'],
+    ['git push origin feat 2>&1 -f'],
+    ['git push origin feat >| out -f'],
+    ['git push origin feat#x -f'],
+    ['git push $(git remote) feat -f'],
+    ['git push origin `git branch --show-current` --force'],
+    ['git push origin {feat,} -f'],
+    ['git push origin feat \\\n  --force'],
+    ['git push origin "a;b" -f'],
+    ["git push origin 'a && b' -f"],
+    ['git push origin "$(echo ")")" -f'],
+    ['git push origin feat \\; -f'],
+    ["git push origin $'a\\'; ' -f"],
+    ['git -C dir push -f origin feat'],
+    ['sh -c "git push -f origin feat"'],
+    ['sh -c "git stash push; git push -f origin feat"'],
+    ['eval "git push -f origin feat"'],
+    ['echo feat | xargs git push -f origin'],
+    ['(git push -f origin feat)'],
+    ['echo $(git push -f origin feat)'],
+    ['true\ngit push -f origin feat'],
+    ['git push -f origin feat &'],
+    ['git push --force-with-lease=feat:abc origin feat'],
+    ['git push -fu origin feat'],
+    ['git push -uf origin feat'],
+  ])('denies %s — the flag is still on the push command line', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
   it('allows a branch name that merely contains "force" as a substring, not a flag', () => {
     const d = evaluateCommand(
       ctx({ command: 'git push origin feature-force', branch: 'feature-force' }),

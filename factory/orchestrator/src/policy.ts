@@ -964,14 +964,93 @@ function checkPushToProtected(
 /** Rule 2: force push (`--force` / `--force-with-lease` / `-f`). Case-sensitive, same as guard.sh (its `grep -Eq` has no `-i`). */
 const FORCE_PUSH_RE = /(--force(-with-lease)?\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$))/;
 
+const GIT_PUSH_ANYWHERE_RE = new RegExp(`\\bgit\\b[\\s\\S]*${bareWord('push')}`, 'i');
+
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   if (!isGitSubcommand(command, 'push')) return null;
-  // Read per push segment, as rule 1 does: a `-f` or `--force` belonging to
+  // Read per command, not per chain: a `-f` or `--force` that belongs to
   // another command in the chain (`rm -f`, `git worktree remove --force`)
-  // says nothing about the push.
-  const pushSegments = gitSegmentsFor(command, 'push').filter((s) => !STASH_PUSH_RE.test(s));
-  if (!pushSegments.some((segment) => FORCE_PUSH_RE.test(segment))) return null;
-  return violation(requireRule(policy, 'force-push'));
+  // says nothing about the push. Split on true command boundaries only —
+  // `gitSegmentsFor`'s split also cuts at redirections, `#`, braces and
+  // substitutions, which leave the flag on the push's own command line.
+  // A `git stash push` names no remote, so its `push` is removed before
+  // asking whether the segment still pushes.
+  const forced = topLevelCommands(command).some((segment) => {
+    const withoutStash = segment.replace(/\bstash\s+push\b/gi, 'stash');
+    return GIT_PUSH_ANYWHERE_RE.test(withoutStash) && FORCE_PUSH_RE.test(segment);
+  });
+  return forced ? violation(requireRule(policy, 'force-push')) : null;
+}
+
+/**
+ * The command's top-level commands, split only where the shell itself ends a
+ * command: `;`, `&&`, `||`, `|` and an unescaped newline, outside quotes,
+ * backticks and `$( )` / `( )`. A redirection (`>`, `2>&1`, `>|`), a lone `&`
+ * and everything nested stay inside the command they belong to.
+ *
+ * Anything it cannot read with confidence — an unbalanced quote or paren, or
+ * ANSI-C `$'…'` quoting, whose escapes it does not model — returns the whole
+ * command as one segment. That is the pre-split reading, so a parse it gets
+ * wrong can only over-refuse, never let a force flag through.
+ */
+function topLevelCommands(command: string): string[] {
+  if (/\$'/.test(command)) return [command];
+  const segments: string[] = [];
+  const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
+  let start = 0;
+  let i = 0;
+  const cut = (end: number, next: number) => {
+    segments.push(command.slice(start, end));
+    start = next;
+  };
+  while (i < command.length) {
+    const c = command[i];
+    const top = stack[stack.length - 1];
+    if (top === 'sq') {
+      if (c === "'") stack.pop();
+      i += 1;
+      continue;
+    }
+    if (c === '\\') {
+      i += 2;
+      continue;
+    }
+    if (top === 'dq') {
+      if (c === '"') stack.pop();
+      else if (c === '`') stack.push('bt');
+      else if (c === '$' && command[i + 1] === '(') {
+        stack.push('paren');
+        i += 1;
+      }
+      i += 1;
+      continue;
+    }
+    if (top === 'bt' && c === '`') {
+      stack.pop();
+      i += 1;
+      continue;
+    }
+    if (c === "'") stack.push('sq');
+    else if (c === '"') stack.push('dq');
+    else if (c === '`') stack.push('bt');
+    else if (c === '(') stack.push('paren');
+    else if (c === ')') {
+      if (top !== 'paren') return [command];
+      stack.pop();
+    } else if (stack.length === 0) {
+      const pair = command.slice(i, i + 2);
+      if (pair === '&&' || pair === '||') {
+        cut(i, i + 2);
+        i += 2;
+        continue;
+      }
+      if (c === ';' || c === '\n' || (c === '|' && command[i - 1] !== '>')) cut(i, i + 1);
+    }
+    i += 1;
+  }
+  if (stack.length > 0) return [command];
+  segments.push(command.slice(start));
+  return segments;
 }
 
 /** Rule 3: `git merge` or `git pull` while standing on a protected branch — the only place a merge can land. */
