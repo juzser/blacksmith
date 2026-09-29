@@ -695,7 +695,11 @@ describe('the audit verbs', () => {
       }
 
       /** Record that `taskId`'s branch landed on the integration branch, the way the merge queue's `emitWaveMerged` does. */
-      async function waveMerged(sessionId: string, causalParent: string, taskId: string): Promise<void> {
+      async function waveMerged(
+        sessionId: string,
+        causalParent: string,
+        taskId: string,
+      ): Promise<void> {
         await appendEvent(
           {
             session_id: sessionId,
