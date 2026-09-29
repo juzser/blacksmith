@@ -572,13 +572,10 @@ describe('evaluateCommand — rule 2: force-push', () => {
     },
   );
 
-  // `git -c alias.<name>=<value>` defines an alias inline, and a value that
-  // mentions `push` is a force-push escape hatch in waiting: the flag rule
-  // 2 already refuses never has to appear on the command line at all once an
-  // alias spells it for it. Refused on the definition alone, whether or not
-  // the same segment goes on to invoke it — see policy.ts's
-  // `definesForceCapablePushAlias`. Aliases defined in git config (not
-  // `-c`) are out of scope for this rule.
+  // `git -c alias.<name>=<value>` defines an alias inline. Denied on the
+  // definition alone, whatever the value is — see policy.ts's
+  // `definesInlineGitAlias` and the comment on why "does the value mention
+  // push" stopped being the question.
   it.each([
     ['git -c alias.p=push p origin feat'],
     ["git -c alias.p='push --force' p origin feat"],
@@ -593,18 +590,46 @@ describe('evaluateCommand — rule 2: force-push', () => {
     // between `-c` and `alias.` — both still name an alias.
     ["git -c 'alias.p=push -f' p"],
     ['git -calias.p=push p'],
-  ])('denies %s — an inline alias whose value mentions push', (command) => {
+    // An alias whose value never mentions push at all is still denied: the
+    // value can come from entirely out of band (a shell variable, a config
+    // key set elsewhere), so "does this line mention push" is not a
+    // question the command line can always answer.
+    ['git -c alias.st=status st'],
+  ])('denies %s — an inline alias definition', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(ruleIds(d)).toContain('force-push');
   });
 
-  it.each([['git -c alias.st=status st'], ['git -c user.name=agent push origin feat']])(
-    'allows %s — no alias value mentions push',
-    (command) => {
-      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
-      expect(d.allowed).toBe(true);
-    },
-  );
+  // Alias vectors beyond `-c`: `--config-env` names an alias key whose value
+  // is the *name* of an environment variable read later, never visible on
+  // this line; `GIT_CONFIG_PARAMETERS` is git's own serialisation of a whole
+  // `-c` list; `GIT_CONFIG_KEY_<n>` pairs with a `GIT_CONFIG_VALUE_<n>` this
+  // line may not even set. All three are denied unconditionally, same as
+  // `-c alias.`.
+  it.each([
+    ['git -c foo=bar --config-env=alias.p=MYVAR push origin feat'],
+    ['git --config-env alias.p=MYVAR push origin feat'],
+    ['GIT_CONFIG_PARAMETERS="\'alias.p=push\'" git p origin feat'],
+    ['export GIT_CONFIG_PARAMETERS; git p origin feat'],
+    ['GIT_CONFIG_KEY_0=alias.p GIT_CONFIG_VALUE_0=push git p origin feat'],
+    ["GIT_CONFIG_KEY_0='alias.p' git p origin feat"],
+    ['GIT_CONFIG_KEY_0=$SOMEVAR git p origin feat'],
+    ['GIT_CONFIG_KEY_0=`echo alias.p` git p origin feat'],
+  ])('denies %s — an alias defined through a non "-c" vector', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // Ordinary, non-alias inline config stays allowed: a plain key/value on
+  // `-c`, `--config-env` or `GIT_CONFIG_KEY_<n>` that never names `alias.`.
+  it.each([
+    ['git -c user.name=agent push origin feat'],
+    ['GIT_CONFIG_KEY_0=user.name GIT_CONFIG_VALUE_0=agent git push origin feat'],
+    ['git --config-env=user.email=E push origin feat'],
+  ])('allows %s — inline config that never names an alias', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
 
   it('denies --mirror, which force-pushes every ref', () => {
     const d = evaluateCommand(
@@ -613,6 +638,32 @@ describe('evaluateCommand — rule 2: force-push', () => {
     );
     expect(ruleIds(d)).toContain('force-push');
   });
+
+  // `$'...'` — bash's ANSI-C quoting — decodes backslash escapes before git
+  // ever sees them: `\x2d\x2dforce` and `\055\055force` both become
+  // `--force`, and `\x70ush` becomes the bare word `push`. A rule that scans
+  // the raw text for either spelling misses all three.
+  it.each([
+    ["git push origin feat $'\\x2d\\x2dforce'"],
+    ["git push origin feat $'\\055\\055force'"],
+    // The word "push" itself hidden, so the segment does not even look like
+    // a push to the "is this a push at all" gate — until decoded.
+    ["git $'\\x70ush' --force origin feat"],
+    // The same hiding trick applied to an inline alias definition.
+    ["git -c $'alias.p=push \\x2d\\x2dforce' p origin feat"],
+    ["git -c $'alias.p=push \\055\\055force' p origin feat"],
+  ])('denies %s — ANSI-C quoting decoded before the rule-2 checks run', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([["git commit -m $'line1\\nline2'"], ["git push origin $'feat'"]])(
+    'allows %s — a harmless "$\'...\'" payload with nothing force-push shaped in it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {

@@ -975,31 +975,131 @@ const FORCE_PUSH_RE = /(--force(-with-lease)?\b|--mirror\b|(^|\s)-[a-zA-Z]*f[a-z
 const GIT_PUSH_ANYWHERE_RE = new RegExp(`\\bgit\\b[\\s\\S]*${bareWord('push')}`, 'i');
 
 /**
- * An inline `git -c alias.<name>=<value>` whose value mentions `push` — a
- * force-push escape hatch handed to whatever runs `git <name>` next, whether
- * or not the same segment goes on to invoke it. Kept simple, on purpose
- * (issue #258): find every place a segment spells `-c` immediately naming an
- * `alias.` key — with or without a space (`-c alias.p=`, `-calias.p=`), with
- * or without a surrounding quote (`-c 'alias.p=...'`) — and if the text from
- * that point to the end of the segment contains `push` anywhere, deny it.
+ * `$'...'` — bash's ANSI-C quoting — is decoded to real bytes before git (or
+ * anything else) ever sees it: `\x2d` is `-`, `\146` is `f`, `\x70ush` is
+ * `push`. A rule that scans the raw command text for `--force` or `push`
+ * never finds either spelled this way, so every regex rule 2 runs is run
+ * against this decoded reading instead of the raw segment.
  *
- * The value is not parsed out and matched on its own: an escaped space
- * inside it (`alias.p=!git\ push`) is one shell word by the time git runs
- * it, but two words on the raw command line this rule scans, and a value
- * boundary that tries to guess where a shell escape ends is a guess this
- * rule does not need to make. Reading to the end of the segment costs
- * nothing a `-c alias.` line was not already about to spend on running git.
- *
- * Aliases declared in git config (not `-c`) are out of scope; this only sees
- * what is on the command line.
+ * Only the escapes bash's own `$'...'` grammar defines are decoded: `\xHH`
+ * hex, `\NNN` octal (1-3 digits), `\uHHHH` / `\UHHHHHHHH` Unicode, and the
+ * single-letter escapes (`\n`, `\t`, `\\`, `\'`, `\"`, …). Anything else
+ * inside the quotes is copied through unchanged — under-decoding only
+ * leaves an escape sequence looking like itself, never invents a character
+ * that helps an evasion.
  */
-const ALIAS_CONFIG_RE = /(^|\s)-c\s*['"]?alias\./gi;
+const ANSI_C_ESCAPE_RE =
+  /\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|n|t|r|a|b|f|v|e|E|\\|'|")/g;
 
-function definesForceCapablePushAlias(segment: string): boolean {
-  for (const match of segment.matchAll(ALIAS_CONFIG_RE)) {
-    const start = match.index + (match[1]?.length ?? 0);
-    if (/push/i.test(segment.slice(start))) return true;
+function decodeAnsiCPayload(payload: string): string {
+  return payload.replace(ANSI_C_ESCAPE_RE, (_match, esc: string) => {
+    switch (esc[0]) {
+      case 'x':
+      case 'u':
+      case 'U':
+        return String.fromCodePoint(Number.parseInt(esc.slice(1), 16));
+      case 'n':
+        return '\n';
+      case 't':
+        return '\t';
+      case 'r':
+        return '\r';
+      case 'a':
+        return '\x07';
+      case 'b':
+        return '\b';
+      case 'f':
+        return '\f';
+      case 'v':
+        return '\v';
+      case 'e':
+      case 'E':
+        return '\x1b';
+      case '\\':
+        return '\\';
+      case "'":
+        return "'";
+      case '"':
+        return '"';
+      default:
+        // Only octal digits reach here (the `[0-7]{1,3}` branch).
+        return String.fromCharCode(Number.parseInt(esc, 8) & 0xff);
+    }
+  });
+}
+
+/**
+ * Finds the unescaped `'` that closes a `$'` span starting at `start` (the
+ * index right after the opening `$'`). A backslash inside the span escapes
+ * whatever follows it, including a `'`, so `\'` never ends the span early.
+ * Returns -1 when the span runs off the end of the segment unterminated.
+ */
+function findAnsiCQuoteEnd(text: string, start: number): number {
+  let i = start;
+  while (i < text.length) {
+    if (text[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (text[i] === "'") return i;
+    i += 1;
   }
+  return -1;
+}
+
+/**
+ * Replaces every `$'...'` span in a segment with its decoded content, so the
+ * rule-2 checks below read what git will actually receive rather than the
+ * quoted spelling. An unterminated span — no closing `'` before the segment
+ * ends — cannot be decoded with confidence; `unterminated` tells the caller
+ * to fail closed rather than silently reading past it.
+ */
+function decodeAnsiCQuoting(segment: string): { text: string; unterminated: boolean } {
+  let result = '';
+  let i = 0;
+  while (i < segment.length) {
+    if (segment[i] === '$' && segment[i + 1] === "'") {
+      const end = findAnsiCQuoteEnd(segment, i + 2);
+      if (end === -1) return { text: result + segment.slice(i), unterminated: true };
+      result += decodeAnsiCPayload(segment.slice(i + 2, end));
+      i = end + 1;
+      continue;
+    }
+    result += segment[i];
+    i += 1;
+  }
+  return { text: result, unterminated: false };
+}
+
+/**
+ * Every way this segment could hand git an alias definition inline, without
+ * checking what the alias resolves to:
+ *
+ * - `-c` or `-c<nospace>` naming an `alias.` key, quoted or not
+ *   (`-c alias.p=`, `-calias.p=`, `-c 'alias.p=...'`).
+ * - `--config-env` naming an `alias.` key, whose value is the *name* of an
+ *   environment variable read later — never visible on this line at all.
+ * - `GIT_CONFIG_PARAMETERS`, git's own serialisation of a whole `-c` list,
+ *   assigned or exported.
+ * - A `GIT_CONFIG_KEY_<n>=` pair whose value is an `alias.` key, or is a
+ *   shell variable (`$V`, `${V}`) or command substitution (`` `cmd` ``,
+ *   `$(cmd)`) this scanner cannot resolve — read alongside a
+ *   `GIT_CONFIG_VALUE_<n>` this line may not even set.
+ *
+ * Issue #258's original fix denied an inline alias only when its value
+ * visibly mentioned `push`. That is not a question this line can always
+ * answer: the value can come from a shell variable, a named environment
+ * variable read later, or a `GIT_CONFIG_VALUE_<n>` set nowhere near the key.
+ * `git -c alias.st=status st` is refused for the same reason as everything
+ * else in this file errs the same direction — a rule that cannot always
+ * tell "harmless alias" from "force-push escape hatch" apart denies both,
+ * because the cost of the false deny is smaller than the cost of the hole.
+ */
+function definesInlineGitAlias(segment: string): boolean {
+  if (/(^|\s)-c\s*['"]?alias\./i.test(segment)) return true;
+  if (/--config-env(=|\s+)['"]?alias\./i.test(segment)) return true;
+  if (/\bGIT_CONFIG_PARAMETERS\b/.test(segment)) return true;
+  if (/\bGIT_CONFIG_KEY_\d+=(['"]?)(alias\.|\$|`)/i.test(segment)) return true;
   return false;
 }
 
@@ -1015,10 +1115,16 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   // A `git stash push` names no remote, so its `push` is removed before
   // asking whether the segment still pushes.
   const forced = topLevelCommands(command).some((segment) => {
-    const withoutStash = segment.replace(/\bstash\s+push\b/gi, 'stash');
-    if (definesForceCapablePushAlias(segment)) return true;
+    const decoded = decodeAnsiCQuoting(segment);
+    // An unterminated `$'` span cannot be decoded with confidence — fail
+    // closed rather than guess at what it hides, the same direction as
+    // `topLevelCommands`' own fallback for a construct it cannot read.
+    if (decoded.unterminated) return /\bgit\b/i.test(segment);
+    const text = decoded.text;
+    if (definesInlineGitAlias(text)) return true;
+    const withoutStash = text.replace(/\bstash\s+push\b/gi, 'stash');
     if (!GIT_PUSH_ANYWHERE_RE.test(withoutStash)) return false;
-    if (FORCE_PUSH_RE.test(segment)) return true;
+    if (FORCE_PUSH_RE.test(text)) return true;
     // A refspec operand starting with `+` forces the update the same way
     // `--force` does, with no flag on the line at all. Read the same way
     // rule 1 reads a push's destination: every non-flag operand of the push,
@@ -1026,7 +1132,7 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // removes them before git ever sees the argument. `git push origin
     // \+feat` reaches git as `+feat`; scanning the raw `\+feat` for a
     // leading `+` misses it, so the operand is read the way git will.
-    return pushOperands(segment).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
+    return pushOperands(text).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
   });
   return forced ? violation(requireRule(policy, 'force-push')) : null;
 }
