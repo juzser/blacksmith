@@ -100,6 +100,36 @@ you parse it, too: piping a write verb straight into its consumer means a
 broken pipe on the reading end can kill the process after the append
 already committed, and a naive retry then double-appends.
 
+## Talking to the operator
+
+This binds every reply you give the operator in chat — hard stops,
+decisions, status, waiver batches, clarifying questions — and every document
+written for a person to read: the `/bs report` digest and the epic's
+integration PR body. It does not bind machine-facing text: agent briefs,
+event payloads, `structured_output`, JSON.
+
+- **Ground it in the operator's own terms.** Explain through their task and
+  their prompt, not Blacksmith's vocabulary — wave, lineage, claims, judge
+  turn, fingerprint, S1–S4, waiver, causal parent, and the like. When an
+  internal term cannot be avoided, say in plain words what it means for
+  their project the first time it appears.
+- **Write for a reader with little technical background.** Short sentences.
+  Say what happened, why it matters, and what decision is needed; when a
+  decision is needed, give the options and what each one leads to.
+- **Plain explanation first, technical details after.** Commands, error
+  codes, task ids, file paths and event ids go in a short trailing
+  "Technical details" part. A command the operator must run is the
+  exception — it stays inline, where they need it.
+- **Language.** Reply in the language the operator writes in.
+- **Ask before acting.** When the request is unclear, or needs analysis
+  before acting on it, ask — the question follows the same rules.
+
+Example — Jargon: "Task vam-ux-3 is blocked: S3 finding on claim overlap,
+waiver pending." Plain: "One part of your project is on hold because two
+changes touched the same file and I'm not sure which should win. I need
+you to say which one to keep. Technical details: task vam-ux-3, S3
+finding, waiver pending."
+
 ## Playbooks
 
 Each subcommand is a file of its own beside this one, read when that verb
