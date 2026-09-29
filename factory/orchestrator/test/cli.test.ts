@@ -4984,18 +4984,21 @@ describe('cli.ts (built binary)', () => {
       // (this plan trips no trigger). The same wave, the same policy
       // file: a small epic cannot afford it, a medium one can.
       it("refuses against the cap of the plan's effort tier, not the default tier", async () => {
-        const { sessionId, eventsDir } = await session();
-        const budgetPolicy = path.join(scratchDir, `${sessionId}-tiered-budgets.yml`);
+        const { sessionId: policyName } = await session();
+        const budgetPolicy = path.join(scratchDir, `${policyName}-tiered-budgets.yml`);
         await writeFile(
           budgetPolicy,
           'epic:\n  cap_tokens:\n    small: 5000\n    medium: 50000\n    huge: 100000\n' +
             '  alarm_ratio: 0.7\n  max_in_flight_tasks: null\n',
         );
-        const plans: Record<string, string> = {};
-        for (const effort of ['small', 'medium']) {
-          plans[effort] = path.join(scratchDir, `${sessionId}-${effort}-plan.json`);
+        // One session per tier: wave check under --session admits only the
+        // live tasks of an ingested plan, and the two plans share an epic id
+        // and version, so each is ingested into a session of its own.
+        const tiered = async (effort: string) => {
+          const { sessionId, eventsDir } = await session();
+          const planPath = path.join(scratchDir, `${sessionId}-${effort}-plan.json`);
           await writeFile(
-            plans[effort] as string,
+            planPath,
             JSON.stringify({
               ...PLAN,
               effort,
@@ -5005,28 +5008,31 @@ describe('cli.ts (built binary)', () => {
               })),
             }),
           );
-        }
-        const check = (planPath: string, env: Record<string, string> = {}) =>
-          runCli(
-            [
-              'wave',
-              'check',
-              planPath,
-              'task-1',
-              'task-2',
-              '--session',
-              sessionId,
-              '--causal-parent',
-              `${sessionId}#0`,
-              '--state-dir',
-              eventsDir,
-              '--budget-policy',
-              budgetPolicy,
-            ],
-            env,
-          );
+          ingest(planPath, sessionId, eventsDir);
+          return (env: Record<string, string> = {}) =>
+            runCli(
+              [
+                'wave',
+                'check',
+                planPath,
+                'task-1',
+                'task-2',
+                '--session',
+                sessionId,
+                '--causal-parent',
+                `${sessionId}#0`,
+                '--state-dir',
+                eventsDir,
+                '--budget-policy',
+                budgetPolicy,
+              ],
+              env,
+            );
+        };
+        const checkSmall = await tiered('small');
+        const checkMedium = await tiered('medium');
 
-        const small = check(plans.small as string);
+        const small = checkSmall();
         expect(small.status).toBe(1);
         expect(JSON.parse(small.stdout).budget).toMatchObject({
           status: 'refused',
@@ -5035,11 +5041,11 @@ describe('cli.ts (built binary)', () => {
         });
 
         // A per-tier env override for this tier beats the file.
-        const raised = check(plans.small as string, { SMITH_EPIC_CAP_TOKENS_SMALL: '7000' });
+        const raised = checkSmall({ SMITH_EPIC_CAP_TOKENS_SMALL: '7000' });
         expect(JSON.parse(raised.stdout).budget).toMatchObject({ capTokens: 7000 });
         expect(JSON.parse(raised.stdout).budget.status).not.toBe('refused');
 
-        const medium = check(plans.medium as string);
+        const medium = checkMedium();
         expect(JSON.parse(medium.stdout).budget).toMatchObject({ capTokens: 50000 });
         expect(JSON.parse(medium.stdout).budget.status).not.toBe('refused');
       });
