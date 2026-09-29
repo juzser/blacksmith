@@ -993,13 +993,15 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
  * Anything it cannot read with confidence returns the whole command as one
  * segment: an unbalanced quote or paren, or a construct it does not model —
  * ANSI-C `$'…'` quoting, `${…}` expansion (whose operands may hold `;` or
- * `&&`), a heredoc (`<<`, whose body is not shell syntax) or a comment (`#`
- * at the start of a word, whose text may hold a lone quote). That is the
- * pre-split reading, so a parse it gets wrong can only over-refuse, never let
- * a force flag through.
+ * `&&`), a heredoc (`<<`, whose body is not shell syntax) or any `#` other
+ * than `$#`. A comment's text may hold a lone quote, and a comment starts not
+ * only after a space but right after `;`, `&` or `)` too, so every `#` that
+ * could open one falls back rather than the scan guessing which do. That is
+ * the pre-split reading, so a parse it gets wrong can only over-refuse, never
+ * let a force flag through.
  */
 function topLevelCommands(command: string): string[] {
-  if (/\$'|\$\{|<<|(^|\s)#/.test(command)) return [command];
+  if (/\$'|\$\{|<<|(^|[^$])#/.test(command)) return [command];
   const segments: string[] = [];
   const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
   let start = 0;

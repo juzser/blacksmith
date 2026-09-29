@@ -424,6 +424,7 @@ describe('evaluateCommand — rule 2: force-push', () => {
     ['rm -f x && git push origin feature'],
     ['git push origin feature | tee out --force-with-lease-note'],
     ['git stash push -f && git push origin feature'],
+    ['git stash push -f && git status'],
   ])('allows %s — the force flag belongs to another segment', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(d.allowed).toBe(true);
@@ -480,6 +481,10 @@ describe('evaluateCommand — rule 2: force-push', () => {
     ["cat <<EOF\nit's\nEOF\ngit push origin 'x;' -f feat #'"],
     ["true # '\ngit push origin 'x;' -f feat # '"],
     ['git -c "a.b=;" push -f origin feat'],
+    // A comment also starts right after `;`, `&` or `)`, not only after a space.
+    ["true;# '\ngit push origin 'x;' -f feat;# '"],
+    ["true&&# '\ngit push origin 'x;' -f feat;# '"],
+    ["(true)# '\ngit push origin 'x;' -f feat;# '"],
   ])('denies %s — the flag is still on the push command line', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(ruleIds(d)).toContain('force-push');
