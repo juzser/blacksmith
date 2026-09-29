@@ -1688,6 +1688,7 @@ describe('cli.ts (built binary)', () => {
       const { stdout, status } = runCli(['epic', 'spec-review', '--help']);
       expect(status).toBe(0);
       expect(stdout).toContain('--reviewed-by');
+      expect(stdout).toContain('--no-findings');
     });
   });
 
@@ -6767,6 +6768,45 @@ describe('cli.ts (built binary)', () => {
         expect(existsSync(path.join(ownSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(true);
       });
 
+      // Issue #249: a missing --evidence used to be read as "found nothing",
+      // so a review that never wrote its file closed as clean. An empty review
+      // is now said out loud, one way or the other, never by omission.
+      it.each([
+        ['neither --evidence nor --no-findings', [], 'cli.missing-flag'],
+        [
+          'both --evidence and --no-findings',
+          ['--evidence', 'review.json', '--no-findings'],
+          'cli.incompatible-flags',
+        ],
+      ])('refuses a closing spec review given %s', async (_label, extra, code) => {
+        const { sessionId, eventsDir, planPath } = await session();
+
+        const result = runCli([
+          'epic',
+          'spec-review',
+          '--epic',
+          'epic-1',
+          '--project',
+          scratchDir,
+          '--plan',
+          planPath,
+          '--reviewed-by',
+          'spec-reviewer',
+          ...extra.map((arg) => (arg === 'review.json' ? path.join(scratchDir, arg) : arg)),
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe(code);
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === SPEC_REVIEW_EVENT),
+        ).toEqual([]);
+      });
+
       it('refuses a closing spec review it cannot pin to an integration head', async () => {
         const { sessionId, eventsDir, planPath } = await session();
 
@@ -6783,6 +6823,7 @@ describe('cli.ts (built binary)', () => {
           planPath,
           '--reviewed-by',
           'spec-reviewer',
+          '--no-findings',
           '--session',
           sessionId,
           '--causal-parent',

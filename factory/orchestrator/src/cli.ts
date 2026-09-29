@@ -3617,6 +3617,26 @@ async function main(): Promise<number> {
     const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
     // Evidence, not identity (interview N-2): the reviewer reports what it
     // read; the plan version and the head it was read at come from here.
+    //
+    // Exactly one of --evidence or --no-findings (issue #249). A missing
+    // --evidence used to read as "found nothing", so a reviewer that never
+    // wrote its file closed the review clean. Same rule as `judge report`:
+    // an empty review is the file saying so, or the operator attesting it.
+    const noFindings = flags['no-findings'] === 'true';
+    if (noFindings && flags.evidence) {
+      throw new SmithError(
+        'cli.incompatible-flags',
+        'epic spec-review takes --evidence <file> or --no-findings, not both: the review either handed over its findings file or the operator attests it found nothing.',
+        { epicId },
+      );
+    }
+    if (!noFindings && !flags.evidence) {
+      throw new SmithError(
+        'cli.missing-flag',
+        "epic spec-review needs --evidence <file> (the reviewer's findings list, `[]` when it found nothing) or --no-findings (the operator attests an empty review). A missing file is not an empty review.",
+        { epicId, flag: 'evidence' },
+      );
+    }
     const evidence = flags.evidence ? readJsonFile<FindingEvidence[]>(flags.evidence) : [];
     // No branch, no review. The whole point of this dispatch is that it reads
     // the code that now exists; recording one against a head that could not be
@@ -3639,6 +3659,7 @@ async function main(): Promise<number> {
           ? { reviewedByProvider: flags['reviewed-by-provider'] }
           : {}),
         evidence,
+        ...(noFindings ? { noFindings: true } : {}),
       },
       eventContextFromFlags(flags),
       eventOptsFromFlags(flags),

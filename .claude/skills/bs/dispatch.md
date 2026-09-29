@@ -345,10 +345,17 @@ smith judge outstanding --task <task-id> --session ...
 `judges.non-judge-role` — accepted roles are reviewer, verifier, grader,
 spec-reviewer, security-reviewer, auditor, and uiux (the visual pass;
 wave.md:227-237 brackets it with `judge dispatch`/`judge report` the same as
-the other six). `judge report` reads the declared file and refuses it three
+the other six). `judge report` reads the declared file and refuses it four
 ways — `judges.artifact-missing` (re-poke the agent; recovery was six for
 six), `judges.artifact-unparseable` (it narrated instead of reporting),
-`judges.artifact-not-a-list` (it wrote some other shape). `judge outstanding`
+`judges.artifact-not-a-list` (it wrote some other shape), and
+`judges.artifact-stale` (the file was not written during this turn: its mtime
+is not later than the turn's `dispatch_decision`, or it was already on disk
+at dispatch and nothing has rewritten it since — an earlier round's report,
+or a placeholder; re-poke the judge, never `touch` the file). Declared paths
+are reused across rounds, so `judge dispatch` does not refuse an existing
+file; it records its mtime, and the report refuses that same mtime. The
+same check runs when `gate run --evidence` closes the turn. `judge outstanding`
 prints what is still owed and **exits 1 while anything is**, so it is the loop
 condition for a re-poke, not just a report. Passing the file to
 `gate run --evidence <path> --found-by <role>` reports for you, so the normal

@@ -602,8 +602,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'epic spec-review',
     positionals: '',
-    flags: `--epic <id> --project <dir> --plan <plan.json> --reviewed-by <role> [--reviewed-by-provider <name>] [--evidence <file>] ${EVENTS_DIR}`,
-    summary: 'Record the closing spec review, pinned to the integration head it was read at.',
+    flags: `--epic <id> --project <dir> --plan <plan.json> --reviewed-by <role> [--reviewed-by-provider <name>] [--evidence <file>] [--no-findings] ${EVENTS_DIR}`,
+    summary:
+      'Record the closing spec review, pinned to the integration head it was read at. Exactly one of --evidence or --no-findings; --no-findings attests the clean case.',
   },
   {
     command: 'epic goal',
@@ -764,7 +765,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: `--task <task-id> --role <role> [--round <n>] [--artifact <file>] [--no-findings] ${EVENTS_DIR}`,
     summary:
-      'Close a judge turn against the artifact it declared. --no-findings attests the clean case.',
+      'Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case.',
   },
   {
     command: 'judge outstanding',

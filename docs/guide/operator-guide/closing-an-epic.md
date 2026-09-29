@@ -252,9 +252,17 @@ epic close, against composite behaviour:
 smith epic spec-review --epic epic-1 --project ../my-project \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --reviewed-by spec-reviewer [--reviewed-by-provider anthropic:claude-opus-5] \
-  [--evidence spec-findings.json] \
+  (--evidence spec-findings.json | --no-findings) \
   --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
+
+Exactly one of `--evidence` or `--no-findings`, the way `judge report` takes
+them (worktrees-and-judges.md §3c). A reviewer that found nothing writes `[]`
+and you hand that file over; `--no-findings` is the operator attesting a
+review that ran outside the factory, and the event records it as
+`attested_by: operator`. Passing neither is refused with `cli.missing-flag`,
+passing both with `cli.incompatible-flags`: an absent `--evidence` used to read as a clean
+review, which is how a reviewer that never wrote its file closed clean.
 
 It reads the head of `smith/<epic>/integration` itself and pins the record to
 it — like `integration check`, and for the same reason: a review is evidence
