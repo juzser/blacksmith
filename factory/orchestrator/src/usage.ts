@@ -692,7 +692,11 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'lessons candidates',
     positionals: '',
-    flags: STATS,
+    // Only `candidates` takes `--state-dir` alongside STATS: it validates
+    // `--session` against the event log the same way `raise`/`approve`/
+    // `reject`/`db rebuild` do (P9-28), which is a per-session log, not a
+    // per-DB-query concern the other STATS-flagged commands share.
+    flags: `${STATS} [--state-dir <dir>]`,
     summary: 'List the lesson candidates awaiting an approve or a reject.',
   },
   {

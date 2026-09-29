@@ -15,7 +15,14 @@
 // nothing at runtime. `test/cliBoot.test.ts` reads the built graph and fails if
 // the database layer creeps back into it.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resetAgentMaxTurns, syncAgentMaxTurns } from './agentsSync.js';
@@ -3985,6 +3992,11 @@ async function main(): Promise<number> {
     const { openDb } = await import('./db/projector.js');
     const { lessonsPage } = await import('./db/queries.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
+    // A named session must exist, same as `db rebuild`/`db apply` (P9-28):
+    // without this, a typoed --session silently reads as "no rows for this
+    // session" instead of "no such session", and --state-dir (accepted here
+    // for exactly this) had no effect at all.
+    if (flags.session) requireSession(flags.session, eventOptsFromFlags(flags));
     const handle = openDb(dbPath);
     try {
       const scope = flags.session ? { sessionId: flags.session } : {};
@@ -4085,6 +4097,13 @@ async function main(): Promise<number> {
     try {
       const scope = flags.session ? { sessionId: flags.session } : {};
       const approved = lessonsPage(handle.db, scope).approved;
+      // The store only ever tracks its OWN rows: an entry already in outPath
+      // with no store row (hand-authored, or raised before the store existed)
+      // is invisible to `approved` above, so compileLessons has to be handed
+      // the file's own prior content or it has no way to tell "the store
+      // doesn't track this" apart from "this was deleted" — see its own
+      // docstring.
+      const existingMarkdown = existsSync(outPath) ? readFileSync(outPath, 'utf8') : undefined;
       const markdown = compileLessons(
         approved.map((l) => ({
           lessonId: l.lessonId,
@@ -4095,6 +4114,7 @@ async function main(): Promise<number> {
           agentRole: l.agentRole,
           caseType: l.caseType,
         })),
+        existingMarkdown,
       );
       writeFileSync(outPath, markdown, 'utf8');
       printJson({ outPath, lessonsCompiled: approved.length });

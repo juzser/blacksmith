@@ -110,11 +110,15 @@ export interface LessonRule {
   statement: string;
 }
 
-const ENTRY_HEADING = /^### /;
-const SECTION_HEADING = /^## (.+)$/;
-const BULLET = /^- ([a-z_]+):\s*(.*)$/;
+// Exported (not just used by parseLessons below): lessons.ts's compileLessons
+// reuses these four to salvage a pre-existing entry compileLessons() itself
+// can't regenerate (no store row) — one parser, shared by both directions of
+// the round-trip, so they can't drift apart on what an "entry" is.
+export const ENTRY_HEADING = /^### /;
+export const SECTION_HEADING = /^## (.+)$/;
+export const BULLET = /^- ([a-z_]+):\s*(.*)$/;
 /** An indented, non-bullet line — a continuation of the previous bullet's value. */
-const CONTINUATION = /^\s+(\S.*)$/;
+export const CONTINUATION = /^\s+(\S.*)$/;
 
 /**
  * taxonomy.yml `lesson_scope`, in compiled-section order — only entries under
