@@ -25,6 +25,7 @@ import {
   transition,
 } from './findings.js';
 import {
+  bareTaskId,
   diffPlans,
   draftNextVersion,
   livePlanTasks,
@@ -181,6 +182,83 @@ export function taskSuccessors(
     }
   }
   return successors;
+}
+
+/**
+ * Walks `taskSuccessors`' one-hop map forward from `from` and returns the
+ * ordered bare hop ids from the one right after `from` through `target`
+ * inclusive — or `undefined` if `target` never turns up on that chain.
+ * `worktree create --from` (cli.ts's `worktree.not-a-successor` guard) used
+ * to ask `successors.get(from)` alone, which only ever names the *direct*
+ * successor: a plan amended twice before the intermediate successor is ever
+ * cut — A superseded by B in v6, B superseded by C in v7, B never cut —
+ * leaves `taskSuccessors` with two independent one-hop entries (A -> B,
+ * B -> C) and no direct A -> C entry at all, so cutting C `--from A` was
+ * refused despite the log naming C as A's transitive successor.
+ *
+ * Every hop the walk passes through on the way to `target` comes back too,
+ * not just the yes/no answer: `createTaskWorktree` (worktree.ts) branches
+ * `--from`'s target directly off `from`'s own branch, so if some *hop in
+ * between* was already cut as its own branch, skipping straight from `from`
+ * to `target` silently drops that hop's commits. Answering that needs git
+ * state this module deliberately never touches, so the walk hands its own
+ * intermediate hops back and leaves the git-aware check — and which hop to
+ * refuse on — to the caller (cli.ts's guard, paired with worktree.ts's
+ * branch-existence check).
+ *
+ * Keys are normalized to their bare form once (`successors` entries can be
+ * bare or `${epicId}/${id}` at any hop, D-46/P9-29), so each hop after that
+ * is one lookup against the normalized map — the same "check both
+ * spellings" a single-hop lookup did, done once instead of re-derived every
+ * hop. A cycle — a successor id already visited — stops the walk and
+ * reports no match, the same fail-closed answer as a chain that simply runs
+ * out; a malformed log must never spin.
+ *
+ * Directional only: this walks forward from `from`, value to value, never a
+ * hop's key. A `target` that is a predecessor of `from` is therefore never
+ * found, however far back it sits — `--from` claims a task's own future, not
+ * its past.
+ */
+export function successorChainPath(
+  epicId: string,
+  from: string,
+  target: string,
+  successors: ReadonlyMap<string, string>,
+): string[] | undefined {
+  const bareSuccessors = new Map(
+    [...successors].map(([oldId, newId]) => [bareTaskId(epicId, oldId), newId] as const),
+  );
+  const targetBare = bareTaskId(epicId, target);
+  const visited = new Set<string>([bareTaskId(epicId, from)]);
+  let currentId = bareTaskId(epicId, from);
+  const path: string[] = [];
+  for (;;) {
+    const nextId = bareSuccessors.get(currentId);
+    if (nextId === undefined) return undefined;
+    const nextBare = bareTaskId(epicId, nextId);
+    path.push(nextBare);
+    if (nextBare === targetBare) return path;
+    if (visited.has(nextBare)) return undefined;
+    visited.add(nextBare);
+    currentId = nextBare;
+  }
+}
+
+/**
+ * Answers whether `target` sits anywhere on `from`'s forward successor
+ * chain — not only at the first hop. A thin boolean wrapper over
+ * `successorChainPath`; callers that also need to know *which* hops sit
+ * between `from` and `target` (cli.ts's `worktree create --from` guard, to
+ * refuse skipping past a hop already cut as its own branch) want that
+ * function directly instead.
+ */
+export function isTaskInSuccessorChain(
+  epicId: string,
+  from: string,
+  target: string,
+  successors: ReadonlyMap<string, string>,
+): boolean {
+  return successorChainPath(epicId, from, target, successors) !== undefined;
 }
 
 /**

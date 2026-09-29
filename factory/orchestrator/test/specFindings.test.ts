@@ -30,6 +30,7 @@ import { MCP_SURFACE_NOT_REQUIRED } from '../src/mcp.js';
 import type { PlanChanges, PlanFile } from '../src/plan.js';
 import {
   amendPlan,
+  isTaskInSuccessorChain,
   latestSpecReview,
   PLAN_AMENDED_EVENT,
   recordSpecReview,
@@ -37,6 +38,7 @@ import {
   SpecError,
   type SpecReviewStatus,
   specReviewBlockers,
+  successorChainPath,
   taskSuccessors,
 } from '../src/spec.js';
 
@@ -1091,6 +1093,112 @@ describe('spec-scoped findings (P9-9)', () => {
 
         expect(result.warnings).toEqual([]);
       });
+    });
+  });
+
+  // `worktree create --from` spends a predecessor's commits only on a task the
+  // log names as its successor (cli.ts's `worktree.not-a-successor`). A plan
+  // amended twice before the intermediate successor is ever cut leaves
+  // `taskSuccessors` with two independent one-hop entries and no direct entry
+  // at all from the first task to the last -- these pin the chain walk that
+  // reads those hops as one relationship instead of refusing the transitive
+  // case.
+  describe('isTaskInSuccessorChain — multi-hop successor lookup (worktree create --from)', () => {
+    it('still accepts the direct, one-hop successor', () => {
+      const successors = new Map([['demo/task-a', 'demo/task-b']]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-b', successors)).toBe(true);
+    });
+
+    it('accepts a two-hop chain: A superseded by B, B (never cut) superseded by C', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-c', successors)).toBe(true);
+    });
+
+    it('refuses a task with no successor relationship on the chain at all', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-x', successors)).toBe(false);
+    });
+
+    it('refuses walking backwards: a predecessor of `from` is not on its successor chain', () => {
+      const successors = new Map([['demo/task-a', 'demo/task-b']]);
+      // task-a is task-b's predecessor, not its successor -- the map only
+      // ever gets walked forward, value to value, never key to key.
+      expect(isTaskInSuccessorChain('demo', 'task-b', 'task-a', successors)).toBe(false);
+    });
+
+    it('does not spin on a cycle -- reports no match instead of hanging', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-a'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-x', successors)).toBe(false);
+    });
+
+    it('matches across bare and epic-qualified id spellings at every hop (D-46/P9-29)', () => {
+      const successors = new Map([
+        ['task-a', 'demo/task-b'],
+        ['demo/task-b', 'task-c'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-c', successors)).toBe(true);
+    });
+  });
+
+  // A verified review blocker on the cli.ts `--from` guard built on
+  // `isTaskInSuccessorChain`: a boolean alone tells the caller the chain
+  // reaches, but not which hops sit strictly between `from` and `target` --
+  // and `createTaskWorktree` branches directly off `from`'s own branch, so a
+  // cut intermediate's commits are dropped silently unless the guard can
+  // name and check every hop in between. `successorChainPath` is the map
+  // walk that hands those hops back; cli.ts pairs it with a git-aware
+  // predicate (spec.ts itself never touches git).
+  describe('successorChainPath — ordered hops from a chain walk (worktree create --from)', () => {
+    it('returns just the target for a direct, one-hop successor', () => {
+      const successors = new Map([['demo/task-a', 'demo/task-b']]);
+      expect(successorChainPath('demo', 'task-a', 'task-b', successors)).toEqual(['task-b']);
+    });
+
+    it('returns every hop after `from`, in order, ending at `target`', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-c', successors)).toEqual([
+        'task-b',
+        'task-c',
+      ]);
+    });
+
+    it('returns undefined when target is off the chain entirely', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-x', successors)).toBeUndefined();
+    });
+
+    it('returns undefined on a cycle instead of hanging', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-a'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-x', successors)).toBeUndefined();
+    });
+
+    it('normalizes bare and epic-qualified spellings at every hop, same as isTaskInSuccessorChain', () => {
+      const successors = new Map([
+        ['task-a', 'demo/task-b'],
+        ['demo/task-b', 'task-c'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-c', successors)).toEqual([
+        'task-b',
+        'task-c',
+      ]);
     });
   });
 

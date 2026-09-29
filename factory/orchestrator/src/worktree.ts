@@ -19,6 +19,20 @@ function localBranchExists(projectDir: string, branch: string): boolean {
 }
 
 /**
+ * Whether a task's own branch (`taskBranchName`) already exists locally —
+ * i.e. whether the task has already been cut. Exported for cli.ts's
+ * `worktree create --from` guard: spec.ts's `successorChainPath` hands back
+ * the bare hop ids between a `--from` predecessor and its target purely from
+ * the event log, with no notion of git state; this is the git-aware
+ * predicate the guard pairs it with to refuse skipping past a hop that was
+ * already cut (`createTaskWorktree` branches straight off `--from`'s own
+ * branch, so a cut hop's commits would otherwise vanish silently).
+ */
+export function taskBranchExists(projectDir: string, epic: string, taskId: string): boolean {
+  return localBranchExists(projectDir, taskBranchName(epic, taskId));
+}
+
+/**
  * Best-effort default-branch detection: origin/HEAD symbolic ref first (the
  * normal case after a clone), then whatever branch is currently checked out,
  * then the conventional main/master names.
