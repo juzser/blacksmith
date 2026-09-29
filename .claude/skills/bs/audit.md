@@ -132,6 +132,10 @@ smith audit record <project-dir> --axis <axis> --evidence state/audit/<audit-id>
   --session <session-id> --causal-parent <event-id>
 ```
 
+`judge report`'s own JSON carries the `event_id` of the `judge-reported`
+event it just appended — pass that straight through as `audit record`'s
+`--causal-parent` on the second line, rather than reading the log for it.
+
 `--role security-reviewer` on both lines for the security axis, as at
 dispatch. `judge report` refuses three ways — `judges.artifact-missing` (the judge
 ended on a plan and wrote nothing: re-poke it, and

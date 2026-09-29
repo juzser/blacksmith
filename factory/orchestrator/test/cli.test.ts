@@ -8652,13 +8652,19 @@ describe('cli.ts (built binary)', () => {
         'reviewer',
       ]);
       expect(reported.status).toBe(0);
-      expect(JSON.parse(reported.stdout)).toMatchObject({
+      const parsedReport = JSON.parse(reported.stdout);
+      expect(parsedReport).toMatchObject({
         role: 'reviewer',
         round: 1,
         artifactPath: artifact,
         findingCount: 1,
         attested: false,
       });
+      // session-start is #0, the dispatch above is #1, so this report's own
+      // judge-reported event is #2 — printed here instead of making the
+      // operator read the log (line-1) to find the id `audit record` wants
+      // as its `--causal-parent`.
+      expect(parsedReport.event_id).toBe(`${sessionId}#2`);
 
       const outstanding = judgeCli('outstanding', sessionId, eventsDir, [
         '--task',

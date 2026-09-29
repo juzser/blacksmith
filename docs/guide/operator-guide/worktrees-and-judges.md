@@ -210,7 +210,10 @@ through the other door.
 
 `judge report` reads the declared file, refuses it three distinct ways, and
 emits `judge-reported` with `agent_role`, `round`, `artifact_path` and
-`finding_count`:
+`finding_count`. Its own printed result carries that event's `event_id` too
+— the same id `smith event tail` would show at line-1, printed here instead
+so a command chained after it (e.g. `audit record --causal-parent`, §5 of
+`.claude/skills/bs/audit.md`) can use it straight off stdout:
 
 | Error code | What it means | What to do |
 |---|---|---|
