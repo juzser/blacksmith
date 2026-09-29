@@ -559,6 +559,19 @@ describe('evaluateCommand — rule 2: force-push', () => {
     },
   );
 
+  // The shell strips a backslash before git ever sees the argument, so `git
+  // push origin \+feat` reaches git as `+feat` — a force refspec — even
+  // though the raw command text this rule scans still has the backslash in
+  // front of the `+`. Stripping backslashes before the `+` test reads the
+  // operand the way git will, not the way it is typed.
+  it.each([['git push origin \\+feat'], ['git push origin \\+HEAD:feat']])(
+    'denies %s — the shell drops the backslash before git sees a "+" refspec',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
   // `git -c alias.<name>=<value>` defines an alias inline, and a value that
   // mentions `push` is a force-push escape hatch in waiting: the flag rule
   // 2 already refuses never has to appear on the command line at all once an
@@ -571,6 +584,15 @@ describe('evaluateCommand — rule 2: force-push', () => {
     ["git -c alias.p='push --force' p origin feat"],
     ['git -c alias.p="push -f" origin feat'],
     ['git -c alias.p=push origin feat'],
+    // An escaped space inside the value is still one shell word by the time
+    // git runs it (`!git push`), but it is two words on the raw command
+    // line this rule scans — so the check reads from the `-c` to the end of
+    // the segment rather than trying to isolate the value's own boundary.
+    ['git -c alias.p=!git\\ push p'],
+    // Single-quoted around the whole `key=value`, and no space at all
+    // between `-c` and `alias.` — both still name an alias.
+    ["git -c 'alias.p=push -f' p"],
+    ['git -calias.p=push p'],
   ])('denies %s — an inline alias whose value mentions push', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(ruleIds(d)).toContain('force-push');

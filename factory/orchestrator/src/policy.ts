@@ -978,16 +978,29 @@ const GIT_PUSH_ANYWHERE_RE = new RegExp(`\\bgit\\b[\\s\\S]*${bareWord('push')}`,
  * An inline `git -c alias.<name>=<value>` whose value mentions `push` — a
  * force-push escape hatch handed to whatever runs `git <name>` next, whether
  * or not the same segment goes on to invoke it. Kept simple, on purpose
- * (issue #258): match `-c` followed by an `alias.` key and any value —
- * unquoted, single- or double-quoted — and deny the segment if that value
- * contains `push`. Aliases declared in git config (not `-c`) are out of
- * scope; this only sees what is on the command line.
+ * (issue #258): find every place a segment spells `-c` immediately naming an
+ * `alias.` key — with or without a space (`-c alias.p=`, `-calias.p=`), with
+ * or without a surrounding quote (`-c 'alias.p=...'`) — and if the text from
+ * that point to the end of the segment contains `push` anywhere, deny it.
+ *
+ * The value is not parsed out and matched on its own: an escaped space
+ * inside it (`alias.p=!git\ push`) is one shell word by the time git runs
+ * it, but two words on the raw command line this rule scans, and a value
+ * boundary that tries to guess where a shell escape ends is a guess this
+ * rule does not need to make. Reading to the end of the segment costs
+ * nothing a `-c alias.` line was not already about to spend on running git.
+ *
+ * Aliases declared in git config (not `-c`) are out of scope; this only sees
+ * what is on the command line.
  */
-const ALIAS_DEFINITION_RE = /-c\s+alias\.[^\s='"]+=(?:'[^']*'|"[^"]*"|\S*)/gi;
+const ALIAS_CONFIG_RE = /(^|\s)-c\s*['"]?alias\./gi;
 
 function definesForceCapablePushAlias(segment: string): boolean {
-  const matches = segment.match(ALIAS_DEFINITION_RE);
-  return matches !== null && matches.some((m) => /push/i.test(m));
+  for (const match of segment.matchAll(ALIAS_CONFIG_RE)) {
+    const start = match.index + (match[1]?.length ?? 0);
+    if (/push/i.test(segment.slice(start))) return true;
+  }
+  return false;
 }
 
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
@@ -1009,8 +1022,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // A refspec operand starting with `+` forces the update the same way
     // `--force` does, with no flag on the line at all. Read the same way
     // rule 1 reads a push's destination: every non-flag operand of the push,
-    // quotes stripped.
-    return pushOperands(segment).some((ref) => ref.startsWith('+'));
+    // quotes stripped — and backslashes stripped too, since the shell
+    // removes them before git ever sees the argument. `git push origin
+    // \+feat` reaches git as `+feat`; scanning the raw `\+feat` for a
+    // leading `+` misses it, so the operand is read the way git will.
+    return pushOperands(segment).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
   });
   return forced ? violation(requireRule(policy, 'force-push')) : null;
 }
