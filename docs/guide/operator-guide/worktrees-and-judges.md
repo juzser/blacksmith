@@ -231,10 +231,13 @@ other role gets that reading, and `gate run --grader <file>` closes the
 grader's turn the way `--evidence` closes a reviewer's.
 
 `judge outstanding` prints the difference between the two sets and **exits 1
-while it is non-empty**, so it is a loop condition, not just a report:
+while it is non-empty**, so it is a loop condition, not just a report. The
+printed object echoes the `--task`/`--session` it answered for, so an empty
+`outstanding` array is never mistaken for "nothing to check" or misread as a
+round number:
 
 ```json
-[{"taskId":"epic-1/task-1","role":"security-reviewer","round":1,"declaredArtifact":"/abs/path/task-1.security.json","reported":false,"reportedArtifact":null,"attested":false}]
+{"taskId":"epic-1/task-1","sessionId":"<session-id>","outstanding":[{"taskId":"epic-1/task-1","role":"security-reviewer","round":1,"declaredArtifact":"/abs/path/task-1.security.json","reported":false,"reportedArtifact":null,"attested":false}],"count":1}
 ```
 
 Re-dispatching the same role opens a new round and supersedes the old one, so a
