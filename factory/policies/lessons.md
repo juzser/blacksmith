@@ -700,6 +700,11 @@ _(none yet)_
 - lesson_id: bs-audit-3-gate-timeout-under-load
 - statement: Size a test-gate check's timeout for a loaded machine, not a quiet one: a suite that runs in about 200 s bare can be killed at a 300 s default with no output while another build shares the CPUs. When a check dies at its timeout with no test output, read machine load before blaming the code, log it as an env failure, and raise that check's timeout_ms through the per-check override; never drop or narrow the check to get it under the limit.
 
+### lesson-dream-vam-audit-7-2026-09-28-135: Every judge or worker dispatch brief names the JSON Schema its result...
+
+- lesson_id: lesson-dream-vam-audit-7-2026-09-28-135
+- statement: Every judge or worker dispatch brief names the JSON Schema its result file must satisfy: the full result envelope (task_id, agent, provider, model_tier, token_usage), the verdict at .structured_output, and the schema's own keys; the orchestrator schema-checks the file as soon as the agent returns, before gate run.
+
 ## security
 
 _(none yet)_
