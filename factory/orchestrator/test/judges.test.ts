@@ -41,6 +41,21 @@ describe('judges.ts', () => {
   const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
   const opts = () => ({ stateDir });
 
+  // The shape `finding-evidence.schema.json` requires — the same shape
+  // mintFindings validates on the raise side (issue #233). A judge's reported
+  // array is read by the same rule, so a fixture standing in for "an artifact
+  // with real findings" has to actually satisfy it, not just be an array.
+  function validEvidence(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      file_path: 'src/a.ts',
+      finding_category: 'correctness',
+      severity: 'S2-major',
+      summary: 'off-by-one in loop bound',
+      failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
+      ...overrides,
+    };
+  }
+
   async function dispatch(overrides: Record<string, unknown> = {}) {
     return recordJudgeDispatch(
       {
@@ -213,7 +228,7 @@ describe('judges.ts', () => {
       await dispatch();
       await writeFile(
         path.join(artifactDir, 'reviewer.json'),
-        JSON.stringify([{ filePath: 'src/a.ts', finding: {} }, { filePath: 'src/b.ts' }]),
+        JSON.stringify([validEvidence(), validEvidence({ file_path: 'src/b.ts' })]),
         'utf8',
       );
       const report = await recordJudgeReport(
@@ -236,6 +251,74 @@ describe('judges.ts', () => {
       });
       expect(outstandingJudges(await turns())).toEqual([]);
     });
+
+    // Issue #233: the same schema-shape check mintFindings runs before raising
+    // a finding has to run here too, so a malformed artifact is caught when
+    // the judge reports rather than surfacing as a crash somewhere downstream
+    // that reads the finding_count this would have minted.
+    it('refuses a report whose artifact array holds a schema-invalid item, and leaves the turn open', async () => {
+      await dispatch();
+      await writeFile(
+        path.join(artifactDir, 'reviewer.json'),
+        JSON.stringify([
+          validEvidence(),
+          { category: 'correctness', title: 'bad', evidence: 'blah', severity: 'S2-major' },
+        ]),
+        'utf8',
+      );
+      await expect(
+        recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts()),
+      ).rejects.toMatchObject({ code: 'judges.artifact-invalid-evidence' });
+      // The turn stays open: a failed report is not a report.
+      expect(outstandingJudges(await turns())).toHaveLength(1);
+    });
+
+    it('still accepts an empty array artifact — an empty review is "[]", written out', async () => {
+      await dispatch();
+      await writeFile(path.join(artifactDir, 'reviewer.json'), '[]', 'utf8');
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'reviewer' },
+        ctx(),
+        opts(),
+      );
+      expect(report.findingCount).toBe(0);
+    });
+
+    // `/bs audit`'s four axes are the other array-shaped judge artifact: an
+    // `AuditEvidenceItem` (`file_path`, `severity`, `summary`,
+    // `failure_scenario`, `confidence`) that `smith audit record` validates
+    // on its own terms, never `finding-evidence.schema.json` — it has no
+    // `finding_category` and a `confidence` that schema's
+    // `additionalProperties: false` does not allow. Three axes report as
+    // `auditor`; the security axis reports as `security-reviewer`, the same
+    // role an ordinary per-task security review uses for real
+    // finding-evidence. Both roles skip the new check rather than reject a
+    // well-formed audit artifact outright — mintFindings still validates
+    // fully whenever this evidence is actually minted.
+    for (const auditRole of ['auditor', 'security-reviewer']) {
+      it(`does not apply finding-evidence shape checking to a "${auditRole}" artifact — that role also carries an audit's differently-shaped evidence`, async () => {
+        await dispatch({ role: auditRole, artifactPath: path.join(artifactDir, 'axis.json') });
+        await writeFile(
+          path.join(artifactDir, 'axis.json'),
+          JSON.stringify([
+            {
+              file_path: 'src/a.ts',
+              severity: 'S2-major',
+              summary: 'no input validation on the token endpoint',
+              failure_scenario: { inputs: 'a', expected: 'b', actual: 'c' },
+              confidence: 0.9,
+            },
+          ]),
+          'utf8',
+        );
+        const report = await recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: auditRole },
+          ctx(),
+          opts(),
+        );
+        expect(report.findingCount).toBe(1);
+      });
+    }
 
     it('refuses a declared artifact that is not on disk', async () => {
       await dispatch();
@@ -360,7 +443,7 @@ describe('judges.ts', () => {
 
       it('still takes a findings array from the grader, so the round-1 workaround keeps working', async () => {
         await dispatchGrader();
-        await writeFile(graderPath(), JSON.stringify([{ filePath: 'src/a.ts' }]), 'utf8');
+        await writeFile(graderPath(), JSON.stringify([validEvidence()]), 'utf8');
         const report = await recordJudgeReport(
           { taskId: 'epic-1/task-1', role: 'grader' },
           ctx(),

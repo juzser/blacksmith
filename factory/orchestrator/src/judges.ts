@@ -9,7 +9,9 @@ import {
   readLineageEvents,
   type StoredEvent,
 } from './events.js';
+import { type CompiledSchemaSet, compileSchemas, validateEachShape } from './schemas.js';
 import { isQualifiedTaskId, taskIdsMatch } from './taskId.js';
+import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 
 export class JudgeError extends SmithError {}
 
@@ -400,6 +402,33 @@ function graderFindingCount(parsed: unknown): number | undefined {
   ).length;
 }
 
+let cachedTaxonomyForSchemas: Taxonomy | undefined;
+let cachedSchemas: CompiledSchemaSet | undefined;
+
+/**
+ * Schemas only — no taxonomy is read on this path, unlike the `{taxonomy,
+ * schemas}` pair `events.ts`/`findings.ts` each resolve for themselves.
+ * `compileSchemas` still takes a taxonomy argument (it needs one to compile
+ * at all), so one is loaded and cached to satisfy that, but nothing here ever
+ * reads it back out.
+ */
+function resolveSchemas(opts: EventOpts): CompiledSchemaSet {
+  if (opts.schemas) return opts.schemas;
+  if (cachedSchemas === undefined) {
+    if (cachedTaxonomyForSchemas === undefined) cachedTaxonomyForSchemas = loadTaxonomy();
+    cachedSchemas = compileSchemas(cachedTaxonomyForSchemas);
+  }
+  return cachedSchemas;
+}
+
+function describeShapeFailures(
+  failures: readonly { index: number; errors: readonly { message: string }[] }[],
+): string {
+  return failures
+    .map((f) => `index ${f.index} (${f.errors.map((e) => e.message).join('; ')})`)
+    .join(', ');
+}
+
 /**
  * Read a judge's artifact and answer how many findings it holds.
  *
@@ -415,8 +444,20 @@ function graderFindingCount(parsed: unknown): number | undefined {
  * the grader result document is accepted beside the list, and the count is
  * its non-pass criteria. No other role gets that reading — a reviewer that
  * wrote a verdict wrote the wrong shape.
+ *
+ * A findings-evidence array is schema-validated element-wise before it is
+ * even counted (issue #233): a malformed array used to close the turn on a
+ * finding_count that `mintFindings` would later crash trying to mint from
+ * the same file, since `findings raise --evidence`/`gate run --evidence`
+ * read the identical artifact. Reusing `finding-evidence.schema.json` here
+ * keeps the two intake paths agreeing on what "malformed" means. An empty
+ * array has nothing to validate, so `[]` still passes.
  */
-export function readJudgeArtifact(artifactPath: string, role?: string): number {
+export function readJudgeArtifact(
+  artifactPath: string,
+  role?: string,
+  opts: EventOpts = {},
+): number {
   let raw: string;
   try {
     raw = readFileSync(artifactPath, 'utf8');
@@ -439,7 +480,30 @@ export function readJudgeArtifact(artifactPath: string, role?: string): number {
     );
   }
 
-  if (Array.isArray(parsed)) return parsed.length;
+  if (Array.isArray(parsed)) {
+    // `auditor` and `security-reviewer` can also close a turn with an
+    // AuditEvidenceItem[] artifact (`{file_path, severity, summary,
+    // failure_scenario, confidence}`) — one of `/bs audit`'s four axes,
+    // never a per-task finding-evidence list. That shape is validated on its
+    // own terms by `smith audit record`, not this schema: it lacks
+    // `finding_category` and carries `confidence`, which
+    // finding-evidence.schema.json's `additionalProperties: false` rejects.
+    // Skipping the check here for these two roles does not weaken issue
+    // #233's guarantee — anything that reaches `mintFindings` is still
+    // validated in full before it is minted, regardless of role.
+    const isAuditRole = role === 'auditor' || role === 'security-reviewer';
+    if (!isAuditRole) {
+      const failures = validateEachShape(resolveSchemas(opts), 'finding-evidence', parsed);
+      if (failures.length > 0) {
+        throw new JudgeError(
+          'judges.artifact-invalid-evidence',
+          `Judge artifact "${artifactPath}" holds ${failures.length} item(s) that do not match finding-evidence.schema.json at ${describeShapeFailures(failures)}. Expected {file_path, finding_category, severity, summary, failure_scenario: {inputs, expected, actual}} (criterion_ref optional).`,
+          { artifact_path: artifactPath, failures },
+        );
+      }
+    }
+    return parsed.length;
+  }
 
   const graderCount = role === GRADER_ROLE ? graderFindingCount(parsed) : undefined;
   if (graderCount !== undefined) return graderCount;
@@ -494,7 +558,8 @@ export async function recordJudgeReport(
   }
 
   const artifactPath = input.noFindings ? null : (input.artifactPath ?? turn.declaredArtifact);
-  const findingCount = artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role);
+  const findingCount =
+    artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role, opts);
 
   await emit(
     JUDGE_REPORT_EVENT_TYPE,

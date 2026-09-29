@@ -4,7 +4,13 @@ import { claimCoversPath } from './claims.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import { describeType } from './plan.js';
-import { type CompiledSchemaSet, compileSchemas, validateRecord } from './schemas.js';
+import {
+  type CompiledSchemaSet,
+  compileSchemas,
+  type RecordValidationFailure,
+  validateEachShape,
+  validateRecord,
+} from './schemas.js';
 import { readAddedTasks } from './taskEvents.js';
 import { bareTaskId, epicOfTaskId, taskIdsMatch } from './taskId.js';
 import { loadTaxonomy, type Taxonomy, validateTag } from './taxonomy.js';
@@ -493,6 +499,28 @@ function mintFindingId(taskId: string, fingerprint: string): string {
 }
 
 /**
+ * A shallow clone with the orchestrator-owned fields removed, so the
+ * schema-shape check below runs against exactly the judge's half of the
+ * contract. `finding-evidence.schema.json` declares `additionalProperties:
+ * false` and never lists these six fields — they are the orchestrator's to
+ * mint, never the judge's to write (interview N-2) — so validating a raw
+ * evidence item against it, un-stripped, would reject every legitimate item
+ * that happens to be re-minted from a stored finding and would make the
+ * dedicated `findings.evidence-carries-identity` error below unreachable.
+ */
+function stripOwnedFields(item: unknown): Record<string, unknown> {
+  const clone = { ...(item as Record<string, unknown>) };
+  for (const field of ORCHESTRATOR_OWNED_FINDING_FIELDS) delete clone[field];
+  return clone;
+}
+
+function describeShapeFailures(failures: readonly RecordValidationFailure[]): string {
+  return failures
+    .map((f) => `index ${f.index} (${f.errors.map((e) => e.message).join('; ')})`)
+    .join(', ');
+}
+
+/**
  * Guess which taxonomy value a judge meant when it wrote something close but
  * not equal to one. Derived from the vocabulary itself rather than a synonym
  * table, so it cannot drift from taxonomy.yml the way a hand-written map
@@ -535,7 +563,30 @@ export function mintFindings(
   ctx: MintContext,
   opts: EventOpts = {},
 ): RaiseFindingInput[] {
-  const { taxonomy } = resolveTaxonomyAndSchemas(opts);
+  const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
+
+  // Issue #233: a wrong field name (`category`/`title`/`evidence` for
+  // `finding_category`/`summary`/none-of-those) or a wrong-shaped field
+  // (`failure_scenario` given as a string instead of {inputs, expected,
+  // actual}) used to reach `suggestCanonical`/`computeFingerprint` below and
+  // crash with a raw TypeError instead of a FindingError. Checked here,
+  // against the schema `finding-evidence.schema.json` already documents as
+  // the judge's half of the contract, every item's shape is settled before
+  // any item's fingerprint is computed or any finding is minted — so a batch
+  // with one bad item mints nothing, not "the good ones, then a crash."
+  const shapeFailures = validateEachShape(
+    schemas,
+    'finding-evidence',
+    evidence.map(stripOwnedFields),
+  );
+  if (shapeFailures.length > 0) {
+    throw new FindingError(
+      'findings.invalid-evidence',
+      `Finding evidence does not match finding-evidence.schema.json at ${describeShapeFailures(shapeFailures)}. Expected {file_path, finding_category, severity, summary, failure_scenario: {inputs, expected, actual}} (criterion_ref optional).`,
+      { failures: shapeFailures },
+    );
+  }
+
   const severities = taxonomy.dimensions.severity ?? [];
   const categories = taxonomy.dimensions.finding_category ?? [];
 

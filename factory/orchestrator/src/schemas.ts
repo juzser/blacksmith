@@ -209,7 +209,47 @@ function assertEveryAnnotationReachable(
 }
 
 function ajvErrorToIssue(err: ErrorObject): ValidationIssue {
-  return { path: err.instancePath || '/', message: `${err.instancePath} ${err.message}`.trim() };
+  // additionalProperties names the offending key only in `params`, never in
+  // `instancePath`/`message` — without it, "must NOT have additional
+  // properties" is true of every extra key on the record at once, and an
+  // evidence file with three wrong field names (issue #233) reads as one
+  // undifferentiated complaint instead of three actionable ones.
+  const extra =
+    err.keyword === 'additionalProperties'
+      ? (err.params as { additionalProperty?: string }).additionalProperty
+      : undefined;
+  const base = `${err.instancePath} ${err.message}`.trim();
+  return { path: err.instancePath || '/', message: extra ? `${base}: ${extra}` : base };
+}
+
+/**
+ * The ajv-structural half of `validateRecord`, on its own: does this record
+ * have the shape the schema declares, with no taxonomy lookup at all.
+ *
+ * Split out for `validateEachShape` below, which checks a whole array of
+ * records (a judge's evidence file) against one schema before anything reads
+ * a taxonomy value out of any of them — a record that got the shape wrong
+ * (issue #233's wrong field names, a `failure_scenario` given as a string)
+ * must never reach code that assumes the shape is already right.
+ */
+export function validateSchemaShape(
+  schemas: CompiledSchemaSet,
+  schemaName: string,
+  record: unknown,
+): ValidationResult {
+  const compiled = schemas.get(schemaName);
+  if (!compiled) {
+    throw new SchemaError('schema.unknown-name', `Unknown schema "${schemaName}".`, {
+      schemaName,
+      known: [...schemas.keys()],
+    });
+  }
+
+  const schemaValid = compiled.validate(record);
+  if (!schemaValid) {
+    return { valid: false, errors: (compiled.validate.errors ?? []).map(ajvErrorToIssue) };
+  }
+  return { valid: true };
 }
 
 /**
@@ -231,14 +271,8 @@ export function validateRecord(
     });
   }
 
-  const errors: ValidationIssue[] = [];
-
-  const schemaValid = compiled.validate(record);
-  if (!schemaValid) {
-    for (const err of compiled.validate.errors ?? []) {
-      errors.push(ajvErrorToIssue(err));
-    }
-  }
+  const shape = validateSchemaShape(schemas, schemaName, record);
+  const errors: ValidationIssue[] = shape.valid ? [] : [...shape.errors];
 
   for (const pointer of compiled.taxonomyPointers) {
     for (const hit of resolveAtPath(record, pointer.segments)) {
@@ -254,4 +288,34 @@ export function validateRecord(
 
   if (errors.length > 0) return { valid: false, errors };
   return { valid: true };
+}
+
+/** One array element's shape failures, keeping the index a batch check has to report against. */
+export interface RecordValidationFailure {
+  readonly index: number;
+  readonly errors: ValidationIssue[];
+}
+
+/**
+ * Validate every element of an array against one named schema, structurally
+ * (`validateSchemaShape`, no taxonomy lookup), collecting every index that
+ * fails rather than stopping at the first.
+ *
+ * Shared by `findings.ts` (evidence a judge hands `findings raise --evidence`
+ * or `gate run --evidence`) and `judges.ts` (the same evidence shape arriving
+ * as a judge's reported artifact) — one schema, one failure-collection rule,
+ * so the two intake paths cannot drift on what "malformed" means (issue
+ * #233).
+ */
+export function validateEachShape(
+  schemas: CompiledSchemaSet,
+  schemaName: string,
+  records: readonly unknown[],
+): RecordValidationFailure[] {
+  const failures: RecordValidationFailure[] = [];
+  records.forEach((record, index) => {
+    const result = validateSchemaShape(schemas, schemaName, record);
+    if (!result.valid) failures.push({ index, errors: result.errors });
+  });
+  return failures;
 }

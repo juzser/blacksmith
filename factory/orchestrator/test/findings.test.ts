@@ -437,6 +437,103 @@ describe('mintFindings', () => {
       ).toThrow(/index 1/);
     });
   });
+
+  // Issue #233: a judge's evidence file can be malformed in ways severity/
+  // finding_category checks above never see, because those checks run on a
+  // field that exists — a wrong field name or a wrong-shaped field crashes
+  // earlier, inside fingerprinting or the near-miss suggester, with a raw
+  // TypeError instead of a FindingError. Schema-shape validation has to run
+  // before any of that per-item logic, over the whole batch at once, so a
+  // batch with one bad item mints nothing rather than minting the good items
+  // and crashing on the bad one.
+  describe('evidence shape is schema-validated before anything is minted (#233)', () => {
+    it('rejects wrong field names and a failure_scenario given as a string, instead of crashing', () => {
+      // The exact issue #233 case 1: `category`/`title`/`evidence` instead of
+      // `finding_category`/`summary`, and `failure_scenario` as a string.
+      const wrongShape = {
+        category: 'correctness',
+        title: 'bad',
+        evidence: 'blah',
+        severity: 'S2-major',
+        failure_scenario: 'a string, not {inputs, expected, actual}',
+      };
+      let err: FindingError | undefined;
+      try {
+        mintFindings([wrongShape as unknown as FindingEvidence], {
+          taskId: 'epic-1/task-1',
+          foundBy: 'reviewer',
+        });
+      } catch (e) {
+        err = e as FindingError;
+      }
+      expect(err).toBeInstanceOf(FindingError);
+      expect(err?.code).toBe('findings.invalid-evidence');
+      expect(String(err?.message)).toContain('index 0');
+    });
+
+    it('rejects evidence missing file_path, instead of crashing inside fingerprinting', () => {
+      // The exact issue #233 case 2.
+      const missingFilePath = {
+        finding_category: 'correctness',
+        severity: 'S2-major',
+        summary: 'x',
+        failure_scenario: { inputs: 'a', expected: 'b', actual: 'c' },
+      };
+      let err: FindingError | undefined;
+      try {
+        mintFindings([missingFilePath as unknown as FindingEvidence], {
+          taskId: 'epic-1/task-1',
+          foundBy: 'reviewer',
+        });
+      } catch (e) {
+        err = e as FindingError;
+      }
+      expect(err).toBeInstanceOf(FindingError);
+      expect(err?.code).toBe('findings.invalid-evidence');
+      expect(String(err?.message)).toContain('file_path');
+    });
+
+    it('mints nothing when one item in a batch is malformed, even though another is fine', () => {
+      const malformed = { ...evidence, file_path: undefined } as unknown as FindingEvidence;
+      expect(() =>
+        mintFindings([evidence, malformed], { taskId: 'epic-1/task-1', foundBy: 'reviewer' }),
+      ).toThrow(FindingError);
+    });
+
+    it('names every malformed item in the batch, not only the first', () => {
+      const badA = { ...evidence, file_path: undefined } as unknown as FindingEvidence;
+      const badB = {
+        ...evidence,
+        failure_scenario: 'not an object',
+      } as unknown as FindingEvidence;
+      let err: FindingError | undefined;
+      try {
+        mintFindings([badA, badB], { taskId: 'epic-1/task-1', foundBy: 'reviewer' });
+      } catch (e) {
+        err = e as FindingError;
+      }
+      expect(err).toBeInstanceOf(FindingError);
+      expect(String(err?.message)).toContain('index 0');
+      expect(String(err?.message)).toContain('index 1');
+    });
+
+    it('still rejects evidence carrying its own identity by its own specific code, not the generic shape one', () => {
+      // Regression guard: stripping the orchestrator-owned fields before the
+      // new bulk shape check must not swallow findings.evidence-carries-identity.
+      const withIdentity = { ...evidence, finding_id: 'reviewer-made-this-up' };
+      let err: FindingError | undefined;
+      try {
+        mintFindings([withIdentity as FindingEvidence], {
+          taskId: 'epic-1/task-1',
+          foundBy: 'reviewer',
+        });
+      } catch (e) {
+        err = e as FindingError;
+      }
+      expect(err).toBeInstanceOf(FindingError);
+      expect(err?.code).toBe('findings.evidence-carries-identity');
+    });
+  });
 });
 
 describe('findings.ts', () => {

@@ -8632,7 +8632,18 @@ describe('cli.ts (built binary)', () => {
     it('report closes the turn and counts findings; outstanding then exits 0 on an empty list', async () => {
       const { sessionId, eventsDir, artifact } = await judgeSession();
       dispatchJudge(sessionId, eventsDir, 'reviewer', artifact);
-      await writeFile(artifact, JSON.stringify([{ file_path: 'src/a.ts' }]));
+      await writeFile(
+        artifact,
+        JSON.stringify([
+          {
+            file_path: 'src/a.ts',
+            finding_category: 'correctness',
+            severity: 'S2-major',
+            summary: 'off-by-one in loop bound',
+            failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
+          },
+        ]),
+      );
 
       const reported = judgeCli('report', sessionId, eventsDir, [
         '--task',

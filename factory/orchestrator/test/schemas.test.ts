@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { compileSchemas, SchemaError, validateRecord } from '../src/schemas.js';
+import {
+  compileSchemas,
+  SchemaError,
+  validateEachShape,
+  validateRecord,
+  validateSchemaShape,
+} from '../src/schemas.js';
 import { loadTaxonomy } from '../src/taxonomy.js';
 
 describe('compileSchemas + validateRecord', () => {
@@ -476,5 +482,61 @@ describe('result.token_usage accepts an honest "not measured" alongside a real c
     expect(validateRecord(schemas, taxonomy, 'result', result({ measured: true })).valid).toBe(
       false,
     );
+  });
+});
+
+// Issue #233: mintFindings and readJudgeArtifact both need to check a whole
+// array of evidence, structurally, before either reads a field out of any
+// element — validateSchemaShape is the ajv-only half validateRecord already
+// does internally, and validateEachShape is the batch wrapper around it.
+describe('validateSchemaShape + validateEachShape', () => {
+  const taxonomy = loadTaxonomy();
+  const schemas = compileSchemas(taxonomy);
+
+  const evidence = (overrides: Record<string, unknown> = {}) => ({
+    file_path: 'src/foo.ts',
+    finding_category: 'correctness',
+    severity: 'S2-major',
+    summary: 'off-by-one',
+    failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
+    ...overrides,
+  });
+
+  it('accepts a schema-valid finding-evidence record with no taxonomy lookup', () => {
+    // A taxonomy-invalid but schema-shaped value passes: validateSchemaShape
+    // never resolves x-taxonomy, unlike validateRecord.
+    const result = validateSchemaShape(
+      schemas,
+      'finding-evidence',
+      evidence({ severity: 'not-a-real-severity' }),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects a record with the wrong field names', () => {
+    const result = validateSchemaShape(schemas, 'finding-evidence', {
+      category: 'correctness',
+      title: 'bad',
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('throws SchemaError for an unknown schema name, same as validateRecord', () => {
+    expect(() => validateSchemaShape(schemas, 'not-a-schema', {})).toThrow(SchemaError);
+  });
+
+  it('validateEachShape returns no failures for an all-valid array, including the empty array', () => {
+    expect(validateEachShape(schemas, 'finding-evidence', [])).toEqual([]);
+    expect(validateEachShape(schemas, 'finding-evidence', [evidence(), evidence()])).toEqual([]);
+  });
+
+  it('validateEachShape collects one failure per bad index, not only the first', () => {
+    const failures = validateEachShape(schemas, 'finding-evidence', [
+      evidence(),
+      { category: 'correctness' },
+      evidence({ file_path: undefined }),
+    ]);
+    expect(failures.map((f) => f.index)).toEqual([1, 2]);
+    expect(failures.every((f) => f.errors.length > 0)).toBe(true);
   });
 });
