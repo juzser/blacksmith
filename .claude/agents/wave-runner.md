@@ -23,6 +23,11 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
   delegation check <epic-session>` reports a wave-runner that dispatched
   without opening a session, and reports one that has not opened it yet as
   unverifiable rather than as a pass.
+- **Every event you write in that session carries `--actor wave-runner`**
+  (or `"actor":"wave-runner"` in `event append` JSON). `smith delegation
+  check` compares each dispatch's actor against your session's owner role
+  and flags anything else as a violation — including `system`, the default
+  most write verbs fall back to when `--actor` is omitted.
 - **`--continues` is what makes your log the epic's log.** Every deciding read
   at the epic tier folds the lineage, so a dispatch you record is visible from
   the epic session that admitted you and is not visible from a sibling wave's.

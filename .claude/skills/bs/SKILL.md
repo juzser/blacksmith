@@ -85,6 +85,18 @@ belong to sibling tasks, and a `--causal-parent` you guessed will name a
 real event that is not the parent, which validates and quietly mis-shapes
 the lineage.
 
+Parse that output by key, never by a regex over the raw text: several
+verbs' payloads echo a parent id right beside the new one (`record`'s own
+`causal_parent`), so a pattern grepped for the id's shape can just as
+easily match the parent's as yours. Most commands name the field
+`event_id`; `smith epic close`, `smith integration check` and `smith epic
+goal-check` name it `eventId` instead — check a new command's actual
+output before assuming either, and read it with `jq -r '.event_id //
+.eventId'` rather than a hand-rolled pattern. Capture the output to a file
+or a variable before you parse it, too: piping a write verb straight into
+its consumer means a broken pipe on the reading end can kill the process
+after the append already committed, and a naive retry then double-appends.
+
 ## Playbooks
 
 Each subcommand is a file of its own beside this one, read when that verb
