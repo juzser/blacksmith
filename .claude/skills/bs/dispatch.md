@@ -73,7 +73,7 @@ fix the template or run `smith lessons compile`.
 Before you dispatch a role that touches files, run
 
 ```
-smith findings for-dispatch --plan factory/specs/active/<epic>/plan-vN.json --task <task-id>
+smith findings for-dispatch [--plan factory/specs/active/<epic>/plan-vN.json --task <task-id>]
 ```
 
 and paste its `text` verbatim into the prompt, next to the lessons block. It
@@ -81,8 +81,11 @@ intersects the session's still-open findings (`raised`, `confirmed`) against
 that task's claims and hands back the overlap as **context, not scope**
 (D-26). The task's
 own findings are left out: those reach it as scope through its fix round.
-Unlike `lessons for-dispatch`, `--plan` is **required** — the claims come from
-the plan, and an empty answer that was never computed is worse than an error.
+`--plan` and `--task` come as a **pair** — the claims come from the plan, and
+either one alone is refused, because an empty answer that was never computed
+is worse than an error. Omit both only for an epic-level role (below): with
+no task there are no claims to join, and the block lists every open finding
+in the epic, path-less ones included.
 The block is delimited by `<!-- BEGIN OPEN FINDINGS -->` /
 `<!-- END OPEN FINDINGS -->` with the same one-line escaping, renders even
 when nothing matches, and names any open finding it could not check at all
@@ -264,8 +267,9 @@ So: the closing spec-reviewer, the goal-check spec-reviewer, the planner
 rendering a verdict and the scribe are dispatched against
 `<epic>/integration`; a plan critic against `<epic>/plan-v<n>`. Same for
 `smith judge dispatch --task` when the judge is epic-level. The lessons and
-findings splices above still take no `--task` for these roles — the ref is
-for the log, not for claim filtering.
+findings splices above still take no `--plan`/`--task` for these roles — the
+ref is for the log, not for claim filtering; the findings block comes back
+epic-wide.
 
 ## Fingerprint the worktree around every judge (agent-interviews.md N-10, P9-5)
 
@@ -345,10 +349,17 @@ smith judge outstanding --task <task-id> --session ...
 `judges.non-judge-role` — accepted roles are reviewer, verifier, grader,
 spec-reviewer, security-reviewer, auditor, and uiux (the visual pass;
 wave.md:227-237 brackets it with `judge dispatch`/`judge report` the same as
-the other six). `judge report` reads the declared file and refuses it three
+the other six). `judge report` reads the declared file and refuses it four
 ways — `judges.artifact-missing` (re-poke the agent; recovery was six for
 six), `judges.artifact-unparseable` (it narrated instead of reporting),
-`judges.artifact-not-a-list` (it wrote some other shape). `judge outstanding`
+`judges.artifact-not-a-list` (it wrote some other shape), and
+`judges.artifact-stale` (the file was not written during this turn: its mtime
+is not later than the turn's `dispatch_decision`, or it was already on disk
+at dispatch and nothing has rewritten it since — an earlier round's report,
+or a placeholder; re-poke the judge, never `touch` the file). Declared paths
+are reused across rounds, so `judge dispatch` does not refuse an existing
+file; it records its mtime, and the report refuses that same mtime. The
+same check runs when `gate run --evidence` closes the turn. `judge outstanding`
 prints what is still owed and **exits 1 while anything is**, so it is the loop
 condition for a re-poke, not just a report. Passing the file to
 `gate run --evidence <path> --found-by <role>` reports for you, so the normal

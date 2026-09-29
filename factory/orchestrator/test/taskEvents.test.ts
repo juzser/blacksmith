@@ -13,8 +13,10 @@ import {
   emitTasksAdded,
   emitWaveAdmitted,
   emitWaveMerged,
+  planIngestGaps,
   readAddedTasks,
   type TaskEventContext,
+  unadmissibleTasks,
 } from '../src/taskEvents.js';
 
 function task(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -290,6 +292,96 @@ describe('taskEvents', () => {
       ]);
       expect(await typesFor('task-superseded')).toHaveLength(1);
       expect(written).toHaveLength(2);
+    });
+  });
+
+  // #250. `wave check --session` must refuse a plan version the lineage never
+  // ingested, and it asks through the same decision the ingest makes.
+  describe('planIngestGaps', () => {
+    it('names every event an ingest would still write, and writes none of them', async () => {
+      const plan = planWith(task(), task({ task_id: 'epic-1/task-2', task_status: 'superseded' }));
+      const gaps = await planIngestGaps(plan, { sessionId }, { stateDir });
+
+      expect(gaps).toEqual([
+        { taskId: 'epic-1/task-1', eventType: 'task-added' },
+        { taskId: 'epic-1/task-2', eventType: 'task-added' },
+        { taskId: 'epic-1/task-2', eventType: 'task-superseded' },
+      ]);
+      expect(await typesFor('task-added')).toEqual([]);
+    });
+
+    it('is empty once the plan has been ingested', async () => {
+      const plan = planWith(task(), task({ task_id: 'epic-1/task-2' }));
+      await emitTasksAdded(plan, ctx, { stateDir });
+
+      expect(await planIngestGaps(plan, { sessionId }, { stateDir })).toEqual([]);
+    });
+
+    it('names the amended ids of a v2 cut whose v1 alone was ingested', async () => {
+      await emitTasksAdded(planWith(task(), task({ task_id: 'epic-1/task-2' })), ctx, {
+        stateDir,
+      });
+      const amended = planWith(
+        task({ task_status: 'superseded', plan_version: 1 }),
+        task({ plan_version: 2 }),
+        task({ task_id: 'epic-1/task-2', plan_version: 2 }),
+      );
+      amended.version = 2;
+
+      expect(await planIngestGaps(amended, { sessionId }, { stateDir })).toEqual([
+        { taskId: 'epic-1/task-1', eventType: 'task-added' },
+      ]);
+    });
+  });
+
+  describe('unadmissibleTasks', () => {
+    it('splits ids with no row from ids whose status is terminal', () => {
+      const statusOf = new Map([
+        ['epic-1/task-1', 'todo'],
+        ['epic-1/task-2', 'superseded'],
+        ['epic-1/task-3', 'completed'],
+        ['epic-1/task-4', 'in-progress'],
+      ]);
+      expect(
+        unadmissibleTasks(
+          ['epic-1/task-1', 'epic-1/task-2', 'epic-1/task-3', 'epic-1/task-4', 'epic-1/ghost'],
+          statusOf,
+        ),
+      ).toEqual({
+        missing: ['epic-1/ghost'],
+        terminal: [
+          { taskId: 'epic-1/task-2', taskStatus: 'superseded' },
+          { taskId: 'epic-1/task-3', taskStatus: 'completed' },
+        ],
+      });
+    });
+
+    it('admits every live id', () => {
+      const statusOf = new Map([
+        ['epic-1/task-1', 'todo'],
+        ['epic-1/followup-4b70d608', 'ready'],
+      ]);
+      expect(unadmissibleTasks(['epic-1/task-1', 'epic-1/followup-4b70d608'], statusOf)).toEqual({
+        missing: [],
+        terminal: [],
+      });
+    });
+
+    // HELD_OPEN_BY_AN_OPERATOR: work can still land on a failed or escalated
+    // task, and the escalation ladder re-admits it — refusing it here would
+    // strand the retry the ladder exists to run.
+    it('admits a failed and an escalated task, which an operator still holds', () => {
+      const statusOf = new Map([
+        ['epic-1/task-1', 'failed'],
+        ['epic-1/task-2', 'escalated'],
+        ['epic-1/task-3', 'waived'],
+      ]);
+      expect(
+        unadmissibleTasks(['epic-1/task-1', 'epic-1/task-2', 'epic-1/task-3'], statusOf),
+      ).toEqual({
+        missing: [],
+        terminal: [{ taskId: 'epic-1/task-3', taskStatus: 'waived' }],
+      });
     });
   });
 
