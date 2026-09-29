@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
+import { AUDIT_AXES } from './audit.js';
 import { sessionOwnerRole } from './delegation.js';
 import { SmithError } from './errors.js';
 import {
@@ -9,7 +10,9 @@ import {
   readLineageEvents,
   type StoredEvent,
 } from './events.js';
+import { type CompiledSchemaSet, compileSchemas, validateEachShape } from './schemas.js';
 import { isQualifiedTaskId, taskIdsMatch } from './taskId.js';
+import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 
 export class JudgeError extends SmithError {}
 
@@ -400,6 +403,105 @@ function graderFindingCount(parsed: unknown): number | undefined {
   ).length;
 }
 
+let cachedTaxonomyForSchemas: Taxonomy | undefined;
+let cachedSchemas: CompiledSchemaSet | undefined;
+
+/**
+ * Schemas only — no taxonomy is read on this path, unlike the `{taxonomy,
+ * schemas}` pair `events.ts`/`findings.ts` each resolve for themselves.
+ * `compileSchemas` still takes a taxonomy argument (it needs one to compile
+ * at all), so one is loaded and cached to satisfy that, but nothing here ever
+ * reads it back out.
+ */
+function resolveSchemas(opts: EventOpts): CompiledSchemaSet {
+  if (opts.schemas) return opts.schemas;
+  if (cachedSchemas === undefined) {
+    if (cachedTaxonomyForSchemas === undefined) cachedTaxonomyForSchemas = loadTaxonomy();
+    cachedSchemas = compileSchemas(cachedTaxonomyForSchemas);
+  }
+  return cachedSchemas;
+}
+
+function describeShapeFailures(
+  failures: readonly { index: number; errors: readonly { message: string }[] }[],
+): string {
+  return failures
+    .map((f) => `index ${f.index} (${f.errors.map((e) => e.message).join('; ')})`)
+    .join(', ');
+}
+
+/**
+ * `mintAuditId` (audit.ts) mints `<YYYYMMDD>-<8 hex>` — a day stamp and eight
+ * hex characters joined by "-", never a "/". Audit.md's "Declare the artifact
+ * before the call" names the task id an audit axis turn dispatches and
+ * reports against as `<audit-id>.<axis>`. An ordinary task id is always
+ * "<epic>/<bare>" (taskId.ts) — qualified with a "/" by construction — so the
+ * two shapes cannot collide: this checks the exact mint format, not just the
+ * absence of "/", so a coincidentally dotted bare task id still reads as
+ * ordinary rather than as an axis.
+ */
+const AUDIT_AXIS_TASK_ID = new RegExp(`^\\d{8}-[0-9a-f]{8}\\.(${AUDIT_AXES.join('|')})$`);
+
+function isAuditAxisTaskId(taskId: string): boolean {
+  return AUDIT_AXIS_TASK_ID.test(taskId);
+}
+
+/**
+ * Whether `role`'s array-shaped artifact, on this `taskId`, is finding-
+ * evidence and should be schema-checked. An allow-list, not a blanket check
+ * minus exceptions — each entry below was confirmed against the role's own
+ * output contract (`.claude/agents/*.md`) and, for `judge dispatch`/`judge
+ * report` specifically, `.claude/skills/bs/wave.md`'s list of the judges that
+ * bracket ("uiux visual pass, grader, reviewer, verifier, security-reviewer").
+ *
+ * - `reviewer` (reviewer.md): its whole array is exactly the five
+ *   finding-evidence keys.
+ * - `security-reviewer` (security-reviewer.md): its per-task array is the
+ *   same five keys as `reviewer`'s. Its OTHER artifact — the security axis of
+ *   `/bs audit` — carries a sixth key, `confidence`, and drops
+ *   `finding_category`, which `additionalProperties: false` rejects; that
+ *   shape is validated on its own terms by `smith audit record`, not this
+ *   schema. The two are told apart by `taskId`, not by role alone — an
+ *   ordinary per-task security review has no other way to distinguish
+ *   itself, and leaving the role exempt everywhere (as before) left real
+ *   per-task security findings unvalidated.
+ * - `GRADER_ROLE`: its declared artifact is a verdict OBJECT, handled by
+ *   `graderFindingCount` below and never reaching this check. But `gate run
+ *   --evidence <file> --found-by grader` (FD-1) can also close a grader turn
+ *   with an ordinary finding-evidence ARRAY, distinct from the `--grader
+ *   <file>` verdict-document path, so the role belongs here for that case.
+ *
+ * Every other role keeps the old count-only behaviour:
+ * - `verifier` (verifier.md) reports `{finding_id, verdict, rationale,
+ *   failure_scenario}` — echoing a finding back rather than describing a
+ *   fresh one — a different, and never finding-evidence, shape by design.
+ * - `uiux` (uiux.md): its artifact is always the OBJECT `{run_status,
+ *   structured_output, artifacts}`, never an array, so this check never
+ *   applies to it regardless of allow-listing.
+ * - `auditor`: the other three audit axes, the same AuditEvidenceItem shape
+ *   as security-reviewer's audit path — but auditor never reviews a single
+ *   task (auditor.md: "never per-task, never for a diff"), so there is no
+ *   taskId to gate on; it stays exempt unconditionally.
+ * - `spec-reviewer` (spec-reviewer.md): not on the list. Neither of its two
+ *   array artifacts — the pre-code/close spec review (finding-evidence
+ *   shaped) and the spec-vs-goal coverage check (`{clause, verdict,
+ *   taskIds?, reason?}`, not finding-evidence shaped) — currently reaches
+ *   this function at all: `smith epic spec-review`/`smith epic goal-check`
+ *   read them directly (cli.ts), never through `judge report`, and
+ *   wave.md's judge-dispatch/report roster does not name spec-reviewer.
+ *   Allow-listing the role here would be inert today and, because its two
+ *   artifacts disagree on shape with no taskId to tell them apart the way
+ *   security-reviewer's two are told apart, a latent wrong-rejection the day
+ *   something does route the goal-coverage array through this same role
+ *   string.
+ * - anything this taxonomy does not yet name.
+ */
+function validatesFindingEvidence(role: string | undefined, taskId: string): boolean {
+  if (role === 'reviewer' || role === GRADER_ROLE) return true;
+  if (role === 'security-reviewer') return !isAuditAxisTaskId(taskId);
+  return false;
+}
+
 /**
  * Read a judge's artifact and answer how many findings it holds.
  *
@@ -415,8 +517,24 @@ function graderFindingCount(parsed: unknown): number | undefined {
  * the grader result document is accepted beside the list, and the count is
  * its non-pass criteria. No other role gets that reading — a reviewer that
  * wrote a verdict wrote the wrong shape.
+ *
+ * A findings-evidence array is schema-validated element-wise before it is
+ * even counted (issue #233), but only for the roles `validatesFindingEvidence`
+ * names: a malformed array used to close the turn on a finding_count that
+ * `mintFindings` would later crash trying to mint from the same file, since
+ * `findings raise --evidence`/`gate run --evidence` read the identical
+ * artifact. Reusing `finding-evidence.schema.json` here keeps the two intake
+ * paths agreeing on what "malformed" means, for the roles that actually write
+ * that shape — a role whose real artifact is something else (verifier, an
+ * audit axis) is not "malformed" for failing to look like a finding. An empty
+ * array has nothing to validate, so `[]` still passes.
  */
-export function readJudgeArtifact(artifactPath: string, role?: string): number {
+export function readJudgeArtifact(
+  artifactPath: string,
+  role: string | undefined,
+  taskId: string,
+  opts: EventOpts = {},
+): number {
   let raw: string;
   try {
     raw = readFileSync(artifactPath, 'utf8');
@@ -439,7 +557,24 @@ export function readJudgeArtifact(artifactPath: string, role?: string): number {
     );
   }
 
-  if (Array.isArray(parsed)) return parsed.length;
+  if (Array.isArray(parsed)) {
+    // Only the roles `validatesFindingEvidence` names actually write a
+    // finding-evidence array; skipping the check for every other role does
+    // not weaken issue #233's guarantee — anything that reaches
+    // `mintFindings` is still validated in full before it is minted,
+    // regardless of role.
+    if (validatesFindingEvidence(role, taskId)) {
+      const failures = validateEachShape(resolveSchemas(opts), 'finding-evidence', parsed);
+      if (failures.length > 0) {
+        throw new JudgeError(
+          'judges.artifact-invalid-evidence',
+          `Judge artifact "${artifactPath}" holds ${failures.length} item(s) that do not match finding-evidence.schema.json at ${describeShapeFailures(failures)}. Expected {file_path, finding_category, severity, summary, failure_scenario: {inputs, expected, actual}} (criterion_ref optional).`,
+          { artifact_path: artifactPath, failures },
+        );
+      }
+    }
+    return parsed.length;
+  }
 
   const graderCount = role === GRADER_ROLE ? graderFindingCount(parsed) : undefined;
   if (graderCount !== undefined) return graderCount;
@@ -494,7 +629,8 @@ export async function recordJudgeReport(
   }
 
   const artifactPath = input.noFindings ? null : (input.artifactPath ?? turn.declaredArtifact);
-  const findingCount = artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role);
+  const findingCount =
+    artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role, input.taskId, opts);
 
   await emit(
     JUDGE_REPORT_EVENT_TYPE,
