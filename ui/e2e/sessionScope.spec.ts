@@ -16,10 +16,25 @@ const WIDTH = 'select[aria-label="Session scope width"]';
 /** The fixture's own run, read off the picker rather than imported, so the
  *  spec keeps working when the fixture grows a third session. */
 async function firstSession(page: import('@playwright/test').Page): Promise<string> {
-  const values = await page
-    .locator(`${PICKER} option`)
-    .evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value).filter((v) => v !== ''));
-  expect(values.length, 'the fixture projects at least one session').toBeGreaterThan(0);
+  // The picker's options arrive via App.vue's loadSessionOptions -> an async
+  // fetchSessions() fired from onMounted -- so the instant goto() resolves,
+  // the <select> can still hold only its empty "all sessions" option. A
+  // one-shot read races that fetch; poll (a retrying assertion) until a real
+  // session has landed before reading.
+  let values: string[] = [];
+  await expect
+    .poll(
+      async () => {
+        values = await page
+          .locator(`${PICKER} option`)
+          .evaluateAll((els) =>
+            els.map((el) => (el as HTMLOptionElement).value).filter((v) => v !== ''),
+          );
+        return values.length;
+      },
+      { message: 'the fixture projects at least one session' },
+    )
+    .toBeGreaterThan(0);
   return values[0] as string;
 }
 
