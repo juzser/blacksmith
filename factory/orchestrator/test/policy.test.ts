@@ -471,6 +471,15 @@ describe('evaluateCommand — rule 2: force-push', () => {
     ['git push --force-with-lease=feat:abc origin feat'],
     ['git push -fu origin feat'],
     ['git push -uf origin feat'],
+    // Constructs the boundary scan does not model — parameter expansion,
+    // heredoc bodies and comments — hide separators or flip quote parity, so
+    // their presence falls back to reading the whole command.
+    ['git push ${X:-;} -f origin feat'],
+    ['git push ${X:-&&} --force origin feat'],
+    ['git push ${X//;/} -f origin feat'],
+    ["cat <<EOF\nit's\nEOF\ngit push origin 'x;' -f feat #'"],
+    ["true # '\ngit push origin 'x;' -f feat # '"],
+    ['git -c "a.b=;" push -f origin feat'],
   ])('denies %s — the flag is still on the push command line', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(ruleIds(d)).toContain('force-push');

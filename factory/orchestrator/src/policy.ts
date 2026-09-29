@@ -967,7 +967,9 @@ const FORCE_PUSH_RE = /(--force(-with-lease)?\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$)
 const GIT_PUSH_ANYWHERE_RE = new RegExp(`\\bgit\\b[\\s\\S]*${bareWord('push')}`, 'i');
 
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
-  if (!isGitSubcommand(command, 'push')) return null;
+  // No `isGitSubcommand` gate: its `[^;&|]*` stops at a quoted separator, so
+  // `git -c "a.b=;" push -f` never reached the flag test. Each segment below
+  // asks the question itself, over the whole segment.
   // Read per command, not per chain: a `-f` or `--force` that belongs to
   // another command in the chain (`rm -f`, `git worktree remove --force`)
   // says nothing about the push. Split on true command boundaries only —
@@ -988,13 +990,16 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
  * backticks and `$( )` / `( )`. A redirection (`>`, `2>&1`, `>|`), a lone `&`
  * and everything nested stay inside the command they belong to.
  *
- * Anything it cannot read with confidence — an unbalanced quote or paren, or
- * ANSI-C `$'…'` quoting, whose escapes it does not model — returns the whole
- * command as one segment. That is the pre-split reading, so a parse it gets
- * wrong can only over-refuse, never let a force flag through.
+ * Anything it cannot read with confidence returns the whole command as one
+ * segment: an unbalanced quote or paren, or a construct it does not model —
+ * ANSI-C `$'…'` quoting, `${…}` expansion (whose operands may hold `;` or
+ * `&&`), a heredoc (`<<`, whose body is not shell syntax) or a comment (`#`
+ * at the start of a word, whose text may hold a lone quote). That is the
+ * pre-split reading, so a parse it gets wrong can only over-refuse, never let
+ * a force flag through.
  */
 function topLevelCommands(command: string): string[] {
-  if (/\$'/.test(command)) return [command];
+  if (/\$'|\$\{|<<|(^|\s)#/.test(command)) return [command];
   const segments: string[] = [];
   const stack: Array<'sq' | 'dq' | 'bt' | 'paren'> = [];
   let start = 0;
