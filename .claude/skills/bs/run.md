@@ -66,6 +66,16 @@ file asked for would be running it below the floor.
      operator's call. So a proposed wave can still be refused here. That is
      the gate working, not the proposal being wrong — drop tasks from the
      tail of `wave` and re-check.
+   - With `--session`, `wave check` admits only live tasks of an ingested
+     plan. A plan version whose tasks the log never saw is refused
+     `cli.plan-not-ingested`: run `smith plan ingest` on it, then re-check.
+     An id with no task row is refused `plan.unknown-task`, and a task
+     that is `completed`, `superseded` or `waived` is refused
+     `cli.task-not-live`, naming each task and its status. Drop those ids.
+     A `failed` or `escalated` task stays admissible: an operator still
+     holds it, and the escalation ladder re-admits it. A follow-up
+     `findings raise` minted stays admissible while it is live, and a wave
+     of follow-ups alone still needs the plan it names ingested first.
    - Never narrow a wave because a narrow one feels safer. A wave of one
      passes every check in this file — one task is disjoint with nothing,
      shares a hotspot with nothing, crosses no import edge — so `valid: true`
@@ -183,9 +193,16 @@ playbooks are written to prevent.
     smith epic spec-review --epic <epic> --project <project-dir> \
       --plan factory/specs/active/<epic>/plan-vN.json \
       --reviewed-by spec-reviewer \
-      [--evidence state/results/<epic>.spec-review-close-vN.json] \
+      --evidence state/results/<epic>.spec-review-close-vN.json \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
+
+    `--evidence` is required unless you pass `--no-findings` instead, and
+    the two are exclusive: a reviewer that found nothing writes `[]` to that
+    path, and `--no-findings` is the operator attesting a review that ran
+    outside the factory — recorded as `attested_by: operator`, never read as
+    a file. A missing flag is refused (`cli.missing-flag`), because an empty
+    review read from an absent file is how a capped reviewer closed clean.
 
     Its `dispatch_decision` — and step 14's, and the planner's when it
     renders a verdict — goes against the reserved `<epic>/integration` ref,
@@ -382,7 +399,16 @@ playbooks are written to prevent.
     the pack is wrong, rebuild it and dispatch again; do not let the scribe
     reach past it into `state/events/`.
 
-    The PR body has this shape and nothing else: **Summary** (the epic id
+    The PR body opens with a short plain-language summary, written under
+    `.claude/skills/bs/SKILL.md`'s "Talking to the operator" section — cite
+    that section for how to write it, do not restate its rule here. In the
+    project's own terms, not Blacksmith's: what this epic changed, what is
+    still open, and what decision the operator must make, if any. The
+    existing fact sections below follow it as the technical part the rule
+    asks for.
+
+    The PR body has this shape and nothing else: the plain-language opening
+    above; **Summary** (the epic id
     and its goal, one paragraph); **Tasks** (one line per task: id,
     `task_status`, and its `wave-merged` event id when it has one);
     **Waivers** (granted and denied, each with its finding id and event id,

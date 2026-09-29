@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
 import { AUDIT_AXES } from './audit.js';
 import { sessionOwnerRole } from './delegation.js';
@@ -143,6 +144,14 @@ export interface JudgeTurn {
   reportedArtifact: string | null;
   /** True when the report was an operator attestation rather than a file on disk. */
   attested: boolean;
+  /** The `ts` of the dispatch that opened this round: an artifact written before it is not this round's report. */
+  dispatchedAt: string;
+  /**
+   * The declared artifact's mtime (epoch ms) at dispatch, or null when no file
+   * was there yet. A report that finds the file still at this mtime is reading
+   * what was on disk before the judge ran (issue #249).
+   */
+  artifactMtimeAtDispatch: number | null;
 }
 
 export interface JudgeReport {
@@ -234,6 +243,11 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
     // own comment).
     if (role === undefined || declaredArtifact === undefined || round === undefined) continue;
     if (!JUDGE_TURN_ROLE_SET.has(role)) continue;
+    const dispatchedAt = record.ts;
+    const artifactMtimeAtDispatch =
+      typeof record.payload.artifact_mtime_at_dispatch === 'number'
+        ? record.payload.artifact_mtime_at_dispatch
+        : null;
 
     const existing = findTurn(turns, recordTaskId, role);
     if (existing !== undefined) {
@@ -246,6 +260,8 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
       existing.reported = false;
       existing.reportedArtifact = null;
       existing.attested = false;
+      existing.dispatchedAt = dispatchedAt;
+      existing.artifactMtimeAtDispatch = artifactMtimeAtDispatch;
       continue;
     }
     turns.push({
@@ -256,6 +272,8 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
       reported: false,
       reportedArtifact: null,
       attested: false,
+      dispatchedAt,
+      artifactMtimeAtDispatch,
     });
   }
 
@@ -399,6 +417,7 @@ export async function recordJudgeDispatch(
   // Explicit `--actor` is authoritative and skips this lookup entirely; only
   // an absent actor reaches for the delegated session's owner.
   const actor = ctx.actor ?? (await delegatedActor(ctx.sessionId, opts));
+  const priorMtime = artifactMtime(input.artifactPath);
 
   return emit(
     JUDGE_DISPATCH_EVENT_TYPE,
@@ -409,11 +428,85 @@ export async function recordJudgeDispatch(
       model: input.model,
       round: input.round,
       declared_artifact: input.artifactPath,
+      ...(priorMtime === null ? {} : { artifact_mtime_at_dispatch: priorMtime }),
     },
     input.taskId,
     { ...ctx, actor },
     opts,
   );
+}
+
+/** The file's mtime in epoch ms, or null when there is no file to date. */
+function artifactMtime(artifactPath: string): number | null {
+  try {
+    return statSync(artifactPath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How far a fresh artifact's mtime may sit BEHIND its dispatch's `ts` and
+ * still count as written during the turn.
+ *
+ * Not zero, because the two stamps come from two clocks. `ts` is
+ * `Date.now()`; a file's mtime on Linux is taken from the kernel's coarse
+ * clock, which lags the real-time one by up to a scheduler tick (4 ms at the
+ * common HZ=250, 10 ms at HZ=100). A judge that answers inside one tick of
+ * its dispatch — a test, or a `[]` written back by a scripted run — would
+ * otherwise read as stale. Fifty milliseconds covers the tick with margin and
+ * reopens nothing the check exists for: the artifacts it refuses are an
+ * earlier round's, minutes to days old, and a file that existed at dispatch
+ * is refused by `artifactMtimeAtDispatch` regardless of this window.
+ */
+const ARTIFACT_CLOCK_TOLERANCE_MS = 50;
+
+/**
+ * Refuse an artifact that was not written during this turn (issue #249).
+ *
+ * Two ways to be stale, one code, because the remedy is the same — the judge
+ * did not report this round; re-run it:
+ *
+ *   - its mtime is not later than the dispatch that opened the round, so the
+ *     file is an earlier round's, or a placeholder left behind;
+ *   - it is the declared file, it was already there at dispatch, and its mtime
+ *     has not moved since — nothing rewrote it, whatever the clock says.
+ *     This is what catches a file dated in the future.
+ *
+ * Only the declared path is compared against the at-dispatch mtime: that is
+ * the only file whose mtime the dispatch recorded. An explicit `--artifact`
+ * (or `gate run --evidence`) elsewhere still has to postdate the dispatch.
+ */
+function assertArtifactFresh(artifactPath: string, turn: JudgeTurn): void {
+  const mtime = artifactMtime(artifactPath);
+  // Missing is `readJudgeArtifact`'s refusal to make, with its own code.
+  if (mtime === null) return;
+  const dispatchedMs = Date.parse(turn.dispatchedAt);
+  const context = {
+    artifact_path: artifactPath,
+    artifact_mtime: new Date(mtime).toISOString(),
+    dispatched_at: turn.dispatchedAt,
+    agent_role: turn.role,
+    round: turn.round,
+  };
+  if (mtime <= dispatchedMs - ARTIFACT_CLOCK_TOLERANCE_MS) {
+    throw new JudgeError(
+      'judges.artifact-stale',
+      `Judge artifact "${artifactPath}" was last written at ${context.artifact_mtime}, before round ${turn.round} of "${turn.role}" was dispatched at ${turn.dispatchedAt}. It is an earlier round's file or a placeholder, not this turn's report; re-run the judge.`,
+      context,
+    );
+  }
+  if (
+    turn.artifactMtimeAtDispatch !== null &&
+    mtime === turn.artifactMtimeAtDispatch &&
+    path.resolve(artifactPath) === path.resolve(turn.declaredArtifact)
+  ) {
+    throw new JudgeError(
+      'judges.artifact-stale',
+      `Judge artifact "${artifactPath}" already existed when round ${turn.round} of "${turn.role}" was dispatched, and nothing has rewritten it since. The judge did not report this round; re-run it.`,
+      { ...context, artifact_mtime_at_dispatch: turn.artifactMtimeAtDispatch },
+    );
+  }
 }
 
 /** The one judge whose artifact is a verdict document rather than a findings list. */
@@ -673,6 +766,7 @@ export async function recordJudgeReport(
   }
 
   const artifactPath = input.noFindings ? null : (input.artifactPath ?? turn.declaredArtifact);
+  if (artifactPath !== null) assertArtifactFresh(artifactPath, turn);
   const findingCount =
     artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role, input.taskId, opts);
 

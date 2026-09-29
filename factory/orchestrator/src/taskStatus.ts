@@ -75,3 +75,20 @@ export const TERMINAL_OK_TASK_STATUSES = new Set(['completed', 'waived']);
  * parking silently on a task nobody is working.
  */
 export const HELD_OPEN_BY_AN_OPERATOR = new Set(['failed', 'escalated']);
+
+/**
+ * Task statuses that mean "this task's diff is closed to further work": the
+ * branch already landed (`completed`), the team already accepted the gap
+ * (`waived`), or a later plan version replaced the task outright
+ * (`superseded`).
+ *
+ * That is every terminal status except the ones an operator is still holding,
+ * subtracted here so the remainder is derived from the two rosters above
+ * rather than typed out as a third. Read by claims.ts (a finding about a
+ * closed task's files mints a follow-up) and by `wave check --session` (a
+ * closed task is refused admission; a held one is re-admitted by the
+ * escalation ladder).
+ */
+export const CLOSED_TO_FURTHER_WORK: ReadonlySet<string> = new Set(
+  [...TERMINAL_TASK_STATUSES].filter((status) => !HELD_OPEN_BY_AN_OPERATOR.has(status)),
+);

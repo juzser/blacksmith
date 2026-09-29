@@ -45,6 +45,11 @@ is **omit, never infer**: a status, a count, an event id or a waiver the pack
 does not hold stays out of the body. Never fill a gap from the raw logs or
 from what probably happened.
 
+Both a PR body and the `/bs report` digest are read by the operator, so both
+follow `.claude/skills/bs/SKILL.md`'s "Talking to the operator" section —
+plain language first, jargon explained in the operator's own terms,
+technical details (event ids, task ids, counts) in a short trailing part.
+
 <!-- LESSONS:stack-wide -->
 
 ## Output contract

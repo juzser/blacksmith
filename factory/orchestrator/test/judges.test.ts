@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -601,6 +601,116 @@ describe('judges.ts', () => {
           recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts()),
         ).rejects.toMatchObject({ code: 'judges.artifact-not-a-list' });
       });
+    });
+  });
+
+  // Issue #249. An artifact on disk proved only that SOME file existed at the
+  // declared path. A capped judge whose earlier round left `[]` there, or a
+  // placeholder nobody rewrote, closed its turn with zero findings. The report
+  // now also asks whether the file was written during THIS turn.
+  describe('artifact freshness (issue #249)', () => {
+    const reviewerPath = () => path.join(artifactDir, 'reviewer.json');
+    const anHourAgo = () => new Date(Date.now() - 60 * 60 * 1000);
+    const inAnHour = () => new Date(Date.now() + 60 * 60 * 1000);
+
+    it('refuses an artifact last written before the turn was dispatched, and leaves the turn open', async () => {
+      await writeFile(reviewerPath(), '[]', 'utf8');
+      await utimes(reviewerPath(), anHourAgo(), anHourAgo());
+      await dispatch();
+      await expect(
+        recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts()),
+      ).rejects.toMatchObject({ code: 'judges.artifact-stale' });
+      expect(outstandingJudges(await turns())).toHaveLength(1);
+    });
+
+    it('refuses the same stale file handed in through an explicit --artifact path', async () => {
+      await dispatch();
+      const elsewhere = path.join(artifactDir, 'moved.json');
+      await writeFile(elsewhere, '[]', 'utf8');
+      await utimes(elsewhere, anHourAgo(), anHourAgo());
+      await expect(
+        recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'reviewer', artifactPath: elsewhere },
+          ctx(),
+          opts(),
+        ),
+      ).rejects.toMatchObject({ code: 'judges.artifact-stale' });
+    });
+
+    it('records the mtime of a declared artifact that already exists at dispatch, and nothing when it does not', async () => {
+      const absent = await dispatch();
+      expect(absent.record.payload).not.toHaveProperty('artifact_mtime_at_dispatch');
+
+      // Whole seconds, so the value utimes stores is the value it reads back.
+      const stamp = new Date(Math.floor(anHourAgo().getTime() / 1000) * 1000);
+      await writeFile(path.join(artifactDir, 'reviewer-r2.json'), '[]', 'utf8');
+      await utimes(path.join(artifactDir, 'reviewer-r2.json'), stamp, stamp);
+      const present = await dispatch({
+        round: 2,
+        artifactPath: path.join(artifactDir, 'reviewer-r2.json'),
+      });
+      expect(present.record.payload.artifact_mtime_at_dispatch).toBe(stamp.getTime());
+    });
+
+    // The mtime check alone would pass a file dated in the future — a clock
+    // skew or a `touch -d` — however stale its contents. Recording the mtime
+    // the file had at dispatch catches it: a judge that wrote nothing leaves
+    // that mtime exactly where it was.
+    it('refuses an artifact that existed at dispatch and was never rewritten, even when its mtime is later than the dispatch', async () => {
+      await writeFile(reviewerPath(), '[]', 'utf8');
+      await utimes(reviewerPath(), inAnHour(), inAnHour());
+      await dispatch();
+      await expect(
+        recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts()),
+      ).rejects.toMatchObject({ code: 'judges.artifact-stale' });
+    });
+
+    it('accepts an artifact that existed at dispatch once the judge has rewritten it', async () => {
+      await writeFile(reviewerPath(), '[]', 'utf8');
+      await utimes(reviewerPath(), anHourAgo(), anHourAgo());
+      await dispatch();
+      await writeFile(reviewerPath(), JSON.stringify([validEvidence()]), 'utf8');
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'reviewer' },
+        ctx(),
+        opts(),
+      );
+      expect(report.findingCount).toBe(1);
+    });
+
+    // The observed failure: round 1 wrote its artifact and reported; round 2
+    // re-dispatched the same path, capped, and wrote nothing. Round 1's file
+    // must not close round 2.
+    it("does not let an earlier round's artifact close a re-dispatch of the same path", async () => {
+      await dispatch();
+      await writeFile(reviewerPath(), '[]', 'utf8');
+      await recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts());
+      // Round 1 finished an hour ago; round 2 reuses its path.
+      await utimes(reviewerPath(), anHourAgo(), anHourAgo());
+      await dispatch({ round: 2 });
+      await expect(
+        recordJudgeReport({ taskId: 'epic-1/task-1', role: 'reviewer' }, ctx(), opts()),
+      ).rejects.toMatchObject({ code: 'judges.artifact-stale' });
+      expect(outstandingJudges(await turns()).map((t) => t.round)).toEqual([2]);
+    });
+
+    it('still takes an attestation, which names no file to date', async () => {
+      await writeFile(reviewerPath(), '[]', 'utf8');
+      await utimes(reviewerPath(), anHourAgo(), anHourAgo());
+      await dispatch();
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'reviewer', noFindings: true },
+        ctx(),
+        opts(),
+      );
+      expect(report.attested).toBe(true);
+    });
+
+    it('folds the dispatch time and the at-dispatch mtime into the turn', async () => {
+      const stored = await dispatch();
+      const [turn] = await turns();
+      expect(turn?.dispatchedAt).toBe(stored.record.ts);
+      expect(turn?.artifactMtimeAtDispatch).toBeNull();
     });
   });
 

@@ -4,7 +4,7 @@ import { parse as parseYaml } from 'yaml';
 import { SmithError } from './errors.js';
 import { runGit, runGitRaw } from './git.js';
 import { WORKTREE_POLICY_PATH } from './paths.js';
-import { HELD_OPEN_BY_AN_OPERATOR, TERMINAL_TASK_STATUSES } from './taskStatus.js';
+import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 
 export class ClaimsError extends SmithError {}
 
@@ -637,22 +637,10 @@ export type FindingAttribution =
   /** Nobody can act on it under an existing task: escalate to the epic. */
   | { attribution: 'follow-up'; reason: string };
 
-/**
- * Task statuses that mean "this task's diff is closed to further work". A
- * finding routed to one of these has nobody to fix it — the branch already
- * landed (`completed`), the team already accepted the gap (`waived`), or a
- * later plan version replaced the task outright (`superseded`).
- *
- * That is every terminal status except the ones an operator is still holding:
- * a finding about a `failed` or `escalated` task's files belongs on that task
- * rather than on a new one competing for the same claims. The exception is
- * declared in taskStatus.ts as HELD_OPEN_BY_AN_OPERATOR and subtracted here,
- * so the three strings this used to name by hand come from the roster the
- * dimension already keeps rather than from a fourth copy of it.
- */
-const CLOSED_TO_FURTHER_WORK: ReadonlySet<string> = new Set(
-  [...TERMINAL_TASK_STATUSES].filter((status) => !HELD_OPEN_BY_AN_OPERATOR.has(status)),
-);
+// CLOSED_TO_FURTHER_WORK (taskStatus.ts): a finding routed to one of those
+// statuses has nobody to fix it. A finding about a `failed` or `escalated`
+// task's files belongs on that task rather than on a new one competing for
+// the same claims, which is why the operator-held pair is subtracted.
 
 /**
  * Where a finding should land, given who owns its file (D-41/P9-24).
