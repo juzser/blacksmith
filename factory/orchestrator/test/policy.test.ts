@@ -657,13 +657,28 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(ruleIds(d)).toContain('force-push');
   });
 
-  it.each([["git commit -m $'line1\\nline2'"], ["git push origin $'feat'"]])(
-    'allows %s — a harmless "$\'...\'" payload with nothing force-push shaped in it',
-    (command) => {
-      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
-      expect(d.allowed).toBe(true);
-    },
-  );
+  it("allows git commit -m $'line1\\nline2' — commit is not a gated subcommand", () => {
+    const d = evaluateCommand(
+      ctx({ command: "git commit -m $'line1\\nline2'", branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // Behaviour change from round 4: a `$'...'` payload is itself one of the
+  // constructs the plain-word gate exists to refuse, whatever it decodes to.
+  // `git push origin $'feat'` used to be allowed because nothing about it
+  // decoded to anything force-shaped; it is refused now because the gate
+  // cannot tell that from a `$'...'` payload hiding something else without
+  // decoding it first — which is the laundering move the gate exists to
+  // close off.
+  it("denies git push origin $'feat' — a \"$'...'\" payload is not a plain word", () => {
+    const d = evaluateCommand(
+      ctx({ command: "git push origin $'feat'", branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
 
   // Quote-splicing: the shell removes quote characters as the very last step
   // of word expansion, gluing whatever sat on either side of them into one
@@ -691,8 +706,6 @@ describe('evaluateCommand — rule 2: force-push', () => {
   it.each([
     ['git push --fo{r,r}ce origin feat'],
     ['git push --for{c,}e origin feat'],
-    // A range brace.
-    ['git branch old-{a..z} new'],
     // Brace combined with `--force-with-lease`.
     ['git push --force-with-le{a,a}se origin feat'],
     // Brace combined with a `+refspec`.
@@ -712,6 +725,13 @@ describe('evaluateCommand — rule 2: force-push', () => {
     ["git commit -m $'a\\nb'"],
     ['git push origin feat'],
     ['git -c user.name=agent push origin feat'],
+    // `git branch` without a forcing flag is out of the gate's scope, so a
+    // brace word in its operands — even one that reads like an escaped
+    // literal `{1,2}`, never expanded by the shell — is not examined at all.
+    // Pinned per the coordinator's correction: `branch -d`/plain `branch`
+    // deletes or renames nothing the gate is scoped to.
+    ['git branch old-{a..z} new'],
+    ['git branch -d rel\\{1,2\\}'],
   ])('allows %s — braces and quotes with nothing force-push shaped in them', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(d.allowed).toBe(true);
@@ -744,6 +764,68 @@ describe('evaluateCommand — rule 2: force-push', () => {
     ['git -c ALIAS.x=push x'],
   ])('denies %s — inline alias vector', (command) => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // Round 5: a plain-word gate replaces enumerating shell tricks one at a
+  // time. In a segment reaching a covered subcommand, every word after it
+  // must be free of shell-active characters (backslash, `$`, backtick,
+  // braces, glob characters, …) or be a single cleanly-quoted word. Each of
+  // these reconstructs "--force" without ever spelling it, and none of them
+  // decode to anything a prior round's individual fix would have caught.
+  it.each([
+    // Backslash mid-word.
+    ['git push --for\\ce origin feat'],
+    // Line-continuation backslash-newline mid-word.
+    ['git push --for\\\nce origin feat'],
+    // Empty/variable expansion.
+    ['git push --for${x}ce origin feat'],
+    // `$"…"` quoting — stripSpliceQuotes alone would leave `--for$ce`.
+    ['git push --for$""ce origin feat'],
+    // Glob characters.
+    ['git push --forc? origin feat'],
+    ['git push --f*ce origin feat'],
+  ])('denies %s — the word is not plain', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // A shell wrapper hands a whole second command line to another shell to
+  // parse, which is a second chance for a trick above to hide inside a
+  // string this scanner would otherwise read as inert text.
+  it.each([
+    ['eval "git push --for""ce origin feat"'],
+    ["bash -c 'git push --for\\ce origin feat'"],
+  ])('denies %s — a shell wrapper hides push-shaped text', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // Required allows under the plain-word gate: ordinary git commands whose
+  // words are already plain must keep working.
+  it.each([
+    ['git push origin feat'],
+    ['git push -u origin feat'],
+    ['git push origin feat:feat'],
+    ['git reset --soft HEAD~1'],
+    ['git rebase main'],
+    ['git rebase origin/main'],
+    ['git branch -d feat-1'],
+    ["git log --format='%H {x,y}'"],
+    ['git -c user.name=agent push origin feat'],
+  ])('allows %s — every word after the covered subcommand is plain', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  // Accepted behaviour change: a variable substitution is not a plain word,
+  // so a push whose ref comes from `"$BRANCH"` is now refused even though
+  // this specific instance would have been harmless.
+  it('denies git push origin "$BRANCH" — a variable substitution is not a plain word', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin "$BRANCH"', branch: 'feature' }),
+      policy,
+    );
     expect(ruleIds(d)).toContain('force-push');
   });
 });

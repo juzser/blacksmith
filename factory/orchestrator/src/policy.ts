@@ -1119,74 +1119,186 @@ function stripSpliceQuotes(text: string): string {
   return text.replace(/['"]/g, '');
 }
 
-/** A `{a,b}` list or `{a..b}` range — bash brace expansion, unexpanded. */
-const BRACE_EXPANSION_RE = /\{[^{}]*,[^{}]*\}|\{[^{}]+\.\.[^{}]+\}/;
+/**
+ * A character the shell can still act on inside a word: an escape, a
+ * variable or command expansion, a brace list, or a glob. Three rounds of
+ * this rule chased individual tricks spelled with these characters — hex
+ * escapes, quote-splicing, brace expansion — one at a time, and each fix
+ * left the next spelling undetected. This is the fail-closed replacement:
+ * rather than keep enumerating tricks, refuse to read a word built from any
+ * of them at all.
+ */
+const SHELL_ACTIVE_CHAR_RE = /[\\$`{}*?[()<>!\n]/;
 
 /**
- * Subcommands rule 2 must not let a brace-expansion word slip through
- * unexamined. `push` is the one this rule exists for; the rest write or move
- * refs the same way a force push does and share the same operand shape.
+ * True when `word` is exactly what it looks like to git: either free of
+ * every character the shell could still act on, or a single matching pair
+ * of quotes wrapped around such a word (`"feat"`, `'origin'` — the quotes
+ * themselves removed, nothing shell-active left inside). Anything else — a
+ * bare backslash, a `$`, a backtick, a brace, a glob character, or a quote
+ * that does not open and close the whole word — means this rule cannot read
+ * what git will actually receive, and it refuses rather than guess.
  */
-const BRACE_COVERED_SUBCOMMANDS = [
-  'push',
-  'rebase',
-  'reset',
-  'filter-branch',
-  'update-ref',
-  'branch',
-];
-
-/**
- * `git push --fo{r,r}ce origin main` and `git push --for{c,}e origin main`
- * both come back allowed with no violations at all: `FORCE_PUSH_RE` cannot
- * see a flag spelled with a brace, and `splitChainSegments` — which rule 1
- * reads its destination through — treats `{`/`}` as chain separators and
- * slices `origin main` away from the segment before rule 1 ever looks at it.
- * Rather than expand the brace ourselves (bash's expansion rules are
- * involved, and a spec drifting out of step with them would reopen the same
- * hole), a brace-shaped word anywhere in a covered segment is refused
- * outright — fail closed on the word, not on a guess at what it expands to.
- * That denial also covers rule 1's read: this rule sees the whole segment
- * through `topLevelCommands`, which does not split on braces the way
- * `splitChainSegments` does, so a brace word here is caught before rule 1's
- * narrower view of the same segment would have missed it.
- */
-function hasUnsafeBraceWord(segment: string): boolean {
-  return BRACE_COVERED_SUBCOMMANDS.some((subcommand) => {
-    if (!isGitSubcommand(segment, subcommand)) return false;
-    return gitTokens(segment, subcommand).some(
-      (token) =>
-        !isQuotedWith(token, "'") && !isQuotedWith(token, '"') && BRACE_EXPANSION_RE.test(token),
-    );
-  });
+function isPlainWord(word: string): boolean {
+  if (word === '') return true;
+  const quoted =
+    word.length >= 2 &&
+    ((word.startsWith("'") && word.endsWith("'")) || (word.startsWith('"') && word.endsWith('"')));
+  const inner = quoted ? word.slice(1, -1) : word;
+  if (/['"]/.test(inner)) return false;
+  return !SHELL_ACTIVE_CHAR_RE.test(inner);
 }
 
+const PLAIN_WORD_REASON =
+  'write this git command with plain words — no quotes inside words, escapes, variables, braces or globs — so the guard can read exactly what git will receive';
+
+/** Subcommands the plain-word gate covers unconditionally. */
+const FORCE_GATE_SUBCOMMANDS = ['push', 'rebase', 'reset', 'filter-branch', 'update-ref'];
+
+const BRANCH_SHORT_FLAG_RE = /^-[a-zA-Z]+$/;
+
+/**
+ * `git branch` only rewrites or drops a ref when it forces or deletes one:
+ * `-D`, `-f`, `-M` or `--force`, bundled or spelled long. Plain `-d` (delete
+ * a merged branch) and `-m` (rename) are not covered — see the comment on
+ * `checkForcePush` for why a delete without force is let through unread.
+ */
+function isForcingBranchCommand(tokens: readonly string[]): boolean {
+  return tokens.some(
+    (token) => token === '--force' || (BRANCH_SHORT_FLAG_RE.test(token) && /[DfM]/.test(token)),
+  );
+}
+
+/**
+ * Same read as `gitTokens`, but bridges a real newline in the remainder —
+ * `gitTokens`' `(.*)$` cannot, since `.` does not match `\n` and `$` without
+ * a multiline flag only anchors at the true end of the string. A word split
+ * across a line-continuation backslash-newline (`--for\`<LF>`ce`) still
+ * needs to be read as two whitespace-joined pieces rather than dropped as no
+ * match at all. Local to the gate rather than a change to `gitTokens`
+ * itself, which rules 1 and 3 also read through.
+ */
+function wordsAfterSubcommand(text: string, subcommand: string): string[] {
+  const match = new RegExp(`${bareWord(subcommand)}([\\s\\S]*)$`, 'i').exec(text);
+  if (!match) return [];
+  return (match[1] ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token !== '');
+}
+
+/**
+ * `text` with every quoted span blanked to spaces of the same length, so a
+ * quoted phrase cannot be misread as a real subcommand invocation. `--command
+ * 'git push origin main'` and `git commit -m "... push origin main"` both
+ * hold that literal text, but neither one runs it — one is describing a
+ * command, the other is prose in a commit message. Lengths are preserved
+ * only so this stays a drop-in swap for `text` in a regex test; nothing here
+ * reads offsets.
+ */
+function blankQuotedSpans(text: string): string {
+  return text.replace(/'[^']*'|"[^"]*"/g, (span) => ' '.repeat(span.length));
+}
+
+/**
+ * `text` with the reading the plain-word gate needs: quoted spans blanked
+ * (so a subcommand word only inside quotes is not "really" invoked) and
+ * redirections removed (so `git push origin main > /dev/null` is not read as
+ * having `>` and `/dev/null` for words). Used only to decide *whether* a
+ * segment is covered — word extraction itself still reads real text, quotes
+ * and all, through `isPlainWord`.
+ */
+function forceGateStructuralText(text: string): string {
+  return stripRedirections(blankQuotedSpans(text));
+}
+
+/** Whether `text` reaches a git subcommand the plain-word gate must cover. */
+function isCoveredForcePushSegment(text: string): boolean {
+  const structural = forceGateStructuralText(text);
+  if (FORCE_GATE_SUBCOMMANDS.some((subcommand) => isGitSubcommand(structural, subcommand))) {
+    return true;
+  }
+  return (
+    isGitSubcommand(structural, 'branch') &&
+    isForcingBranchCommand(wordsAfterSubcommand(stripRedirections(text), 'branch'))
+  );
+}
+
+/** True when every word after a covered subcommand in `text` is plain. */
+function hasUnsafeWord(text: string): boolean {
+  const structural = forceGateStructuralText(text);
+  const wordsText = stripRedirections(text);
+  for (const subcommand of FORCE_GATE_SUBCOMMANDS) {
+    if (!isGitSubcommand(structural, subcommand)) continue;
+    if (wordsAfterSubcommand(wordsText, subcommand).some((token) => !isPlainWord(token)))
+      return true;
+  }
+  if (isGitSubcommand(structural, 'branch')) {
+    const tokens = wordsAfterSubcommand(wordsText, 'branch');
+    if (isForcingBranchCommand(tokens) && tokens.some((token) => !isPlainWord(token))) return true;
+  }
+  return false;
+}
+
+const EVAL_RE = /\beval\b/;
+const SHELL_C_WRAPPER_RE = /\b(sh|bash|zsh|env)\b[^;&|]*-c\b/;
+const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
+
+/**
+ * `eval`, or a `-c` string handed to `sh`/`bash`/`zsh`/`env`, passes a whole
+ * second command line to another shell to parse — a second chance for any
+ * trick above to hide inside a string this rule would otherwise read as
+ * inert text, without this scanner ever parsing the nested line itself.
+ * Simplest fail-closed read: a segment naming one of those wrappers
+ * alongside `git` and force-push-shaped subcommand text is refused outright,
+ * rather than trusted to be read correctly.
+ */
+function isShellWrappedForceCandidate(segment: string): boolean {
+  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return false;
+  return /\bgit\b/i.test(segment) && FORCE_GATE_WORD_RE.test(segment);
+}
+
+/**
+ * Rule 2's main defence: a plain-word gate, not a growing list of individual
+ * shell tricks. In a segment that reaches `push`, `rebase`, `reset`,
+ * `filter-branch`, `update-ref`, or `branch` when it forces or deletes a
+ * ref, every word after the subcommand must be plain — see `isPlainWord`.
+ * A word this rule cannot read safely is refused rather than guessed at; the
+ * gate decides only readability, not force-ness, which the checks below
+ * still do once the words are known safe to read.
+ */
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
-  // No `isGitSubcommand` gate: its `[^;&|]*` stops at a quoted separator, so
-  // `git -c "a.b=;" push -f` never reached the flag test. Each segment below
-  // asks the question itself, over the whole segment.
-  // Read per command, not per chain: a `-f` or `--force` that belongs to
-  // another command in the chain (`rm -f`, `git worktree remove --force`)
-  // says nothing about the push. Split on true command boundaries only —
-  // `gitSegmentsFor`'s split also cuts at redirections, `#`, braces and
-  // substitutions, which leave the flag on the push's own command line.
-  // A `git stash push` names no remote, so its `push` is removed before
-  // asking whether the segment still pushes.
-  const forced = topLevelCommands(command).some((segment) => {
+  const rule = requireRule(policy, 'force-push');
+  for (const segment of topLevelCommands(command)) {
+    if (isShellWrappedForceCandidate(segment)) return violation(rule);
+
     const decoded = decodeAnsiCQuoting(segment);
     // An unterminated `$'` span cannot be decoded with confidence — fail
     // closed rather than guess at what it hides, the same direction as
     // `topLevelCommands`' own fallback for a construct it cannot read.
-    if (decoded.unterminated) return /\bgit\b/i.test(segment);
-    // Read for a brace-expansion word before quotes are stripped, so a
-    // quoted brace (`"release-{1,2}"`, never expanded by the shell) is not
-    // caught by a check meant for the unquoted, expanding form.
-    if (hasUnsafeBraceWord(decoded.text)) return true;
+    if (decoded.unterminated) {
+      if (/\bgit\b/i.test(segment)) return violation(rule);
+      continue;
+    }
+    if (definesInlineGitAlias(decoded.text)) return violation(rule);
+
+    // Subcommand detection reads the decoded text, so a subcommand word
+    // hidden inside a `$'...'` span (`$'\x70ush'`) is still found. But a
+    // `$'...'` span is itself one of the constructs the plain-word gate
+    // exists to refuse — decoding it away first, then checking the decoded
+    // words for plainness, would launder exactly what it is meant to catch.
+    // So once a covered subcommand is found, an undecoded `$'...'` span
+    // anywhere in the segment is already a plain-word failure on its own;
+    // otherwise (no span at all) the raw segment is checked directly.
+    if (isCoveredForcePushSegment(decoded.text)) {
+      if (decoded.text !== segment) return violation(rule, PLAIN_WORD_REASON);
+      if (hasUnsafeWord(segment)) return violation(rule, PLAIN_WORD_REASON);
+    }
+
     const text = stripSpliceQuotes(decoded.text);
-    if (definesInlineGitAlias(text)) return true;
     const withoutStash = text.replace(/\bstash\s+push\b/gi, 'stash');
-    if (!GIT_PUSH_ANYWHERE_RE.test(withoutStash)) return false;
-    if (FORCE_PUSH_RE.test(text)) return true;
+    if (!GIT_PUSH_ANYWHERE_RE.test(withoutStash)) continue;
+    if (FORCE_PUSH_RE.test(text)) return violation(rule);
     // A refspec operand starting with `+` forces the update the same way
     // `--force` does, with no flag on the line at all. Read the same way
     // rule 1 reads a push's destination: every non-flag operand of the push,
@@ -1194,9 +1306,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // removes them before git ever sees the argument. `git push origin
     // \+feat` reaches git as `+feat`; scanning the raw `\+feat` for a
     // leading `+` misses it, so the operand is read the way git will.
-    return pushOperands(text).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
-  });
-  return forced ? violation(requireRule(policy, 'force-push')) : null;
+    if (pushOperands(text).some((ref) => ref.replace(/\\/g, '').startsWith('+'))) {
+      return violation(rule);
+    }
+  }
+  return null;
 }
 
 /**
