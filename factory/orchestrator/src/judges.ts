@@ -131,6 +131,13 @@ export interface JudgeReport {
   artifactPath: string | null;
   findingCount: number;
   attested: boolean;
+  /**
+   * The id of the `judge-reported` event this call just appended — the same
+   * id a hand-run `event tail` would find at line-1, printed here instead so
+   * the operator has it for `audit record --causal-parent` without reading
+   * the log (audit.ts's RecordAuditResult does the same).
+   */
+  event_id: string;
 }
 
 /**
@@ -632,7 +639,7 @@ export async function recordJudgeReport(
   const findingCount =
     artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role, input.taskId, opts);
 
-  await emit(
+  const stored = await emit(
     JUDGE_REPORT_EVENT_TYPE,
     {
       agent_role: input.role,
@@ -653,5 +660,6 @@ export async function recordJudgeReport(
     artifactPath,
     findingCount,
     attested: input.noFindings === true,
+    event_id: stored.event_id,
   };
 }

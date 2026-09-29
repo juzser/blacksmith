@@ -249,6 +249,12 @@ describe('judges.ts', () => {
         artifact_path: path.join(artifactDir, 'reviewer.json'),
         finding_count: 2,
       });
+      // Sibling verbs (audit record, judge dispatch) hand the operator the
+      // event_id the append produced, so `--causal-parent` for the next
+      // write is a copy-paste, not a log read. `judge report` owed the same:
+      // the id on the result must be the id the judge-reported event was
+      // actually appended under, not a guess reconstructed from the log.
+      expect(report.event_id).toBe(stored?.event_id);
       expect(outstandingJudges(await turns())).toEqual([]);
     });
 
