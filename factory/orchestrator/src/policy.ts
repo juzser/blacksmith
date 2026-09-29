@@ -585,7 +585,14 @@ function isProtectedRef(ref: string, policy: GuardrailPolicy): boolean {
   );
 }
 
-function isProtectedBranchName(branch: string, policy: GuardrailPolicy): boolean {
+/**
+ * Exported so `hookDecision.ts` can tell, on the rule-3 fallback path,
+ * whether a directory the command named is itself protected — the
+ * difference between "the fallback found nowhere safe to land" (old reason
+ * stands) and "the fallback denied cwd, but the named directory would have
+ * been fine" (the reason needs to say so).
+ */
+export function isProtectedBranchName(branch: string, policy: GuardrailPolicy): boolean {
   return policy.protectedBranchNames.includes(branch);
 }
 

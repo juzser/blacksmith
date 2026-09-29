@@ -19,6 +19,9 @@ import { runOrThrow } from './helpers/process.js';
 
 let scratch: string;
 let mainRepo: string;
+// A second, independent repo also on `main` — used to prove the fallback's
+// new reason text only fires when a named directory is NOT itself protected.
+let mainRepo2: string;
 let sideRepo: string;
 // A worktree on no named branch — `detectCurrentBranch` reads it as `HEAD`.
 let detachedRepo: string;
@@ -52,6 +55,7 @@ function reasonOf(decision: ReturnType<typeof decideHookPayload>): string | null
 beforeAll(async () => {
   scratch = await mkdtemp(path.join(tmpdir(), 'hook-decision-'));
   mainRepo = initRepoOnBranch(path.join(scratch, 'main-clone'), 'main');
+  mainRepo2 = initRepoOnBranch(path.join(scratch, 'main-clone-2'), 'main');
   sideRepo = path.join(scratch, 'side-worktree');
   runOrThrow('git', ['worktree', 'add', '-q', '-b', 'feat/side', sideRepo], { cwd: mainRepo });
   detachedRepo = path.join(scratch, 'detached-worktree');
@@ -179,6 +183,49 @@ describe('decideHookPayload — where the command runs, not where the session st
     expect(reasonOf(decide(`cd ${sideRepo} && ${rm} src`, mainRepo))).toMatch(/rm -rf/);
     // Outside any repo there is no root to bound the removal by.
     expect(reasonOf(decide(`cd ${scratch} && ${rm} workspaces`, mainRepo))).toMatch(/rm -rf/);
+  });
+});
+
+// Rule 3 (merge-into-protected) can only judge a command in its named target
+// alone when the command matches the narrow `shortcutDirectories` shape.
+// Anything else falls back to also judging the session's cwd, and that
+// fallback is correct and stays. But when the fallback is what denied the
+// command, and the command named another directory that is NOT itself
+// protected, "you are on main" states a guess as fact: the session's cwd was
+// judged only because the shape could not be read for certain, not because
+// that is provably where the command runs. See GitHub issue #263.
+describe('decideHookPayload — rule 3 reason on the fallback path', () => {
+  it('explains the fallback, and the readable shapes, when a named side branch fell out of the shortcut shape via a pipe', () => {
+    const reason = reasonOf(decide(`git -C ${sideRepo} merge main | tail -1`, mainRepo));
+    expect(reason).toMatch(/on main/);
+    expect(reason).toMatch(/could not.*read.*certain|not one the guard can read for certain/i);
+    expect(reason).toMatch(/session's own directory/i);
+    expect(reason).toMatch(/no pipes/i);
+    expect(reason).toMatch(/&&/);
+    expect(reason).toMatch(/git -C <dir> merge/);
+  });
+
+  it('explains the fallback when a named side branch fell out of the shortcut shape via a semicolon', () => {
+    const reason = reasonOf(decide(`cd ${sideRepo}; git merge main`, mainRepo));
+    expect(reason).toMatch(/on main/);
+    expect(reason).toMatch(/session's own directory/i);
+    expect(reason).toMatch(/no pipes/i);
+  });
+
+  it('still allows the same command once rewritten into the shortcut shape', () => {
+    expect(decide(`git -C ${sideRepo} merge main`, mainRepo)).toBeNull();
+  });
+
+  it('keeps the old reason for a plain merge on main naming no other directory', () => {
+    const reason = reasonOf(decide('git merge feat/side', mainRepo));
+    expect(reason).toMatch(/Check out a side branch instead/);
+    expect(reason).not.toMatch(/session's own directory/i);
+  });
+
+  it('keeps the old reason when the named directory is also on a protected branch', () => {
+    const reason = reasonOf(decide(`git -C ${mainRepo2} merge main | tail -1`, mainRepo));
+    expect(reason).toMatch(/Check out a side branch instead/);
+    expect(reason).not.toMatch(/session's own directory/i);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   detectCurrentBranch,
   detectRepoRoot,
   evaluateCommand,
+  isProtectedBranchName,
   loadGuardrailPolicy,
   type PolicyContext,
 } from './policy.js';
@@ -118,6 +119,8 @@ export function decideHookPayload(
       ? certain
       : fallbackDirectories(command, cwd).map(locate);
   let reason: string | null = null;
+  let firingRuleId: string | null = null;
+  let firingDir: string | null = null;
   for (const { dir, branch, repoRoot } of places) {
     const targetLease = dir === cwd ? null : activeSandboxFor(dir, leaseDir);
     for (const sandbox of distinctLeases(sessionLease, targetLease)) {
@@ -131,11 +134,41 @@ export function decideHookPayload(
       // behaviour even though evaluateCommand (policy check's diagnostic
       // output) reports every rule that tripped.
       if (!decision.allowed) {
-        reason = decision.violations[0]?.reason ?? 'guardrails.yml denied this command.';
+        const violation = decision.violations[0];
+        reason = violation?.reason ?? 'guardrails.yml denied this command.';
+        firingRuleId = violation?.ruleId ?? null;
+        firingDir = dir;
         break;
       }
     }
     if (reason !== null) break;
+  }
+  // Rule 3 denying on the fallback (`certain === null`) because cwd itself is
+  // protected is a guess dressed as fact when the command also named another
+  // directory that is NOT protected: the fallback ran only because the shape
+  // could not be read for certain, not because cwd is provably where this
+  // runs. Swap in a reason that says so and names the readable shapes, so the
+  // same merge can go through rewritten. Every other case — no named
+  // directory, or a named directory that is protected too — keeps the
+  // original reason unchanged.
+  if (
+    reason !== null &&
+    firingRuleId === 'merge-into-protected' &&
+    certain == null &&
+    firingDir === cwd
+  ) {
+    const namedUnprotected = places.some(
+      (p) =>
+        p.dir !== cwd &&
+        p.branch !== '' &&
+        p.branch !== 'HEAD' &&
+        p.repoRoot !== null &&
+        !isProtectedBranchName(p.branch, policy),
+    );
+    if (namedUnprotected) {
+      const cwdBranch = places.find((p) => p.dir === cwd)?.branch ?? '';
+      reason = fallbackMergeReason(cwdBranch);
+    }
   }
   if (reason === null) {
     // Allow prints NOTHING, on purpose, and this is not a cosmetic choice.
@@ -160,6 +193,27 @@ export function decideHookPayload(
       permissionDecisionReason: `BLOCKED: ${reason}`,
     },
   };
+}
+
+/**
+ * Rule 3's fallback reason for the one case where "you are on {branch}"
+ * states a guess as fact: the command named another directory, that
+ * directory is NOT protected, and the only reason cwd was judged at all is
+ * that the command's shape was not one `shortcutDirectories` can read for
+ * certain — see its own doc comment for the two shapes it accepts. Says so
+ * plainly, and names those shapes, rather than telling an agent already
+ * standing on a side branch to "check out a side branch instead".
+ */
+function fallbackMergeReason(cwdBranch: string): string {
+  return (
+    `this command's shape is not one the guard can read for certain — ` +
+    `cd/-C mixed with anything past a plain \`&&\` chain (a pipe, \`;\`, or a ` +
+    `redirect) leaves it ambiguous — so it was also judged against your ` +
+    `session's own directory, which is on ${cwdBranch}, a protected branch; ` +
+    `git merge/pull is denied there. Write it as \`cd <dir> && git merge …\`, ` +
+    `joined only by \`&&\`, or a single \`git -C <dir> merge …\`, with no ` +
+    `pipes, \`;\` or redirects, and the same merge will be judged in <dir> alone.`
+  );
 }
 
 /**
