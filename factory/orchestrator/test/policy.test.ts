@@ -664,6 +664,88 @@ describe('evaluateCommand — rule 2: force-push', () => {
       expect(d.allowed).toBe(true);
     },
   );
+
+  // Quote-splicing: the shell removes quote characters as the very last step
+  // of word expansion, gluing whatever sat on either side of them into one
+  // word. `--for""ce`, `--for''ce` and `-"-"force` all reach git as
+  // `--force`; the raw command text never has `--force` as one substring.
+  it.each([
+    ['git push --for""ce origin feat'],
+    ["git push --for''ce origin feat"],
+    ['git push -"-"force origin feat'],
+    // Three-or-more quote fragments spliced back together.
+    ['git push --f"o"r"c"e origin feat'],
+    ["git push --f'o'r'c'e origin feat"],
+    // The splice trick against `--force-with-lease`.
+    ['git push --force-with-le""ase origin feat'],
+    // The splice trick hiding a `+refspec`.
+    ['git push origin "+"feat'],
+  ])('denies %s — quote-splicing reassembles a force flag or refspec', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // Brace expansion: `{a,b}` and `{a..z}` are expanded by the shell before
+  // the command ever reaches git. Rather than expand them ourselves, any
+  // brace-shaped word in a segment covered by this rule is refused outright.
+  it.each([
+    ['git push --fo{r,r}ce origin feat'],
+    ['git push --for{c,}e origin feat'],
+    // A range brace.
+    ['git branch old-{a..z} new'],
+    // Brace combined with `--force-with-lease`.
+    ['git push --force-with-le{a,a}se origin feat'],
+    // Brace combined with a `+refspec`.
+    ['git push origin +f{e,e}at'],
+    // The reviewer's example: a brace word also defeats rule 1's read of the
+    // destination (`splitChainSegments` cuts the segment at `{`/`}`), so this
+    // must not come back allowed even though the branch is `main`.
+    ['git push --fo{r,r}ce origin main'],
+  ])('denies %s — a brace-expansion word in a covered segment', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(false);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([
+    ['git commit -m "a {b,c} message"'],
+    ["git commit -m $'a\\nb'"],
+    ['git push origin feat'],
+    ['git -c user.name=agent push origin feat'],
+  ])('allows %s — braces and quotes with nothing force-push shaped in them', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  // The git binary itself wrapped in command substitution. `echo git` still
+  // leaves the literal word "git" in the command text, which the existing
+  // substring-based checks already catch — this is not a new gap, just a
+  // case the reviewer asked to confirm rather than a construct this rule
+  // tries to resolve. A binary name obscured so no literal "git" substring
+  // survives (e.g. built from `\x67it` at runtime) is out of scope: this
+  // rule reads text, it does not execute a shell to see what it would run.
+  it.each([['$(echo git) push -f origin feat'], ['`echo git` push -f origin feat']])(
+    'denies %s — the literal word "git" survives command substitution',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  // Isolated alias-vector cases: confirms each is denied on its own, not just
+  // when combined with other tricks.
+  it.each([
+    // The env-var name is present unconditionally; the value's own force
+    // text is never required for `GIT_CONFIG_PARAMETERS` to trip the rule.
+    [`GIT_CONFIG_PARAMETERS="'alias.x=push'" git x origin feat`],
+    // `-c` glued directly to the key, no space.
+    ['git -calias.x=push x'],
+    // Case-insensitive key match.
+    ['git -c ALIAS.x=push x'],
+  ])('denies %s — inline alias vector', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {

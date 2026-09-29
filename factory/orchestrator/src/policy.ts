@@ -1103,6 +1103,64 @@ function definesInlineGitAlias(segment: string): boolean {
   return false;
 }
 
+/**
+ * Quote removal is the last step of shell word expansion, and it glues
+ * whatever sat on either side of a quote pair into one word: `--for""ce`,
+ * `--for''ce` and `-"-"force` all reach git as `--force`, with no
+ * `--force` substring ever appearing in the raw command text a regex would
+ * scan. Stripping every quote character before the rule-2 checks run reads
+ * the segment the way git will — the same "read it the way the shell will"
+ * move the `$'...'` decode above and the `+refspec` backslash-strip below
+ * already make. Stripping can only pull characters together, never hide
+ * one, so it costs nothing a substring check over the raw text was not
+ * already blind to.
+ */
+function stripSpliceQuotes(text: string): string {
+  return text.replace(/['"]/g, '');
+}
+
+/** A `{a,b}` list or `{a..b}` range — bash brace expansion, unexpanded. */
+const BRACE_EXPANSION_RE = /\{[^{}]*,[^{}]*\}|\{[^{}]+\.\.[^{}]+\}/;
+
+/**
+ * Subcommands rule 2 must not let a brace-expansion word slip through
+ * unexamined. `push` is the one this rule exists for; the rest write or move
+ * refs the same way a force push does and share the same operand shape.
+ */
+const BRACE_COVERED_SUBCOMMANDS = [
+  'push',
+  'rebase',
+  'reset',
+  'filter-branch',
+  'update-ref',
+  'branch',
+];
+
+/**
+ * `git push --fo{r,r}ce origin main` and `git push --for{c,}e origin main`
+ * both come back allowed with no violations at all: `FORCE_PUSH_RE` cannot
+ * see a flag spelled with a brace, and `splitChainSegments` — which rule 1
+ * reads its destination through — treats `{`/`}` as chain separators and
+ * slices `origin main` away from the segment before rule 1 ever looks at it.
+ * Rather than expand the brace ourselves (bash's expansion rules are
+ * involved, and a spec drifting out of step with them would reopen the same
+ * hole), a brace-shaped word anywhere in a covered segment is refused
+ * outright — fail closed on the word, not on a guess at what it expands to.
+ * That denial also covers rule 1's read: this rule sees the whole segment
+ * through `topLevelCommands`, which does not split on braces the way
+ * `splitChainSegments` does, so a brace word here is caught before rule 1's
+ * narrower view of the same segment would have missed it.
+ */
+function hasUnsafeBraceWord(segment: string): boolean {
+  return BRACE_COVERED_SUBCOMMANDS.some((subcommand) => {
+    if (!isGitSubcommand(segment, subcommand)) return false;
+    return gitTokens(segment, subcommand).some(
+      (token) =>
+        !isQuotedWith(token, "'") && !isQuotedWith(token, '"') && BRACE_EXPANSION_RE.test(token),
+    );
+  });
+}
+
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   // No `isGitSubcommand` gate: its `[^;&|]*` stops at a quoted separator, so
   // `git -c "a.b=;" push -f` never reached the flag test. Each segment below
@@ -1120,7 +1178,11 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
     // closed rather than guess at what it hides, the same direction as
     // `topLevelCommands`' own fallback for a construct it cannot read.
     if (decoded.unterminated) return /\bgit\b/i.test(segment);
-    const text = decoded.text;
+    // Read for a brace-expansion word before quotes are stripped, so a
+    // quoted brace (`"release-{1,2}"`, never expanded by the shell) is not
+    // caught by a check meant for the unquoted, expanding form.
+    if (hasUnsafeBraceWord(decoded.text)) return true;
+    const text = stripSpliceQuotes(decoded.text);
     if (definesInlineGitAlias(text)) return true;
     const withoutStash = text.replace(/\bstash\s+push\b/gi, 'stash');
     if (!GIT_PUSH_ANYWHERE_RE.test(withoutStash)) return false;
