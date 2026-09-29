@@ -20,10 +20,11 @@ const MANUAL_REFRESH_PAGES = [
     name: 'Task detail',
     path: `/tasks/${encodeURIComponent('epic-9/task-3')}`,
     ready: 'Task detail sections',
+    api: '/api/tasks/',
   },
-  { name: 'Lessons', path: '/lessons', ready: null },
-  { name: 'Errors', path: '/errors', ready: null },
-  { name: 'Analytics', path: '/analytics', ready: null },
+  { name: 'Lessons', path: '/lessons', ready: null, api: '/api/lessons' },
+  { name: 'Errors', path: '/errors', ready: null, api: '/api/errors' },
+  { name: 'Analytics', path: '/analytics', ready: null, api: '/api/analytics' },
 ] as const;
 
 test.describe('Manual refresh (design-spec §8)', () => {
@@ -49,7 +50,20 @@ test.describe('Manual refresh (design-spec §8)', () => {
 
   for (const surface of MANUAL_REFRESH_PAGES) {
     test(`${surface.name} keeps its content on screen while refreshing`, async ({ page }) => {
+      // The route is lazy-loaded (router.ts's `component: () => import(...)`),
+      // so goto() can resolve, and even surface.ready's landmark can go
+      // visible, before the page's own load() has run at all -- the skeleton
+      // check below would then pass for having nothing mounted yet rather
+      // than for having real content. The page's `loading` gate is
+      // `data.value === null` (see e.g. ErrorsPage.vue's load()), so the
+      // skeleton this test forbids during refresh is only actually avoidable
+      // once the first fetch has landed and data is non-null. Wait for that
+      // fetch -- armed before goto() so it cannot be missed -- before
+      // touching anything else.
+      const initialLoad = page.waitForResponse((r) => r.url().includes(surface.api));
       await page.goto(surface.path);
+      await initialLoad;
+
       if (surface.ready) {
         await expect(page.getByRole('tablist', { name: surface.ready })).toBeVisible();
       }
@@ -61,7 +75,12 @@ test.describe('Manual refresh (design-spec §8)', () => {
         await new Promise((resolve) => setTimeout(resolve, 1500));
         await route.continue();
       });
+      // Resolves the moment the refetch is issued, so the read below lands
+      // inside load()'s in-flight window instead of racing the click itself
+      // (kanban.spec.ts's "a failing refresh..." idiom).
+      const inFlight = page.waitForRequest((r) => r.url().includes(surface.api));
       await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await inFlight;
 
       // Read synchronously, inside the route's hold. A retrying matcher would
       // go green the moment the refetch lands -- which is precisely the
