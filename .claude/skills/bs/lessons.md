@@ -3,9 +3,12 @@
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
 none of it is restated here.
 
-1. `smith lessons candidates [--session <id>] [--db state/smith.db]` —
-   pending candidates with their statement, type, scope, and evidence/
-   provenance event ids.
+1. `smith lessons candidates [--session <id>] [--db state/smith.db]
+   [--state-dir <dir>]` — pending candidates with their statement, type,
+   scope, and evidence/provenance event ids. `--state-dir` matters whenever
+   `--session` is given: it is validated against that event log the same
+   way `raise`/`approve`/`reject`/`db rebuild` do, so a typoed session id
+   fails loudly instead of silently reading back an empty list.
 2. Present each to the operator. Approve, edit, or reject is **always**
    their call — nothing here self-modifies an agent
    (architecture §9.4, the memory-poisoning safety boundary).
@@ -55,9 +58,20 @@ none of it is restated here.
 5. Once a batch is approved, recompile the committed file:
    `smith lessons compile [--session <id>] [--db state/smith.db]` —
    regenerates `factory/policies/lessons.md` from every `approved` lesson,
-   sectioned by scope (architecture §9.5). Commit the regenerated file — it
-   is the file every later dispatch reads (`smith lessons for-dispatch`), so
-   an approved-but-uncompiled lesson reaches nobody.
+   sectioned by scope (architecture §9.5). Entry preservation is
+   insertions-only: an entry already there with no store row (hand-
+   authored, or raised before the store existed) is preserved verbatim, not
+   dropped. If an existing entry can't be parsed, or carries a `lesson_id`
+   under a `## ` heading compile doesn't recognize as a scope, compile
+   refuses rather than silently losing it — fix the heading or remove the
+   entry by hand, then recompile. The rest of the file is **not**
+   preserved verbatim: the header above the first scope section is always
+   regenerated from a fixed template, and any prose sitting between a
+   `## <scope>` heading and its first `### ` entry is dropped — don't
+   hand-edit either expecting it to survive a compile.
+   Commit the regenerated file — it is the file every later dispatch reads
+   (`smith lessons for-dispatch`), so an approved-but-uncompiled lesson
+   reaches nobody.
 6. After a compile — or whenever `lessons.md` has grown enough that nobody
    reads it — ask which entries still earn their place:
    `smith lessons audit <session-id> [--lessons <file>] [--state-dir <dir>]`.
