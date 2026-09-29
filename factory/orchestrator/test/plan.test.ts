@@ -991,8 +991,8 @@ describe("draftNextVersion's edges vs the tasks the version still declares", () 
   // any task with a declared dependency completes writes a version that fails
   // validation on an id the file no longer mentions -- and plans are
   // immutable, so there is nothing to edit and no way out.
-  function edge(task: string, dependsOn: string) {
-    return { task, dependsOn, edge_type: 'artifact', edge_provenance: 'declared' };
+  function edge(task: string, dependsOn: string, overrides: Record<string, unknown> = {}) {
+    return { task, dependsOn, edge_type: 'artifact', edge_provenance: 'declared', ...overrides };
   }
 
   function planWith(tasks: TaskSpecRecord[], edges: PlanFile['edges']): PlanFile {
@@ -1018,11 +1018,10 @@ describe("draftNextVersion's edges vs the tasks the version still declares", () 
     expect(validatePlan(v2)).toEqual({ valid: true });
   });
 
-  it('keeps an edge onto a superseded task, which the version still declares', () => {
-    // Superseding a completed task carries it forward as `superseded` rather
-    // than dropping it, so the edge still names a task in the file and the
-    // history stays readable. Only the ids that actually left may take their
-    // edges with them.
+  it('keeps an edge unchanged when the supersede keeps the same task_id (#234)', () => {
+    // The common amendment: the replacement keeps the old id (D-121), so the
+    // edge already names the id the live spec still lives under. Nothing to
+    // rewire.
     const v1 = planWith(
       [
         task({ task_id: 'epic-1/task-1', task_status: 'completed' }),
@@ -1032,11 +1031,106 @@ describe("draftNextVersion's edges vs the tasks the version still declares", () 
     );
 
     const v2 = draftNextVersion(v1, {
-      supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-1b' }) },
+      supersede: {
+        'epic-1/task-1': task({ task_id: 'epic-1/task-1', objective: 'Do the thing better.' }),
+      },
     });
 
     expect(v2.edges).toEqual([edge('epic-1/task-2', 'epic-1/task-1')]);
     expect(validatePlan(v2)).toEqual({ valid: true });
+  });
+
+  it('rewires an edge onto a supersede that changes the task_id, so the dependent can still resolve it (#234)', () => {
+    // When the replacement takes a *different* id, the old id is only
+    // declared here as a dead `superseded` record -- `livePlanTasks` (and so
+    // `computeNextWave`'s done set) drops it entirely. An edge still naming
+    // the old id would name a task that can never become terminal, so B's
+    // dependency on A must move to A2, not stay pinned to the id A left
+    // behind.
+    const v1 = planWith(
+      [
+        task({ task_id: 'epic-1/task-1' }), // A
+        task({ task_id: 'epic-1/task-2' }), // B, depends on A
+      ],
+      [edge('epic-1/task-2', 'epic-1/task-1')], // B -> A
+    );
+
+    const v2 = draftNextVersion(v1, {
+      supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-1b' }) }, // A -> A2
+    });
+
+    expect(v2.edges).toEqual([edge('epic-1/task-2', 'epic-1/task-1b')]); // B -> A2
+    expect(validatePlan(v2)).toEqual({ valid: true });
+  });
+
+  it('drops a rewired carried edge that would duplicate one in newEdges, keeping the newEdges copy (#234)', () => {
+    const v1 = planWith(
+      [task({ task_id: 'epic-1/task-1' }), task({ task_id: 'epic-1/task-2' })],
+      [edge('epic-1/task-2', 'epic-1/task-1')],
+    );
+    const authoredEdge = edge('epic-1/task-2', 'epic-1/task-1b', { edge_provenance: 'inferred' });
+
+    const v2 = draftNextVersion(v1, {
+      supersede: { 'epic-1/task-1': task({ task_id: 'epic-1/task-1b' }) },
+      newEdges: [authoredEdge],
+    });
+
+    // Rewiring the carried edge would produce the same (task, dependsOn) pair
+    // as `authoredEdge`. Only one edge survives, and it is the author's.
+    expect(v2.edges).toEqual([authoredEdge]);
+  });
+
+  it('drops a carried edge that would become a self-edge once both ends rewire to the same replacement (#234)', () => {
+    const v1 = planWith(
+      [task({ task_id: 'epic-1/task-1' }), task({ task_id: 'epic-1/task-2' })],
+      [edge('epic-1/task-2', 'epic-1/task-1')],
+    );
+
+    const v2 = draftNextVersion(v1, {
+      supersede: {
+        'epic-1/task-1': task({ task_id: 'epic-1/task-merged' }),
+        'epic-1/task-2': task({ task_id: 'epic-1/task-merged' }),
+      },
+    });
+
+    expect(v2.edges).toEqual([]);
+  });
+
+  it('keeps two carried edges on the same pair with different edge_type, rather than collapsing them (#234)', () => {
+    // taskEvents.ts's edgeKey (and edgesAlreadyRecorded's doc comment) treat
+    // task+dependsOn+edge_type as the triple that identifies an edge: an
+    // `artifact` handoff and a `claim-order` handoff between the same two
+    // tasks are two different claims and both belong in the log. Dedup here
+    // must use that same triple, not just the pair.
+    const v1 = planWith(
+      [task({ task_id: 'epic-1/task-1' }), task({ task_id: 'epic-1/task-2' })],
+      [
+        edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' }),
+        edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'claim-order' }),
+      ],
+    );
+
+    const v2 = draftNextVersion(v1, { added: [task({ task_id: 'epic-1/task-3' })] });
+
+    expect(v2.edges).toEqual([
+      edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' }),
+      edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'claim-order' }),
+    ]);
+  });
+
+  it('keeps a carried edge whose newEdges collision only matches on task+dependsOn, not edge_type (#234)', () => {
+    const v1 = planWith(
+      [task({ task_id: 'epic-1/task-1' }), task({ task_id: 'epic-1/task-2' })],
+      [edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' })],
+    );
+    const claimOrderEdge = edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'claim-order' });
+
+    const v2 = draftNextVersion(v1, { newEdges: [claimOrderEdge] });
+
+    expect(v2.edges).toEqual([
+      edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' }),
+      claimOrderEdge,
+    ]);
   });
 
   it('reports a new edge naming an unknown task rather than quietly dropping it', () => {

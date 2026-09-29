@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ClaimsError, validateWave, type WorktreePolicy } from '../src/claims.js';
-import type { PlanDependencyEdge, PlanFile } from '../src/plan.js';
+import {
+  draftNextVersion,
+  type PlanDependencyEdge,
+  type PlanFile,
+  type TaskSpecRecord,
+} from '../src/plan.js';
 import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../src/taskStatus.js';
 import { computeNextWave, liveWaveTasks } from '../src/waveNext.js';
 
@@ -94,6 +99,42 @@ describe('computeNextWave — the widest wave the graph allows', () => {
     const result = computeNextWave({ plan, policy: POLICY });
     expect(result.wave).toEqual(['t2']);
     expect(result.done).toEqual(['t1']);
+  });
+
+  it('admits a dependent once a re-cut dependency (different task_id) completes (#234)', () => {
+    // B depends on A. A is superseded by A2 -- a *different* task_id, the
+    // shape a re-cut task takes. `draftNextVersion` has to rewire B's edge
+    // onto A2, or A2 completing never unblocks B: A only survives the new
+    // version as a dead `superseded` record, which `livePlanTasks` (and so
+    // this function's done set) drops entirely.
+    const v1 = planOf(
+      [
+        { id: 'a', claims: ['src/a/**'] },
+        { id: 'b', claims: ['src/b/**'] },
+      ],
+      [edge('b', 'a')],
+    );
+
+    const v2 = draftNextVersion(v1, {
+      supersede: {
+        a: {
+          task_id: 'a2',
+          task_status: 'todo',
+          plan_version: 1,
+          claims: ['src/a/**'],
+        } as TaskSpecRecord,
+      },
+    });
+
+    const result = computeNextWave({
+      plan: v2,
+      policy: POLICY,
+      statusById: new Map([['a2', 'completed']]),
+    });
+
+    expect(result.wave).toEqual(['b']);
+    expect(result.deferred).toEqual([]);
+    expect(result.done).toEqual(['a2']);
   });
 
   it('counts a waived dependency as landed — a decision is terminal too', () => {
