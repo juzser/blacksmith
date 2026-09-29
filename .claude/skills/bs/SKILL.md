@@ -100,6 +100,63 @@ you parse it, too: piping a write verb straight into its consumer means a
 broken pipe on the reading end can kill the process after the append
 already committed, and a naive retry then double-appends.
 
+## Talking to the operator
+
+This binds every reply you give the operator in chat — hard stops,
+decisions, status, waiver batches, clarifying questions — and every document
+written for a person to read: the `/bs report` digest and the epic's
+integration PR body. It does not bind machine-facing text: agent briefs,
+event payloads, `structured_output`, JSON.
+
+- **Ground it in the operator's own terms.** Explain through their task and
+  their prompt, not Blacksmith's vocabulary — wave, lineage, claims, judge
+  turn, fingerprint, S1–S4, waiver, causal parent, and the like. When an
+  internal term cannot be avoided, say in plain words what it means for
+  their project the first time it appears, or reach for a real-life
+  comparison.
+- **Write for a reader with little technical background.** Short sentences,
+  little raw technical writing. Say what happened, why it matters, and what
+  decision is needed; when a decision is needed, give the options and what
+  each one leads to.
+- **Plain explanation first, technical details after.** The explanation
+  opens with the result, or the decision the operator needs to make.
+  Commands, error codes, task ids, file paths and event ids go in a short
+  trailing "Technical details" part. A command the operator must run is the
+  exception — it stays inline, where they need it.
+- **Restate where things stand.** State the current state in the
+  operator's own terms whenever it changes, e.g. "checkout work, part 2 of
+  3: 4 of 6 pieces done" — the operator cannot hold state between messages.
+- **Number multi-step replies.** When a reply asks for more than one thing
+  or walks through more than one step, number the steps, one action per
+  step, using the fewest steps that still work.
+- **State errors plainly.** What broke, why, and the fix, in plain words —
+  skip "oops" and "unfortunately".
+- **Keep lists short.** About 5 items, most important first; hold the rest
+  back and show it on request rather than dropping it.
+- **Language.** Reply in the language the operator writes in.
+- **Ask before acting.** When the request is unclear, ask one short
+  question rather than guessing; before a destructive or irreversible step,
+  confirm first. The question follows the same rules.
+- **Confidence on options.** When you offer the operator options and
+  recommend one, every option's title — not only the recommended one —
+  carries a confidence figure for how well it fits their goal, judged on
+  its own (the figures need not add to 100): `Keep the current layout
+  (Recommended · 80%)`, `Rebuild the page · 35%`. The recommended option
+  has the highest figure, and its one-line description says briefly what
+  the figure rests on.
+- **Pre-send check.** Drop any announcing first sentence, recap of what you
+  just did, or closing pleasantry; then check that the first and last lines
+  alone tell the reader what happened and what comes next.
+
+Some phrasing ideas drawn from ayghri/i-have-adhd (MIT) where they served the
+rules above; it is a reference, not a rule set of its own.
+
+Example — Jargon: "Task checkout-3 is blocked: S3 finding on claim overlap,
+waiver pending." Plain: "One part of your project is on hold because two
+changes touched the same file and I'm not sure which should win. I need
+you to say which one to keep. Technical details: task checkout-3, S3
+finding, waiver pending."
+
 ## Playbooks
 
 Each subcommand is a file of its own beside this one, read when that verb

@@ -124,6 +124,31 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
     expect(step).not.toContain('report.md');
     expect(prose).toMatch(/PR body/i);
   });
+
+  it('opens the PR body with a plain-language summary before the technical sections', () => {
+    // Read the console's rule before writing the prose that cites it.
+    const skillIndex = prose.indexOf('Talking to the operator');
+    const summaryIndex = prose.search(/opens with/i);
+    expect(skillIndex).toBeGreaterThanOrEqual(0);
+    expect(summaryIndex).toBeGreaterThanOrEqual(0);
+    // The plain-language opening is named before the existing fact
+    // sections ("**Summary**" the technical paragraph, "**Tasks**", etc.).
+    const factSectionsIndex = prose.indexOf('**Summary**');
+    expect(summaryIndex).toBeLessThan(factSectionsIndex);
+  });
+
+  it("cites SKILL.md's operator-language section rather than restating it", () => {
+    expect(prose).toMatch(/SKILL\.md/);
+    expect(prose).toMatch(/Talking to the operator/);
+    // No duplicated Jargon:/Plain: example from the rule itself.
+    expect(prose).not.toMatch(/Jargon:/);
+  });
+
+  it('says what changed, what is still open, and what decision is needed', () => {
+    expect(prose).toMatch(/what (this epic )?changed/i);
+    expect(prose).toMatch(/still open/i);
+    expect(prose).toMatch(/decide|decision/i);
+  });
 });
 
 describe("scribe.md's mission carries the omit-never-infer rule (#252)", () => {

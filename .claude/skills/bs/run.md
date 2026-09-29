@@ -399,7 +399,16 @@ playbooks are written to prevent.
     the pack is wrong, rebuild it and dispatch again; do not let the scribe
     reach past it into `state/events/`.
 
-    The PR body has this shape and nothing else: **Summary** (the epic id
+    The PR body opens with a short plain-language summary, written under
+    `.claude/skills/bs/SKILL.md`'s "Talking to the operator" section — cite
+    that section for how to write it, do not restate its rule here. In the
+    project's own terms, not Blacksmith's: what this epic changed, what is
+    still open, and what decision the operator must make, if any. The
+    existing fact sections below follow it as the technical part the rule
+    asks for.
+
+    The PR body has this shape and nothing else: the plain-language opening
+    above; **Summary** (the epic id
     and its goal, one paragraph); **Tasks** (one line per task: id,
     `task_status`, and its `wave-merged` event id when it has one);
     **Waivers** (granted and denied, each with its finding id and event id,
