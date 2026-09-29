@@ -388,20 +388,25 @@ export function foldAgents(events: readonly StoredEvent[]): AgentRecord[] {
       const payload = record.payload as {
         task_ref?: string;
         agent_role?: string;
+        agent?: string;
         epic_id?: string;
       };
       // `task_ref` is this event's own spelling; eventTaskId covers the two
-      // the rest of the log uses (D-245).
+      // the rest of the log uses (D-245). `agent_role` is the dispatch's own
+      // key and this event's usual spelling, but a hand-written one may only
+      // carry `agent` (the Result file's spelling) -- symmetric with
+      // task-result-recorded above, so either key alone still finds the role.
       const taskId = eventTaskId(record) ?? payload.task_ref;
+      const role = payload.agent_role ?? payload.agent ?? null;
       if (taskId) {
-        closeOpen(open, taskId, payload.agent_role ?? null, event_id, record.ts, 'error');
-      } else if (payload.agent_role) {
+        closeOpen(open, taskId, role, event_id, record.ts, 'error');
+      } else if (role) {
         // Only with a role: a session-level error names nobody, and every
         // epic-level agent stays where it was.
         closeOpenEpicLevel(
           openEpicLevel,
           record.session_id,
-          payload.agent_role,
+          role,
           payload.epic_id,
           event_id,
           record.ts,
