@@ -10610,6 +10610,126 @@ describe('cli.ts (built binary)', () => {
       const result = JSON.parse(stdout);
       expect(result.branch).toBe('smith/epic-from2/task-1-v2');
     });
+
+    // The bug this pins: a plan amended twice before the intermediate
+    // successor is ever cut. v2 pairs task-1 -> task-1-v2, v3 pairs
+    // task-1-v2 -> task-1-v3, and task-1-v2 itself never gets a worktree.
+    // `taskSuccessors` only ever holds each amendment's own one-hop pairing,
+    // so `--from task-1` has to walk both hops to see task-1-v3 as task-1's
+    // successor at all.
+    it('is accepted across a two-hop supersede chain when the intermediate task was never cut', () => {
+      const sessionId = `cli-from-chain-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-chain-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      const v2 = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 2,
+        causal_parent: parent,
+        payload: {
+          epic_id: 'epic-from3',
+          version: 2,
+          previous_version: 1,
+          successors: { 'epic-from3/task-1': 'epic-from3/task-1-v2' },
+        },
+      });
+      append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 3,
+        causal_parent: v2,
+        payload: {
+          epic_id: 'epic-from3',
+          version: 3,
+          previous_version: 2,
+          successors: { 'epic-from3/task-1-v2': 'epic-from3/task-1-v3' },
+        },
+      });
+
+      runOrThrow(
+        'git',
+        [
+          'worktree',
+          'add',
+          '-b',
+          'smith/epic-from3/task-1',
+          path.join(scratchDir, 'wt', 'from3-pred'),
+          'main',
+        ],
+        { cwd: projectDir },
+      );
+
+      const { stdout, status } = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from3',
+        'task-1-v3',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status, stdout).toBe(0);
+      const result = JSON.parse(stdout);
+      expect(result.branch).toBe('smith/epic-from3/task-1-v3');
+    });
+
+    // A logged chain existing at all must not loosen the check into "any task
+    // this epic ever amended" -- an id that never appears on `from`'s own
+    // chain is still refused.
+    it('is refused for a task off the chain even when other successors are logged', () => {
+      const sessionId = `cli-from-offchain-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-offchain-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 2,
+        causal_parent: parent,
+        payload: {
+          epic_id: 'epic-from4',
+          version: 2,
+          previous_version: 1,
+          successors: { 'epic-from4/task-1': 'epic-from4/task-1-v2' },
+        },
+      });
+
+      const { stdout, status } = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from4',
+        'task-unrelated',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(status).toBe(1);
+      expect(JSON.parse(stdout).error.code).toBe('worktree.not-a-successor');
+    });
   });
 
   // D-40/P9-25: the gate's coverage evidence, reachable without staging a

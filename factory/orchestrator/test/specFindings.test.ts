@@ -30,6 +30,7 @@ import { MCP_SURFACE_NOT_REQUIRED } from '../src/mcp.js';
 import type { PlanChanges, PlanFile } from '../src/plan.js';
 import {
   amendPlan,
+  isTaskInSuccessorChain,
   latestSpecReview,
   PLAN_AMENDED_EVENT,
   recordSpecReview,
@@ -1091,6 +1092,59 @@ describe('spec-scoped findings (P9-9)', () => {
 
         expect(result.warnings).toEqual([]);
       });
+    });
+  });
+
+  // `worktree create --from` spends a predecessor's commits only on a task the
+  // log names as its successor (cli.ts's `worktree.not-a-successor`). A plan
+  // amended twice before the intermediate successor is ever cut leaves
+  // `taskSuccessors` with two independent one-hop entries and no direct entry
+  // at all from the first task to the last -- these pin the chain walk that
+  // reads those hops as one relationship instead of refusing the transitive
+  // case.
+  describe('isTaskInSuccessorChain — multi-hop successor lookup (worktree create --from)', () => {
+    it('still accepts the direct, one-hop successor', () => {
+      const successors = new Map([['demo/task-a', 'demo/task-b']]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-b', successors)).toBe(true);
+    });
+
+    it('accepts a two-hop chain: A superseded by B, B (never cut) superseded by C', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-c', successors)).toBe(true);
+    });
+
+    it('refuses a task with no successor relationship on the chain at all', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-x', successors)).toBe(false);
+    });
+
+    it('refuses walking backwards: a predecessor of `from` is not on its successor chain', () => {
+      const successors = new Map([['demo/task-a', 'demo/task-b']]);
+      // task-a is task-b's predecessor, not its successor -- the map only
+      // ever gets walked forward, value to value, never key to key.
+      expect(isTaskInSuccessorChain('demo', 'task-b', 'task-a', successors)).toBe(false);
+    });
+
+    it('does not spin on a cycle -- reports no match instead of hanging', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-a'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-x', successors)).toBe(false);
+    });
+
+    it('matches across bare and epic-qualified id spellings at every hop (D-46/P9-29)', () => {
+      const successors = new Map([
+        ['task-a', 'demo/task-b'],
+        ['demo/task-b', 'task-c'],
+      ]);
+      expect(isTaskInSuccessorChain('demo', 'task-a', 'task-c', successors)).toBe(true);
     });
   });
 

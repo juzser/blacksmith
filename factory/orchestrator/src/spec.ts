@@ -25,6 +25,7 @@ import {
   transition,
 } from './findings.js';
 import {
+  bareTaskId,
   diffPlans,
   draftNextVersion,
   livePlanTasks,
@@ -181,6 +182,54 @@ export function taskSuccessors(
     }
   }
   return successors;
+}
+
+/**
+ * Walks `taskSuccessors`' one-hop map forward from `from` and answers whether
+ * `target` sits anywhere on that chain — not only at the first hop.
+ * `worktree create --from` (cli.ts's `worktree.not-a-successor` guard) used
+ * to ask `successors.get(from)` alone, which only ever names the *direct*
+ * successor: a plan amended twice before the intermediate successor is ever
+ * cut — A superseded by B in v6, B superseded by C in v7, B never cut —
+ * leaves `taskSuccessors` with two independent one-hop entries (A -> B,
+ * B -> C) and no direct A -> C entry at all, so cutting C `--from A` was
+ * refused despite the log naming C as A's transitive successor.
+ *
+ * Mirrors epic.ts's `resolveSupersededRow`, the chain walk this codebase
+ * already has: keys are normalized to their bare form once (`successors`
+ * entries can be bare or `${epicId}/${id}` at any hop, D-46/P9-29), so each
+ * hop after that is one lookup against the normalized map — the same "check
+ * both spellings" the caller's old single-hop lookup did, done once instead
+ * of re-derived every hop. A cycle — a successor id already visited — stops
+ * the walk and reports no match, the same fail-closed answer as a chain that
+ * simply runs out; a malformed log must never spin.
+ *
+ * Directional only: this walks forward from `from`, value to value, never a
+ * hop's key. A `target` that is a predecessor of `from` is therefore never
+ * found, however far back it sits — `--from` claims a task's own future, not
+ * its past.
+ */
+export function isTaskInSuccessorChain(
+  epicId: string,
+  from: string,
+  target: string,
+  successors: ReadonlyMap<string, string>,
+): boolean {
+  const bareSuccessors = new Map(
+    [...successors].map(([oldId, newId]) => [bareTaskId(epicId, oldId), newId] as const),
+  );
+  const targetBare = bareTaskId(epicId, target);
+  const visited = new Set<string>([bareTaskId(epicId, from)]);
+  let currentId = bareTaskId(epicId, from);
+  for (;;) {
+    const nextId = bareSuccessors.get(currentId);
+    if (nextId === undefined) return false;
+    const nextBare = bareTaskId(epicId, nextId);
+    if (nextBare === targetBare) return true;
+    if (visited.has(nextBare)) return false;
+    visited.add(nextBare);
+    currentId = nextBare;
+  }
 }
 
 /**

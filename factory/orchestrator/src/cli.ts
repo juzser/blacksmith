@@ -128,7 +128,6 @@ import {
   STATE_DB_PATH,
 } from './paths.js';
 import {
-  bareTaskId,
   diffPlans,
   impliedSpecsDir,
   latestPlanVersion,
@@ -174,7 +173,7 @@ import {
   securityTriggers,
 } from './security.js';
 import { parseLessons } from './severity.js';
-import { amendPlan, recordSpecReview, taskSuccessors } from './spec.js';
+import { amendPlan, isTaskInSuccessorChain, recordSpecReview, taskSuccessors } from './spec.js';
 import {
   approveSpecChange,
   listSpecChanges,
@@ -2274,9 +2273,12 @@ async function main(): Promise<number> {
       const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
       const successors = taskSuccessors(events, epic);
       const from = flags.from;
-      const expected = bareTaskId(epic, taskId);
-      const actual = successors.get(from) ?? successors.get(`${epic}/${from}`);
-      if (actual === undefined || bareTaskId(epic, actual) !== expected) {
+      // Walks the successor chain hop by hop (spec.ts's
+      // `isTaskInSuccessorChain`) rather than asking about the direct
+      // successor alone: a plan amended twice before the intermediate
+      // successor is ever cut still names `taskId` as `from`'s transitive
+      // successor, and the log is the register this guard is answerable to.
+      if (!isTaskInSuccessorChain(epic, from, taskId, successors)) {
         throw new SmithError(
           'worktree.not-a-successor',
           `${epic}/${taskId} is not logged as the successor of ${epic}/${from}; run \`plan propose\`/\`plan approve\` with a supersede pairing them first.`,
