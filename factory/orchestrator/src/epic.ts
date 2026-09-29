@@ -1145,7 +1145,14 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
         (c) => `  ${c.taskId} — waived findings: ${c.waivedFindingIds.join(', ')}`,
       ),
     ),
-    `Findings closed by waiver or amendment: ${summary.discretionaryFindings.length}`,
+    // bs quorum misread: this line sits right above the satisfiedAmendments
+    // line below, and a cross-provider judge read "closed by ... amendment: 0"
+    // next to "this close marks them amended: N" as the digest contradicting
+    // itself. Both counts were right; this one counts closures a person
+    // already made BEFORE this close, the other counts what THIS close is
+    // about to transition -- the label has to say which side of "this close"
+    // it counts, not just what closed the finding.
+    `Findings already closed by waiver or amendment before this close: ${summary.discretionaryFindings.length}`,
     ...listOr(summary.discretionaryFindings.map(findingLine)),
     // bs #222: this line sits right under "Open findings: 0", and a
     // cross-provider judge read the earlier "Amendments this close will
