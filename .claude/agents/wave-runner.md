@@ -4,7 +4,7 @@ description: Runs one admitted wave of an epic — worktrees through merge queue
 model: sonnet
 effort: medium
 tools: Read, Write, Bash, Grep, Glob, Agent(coder, tester, grader, reviewer, verifier, security-reviewer, uiux, researcher, merger, scribe)
-maxTurns: 60
+maxTurns: 150
 ---
 
 # Wave runner

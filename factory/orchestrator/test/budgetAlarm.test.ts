@@ -17,11 +17,19 @@ import type { StoredEvent } from '../src/events.js';
 // ---------------------------------------------------------------------------
 
 const POLICY: BudgetPolicy = {
+  tier: 'medium',
   epic: { capTokens: 1_000_000, alarmRatio: 0.7, maxInFlightTasks: null },
   task: {
     coder: { capTokens: 150_000, capDiffLines: 400 },
+    tester: { capTokens: 60_000 },
+    planner: { capTokens: 110_000 },
     researcher: { capTokens: 60_000 },
-    judges: { capTokens: 40_000 },
+    'spec-reviewer': { capTokens: 40_000 },
+    grader: { capTokens: 40_000 },
+    reviewer: { capTokens: 40_000 },
+    verifier: { capTokens: 40_000 },
+    'security-reviewer': { capTokens: 80_000 },
+    auditor: { capTokens: 90_000 },
   },
   preCodeBudget: { shareOfEpicBudgetMax: 0.15 },
   escalationLadder: [],
@@ -292,20 +300,85 @@ describe('checkBudgetAlarm', () => {
   });
 
   it('is unverifiable when a dispatched role has no declared cap', () => {
-    // budgets.yml prices coder, researcher and four named judges. The factory
-    // also dispatches security-reviewer, merger, tester and uiux. A role the
-    // policy is silent about cannot be projected, and a projection with a hole
-    // in it is not an upper bound.
+    // budgets.yml prices ten roles. The factory also dispatches merger, uiux,
+    // scribe and wave-runner. A role the policy is silent about cannot be
+    // projected, and a projection with a hole in it is not an upper bound.
     seq = 0;
     const report = checkBudgetAlarm(
-      [waveAdmitted('epic-1', ['task-1']), dispatch('security-reviewer', 'task-1')],
+      [waveAdmitted('epic-1', ['task-1']), dispatch('merger', 'task-1')],
       POLICY,
       OPTS,
     );
     const epic = report.epics[0];
     expect(epic?.status).toBe('unverifiable');
-    expect(epic?.rolesWithoutCap).toEqual(['security-reviewer']);
+    expect(epic?.rolesWithoutCap).toEqual(['merger']);
     expect(report.ok).toBe(false);
+  });
+
+  it('prices a planner, tester, auditor or security-reviewer dispatch from its own cap', () => {
+    // Before per-role caps these four had no price, so any epic that
+    // dispatched one could only ever report unverifiable.
+    seq = 0;
+    const report = checkBudgetAlarm(
+      [
+        waveAdmitted('epic-1', ['task-1']),
+        dispatch('planner', 'task-1'),
+        dispatch('tester', 'task-1'),
+        dispatch('auditor', 'task-1'),
+        dispatch('security-reviewer', 'task-1'),
+      ],
+      POLICY,
+      OPTS,
+    );
+    const epic = report.epics[0];
+    expect(epic?.rolesWithoutCap).toEqual([]);
+    expect(epic?.projectedFrom).toEqual({
+      auditor: 90_000,
+      planner: 110_000,
+      'security-reviewer': 80_000,
+      tester: 60_000,
+    });
+    expect(epic?.projectedTokens).toBe(340_000);
+    expect(epic?.status).toBe('under');
+    expect(report.ok).toBe(true);
+  });
+
+  it('treats a tester as a worker: its measured result pays for one dispatch', () => {
+    seq = 0;
+    const report = checkBudgetAlarm(
+      [waveAdmitted('epic-1', ['task-1']), result('task-1', 50_000), dispatch('tester', 'task-1')],
+      POLICY,
+      OPTS,
+    );
+    expect(report.epics[0]?.projectedFrom).toEqual({});
+  });
+
+  it('judges each epic against the policy for its own tier when given one', () => {
+    seq = 0;
+    const small: BudgetPolicy = {
+      ...POLICY,
+      tier: 'small',
+      epic: { ...POLICY.epic, capTokens: 100_000 },
+      task: { ...POLICY.task, coder: { capTokens: 75_000, capDiffLines: 200 } },
+    };
+    const report = checkBudgetAlarm(
+      [
+        waveAdmitted('epic-a', ['task-a']),
+        waveAdmitted('epic-b', ['task-b']),
+        dispatch('coder', 'task-a'),
+        dispatch('coder', 'task-b'),
+      ],
+      POLICY,
+      { ...OPTS, policyForEpic: (epicId: string) => (epicId === 'epic-a' ? small : POLICY) },
+    );
+    const [a, b] = report.epics;
+    expect(a?.epicId).toBe('epic-a');
+    expect(a?.capTokens).toBe(100_000);
+    expect(a?.projectedFrom).toEqual({ coder: 75_000 });
+    expect(a?.status).toBe('at-risk');
+    expect(b?.capTokens).toBe(1_000_000);
+    expect(b?.projectedFrom).toEqual({ coder: 150_000 });
+    expect(b?.status).toBe('under');
   });
 
   it('still fires the alarm when measured spend crosses it despite a priceless role', () => {
@@ -314,11 +387,7 @@ describe('checkBudgetAlarm', () => {
     // a fact behind an unknown.
     seq = 0;
     const report = checkBudgetAlarm(
-      [
-        waveAdmitted('epic-1', ['task-1']),
-        result('task-1', 800_000),
-        dispatch('security-reviewer', 'task-1'),
-      ],
+      [waveAdmitted('epic-1', ['task-1']), result('task-1', 800_000), dispatch('merger', 'task-1')],
       POLICY,
       OPTS,
     );

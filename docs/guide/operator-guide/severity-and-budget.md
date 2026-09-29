@@ -54,16 +54,23 @@ quality KPI: same-mistake rate should trend to zero.
 
 ## 9. Budget alarms + the escalation ladder
 
-- **Per-epic cap: 4,000,000 tokens** (planner + all workers + judges),
-  raised from 2,000,000 on 2026-08-11 after the `envkit-mcp-surface` dogfood
-  measured 1,529,963 tokens for its two *smallest* tasks. That raise was an
-  operator decision, recorded beside the number in `budgets.yml` along with
-  what it does not fix. Alarm at 70% (2.8M): the planner must re-plan
+- **Per-epic cap, sized per effort tier: 4,000,000 small / 16,000,000
+  medium / 32,000,000 huge** (planner + all workers + judges). The tier is
+  the plan's `effort`, else `effort.yml`'s `default_tier` (medium). The cap
+  was raised from 2,000,000 to 4,000,000 on 2026-08-11 after the
+  `envkit-mcp-surface` dogfood measured 1,529,963 tokens for its two
+  *smallest* tasks, and sized per tier on 2026-09-29 after eight medium-tier
+  dogfood epics (2026-09-14..29) peaked near 7.3M. Both were operator
+  decisions, recorded beside the number in `budgets.yml`. Alarm at 70%
+  (11.2M at medium): the planner must re-plan
   remaining work to fit, or ask you. Epics that can't fit are split into
   multiple epics at spec time — the cap is never silently extended. Checked
   by `smith budget alarm` (§9a); until 2026-08-10 nothing checked it at all.
-- **Per-task caps (coder): 150,000 tokens, ≤400 changed diff lines**
-  (excluding lockfiles/generated files). Hitting either is not a failure —
+- **Per-task caps (coder), medium tier: 220,000 tokens, ≤700 changed diff
+  lines** (excluding lockfiles/generated files); half at small, double at
+  huge. Every other priced role (tester, planner, researcher, the four judges,
+  security-reviewer, auditor) has its own per-tier token cap in
+  `budgets.yml`. Hitting either is not a failure —
   the coder stops, reports what's done, and the task returns to the planner
   for re-scoping (`budget-exceeded`, no retry at the same scope).
 - **Concurrency: uncapped by default.** Fan-out is limited by the path-claim
@@ -87,9 +94,12 @@ quality KPI: same-mistake rate should trend to zero.
 **Per-box overrides.** Each number above can be replaced on one machine without
 editing `budgets.yml`: `SMITH_EPIC_CAP_TOKENS`, `SMITH_EPIC_ALARM_RATIO`,
 `SMITH_EPIC_MAX_IN_FLIGHT_TASKS`, `SMITH_TASK_CODER_CAP_TOKENS`,
-`SMITH_TASK_CODER_CAP_DIFF_LINES`, `SMITH_TASK_RESEARCHER_CAP_TOKENS` and
-`SMITH_TASK_JUDGES_CAP_TOKENS`, set in `.env` or exported (an exported value
-beats `.env`). `.env.example` lists each at its `budgets.yml` default. This is
+`SMITH_TASK_CODER_CAP_DIFF_LINES` and one `SMITH_TASK_<ROLE>_CAP_TOKENS` per
+priced role, set in `.env` or exported (an exported value beats `.env`). Each
+name also comes with `_SMALL`, `_MEDIUM` and `_HUGE` variants. Highest first:
+the tier's suffixed name, then the bare name (which pins every tier), then
+`budgets.yml`'s number for the tier. `.env.example` ships every bare name
+empty and every tier variant commented out at its `budgets.yml` default. This is
 per box, not per epic: while set, it applies to every epic that box runs. Every
 verb reads the policy through one loader, so an override reaches all of them.
 Integers must be positive and the ratio must lie in (0, 1]; anything else stops
@@ -150,9 +160,11 @@ is under too, which is why an epic with an unpriceable dispatch comes back
 ### What makes an epic unverifiable
 
 - **A role `budgets.yml` prices nowhere** (`rolesWithoutCap`). The policy prices
-  `coder`, `researcher`, and the four judges named at `task.judges`. It does not
-  price `security-reviewer`, `merger`, `tester`, `uiux`, `planner` or `scribe`,
-  all of which the factory dispatches. Those dispatches are in neither number,
+  `coder`, `tester`, `planner`, `researcher`, the four judges,
+  `security-reviewer` and `auditor`. It does not price `merger`, `uiux`,
+  `scribe` or `wave-runner`, all of which the factory dispatches. (A policy
+  file that still carries the pre-2026-09-29 shared `task.judges` bucket is
+  read as the cap for each judge it does not price by name.) Those dispatches are in neither number,
   so the projection is not a ceiling.
 - **A dispatch no epic can be charged for** (`unattributedDispatches`). Its
   tokens are in nobody's total, so no epic's "under" is trustworthy.

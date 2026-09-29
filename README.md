@@ -339,8 +339,10 @@ runs, plus branch protection — not by trust. Full rules:
   branch solely through the serial merge queue.
 - **No autonomous deploy or outbound sends.** Deploys, publishes and message
   sends each need per-invocation approval.
-- **Budgets are declared per role.** 4M tokens per epic with an alarm at 70%;
-  150K tokens and 400 diff lines per coder task. Fan-out is bounded by the
+- **Budgets are declared per role and sized per effort tier.** A medium epic
+  gets 16M tokens with an alarm at 70%, and a coder task 220K tokens and 700
+  diff lines; a small epic gets half the task numbers and 4M, a huge one
+  double and 32M. Fan-out is bounded by the
   claim graph, and `max_in_flight_tasks` is available on top of it, off by
   default. Which of these *block* versus *report* is spelled out in
   [`factory/policies/budgets.yml`](factory/policies/budgets.yml) — the task cap

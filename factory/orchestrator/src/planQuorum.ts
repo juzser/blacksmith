@@ -565,7 +565,9 @@ export async function runPlanQuorum(
     );
   }
   const policy = input.crosscheck?.policy ?? loadCrosscheckPolicy();
-  const epicCapTokens = input.epicCapTokens ?? loadBudgetPolicy().epic.capTokens;
+  // The cap for this plan's own effort tier (default_tier when it names none).
+  const epicCapTokens =
+    input.epicCapTokens ?? loadBudgetPolicy(undefined, process.env, plan.effort).epic.capTokens;
   const triggers = evaluatePlanQuorumTriggers(plan, policy.planQuorum, epicCapTokens, {
     plannerConfidence: input.plannerConfidence,
   });

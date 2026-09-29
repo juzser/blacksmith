@@ -78,7 +78,7 @@ const NOT_ERROR_CODES: NotAnErrorCode[] = [
   {
     token: 'task.judges',
     reason:
-      "A key path in `budgets.yml`, not a code: the guide's budget section names the policy key that prices the four judges. `task` is an error namespace too (`task.unknown`, `task.not-claimed`), which is the only reason this collides.",
+      "A key path in `budgets.yml`, not a code: the guide's budget section names the legacy policy key that once priced the four judges together and is still read when a judge has no key of its own. `task` is an error namespace too (`task.unknown`, `task.not-claimed`), which is the only reason this collides.",
   },
 ];
 

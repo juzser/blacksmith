@@ -10,10 +10,18 @@
 // against the event log by src/escalation.ts. `context_window` and
 // `effort_scaling` are still prompt-level: agents read them from their own
 // templates, and nothing here parses them.
+//
+// Every number is sized per effort tier (effort.yml's small / medium / huge,
+// the tier being the epic plan's `effort`). budgets.yml declares the epic cap
+// as an explicit triplet and each task cap once, at medium, with one
+// `task_tier_scale` multiplying them for the other tiers. A policy is loaded
+// FOR a tier: parseBudgetPolicy / loadBudgetPolicy take it, and a caller with
+// no plan in hand gets effort.yml's `default_tier`.
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
+import { EFFORT_TIERS, type EffortTier, isEffortTier } from './effortTiers.js';
 import { SmithError } from './errors.js';
-import { BUDGETS_POLICY_PATH } from './paths.js';
+import { BUDGETS_POLICY_PATH, EFFORT_POLICY_PATH } from './paths.js';
 
 export class BudgetError extends SmithError {}
 
@@ -32,11 +40,34 @@ export interface CoderBudgetPolicy extends RoleBudgetPolicy {
   capDiffLines: number;
 }
 
-export interface TaskBudgetPolicy {
-  coder: CoderBudgetPolicy;
-  researcher: RoleBudgetPolicy;
-  judges: RoleBudgetPolicy;
+/**
+ * The roles budgets.yml prices, one cap each. Every other role the factory
+ * dispatches (merger, uiux, scribe, wave-runner) has no cap, and
+ * src/budgetAlarm.ts reports a dispatch of one as a hole rather than as free.
+ */
+export const PRICED_ROLES = [
+  'coder',
+  'tester',
+  'planner',
+  'researcher',
+  'spec-reviewer',
+  'grader',
+  'reviewer',
+  'verifier',
+  'security-reviewer',
+  'auditor',
+] as const;
+
+export type PricedRole = (typeof PRICED_ROLES)[number];
+
+export function isPricedRole(role: string): role is PricedRole {
+  return (PRICED_ROLES as readonly string[]).includes(role);
 }
+
+export type TaskBudgetPolicy = { coder: CoderBudgetPolicy } & Record<
+  Exclude<PricedRole, 'coder'>,
+  RoleBudgetPolicy
+>;
 
 export interface PreCodeBudgetPolicy {
   shareOfEpicBudgetMax: number;
@@ -68,6 +99,8 @@ export interface EscalationRung {
 }
 
 export interface BudgetPolicy {
+  /** The effort tier every number below was sized for. */
+  tier: EffortTier;
   epic: EpicBudgetPolicy;
   task: TaskBudgetPolicy;
   preCodeBudget: PreCodeBudgetPolicy;
@@ -84,38 +117,98 @@ interface RawEscalationRung {
 }
 
 interface RawBudgetsYaml {
-  epic?: { cap_tokens?: number; alarm_ratio?: number; max_in_flight_tasks?: number | null };
-  task?: {
-    coder?: { cap_tokens?: number; cap_diff_lines?: number };
-    researcher?: { cap_tokens?: number };
-    judges?: { cap_tokens?: number };
+  epic?: {
+    cap_tokens?: number | Partial<Record<EffortTier, number>>;
+    alarm_ratio?: number;
+    max_in_flight_tasks?: number | null;
   };
+  task_tier_scale?: Partial<Record<EffortTier, number>>;
+  task?: Partial<Record<PricedRole | 'judges', { cap_tokens?: number; cap_diff_lines?: number }>>;
   pre_code_budget?: { share_of_epic_budget_max?: number };
   escalation_ladder?: { rungs?: RawEscalationRung[] };
 }
 
 /**
- * Deliberately NOT the number budgets.yml declares (4,000,000 since
- * 2026-08-11) — the one default here that does not mirror the policy file.
+ * Deliberately NOT the number budgets.yml declares (a 4M / 16M / 32M triplet
+ * since 2026-09-29) — the one default here that does not mirror the policy
+ * file, and the same number at every tier.
  *
- * The other DEFAULT_* constants below match budgets.yml because nobody has
- * ever had cause to diverge them. This one has cause: the repo's cap was
- * raised by an operator decision sized from a single dogfood epic that
- * measured 1,529,963 tokens for two of four tasks, a figure inflated by
- * rework `smith escalation check` recorded as ladder violations. That is a
- * judgement about this repo's epics, not a floor to hand a project that
- * shipped no policy at all — such a project gets the conservative number and
- * an alarm that fires early, which is the failure direction to prefer.
+ * The other DEFAULT_* numbers below match budgets.yml's medium tier because
+ * nobody has ever had cause to diverge them. This one has cause: the repo's
+ * cap was raised by operator decisions sized from this repo's own dogfood
+ * epics. That is a judgement about this repo's epics, not a floor to hand a
+ * project that shipped no policy at all — such a project gets the
+ * conservative number and an alarm that fires early, which is the failure
+ * direction to prefer.
  *
  * Do not "fix" the mismatch by syncing them.
  */
 const DEFAULT_EPIC_CAP_TOKENS = 2_000_000;
 const DEFAULT_EPIC_ALARM_RATIO = 0.7;
-const DEFAULT_CODER_CAP_TOKENS = 150_000;
-const DEFAULT_CODER_CAP_DIFF_LINES = 400;
-const DEFAULT_RESEARCHER_CAP_TOKENS = 60_000;
-const DEFAULT_JUDGES_CAP_TOKENS = 40_000;
+const DEFAULT_CODER_CAP_DIFF_LINES = 700;
+/** budgets.yml's medium-tier task caps. */
+const DEFAULT_TASK_CAP_TOKENS: Readonly<Record<PricedRole, number>> = Object.freeze({
+  coder: 220_000,
+  tester: 60_000,
+  planner: 110_000,
+  researcher: 80_000,
+  'spec-reviewer': 170_000,
+  grader: 110_000,
+  reviewer: 60_000,
+  verifier: 40_000,
+  'security-reviewer': 80_000,
+  auditor: 90_000,
+});
+const DEFAULT_TASK_TIER_SCALE: Readonly<Record<EffortTier, number>> = Object.freeze({
+  small: 0.5,
+  medium: 1,
+  huge: 2,
+});
 const DEFAULT_PRE_CODE_SHARE_MAX = 0.15;
+
+/**
+ * The four judges a pre-2026-09-29 budgets.yml priced together under
+ * `task.judges`. Still read, below a role the file names itself, so an older
+ * policy file keeps its numbers.
+ */
+const LEGACY_JUDGE_BUCKET_ROLES: readonly PricedRole[] = [
+  'spec-reviewer',
+  'reviewer',
+  'verifier',
+  'grader',
+];
+
+let cachedDefaultTier: EffortTier | null = null;
+
+/**
+ * effort.yml's `default_tier`, read directly rather than through effort.ts:
+ * effort.ts imports plan.ts, and plan.ts imports this module. Falls back to
+ * `medium` — the tier effort.yml has shipped as its default since it existed —
+ * only when the file cannot be read or names no tier.
+ */
+function defaultBudgetTier(): EffortTier {
+  if (cachedDefaultTier !== null) return cachedDefaultTier;
+  let tier: EffortTier = 'medium';
+  try {
+    const doc = parseYaml(readFileSync(EFFORT_POLICY_PATH, 'utf8')) as { default_tier?: unknown };
+    if (isEffortTier(doc?.default_tier)) tier = doc.default_tier;
+  } catch {
+    // Unreadable effort.yml: keep the documented default.
+  }
+  cachedDefaultTier = tier;
+  return tier;
+}
+
+/**
+ * The tier a budget is sized for: the given one when it names an effort tier,
+ * otherwise effort.yml's `default_tier`. A plan's `effort` goes in here as is;
+ * an absent or unknown value is "no tier chosen", never an error — plan
+ * validation owns refusing a bad `effort`, and a budget reader is not the place
+ * to fail a run over it.
+ */
+export function resolveBudgetTier(tier: unknown): EffortTier {
+  return isEffortTier(tier) ? tier : defaultBudgetTier();
+}
 
 function optionalString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -174,7 +267,7 @@ function parseEscalationLadder(raw: RawEscalationRung[] | undefined): Escalation
  */
 const NO_CAP_AT_ALL = 'A cap the comparison cannot read is not a loose cap, it is no cap at all.';
 
-function capNumber(field: string, value: number): number {
+function capNumber(field: string, value: unknown): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
     throw new BudgetError(
       'budgets.invalid-policy',
@@ -206,41 +299,78 @@ function capNumberOrNull(field: string, value: number | null): number | null {
   return value;
 }
 
-export function parseBudgetPolicy(yamlText: string): BudgetPolicy {
+/**
+ * `epic.cap_tokens` for `tier`. A scalar is one cap for every tier (the shape
+ * before 2026-09-29, still accepted); a mapping must name all three tiers —
+ * a triplet missing one is refused whichever tier is being read, because the
+ * missing tier's epics would otherwise fall to a default nobody chose.
+ */
+function epicCapFor(raw: unknown, tier: EffortTier): number {
+  if (raw === undefined || raw === null) return DEFAULT_EPIC_CAP_TOKENS;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return capNumber('epic.cap_tokens', raw);
+  const byTier = raw as Record<string, unknown>;
+  const caps = Object.fromEntries(
+    EFFORT_TIERS.map((t) => [t, capNumber(`epic.cap_tokens.${t}`, byTier[t])]),
+  ) as Record<EffortTier, number>;
+  return caps[tier];
+}
+
+function tierScale(raw: RawBudgetsYaml['task_tier_scale'], tier: EffortTier): number {
+  const scales = Object.fromEntries(
+    EFFORT_TIERS.map((t) => [
+      t,
+      capNumber(`task_tier_scale.${t}`, raw?.[t] ?? DEFAULT_TASK_TIER_SCALE[t]),
+    ]),
+  ) as Record<EffortTier, number>;
+  return scales[tier];
+}
+
+/**
+ * budgets.yml sized for `tier` (plan `effort`; absent or unknown reads as
+ * effort.yml's `default_tier`). Task caps are declared at medium and scaled by
+ * `task_tier_scale`; the epic cap is read per tier as declared.
+ */
+export function parseBudgetPolicy(yamlText: string, tier?: unknown): BudgetPolicy {
+  const resolved = resolveBudgetTier(tier);
   const doc = (parseYaml(yamlText) ?? {}) as RawBudgetsYaml;
+  const scale = tierScale(doc.task_tier_scale, resolved);
+  const scaled = (n: number): number => Math.round(n * scale);
+
+  const legacyJudges =
+    doc.task?.judges?.cap_tokens === undefined
+      ? null
+      : capNumber('task.judges.cap_tokens', doc.task.judges.cap_tokens);
+  const medium = (role: PricedRole): number => {
+    const declared = doc.task?.[role]?.cap_tokens;
+    if (declared !== undefined) return capNumber(`task.${role}.cap_tokens`, declared);
+    if (legacyJudges !== null && LEGACY_JUDGE_BUCKET_ROLES.includes(role)) return legacyJudges;
+    return DEFAULT_TASK_CAP_TOKENS[role];
+  };
+
+  const task = Object.fromEntries(
+    PRICED_ROLES.map((role) => [role, { capTokens: scaled(medium(role)) }]),
+  ) as unknown as TaskBudgetPolicy;
+  task.coder = {
+    capTokens: task.coder.capTokens,
+    capDiffLines: scaled(
+      capNumber(
+        'task.coder.cap_diff_lines',
+        doc.task?.coder?.cap_diff_lines ?? DEFAULT_CODER_CAP_DIFF_LINES,
+      ),
+    ),
+  };
+
   return {
+    tier: resolved,
     epic: {
-      capTokens: capNumber('epic.cap_tokens', doc.epic?.cap_tokens ?? DEFAULT_EPIC_CAP_TOKENS),
+      capTokens: epicCapFor(doc.epic?.cap_tokens, resolved),
       alarmRatio: capNumber('epic.alarm_ratio', doc.epic?.alarm_ratio ?? DEFAULT_EPIC_ALARM_RATIO),
       maxInFlightTasks: capNumberOrNull(
         'epic.max_in_flight_tasks',
         doc.epic?.max_in_flight_tasks ?? null,
       ),
     },
-    task: {
-      coder: {
-        capTokens: capNumber(
-          'task.coder.cap_tokens',
-          doc.task?.coder?.cap_tokens ?? DEFAULT_CODER_CAP_TOKENS,
-        ),
-        capDiffLines: capNumber(
-          'task.coder.cap_diff_lines',
-          doc.task?.coder?.cap_diff_lines ?? DEFAULT_CODER_CAP_DIFF_LINES,
-        ),
-      },
-      researcher: {
-        capTokens: capNumber(
-          'task.researcher.cap_tokens',
-          doc.task?.researcher?.cap_tokens ?? DEFAULT_RESEARCHER_CAP_TOKENS,
-        ),
-      },
-      judges: {
-        capTokens: capNumber(
-          'task.judges.cap_tokens',
-          doc.task?.judges?.cap_tokens ?? DEFAULT_JUDGES_CAP_TOKENS,
-        ),
-      },
-    },
+    task,
     preCodeBudget: {
       shareOfEpicBudgetMax: capNumber(
         'pre_code_budget.share_of_epic_budget_max',
@@ -252,6 +382,14 @@ export function parseBudgetPolicy(yamlText: string): BudgetPolicy {
 }
 
 /**
+ * The declared per-dispatch cap for `role` in this policy's tier, or null when
+ * budgets.yml prices no such role.
+ */
+export function roleCapTokens(policy: BudgetPolicy, role: string): number | null {
+  return isPricedRole(role) ? policy.task[role].capTokens : null;
+}
+
+/**
  * The env names that may override a budgets.yml number on one box, and the
  * field each one replaces. budgets.yml stays the committed default; these are
  * how an operator raises or lowers a cap for their own machine (`.env`, which
@@ -259,31 +397,102 @@ export function parseBudgetPolicy(yamlText: string): BudgetPolicy {
  * editing a file every other clone reads.
  *
  * A per-box override, not a per-epic one: it applies to every epic run on
- * that box while it is set.
+ * that box while it is set. Each name also has a `_SMALL` / `_MEDIUM` /
+ * `_HUGE` variant that applies to epics of that tier only. Precedence, highest
+ * first: the variant for the policy's tier; then the bare name, which applies
+ * to every tier with no variant of its own set; then budgets.yml's number for
+ * the tier.
  */
-type IntField =
-  | 'epicCap'
-  | 'maxInFlight'
-  | 'coderCap'
-  | 'coderDiff'
-  | 'researcherCap'
-  | 'judgesCap';
+interface EnvField {
+  name: string;
+  kind: 'int' | 'ratio';
+  read: (p: BudgetPolicy) => number | null;
+  write: (p: BudgetPolicy, value: number) => void;
+}
 
-const INT_OVERRIDES: ReadonlyArray<readonly [string, IntField]> = [
-  ['SMITH_EPIC_CAP_TOKENS', 'epicCap'],
-  ['SMITH_EPIC_MAX_IN_FLIGHT_TASKS', 'maxInFlight'],
-  ['SMITH_TASK_CODER_CAP_TOKENS', 'coderCap'],
-  ['SMITH_TASK_CODER_CAP_DIFF_LINES', 'coderDiff'],
-  ['SMITH_TASK_RESEARCHER_CAP_TOKENS', 'researcherCap'],
-  ['SMITH_TASK_JUDGES_CAP_TOKENS', 'judgesCap'],
+function envNameForRole(role: PricedRole): string {
+  return `SMITH_TASK_${role.toUpperCase().replace(/-/g, '_')}_CAP_TOKENS`;
+}
+
+const ENV_FIELDS: readonly EnvField[] = [
+  {
+    name: 'SMITH_EPIC_CAP_TOKENS',
+    kind: 'int',
+    read: (p) => p.epic.capTokens,
+    write: (p, v) => {
+      p.epic.capTokens = v;
+    },
+  },
+  {
+    name: 'SMITH_EPIC_ALARM_RATIO',
+    kind: 'ratio',
+    read: (p) => p.epic.alarmRatio,
+    write: (p, v) => {
+      p.epic.alarmRatio = v;
+    },
+  },
+  {
+    name: 'SMITH_EPIC_MAX_IN_FLIGHT_TASKS',
+    kind: 'int',
+    read: (p) => p.epic.maxInFlightTasks,
+    write: (p, v) => {
+      p.epic.maxInFlightTasks = v;
+    },
+  },
+  {
+    name: envNameForRole('coder'),
+    kind: 'int',
+    read: (p) => p.task.coder.capTokens,
+    write: (p, v) => {
+      p.task.coder.capTokens = v;
+    },
+  },
+  {
+    name: 'SMITH_TASK_CODER_CAP_DIFF_LINES',
+    kind: 'int',
+    read: (p) => p.task.coder.capDiffLines,
+    write: (p, v) => {
+      p.task.coder.capDiffLines = v;
+    },
+  },
+  ...PRICED_ROLES.filter((role) => role !== 'coder').map(
+    (role): EnvField => ({
+      name: envNameForRole(role),
+      kind: 'int',
+      read: (p) => p.task[role].capTokens,
+      write: (p, v) => {
+        p.task[role].capTokens = v;
+      },
+    }),
+  ),
 ];
-const RATIO_OVERRIDE = 'SMITH_EPIC_ALARM_RATIO';
 
-export const BUDGET_ENV_VARS: readonly string[] = Object.freeze([
-  'SMITH_EPIC_CAP_TOKENS',
-  RATIO_OVERRIDE,
-  ...INT_OVERRIDES.slice(1).map(([name]) => name),
-]);
+/**
+ * The pre-2026-09-29 name for the four judges' shared cap. Still honoured —
+ * below each judge's own name — so a `.env` copied from an older
+ * `.env.example` keeps working; no longer listed there.
+ */
+const LEGACY_JUDGES_ENV = 'SMITH_TASK_JUDGES_CAP_TOKENS';
+
+const TIER_SUFFIXES: readonly string[] = EFFORT_TIERS.map((t) => `_${t.toUpperCase()}`);
+
+function tierSuffix(tier: EffortTier): string {
+  return `_${tier.toUpperCase()}`;
+}
+
+/** The documented budget env names, each one bare (the tier variants aside). */
+export const BUDGET_ENV_VARS: readonly string[] = Object.freeze(ENV_FIELDS.map((f) => f.name));
+
+/** Names still read for compatibility but no longer documented. */
+export const LEGACY_BUDGET_ENV_VARS: readonly string[] = Object.freeze([LEGACY_JUDGES_ENV]);
+
+/** Every name the overlay reads: bare, legacy, and each one's tier variants. */
+export const ALL_BUDGET_ENV_NAMES: readonly string[] = Object.freeze(
+  [...BUDGET_ENV_VARS, ...LEGACY_BUDGET_ENV_VARS].flatMap((name) => [
+    name,
+    ...TIER_SUFFIXES.map((suffix) => `${name}${suffix}`),
+  ]),
+);
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -322,63 +531,87 @@ function envRatio(name: string, raw: string): number {
   return value;
 }
 
+function parseEnv(name: string, kind: EnvField['kind'], raw: string): number {
+  return kind === 'ratio' ? envRatio(name, raw) : envPositiveInt(name, raw);
+}
+
 /**
- * `policy` with every set budget env name applied on top. Pure: it reads only
- * `env` and returns a new policy. Every name is validated before any is
- * applied, so a bad value refuses the whole overlay rather than half of it.
+ * The name that supplies `field` for `tier`, or null: the tier variant, else
+ * the bare name, else (for the four old bucket judges) the legacy name with
+ * the same two-step precedence.
+ */
+function supplierFor(field: EnvField, tier: EffortTier, env: Env): string | null {
+  const candidates = [`${field.name}${tierSuffix(tier)}`, field.name];
+  const role = PRICED_ROLES.find((r) => envNameForRole(r) === field.name);
+  if (role !== undefined && LEGACY_JUDGE_BUCKET_ROLES.includes(role)) {
+    candidates.push(`${LEGACY_JUDGES_ENV}${tierSuffix(tier)}`, LEGACY_JUDGES_ENV);
+  }
+  return candidates.find((name) => envValue(env, name) !== null) ?? null;
+}
+
+/**
+ * Every set name is validated — every tier's variant, not only this policy's
+ * — before any is applied, so a bad value refuses the whole overlay rather
+ * than half of it, and a typo in a tier not in play today is caught today.
+ */
+function validateBudgetEnv(env: Env): void {
+  for (const field of ENV_FIELDS) {
+    for (const name of [field.name, ...TIER_SUFFIXES.map((s) => `${field.name}${s}`)]) {
+      const raw = envValue(env, name);
+      if (raw !== null) parseEnv(name, field.kind, raw);
+    }
+  }
+  for (const name of [LEGACY_JUDGES_ENV, ...TIER_SUFFIXES.map((s) => `${LEGACY_JUDGES_ENV}${s}`)]) {
+    const raw = envValue(env, name);
+    if (raw !== null) envPositiveInt(name, raw);
+  }
+}
+
+/**
+ * `policy` with every set budget env name applied on top, for the policy's
+ * own tier. Pure: it reads only `env` and returns a new policy.
  */
 export function applyBudgetEnv(policy: BudgetPolicy, env: Env): BudgetPolicy {
-  const ints = new Map<IntField, number>();
-  for (const [name, field] of INT_OVERRIDES) {
-    const raw = envValue(env, name);
-    if (raw !== null) ints.set(field, envPositiveInt(name, raw));
+  validateBudgetEnv(env);
+  const next = structuredClone(policy);
+  for (const field of ENV_FIELDS) {
+    const supplier = supplierFor(field, policy.tier, env);
+    if (supplier === null) continue;
+    field.write(next, parseEnv(supplier, field.kind, envValue(env, supplier) as string));
   }
-  const rawRatio = envValue(env, RATIO_OVERRIDE);
-  const ratio = rawRatio === null ? null : envRatio(RATIO_OVERRIDE, rawRatio);
-
-  return {
-    ...policy,
-    epic: {
-      capTokens: ints.get('epicCap') ?? policy.epic.capTokens,
-      alarmRatio: ratio ?? policy.epic.alarmRatio,
-      maxInFlightTasks: ints.get('maxInFlight') ?? policy.epic.maxInFlightTasks,
-    },
-    task: {
-      coder: {
-        capTokens: ints.get('coderCap') ?? policy.task.coder.capTokens,
-        capDiffLines: ints.get('coderDiff') ?? policy.task.coder.capDiffLines,
-      },
-      researcher: { capTokens: ints.get('researcherCap') ?? policy.task.researcher.capTokens },
-      judges: { capTokens: ints.get('judgesCap') ?? policy.task.judges.capTokens },
-    },
-  };
+  return next;
 }
 
 /**
  * The budget env names whose value actually changed a number of `base` (the
- * policy as budgets.yml has it) — names only, never values — so a report that
- * prints an effective cap can say it did not come from budgets.yml. A name
- * set to the value budgets.yml already holds overrode nothing and is left
- * out: `.env.example` ships every knob at its default, so a copied `.env`
- * sets all of them.
+ * policy as budgets.yml has it, for its tier) — names only, never values — so
+ * a report that prints an effective cap can say it did not come from
+ * budgets.yml. Each is the name that won for that tier: a variant for another
+ * tier supplies nothing here and is left out. A name set to the value
+ * budgets.yml already holds overrode nothing and is left out too.
  */
 export function budgetEnvOverrides(base: BudgetPolicy, env: Env = process.env): string[] {
-  return BUDGET_ENV_VARS.filter((name) => {
-    if (envValue(env, name) === null) return false;
-    const alone = applyBudgetEnv(base, { [name]: env[name] });
-    return JSON.stringify(alone) !== JSON.stringify(base);
-  });
+  validateBudgetEnv(env);
+  const names: string[] = [];
+  for (const field of ENV_FIELDS) {
+    const supplier = supplierFor(field, base.tier, env);
+    if (supplier === null || names.includes(supplier)) continue;
+    const value = parseEnv(supplier, field.kind, envValue(env, supplier) as string);
+    if (value !== field.read(base)) names.push(supplier);
+  }
+  return names;
 }
 
 /**
- * budgets.yml, with the box's env overrides on top. Every consumer reads the
- * policy through here, so an override reaches all of them or none.
+ * budgets.yml for `tier`, with the box's env overrides on top. Every consumer
+ * reads the policy through here, so an override reaches all of them or none.
  */
 export function loadBudgetPolicy(
   filePath: string = BUDGETS_POLICY_PATH,
   env: Env = process.env,
+  tier?: unknown,
 ): BudgetPolicy {
-  return applyBudgetEnv(parseBudgetPolicy(readFileSync(filePath, 'utf8')), env);
+  return applyBudgetEnv(parseBudgetPolicy(readFileSync(filePath, 'utf8'), tier), env);
 }
 
 /** A task spec's `budget` block, in the plan's own snake_case shape. */

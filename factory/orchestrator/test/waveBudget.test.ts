@@ -19,11 +19,19 @@ import {
 // ---------------------------------------------------------------------------
 
 const POLICY: BudgetPolicy = {
+  tier: 'medium',
   epic: { capTokens: 1_000_000, alarmRatio: 0.7, maxInFlightTasks: null },
   task: {
     coder: { capTokens: 150_000, capDiffLines: 400 },
     researcher: { capTokens: 60_000 },
-    judges: { capTokens: 40_000 },
+    tester: { capTokens: 60_000 },
+    planner: { capTokens: 110_000 },
+    'spec-reviewer': { capTokens: 40_000 },
+    grader: { capTokens: 40_000 },
+    reviewer: { capTokens: 40_000 },
+    verifier: { capTokens: 40_000 },
+    'security-reviewer': { capTokens: 80_000 },
+    auditor: { capTokens: 90_000 },
   },
   preCodeBudget: { shareOfEpicBudgetMax: 0.15 },
   escalationLadder: [],

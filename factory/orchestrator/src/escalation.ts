@@ -38,8 +38,8 @@ import { bareTaskId, epicOfTaskId, isQualifiedTaskId, taskIdsMatch } from './tas
 /**
  * Roles whose dispatch constitutes a new round on the task.
  *
- * The split follows budgets.yml: `task.judges` names spec-reviewer, reviewer,
- * verifier and grader, and `context_window.narrowing_roles` adds
+ * The split follows budgets.yml: its judges (spec-reviewer, reviewer, verifier,
+ * grader) read a diff, and `context_window.narrowing_roles` adds
  * security-reviewer and merger — those roles read a diff, they do not produce
  * the one the gate scores. planner/researcher/scribe produce no task diff
  * either. What is left is what a "round" means: someone built again.

@@ -4,7 +4,7 @@ description: Hunts deficiencies in a planner's epic spec — before it becomes a
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 50
 hooks:
   Stop:
     - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]

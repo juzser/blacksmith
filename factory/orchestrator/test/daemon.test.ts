@@ -52,11 +52,19 @@ import type { OutdatedPackage, SchedulerPolicy } from '../src/scheduler.js';
 // ---------------------------------------------------------------------------
 
 const BUDGET: BudgetPolicy = {
+  tier: 'medium',
   epic: { capTokens: 100_000, alarmRatio: 0.7, maxInFlightTasks: null },
   task: {
     coder: { capTokens: 20_000, capDiffLines: 400 },
     researcher: { capTokens: 10_000 },
-    judges: { capTokens: 5_000 },
+    tester: { capTokens: 5_000 },
+    planner: { capTokens: 5_000 },
+    'spec-reviewer': { capTokens: 5_000 },
+    grader: { capTokens: 5_000 },
+    reviewer: { capTokens: 5_000 },
+    verifier: { capTokens: 5_000 },
+    'security-reviewer': { capTokens: 5_000 },
+    auditor: { capTokens: 5_000 },
   },
   preCodeBudget: { shareOfEpicBudgetMax: 0.15 },
   escalationLadder: [],

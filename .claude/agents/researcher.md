@@ -4,7 +4,7 @@ description: Produces a targeted research brief for a planner's pre-code questio
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
-maxTurns: 15
+maxTurns: 70
 ---
 
 # Researcher

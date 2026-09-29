@@ -19,6 +19,13 @@
 # `effort_scaling:` block is the prose sibling of this file — it says fan-out
 # is a wall-clock optimisation; this says how much judgment each epic buys.
 #
+# Budgets follow the same tier (2026-09-29): `budgets.yml` sizes the epic cap
+# and every per-task cap for small / medium / huge, and each budget reader
+# takes the tier from the plan's `effort`, else `default_tier` below. That is
+# a size, not a skipped step — the budgets still report and alarm at every
+# tier. Agent `maxTurns` is not tiered: one ceiling per template, sized for
+# `huge`.
+#
 # THE INVARIANT THAT MAKES THIS SAFE: a tier scales judgment steps only. It
 # never touches a mechanical oracle or a guardrail — see `invariants:` at the
 # bottom, which the host returns alongside every profile so the list cannot be

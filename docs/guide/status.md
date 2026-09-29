@@ -103,7 +103,7 @@ only moment a refusal costs nothing and distorts no work in progress. An
 operator who disagrees admits it anyway with `--override-rationale`, and the
 log then carries the machine's verdict beside the human's reason.
 
-What is still true: the 150,000-tokens-per-task cap is *designed* to report
+What is still true: the per-task token cap is *designed* to report
 rather than block — a self-policed cap becomes pressure on the work being
 measured — and the loop runner does not hard-stop a dispatch that is already
 running, at either cap. An epic can still cross its cap by overrunning inside

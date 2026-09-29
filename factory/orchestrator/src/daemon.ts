@@ -31,6 +31,7 @@ import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
 import type { DbOpts } from './db/projector.js';
 import { apply, foldTasks, rebuild } from './db/projector.js';
+import { epicBudgetPolicies } from './epicBudget.js';
 import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
 import type { ResolveProjectForTaskRef } from './errorIssues.js';
 import { SmithError } from './errors.js';
@@ -256,7 +257,10 @@ export function inspectSession(
   opts: InspectOptions = {},
 ): DaemonFinding[] {
   const now = opts.now ?? new Date();
+  // An injected policy judges every epic; otherwise each epic is judged
+  // against budgets.yml sized for its own plan's effort tier.
   const budgetPolicy = opts.budgetPolicy ?? loadBudgetPolicy();
+  const policyForEpic = opts.budgetPolicy === undefined ? epicBudgetPolicies() : undefined;
   const schedulerPolicy = opts.schedulerPolicy ?? loadSchedulerPolicy();
   const staleHours = opts.staleHours ?? DEFAULT_STALE_HOURS;
   const findings: DaemonFinding[] = [];
@@ -272,7 +276,10 @@ export function inspectSession(
     if (typeof epicId === 'string') closedEpics.add(epicId);
   }
 
-  const budget = checkBudgetAlarm(events, budgetPolicy, { sessionId });
+  const budget = checkBudgetAlarm(events, budgetPolicy, {
+    sessionId,
+    ...(policyForEpic ? { policyForEpic } : {}),
+  });
   for (const epic of budget.epics) {
     // `under` is the only status that is an answer rather than a question.
     if (epic.status === 'under') continue;

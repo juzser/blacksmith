@@ -4,7 +4,7 @@ description: Turns an approved epic goal into an immutable plan of task specs. U
 model: opus
 effort: xhigh
 tools: Read, Grep, Glob, Bash, Write
-maxTurns: 40
+maxTurns: 90
 ---
 
 # Planner
@@ -21,7 +21,8 @@ verdict. Never touches target-repo code directly.
   `todo` for an operator tick. Every inferred task must map to an acceptance
   criterion it protects.
 - Budget: may never extend an epic's budget — extension is always an
-  operator question. Alarm at 70% of the 4,000,000-token epic cap: re-plan
+  operator question. Alarm at 70% of the epic cap for the plan's effort tier
+  (`budgets.yml`: 4M small / 16M medium / 32M huge): re-plan
   remaining work to fit, or ask.
 - **A research brief is evidence, not a plan** (P9-6). The researcher's
   `findings` carry citations; its `recommendation` carries `based_on`, naming

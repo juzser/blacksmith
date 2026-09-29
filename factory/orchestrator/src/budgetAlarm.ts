@@ -51,7 +51,7 @@
 // tokens are in no task result and never will be: a judge returns findings, not
 // a Result. Anything that reads only `task-result-recorded` is reading the
 // builder's half and calling it the total.
-import type { BudgetPolicy } from './budgets.js';
+import { type BudgetPolicy, PRICED_ROLES, roleCapTokens } from './budgets.js';
 import { eventTaskId, type StoredEvent } from './events.js';
 import { bareTaskId, epicOfTaskId } from './taskId.js';
 
@@ -117,26 +117,21 @@ export interface BudgetAlarmOptions {
   sessionId: string;
   /** Report only this epic. Others are dropped, not merely un-flagged. */
   epicId?: string;
+  /**
+   * The policy to judge one epic against — budgets.yml sized for that epic's
+   * effort tier. Absent, every epic is judged against the policy passed in.
+   */
+  policyForEpic?: (epicId: string) => BudgetPolicy;
 }
 
 /**
- * The roles budgets.yml prices under `task.judges` — its line 53 comment is the
- * enumeration: "# spec-reviewer, reviewer, verifier, grader".
- *
- * Hardcoded here rather than added to the YAML as a `roles:` list, for the same
- * reason escalation.ts derives BUILDER_ROLES from the policy's own prose: the
- * list is already written down, and a second copy in a different file is a
- * second thing to keep true. What matters is that a role absent from *both*
- * this list and the priced worker roles is reported rather than assumed free —
- * see rolesWithoutCap. `security-reviewer` and `merger` are the live examples:
- * both appear in budgets.yml's `narrowing_roles`, neither has a declared cap.
- *
- * Deliberately a separate list from judgeRoles.ts's exported `JUDGE_ROLES`
- * (which also names `security-reviewer` and `auditor`): this one is scoped to
- * what budgets.yml prices under `task.judges`, not to who owes a
- * declared-artifact line or opens a judge turn.
+ * The priced roles whose tokens reach a Result, and so `task-result-recorded`.
+ * Every other priced role (the judges, planner, security-reviewer, auditor)
+ * produces findings or a plan whose spend reaches no result event, so it is
+ * always projected. A role budgets.yml prices nowhere (merger, uiux, scribe,
+ * wave-runner) is reported rather than assumed free — see rolesWithoutCap.
  */
-const JUDGE_ROLES: readonly string[] = ['spec-reviewer', 'reviewer', 'verifier', 'grader'];
+const WORKER_ROLES: readonly string[] = ['coder', 'researcher', 'tester'];
 
 /**
  * How a dispatch's tokens can be accounted for.
@@ -152,10 +147,9 @@ type RolePricing =
   | { kind: 'unpriced' };
 
 function priceRole(role: string, policy: BudgetPolicy): RolePricing {
-  if (role === 'coder') return { kind: 'worker', capTokens: policy.task.coder.capTokens };
-  if (role === 'researcher') return { kind: 'worker', capTokens: policy.task.researcher.capTokens };
-  if (JUDGE_ROLES.includes(role)) return { kind: 'judge', capTokens: policy.task.judges.capTokens };
-  return { kind: 'unpriced' };
+  const capTokens = roleCapTokens(policy, role);
+  if (capTokens === null) return { kind: 'unpriced' };
+  return { kind: WORKER_ROLES.includes(role) ? 'worker' : 'judge', capTokens };
 }
 
 /**
@@ -166,11 +160,7 @@ function priceRole(role: string, policy: BudgetPolicy): RolePricing {
  * otherwise let spend above the real ceiling pass unnamed.
  */
 function largestDeclaredPrice(policy: BudgetPolicy): number {
-  return Math.max(
-    policy.task.coder.capTokens,
-    policy.task.researcher.capTokens,
-    policy.task.judges.capTokens,
-  );
+  return Math.max(...PRICED_ROLES.map((role) => policy.task[role].capTokens));
 }
 
 function payloadString(payload: Record<string, unknown>, key: string): string | null {
@@ -400,7 +390,16 @@ export function checkBudgetAlarm(
   const alarmRatio = policy.epic.alarmRatio;
   const alarmTokens = Math.floor(capTokens * alarmRatio);
 
-  const largestPrice = largestDeclaredPrice(policy);
+  // Each epic is judged against budgets.yml sized for its own effort tier.
+  const epicPolicies = new Map<string, BudgetPolicy>();
+  const policyFor = (epicId: string): BudgetPolicy => {
+    let found = epicPolicies.get(epicId);
+    if (found === undefined) {
+      found = options.policyForEpic?.(epicId) ?? policy;
+      epicPolicies.set(epicId, found);
+    }
+    return found;
+  };
 
   const membership = readEpicMembership(events);
   const rawSpend = readMeasuredSpend(events);
@@ -454,7 +453,7 @@ export function checkBudgetAlarm(
     acc.tasks.add(bare);
     acc.measuredTasks.add(bare);
     acc.measuredTokens += tokens;
-    if (tokens > largestPrice) acc.tasksOverPrice.add(bare);
+    if (tokens > largestDeclaredPrice(policyFor(epicId))) acc.tasksOverPrice.add(bare);
   }
 
   let unattributedDispatches = 0;
@@ -478,7 +477,7 @@ export function checkBudgetAlarm(
 
     const acc = accumulatorFor(epicId);
     if (taskId !== null) acc.tasks.add(bareTaskId(taskId));
-    const pricing = priceRole(role, policy);
+    const pricing = priceRole(role, policyFor(epicId));
     if (pricing.kind === 'unpriced') {
       acc.rolesWithoutCap.add(role);
       continue;
@@ -502,6 +501,10 @@ export function checkBudgetAlarm(
   const epics: EpicSpendCheck[] = [...accumulators.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([epicId, acc]) => {
+      const epicPolicy = policyFor(epicId);
+      const epicCap = epicPolicy.epic.capTokens;
+      const epicAlarm = Math.floor(epicCap * epicPolicy.epic.alarmRatio);
+      const largestPrice = largestDeclaredPrice(epicPolicy);
       const projectedFrom = Object.fromEntries(
         [...acc.projectedFrom.entries()].sort(([a], [b]) => a.localeCompare(b)),
       );
@@ -512,14 +515,14 @@ export function checkBudgetAlarm(
       const status = decide(
         acc.measuredTokens,
         projectedTokens,
-        alarmTokens,
-        capTokens,
+        epicAlarm,
+        epicCap,
         rolesWithoutCap.length > 0 || unattributedDispatches > 0 || tasksOverPrice.length > 0,
       );
       const partial: Omit<EpicSpendCheck, 'detail'> = {
         epicId,
-        capTokens,
-        alarmTokens,
+        capTokens: epicCap,
+        alarmTokens: epicAlarm,
         measuredTokens: acc.measuredTokens,
         projectedTokens,
         taskCount: acc.tasks.size,

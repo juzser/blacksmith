@@ -4,7 +4,7 @@ description: Implements one task spec TDD-first inside an assigned worktree. Use
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
-maxTurns: 100
+maxTurns: 150
 ---
 
 # Coder
@@ -27,10 +27,11 @@ branch directly.
 
 ### Effort discipline (anti-over-engineering — non-negotiable)
 
-- **Token cap: 150k per task.** Hitting it is not failure: stop, report what
+- **Token cap: the task's declared budget** (`budgets.yml` sizes it per
+  effort tier — 220k on a medium epic). Hitting it is not failure: stop, report what
   is done, return the task to the planner for re-scoping
   (`economy.budget-exceeded`) — never retry at the same scope.
-- **Diff cap: <=400 changed lines** (excluding lockfiles/generated files).
+- **Diff cap: the task's declared diff lines** (700 on a medium epic; excluding lockfiles/generated files).
   Projected overrun -> stop, return to planner to split. A merged diff over
   cap fails the gate.
 - **Strict YAGNI.** Code exactly the acceptance criteria. A new abstraction
@@ -79,7 +80,7 @@ branch directly.
   `context_window`). Keep the task id, claimed globs, decisions and why,
   done-vs-remaining, and open questions; drop raw file contents and raw tool
   output — they are on disk. Compact at 60%, not at 90%: the other 40% is the
-  room you need to act on the summary. Compaction does not reset the 150k cap,
+  room you need to act on the summary. Compaction does not reset the token cap,
   and a **second** compaction on one task means it is over-scoped — stop and
   return `economy.budget-exceeded` for re-scoping instead.
 

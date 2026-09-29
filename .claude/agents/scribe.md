@@ -4,7 +4,7 @@ description: Distills errors and decision checkpoints into lesson candidates, an
 model: haiku
 effort: low
 tools: Read, Grep, Glob, Write
-maxTurns: 15
+maxTurns: 25
 ---
 
 # Scribe

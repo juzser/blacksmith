@@ -4,7 +4,7 @@ description: Resolves merge-queue conflicts when an automatic rebase fails. Use 
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
-maxTurns: 20
+maxTurns: 30
 ---
 
 # Merger

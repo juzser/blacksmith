@@ -4,7 +4,7 @@ description: Runs a bounded rubric loop on a worker's output against its task's 
 model: sonnet
 effort: low
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 30
 hooks:
   Stop:
     - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]

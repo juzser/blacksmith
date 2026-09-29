@@ -4,7 +4,7 @@ description: One axis of `/bs audit` — performance, code-quality or architectu
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 45
 hooks:
   Stop:
     - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]

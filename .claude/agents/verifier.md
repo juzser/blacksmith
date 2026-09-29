@@ -4,7 +4,7 @@ description: Adversarially re-checks reviewer findings before they cost a round-
 model: opus
 effort: xhigh
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 25
 hooks:
   Stop:
     - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]

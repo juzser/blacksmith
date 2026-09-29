@@ -68,6 +68,7 @@ import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { lintDispatchPrompt } from './dispatchLint.js';
 import { loadDotEnv } from './dotenv.js';
 import { type ClosingReviewEffort, loadEffortPolicy, resolveEffort } from './effort.js';
+import { epicBudgetPolicies } from './epicBudget.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
@@ -1774,7 +1775,9 @@ async function main(): Promise<number> {
         // the sum of every session that worked on it.
         await readLineageEvents(flags.session as string, eventOptsFromFlags(flags))
       : [];
-    const budgetPolicy = loadBudgetPolicy(flags['budget-policy']);
+    // Sized for this epic's effort tier: the plan's own `effort`, else
+    // effort.yml's default_tier.
+    const budgetPolicy = loadBudgetPolicy(flags['budget-policy'], process.env, plan.effort);
     const budget = checkWaveBudget(
       budgetEvents,
       budgetPolicy,
@@ -1800,7 +1803,9 @@ async function main(): Promise<number> {
     }
     // Names only, and only when some differ from budgets.yml: which caps came
     // from the box's env rather than the file.
-    const envOverrides = budgetEnvOverrides(loadBudgetPolicy(flags['budget-policy'], {}));
+    const envOverrides = budgetEnvOverrides(
+      loadBudgetPolicy(flags['budget-policy'], {}, plan.effort),
+    );
     printJson({
       ...result,
       symbolImpact,
@@ -3492,11 +3497,29 @@ async function main(): Promise<number> {
     // session reports half an epic's cost as the whole of it, and reports it
     // under an alarm threshold it may already have crossed.
     const events = await readLineageEvents(sessionId, eventOptsFromFlags(flags));
+    // Each epic is judged against budgets.yml sized for its own effort tier
+    // (its latest plan's `effort`); the report's top-level cap is the default
+    // tier's, and each epic line carries the cap it was judged against.
+    const policyForEpic = epicBudgetPolicies({ policyFile: flags.policy });
     const report = checkBudgetAlarm(events, loadBudgetPolicy(flags.policy), {
       sessionId,
       ...(flags.epic ? { epicId: flags.epic } : {}),
+      policyForEpic,
     });
-    const envOverrides = budgetEnvOverrides(loadBudgetPolicy(flags.policy, {}));
+    const envOverrides = [
+      ...new Set(
+        [undefined, ...report.epics.filter((e) => e.epicId !== '*').map((e) => e.epicId)].flatMap(
+          (epicId) =>
+            budgetEnvOverrides(
+              loadBudgetPolicy(
+                flags.policy,
+                {},
+                epicId === undefined ? undefined : policyForEpic(epicId).tier,
+              ),
+            ),
+        ),
+      ),
+    ];
     printJson(envOverrides.length > 0 ? { ...report, budgetEnvOverrides: envOverrides } : report);
     return report.ok ? 0 : 1;
   }

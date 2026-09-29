@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
+import { type BudgetPolicy, loadBudgetPolicy, roleCapTokens } from './budgets.js';
 import { SmithError } from './errors.js';
 import { AGENTS_DIR, HARNESS_POLICY_PATH, REPO_ROOT } from './paths.js';
 import { type GuardrailPolicy, INSPECTED_FILE_TOOLS, loadGuardrailPolicy } from './policy.js';
@@ -492,14 +492,11 @@ function resolveSchema(
   return { name, file };
 }
 
-function capTokensFor(role: string, access: RoleAccess, budgets: BudgetPolicy): number | null {
-  // Only these three named roles carry a cap in budgets.yml today — every
-  // other role (security-reviewer, merger, tester, uiux, planner, scribe)
-  // has none, and null says so rather than inventing a number nobody set.
-  if (access === 'judge') return budgets.task.judges.capTokens;
-  if (role === 'coder') return budgets.task.coder.capTokens;
-  if (role === 'researcher') return budgets.task.researcher.capTokens;
-  return null;
+function capTokensFor(role: string, budgets: BudgetPolicy): number | null {
+  // budgets.yml prices each role on its own line, sized for the policy's
+  // effort tier. A role it prices nowhere (merger, uiux, scribe, wave-runner)
+  // gets null, which says so rather than inventing a number nobody set.
+  return roleCapTokens(budgets, role);
 }
 
 // ---------------------------------------------------------------------------
@@ -844,7 +841,7 @@ export function planWorkerTurn(
   const budget: HarnessBudget = {
     timeout_ms: harness.timeoutMs,
     max_output_bytes: harness.maxOutputBytes ?? HARNESS_DEFAULT_MAX_OUTPUT_BYTES,
-    cap_tokens: capTokensFor(role, access, budgets),
+    cap_tokens: capTokensFor(role, budgets),
   };
 
   return {
