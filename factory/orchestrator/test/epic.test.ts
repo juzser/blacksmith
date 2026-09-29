@@ -3821,6 +3821,23 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       expect(prompt).toContain('race in the cache warmer');
     });
 
+    // A quorum judge refuted a close that read "closed by ... amendment: 0"
+    // immediately above "this close marks them amended: N" and concluded the
+    // digest contradicted itself. discretionaryFindings counts closures a
+    // person already made BEFORE this close; satisfiedAmendments counts what
+    // THIS close is about to transition. Both counts were right; only the
+    // first label was silent about which side of "this close" it counted.
+    it('labels the discretionary count as closures already made before this close', () => {
+      const prompt = promptFor(
+        [doneTask()],
+        [findingFixture({ finding_id: 'f-waived', finding_status: 'waived' })],
+      );
+      expect(prompt).toContain(
+        'Findings already closed by waiver or amendment before this close: 1',
+      );
+      expect(prompt).not.toContain('Findings closed by waiver or amendment: ');
+    });
+
     it('names a landed amendment this close marks amended, and the task that landed it', () => {
       const prompt = promptFor(
         [taskRow({ taskId: 'epic-1/task-2', taskStatus: 'completed', planVersion: 2 })],
