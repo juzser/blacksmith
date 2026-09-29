@@ -961,27 +961,579 @@ function checkPushToProtected(
   return null;
 }
 
-/** Rule 2: force push (`--force` / `--force-with-lease` / `-f`). Case-sensitive, same as guard.sh (its `grep -Eq` has no `-i`). */
-const FORCE_PUSH_RE = /(--force(-with-lease)?\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$))/;
+/**
+ * Rule 2: force push (`--force` / `--force-with-lease` / `-f` / `--mirror`).
+ * Case-sensitive, same as guard.sh (its `grep -Eq` has no `-i`).
+ * `--force-if-includes` is already covered: it contains `--force` as a
+ * prefix, and `\b` stops at the `-` that follows. `--mirror` shares nothing
+ * with `--force`, so it needs its own alternative — a mirror push writes
+ * every ref on the remote to match the local one, which is a force push on
+ * every branch at once.
+ */
+const FORCE_PUSH_RE = /(--force(-with-lease)?\b|--mirror\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$))/;
 
 const GIT_PUSH_ANYWHERE_RE = new RegExp(`\\bgit\\b[\\s\\S]*${bareWord('push')}`, 'i');
 
-function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
-  // No `isGitSubcommand` gate: its `[^;&|]*` stops at a quoted separator, so
-  // `git -c "a.b=;" push -f` never reached the flag test. Each segment below
-  // asks the question itself, over the whole segment.
-  // Read per command, not per chain: a `-f` or `--force` that belongs to
-  // another command in the chain (`rm -f`, `git worktree remove --force`)
-  // says nothing about the push. Split on true command boundaries only —
-  // `gitSegmentsFor`'s split also cuts at redirections, `#`, braces and
-  // substitutions, which leave the flag on the push's own command line.
-  // A `git stash push` names no remote, so its `push` is removed before
-  // asking whether the segment still pushes.
-  const forced = topLevelCommands(command).some((segment) => {
-    const withoutStash = segment.replace(/\bstash\s+push\b/gi, 'stash');
-    return GIT_PUSH_ANYWHERE_RE.test(withoutStash) && FORCE_PUSH_RE.test(segment);
+/**
+ * `$'...'` — bash's ANSI-C quoting — is decoded to real bytes before git (or
+ * anything else) ever sees it: `\x2d` is `-`, `\146` is `f`, `\x70ush` is
+ * `push`. A rule that scans the raw command text for `--force` or `push`
+ * never finds either spelled this way, so every regex rule 2 runs is run
+ * against this decoded reading instead of the raw segment.
+ *
+ * Only the escapes bash's own `$'...'` grammar defines are decoded: `\xHH`
+ * hex, `\NNN` octal (1-3 digits), `\uHHHH` / `\UHHHHHHHH` Unicode, and the
+ * single-letter escapes (`\n`, `\t`, `\\`, `\'`, `\"`, …). Anything else
+ * inside the quotes is copied through unchanged — under-decoding only
+ * leaves an escape sequence looking like itself, never invents a character
+ * that helps an evasion.
+ */
+const ANSI_C_ESCAPE_RE =
+  /\\(x[0-9a-fA-F]{1,2}|u[0-9a-fA-F]{1,4}|U[0-9a-fA-F]{1,8}|[0-7]{1,3}|n|t|r|a|b|f|v|e|E|\\|'|")/g;
+
+function decodeAnsiCPayload(payload: string): string {
+  return payload.replace(ANSI_C_ESCAPE_RE, (_match, esc: string) => {
+    switch (esc[0]) {
+      case 'x':
+      case 'u':
+      case 'U':
+        return String.fromCodePoint(Number.parseInt(esc.slice(1), 16));
+      case 'n':
+        return '\n';
+      case 't':
+        return '\t';
+      case 'r':
+        return '\r';
+      case 'a':
+        return '\x07';
+      case 'b':
+        return '\b';
+      case 'f':
+        return '\f';
+      case 'v':
+        return '\v';
+      case 'e':
+      case 'E':
+        return '\x1b';
+      case '\\':
+        return '\\';
+      case "'":
+        return "'";
+      case '"':
+        return '"';
+      default:
+        // Only octal digits reach here (the `[0-7]{1,3}` branch).
+        return String.fromCharCode(Number.parseInt(esc, 8) & 0xff);
+    }
   });
-  return forced ? violation(requireRule(policy, 'force-push')) : null;
+}
+
+/**
+ * Finds the unescaped `'` that closes a `$'` span starting at `start` (the
+ * index right after the opening `$'`). A backslash inside the span escapes
+ * whatever follows it, including a `'`, so `\'` never ends the span early.
+ * Returns -1 when the span runs off the end of the segment unterminated.
+ */
+function findAnsiCQuoteEnd(text: string, start: number): number {
+  let i = start;
+  while (i < text.length) {
+    if (text[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (text[i] === "'") return i;
+    i += 1;
+  }
+  return -1;
+}
+
+/**
+ * Replaces every `$'...'` span in a segment with its decoded content, so the
+ * rule-2 checks below read what git will actually receive rather than the
+ * quoted spelling. An unterminated span — no closing `'` before the segment
+ * ends — cannot be decoded with confidence; `unterminated` tells the caller
+ * to fail closed rather than silently reading past it.
+ */
+function decodeAnsiCQuoting(segment: string): { text: string; unterminated: boolean } {
+  let result = '';
+  let i = 0;
+  while (i < segment.length) {
+    if (segment[i] === '$' && segment[i + 1] === "'") {
+      const end = findAnsiCQuoteEnd(segment, i + 2);
+      if (end === -1) return { text: result + segment.slice(i), unterminated: true };
+      result += decodeAnsiCPayload(segment.slice(i + 2, end));
+      i = end + 1;
+      continue;
+    }
+    result += segment[i];
+    i += 1;
+  }
+  return { text: result, unterminated: false };
+}
+
+/**
+ * Joins a shell line continuation — a backslash immediately followed by a
+ * newline — the way bash does before word splitting even starts: the pair
+ * is deleted outright, wherever it sits, including mid-word (`gi\`<LF>`t`)
+ * and inside double quotes, which is why `git` spelled with one hidden in
+ * the middle reads as `git` to every scanner below rather than as two
+ * fragments a literal-substring or exact-word match would miss.
+ *
+ * Two spans are left untouched because bash itself treats a backslash there
+ * differently: a single-quoted span is fully literal, so a backslash-newline
+ * pair inside it is data, not a continuation; and a `$'...'` span decodes its
+ * own escapes — `decodeAnsiCPayload` already reads a `\`-newline pair inside
+ * one through unchanged, so joining it here first would be a second, and
+ * conflicting, decode of the same text.
+ */
+function joinLineContinuations(command: string): string {
+  let result = '';
+  let i = 0;
+  while (i < command.length) {
+    const c = command[i];
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      const spanEnd = end === -1 ? command.length : end + 1;
+      result += command.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (c === '$' && command[i + 1] === "'") {
+      const end = findAnsiCQuoteEnd(command, i + 2);
+      const spanEnd = end === -1 ? command.length : end + 1;
+      result += command.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (c === '\\' && command[i + 1] === '\n') {
+      i += 2;
+      continue;
+    }
+    result += c;
+    i += 1;
+  }
+  return result;
+}
+
+/**
+ * Every way this segment could hand git an alias definition inline, without
+ * checking what the alias resolves to:
+ *
+ * - `-c` or `-c<nospace>` naming an `alias.` key, quoted or not
+ *   (`-c alias.p=`, `-calias.p=`, `-c 'alias.p=...'`).
+ * - `--config-env` naming an `alias.` key, whose value is the *name* of an
+ *   environment variable read later — never visible on this line at all.
+ * - `GIT_CONFIG_PARAMETERS`, git's own serialisation of a whole `-c` list,
+ *   assigned or exported.
+ * - A `GIT_CONFIG_KEY_<n>=` pair whose value is an `alias.` key, or is a
+ *   shell variable (`$V`, `${V}`) or command substitution (`` `cmd` ``,
+ *   `$(cmd)`) this scanner cannot resolve — read alongside a
+ *   `GIT_CONFIG_VALUE_<n>` this line may not even set.
+ *
+ * Issue #258's original fix denied an inline alias only when its value
+ * visibly mentioned `push`. That is not a question this line can always
+ * answer: the value can come from a shell variable, a named environment
+ * variable read later, or a `GIT_CONFIG_VALUE_<n>` set nowhere near the key.
+ * `git -c alias.st=status st` is refused for the same reason as everything
+ * else in this file errs the same direction — a rule that cannot always
+ * tell "harmless alias" from "force-push escape hatch" apart denies both,
+ * because the cost of the false deny is smaller than the cost of the hole.
+ */
+function definesInlineGitAlias(segment: string): boolean {
+  if (/(^|\s)-c\s*['"]?alias\./i.test(segment)) return true;
+  if (/--config-env(=|\s+)['"]?alias\./i.test(segment)) return true;
+  if (/\bGIT_CONFIG_PARAMETERS\b/.test(segment)) return true;
+  if (/\bGIT_CONFIG_KEY_\d+=(['"]?)(alias\.|\$|`)/i.test(segment)) return true;
+  return false;
+}
+
+/**
+ * Quote removal is the last step of shell word expansion, and it glues
+ * whatever sat on either side of a quote pair into one word: `--for""ce`,
+ * `--for''ce` and `-"-"force` all reach git as `--force`, with no
+ * `--force` substring ever appearing in the raw command text a regex would
+ * scan. Stripping every quote character before the rule-2 checks run reads
+ * the segment the way git will — the same "read it the way the shell will"
+ * move the `$'...'` decode above and the `+refspec` backslash-strip below
+ * already make. Stripping can only pull characters together, never hide
+ * one, so it costs nothing a substring check over the raw text was not
+ * already blind to.
+ */
+function stripSpliceQuotes(text: string): string {
+  return text.replace(/['"]/g, '');
+}
+
+/**
+ * A character the shell can still act on inside a word: an escape, a
+ * variable or command expansion, a brace list, or a glob. Three rounds of
+ * this rule chased individual tricks spelled with these characters — hex
+ * escapes, quote-splicing, brace expansion — one at a time, and each fix
+ * left the next spelling undetected. This is the fail-closed replacement:
+ * rather than keep enumerating tricks, refuse to read a word built from any
+ * of them at all.
+ */
+const SHELL_ACTIVE_CHAR_RE = /[\\$`{}*?[()<>!\n]/;
+
+/**
+ * True when `word` is exactly what it looks like to git: either free of
+ * every character the shell could still act on, or a single matching pair
+ * of quotes wrapped around such a word (`"feat"`, `'origin'` — the quotes
+ * themselves removed, nothing shell-active left inside). Anything else — a
+ * bare backslash, a `$`, a backtick, a brace, a glob character, or a quote
+ * that does not open and close the whole word — means this rule cannot read
+ * what git will actually receive, and it refuses rather than guess.
+ */
+function isPlainWord(word: string): boolean {
+  if (word === '') return true;
+  const quoted =
+    word.length >= 2 &&
+    ((word.startsWith("'") && word.endsWith("'")) || (word.startsWith('"') && word.endsWith('"')));
+  const inner = quoted ? word.slice(1, -1) : word;
+  if (/['"]/.test(inner)) return false;
+  return !SHELL_ACTIVE_CHAR_RE.test(inner);
+}
+
+const PLAIN_WORD_REASON =
+  'write this git command with plain words — no quotes inside words, escapes, variables, braces or globs — so the guard can read exactly what git will receive';
+
+/** Subcommands the plain-word gate covers unconditionally. */
+const FORCE_GATE_SUBCOMMANDS = ['push', 'rebase', 'reset', 'filter-branch', 'update-ref'];
+
+const BRANCH_SHORT_FLAG_RE = /^-[a-zA-Z]+$/;
+
+/**
+ * `git branch` only rewrites or drops a ref when it forces or deletes one:
+ * `-D`, `-f`, `-M` or `--force`, bundled or spelled long. Plain `-d` (delete
+ * a merged branch) and `-m` (rename) are not covered — see the comment on
+ * `checkForcePush` for why a delete without force is let through unread.
+ */
+function isForcingBranchCommand(tokens: readonly string[]): boolean {
+  return tokens.some(
+    (token) => token === '--force' || (BRANCH_SHORT_FLAG_RE.test(token) && /[DfM]/.test(token)),
+  );
+}
+
+/**
+ * Same read as `gitTokens`, but bridges a real newline in the remainder —
+ * `gitTokens`' `(.*)$` cannot, since `.` does not match `\n` and `$` without
+ * a multiline flag only anchors at the true end of the string. A word split
+ * across a line-continuation backslash-newline (`--for\`<LF>`ce`) still
+ * needs to be read as two whitespace-joined pieces rather than dropped as no
+ * match at all. Local to the gate rather than a change to `gitTokens`
+ * itself, which rules 1 and 3 also read through.
+ */
+function wordsAfterSubcommand(text: string, subcommand: string): string[] {
+  const match = new RegExp(`${bareWord(subcommand)}([\\s\\S]*)$`, 'i').exec(text);
+  if (!match) return [];
+  return (match[1] ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token !== '');
+}
+
+/**
+ * `text` with every quoted span blanked to spaces of the same length, so a
+ * quoted phrase cannot be misread as a real subcommand invocation. `--command
+ * 'git push origin main'` and `git commit -m "... push origin main"` both
+ * hold that literal text, but neither one runs it — one is describing a
+ * command, the other is prose in a commit message. Lengths are preserved
+ * only so this stays a drop-in swap for `text` in a regex test; nothing here
+ * reads offsets.
+ */
+function blankQuotedSpans(text: string): string {
+  return text.replace(/'[^']*'|"[^"]*"/g, (span) => ' '.repeat(span.length));
+}
+
+/**
+ * `text` with the reading the plain-word gate needs: quoted spans blanked
+ * (so a subcommand word only inside quotes is not "really" invoked) and
+ * redirections removed (so `git push origin main > /dev/null` is not read as
+ * having `>` and `/dev/null` for words). Used only to decide *whether* a
+ * segment is covered — word extraction itself still reads real text, quotes
+ * and all, through `isPlainWord`.
+ */
+function forceGateStructuralText(text: string): string {
+  return stripRedirections(blankQuotedSpans(text));
+}
+
+/** Whether `text` reaches a git subcommand the plain-word gate must cover. */
+function isCoveredForcePushSegment(text: string): boolean {
+  const structural = forceGateStructuralText(text);
+  if (FORCE_GATE_SUBCOMMANDS.some((subcommand) => isGitSubcommand(structural, subcommand))) {
+    return true;
+  }
+  return (
+    isGitSubcommand(structural, 'branch') &&
+    isForcingBranchCommand(wordsAfterSubcommand(stripRedirections(text), 'branch'))
+  );
+}
+
+/** True when every word after a covered subcommand in `text` is plain. */
+function hasUnsafeWord(text: string): boolean {
+  const structural = forceGateStructuralText(text);
+  const wordsText = stripRedirections(text);
+  for (const subcommand of FORCE_GATE_SUBCOMMANDS) {
+    if (!isGitSubcommand(structural, subcommand)) continue;
+    if (wordsAfterSubcommand(wordsText, subcommand).some((token) => !isPlainWord(token)))
+      return true;
+  }
+  if (isGitSubcommand(structural, 'branch')) {
+    const tokens = wordsAfterSubcommand(wordsText, 'branch');
+    if (isForcingBranchCommand(tokens) && tokens.some((token) => !isPlainWord(token))) return true;
+  }
+  return false;
+}
+
+const EVAL_RE = /\beval\b/;
+const SHELL_C_WRAPPER_RE = /\b(sh|bash|zsh|env)\b[^;&|]*-c\b/;
+const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
+
+/**
+ * `eval`, or a `-c` string handed to `sh`/`bash`/`zsh`/`env`, passes a whole
+ * second command line to another shell to parse — a second chance for any
+ * trick above to hide inside a string this rule would otherwise read as
+ * inert text, without this scanner ever parsing the nested line itself.
+ * Simplest fail-closed read: a segment naming one of those wrappers
+ * alongside `git` and force-push-shaped subcommand text is refused outright,
+ * rather than trusted to be read correctly. The wrapped text is dequoted
+ * first — `bash -c 'git rese""t --hard $(x)'` names `git` and a spliced
+ * `reset` only once quotes and backslashes are gone, the same read the
+ * plain-word gate gives every other word here.
+ */
+function isShellWrappedForceCandidate(segment: string): boolean {
+  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return false;
+  const dequoted = stripSpliceQuotes(segment).replace(/\\/g, '');
+  return /\bgit\b/i.test(dequoted) && FORCE_GATE_WORD_RE.test(dequoted);
+}
+
+/**
+ * One shell word of a segment, split the way a shell would: an unquoted
+ * backslash escapes the next character, a single-quoted span is fully
+ * literal, a double-quoted span lets a backslash escape the quote itself.
+ * `raw` keeps the word exactly as written, for `isPlainWord`; `text` is the
+ * same word with every quote and escaping backslash removed — what git
+ * actually receives once the shell is done. This is what lets the gate find
+ * a subcommand spelled `rese""t`, `p\ush` or `"reset"` as `reset`, where
+ * `isGitSubcommand`'s literal-substring read cannot.
+ */
+interface DequotedWord {
+  readonly raw: string;
+  readonly text: string;
+}
+
+function splitDequotedWords(segment: string): DequotedWord[] {
+  const words: DequotedWord[] = [];
+  let raw = '';
+  let text = '';
+  let inWord = false;
+  const flush = () => {
+    if (inWord) words.push({ raw, text });
+    raw = '';
+    text = '';
+    inWord = false;
+  };
+  let i = 0;
+  while (i < segment.length) {
+    const c = segment.charAt(i);
+    if (c === "'") {
+      inWord = true;
+      raw += c;
+      i += 1;
+      while (i < segment.length && segment.charAt(i) !== "'") {
+        raw += segment.charAt(i);
+        text += segment.charAt(i);
+        i += 1;
+      }
+      if (i < segment.length) {
+        raw += segment.charAt(i);
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '"') {
+      inWord = true;
+      raw += c;
+      i += 1;
+      while (i < segment.length && segment.charAt(i) !== '"') {
+        if (segment.charAt(i) === '\\' && i + 1 < segment.length) {
+          raw += segment.charAt(i) + segment.charAt(i + 1);
+          text += segment.charAt(i + 1);
+          i += 2;
+        } else {
+          raw += segment.charAt(i);
+          text += segment.charAt(i);
+          i += 1;
+        }
+      }
+      if (i < segment.length) {
+        raw += segment.charAt(i);
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '\\' && i + 1 < segment.length) {
+      inWord = true;
+      raw += c + segment.charAt(i + 1);
+      text += segment.charAt(i + 1);
+      i += 2;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      flush();
+      i += 1;
+      continue;
+    }
+    inWord = true;
+    raw += c;
+    text += c;
+    i += 1;
+  }
+  flush();
+  return words;
+}
+
+/** `git` global options that spend the *next* word on a value rather than folding it in with `=`, enough to walk past them to the subcommand. */
+const GIT_GLOBAL_VALUE_FLAGS = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--exec-path',
+  '--config-env',
+]);
+
+/** The subcommand word of a `git` invocation found at `words[gitIndex]`, walking past global options the way `git` itself does. */
+function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): number {
+  let i = gitIndex + 1;
+  while (i < words.length) {
+    const word = words[i];
+    if (word === undefined) break;
+    if (word.text.startsWith('-')) {
+      i += GIT_GLOBAL_VALUE_FLAGS.has(word.text) ? 2 : 1;
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
+
+const SUBCOMMAND_NOT_PLAIN_REASON =
+  'the git subcommand is not written as a plain word, so the guard cannot tell what it runs — write it out plainly';
+
+/**
+ * Round 6's fix for a subcommand word the shell will glue back together
+ * before git ever sees it — quote-splicing (`rese""t`), a stray backslash
+ * (`p\ush`, `\git`) or an expansion (`upd${x}ate-ref`) — none of which
+ * `isCoveredForcePushSegment` can see, since it matches a literal substring
+ * against text that still holds the quotes and backslashes. This reads the
+ * segment as shell words instead: find the actual `git` word (whatever
+ * wrapper precedes it — this needs no wrapper list, since it is looking for
+ * `git` itself, not what comes before it), walk to its subcommand, and
+ * refuse outright if that word cannot be read plainly — not just when it
+ * happens to name a covered subcommand, since a word this unreadable could
+ * be any of them. A subcommand read plainly and found covered still needs
+ * every word after it plain, the same gate `hasUnsafeWord` already applies.
+ */
+function checkForcePushSubcommandWord(
+  segment: string,
+  rule: GuardrailRule,
+): PolicyViolation | null {
+  const words = splitDequotedWords(stripRedirections(segment));
+  const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
+  if (gitIndex === -1) {
+    // Defence in depth for `joinLineContinuations` missing a spelling of its
+    // own: a word whose dequoted text is not exactly `git` can still resolve
+    // to it once the whitespace a shell trick left behind (a stray literal
+    // newline, here, rather than a real word break) is stripped out. Such a
+    // word is never plain — `isPlainWord` already refuses a bare backslash or
+    // an embedded newline — so this only fires for a raw form this rule
+    // could not read anyway; refuse it rather than silently pass through.
+    const hidden = words.some(
+      (word) =>
+        word.text.toLowerCase() !== 'git' &&
+        !isPlainWord(word.raw) &&
+        word.text.replace(/\s+/g, '').toLowerCase().endsWith('git'),
+    );
+    if (hidden) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
+    return null;
+  }
+  const subcommandIndex = gitSubcommandWord(words, gitIndex);
+  if (subcommandIndex === -1) return null;
+  const subcommand = words[subcommandIndex];
+  if (subcommand === undefined) return null;
+  if (!isPlainWord(subcommand.raw)) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
+  const name = subcommand.text.toLowerCase();
+  const rest = words.slice(subcommandIndex + 1);
+  const covered =
+    FORCE_GATE_SUBCOMMANDS.includes(name) ||
+    (name === 'branch' && isForcingBranchCommand(rest.map((word) => word.text)));
+  if (covered && rest.some((word) => !isPlainWord(word.raw))) {
+    return violation(rule, PLAIN_WORD_REASON);
+  }
+  return null;
+}
+
+/**
+ * Rule 2's main defence: a plain-word gate, not a growing list of individual
+ * shell tricks. In a segment that reaches `push`, `rebase`, `reset`,
+ * `filter-branch`, `update-ref`, or `branch` when it forces or deletes a
+ * ref, every word after the subcommand must be plain — see `isPlainWord`.
+ * A word this rule cannot read safely is refused rather than guessed at; the
+ * gate decides only readability, not force-ness, which the checks below
+ * still do once the words are known safe to read.
+ */
+function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
+  const rule = requireRule(policy, 'force-push');
+  // Joined first, so every rule-2 layer below — the shell-wrapper check, the
+  // subcommand-word gate, and the plain-word gate over the words after it —
+  // reads the command the way bash will run it, with no continuation left to
+  // hide a subcommand word inside.
+  for (const segment of topLevelCommands(joinLineContinuations(command))) {
+    if (isShellWrappedForceCandidate(segment)) return violation(rule);
+
+    const subcommandWordViolation = checkForcePushSubcommandWord(segment, rule);
+    if (subcommandWordViolation) return subcommandWordViolation;
+
+    const decoded = decodeAnsiCQuoting(segment);
+    // An unterminated `$'` span cannot be decoded with confidence — fail
+    // closed rather than guess at what it hides, the same direction as
+    // `topLevelCommands`' own fallback for a construct it cannot read.
+    if (decoded.unterminated) {
+      if (/\bgit\b/i.test(segment)) return violation(rule);
+      continue;
+    }
+    if (definesInlineGitAlias(decoded.text)) return violation(rule);
+
+    // Subcommand detection reads the decoded text, so a subcommand word
+    // hidden inside a `$'...'` span (`$'\x70ush'`) is still found. But a
+    // `$'...'` span is itself one of the constructs the plain-word gate
+    // exists to refuse — decoding it away first, then checking the decoded
+    // words for plainness, would launder exactly what it is meant to catch.
+    // So once a covered subcommand is found, an undecoded `$'...'` span
+    // anywhere in the segment is already a plain-word failure on its own;
+    // otherwise (no span at all) the raw segment is checked directly.
+    if (isCoveredForcePushSegment(decoded.text)) {
+      if (decoded.text !== segment) return violation(rule, PLAIN_WORD_REASON);
+      if (hasUnsafeWord(segment)) return violation(rule, PLAIN_WORD_REASON);
+    }
+
+    const text = stripSpliceQuotes(decoded.text);
+    const withoutStash = text.replace(/\bstash\s+push\b/gi, 'stash');
+    if (!GIT_PUSH_ANYWHERE_RE.test(withoutStash)) continue;
+    if (FORCE_PUSH_RE.test(text)) return violation(rule);
+    // A refspec operand starting with `+` forces the update the same way
+    // `--force` does, with no flag on the line at all. Read the same way
+    // rule 1 reads a push's destination: every non-flag operand of the push,
+    // quotes stripped — and backslashes stripped too, since the shell
+    // removes them before git ever sees the argument. `git push origin
+    // \+feat` reaches git as `+feat`; scanning the raw `\+feat` for a
+    // leading `+` misses it, so the operand is read the way git will.
+    if (pushOperands(text).some((ref) => ref.replace(/\\/g, '').startsWith('+'))) {
+      return violation(rule);
+    }
+  }
+  return null;
 }
 
 /**
