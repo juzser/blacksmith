@@ -124,10 +124,10 @@ event payloads, `structured_output`, JSON.
 - **Ask before acting.** When the request is unclear, or needs analysis
   before acting on it, ask — the question follows the same rules.
 
-Example — Jargon: "Task vam-ux-3 is blocked: S3 finding on claim overlap,
+Example — Jargon: "Task checkout-3 is blocked: S3 finding on claim overlap,
 waiver pending." Plain: "One part of your project is on hold because two
 changes touched the same file and I'm not sure which should win. I need
-you to say which one to keep. Technical details: task vam-ux-3, S3
+you to say which one to keep. Technical details: task checkout-3, S3
 finding, waiver pending."
 
 ## Playbooks
