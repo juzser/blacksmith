@@ -481,7 +481,7 @@ function renderEntry(lesson: CompiledLessonInput): string {
  * re-rendering) — so an entry compileLessons() preserves unchanged never
  * drifts by so much as a space.
  */
-interface PreservedEntry {
+export interface PreservedEntry {
   lessonId: string;
   scope: string;
   /** Raw original lines, joined with `\n` and a single trailing `\n` — the
@@ -501,16 +501,39 @@ interface PreservedEntry {
  * `## <scope>` heading (this file's own header, including its illustrative
  * fenced `### ` example) is ignored exactly as parseLessons ignores it: real
  * entries only start once `scope` is one of severity.ts's `LESSON_SCOPES`.
+ *
+ * Line endings are normalized to `\n` before any of the above line-based
+ * regexes run: `SECTION_HEADING`/`BULLET`'s trailing `$` and `.` never match a
+ * `\r`, so on an unmodified `\r\n` file every line silently fails to match,
+ * `scope` never leaves `''`, and every entry in the file is dropped with no
+ * error at all — the exact silent-loss failure this function exists to
+ * prevent, just triggered by a different byte.
+ *
+ * A `### ` entry that carries a `lesson_id` bullet but sits under a `##`
+ * heading that is NOT one of `LESSON_SCOPES` — an unknown or misspelled
+ * section — is refused the same way an unparseable entry is, but only once a
+ * real scope section has already been seen once in the file: before that
+ * point the file is still in its own header/doc zone (the `## Schema`
+ * walkthrough, with its illustrative fenced example), which parseLessons has
+ * always ignored and must keep being ignored here too. After the first real
+ * scope section, though, a `## ` heading is no longer prose — it is a typo
+ * or a moved section, and an entry stranded under it would otherwise vanish
+ * exactly like the CRLF case above: no bucket matches, so it is never
+ * pushed, and flush()'s `heading === null` guard means it is never even
+ * counted as unparseable.
  */
 function extractExistingLessonEntries(markdown: string): PreservedEntry[] {
-  const lines = markdown.split('\n');
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
   const entries: PreservedEntry[] = [];
 
   let scope = '';
+  let seenValidScope = false;
   let heading: string | null = null;
   let entryLines: string[] = [];
   let bullets: Record<string, string> = {};
   let lastKey: string | null = null;
+  /** Whether the entry currently being tracked sits under an unrecognized scope (see header comment). */
+  let orphan = false;
 
   function flush(): void {
     if (heading === null) return;
@@ -519,6 +542,27 @@ function extractExistingLessonEntries(markdown: string): PreservedEntry[] {
     }
     const lessonId = bullets.lesson_id;
     const statement = bullets.statement;
+    if (orphan) {
+      if (lessonId) {
+        throw new LessonsError(
+          'lessons.entry-under-unknown-scope',
+          `Existing lessons.md entry ${JSON.stringify(heading)} carries lesson_id ` +
+            `${JSON.stringify(lessonId)} under "## ${scope}", which is not a recognized lesson ` +
+            `scope (${VALID_SCOPES.join(', ')}) — refusing to compile, which would silently drop ` +
+            'it. Fix the scope heading or remove the entry by hand, then recompile.',
+          { scope, heading, lessonId },
+        );
+      }
+      // No lesson_id: treated like the header's own doc examples — ignored,
+      // not an error, so free-standing prose under a stray heading doesn't
+      // become a hard failure.
+      heading = null;
+      entryLines = [];
+      bullets = {};
+      lastKey = null;
+      orphan = false;
+      return;
+    }
     if (!lessonId || !statement) {
       throw new LessonsError(
         'lessons.unparseable-existing-entry',
@@ -533,6 +577,7 @@ function extractExistingLessonEntries(markdown: string): PreservedEntry[] {
     entryLines = [];
     bullets = {};
     lastKey = null;
+    orphan = false;
   }
 
   for (const line of lines) {
@@ -540,6 +585,7 @@ function extractExistingLessonEntries(markdown: string): PreservedEntry[] {
     if (sectionMatch) {
       flush();
       scope = (sectionMatch[1] as string).trim();
+      if ((VALID_SCOPES as readonly string[]).includes(scope)) seenValidScope = true;
       continue;
     }
     if (ENTRY_HEADING.test(line)) {
@@ -549,6 +595,13 @@ function extractExistingLessonEntries(markdown: string): PreservedEntry[] {
         entryLines = [line];
         bullets = {};
         lastKey = null;
+        orphan = false;
+      } else if (seenValidScope) {
+        heading = line;
+        entryLines = [line];
+        bullets = {};
+        lastKey = null;
+        orphan = true;
       }
       continue;
     }
@@ -574,6 +627,24 @@ function extractExistingLessonEntries(markdown: string): PreservedEntry[] {
   flush();
 
   return entries;
+}
+
+/**
+ * Which pre-existing entries a compile of `lessons` against `existingMarkdown`
+ * would preserve — the same set compileLessons() itself splices in, exposed
+ * so a caller (the CLI's `lessons compile` handler) can report how many
+ * survived without re-deriving the "now store-tracked, so the fresh render
+ * wins" filter a second time and risking the two counts drifting apart.
+ */
+export function lessonsToPreserve(
+  lessons: readonly CompiledLessonInput[],
+  existingMarkdown?: string,
+): PreservedEntry[] {
+  if (existingMarkdown === undefined) return [];
+  const knownIds = new Set(lessons.map((l) => l.lessonId));
+  return extractExistingLessonEntries(existingMarkdown).filter(
+    (entry) => !knownIds.has(entry.lessonId),
+  );
 }
 
 /**
@@ -604,14 +675,10 @@ export function compileLessons(
     if (bucket) bucket.push(lesson);
   }
 
-  const knownIds = new Set(lessons.map((l) => l.lessonId));
   const preservedBySection = new Map<string, string[]>(VALID_SCOPES.map((s) => [s, []]));
-  if (existingMarkdown !== undefined) {
-    for (const entry of extractExistingLessonEntries(existingMarkdown)) {
-      if (knownIds.has(entry.lessonId)) continue; // now store-tracked; fresh render wins.
-      const bucket = preservedBySection.get(entry.scope);
-      if (bucket) bucket.push(entry.raw);
-    }
+  for (const entry of lessonsToPreserve(lessons, existingMarkdown)) {
+    const bucket = preservedBySection.get(entry.scope);
+    if (bucket) bucket.push(entry.raw);
   }
 
   const sections = VALID_SCOPES.map((scope) => {

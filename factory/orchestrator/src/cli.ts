@@ -4084,7 +4084,7 @@ async function main(): Promise<number> {
   if (namespace === 'lessons' && action === 'compile') {
     const { openDb } = await import('./db/projector.js');
     const { lessonsPage } = await import('./db/queries.js');
-    const { compileLessons } = await import('./lessons.js');
+    const { compileLessons, lessonsToPreserve } = await import('./lessons.js');
     const dbPath = flags.db ?? STATE_DB_PATH;
     // The operator's copy, not the package's: under an install the shipped one
     // lives in node_modules, which the next `npm i` replaces wholesale. mkdir
@@ -4104,20 +4104,22 @@ async function main(): Promise<number> {
       // doesn't track this" apart from "this was deleted" — see its own
       // docstring.
       const existingMarkdown = existsSync(outPath) ? readFileSync(outPath, 'utf8') : undefined;
-      const markdown = compileLessons(
-        approved.map((l) => ({
-          lessonId: l.lessonId,
-          lessonScope: l.lessonScope,
-          statement: l.statement,
-          findingCategory: l.findingCategory,
-          claimPath: l.claimPath,
-          agentRole: l.agentRole,
-          caseType: l.caseType,
-        })),
-        existingMarkdown,
-      );
+      const compileInputs = approved.map((l) => ({
+        lessonId: l.lessonId,
+        lessonScope: l.lessonScope,
+        statement: l.statement,
+        findingCategory: l.findingCategory,
+        claimPath: l.claimPath,
+        agentRole: l.agentRole,
+        caseType: l.caseType,
+      }));
+      const markdown = compileLessons(compileInputs, existingMarkdown);
       writeFileSync(outPath, markdown, 'utf8');
-      printJson({ outPath, lessonsCompiled: approved.length });
+      // lessonsPreserved: pre-existing entries with no store row that this
+      // compile kept verbatim rather than regenerated — the count an operator
+      // needs to notice a hand-authored entry silently stopped surviving.
+      const lessonsPreserved = lessonsToPreserve(compileInputs, existingMarkdown).length;
+      printJson({ outPath, lessonsCompiled: approved.length, lessonsPreserved });
       return 0;
     } finally {
       handle.sqlite.close();

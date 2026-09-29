@@ -672,6 +672,69 @@ describe('compileLessons: preserving pre-existing entries with no store row', ()
     ]);
     expect(parseLessons(md).map((l) => l.lessonId)).toEqual(['lesson-only']);
   });
+
+  it('preserves a pre-existing entry when the existing file uses CRLF line endings', () => {
+    const crlfMarkdown = existingMarkdown.replace(/\n/g, '\r\n');
+    const md = compileLessons([], crlfMarkdown);
+    const parsed = parseLessons(md);
+    const hand = parsed.find((l) => l.lessonId === 'lesson-hand-001');
+    expect(hand).toBeDefined();
+    expect(hand?.statement).toContain('Lockfiles are regenerable');
+    expect(hand?.claimPath).toBe('**/pnpm-lock.yaml');
+  });
+
+  it('refuses with a clear error rather than silently dropping a lesson_id-bearing entry under an unrecognized scope after the first real scope section', () => {
+    const orphaned = [
+      '# Compiled Lessons (fixture)',
+      '',
+      '## stack-wide',
+      '',
+      '_(none yet)_',
+      '',
+      '## staack-wide',
+      '',
+      '### A misspelled-scope entry',
+      '',
+      '- lesson_id: lesson-orphan-001',
+      '- statement: This entry sits under a misspelled scope heading.',
+      '',
+    ].join('\n');
+    expect(() => compileLessons([], orphaned)).toThrow(/lesson-orphan-001/);
+    expect(() => compileLessons([], orphaned)).toThrow(/staack-wide/);
+  });
+
+  it('still ignores a lesson_id-bearing entry under an unrecognized heading BEFORE the first real scope section (doc-example precedent)', () => {
+    const beforeFirstScope = [
+      '# Compiled Lessons (fixture)',
+      '',
+      '## Schema',
+      '',
+      '### Never hand-edit a lockfile in a worker',
+      '',
+      '- lesson_id: doc-example-002',
+      '- statement: This is illustrative doc prose, not a real entry.',
+      '',
+      '## stack-wide',
+      '',
+      '_(none yet)_',
+      '',
+    ].join('\n');
+    expect(() => compileLessons([], beforeFirstScope)).not.toThrow();
+    expect(compileLessons([], beforeFirstScope)).not.toContain('doc-example-002');
+  });
+
+  it('compiles the real tracked lessons.md against an empty store byte-identical to the input', () => {
+    const original = readFileSync(LESSONS_MD_PATH, 'utf8');
+    const compiled = compileLessons([], original);
+    expect(compiled).toBe(original);
+  });
+
+  it('is idempotent: compiling that byte-identical output again changes nothing further', () => {
+    const original = readFileSync(LESSONS_MD_PATH, 'utf8');
+    const once = compileLessons([], original);
+    const twice = compileLessons([], once);
+    expect(twice).toBe(once);
+  });
 });
 
 describe('lessonsForScope', () => {

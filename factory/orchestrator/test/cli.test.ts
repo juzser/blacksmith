@@ -3089,7 +3089,11 @@ describe('cli.ts (built binary)', () => {
       lessonsOut,
     ]);
     expect(compileResult.status).toBe(0);
-    expect(JSON.parse(compileResult.stdout)).toEqual({ outPath: lessonsOut, lessonsCompiled: 1 });
+    expect(JSON.parse(compileResult.stdout)).toEqual({
+      outPath: lessonsOut,
+      lessonsCompiled: 1,
+      lessonsPreserved: 0,
+    });
     expect(readFileSync(lessonsOut, 'utf8')).toContain(lessonId);
 
     // A hand-authored entry with no store row, sitting in the output file
@@ -3146,11 +3150,13 @@ describe('cli.ts (built binary)', () => {
       lessonsOutPreserve,
     ]);
     expect(compilePreserveResult.status).toBe(0);
-    // Unchanged: this counts DB-approved rows compiled, not entries in the
-    // output file — the preserved hand entry has no store row to count.
+    // lessonsCompiled counts DB-approved rows compiled, not entries in the
+    // output file; lessonsPreserved is the hand entry that has no store row
+    // and so survives verbatim instead.
     expect(JSON.parse(compilePreserveResult.stdout)).toEqual({
       outPath: lessonsOutPreserve,
       lessonsCompiled: 1,
+      lessonsPreserved: 1,
     });
     const preservedMarkdown = readFileSync(lessonsOutPreserve, 'utf8');
     expect(preservedMarkdown).toContain(lessonId);
