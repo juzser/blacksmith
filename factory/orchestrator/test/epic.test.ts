@@ -1113,6 +1113,90 @@ describe('epic.ts summarizeEpic — superseded successor chains', () => {
   });
 });
 
+// #251: the amend-pending blocker used to read "waiting on X to land" for
+// every outstanding id, including ones that can never land as they stand.
+// Each id now carries its own reason; which ids are outstanding is unchanged.
+describe('epic.ts summarizeEpic — why each amend-pending obligation is outstanding (#251)', () => {
+  function blockerFor(tasks: EpicTaskRow[], successors = new Map<string, string>()): string {
+    const summary = summarizeEpic(
+      'epic-1',
+      tasks,
+      [
+        findingFixture({
+          finding_status: 'amend-pending',
+          finding_scope: 'spec',
+          amends_task_ids: ['epic-1/task-2'],
+          amends_plan_version: 2,
+        }),
+      ],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      alwaysEffort(),
+      null,
+      [],
+      null,
+      successors,
+    );
+    expect(summary.mechanicallyReady).toBe(false);
+    expect(summary.satisfiedAmendments).toHaveLength(0);
+    const blocker = summary.blockers.find((b) => b.includes('is amend-pending on plan v2'));
+    expect(blocker).toBeDefined();
+    return blocker as string;
+  }
+
+  it('names the successor when the obligation was superseded and the successor has not landed', () => {
+    const blocker = blockerFor(
+      [
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'superseded', planVersion: 2 }),
+        taskRow({ taskId: 'epic-1/task-4', taskStatus: 'todo', planVersion: 3 }),
+      ],
+      new Map([['epic-1/task-2', 'epic-1/task-4']]),
+    );
+    expect(blocker).toContain('epic-1/task-2 is superseded by epic-1/task-4');
+    expect(blocker).toContain('epic-1/task-4 has not landed');
+    expect(blocker).not.toContain('waiting on epic-1/task-2');
+  });
+
+  it('says the successor chain does not resolve when a superseded obligation has no successor', () => {
+    const blocker = blockerFor([
+      taskRow({ taskId: 'epic-1/task-2', taskStatus: 'superseded', planVersion: 2 }),
+    ]);
+    expect(blocker).toContain(
+      'epic-1/task-2 is superseded, but its successor chain does not resolve',
+    );
+    expect(blocker).not.toContain('waiting on');
+  });
+
+  it('says a re-cut is needed when the obligation landed below the amendment version', () => {
+    const summaryBlocker = blockerFor([
+      taskRow({ taskId: 'epic-1/task-2', taskStatus: 'completed', planVersion: 1 }),
+    ]);
+    expect(summaryBlocker).toContain(
+      'epic-1/task-2 landed completed at v1, below plan v2, so it needs a re-cut',
+    );
+    expect(summaryBlocker).not.toContain('waiting on');
+  });
+
+  it('says there is no task row when the obligation names a task the log never recorded', () => {
+    const blocker = blockerFor([
+      taskRow({ taskId: 'epic-1/task-1', taskStatus: 'completed', planVersion: 2 }),
+    ]);
+    expect(blocker).toContain('epic-1/task-2 has no task row in the event log');
+    expect(blocker).not.toContain('waiting on');
+  });
+
+  it('keeps the existing wording when the obligation has simply not landed yet', () => {
+    const blocker = blockerFor([
+      taskRow({ taskId: 'epic-1/task-2', taskStatus: 'in-progress', planVersion: 2 }),
+    ]);
+    expect(blocker).toBe(
+      'Finding "finding-1" is amend-pending on plan v2: waiting on epic-1/task-2 to land terminal-OK at v2 or later.',
+    );
+  });
+});
+
 // A follow-up task (taskEvents.ts's emitFollowUpTask, `origin: escalation`)
 // exists only to own findings no open task could. It is minted `todo` and no
 // event ever moves it to `waived`, so when the operator waives the findings it

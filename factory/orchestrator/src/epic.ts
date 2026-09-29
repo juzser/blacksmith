@@ -139,6 +139,70 @@ function resolveSupersededRow(
 }
 
 /**
+ * Why one amend-pending obligation id has not discharged (#251). Only the
+ * explanation: the decision that the id is outstanding is made beside
+ * `satisfiedBy` in summarizeEpic and this never feeds back into it.
+ */
+type ObligationReason =
+  | { kind: 'pending' }
+  | { kind: 'no-row' }
+  | { kind: 'chain-unresolved' }
+  | { kind: 'successor-pending'; successorId: string; status: string }
+  | { kind: 'below-version'; successorId: string | undefined; status: string; landedAt: number };
+
+interface OutstandingObligation {
+  id: string;
+  reason: ObligationReason;
+}
+
+/**
+ * The blocker for an amend-pending finding with outstanding obligations. Ids
+ * that are simply not landed yet keep the original "waiting on" wording, so
+ * the common case reads exactly as before; every other id is named with the
+ * reason it cannot land as things stand.
+ */
+function describeOutstandingObligations(
+  findingId: string,
+  version: number | undefined,
+  outstanding: readonly OutstandingObligation[],
+): string {
+  const waiting = outstanding.filter((o) => o.reason.kind === 'pending').map((o) => o.id);
+  const parts: string[] = [];
+  if (waiting.length > 0)
+    parts.push(`waiting on ${waiting.join(', ')} to land terminal-OK at v${version} or later`);
+  for (const { id, reason } of outstanding) {
+    switch (reason.kind) {
+      case 'pending':
+        break;
+      case 'no-row':
+        parts.push(`${id} has no task row in the event log, so nothing can land it`);
+        break;
+      case 'chain-unresolved':
+        parts.push(
+          `${id} is superseded, but its successor chain does not resolve, so it can never land`,
+        );
+        break;
+      case 'successor-pending':
+        parts.push(
+          `${id} is superseded by ${reason.successorId}; ${reason.successorId} has not landed ` +
+            `terminal-OK (status: ${reason.status})`,
+        );
+        break;
+      case 'below-version': {
+        const landedId = reason.successorId ?? id;
+        const via = reason.successorId === undefined ? '' : `${id} is superseded by ${landedId}; `;
+        parts.push(
+          `${via}${landedId} landed ${reason.status} at v${reason.landedAt}, below plan ` +
+            `v${version}, so it needs a re-cut`,
+        );
+        break;
+      }
+    }
+  }
+  return `Finding "${findingId}" is amend-pending on plan v${version}: ${parts.join('; ')}.`;
+}
+
+/**
  * The `origin` taskEvents.ts's `emitFollowUpTask` stamps on a follow-up task:
  * one minted for a finding no open task could own, rather than one a plan cut.
  */
@@ -750,7 +814,7 @@ export function summarizeEpic(
           // silently read as done — null here, not [], is what distinguishes
           // "nothing to wait on" from "waiting on nothing outstanding".
           null
-        : wellFormedObligationIds.filter((id) => {
+        : wellFormedObligationIds.flatMap((id): OutstandingObligation[] => {
             const bare = bareTaskId(epicId, id);
             const row = tasks.find((t) => bareTaskId(epicId, t.taskId) === bare);
             // An obligation named a task a LATER, separate amendment went on
@@ -784,7 +848,44 @@ export function summarizeEpic(
                 taskId: row.taskId,
                 planVersion: evidenceRow.planVersion,
               });
-            return !landed;
+            if (landed) return [];
+            // #251: which ids are outstanding is decided above and nowhere
+            // else; this only says why, so the blocker stops calling an id
+            // "waiting" when it can never land as things stand.
+            if (row === undefined) return [{ id, reason: { kind: 'no-row' } }];
+            if (row.taskStatus === SUPERSEDED_TASK_STATUS && evidenceRow === row)
+              return [{ id, reason: { kind: 'chain-unresolved' } }];
+            const successorId = evidenceRow === row ? undefined : evidenceRow?.taskId;
+            if (
+              evidenceRow !== undefined &&
+              TERMINAL_OK_TASK_STATUSES.has(evidenceRow.taskStatus) &&
+              version !== undefined &&
+              evidenceRow.planVersion !== null &&
+              evidenceRow.planVersion < version
+            )
+              return [
+                {
+                  id,
+                  reason: {
+                    kind: 'below-version',
+                    successorId,
+                    status: evidenceRow.taskStatus,
+                    landedAt: evidenceRow.planVersion,
+                  },
+                },
+              ];
+            if (successorId !== undefined && evidenceRow !== undefined)
+              return [
+                {
+                  id,
+                  reason: {
+                    kind: 'successor-pending',
+                    successorId,
+                    status: evidenceRow.taskStatus,
+                  },
+                },
+              ];
+            return [{ id, reason: { kind: 'pending' } }];
           });
 
     if (malformedObligations.length === 0 && outstanding !== null && outstanding.length === 0) {
@@ -816,9 +917,7 @@ export function summarizeEpic(
         `Finding "${f.finding_id}" is amend-pending but names no task ids to wait on — it can never be discharged this way; check how it entered amend-pending.`,
       );
     } else if (outstanding.length > 0) {
-      findingBlockers.push(
-        `Finding "${f.finding_id}" is amend-pending on plan v${version}: waiting on ${outstanding.join(', ')} to land terminal-OK at v${version} or later.`,
-      );
+      findingBlockers.push(describeOutstandingObligations(f.finding_id, version, outstanding));
     }
   }
 
