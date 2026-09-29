@@ -2,9 +2,12 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { type BudgetPolicy, loadBudgetPolicy, roleCapTokens } from './budgets.js';
+import { epicBudgetPolicies } from './epicBudget.js';
 import { SmithError } from './errors.js';
 import { AGENTS_DIR, HARNESS_POLICY_PATH, REPO_ROOT } from './paths.js';
+import type { PlanOpts } from './plan.js';
 import { type GuardrailPolicy, INSPECTED_FILE_TOOLS, loadGuardrailPolicy } from './policy.js';
+import { epicOfTaskId } from './taskId.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 
 /**
@@ -499,6 +502,18 @@ function capTokensFor(role: string, budgets: BudgetPolicy): number | null {
   return roleCapTokens(budgets, role);
 }
 
+/**
+ * budgets.yml sized for the effort tier of the epic `taskId` belongs to — the
+ * tier `cap_tokens` (and so the runner's `over_budget`) is judged at. A bare
+ * task id names no epic, and is priced at effort.yml's default tier.
+ */
+function budgetsForTask(taskId: string, planOpts: PlanOpts | undefined): BudgetPolicy {
+  const epicId = epicOfTaskId(taskId);
+  return epicId === null
+    ? loadBudgetPolicy()
+    : epicBudgetPolicies(planOpts === undefined ? {} : { planOpts })(epicId);
+}
+
 // ---------------------------------------------------------------------------
 // Planning a turn
 // ---------------------------------------------------------------------------
@@ -524,7 +539,14 @@ export interface HarnessOptions {
   readonly guardrails?: GuardrailPolicy;
   readonly taxonomy?: Taxonomy;
   readonly agentsDir?: string;
+  /**
+   * budgets.yml as priced for this turn. Absent, it is sized for the effort
+   * tier of the task's own epic (its latest plan, after the security floor),
+   * read from `planOpts`' specs dir; effort.yml's default tier when the task
+   * id names no epic or the epic has no plan there.
+   */
   readonly budgets?: BudgetPolicy;
+  readonly planOpts?: PlanOpts;
 }
 
 interface InvocationBase {
@@ -837,7 +859,7 @@ export function planWorkerTurn(
   const rawArgs = [...harness.args, ...roleArgs, ...(schema !== null ? harness.schemaArgs : [])];
   const args = rawArgs.map((arg) => substitute(arg, values, harness.name));
 
-  const budgets = options.budgets ?? loadBudgetPolicy();
+  const budgets = options.budgets ?? budgetsForTask(taskId, options.planOpts);
   const budget: HarnessBudget = {
     timeout_ms: harness.timeoutMs,
     max_output_bytes: harness.maxOutputBytes ?? HARNESS_DEFAULT_MAX_OUTPUT_BYTES,

@@ -56,7 +56,9 @@ quality KPI: same-mistake rate should trend to zero.
 
 - **Per-epic cap, sized per effort tier: 4,000,000 small / 16,000,000
   medium / 32,000,000 huge** (planner + all workers + judges). The tier is
-  the plan's `effort`, else `effort.yml`'s `default_tier` (medium). The cap
+  the one the epic runs at: the plan's `effort` (else `effort.yml`'s
+  `default_tier`, medium), raised to `security_floor` when a live task trips
+  a security trigger. The cap
   was raised from 2,000,000 to 4,000,000 on 2026-08-11 after the
   `envkit-mcp-surface` dogfood measured 1,529,963 tokens for its two
   *smallest* tasks, and sized per tier on 2026-09-29 after eight medium-tier

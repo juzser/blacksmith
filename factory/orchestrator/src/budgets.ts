@@ -178,36 +178,46 @@ const LEGACY_JUDGE_BUCKET_ROLES: readonly PricedRole[] = [
   'grader',
 ];
 
-let cachedDefaultTier: EffortTier | null = null;
-
 /**
  * effort.yml's `default_tier`, read directly rather than through effort.ts:
- * effort.ts imports plan.ts, and plan.ts imports this module. Falls back to
- * `medium` — the tier effort.yml has shipped as its default since it existed —
- * only when the file cannot be read or names no tier.
+ * effort.ts imports plan.ts, and plan.ts imports this module. Read on every
+ * call, not cached: the file is small, and a process that outlives an edit to
+ * it (the daemon) must not keep budgeting at the tier it read first. A file
+ * that cannot be read, or whose `default_tier` is missing or names no tier, is
+ * refused the way effort.ts refuses it — a typo there must not quietly size
+ * every untiered epic at `medium`.
  */
-function defaultBudgetTier(): EffortTier {
-  if (cachedDefaultTier !== null) return cachedDefaultTier;
-  let tier: EffortTier = 'medium';
+function defaultBudgetTier(effortPolicyFile: string = EFFORT_POLICY_PATH): EffortTier {
+  let doc: { default_tier?: unknown } | null;
   try {
-    const doc = parseYaml(readFileSync(EFFORT_POLICY_PATH, 'utf8')) as { default_tier?: unknown };
-    if (isEffortTier(doc?.default_tier)) tier = doc.default_tier;
-  } catch {
-    // Unreadable effort.yml: keep the documented default.
+    doc = parseYaml(readFileSync(effortPolicyFile, 'utf8')) as { default_tier?: unknown } | null;
+  } catch (error) {
+    throw new BudgetError(
+      'budgets.invalid-policy',
+      `Cannot read effort.yml's default_tier from ${effortPolicyFile}: ${(error as Error).message}. A budget with no tier named is sized at that tier, so there is no budget without it.`,
+      { file: effortPolicyFile },
+    );
   }
-  cachedDefaultTier = tier;
+  const tier = doc?.default_tier;
+  if (!isEffortTier(tier)) {
+    throw new BudgetError(
+      'budgets.invalid-policy',
+      `effort.yml default_tier must be one of ${EFFORT_TIERS.join(', ')}; got ${JSON.stringify(tier ?? null)} in ${effortPolicyFile}.`,
+      { file: effortPolicyFile, field: 'default_tier', value: tier ?? null },
+    );
+  }
   return tier;
 }
 
 /**
  * The tier a budget is sized for: the given one when it names an effort tier,
- * otherwise effort.yml's `default_tier`. A plan's `effort` goes in here as is;
- * an absent or unknown value is "no tier chosen", never an error — plan
- * validation owns refusing a bad `effort`, and a budget reader is not the place
- * to fail a run over it.
+ * otherwise effort.yml's `default_tier`. An absent or unknown value is "no
+ * tier chosen", never an error — plan validation owns refusing a bad
+ * `effort`. Callers holding a plan pass epicBudget.ts `budgetTierForPlan`,
+ * which applies the security floor; a plan's raw `effort` is not its tier.
  */
-export function resolveBudgetTier(tier: unknown): EffortTier {
-  return isEffortTier(tier) ? tier : defaultBudgetTier();
+export function resolveBudgetTier(tier: unknown, effortPolicyFile?: string): EffortTier {
+  return isEffortTier(tier) ? tier : defaultBudgetTier(effortPolicyFile);
 }
 
 function optionalString(value: unknown): string | null {
@@ -303,12 +313,21 @@ function capNumberOrNull(field: string, value: number | null): number | null {
  * `epic.cap_tokens` for `tier`. A scalar is one cap for every tier (the shape
  * before 2026-09-29, still accepted); a mapping must name all three tiers —
  * a triplet missing one is refused whichever tier is being read, because the
- * missing tier's epics would otherwise fall to a default nobody chose.
+ * missing tier's epics would otherwise fall to a default nobody chose, and so
+ * is a key that names no tier (`hughe:`), which would leave its number unread.
  */
 function epicCapFor(raw: unknown, tier: EffortTier): number {
   if (raw === undefined || raw === null) return DEFAULT_EPIC_CAP_TOKENS;
   if (typeof raw !== 'object' || Array.isArray(raw)) return capNumber('epic.cap_tokens', raw);
   const byTier = raw as Record<string, unknown>;
+  const unknown = Object.keys(byTier).filter((key) => !isEffortTier(key));
+  if (unknown.length > 0) {
+    throw new BudgetError(
+      'budgets.invalid-policy',
+      `budgets.yml epic.cap_tokens names ${unknown.map((k) => `"${k}"`).join(', ')}, which ${unknown.length === 1 ? 'is not an effort tier' : 'are not effort tiers'}; the keys are ${EFFORT_TIERS.join(', ')}.`,
+      { field: 'epic.cap_tokens', unknown, allowed: [...EFFORT_TIERS] },
+    );
+  }
   const caps = Object.fromEntries(
     EFFORT_TIERS.map((t) => [t, capNumber(`epic.cap_tokens.${t}`, byTier[t])]),
   ) as Record<EffortTier, number>;

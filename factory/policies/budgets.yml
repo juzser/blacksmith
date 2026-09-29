@@ -79,9 +79,11 @@
 # smaller epic; the turn ceiling does not.
 #
 # Effort tiers (2026-09-29). Every token and diff number in this file is sized
-# per effort tier — effort.yml's small / medium / huge, read from the epic
-# plan's `effort`, and effort.yml's `default_tier` (medium) when there is no
-# plan in hand or it names none. One source of truth, one scale:
+# per effort tier — effort.yml's small / medium / huge: the tier the epic
+# runs at, i.e. its plan's `effort` raised by effort.yml's `security_floor`
+# when a live task trips a security trigger, and effort.yml's `default_tier`
+# (medium) when there is no plan in hand or it names none. One source of
+# truth, one scale:
 #
 #   * `epic.cap_tokens` is an explicit triplet, because an epic's size is not
 #     a straight multiple of its tasks'.

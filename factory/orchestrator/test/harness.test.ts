@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -382,6 +382,38 @@ describe('judge_args is the escape valve: OS/tool-enforced read-only, declared b
       max_output_bytes: HARNESS_DEFAULT_MAX_OUTPUT_BYTES,
       cap_tokens: budgets.task.coder.capTokens,
     });
+  });
+
+  it("sizes cap_tokens for the task's own epic tier, read off its latest plan", () => {
+    const specsDir = mkdtempSync(path.join(tmpdir(), 'harness-tier-'));
+    try {
+      mkdirSync(path.join(specsDir, 'epic-small'));
+      writeFileSync(
+        path.join(specsDir, 'epic-small', 'plan-v1.json'),
+        JSON.stringify({
+          epic_id: 'epic-small',
+          version: 1,
+          effort: 'small',
+          tasks: [{ task_id: 'epic-small/task-1', case: 'feature' }],
+        }),
+      );
+      const small = loadBudgetPolicy(undefined, process.env, 'small');
+      const medium = loadBudgetPolicy(undefined, process.env, 'medium');
+      expect(small.task.coder.capTokens).not.toBe(medium.task.coder.capTokens);
+      const plan = (taskId: string) => {
+        const invocation = planWorkerTurn(
+          request({ harness: 'codex-cli', role: 'coder', schema: 'result', taskId }),
+          { policy: JUDGE_CAPABLE_POLICY, planOpts: { specsDir } },
+        );
+        if (invocation.kind !== 'cli') throw new Error('unreachable');
+        return invocation.budget.cap_tokens;
+      };
+      expect(plan('epic-small/task-1')).toBe(small.task.coder.capTokens);
+      // No plan on disk for the epic: effort.yml's default tier.
+      expect(plan('epic-other/task-1')).toBe(medium.task.coder.capTokens);
+    } finally {
+      rmSync(specsDir, { recursive: true, force: true });
+    }
   });
 
   it('lists a judge_args-capable cli harness as serving judge roles too', () => {

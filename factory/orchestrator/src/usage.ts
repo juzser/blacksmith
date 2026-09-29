@@ -501,7 +501,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'harness plan',
     positionals: '',
     flags:
-      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>] [--tier <frontier|mid|small>] [--schema <name>]',
+      '--role <role> --task <id> --prompt-file <path> [--harness <name>] [--worktree <dir>] [--policy <file>] [--tier <frontier|mid|small>] [--schema <name>] [--specs-dir <dir>]',
     summary:
       'Render the invocation that would run one worker turn, as JSON. Prints it; never starts it.',
   },
@@ -575,7 +575,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'budget alarm',
     positionals: '<session-id>',
-    flags: '[--epic <id>] [--policy <path>] [--state-dir <dir>]',
+    flags: '[--epic <id>] [--policy <path>] [--specs-dir <dir>] [--state-dir <dir>]',
     summary:
       'Epic spend against budgets.yml’s epic.alarm_ratio. Exit 1 on a crossing OR on a record too holey to rule one out.',
   },

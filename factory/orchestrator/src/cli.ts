@@ -68,7 +68,7 @@ import { checkDispatchAsymmetry } from './dispatchAudit.js';
 import { lintDispatchPrompt } from './dispatchLint.js';
 import { loadDotEnv } from './dotenv.js';
 import { type ClosingReviewEffort, loadEffortPolicy, resolveEffort } from './effort.js';
-import { epicBudgetPolicies } from './epicBudget.js';
+import { budgetPolicyForPlan, epicBudgetPolicies } from './epicBudget.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from './errorIssues.js';
 import { SmithError } from './errors.js';
 import { checkEscalationLadder } from './escalation.js';
@@ -1775,9 +1775,9 @@ async function main(): Promise<number> {
         // the sum of every session that worked on it.
         await readLineageEvents(flags.session as string, eventOptsFromFlags(flags))
       : [];
-    // Sized for this epic's effort tier: the plan's own `effort`, else
-    // effort.yml's default_tier.
-    const budgetPolicy = loadBudgetPolicy(flags['budget-policy'], process.env, plan.effort);
+    // Sized for the tier this epic runs at: the plan's own `effort` after
+    // effort.yml's security floor, else effort.yml's default_tier.
+    const budgetPolicy = budgetPolicyForPlan(plan, { policyFile: flags['budget-policy'] });
     const budget = checkWaveBudget(
       budgetEvents,
       budgetPolicy,
@@ -1804,7 +1804,7 @@ async function main(): Promise<number> {
     // Names only, and only when some differ from budgets.yml: which caps came
     // from the box's env rather than the file.
     const envOverrides = budgetEnvOverrides(
-      loadBudgetPolicy(flags['budget-policy'], {}, plan.effort),
+      loadBudgetPolicy(flags['budget-policy'], {}, budgetPolicy.tier),
     );
     printJson({
       ...result,
@@ -2125,6 +2125,7 @@ async function main(): Promise<number> {
       // tiers so a session's own stamp can ride between them (S2-c).
       resolveProjectForTaskRef: planProjectResolverForTaskRef(planOptsFromFlags(flags)),
       selfFallbackForTaskRef: planSelfFallbackForTaskRef(FACTORY_PROJECT, planOptsFromFlags(flags)),
+      planOpts: planOptsFromFlags(flags),
       ...(flags.db ? { dbPath: flags.db } : {}),
       ...(flags['no-db'] === 'true' ? { projectDb: false } : {}),
     };
@@ -3216,7 +3217,7 @@ async function main(): Promise<number> {
         ...(tier !== undefined ? { tier } : {}),
         ...(flags.schema !== undefined ? { schema: flags.schema } : {}),
       },
-      { policy: loadHarnessPolicy(flags.policy) },
+      { policy: loadHarnessPolicy(flags.policy), planOpts: planOptsFromFlags(flags) },
     );
     printJson(invocation);
     return 0;
@@ -3500,7 +3501,10 @@ async function main(): Promise<number> {
     // Each epic is judged against budgets.yml sized for its own effort tier
     // (its latest plan's `effort`); the report's top-level cap is the default
     // tier's, and each epic line carries the cap it was judged against.
-    const policyForEpic = epicBudgetPolicies({ policyFile: flags.policy });
+    const policyForEpic = epicBudgetPolicies({
+      policyFile: flags.policy,
+      planOpts: planOptsFromFlags(flags),
+    });
     const report = checkBudgetAlarm(events, loadBudgetPolicy(flags.policy), {
       sessionId,
       ...(flags.epic ? { epicId: flags.epic } : {}),

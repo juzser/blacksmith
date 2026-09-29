@@ -21,7 +21,8 @@
 #
 # Budgets follow the same tier (2026-09-29): `budgets.yml` sizes the epic cap
 # and every per-task cap for small / medium / huge, and each budget reader
-# takes the tier from the plan's `effort`, else `default_tier` below. That is
+# takes the tier the epic runs at — the plan's `effort`, else `default_tier`
+# below, raised to `security_floor` when the floor applies. That is
 # a size, not a skipped step — the budgets still report and alarm at every
 # tier. Agent `maxTurns` is not tiered: one ceiling per template, sized for
 # `huge`.

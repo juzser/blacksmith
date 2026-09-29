@@ -123,6 +123,37 @@ describe('tier-scaled budgets', () => {
       BudgetError,
     );
   });
+
+  it('refuses an unknown key in an epic cap triplet, naming it', () => {
+    const yml = 'epic:\n  cap_tokens:\n    small: 1\n    medium: 2\n    huge: 3\n    hughe: 4\n';
+    for (const tier of ['small', 'medium', 'huge']) {
+      expect(() => parseBudgetPolicy(yml, tier)).toThrow(BudgetError);
+      expect(() => parseBudgetPolicy(yml, tier)).toThrow(/"hughe"/);
+    }
+  });
+
+  it('refuses an effort.yml whose default_tier is missing or misspelled, re-reading it each call', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'budget-default-tier-'));
+    const file = path.join(dir, 'effort.yml');
+    try {
+      writeFileSync(file, 'default_tier: huge\n');
+      expect(resolveBudgetTier(undefined, file)).toBe('huge');
+      writeFileSync(file, 'default_tier: small\n');
+      expect(resolveBudgetTier(undefined, file)).toBe('small');
+      writeFileSync(file, 'default_tier: meduim\n');
+      expect(() => resolveBudgetTier(undefined, file)).toThrow(BudgetError);
+      expect(() => resolveBudgetTier(undefined, file)).toThrow(/default_tier/);
+      writeFileSync(file, 'security_floor: medium\n');
+      expect(() => resolveBudgetTier(undefined, file)).toThrow(/default_tier/);
+      expect(() => resolveBudgetTier(undefined, path.join(dir, 'missing.yml'))).toThrow(
+        BudgetError,
+      );
+      // A named tier never needs the default.
+      expect(resolveBudgetTier('small', path.join(dir, 'missing.yml'))).toBe('small');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('per-role judge caps', () => {

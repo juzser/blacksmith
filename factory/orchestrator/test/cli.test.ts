@@ -4828,7 +4828,8 @@ describe('cli.ts (built binary)', () => {
       });
 
       // The epic cap is per effort tier (budgets.yml `epic.cap_tokens`), and
-      // the tier is the plan's own `effort`. The same wave, the same policy
+      // the tier is the plan's `effort` after effort.yml's security floor
+      // (this plan trips no trigger). The same wave, the same policy
       // file: a small epic cannot afford it, a medium one can.
       it("refuses against the cap of the plan's effort tier, not the default tier", async () => {
         const { sessionId, eventsDir } = await session();

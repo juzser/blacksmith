@@ -388,7 +388,6 @@ export function checkBudgetAlarm(
 ): BudgetAlarmReport {
   const capTokens = policy.epic.capTokens;
   const alarmRatio = policy.epic.alarmRatio;
-  const alarmTokens = Math.floor(capTokens * alarmRatio);
 
   // Each epic is judged against budgets.yml sized for its own effort tier.
   const epicPolicies = new Map<string, BudgetPolicy>();
@@ -536,10 +535,13 @@ export function checkBudgetAlarm(
     });
 
   if (epics.length === 0) {
+    // An --epic that matched nothing is still reported against that epic's
+    // own tier cap: the default tier's cap would be a number it never had.
+    const emptyPolicy = options.epicId === undefined ? policy : policyFor(options.epicId);
     const partial: Omit<EpicSpendCheck, 'detail'> = {
       epicId: '*',
-      capTokens,
-      alarmTokens,
+      capTokens: emptyPolicy.epic.capTokens,
+      alarmTokens: Math.floor(emptyPolicy.epic.capTokens * emptyPolicy.epic.alarmRatio),
       measuredTokens: 0,
       projectedTokens: 0,
       taskCount: 0,

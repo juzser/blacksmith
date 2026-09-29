@@ -381,6 +381,24 @@ describe('checkBudgetAlarm', () => {
     expect(b?.status).toBe('under');
   });
 
+  it("reports an --epic with no attributed task against that epic's own tier cap", () => {
+    seq = 0;
+    const small: BudgetPolicy = {
+      ...POLICY,
+      tier: 'small',
+      epic: { ...POLICY.epic, capTokens: 100_000 },
+    };
+    const report = checkBudgetAlarm([waveAdmitted('epic-b', ['task-b'])], POLICY, {
+      ...OPTS,
+      epicId: 'epic-a',
+      policyForEpic: (epicId: string) => (epicId === 'epic-a' ? small : POLICY),
+    });
+    expect(report.epics).toHaveLength(1);
+    expect(report.epics[0]?.epicId).toBe('*');
+    expect(report.epics[0]?.capTokens).toBe(100_000);
+    expect(report.epics[0]?.alarmTokens).toBe(Math.floor(100_000 * POLICY.epic.alarmRatio));
+  });
+
   it('still fires the alarm when measured spend crosses it despite a priceless role', () => {
     // Monotonicity: the unpriced dispatch can only add to the bill, so a
     // crossing survives the hole. Downgrading this to unverifiable would hide
