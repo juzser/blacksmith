@@ -413,6 +413,83 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(d.allowed).toBe(true);
   });
 
+  // The flag is read from the push segment only. A chain is several commands,
+  // and a `-f` or `--force` that belongs to a different one of them says
+  // nothing about the push: `rm -f`, `grep -f` and `git worktree remove
+  // --force` chained next to a plain push used to be refused as a force push.
+  it.each([
+    ['git push origin feature && rm -f x'],
+    ['git push origin feature; grep -f patterns.txt log'],
+    ['git push origin feature && git worktree remove --force ../wt'],
+    ['rm -f x && git push origin feature'],
+    ['git push origin feature | tee out --force-with-lease-note'],
+    ['git stash push -f && git push origin feature'],
+    ['git stash push -f && git status'],
+  ])('allows %s — the force flag belongs to another segment', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    ['git push -f origin feature && echo done'],
+    ['git push --force origin feature; ls'],
+    ['git push --force-with-lease origin feature && rm -f x'],
+    ['ls && git push -f origin feature'],
+    ['git push origin feature && git push --force origin other'],
+  ])('still denies %s — the push segment itself forces', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // Only a real command boundary ends the push: a redirection, a `#` inside a
+  // word, a substitution, a brace list, a quoted separator or an escaped
+  // newline all leave the flag on the push's own command line, where git
+  // reads it. Splitting on any of them let the flag through.
+  it.each([
+    ['git push origin feat >/dev/null -f'],
+    ['git push origin feat < /dev/null --force'],
+    ['git push origin feat 2>&1 -f'],
+    ['git push origin feat >| out -f'],
+    ['git push origin feat#x -f'],
+    ['git push $(git remote) feat -f'],
+    ['git push origin `git branch --show-current` --force'],
+    ['git push origin {feat,} -f'],
+    ['git push origin feat \\\n  --force'],
+    ['git push origin "a;b" -f'],
+    ["git push origin 'a && b' -f"],
+    ['git push origin "$(echo ")")" -f'],
+    ['git push origin feat \\; -f'],
+    ["git push origin $'a\\'; ' -f"],
+    ['git -C dir push -f origin feat'],
+    ['sh -c "git push -f origin feat"'],
+    ['sh -c "git stash push; git push -f origin feat"'],
+    ['eval "git push -f origin feat"'],
+    ['echo feat | xargs git push -f origin'],
+    ['(git push -f origin feat)'],
+    ['echo $(git push -f origin feat)'],
+    ['true\ngit push -f origin feat'],
+    ['git push -f origin feat &'],
+    ['git push --force-with-lease=feat:abc origin feat'],
+    ['git push -fu origin feat'],
+    ['git push -uf origin feat'],
+    // Constructs the boundary scan does not model — parameter expansion,
+    // heredoc bodies and comments — hide separators or flip quote parity, so
+    // their presence falls back to reading the whole command.
+    ['git push ${X:-;} -f origin feat'],
+    ['git push ${X:-&&} --force origin feat'],
+    ['git push ${X//;/} -f origin feat'],
+    ["cat <<EOF\nit's\nEOF\ngit push origin 'x;' -f feat #'"],
+    ["true # '\ngit push origin 'x;' -f feat # '"],
+    ['git -c "a.b=;" push -f origin feat'],
+    // A comment also starts right after `;`, `&` or `)`, not only after a space.
+    ["true;# '\ngit push origin 'x;' -f feat;# '"],
+    ["true&&# '\ngit push origin 'x;' -f feat;# '"],
+    ["(true)# '\ngit push origin 'x;' -f feat;# '"],
+  ])('denies %s — the flag is still on the push command line', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
   it('allows a branch name that merely contains "force" as a substring, not a flag', () => {
     const d = evaluateCommand(
       ctx({ command: 'git push origin feature-force', branch: 'feature-force' }),
