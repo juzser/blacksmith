@@ -90,8 +90,23 @@ describe('judges.ts', () => {
       });
     });
 
-    it('rejects a role that is not a taxonomy agent', async () => {
-      await expect(dispatch({ role: 'code-reviewer' })).rejects.toThrow(/taxonomy/i);
+    // `code-reviewer` is not a taxonomy agent at all, so it used to surface
+    // taxonomy validation's own message; the judge-role check below now
+    // catches it first (it is not one of the six judge roles either) with a
+    // message that names the real problem instead.
+    it('rejects a role that is not a judge role', async () => {
+      await expect(dispatch({ role: 'code-reviewer' })).rejects.toBeInstanceOf(JudgeError);
+      await expect(dispatch({ role: 'code-reviewer' })).rejects.toThrow(/judge/i);
+    });
+
+    // A coder dispatch that accidentally carries `--artifact`/`round` (e.g. a
+    // copy-pasted judge dispatch command) must not open a judge turn the gate
+    // can never close — `coder` IS a real taxonomy agent, just not a judge
+    // one, so this is the case a taxonomy check alone would never catch.
+    it('refuses a role that is a real taxonomy agent but not a judge', async () => {
+      await expect(dispatch({ role: 'coder' })).rejects.toBeInstanceOf(JudgeError);
+      await expect(dispatch({ role: 'coder' })).rejects.toThrow(/judge/i);
+      expect(await turns()).toEqual([]);
     });
 
     // P9-23 made `model` a required dispatch dimension, and this is a dispatch.
@@ -136,6 +151,34 @@ describe('judges.ts', () => {
             provider: 'claude',
             model_tier: 'mid',
             model: 'claude-sonnet-5',
+          },
+        },
+        opts(),
+      );
+      expect(await turns()).toEqual([]);
+    });
+
+    // A hand-written or malformed event can carry `declared_artifact` and
+    // `round` on a non-judge role's dispatch (the CLI-level refusal in
+    // `recordJudgeDispatch` only stops the ordinary path). The fold has to
+    // hold the same line, or a coder dispatch that leaked an artifact line
+    // opens a turn nothing will ever close (`judges-outstanding` forever).
+    it('ignores a dispatch_decision from a non-judge role even when it carries an artifact and round', async () => {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'system',
+          event_type: 'dispatch_decision',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5',
+            round: 1,
+            declared_artifact: path.join(artifactDir, 'coder.json'),
           },
         },
         opts(),
