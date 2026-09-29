@@ -40,9 +40,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
-import { resolveFindingOwner } from './claims.js';
+import { type ClaimedTask, resolveFindingOwner } from './claims.js';
 import { SmithError } from './errors.js';
-import { appendEvent, type EventOpts, type StoredEvent } from './events.js';
+import {
+  appendEvent,
+  type EventOpts,
+  eventTaskId,
+  readLineageEvents,
+  type StoredEvent,
+} from './events.js';
 import { computeFingerprint, type EventContext, normalizeFilePath } from './findings.js';
 import { runGit } from './git.js';
 import {
@@ -54,12 +60,15 @@ import {
 import { isFactoryCheckout, SPECS_ACTIVE_DIR } from './paths.js';
 import {
   latestPlanVersion,
+  livePlanTasks,
   loadPlan,
   type PlanFile,
   type PlanOpts,
   planClaimedTasks,
+  type TaskSpecRecord,
 } from './plan.js';
 import { defaultKindFor, FACTORY_PROJECT, type MilestoneKind } from './roadmap.js';
+import { bareTaskId, epicOfTaskId, isQualifiedTaskId } from './taskId.js';
 import { loadTaxonomy } from './taxonomy.js';
 
 export class AuditError extends SmithError {}
@@ -1272,17 +1281,96 @@ function matchExceptFingerprints(
 }
 
 /**
+ * Every task id a `wave-merged` event says landed on the epic's integration
+ * branch — the merge queue's `emitWaveMerged` (`taskEvents.ts`) is the one
+ * writer, so this is "this task's change shipped," not a guess reconstructed
+ * from gate or task-result events. Both fields it may carry are read: the
+ * `payload.task_ids` array `emitWaveMerged` always sets, and the envelope
+ * `task_id` some hand-appended events set alone (`db/projector.ts`'s
+ * `waveTaskIds` comment: reading only one of the two silently dropped merges
+ * during the dogfood run).
+ */
+function mergedTaskIds(events: readonly StoredEvent[]): Set<string> {
+  const ids = new Set<string>();
+  for (const { record } of events) {
+    if (record.event_type !== 'wave-merged') continue;
+    const payloadIds = (record.payload as { task_ids?: unknown }).task_ids;
+    if (Array.isArray(payloadIds)) {
+      for (const id of payloadIds) {
+        if (typeof id === 'string' && id.length > 0) ids.add(id);
+      }
+    }
+    const taskId = eventTaskId(record);
+    if (taskId !== null) ids.add(taskId);
+  }
+  return ids;
+}
+
+/**
+ * Claims of a plan task that is `superseded` in the newest plan but whose
+ * change already merged into the epic's integration branch before a later
+ * replan superseded it — the false negative `planClaimedTasks` alone cannot
+ * see, because `livePlanTasks` drops every dead id whether or not its work
+ * ever shipped.
+ *
+ * A task superseded BEFORE it merged must still not count: that is the
+ * "operator scoped the plan narrower on purpose" case this function's caller
+ * already protects, and `merged` (built only from `wave-merged` events) is
+ * empty for it. A same-id supersede (D-121) is excluded too, via `liveIds` —
+ * its live successor is already in `planClaimedTasks`, so counting the dead
+ * copy again would only repeat the same claims under a second entry.
+ *
+ * A merged id counts only when it is qualified under THIS epic
+ * (`epicOfTaskId(id) === epicId`) and its bare half matches the plan task's.
+ * `taskIdsMatch`'s cross-spelling fallback is deliberately not used here: a
+ * `wave-merged` payload carries no `epic_id`, and `readLineageEvents` is not
+ * epic-scoped, so a bare id in the lineage could belong to a legacy
+ * pre-D-46 session or to a different epic that merged waves in the same
+ * lineage. Trusting a bare match would mark a finding `fixed` when nothing
+ * in *this* epic actually shipped — the wrong direction for an operation
+ * that must never be unsure in the optimistic direction. A bare merged id is
+ * therefore ignored, same as before this file learned about merges at all.
+ */
+function mergedSupersededClaims(
+  plan: PlanFile,
+  merged: ReadonlySet<string>,
+  epicId: string,
+): ClaimedTask[] {
+  if (merged.size === 0) return [];
+  const liveIds = new Set(livePlanTasks(plan).map((task) => task.task_id));
+  const mergedBareIds = new Set(
+    [...merged]
+      .filter((id) => isQualifiedTaskId(id) && epicOfTaskId(id) === epicId)
+      .map((id) => bareTaskId(id)),
+  );
+  const claimed = new Map<string, TaskSpecRecord>();
+  for (const task of plan.tasks) {
+    if (task.task_status !== 'superseded') continue;
+    if (liveIds.has(task.task_id)) continue;
+    if (claimed.has(task.task_id)) continue;
+    if (mergedBareIds.has(bareTaskId(task.task_id))) claimed.set(task.task_id, task);
+  }
+  return [...claimed.values()]
+    .filter((task) => Array.isArray(task.claims))
+    .map((task) => ({ task_id: task.task_id, claims: task.claims as string[] }));
+}
+
+/**
  * `audit resolve <project-dir> --epic <epic-id>`. Appends a `fixed` line only
  * for a carried finding some task in the epic's newest plan still claims
- * (`resolveFindingOwner`, D-41/P9-24) — an operator who scoped the plan
- * narrower than the audit deferred the rest on purpose, and marking them
- * fixed anyway would erase that choice. Unclaimed findings stay exactly as
- * they were and come back in `deferred`; `--except` forces specific
- * fingerprints there even when a task claims them. Called from `/bs run`'s
- * epic-close step, so it is repeatable; an epic no finding carries is
- * refused, because the likely cause is a typo and a silent no-op would leave
- * every finding open. A plan that cannot be found is refused too
- * (`audit.no-plan`): being unsure must never mark anything fixed.
+ * (`resolveFindingOwner`, D-41/P9-24), OR a task the plan now shows
+ * `superseded` whose change already merged into the epic's integration
+ * branch before it was superseded (`mergedSupersededClaims`) — a task
+ * superseded before it ever merged delivered nothing, so it is not counted
+ * either way. An operator who scoped the plan narrower than the audit
+ * deferred the rest on purpose, and marking them fixed anyway would erase
+ * that choice. Unclaimed findings stay exactly as they were and come back in
+ * `deferred`; `--except` forces specific fingerprints there even when a task
+ * claims them. Called from `/bs run`'s epic-close step, so it is repeatable;
+ * an epic no finding carries is refused, because the likely cause is a typo
+ * and a silent no-op would leave every finding open. A plan that cannot be
+ * found is refused too (`audit.no-plan`): being unsure must never mark
+ * anything fixed.
  */
 export async function resolveAudit(
   projectDir: string,
@@ -1304,7 +1392,11 @@ export async function resolveAudit(
   }
   const open = carried.filter((finding) => finding.status !== 'fixed');
   const plan = resolveEpicPlan(epicId, resolveOpts);
-  const claimedTasks = planClaimedTasks(plan);
+  const lineage = await readLineageEvents(ctx.sessionId, opts);
+  const claimedTasks = [
+    ...planClaimedTasks(plan),
+    ...mergedSupersededClaims(plan, mergedTaskIds(lineage), epicId),
+  ];
   const except = matchExceptFingerprints(resolveOpts.except ?? [], carried, epicId);
   const toFix = open.filter(
     (finding) =>

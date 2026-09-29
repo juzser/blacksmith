@@ -20,7 +20,7 @@ import {
   recordAudit,
   resolveAudit,
 } from '../src/audit.js';
-import { type EventRecord, readEvents, startSession } from '../src/events.js';
+import { appendEvent, type EventRecord, readEvents, startSession } from '../src/events.js';
 import type { EventContext } from '../src/findings.js';
 import { SPECS_ACTIVE_DIR } from '../src/paths.js';
 import type { PlanFile, TaskSpecRecord } from '../src/plan.js';
@@ -668,6 +668,135 @@ describe('the audit verbs', () => {
       expect(again.appended).toEqual([fingerprint]);
       expect(again.suppressed).toEqual([]);
       expect(only(foldAuditStore(readAuditStore(project))).status).toBe('raised');
+    });
+
+    describe('a task superseded after its change already merged', () => {
+      /**
+       * A one-task plan whose only task is `superseded` -- as if a later
+       * replan narrowed the epic to a test-only follow-up after this task's
+       * branch had already landed. `livePlanTasks` drops it entirely, so
+       * `planClaiming` (a `todo` task) cannot stand in for this fixture.
+       */
+      function supersededPlanClaiming(...claims: string[]): PlanFile {
+        return {
+          epic_id: input.epicId,
+          version: 2,
+          status: 'active',
+          tasks: [
+            {
+              task_id: `${input.epicId}/task-1`,
+              plan_version: 2,
+              task_status: 'superseded',
+              claims,
+            } as TaskSpecRecord,
+          ],
+          edges: [],
+        };
+      }
+
+      /** Record that `taskId`'s branch landed on the integration branch, the way the merge queue's `emitWaveMerged` does. */
+      async function waveMerged(
+        sessionId: string,
+        causalParent: string,
+        taskId: string,
+      ): Promise<void> {
+        await appendEvent(
+          {
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'wave-merged',
+            task_id: taskId,
+            plan_version: 1,
+            causal_parent: causalParent,
+            payload: { task_ids: [taskId] },
+          },
+          opts(),
+        );
+      }
+
+      it('marks a finding fixed when the superseded task that claimed it already merged', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        await waveMerged(SESSION, `${SESSION}#0`, `${input.epicId}/task-1`);
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [fingerprint], already: [], deferred: [] });
+        expect(only(foldAuditStore(readAuditStore(project))).status).toBe('fixed');
+      });
+
+      it('leaves a finding deferred when the task that claimed it was superseded before it ever merged', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        // No wave-merged event: the operator narrowed the plan on purpose,
+        // and that scoping decision must not be erased (D-41/P9-24).
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+        expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
+      });
+
+      it('counts a merge recorded in a child session that continues this one, the way a wave runner logs it', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+
+        const waveSession = 'sess-audit-1-wave-1';
+        const waveRoot = await startSession(waveSession, { stateDir, continues: `${SESSION}#0` });
+        await waveMerged(waveSession, waveRoot.event_id, `${input.epicId}/task-1`);
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [fingerprint], already: [], deferred: [] });
+      });
+
+      it('does not count a bare (unqualified) merged task id, even when its name matches', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        // A legacy pre-D-46 session, or another epic's task in this same
+        // lineage, can write a bare "task-1" -- there is no epic_id on the
+        // wave-merged payload to tell those apart, so a bare id must never
+        // be trusted to mean *this* epic's task.
+        await waveMerged(SESSION, `${SESSION}#0`, 'task-1');
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      });
+
+      it('does not count a qualified merge from a different epic that happens to share a bare id', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        await waveMerged(SESSION, `${SESSION}#0`, 'some-other-epic/task-1');
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      });
+
+      it('--except still forces deferred for a finding a merged-superseded task would otherwise fix', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        await waveMerged(SESSION, `${SESSION}#0`, `${input.epicId}/task-1`);
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+          except: [fingerprint],
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+        expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
+      });
     });
   });
 
