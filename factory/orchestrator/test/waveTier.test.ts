@@ -294,7 +294,12 @@ describe('an epic session and the wave sessions it fans out into (D13 step 2)', 
       expect(reported.status, reported.stderr).toBe(0);
 
       const owed = smith(['judge', 'outstanding', '--session', EPIC, '--task', T1]);
-      expect(JSON.parse(owed.stdout), owed.stdout).toEqual([]);
+      expect(JSON.parse(owed.stdout), owed.stdout).toEqual({
+        taskId: T1,
+        sessionId: EPIC,
+        outstanding: [],
+        count: 0,
+      });
       expect(owed.status).toBe(0);
     });
 

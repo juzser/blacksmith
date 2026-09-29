@@ -8696,9 +8696,14 @@ describe('cli.ts (built binary)', () => {
         'epic-1/task-1',
       ]);
       expect(outstanding.status).toBe(1);
-      expect(JSON.parse(outstanding.stdout)).toMatchObject([
-        { role: 'security-reviewer', round: 1, declaredArtifact: artifact, reported: false },
-      ]);
+      expect(JSON.parse(outstanding.stdout)).toMatchObject({
+        taskId: 'epic-1/task-1',
+        sessionId,
+        count: 1,
+        outstanding: [
+          { role: 'security-reviewer', round: 1, declaredArtifact: artifact, reported: false },
+        ],
+      });
     });
 
     // A judge dispatch is a dispatch, so P9-23's required `model` applies here
@@ -8724,7 +8729,12 @@ describe('cli.ts (built binary)', () => {
         'epic-1/task-1',
       ]);
       expect(outstanding.status).toBe(0);
-      expect(JSON.parse(outstanding.stdout)).toEqual([]);
+      expect(JSON.parse(outstanding.stdout)).toEqual({
+        taskId: 'epic-1/task-1',
+        sessionId,
+        outstanding: [],
+        count: 0,
+      });
     });
 
     it('report closes the turn and counts findings; outstanding then exits 0 on an empty list', async () => {
@@ -8769,7 +8779,12 @@ describe('cli.ts (built binary)', () => {
         'epic-1/task-1',
       ]);
       expect(outstanding.status).toBe(0);
-      expect(JSON.parse(outstanding.stdout)).toEqual([]);
+      expect(JSON.parse(outstanding.stdout)).toEqual({
+        taskId: 'epic-1/task-1',
+        sessionId,
+        outstanding: [],
+        count: 0,
+      });
     });
 
     it('report on a declared artifact that never landed is an error, not an empty review', async () => {

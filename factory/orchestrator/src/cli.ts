@@ -4269,12 +4269,11 @@ async function main(): Promise<number> {
 
   if (namespace === 'judge' && action === 'outstanding') {
     const sessionId = requireFlag(flags, 'session');
+    const taskId = requireFlag(flags, 'task');
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
-    const open = outstandingJudges(
-      await readJudgeTurns(requireFlag(flags, 'task'), { sessionId }, eventOpts),
-    );
-    printJson(open);
+    const open = outstandingJudges(await readJudgeTurns(taskId, { sessionId }, eventOpts));
+    printJson({ taskId, sessionId, outstanding: open, count: open.length });
     return open.length > 0 ? 1 : 0;
   }
 

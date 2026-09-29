@@ -770,7 +770,8 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'judge outstanding',
     positionals: '',
     flags: '--session <id> --task <task-id> [--state-dir <dir>]',
-    summary: 'List the judge turns still owed on a task. Exit 1 while the list is non-empty.',
+    summary:
+      'Print { taskId, sessionId, outstanding, count } for the judge turns still owed on a task. Exit 1 while count is non-zero.',
   },
   {
     command: 'judge escalations',
