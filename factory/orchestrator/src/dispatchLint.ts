@@ -22,6 +22,7 @@ import { JUDGE_ROLES } from './judgeRoles.js';
 import { readJudgeTurns } from './judges.js';
 import { AGENTS_DIR } from './paths.js';
 
+export type { JudgeRole } from './judgeRoles.js';
 /**
  * Re-exported, not re-declared (judgeRoles.ts is the canonical source, kept
  * dependency-free so both this module and judges.ts can import it without a
@@ -32,7 +33,7 @@ import { AGENTS_DIR } from './paths.js';
  * `undeclared`.
  */
 export { JUDGE_ROLES };
-export type { JudgeRole } from './judgeRoles.js';
+
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
 
 export type TurnsStatus = 'ok' | 'under' | 'over' | 'missing' | 'unverifiable';

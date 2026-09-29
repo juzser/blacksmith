@@ -3,7 +3,6 @@ import { JUDGE_REPORT_EVENT_TYPE } from './agents-registry.js';
 import { AUDIT_AXES } from './audit.js';
 import { sessionOwnerRole } from './delegation.js';
 import { SmithError } from './errors.js';
-import { JUDGE_ROLES } from './judgeRoles.js';
 import {
   appendEvent,
   type EventOpts,
@@ -11,6 +10,7 @@ import {
   readLineageEvents,
   type StoredEvent,
 } from './events.js';
+import { JUDGE_ROLES } from './judgeRoles.js';
 import { type CompiledSchemaSet, compileSchemas, validateEachShape } from './schemas.js';
 import { isQualifiedTaskId, taskIdsMatch } from './taskId.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
@@ -60,6 +60,7 @@ export const JUDGE_DISPATCH_EVENT_TYPE = 'dispatch_decision';
  * can never close, and the gate would refuse the task forever.
  */
 const JUDGE_ROLE_SET: ReadonlySet<string> = new Set(JUDGE_ROLES);
+
 /**
  * Re-exported, not re-declared. The registry owns the terminal-event
  * vocabulary — this one next to `task-result-recorded` and `error-logged`,

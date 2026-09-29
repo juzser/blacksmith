@@ -809,7 +809,11 @@ describe('agents-registry.ts', () => {
           payload: { error: 'execution.env-failure', severity: 'S2-major', agent: 'scribe' },
         }),
       ]);
-      expect(agents[0]).toMatchObject({ status: 'error', terminalType: 'error', terminalEventId: 'e2' });
+      expect(agents[0]).toMatchObject({
+        status: 'error',
+        terminalType: 'error',
+        terminalEventId: 'e2',
+      });
     });
 
     it('leaves every epic-level agent alone on an error that names no role', () => {

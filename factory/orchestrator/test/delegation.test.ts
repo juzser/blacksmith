@@ -419,7 +419,11 @@ describe('checkDelegationLog', () => {
         actor: 'system',
         taskId: 'E1/t-1',
         parent: 'epic-1#1',
-        payload: { error: 'execution.env-failure', severity: 'S2-major', agent_role: 'wave-runner' },
+        payload: {
+          error: 'execution.env-failure',
+          severity: 'S2-major',
+          agent_role: 'wave-runner',
+        },
       }),
     ];
     const report = log(events);
