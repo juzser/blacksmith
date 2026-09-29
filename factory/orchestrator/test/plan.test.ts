@@ -1096,6 +1096,43 @@ describe("draftNextVersion's edges vs the tasks the version still declares", () 
     expect(v2.edges).toEqual([]);
   });
 
+  it('keeps two carried edges on the same pair with different edge_type, rather than collapsing them (#234)', () => {
+    // taskEvents.ts's edgeKey (and edgesAlreadyRecorded's doc comment) treat
+    // task+dependsOn+edge_type as the triple that identifies an edge: an
+    // `artifact` handoff and a `claim-order` handoff between the same two
+    // tasks are two different claims and both belong in the log. Dedup here
+    // must use that same triple, not just the pair.
+    const v1 = planWith(
+      [task({ task_id: 'epic-1/task-1' }), task({ task_id: 'epic-1/task-2' })],
+      [
+        edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' }),
+        edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'claim-order' }),
+      ],
+    );
+
+    const v2 = draftNextVersion(v1, { added: [task({ task_id: 'epic-1/task-3' })] });
+
+    expect(v2.edges).toEqual([
+      edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' }),
+      edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'claim-order' }),
+    ]);
+  });
+
+  it('keeps a carried edge whose newEdges collision only matches on task+dependsOn, not edge_type (#234)', () => {
+    const v1 = planWith(
+      [task({ task_id: 'epic-1/task-1' }), task({ task_id: 'epic-1/task-2' })],
+      [edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' })],
+    );
+    const claimOrderEdge = edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'claim-order' });
+
+    const v2 = draftNextVersion(v1, { newEdges: [claimOrderEdge] });
+
+    expect(v2.edges).toEqual([
+      edge('epic-1/task-2', 'epic-1/task-1', { edge_type: 'artifact' }),
+      claimOrderEdge,
+    ]);
+  });
+
   it('reports a new edge naming an unknown task rather than quietly dropping it', () => {
     // The filter is a consequence of the carry rule, so it applies to carried
     // edges only. An edge this amendment adds is something the author wrote;

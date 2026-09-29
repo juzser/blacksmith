@@ -757,8 +757,18 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
   }
   const rewire = (id: string) => rewireTo.get(id) ?? id;
 
+  // taskEvents.ts's `edgeKey` (see its doc comment at edgesAlreadyRecorded)
+  // treats task+dependsOn+edge_type as the triple that identifies an edge: an
+  // `artifact` handoff and a `claim-order` handoff between the same two tasks
+  // are two different claims and both belong in the log as two events. Not
+  // reused directly -- taskEvents.ts imports plan.ts, so importing back would
+  // make a cycle -- but the dedup below has to match its shape or it silently
+  // merges two edges that the rest of the system has always kept distinct.
+  const edgeKey = (task: string, dependsOn: string, edgeType: string) =>
+    `${task}\u0000${dependsOn}\u0000${edgeType}`;
+
   const newEdges = changes.newEdges ?? [];
-  const newEdgeKeys = new Set(newEdges.map((e) => `${e.task}\u0000${e.dependsOn}`));
+  const newEdgeKeys = new Set(newEdges.map((e) => edgeKey(e.task, e.dependsOn, e.edge_type)));
   const seenCarried = new Set<string>();
   const carriedEdges: PlanFile['edges'] = [];
   for (const e of prev.edges) {
@@ -766,10 +776,12 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
     const rewiredDependsOn = rewire(e.dependsOn);
     if (!declared.has(rewiredTask) || !declared.has(rewiredDependsOn)) continue;
     if (rewiredTask === rewiredDependsOn) continue; // rewiring both ends onto the same replacement is not a dependency
-    const key = `${rewiredTask}\u0000${rewiredDependsOn}`;
+    const key = edgeKey(rewiredTask, rewiredDependsOn, e.edge_type);
     // An edge this amendment adds wins over a carried edge rewired onto the
-    // same pair, and a rewire that collapses two carried edges onto the same
-    // pair keeps only the first -- either way, no duplicate.
+    // same (task, dependsOn, edge_type) triple, and a rewire that collapses
+    // two carried edges onto the same triple keeps only the first -- either
+    // way, no duplicate. Two edges on the same pair with different edge_type
+    // are not a duplicate at all (edgeKey's triple, not just the pair).
     if (newEdgeKeys.has(key) || seenCarried.has(key)) continue;
     seenCarried.add(key);
     carriedEdges.push(
