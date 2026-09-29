@@ -4633,6 +4633,31 @@ describe('cli.ts (built binary)', () => {
         expect(error.details.tasks).toEqual([{ taskId: 'epic-1/task-1', taskStatus: 'completed' }]);
       });
 
+      // HELD_OPEN_BY_AN_OPERATOR: an escalated task is terminal but still held,
+      // and the escalation ladder re-admits it. (`failed` shares the rule; no
+      // event folds a row to it, so the unit test is where it is pinned.)
+      it('admits an escalated task, which an operator still holds', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
+        append(sessionId, eventsDir, {
+          event_type: 'error-logged',
+          task_id: 'epic-1/task-1',
+          payload: {
+            error: 'coordination.deadlock',
+            severity: 'S2-major',
+            task_ref: 'epic-1/task-1',
+            detail: 'worker idle for twenty minutes',
+          },
+        });
+
+        const result = check(planPath, sessionId, eventsDir, 'task-1');
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).valid).toBe(true);
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted'),
+        ).toHaveLength(1);
+      });
+
       it('admits live tasks once the plan is ingested', async () => {
         const { sessionId, eventsDir, planPath } = await session();
         ingest(planPath, sessionId, eventsDir);

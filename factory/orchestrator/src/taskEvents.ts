@@ -7,7 +7,7 @@ import {
 } from './events.js';
 import type { EventContext } from './findings.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
-import { TERMINAL_TASK_STATUSES } from './taskStatus.js';
+import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { taskBranchName } from './worktree.js';
 
 /**
@@ -377,8 +377,10 @@ export async function emitTasksAdded(
 /**
  * The ids in `taskIds` a wave may not admit, read against the lineage's task
  * rows: `missing` has no row at all, `terminal` has one whose `task_status`
- * is over (TERMINAL_TASK_STATUSES, superseded included). Pure; the caller
- * folds the rows and canonicalizes the ids.
+ * is closed to further work (CLOSED_TO_FURTHER_WORK: completed, superseded,
+ * waived). A `failed` or `escalated` task is terminal but still held by an
+ * operator, and the escalation ladder re-admits it, so it passes. Pure; the
+ * caller folds the rows and canonicalizes the ids.
  *
  * #250. A superseded id admitted by `wave check --session` went on to be
  * dispatched, gated and merged as if it were live work.
@@ -392,7 +394,7 @@ export function unadmissibleTasks(
   for (const taskId of taskIds) {
     const taskStatus = statusOf.get(taskId);
     if (taskStatus === undefined) missing.push(taskId);
-    else if (TERMINAL_TASK_STATUSES.has(taskStatus)) terminal.push({ taskId, taskStatus });
+    else if (CLOSED_TO_FURTHER_WORK.has(taskStatus)) terminal.push({ taskId, taskStatus });
   }
   return { missing, terminal };
 }

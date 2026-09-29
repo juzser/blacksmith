@@ -70,10 +70,12 @@ file asked for would be running it below the floor.
      plan. A plan version whose tasks the log never saw is refused
      `cli.plan-not-ingested`: run `smith plan ingest` on it, then re-check.
      An id with no task row is refused `plan.unknown-task`, and a task
-     whose `task_status` is terminal — `completed`, `superseded`,
-     `failed`, `escalated`, `waived` — is refused `cli.task-not-live`, naming each task
-     and its status. Drop those ids; a follow-up `findings raise` minted
-     stays admissible while it is live.
+     that is `completed`, `superseded` or `waived` is refused
+     `cli.task-not-live`, naming each task and its status. Drop those ids.
+     A `failed` or `escalated` task stays admissible: an operator still
+     holds it, and the escalation ladder re-admits it. A follow-up
+     `findings raise` minted stays admissible while it is live, and a wave
+     of follow-ups alone still needs the plan it names ingested first.
    - Never narrow a wave because a narrow one feels safer. A wave of one
      passes every check in this file — one task is disjoint with nothing,
      shares a hotspot with nothing, crosses no import edge — so `valid: true`

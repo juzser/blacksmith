@@ -1076,7 +1076,13 @@ function splitNamespaceAction(argv: string[]): {
  * it asks the log three things, in order: was this plan version ingested,
  * does every id have a task row, and is every row still live. Each refusal is
  * thrown before anything is written, so a refused wave leaves no
- * `wave-admitted` behind.
+ * `wave-admitted` behind. "Live" excludes only CLOSED_TO_FURTHER_WORK: a
+ * `failed` or `escalated` task is held by an operator and is re-admitted by
+ * the escalation ladder, so it passes.
+ *
+ * The no-row refusal is a defensive invariant, not a path the CLI reaches
+ * today: past an ingest every plan id has a row, and an id neither the plan
+ * nor the log knows is refused earlier, by the id resolution.
  *
  * Order matters for the answer the operator reads: an un-ingested plan makes
  * every row question moot (the rows are missing or stale because the ingest

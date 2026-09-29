@@ -366,6 +366,23 @@ describe('taskEvents', () => {
         terminal: [],
       });
     });
+
+    // HELD_OPEN_BY_AN_OPERATOR: work can still land on a failed or escalated
+    // task, and the escalation ladder re-admits it — refusing it here would
+    // strand the retry the ladder exists to run.
+    it('admits a failed and an escalated task, which an operator still holds', () => {
+      const statusOf = new Map([
+        ['epic-1/task-1', 'failed'],
+        ['epic-1/task-2', 'escalated'],
+        ['epic-1/task-3', 'waived'],
+      ]);
+      expect(
+        unadmissibleTasks(['epic-1/task-1', 'epic-1/task-2', 'epic-1/task-3'], statusOf),
+      ).toEqual({
+        missing: [],
+        terminal: [{ taskId: 'epic-1/task-3', taskStatus: 'waived' }],
+      });
+    });
   });
 
   // D-254. A plan declares a DAG, not a list: `plan.edges` is what the
