@@ -3920,22 +3920,28 @@ async function main(): Promise<number> {
 
   // The dispatch-time half of P9-15, shaped exactly like `lessons
   // for-dispatch`: the caller composing a task prompt asks for the block and
-  // splices it. `--plan` is required rather than optional here — without it
-  // the claims list is empty, every finding fails the join, and the command
-  // would answer "nothing is open in your files" when it never looked.
+  // splices it. `--plan` and `--task` come as a pair: a `--task` without
+  // `--plan` would have an empty claims list, every finding would fail the
+  // join, and the command would answer "nothing is open in your files" when it
+  // never looked. Neither is the epic-level shape (#248) — a role with no task
+  // of its own (dispatch.md) gets every open finding in the epic instead.
   if (namespace === 'findings' && action === 'for-dispatch') {
-    const usage =
-      'smith findings for-dispatch --session ... --plan plan.json --task task-id [--state-dir dir]';
-    requireFlag(flags, 'plan');
-    const taskId = requireFlag(flags, 'task');
+    const usage = usageLine(usageFor('findings for-dispatch'));
+    if (flags.task !== undefined) requireFlag(flags, 'plan');
     const sessionId = requireFlag(flags, 'session');
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     if (positional.length > 0) {
       throw new SmithError('cli.usage', `Unexpected argument. Usage: ${usage}`, { positional });
     }
+    // claimsForDispatch refuses a `--plan` with no `--task`, so half a
+    // per-task call never falls through to the epic-wide answer.
+    const claims = claimsForDispatch(flags);
     printJson(
-      await findingsForDispatch({ sessionId, taskId, claims: claimsForDispatch(flags) }, eventOpts),
+      await findingsForDispatch(
+        { sessionId, ...(flags.task === undefined ? {} : { taskId: flags.task }), claims },
+        eventOpts,
+      ),
     );
     return 0;
   }

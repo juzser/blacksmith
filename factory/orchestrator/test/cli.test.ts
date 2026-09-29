@@ -6068,6 +6068,60 @@ describe('cli.ts (built binary)', () => {
         expect(JSON.parse(forTask2.stdout).findings).toEqual([]);
       });
 
+      // #248: dispatch.md has the epic-level roles pass no --task. That call
+      // is epic-wide; half a per-task call is refused, never widened.
+      it('with neither --plan nor --task, hands an epic-level role every open finding', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        await openFinding(sessionId, eventsDir);
+
+        const epicWide = runCli([
+          'findings',
+          'for-dispatch',
+          '--session',
+          sessionId,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(epicWide.status).toBe(0);
+        const block = JSON.parse(epicWide.stdout);
+        expect(block.taskId).toBeNull();
+        expect(block.findings.map((f: { file_path: string }) => f.file_path)).toEqual([
+          'src/foo/thing.ts',
+        ]);
+
+        const taskWithoutPlan = runCli([
+          'findings',
+          'for-dispatch',
+          '--session',
+          sessionId,
+          '--task',
+          'epic-1/task-1',
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(taskWithoutPlan.status).not.toBe(0);
+        expect(JSON.parse(taskWithoutPlan.stdout).error).toMatchObject({
+          code: 'cli.missing-flag',
+          details: { flag: 'plan' },
+        });
+
+        const planWithoutTask = runCli([
+          'findings',
+          'for-dispatch',
+          '--session',
+          sessionId,
+          '--plan',
+          planPath,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(planWithoutTask.status).not.toBe(0);
+        expect(JSON.parse(planWithoutTask.stdout).error).toMatchObject({
+          code: 'cli.missing-flag',
+          details: { flag: 'task' },
+        });
+      });
+
       it('reverify records that a human re-read the finding, without moving its status', async () => {
         const { sessionId, eventsDir } = await session();
         const findingId = await openFinding(sessionId, eventsDir);
