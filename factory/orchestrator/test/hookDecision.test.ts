@@ -227,6 +227,28 @@ describe('decideHookPayload — rule 3 reason on the fallback path', () => {
     expect(reason).toMatch(/Check out a side branch instead/);
     expect(reason).not.toMatch(/session's own directory/i);
   });
+
+  it('explains the fallback without naming a specific cause when a non-allowlisted subcommand forfeits the shortcut', () => {
+    // `checkout` is not in `GIT_SUBCOMMAND_ALLOWLIST`, so this all-`&&` chain
+    // still falls out of the shortcut shape even though it has no pipe, `;`
+    // or redirect — the reason must not claim one of those as the cause.
+    const reason = reasonOf(
+      decide(`cd ${sideRepo} && git checkout main && git merge main`, mainRepo),
+    );
+    expect(reason).toMatch(/on main/);
+    expect(reason).toMatch(/session's own directory/i);
+    expect(reason).toMatch(/not one the guard can read for certain/i);
+    expect(reason).not.toMatch(/leaves it ambiguous/i);
+    expect(reason).not.toMatch(/\(a pipe/i);
+  });
+
+  it('keeps the force-push reason, not the fallback merge text, when both fire in the same chain', () => {
+    const reason = reasonOf(
+      decide(`cd ${sideRepo} && git push --force origin main && git merge main`, mainRepo),
+    );
+    expect(reason).toMatch(/push to main|force-push/i);
+    expect(reason).not.toMatch(/session's own directory/i);
+  });
 });
 
 // Every shape below is denied when judged where the session stands (the main

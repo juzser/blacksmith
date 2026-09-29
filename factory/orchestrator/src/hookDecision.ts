@@ -206,13 +206,15 @@ export function decideHookPayload(
  */
 function fallbackMergeReason(cwdBranch: string): string {
   return (
-    `this command's shape is not one the guard can read for certain — ` +
-    `cd/-C mixed with anything past a plain \`&&\` chain (a pipe, \`;\`, or a ` +
-    `redirect) leaves it ambiguous — so it was also judged against your ` +
-    `session's own directory, which is on ${cwdBranch}, a protected branch; ` +
-    `git merge/pull is denied there. Write it as \`cd <dir> && git merge …\`, ` +
-    `joined only by \`&&\`, or a single \`git -C <dir> merge …\`, with no ` +
-    `pipes, \`;\` or redirects, and the same merge will be judged in <dir> alone.`
+    `this command's shape is not one the guard can read for certain, so it ` +
+    `was also judged against your session's own directory, which is on ` +
+    `${cwdBranch}, a protected branch; git merge/pull is denied there. The ` +
+    `guard reads \`cd <dir> && git <cmd> …\` — <dir> absolute or starting ` +
+    `with \`./\`, joined only by \`&&\`, each command merge, pull or another ` +
+    `read-safe git subcommand (not checkout or switch) — or a single ` +
+    `\`git -C <dir> merge …\`; plain words only, no pipes, \`;\`, redirects, ` +
+    `quotes or variables. Write it that way and the same merge is judged in ` +
+    `<dir> alone.`
   );
 }
 
