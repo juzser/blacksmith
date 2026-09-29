@@ -534,6 +534,63 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(reason).toMatch(/any branch/i);
     expect(reason).toMatch(/add a commit/i);
   });
+
+  // A `+refspec` forces the push without any of the flags above: `+feat`,
+  // `+HEAD:feat` and `+refs/heads/feat:refs/heads/feat` all tell the remote
+  // to accept a non-fast-forward update, which is what --force spells out
+  // loud. Read the same way rule 1 reads a push's destination: every operand
+  // of the push segment, quotes stripped, so a `+feat` typed with quotes
+  // around it is caught the same as a bare one.
+  it.each([
+    ['git push origin +feat'],
+    ['git push origin +HEAD:feat'],
+    ['git push origin +refs/heads/feat:refs/heads/feat'],
+    ["git push origin '+feat'"],
+  ])('denies %s — a leading "+" on a refspec forces the push', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([['git push origin feat'], ['git push -u origin HEAD:feat'], ['git push origin a+b']])(
+    'allows %s — no operand starts with "+"',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  // `git -c alias.<name>=<value>` defines an alias inline, and a value that
+  // mentions `push` is a force-push escape hatch in waiting: the flag rule
+  // 2 already refuses never has to appear on the command line at all once an
+  // alias spells it for it. Refused on the definition alone, whether or not
+  // the same segment goes on to invoke it — see policy.ts's
+  // `definesForceCapablePushAlias`. Aliases defined in git config (not
+  // `-c`) are out of scope for this rule.
+  it.each([
+    ['git -c alias.p=push p origin feat'],
+    ["git -c alias.p='push --force' p origin feat"],
+    ['git -c alias.p="push -f" origin feat'],
+    ['git -c alias.p=push origin feat'],
+  ])('denies %s — an inline alias whose value mentions push', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([['git -c alias.st=status st'], ['git -c user.name=agent push origin feat']])(
+    'allows %s — no alias value mentions push',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('denies --mirror, which force-pushes every ref', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push --mirror origin', branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {

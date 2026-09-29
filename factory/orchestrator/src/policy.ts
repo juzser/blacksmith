@@ -961,10 +961,34 @@ function checkPushToProtected(
   return null;
 }
 
-/** Rule 2: force push (`--force` / `--force-with-lease` / `-f`). Case-sensitive, same as guard.sh (its `grep -Eq` has no `-i`). */
-const FORCE_PUSH_RE = /(--force(-with-lease)?\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$))/;
+/**
+ * Rule 2: force push (`--force` / `--force-with-lease` / `-f` / `--mirror`).
+ * Case-sensitive, same as guard.sh (its `grep -Eq` has no `-i`).
+ * `--force-if-includes` is already covered: it contains `--force` as a
+ * prefix, and `\b` stops at the `-` that follows. `--mirror` shares nothing
+ * with `--force`, so it needs its own alternative — a mirror push writes
+ * every ref on the remote to match the local one, which is a force push on
+ * every branch at once.
+ */
+const FORCE_PUSH_RE = /(--force(-with-lease)?\b|--mirror\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$))/;
 
 const GIT_PUSH_ANYWHERE_RE = new RegExp(`\\bgit\\b[\\s\\S]*${bareWord('push')}`, 'i');
+
+/**
+ * An inline `git -c alias.<name>=<value>` whose value mentions `push` — a
+ * force-push escape hatch handed to whatever runs `git <name>` next, whether
+ * or not the same segment goes on to invoke it. Kept simple, on purpose
+ * (issue #258): match `-c` followed by an `alias.` key and any value —
+ * unquoted, single- or double-quoted — and deny the segment if that value
+ * contains `push`. Aliases declared in git config (not `-c`) are out of
+ * scope; this only sees what is on the command line.
+ */
+const ALIAS_DEFINITION_RE = /-c\s+alias\.[^\s='"]+=(?:'[^']*'|"[^"]*"|\S*)/gi;
+
+function definesForceCapablePushAlias(segment: string): boolean {
+  const matches = segment.match(ALIAS_DEFINITION_RE);
+  return matches !== null && matches.some((m) => /push/i.test(m));
+}
 
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   // No `isGitSubcommand` gate: its `[^;&|]*` stops at a quoted separator, so
@@ -979,7 +1003,14 @@ function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolati
   // asking whether the segment still pushes.
   const forced = topLevelCommands(command).some((segment) => {
     const withoutStash = segment.replace(/\bstash\s+push\b/gi, 'stash');
-    return GIT_PUSH_ANYWHERE_RE.test(withoutStash) && FORCE_PUSH_RE.test(segment);
+    if (definesForceCapablePushAlias(segment)) return true;
+    if (!GIT_PUSH_ANYWHERE_RE.test(withoutStash)) return false;
+    if (FORCE_PUSH_RE.test(segment)) return true;
+    // A refspec operand starting with `+` forces the update the same way
+    // `--force` does, with no flag on the line at all. Read the same way
+    // rule 1 reads a push's destination: every non-flag operand of the push,
+    // quotes stripped.
+    return pushOperands(segment).some((ref) => ref.startsWith('+'));
   });
   return forced ? violation(requireRule(policy, 'force-push')) : null;
 }
