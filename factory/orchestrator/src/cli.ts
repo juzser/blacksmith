@@ -173,7 +173,7 @@ import {
   securityTriggers,
 } from './security.js';
 import { parseLessons } from './severity.js';
-import { amendPlan, isTaskInSuccessorChain, recordSpecReview, taskSuccessors } from './spec.js';
+import { amendPlan, recordSpecReview, successorChainPath, taskSuccessors } from './spec.js';
 import {
   approveSpecChange,
   listSpecChanges,
@@ -220,6 +220,7 @@ import {
   listStale,
   RESERVED_TASK_ID,
   removeTaskWorktree,
+  taskBranchExists,
   taskBranchName,
 } from './worktree.js';
 
@@ -2274,15 +2275,36 @@ async function main(): Promise<number> {
       const successors = taskSuccessors(events, epic);
       const from = flags.from;
       // Walks the successor chain hop by hop (spec.ts's
-      // `isTaskInSuccessorChain`) rather than asking about the direct
-      // successor alone: a plan amended twice before the intermediate
-      // successor is ever cut still names `taskId` as `from`'s transitive
-      // successor, and the log is the register this guard is answerable to.
-      if (!isTaskInSuccessorChain(epic, from, taskId, successors)) {
+      // `successorChainPath`) rather than asking about the direct successor
+      // alone: a plan amended twice before the intermediate successor is
+      // ever cut still names `taskId` as `from`'s transitive successor, and
+      // the log is the register this guard is answerable to.
+      const chain = successorChainPath(epic, from, taskId, successors);
+      if (chain === undefined) {
         throw new SmithError(
           'worktree.not-a-successor',
           `${epic}/${taskId} is not logged as the successor of ${epic}/${from}; run \`plan propose\`/\`plan approve\` with a supersede pairing them first.`,
           { epic, taskId, from },
+        );
+      }
+      // The log naming a chain is not enough: `createTaskWorktree` branches
+      // `taskId` directly off `from`'s own branch, so if some hop strictly
+      // between them was already cut as its own branch, skipping straight
+      // there would silently drop that hop's commits. `chain` is `from`'s
+      // own hops through `taskId` inclusive (spec.ts's `successorChainPath`
+      // doc comment); drop the last one (`taskId` itself, which never has a
+      // branch yet) and refuse on the intermediate hop closest to `taskId`
+      // if any of them do.
+      const intermediates = chain.slice(0, -1);
+      let cutIntermediate: string | undefined;
+      for (const hop of intermediates) {
+        if (taskBranchExists(projectDir, epic, hop)) cutIntermediate = hop;
+      }
+      if (cutIntermediate !== undefined) {
+        throw new SmithError(
+          'worktree.chain-intermediate-cut',
+          `${epic}/${taskId} cannot be cut --from ${epic}/${from}: ${epic}/${cutIntermediate} sits between them and already has its own branch (${taskBranchName(epic, cutIntermediate)}), so its commits would be silently dropped; rerun with --from ${cutIntermediate} instead.`,
+          { epic, taskId, from, intermediate: cutIntermediate },
         );
       }
       printJson(createTaskWorktree(projectDir, epic, taskId, { from }));

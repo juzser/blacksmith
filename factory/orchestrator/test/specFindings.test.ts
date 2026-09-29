@@ -38,6 +38,7 @@ import {
   SpecError,
   type SpecReviewStatus,
   specReviewBlockers,
+  successorChainPath,
   taskSuccessors,
 } from '../src/spec.js';
 
@@ -1145,6 +1146,59 @@ describe('spec-scoped findings (P9-9)', () => {
         ['demo/task-b', 'task-c'],
       ]);
       expect(isTaskInSuccessorChain('demo', 'task-a', 'task-c', successors)).toBe(true);
+    });
+  });
+
+  // A verified review blocker on the cli.ts `--from` guard built on
+  // `isTaskInSuccessorChain`: a boolean alone tells the caller the chain
+  // reaches, but not which hops sit strictly between `from` and `target` --
+  // and `createTaskWorktree` branches directly off `from`'s own branch, so a
+  // cut intermediate's commits are dropped silently unless the guard can
+  // name and check every hop in between. `successorChainPath` is the map
+  // walk that hands those hops back; cli.ts pairs it with a git-aware
+  // predicate (spec.ts itself never touches git).
+  describe('successorChainPath — ordered hops from a chain walk (worktree create --from)', () => {
+    it('returns just the target for a direct, one-hop successor', () => {
+      const successors = new Map([['demo/task-a', 'demo/task-b']]);
+      expect(successorChainPath('demo', 'task-a', 'task-b', successors)).toEqual(['task-b']);
+    });
+
+    it('returns every hop after `from`, in order, ending at `target`', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-c', successors)).toEqual([
+        'task-b',
+        'task-c',
+      ]);
+    });
+
+    it('returns undefined when target is off the chain entirely', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-c'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-x', successors)).toBeUndefined();
+    });
+
+    it('returns undefined on a cycle instead of hanging', () => {
+      const successors = new Map([
+        ['demo/task-a', 'demo/task-b'],
+        ['demo/task-b', 'demo/task-a'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-x', successors)).toBeUndefined();
+    });
+
+    it('normalizes bare and epic-qualified spellings at every hop, same as isTaskInSuccessorChain', () => {
+      const successors = new Map([
+        ['task-a', 'demo/task-b'],
+        ['demo/task-b', 'task-c'],
+      ]);
+      expect(successorChainPath('demo', 'task-a', 'task-c', successors)).toEqual([
+        'task-b',
+        'task-c',
+      ]);
     });
   });
 

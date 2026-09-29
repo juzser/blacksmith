@@ -10730,6 +10730,113 @@ describe('cli.ts (built binary)', () => {
       expect(status).toBe(1);
       expect(JSON.parse(stdout).error.code).toBe('worktree.not-a-successor');
     });
+
+    // Verified review blocker on the transitive-chain fix above: A -> B -> C
+    // logged, but B actually got cut as its own branch before C did. Because
+    // `createTaskWorktree` branches `--from`'s target directly off `--from`'s
+    // own branch, `--from task-1` for task-5-final would silently drop every
+    // commit made on task-5-mid's branch -- the guard must refuse it, name
+    // task-5-mid, and accept `--from task-5-mid` instead.
+    it('is refused across a two-hop chain when the intermediate task was already cut, and names it', () => {
+      const sessionId = `cli-from-cut-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, `events-from-cut-${Date.now()}`);
+      const parent = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      });
+      const v2 = append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 2,
+        causal_parent: parent,
+        payload: {
+          epic_id: 'epic-from5',
+          version: 2,
+          previous_version: 1,
+          successors: { 'epic-from5/task-1': 'epic-from5/task-5-mid' },
+        },
+      });
+      append(eventsDir, {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'plan-version-created',
+        plan_version: 3,
+        causal_parent: v2,
+        payload: {
+          epic_id: 'epic-from5',
+          version: 3,
+          previous_version: 2,
+          successors: { 'epic-from5/task-5-mid': 'epic-from5/task-5-final' },
+        },
+      });
+
+      runOrThrow(
+        'git',
+        [
+          'worktree',
+          'add',
+          '-b',
+          'smith/epic-from5/task-1',
+          path.join(scratchDir, 'wt', 'from5-pred'),
+          'main',
+        ],
+        { cwd: projectDir },
+      );
+      // The intermediate WAS cut -- its branch may carry real commits that a
+      // straight `--from task-1` skip would drop without a trace.
+      runOrThrow(
+        'git',
+        [
+          'worktree',
+          'add',
+          '-b',
+          'smith/epic-from5/task-5-mid',
+          path.join(scratchDir, 'wt', 'from5-mid'),
+          'main',
+        ],
+        { cwd: projectDir },
+      );
+
+      const refused = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from5',
+        'task-5-final',
+        '--from',
+        'task-1',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(refused.status).toBe(1);
+      const error = JSON.parse(refused.stdout).error;
+      expect(error.code).toBe('worktree.chain-intermediate-cut');
+      expect(error.message).toContain('task-5-mid');
+
+      const accepted = runCli([
+        'worktree',
+        'create',
+        projectDir,
+        'epic-from5',
+        'task-5-final',
+        '--from',
+        'task-5-mid',
+        '--session',
+        sessionId,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(accepted.status, accepted.stdout).toBe(0);
+      const result = JSON.parse(accepted.stdout);
+      expect(result.branch).toBe('smith/epic-from5/task-5-final');
+    });
   });
 
   // D-40/P9-25: the gate's coverage evidence, reachable without staging a
