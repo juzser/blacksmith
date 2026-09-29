@@ -4594,11 +4594,43 @@ async function main(): Promise<number> {
   return 1;
 }
 
+// `smith <verb> | head -c1` (or any reader that goes away before draining
+// stdout) closes the pipe out from under a write that has already committed
+// whatever the verb was reporting -- a `dispatch_decision` appended, an event
+// tailed, a report already computed. Node's default for an unheard stdout
+// `error` is to throw, which crashes the process AFTER that commit with an
+// uncaught `write EPIPE` stack; a caller that treats the resulting non-zero
+// exit as "did not happen" and retries then double-appends. `event tail
+// --follow` and `daemon run` already each register their own `process.stdout
+// .on('error', requestStop)` to stop their loop quietly (cli.ts's two other
+// stdout error listeners), but every one-shot verb -- everything that calls
+// `printJson` exactly once -- had no listener at all, so it was still one
+// early reader away from this crash. Registered here, at the top of the
+// file's only entry point, so it is in place before ANY write, including the
+// per-verb ones' own first `printJson` call.
+//
+// Multiple listeners on the same stream's `error` event all fire -- this one
+// does not replace `event tail --follow`'s or `daemon run`'s, it just also
+// catches everything they do not: whichever fires first, an EPIPE is still
+// quiet and a real write failure (ENOSPC, say) still throws.
+let mainExitCode: number | null = null;
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code !== 'EPIPE') throw err;
+  // The command's own resolved status when we already have one (a verb that
+  // computed its exit code before this write, the common case); 0 -- "wrote
+  // everything there was, the reader just stopped listening" -- when main()
+  // has not resolved yet, since an early EPIPE is the reader saying "enough",
+  // not this process failing to do its job.
+  process.exitCode = mainExitCode ?? 0;
+});
+
 main()
   .then((code) => {
+    mainExitCode = code;
     process.exitCode = code;
   })
   .catch((err: unknown) => {
+    mainExitCode = 1;
     // A SmithError is a designed answer: its code names the failure and its
     // details name the record, so a stack would only add noise. Anything else
     // is a bug, and D-135 is what that costs — `{"message":"Cannot read

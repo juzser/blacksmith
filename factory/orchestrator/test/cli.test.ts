@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12165,5 +12166,41 @@ describe('smith init (built binary)', () => {
     const { stdout, status } = runCli(['--help']);
     expect(status).toBe(0);
     expect(stdout).toContain('smith init [--work-root');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// stdout closed early (EPIPE) -- `smith <verb> | head -c1` (or any reader
+// that goes away before draining stdout) closes the pipe out from under a
+// write that has already committed whatever the verb was reporting. Crashing
+// on it after the fact is a false failure: an uncaught EPIPE prints a stack
+// and exits non-zero, and a caller that retries a non-zero status
+// double-appends the very event the write had already recorded.
+//
+// This closes the child's own stdout read end deterministically -- the
+// instant the child is spawned, well before its Node startup even finishes,
+// let alone reaches the `--help` write -- rather than racing a real `head`
+// process over how many bytes it reads before exiting. Same condition a
+// `| true` shell pipeline creates, without the byte-count race `head -c1`
+// itself would add.
+// ---------------------------------------------------------------------------
+
+describe('cli.ts stdout closed early (EPIPE)', () => {
+  it('exits clean, with no uncaught EPIPE stack on stderr, when the reader is already gone', async () => {
+    const child = spawn('node', [CLI_PATH, '--help'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    child.stdout.destroy();
+
+    const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => {
+      child.once('close', (code, sig) => resolve([code, sig]));
+    });
+
+    expect(signal).toBeNull();
+    expect(stderr).not.toMatch(/EPIPE/);
+    expect(code).toBe(0);
   });
 });
