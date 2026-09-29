@@ -866,6 +866,49 @@ describe('evaluateCommand — rule 2: force-push', () => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(d.allowed).toBe(true);
   });
+
+  // Round 7: bash deletes a backslash-newline pair (its line continuation)
+  // outside single quotes before it ever splits words. A pair left inside
+  // the `git` word itself — `gi\`<LF>`t` — used to survive into the word
+  // list as a literal newline, so neither the exact `git` match nor the
+  // literal-substring scanners below it ever found `git` at all and every
+  // rule-2 layer was skipped outright.
+  //
+  // `gi\<LF>t reset --hard origin/main` and `gi\<LF>t branch -D main` are not
+  // in this list: their plainly-spelled equivalents (`git reset --hard
+  // origin/main`, `git branch -D main`) are already allowed today, on any
+  // branch, with no line-continuation trick at all — rule 2's actual
+  // force-ness check (`FORCE_PUSH_RE`) only ever runs on a segment that also
+  // reaches `push` (`GIT_PUSH_ANYWHERE_RE`), and rule 5 covers only
+  // rebase/`commit --amend`/filter-branch, not `reset --hard` or `branch -D`.
+  // Joining the continuation could only make the tricked spelling match what
+  // the plain spelling already does; inventing a new denial for words that
+  // were already plain would be a different, unscoped change to rule 2's
+  // design. See the coder report for this task.
+  it.each([
+    ['gi\\\nt push --force origin main'],
+    ['g\\\nit push -f origin feat'],
+    // Bash yields `git push --force origin main` here; the plain-word gate
+    // already denies it via the flag, pinned anyway for the joined spelling.
+    ['git\\\n push --force origin main'],
+    ['gi\\\nt update-ref refs/heads/main $(x)'],
+  ])('denies %s — a line-continuation hides the git word', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([
+    // A multi-line continuation of a plain, uncovered-subcommand command.
+    ['git status \\\n  --short'],
+    ['git log \\\n  --oneline -5'],
+    // The backslash-newline sits inside single quotes here, where bash
+    // keeps it rather than deleting it — `joinLineContinuations` must leave
+    // this span alone.
+    ["git commit -m 'line1\\\nline2'"],
+  ])('allows %s — a line continuation with nothing force-push shaped in it', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {

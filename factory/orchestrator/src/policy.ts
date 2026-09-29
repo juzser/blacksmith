@@ -1072,6 +1072,50 @@ function decodeAnsiCQuoting(segment: string): { text: string; unterminated: bool
 }
 
 /**
+ * Joins a shell line continuation — a backslash immediately followed by a
+ * newline — the way bash does before word splitting even starts: the pair
+ * is deleted outright, wherever it sits, including mid-word (`gi\`<LF>`t`)
+ * and inside double quotes, which is why `git` spelled with one hidden in
+ * the middle reads as `git` to every scanner below rather than as two
+ * fragments a literal-substring or exact-word match would miss.
+ *
+ * Two spans are left untouched because bash itself treats a backslash there
+ * differently: a single-quoted span is fully literal, so a backslash-newline
+ * pair inside it is data, not a continuation; and a `$'...'` span decodes its
+ * own escapes — `decodeAnsiCPayload` already reads a `\`-newline pair inside
+ * one through unchanged, so joining it here first would be a second, and
+ * conflicting, decode of the same text.
+ */
+function joinLineContinuations(command: string): string {
+  let result = '';
+  let i = 0;
+  while (i < command.length) {
+    const c = command[i];
+    if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      const spanEnd = end === -1 ? command.length : end + 1;
+      result += command.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (c === '$' && command[i + 1] === "'") {
+      const end = findAnsiCQuoteEnd(command, i + 2);
+      const spanEnd = end === -1 ? command.length : end + 1;
+      result += command.slice(i, spanEnd);
+      i = spanEnd;
+      continue;
+    }
+    if (c === '\\' && command[i + 1] === '\n') {
+      i += 2;
+      continue;
+    }
+    result += c;
+    i += 1;
+  }
+  return result;
+}
+
+/**
  * Every way this segment could hand git an alias definition inline, without
  * checking what the alias resolves to:
  *
@@ -1397,7 +1441,23 @@ function checkForcePushSubcommandWord(
 ): PolicyViolation | null {
   const words = splitDequotedWords(stripRedirections(segment));
   const gitIndex = words.findIndex((word) => word.text.toLowerCase() === 'git');
-  if (gitIndex === -1) return null;
+  if (gitIndex === -1) {
+    // Defence in depth for `joinLineContinuations` missing a spelling of its
+    // own: a word whose dequoted text is not exactly `git` can still resolve
+    // to it once the whitespace a shell trick left behind (a stray literal
+    // newline, here, rather than a real word break) is stripped out. Such a
+    // word is never plain — `isPlainWord` already refuses a bare backslash or
+    // an embedded newline — so this only fires for a raw form this rule
+    // could not read anyway; refuse it rather than silently pass through.
+    const hidden = words.some(
+      (word) =>
+        word.text.toLowerCase() !== 'git' &&
+        !isPlainWord(word.raw) &&
+        word.text.replace(/\s+/g, '').toLowerCase().endsWith('git'),
+    );
+    if (hidden) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
+    return null;
+  }
   const subcommandIndex = gitSubcommandWord(words, gitIndex);
   if (subcommandIndex === -1) return null;
   const subcommand = words[subcommandIndex];
@@ -1425,7 +1485,11 @@ function checkForcePushSubcommandWord(
  */
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   const rule = requireRule(policy, 'force-push');
-  for (const segment of topLevelCommands(command)) {
+  // Joined first, so every rule-2 layer below — the shell-wrapper check, the
+  // subcommand-word gate, and the plain-word gate over the words after it —
+  // reads the command the way bash will run it, with no continuation left to
+  // hide a subcommand word inside.
+  for (const segment of topLevelCommands(joinLineContinuations(command))) {
     if (isShellWrappedForceCandidate(segment)) return violation(rule);
 
     const subcommandWordViolation = checkForcePushSubcommandWord(segment, rule);
