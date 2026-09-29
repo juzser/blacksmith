@@ -306,9 +306,7 @@ playbooks are written to prevent.
     newest plan from the work root's specs dir by default; when this
     project's plans live elsewhere, pass `--specs-dir` naming the same specs
     dir the epic was run from, or it refuses rather than guess.
-17. Open **one integration PR per epic** with the scribe-written body
-    (`/bs report`'s playbook, [`report.md`](report.md)) — screenshots, test
-    results, reviewer verdict, waivers granted, timeline link. The head is
+17. Open **one integration PR per epic** with a scribe-written body. The head is
     `smith/<epic>/integration`. The base is the target repo's `main` unless
     the epic was cut from another epic's integration branch, in which case
     the PR stacks on that branch and the operator merges the parent's PR
@@ -317,6 +315,87 @@ playbooks are written to prevent.
     and its branch is deleted, GitHub retargets the child to `main`. The
     operator reviews on GitHub; this session never merges to `main`
     (`docs/standards/guardrails.md`).
+
+    **Build the fact pack first.** The scribe has no `Bash` and a small turn
+    cap, so it cannot run `git` or `smith`, and a scribe left to grep raw logs
+    caps and fills the gaps by invention — a wrong event id, a merged task
+    called dead, "no waivers" over two grants. Compute every fact in your own
+    session, from the epic session with `--lineage` so the waves' records
+    count. Every fact comes from the log or from git, never from the SQLite
+    projection: `stats kanban` and `stats timeline` read a projection that
+    can lag the log, and `db rebuild` clears it before it re-reads, so do
+    not refresh it for this.
+
+    ```bash
+    # one pass over the log (pass an --n that covers the whole lineage)
+    smith event tail <session-id> --lineage --n 100000
+    # the fingerprint map: finding_id, task_id and fingerprint of the epic's findings
+    smith findings list --session <session-id> --epic <epic>
+    # the goal the summary states
+    smith epic goal --epic <epic> [--roadmap-path <file>]
+    # the branch itself
+    git log --oneline <base>..smith/<epic>/integration
+    git diff --shortstat <base>...smith/<epic>/integration
+    ```
+
+    From the `event tail` pass keep, each with its `event_id`:
+    - `waiver-granted` and `waiver-denied` records whose
+      `payload.fingerprint` matches one of the epic's findings, mapped to
+      that finding's id and task. Match on the stored `fingerprint` that
+      `findings list` prints, and drop a decision that matches none: an
+      ancestor session can carry an earlier epic's decisions. Grants come
+      from here, not from
+      `findings list --status`, because a grant only moves a raised or
+      confirmed finding to `waived`; an amended or fix-verified one keeps
+      its status.
+    - `wave-merged` records: `payload.task_ids` and the event id.
+    - `epic-closed` from step 16: its event id, `machine_verdict`, and
+      `payload.summary.tasks` — each task's `task_status`, read from the log
+      at close. A follow-up cleared by waiving all its findings still reads
+      `todo` there; cross-check it against the grants and never publish it
+      as an open task.
+    - `audit-resolved`, for an epic cut by `/bs audit`: every record whose
+      `payload.epic` is this epic — one epic can resolve more than once, and
+      the lineage carries a parent epic's resolve too. List each event id.
+      `fixed` and `deferred` are fingerprint arrays: fixed is the union of
+      every kept record's `fixed`; deferred is the last record's `deferred`
+      minus that union. Write the two counts into the pack yourself.
+    - `integration-check` records whose `payload.epic_id` is this epic and
+      whose `head_sha` equals the `epic-closed` record's
+      `summary.integration.check.head_sha`: each check's `name` and `pass`.
+
+    `epic goal` reads this repo's roadmap by default; when the epic's
+    roadmap lives elsewhere, pass `--roadmap-path` naming it, or the goal
+    you hand over is the wrong one. For a UI epic, take the screenshots
+    from each task's tester result, `state/results/<task-id>.tester*.json`,
+    field `artifacts` (the files sit under `state/artifacts/<task-id>/`);
+    [`docs/standards/stack.md`](../../../docs/standards/stack.md) wants
+    them on this PR. The pack carries a screenshot only as an image you
+    have uploaded or attached — never a local path, which no reviewer can
+    open; one you cannot attach stays out.
+
+    Write only these filtered facts into one pack file — never raw command
+    output, which puts the scribe back to grepping logs. Dispatch the scribe with that file as its **only source**, and the
+    PR-body scratch file as its write root, under one rule: **omit, never
+    infer**. A fact the pack does not hold stays out of the body; a count,
+    a status, or an event id is copied from the pack, never worked out. If
+    the pack is wrong, rebuild it and dispatch again; do not let the scribe
+    reach past it into `state/events/`.
+
+    The PR body has this shape and nothing else: **Summary** (the epic id
+    and its goal, one paragraph); **Tasks** (one line per task: id,
+    `task_status`, and its `wave-merged` event id when it has one);
+    **Waivers** (granted and denied, each with its finding id and event id,
+    or the word "none" only when both lists in the pack are empty);
+    **Verification** (the verdict outcome, the `epic-closed` event id, the
+    `integration-check` results, the `audit-resolved` event ids and the
+    fixed and deferred counts when there are any, the shortstat, and the
+    commit count from the log);
+    **Screenshots** (only when the pack carries them); **Timeline** (the
+    dashboard link, when you put one in the pack). The scribe's 300-word
+    cap binds the prose — Summary and the sentences around the lists; the
+    Tasks, Waivers and check lists are artifacts and are never cut to fit
+    it, since a dropped line reads as a task or waiver that was not there.
 
     Before the first push, read the authorship the branch is about to make
     public — `git log --format=%ae <base>..HEAD | sort -u` — and stop on any
