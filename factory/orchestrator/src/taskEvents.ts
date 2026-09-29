@@ -7,6 +7,7 @@ import {
 } from './events.js';
 import type { EventContext } from './findings.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
+import { TERMINAL_TASK_STATUSES } from './taskStatus.js';
 import { taskBranchName } from './worktree.js';
 
 /**
@@ -129,7 +130,7 @@ function addedPayload(plan: PlanFile, task: TaskSpecRecord): Record<string, unkn
  */
 async function idsAlreadyEmitted(
   eventType: string,
-  ctx: TaskEventContext,
+  ctx: Pick<TaskEventContext, 'sessionId'>,
   opts: EventOpts,
 ): Promise<Set<string>> {
   const events = await readLineageEvents(ctx.sessionId, opts);
@@ -158,7 +159,7 @@ async function idsAlreadyEmitted(
  * rather than being frozen out.
  */
 async function addedPlanVersions(
-  ctx: TaskEventContext,
+  ctx: Pick<TaskEventContext, 'sessionId'>,
   opts: EventOpts,
 ): Promise<Map<string, number>> {
   const events = await readLineageEvents(ctx.sessionId, opts);
@@ -273,28 +274,25 @@ function specsToIngest(plan: PlanFile): TaskSpecRecord[] {
   return specs;
 }
 
+/** One event `emitTasksAdded` owes the log for a plan, before it is written. */
+interface PendingIngest {
+  task: TaskSpecRecord;
+  eventType: 'task-added' | 'task-superseded';
+}
+
 /**
- * Write the plan's backlog into the log: one `task-added` per task id the
- * session has not already recorded, plus a `task-superseded` for any id the
- * plan has no live spec left for (a v(n+1) cut records that as plan state,
- * and the projector needs it as an event to reach the same conclusion).
- *
- * Per id, not per record — see `specsToIngest`. Emitting the dead copies too
- * would say two false things at once: that a task the plan still lists as
- * `todo` was superseded, and that a 5-task backlog is 13 tasks.
- *
- * Returns only the events it actually appended, so a caller can report "5
- * added, 0 already present" truthfully rather than guessing from the plan.
+ * The events an ingest of `plan` would still write into this lineage, in the
+ * order it writes them — the whole of `emitTasksAdded`'s decision, kept apart
+ * from the appending so a reader can ask the question without writing.
  */
-export async function emitTasksAdded(
+async function pendingIngest(
   plan: PlanFile,
-  ctx: TaskEventContext,
-  opts: EventOpts = {},
-): Promise<StoredEvent[]> {
+  ctx: Pick<TaskEventContext, 'sessionId'>,
+  opts: EventOpts,
+): Promise<PendingIngest[]> {
   const added = await addedPlanVersions(ctx, opts);
   const superseded = await idsAlreadyEmitted('task-superseded', ctx, opts);
-  const scoped = planScoped(ctx, plan);
-  const written: StoredEvent[] = [];
+  const pending: PendingIngest[] = [];
 
   // The ids the plan marks as superseded-and-replaced: a dead record beside a
   // live one under the same id is how `draftNextVersion` records an amendment.
@@ -321,22 +319,82 @@ export async function emitTasksAdded(
       supersededIds.has(taskId) &&
       typeof liveVersion === 'number' &&
       liveVersion > recorded;
-    if (recorded === undefined || amended) {
-      written.push(
-        await appendEvent(envelope(scoped, 'task-added', addedPayload(plan, task), taskId), opts),
-      );
-    }
+    if (recorded === undefined || amended) pending.push({ task, eventType: 'task-added' });
     if (task.task_status === 'superseded' && !superseded.has(taskId)) {
-      written.push(
-        await appendEvent(
-          envelope(scoped, 'task-superseded', { epic_id: plan.epic_id }, taskId),
-          opts,
-        ),
-      );
+      pending.push({ task, eventType: 'task-superseded' });
     }
   }
+  return pending;
+}
 
+/**
+ * What `plan ingest` would still write for `plan` into this lineage — empty
+ * exactly when the plan in hand has been ingested. Read-only.
+ *
+ * #250. `wave check --session` admits against the log's task rows, and a plan
+ * version that was never ingested has rows the log does not know about, or
+ * rows at an older version, so a wave admitted from it is admitted against a
+ * backlog nobody recorded. Asked through the same decision `emitTasksAdded`
+ * makes, so "ingested" cannot mean one thing here and another at the ingest.
+ */
+export async function planIngestGaps(
+  plan: PlanFile,
+  ctx: Pick<TaskEventContext, 'sessionId'>,
+  opts: EventOpts = {},
+): Promise<{ taskId: string; eventType: PendingIngest['eventType'] }[]> {
+  const pending = await pendingIngest(plan, ctx, opts);
+  return pending.map(({ task, eventType }) => ({ taskId: task.task_id, eventType }));
+}
+
+/**
+ * Write the plan's backlog into the log: one `task-added` per task id the
+ * session has not already recorded, plus a `task-superseded` for any id the
+ * plan has no live spec left for (a v(n+1) cut records that as plan state,
+ * and the projector needs it as an event to reach the same conclusion).
+ *
+ * Per id, not per record — see `specsToIngest`. Emitting the dead copies too
+ * would say two false things at once: that a task the plan still lists as
+ * `todo` was superseded, and that a 5-task backlog is 13 tasks.
+ *
+ * Returns only the events it actually appended, so a caller can report "5
+ * added, 0 already present" truthfully rather than guessing from the plan.
+ */
+export async function emitTasksAdded(
+  plan: PlanFile,
+  ctx: TaskEventContext,
+  opts: EventOpts = {},
+): Promise<StoredEvent[]> {
+  const scoped = planScoped(ctx, plan);
+  const written: StoredEvent[] = [];
+  for (const { task, eventType } of await pendingIngest(plan, ctx, opts)) {
+    const payload =
+      eventType === 'task-added' ? addedPayload(plan, task) : { epic_id: plan.epic_id };
+    written.push(await appendEvent(envelope(scoped, eventType, payload, task.task_id), opts));
+  }
   return written;
+}
+
+/**
+ * The ids in `taskIds` a wave may not admit, read against the lineage's task
+ * rows: `missing` has no row at all, `terminal` has one whose `task_status`
+ * is over (TERMINAL_TASK_STATUSES, superseded included). Pure; the caller
+ * folds the rows and canonicalizes the ids.
+ *
+ * #250. A superseded id admitted by `wave check --session` went on to be
+ * dispatched, gated and merged as if it were live work.
+ */
+export function unadmissibleTasks(
+  taskIds: readonly string[],
+  statusOf: ReadonlyMap<string, string>,
+): { missing: string[]; terminal: { taskId: string; taskStatus: string }[] } {
+  const missing: string[] = [];
+  const terminal: { taskId: string; taskStatus: string }[] = [];
+  for (const taskId of taskIds) {
+    const taskStatus = statusOf.get(taskId);
+    if (taskStatus === undefined) missing.push(taskId);
+    else if (TERMINAL_TASK_STATUSES.has(taskStatus)) terminal.push({ taskId, taskStatus });
+  }
+  return { missing, terminal };
 }
 
 /** One arrow's identity in the log: who depends on whom, and in what sense. */

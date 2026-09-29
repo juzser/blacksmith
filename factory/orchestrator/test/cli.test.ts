@@ -4108,6 +4108,44 @@ describe('cli.ts (built binary)', () => {
       return JSON.parse(result.stdout).map((e: { record: Record<string, unknown> }) => e.record);
     }
 
+    /** `plan ingest` — what `wave check --session` requires first since #250. */
+    function ingest(planPath: string, sessionId: string, eventsDir: string): void {
+      const result = runCli([
+        'plan',
+        'ingest',
+        planPath,
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(result.status).toBe(0);
+    }
+
+    /** Append one hand-written event under the session root. */
+    function append(
+      sessionId: string,
+      eventsDir: string,
+      record: { event_type: string; task_id?: string; payload: Record<string, unknown> },
+    ): void {
+      const result = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'system',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          ...record,
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(result.status).toBe(0);
+    }
+
     it('plan ingest: writes a task-added per task, and says so; re-running adds nothing', async () => {
       const { sessionId, eventsDir, planPath } = await session();
       const ingest = runCli([
@@ -4197,6 +4235,7 @@ describe('cli.ts (built binary)', () => {
 
     it('wave check: logs wave-admitted under the plan spelling of a bare task id', async () => {
       const { sessionId, eventsDir, planPath } = await session();
+      ingest(planPath, sessionId, eventsDir);
       const result = runCli([
         'wave',
         'check',
@@ -4228,6 +4267,7 @@ describe('cli.ts (built binary)', () => {
     it('wave audit: separates a wave that ran wide from one that ran one at a time', async () => {
       async function ran(order: string[]): Promise<{ sessionId: string; eventsDir: string }> {
         const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
         const admit = runCli([
           'wave',
           'check',
@@ -4525,6 +4565,87 @@ describe('cli.ts (built binary)', () => {
       );
     });
 
+    // #250. With --session the verb admits against the log, so it has to
+    // read the log's answer about each id, not only the plan's.
+    describe('wave check --session admits only live, ingested tasks (#250)', () => {
+      function check(planPath: string, sessionId: string, eventsDir: string, ...ids: string[]) {
+        return runCli([
+          'wave',
+          'check',
+          planPath,
+          ...ids,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+      }
+
+      it('refuses a plan version the lineage never ingested', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const result = check(planPath, sessionId, eventsDir, 'task-1');
+
+        expect(result.status).toBe(1);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('cli.plan-not-ingested');
+        expect(error.details).toMatchObject({ epic: 'epic-1', version: 1 });
+        expect(error.details.pending).toEqual(['epic-1/task-1', 'epic-1/task-2']);
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      it('refuses a superseded task, naming it and its status', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
+        append(sessionId, eventsDir, {
+          event_type: 'task-superseded',
+          task_id: 'epic-1/task-2',
+          payload: { epic_id: 'epic-1' },
+        });
+
+        const result = check(planPath, sessionId, eventsDir, 'task-1', 'task-2');
+        expect(result.status).toBe(1);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('cli.task-not-live');
+        expect(error.details.tasks).toEqual([
+          { taskId: 'epic-1/task-2', taskStatus: 'superseded' },
+        ]);
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted')).toEqual(
+          [],
+        );
+      });
+
+      it('refuses a task that already merged', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
+        append(sessionId, eventsDir, {
+          event_type: 'wave-merged',
+          payload: { epic_id: 'epic-1', task_ids: ['epic-1/task-1'] },
+        });
+
+        const result = check(planPath, sessionId, eventsDir, 'task-1');
+        expect(result.status).toBe(1);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('cli.task-not-live');
+        expect(error.details.tasks).toEqual([{ taskId: 'epic-1/task-1', taskStatus: 'completed' }]);
+      });
+
+      it('admits live tasks once the plan is ingested', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
+
+        const result = check(planPath, sessionId, eventsDir, 'task-1', 'task-2');
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).valid).toBe(true);
+        expect(
+          tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted'),
+        ).toHaveLength(1);
+      });
+    });
+
     // D-212: `factory/policies/worktree.yml` is the file this verb loads, and
     // it says what a dependency edge means — "tasks with overlapping claims
     // are never scheduled concurrently; they get a dependency edge (edge_type:
@@ -4550,6 +4671,7 @@ describe('cli.ts (built binary)', () => {
           ],
         }),
       );
+      ingest(planPath, sessionId, eventsDir);
 
       const result = runCli([
         'wave',
@@ -4620,6 +4742,7 @@ describe('cli.ts (built binary)', () => {
     // is exactly what a glob comparison cannot see (P9-3).
     it('wave check: refuses two tasks joined by an import edge their claims do not show', async () => {
       const { sessionId, eventsDir, planPath } = await session();
+      ingest(planPath, sessionId, eventsDir);
       const coupledRepo = await mkdtemp(path.join(tmpdir(), 'smith-wave-symbols-'));
       try {
         await mkdir(path.join(coupledRepo, 'src', 'foo'), { recursive: true });
@@ -4672,6 +4795,7 @@ describe('cli.ts (built binary)', () => {
 
     it('wave check: admits the same wave when the two claimed trees share no edge', async () => {
       const { sessionId, eventsDir, planPath } = await session();
+      ingest(planPath, sessionId, eventsDir);
       const looseRepo = await mkdtemp(path.join(tmpdir(), 'smith-wave-symbols-ok-'));
       try {
         await mkdir(path.join(looseRepo, 'src', 'foo'), { recursive: true });
@@ -4709,6 +4833,7 @@ describe('cli.ts (built binary)', () => {
     // overlaps nothing, so the wave was admitted rather than questioned.
     it('wave check: refuses a follow-up whose logged claims the register cannot read', async () => {
       const { sessionId, eventsDir, planPath } = await session();
+      ingest(planPath, sessionId, eventsDir);
       const append = runCli([
         'event',
         'append',
@@ -4790,6 +4915,7 @@ describe('cli.ts (built binary)', () => {
       it('refuses a wave whose own declared cost would cross the epic cap', async () => {
         const { sessionId, eventsDir } = await session();
         const planPath = await pricedPlan(sessionId, 3000);
+        ingest(planPath, sessionId, eventsDir);
         const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
 
         const result = runCli([
@@ -4834,6 +4960,7 @@ describe('cli.ts (built binary)', () => {
       it('admits a refused wave under --override-rationale and logs both', async () => {
         const { sessionId, eventsDir } = await session();
         const planPath = await pricedPlan(sessionId, 3000);
+        ingest(planPath, sessionId, eventsDir);
         const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
 
         const result = runCli([
@@ -4871,6 +4998,7 @@ describe('cli.ts (built binary)', () => {
       it('refuses a blank --override-rationale rather than recording an empty reason', async () => {
         const { sessionId, eventsDir } = await session();
         const planPath = await pricedPlan(sessionId, 3000);
+        ingest(planPath, sessionId, eventsDir);
         const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
 
         const result = runCli([
@@ -4905,6 +5033,7 @@ describe('cli.ts (built binary)', () => {
       it('refuses a wave that would put more tasks in flight than the fan-out cap allows', async () => {
         const { sessionId, eventsDir } = await session();
         const planPath = await pricedPlan(sessionId, 1000);
+        ingest(planPath, sessionId, eventsDir);
         const budgetPolicy = await policyFile(sessionId, {
           cap_tokens: 4_000_000,
           max_in_flight_tasks: 1,
@@ -4973,6 +5102,7 @@ describe('cli.ts (built binary)', () => {
       // spend — so the cap is enforced against a real number.
       it('prices a log-only follow-up at the coder cap rather than refusing it', async () => {
         const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
         await logOnlyTask(sessionId, eventsDir, 'epic-1/followup-cd34');
 
         const result = runCli([
@@ -5008,6 +5138,7 @@ describe('cli.ts (built binary)', () => {
       // pricing above is a real charge, not a way past the gate.
       it('refuses that same follow-up when the coder cap will not fit under the epic cap', async () => {
         const { sessionId, eventsDir, planPath } = await session();
+        ingest(planPath, sessionId, eventsDir);
         await logOnlyTask(sessionId, eventsDir, 'epic-1/followup-cd34');
         const budgetPolicy = await policyFile(sessionId, { cap_tokens: 5000 });
 
@@ -5049,6 +5180,7 @@ describe('cli.ts (built binary)', () => {
             tasks: [first, { ...second, budget: { diff_lines: 100 } }],
           }),
         );
+        ingest(planPath, sessionId, eventsDir);
 
         const result = runCli([
           'wave',
@@ -5099,6 +5231,7 @@ describe('cli.ts (built binary)', () => {
       it('records what the gate saw on an admission that fits', async () => {
         const { sessionId, eventsDir } = await session();
         const planPath = await pricedPlan(sessionId, 1000);
+        ingest(planPath, sessionId, eventsDir);
         const budgetPolicy = await policyFile(sessionId, { cap_tokens: 4_000_000 });
 
         const result = runCli([
@@ -7585,6 +7718,7 @@ describe('cli.ts (built binary)', () => {
         runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
         runOrThrow('git', ['push', '-q', 'origin', 'main'], { cwd: projectDir });
 
+        ingest(planPath, sessionId, eventsDir);
         const followUpId = await mintFollowUp(sessionId, eventsDir, planPath);
         // Typed the short way from here on, exactly as a human would — the
         // whole point is that both spellings resolve to the one id the log
@@ -7663,6 +7797,7 @@ describe('cli.ts (built binary)', () => {
             tasks: [{ ...PLAN.tasks[0], task_id: 'epic-1/task-3', claims: ['scripts/**'] }],
           }),
         );
+        ingest(rivalPath, sessionId, eventsDir);
 
         const result = runCli([
           'wave',

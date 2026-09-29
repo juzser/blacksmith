@@ -66,6 +66,14 @@ file asked for would be running it below the floor.
      operator's call. So a proposed wave can still be refused here. That is
      the gate working, not the proposal being wrong — drop tasks from the
      tail of `wave` and re-check.
+   - With `--session`, `wave check` admits only live tasks of an ingested
+     plan. A plan version whose tasks the log never saw is refused
+     `cli.plan-not-ingested`: run `smith plan ingest` on it, then re-check.
+     An id with no task row is refused `plan.unknown-task`, and a task
+     whose `task_status` is terminal — `completed`, `superseded`,
+     `failed`, `escalated`, `waived` — is refused `cli.task-not-live`, naming each task
+     and its status. Drop those ids; a follow-up `findings raise` minted
+     stays admissible while it is live.
    - Never narrow a wave because a narrow one feels safer. A wave of one
      passes every check in this file — one task is disjoint with nothing,
      shares a hotspot with nothing, crosses no import edge — so `valid: true`
