@@ -68,7 +68,7 @@ import {
   type TaskSpecRecord,
 } from './plan.js';
 import { defaultKindFor, FACTORY_PROJECT, type MilestoneKind } from './roadmap.js';
-import { taskIdsMatch } from './taskId.js';
+import { bareTaskId, epicOfTaskId, isQualifiedTaskId } from './taskId.js';
 import { loadTaxonomy } from './taxonomy.js';
 
 export class AuditError extends SmithError {}
@@ -1319,16 +1319,36 @@ function mergedTaskIds(events: readonly StoredEvent[]): Set<string> {
  * empty for it. A same-id supersede (D-121) is excluded too, via `liveIds` —
  * its live successor is already in `planClaimedTasks`, so counting the dead
  * copy again would only repeat the same claims under a second entry.
+ *
+ * A merged id counts only when it is qualified under THIS epic
+ * (`epicOfTaskId(id) === epicId`) and its bare half matches the plan task's.
+ * `taskIdsMatch`'s cross-spelling fallback is deliberately not used here: a
+ * `wave-merged` payload carries no `epic_id`, and `readLineageEvents` is not
+ * epic-scoped, so a bare id in the lineage could belong to a legacy
+ * pre-D-46 session or to a different epic that merged waves in the same
+ * lineage. Trusting a bare match would mark a finding `fixed` when nothing
+ * in *this* epic actually shipped — the wrong direction for an operation
+ * that must never be unsure in the optimistic direction. A bare merged id is
+ * therefore ignored, same as before this file learned about merges at all.
  */
-function mergedSupersededClaims(plan: PlanFile, merged: ReadonlySet<string>): ClaimedTask[] {
+function mergedSupersededClaims(
+  plan: PlanFile,
+  merged: ReadonlySet<string>,
+  epicId: string,
+): ClaimedTask[] {
   if (merged.size === 0) return [];
   const liveIds = new Set(livePlanTasks(plan).map((task) => task.task_id));
+  const mergedBareIds = new Set(
+    [...merged]
+      .filter((id) => isQualifiedTaskId(id) && epicOfTaskId(id) === epicId)
+      .map((id) => bareTaskId(id)),
+  );
   const claimed = new Map<string, TaskSpecRecord>();
   for (const task of plan.tasks) {
     if (task.task_status !== 'superseded') continue;
     if (liveIds.has(task.task_id)) continue;
     if (claimed.has(task.task_id)) continue;
-    if ([...merged].some((id) => taskIdsMatch(id, task.task_id))) claimed.set(task.task_id, task);
+    if (mergedBareIds.has(bareTaskId(task.task_id))) claimed.set(task.task_id, task);
   }
   return [...claimed.values()]
     .filter((task) => Array.isArray(task.claims))
@@ -1375,7 +1395,7 @@ export async function resolveAudit(
   const lineage = await readLineageEvents(ctx.sessionId, opts);
   const claimedTasks = [
     ...planClaimedTasks(plan),
-    ...mergedSupersededClaims(plan, mergedTaskIds(lineage)),
+    ...mergedSupersededClaims(plan, mergedTaskIds(lineage), epicId),
   ];
   const except = matchExceptFingerprints(resolveOpts.except ?? [], carried, epicId);
   const toFix = open.filter(

@@ -751,6 +751,48 @@ describe('the audit verbs', () => {
         });
         expect(resolved).toMatchObject({ fixed: [fingerprint], already: [], deferred: [] });
       });
+
+      it('does not count a bare (unqualified) merged task id, even when its name matches', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        // A legacy pre-D-46 session, or another epic's task in this same
+        // lineage, can write a bare "task-1" -- there is no epic_id on the
+        // wave-merged payload to tell those apart, so a bare id must never
+        // be trusted to mean *this* epic's task.
+        await waveMerged(SESSION, `${SESSION}#0`, 'task-1');
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      });
+
+      it('does not count a qualified merge from a different epic that happens to share a bare id', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        await waveMerged(SESSION, `${SESSION}#0`, 'some-other-epic/task-1');
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+      });
+
+      it('--except still forces deferred for a finding a merged-superseded task would otherwise fix', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        await waveMerged(SESSION, `${SESSION}#0`, `${input.epicId}/task-1`);
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+          except: [fingerprint],
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+        expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
+      });
     });
   });
 
