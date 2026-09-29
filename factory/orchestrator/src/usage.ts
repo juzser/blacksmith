@@ -645,8 +645,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'findings for-dispatch',
     positionals: '',
-    flags: '--session <id> --plan <plan.json> --task <task-id> [--state-dir <dir>]',
-    summary: "Print the open findings a dispatching task's own claims cover, as a prompt block.",
+    flags: '--session <id> [--plan <plan.json> --task <task-id>] [--state-dir <dir>]',
+    summary:
+      "Print the open findings a dispatching task's own claims cover, as a prompt block; with no --plan/--task, every open finding in the epic.",
   },
   {
     command: 'findings list',

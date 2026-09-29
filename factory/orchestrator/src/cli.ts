@@ -195,7 +195,9 @@ import {
   emitEdgesRecorded,
   emitTasksAdded,
   emitWaveAdmitted,
+  planIngestGaps,
   readAddedTasks,
+  unadmissibleTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
 import { loadTaxonomy } from './taxonomy.js';
@@ -1070,6 +1072,63 @@ function splitNamespaceAction(argv: string[]): {
 }
 
 /**
+ * #250. `wave check --session` admits against the log, so before it admits
+ * it asks the log three things, in order: was this plan version ingested,
+ * does every id have a task row, and is every row still live. Each refusal is
+ * thrown before anything is written, so a refused wave leaves no
+ * `wave-admitted` behind. "Live" excludes only CLOSED_TO_FURTHER_WORK: a
+ * `failed` or `escalated` task is held by an operator and is re-admitted by
+ * the escalation ladder, so it passes.
+ *
+ * The no-row refusal is a defensive invariant, not a path the CLI reaches
+ * today: past an ingest every plan id has a row, and an id neither the plan
+ * nor the log knows is refused earlier, by the id resolution.
+ *
+ * Order matters for the answer the operator reads: an un-ingested plan makes
+ * every row question moot (the rows are missing or stale because the ingest
+ * is), so it is asked first and names the one command that fixes it.
+ */
+async function refuseUnadmissibleTasks(
+  plan: PlanFile,
+  taskIds: readonly string[],
+  flags: Record<string, string>,
+): Promise<void> {
+  const sessionId = flags.session as string;
+  const eventOpts = eventOptsFromFlags(flags);
+  const gaps = await planIngestGaps(plan, { sessionId }, eventOpts);
+  if (gaps.length > 0) {
+    const pending = [...new Set(gaps.map((g) => g.taskId))];
+    throw new SmithError(
+      'cli.plan-not-ingested',
+      `Plan "${plan.epic_id}" v${plan.version} has not been ingested into session "${sessionId}" (${pending.length} task(s) pending): run \`smith plan ingest\` on it first, then re-check.`,
+      { epic: plan.epic_id, version: plan.version, session: sessionId, pending },
+    );
+  }
+  // Imported here for the reason nextWaveInputFrom gives: the db layer stays
+  // out of the graph every `smith` invocation loads.
+  const { foldTasks, taskIdCanonicalizer } = await import('./db/projector.js');
+  const events = await readLineageEvents(sessionId, eventOpts);
+  const statusOf = new Map<string, string>();
+  for (const row of foldTasks(events)) statusOf.set(row.taskId, row.taskStatus);
+  const canonical = taskIdCanonicalizer(events);
+  const { missing, terminal } = unadmissibleTasks(taskIds.map(canonical), statusOf);
+  if (missing.length > 0) {
+    throw new SmithError(
+      'plan.unknown-task',
+      `Session "${sessionId}" has no task row for ${missing.map((id) => `"${id}"`).join(', ')}: a wave is admitted against the log, and the log does not know ${missing.length === 1 ? 'this task' : 'these tasks'}.`,
+      { session: sessionId, missing },
+    );
+  }
+  if (terminal.length > 0) {
+    throw new SmithError(
+      'cli.task-not-live',
+      `Refusing to admit ${terminal.map((t) => `"${t.taskId}" (${t.taskStatus})`).join(', ')}: the work is over in session "${sessionId}". Drop ${terminal.length === 1 ? 'it' : 'them'} from the wave.`,
+      { session: sessionId, tasks: terminal },
+    );
+  }
+}
+
+/**
  * Everything a wave computation reads about a plan: the plan itself with the
  * log's follow-ups merged in, the worktree policy, the import crossings
  * between its tasks, and the live status register.
@@ -1698,6 +1757,7 @@ async function main(): Promise<number> {
         logged.map((t) => t.taskId),
       ),
     );
+    if (flags.session) await refuseUnadmissibleTasks(plan, taskIds, flags);
     // Neither register is narrowed on the way in. `?? []` used to stand here
     // and on the line above, and it fires on a missing claims field but not on
     // a claims field holding the wrong thing: a plan writing `"claims":
@@ -3941,22 +4001,28 @@ async function main(): Promise<number> {
 
   // The dispatch-time half of P9-15, shaped exactly like `lessons
   // for-dispatch`: the caller composing a task prompt asks for the block and
-  // splices it. `--plan` is required rather than optional here — without it
-  // the claims list is empty, every finding fails the join, and the command
-  // would answer "nothing is open in your files" when it never looked.
+  // splices it. `--plan` and `--task` come as a pair: a `--task` without
+  // `--plan` would have an empty claims list, every finding would fail the
+  // join, and the command would answer "nothing is open in your files" when it
+  // never looked. Neither is the epic-level shape (#248) — a role with no task
+  // of its own (dispatch.md) gets every open finding in the epic instead.
   if (namespace === 'findings' && action === 'for-dispatch') {
-    const usage =
-      'smith findings for-dispatch --session ... --plan plan.json --task task-id [--state-dir dir]';
-    requireFlag(flags, 'plan');
-    const taskId = requireFlag(flags, 'task');
+    const usage = usageLine(usageFor('findings for-dispatch'));
+    if (flags.task !== undefined) requireFlag(flags, 'plan');
     const sessionId = requireFlag(flags, 'session');
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
     if (positional.length > 0) {
       throw new SmithError('cli.usage', `Unexpected argument. Usage: ${usage}`, { positional });
     }
+    // claimsForDispatch refuses a `--plan` with no `--task`, so half a
+    // per-task call never falls through to the epic-wide answer.
+    const claims = claimsForDispatch(flags);
     printJson(
-      await findingsForDispatch({ sessionId, taskId, claims: claimsForDispatch(flags) }, eventOpts),
+      await findingsForDispatch(
+        { sessionId, ...(flags.task === undefined ? {} : { taskId: flags.task }), claims },
+        eventOpts,
+      ),
     );
     return 0;
   }

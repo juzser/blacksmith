@@ -346,6 +346,48 @@ describe('findingsForDispatch', () => {
     expect(result.text).toContain(FINDING_BLOCK_END);
     expect(result.text).toContain("_No open finding matches this task's claims._");
   });
+
+  // #248: an epic-level role (closing spec-reviewer, planner verdict, scribe)
+  // has no task and no claims. dispatch.md tells it to pass no `--task`, so
+  // the answer is every open finding in the epic, not an empty claims join.
+  describe('with no task (an epic-level dispatch)', () => {
+    it('returns every open finding in the epic, anchored or not', async () => {
+      await raise({ id: 'f-src', taskId: 'epic-1/task-a', filePath: 'src/parse.ts' });
+      await raise({ id: 'f-docs', taskId: 'epic-1/task-b', filePath: 'docs/guide.md' });
+      await raiseUnanchored('f-legacy', 'epic-1/task-c');
+
+      const result = await findingsForDispatch({ sessionId: SESSION, claims: [] }, { stateDir });
+
+      expect(result.taskId).toBeNull();
+      expect(result.findings.map((f) => f.finding_id).sort()).toEqual([
+        'f-docs',
+        'f-legacy',
+        'f-src',
+      ]);
+      // Nothing was joined against claims, so nothing went unchecked.
+      expect(result.unanchored).toEqual([]);
+      expect(result.text).toContain('epic-level dispatch');
+      expect(result.text).toContain('CONTEXT, NOT SCOPE');
+    });
+
+    it('still leaves out findings that are closed or already assigned', async () => {
+      await park(OPEN_BUT_ALREADY_ASSIGNED[0] as string, {
+        id: 'f-assigned',
+        taskId: 'epic-1/task-a',
+        filePath: 'src/parse.ts',
+      });
+      await park(closed[0] as string, {
+        id: 'f-closed',
+        taskId: 'epic-1/task-a',
+        filePath: 'src/parse.ts',
+      });
+
+      const result = await findingsForDispatch({ sessionId: SESSION, claims: [] }, { stateDir });
+
+      expect(result.findings).toEqual([]);
+      expect(result.text).toContain('_No open finding in this epic._');
+    });
+  });
 });
 
 describe('renderFindingBlock', () => {
