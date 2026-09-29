@@ -197,11 +197,12 @@ one thing this playbook never asks you to.
    --causal-parent ...` (schema check → grader verdict → tests → coverage
    evidence → findings intake → severity decision,
    `docs/guide/operator-guide/queue-and-gate.md` §5).
-   - `checks.json`'s unit check must be the project's full test command, or a
-     `testSelect` narrowing template (`factory/orchestrator/src/testSelect.ts`
-     — a `{files}` placeholder filled from the reachable-test graph), never a
-     hand-picked list of files. A scoped-down unit check is how red tests
-     have merged before.
+   - `checks.json`'s unit check must be the project's full test command,
+     never a hand-picked list of files — `gate run` runs each check command
+     literally, with no narrowing of its own. Narrowing by changed files is
+     `smith queue run --select-test-cmd` (`factory/orchestrator/src/testSelect.ts`),
+     a queue-tier flag `--batch` refuses; it does not reach `checks.json`. A
+     scoped-down unit check is how red tests have merged before.
    - `--grader` takes step 6's file, latest round. A criterion that came back
      `fail` or `partial` blocks before any check command runs — the outcome is
      `blocked` with `reason: "grader-fail"`, and the payload's
