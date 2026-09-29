@@ -289,36 +289,86 @@ describe('judges.ts', () => {
     // `failure_scenario`, `confidence`) that `smith audit record` validates
     // on its own terms, never `finding-evidence.schema.json` — it has no
     // `finding_category` and a `confidence` that schema's
-    // `additionalProperties: false` does not allow. Three axes report as
-    // `auditor`; the security axis reports as `security-reviewer`, the same
-    // role an ordinary per-task security review uses for real
-    // finding-evidence. Both roles skip the new check rather than reject a
-    // well-formed audit artifact outright — mintFindings still validates
-    // fully whenever this evidence is actually minted.
-    for (const auditRole of ['auditor', 'security-reviewer']) {
-      it(`does not apply finding-evidence shape checking to a "${auditRole}" artifact — that role also carries an audit's differently-shaped evidence`, async () => {
-        await dispatch({ role: auditRole, artifactPath: path.join(artifactDir, 'axis.json') });
-        await writeFile(
-          path.join(artifactDir, 'axis.json'),
-          JSON.stringify([
-            {
-              file_path: 'src/a.ts',
-              severity: 'S2-major',
-              summary: 'no input validation on the token endpoint',
-              failure_scenario: { inputs: 'a', expected: 'b', actual: 'c' },
-              confidence: 0.9,
-            },
-          ]),
-          'utf8',
-        );
-        const report = await recordJudgeReport(
-          { taskId: 'epic-1/task-1', role: auditRole },
-          ctx(),
-          opts(),
-        );
-        expect(report.findingCount).toBe(1);
+    // `additionalProperties: false` does not allow.
+    const auditEvidence = () => [
+      {
+        file_path: 'src/a.ts',
+        severity: 'S2-major',
+        summary: 'no input validation on the token endpoint',
+        failure_scenario: { inputs: 'a', expected: 'b', actual: 'c' },
+        confidence: 0.9,
+      },
+    ];
+
+    it('does not apply finding-evidence shape checking to an "auditor" artifact — the other three axes never review a single task, so there is no taskId to gate on', async () => {
+      await dispatch({ role: 'auditor', artifactPath: path.join(artifactDir, 'axis.json') });
+      await writeFile(path.join(artifactDir, 'axis.json'), JSON.stringify(auditEvidence()), 'utf8');
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'auditor' },
+        ctx(),
+        opts(),
+      );
+      expect(report.findingCount).toBe(1);
+    });
+
+    // `security-reviewer` is dual-use: an ordinary per-task security review
+    // (real finding-evidence, same five keys as `reviewer`) and the audit's
+    // security axis (AuditEvidenceItem, above). The two are told apart by
+    // taskId — an audit axis turn's is `<audit-id>.<axis>` (audit.md), never
+    // the ordinary "<epic>/<bare>" shape (taskId.ts) — not by role alone.
+    it('does not apply finding-evidence shape checking to a "security-reviewer" artifact on an audit axis task id', async () => {
+      const auditTaskId = '20260929-a1b2c3d4.security';
+      await dispatch({
+        taskId: auditTaskId,
+        role: 'security-reviewer',
+        artifactPath: path.join(artifactDir, 'axis.json'),
       });
-    }
+      await writeFile(path.join(artifactDir, 'axis.json'), JSON.stringify(auditEvidence()), 'utf8');
+      const report = await recordJudgeReport(
+        { taskId: auditTaskId, role: 'security-reviewer' },
+        ctx(),
+        opts(),
+      );
+      expect(report.findingCount).toBe(1);
+    });
+
+    it('applies finding-evidence shape checking to a "security-reviewer" artifact on an ordinary per-task id', async () => {
+      await dispatch({
+        role: 'security-reviewer',
+        artifactPath: path.join(artifactDir, 'axis.json'),
+      });
+      await writeFile(path.join(artifactDir, 'axis.json'), JSON.stringify(auditEvidence()), 'utf8');
+      await expect(
+        recordJudgeReport({ taskId: 'epic-1/task-1', role: 'security-reviewer' }, ctx(), opts()),
+      ).rejects.toMatchObject({ code: 'judges.artifact-invalid-evidence' });
+      // The turn stays open: a failed report is not a report.
+      expect(outstandingJudges(await turns())).toHaveLength(1);
+    });
+
+    // `verifier` (verifier.md) echoes a finding back rather than describing a
+    // fresh one — `{finding_id, verdict, rationale, failure_scenario}` — a
+    // shape that is never finding-evidence, on any taskId.
+    it('does not apply finding-evidence shape checking to a "verifier" artifact', async () => {
+      await dispatch({ role: 'verifier', artifactPath: path.join(artifactDir, 'verifier.json') });
+      await writeFile(
+        path.join(artifactDir, 'verifier.json'),
+        JSON.stringify([
+          {
+            finding_id: 'f-1',
+            verdict: 'confirmed',
+            rationale: 'reproduced against the diff',
+            failure_scenario: { inputs: 'a', expected: 'b', actual: 'c' },
+          },
+        ]),
+        'utf8',
+      );
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'verifier' },
+        ctx(),
+        opts(),
+      );
+      expect(report.findingCount).toBe(1);
+    });
 
     it('refuses a declared artifact that is not on disk', async () => {
       await dispatch();

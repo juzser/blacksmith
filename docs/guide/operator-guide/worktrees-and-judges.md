@@ -217,7 +217,7 @@ emits `judge-reported` with `agent_role`, `round`, `artifact_path` and
 | `judges.artifact-missing` | The turn ended without the file | Re-poke the agent — recovery was six for six across waves 3–4 |
 | `judges.artifact-unparseable` | The file is prose, not JSON | The agent narrated instead of reporting; re-dispatch, don't read the prose as a verdict |
 | `judges.artifact-not-a-list` | Parses, but is not a findings array | It wrote some other shape. An empty review is `[]`, written out |
-| `judges.artifact-invalid-evidence` | A list, but one or more items don't match `finding-evidence.schema.json` | Named by index and field in the error; the agent guessed field names instead of reporting the real shape. `[]` always passes — an empty review has nothing to validate |
+| `judges.artifact-invalid-evidence` | A list, but one or more items don't match `finding-evidence.schema.json` — only checked for `reviewer`, `grader`'s `--found-by grader` evidence path, and `security-reviewer` when the task id is an ordinary per-task id, not an audit axis (`<audit-id>.<axis>`) | Named by index and field in the error; the agent guessed field names instead of reporting the real shape. `[]` always passes — an empty review has nothing to validate |
 
 The grader is the exception the table allows for: its declared artifact is
 its result document (`state/results/<task-id>.grader-r<round>.json`, the file
