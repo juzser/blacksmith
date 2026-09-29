@@ -36,7 +36,7 @@ describe('SKILL.md states the plain-language rule once, in "Talking to the opera
   });
 
   it("requires grounding jargon in the operator's own terms", () => {
-    expect(body).toMatch(/operator's own (task|terms)/i);
+    expect(body).toMatch(/operator's own terms|their (task|prompt)/i);
   });
 
   it('requires plain explanation first, technical details in a trailing part', () => {
@@ -54,6 +54,46 @@ describe('SKILL.md states the plain-language rule once, in "Talking to the opera
   it('carries one before/after example', () => {
     expect(body).toMatch(/Jargon:/);
     expect(body).toMatch(/Plain:/);
+  });
+
+  it('asks for the current state to be restated in the operator’s terms', () => {
+    expect(body).toMatch(/restat/i);
+    expect(body).toMatch(/wave \d of \d/i);
+  });
+
+  it('asks for multi-step replies to be numbered', () => {
+    expect(body).toMatch(/number/i);
+    expect(body).toMatch(/step/i);
+  });
+
+  it('asks for errors to be stated as what broke, why, and the fix', () => {
+    expect(body).toMatch(/broke/i);
+    expect(body).toMatch(/fix/i);
+  });
+
+  it('caps lists and holds the rest back rather than dropping it', () => {
+    expect(body).toMatch(/5 items|five items/i);
+    expect(body).toMatch(/on request|held back|shown if asked/i);
+  });
+
+  it('merges asking one question and confirming destructive steps into one bullet', () => {
+    expect(body).toMatch(/one short question/i);
+    expect(body).toMatch(/destructive|irreversible/i);
+  });
+
+  it('requires a confidence figure on every option title when one is recommended', () => {
+    expect(body).toMatch(/confidence/i);
+    expect(body).toMatch(/%/);
+    expect(body).toMatch(/Recommended/);
+    expect(body).toMatch(/highest figure/i);
+  });
+
+  it('asks for a pre-send check', () => {
+    expect(body).toMatch(/pre-send check/i);
+  });
+
+  it('credits the ADHD reference skill without importing it as a rule set', () => {
+    expect(body).toMatch(/ayghri\/i-have-adhd/);
   });
 });
 
