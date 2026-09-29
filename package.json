@@ -93,7 +93,7 @@
     "hono": "4.13.8",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
-    "vite": "8.3.0",
+    "vite": "8.3.1",
     "vitest": "5.0.1",
     "vue": "3.5.43",
     "vue-router": "5.3.1"
