@@ -732,22 +732,59 @@ export function draftNextVersion(prev: PlanFile, changes: PlanChanges): PlanFile
   // no longer mentions. Plans are immutable and nothing deletes one, so that
   // left no way out.
   //
-  // Dropping the edge loses nothing: the only ids that leave are completed and
-  // not superseded, so the ordering constraint is already discharged, and a
-  // superseded task is carried forward (as `superseded`) and keeps its edges.
-  // Applied to the CARRIED edges only -- an edge this amendment adds is
-  // something the author wrote, and deleting it silently would answer a typo
-  // with a plan that no longer says what they asked for. `validatePlan` names
-  // that one instead.
+  // Dropping the edge loses nothing: the only ids that leave outright are
+  // completed and not superseded, so the ordering constraint is already
+  // discharged. Applied to the CARRIED edges only -- an edge this amendment
+  // adds is something the author wrote, and deleting it silently would answer
+  // a typo with a plan that no longer says what they asked for. `validatePlan`
+  // names that one instead.
+  //
+  // A superseded task is carried forward too (as `superseded`), which used to
+  // read as "so it keeps its edges" -- true only when the replacement keeps
+  // the old task_id (D-121's usual case; the id maps to itself below). A
+  // supersede that changes the id moves the *work* to the new id, but the old
+  // one stays in `tasks` only as a dead record: `livePlanTasks` (and so
+  // `computeNextWave`'s done set, waveNext.ts) drops it, so it can never
+  // become terminal. An edge still naming it would defer its dependent
+  // forever -- `dependency-pending` on an id nothing will ever finish. Moving
+  // both ends of a carried edge through the old-id -> replacement-id map
+  // before the declared-check is what keeps the dependency resolvable under
+  // its new name instead of quietly wedging it (#234).
   const declared = new Set(tasks.map((t) => t.task_id));
-  const carriedEdges = prev.edges.filter((e) => declared.has(e.task) && declared.has(e.dependsOn));
+  const rewireTo = new Map<string, string>();
+  for (const [oldId, replacement] of Object.entries(supersede)) {
+    if (replacement.task_id !== oldId) rewireTo.set(oldId, replacement.task_id);
+  }
+  const rewire = (id: string) => rewireTo.get(id) ?? id;
+
+  const newEdges = changes.newEdges ?? [];
+  const newEdgeKeys = new Set(newEdges.map((e) => `${e.task}\u0000${e.dependsOn}`));
+  const seenCarried = new Set<string>();
+  const carriedEdges: PlanFile['edges'] = [];
+  for (const e of prev.edges) {
+    const rewiredTask = rewire(e.task);
+    const rewiredDependsOn = rewire(e.dependsOn);
+    if (!declared.has(rewiredTask) || !declared.has(rewiredDependsOn)) continue;
+    if (rewiredTask === rewiredDependsOn) continue; // rewiring both ends onto the same replacement is not a dependency
+    const key = `${rewiredTask}\u0000${rewiredDependsOn}`;
+    // An edge this amendment adds wins over a carried edge rewired onto the
+    // same pair, and a rewire that collapses two carried edges onto the same
+    // pair keeps only the first -- either way, no duplicate.
+    if (newEdgeKeys.has(key) || seenCarried.has(key)) continue;
+    seenCarried.add(key);
+    carriedEdges.push(
+      rewiredTask === e.task && rewiredDependsOn === e.dependsOn
+        ? e
+        : { ...e, task: rewiredTask, dependsOn: rewiredDependsOn },
+    );
+  }
 
   return {
     epic_id: prev.epic_id,
     version: newVersion,
     status: 'active',
     tasks,
-    edges: [...carriedEdges, ...(changes.newEdges ?? [])],
+    edges: [...carriedEdges, ...newEdges],
     ...(prev.project ? { project: prev.project } : {}),
     ...(prev.effort ? { effort: prev.effort } : {}),
   };
