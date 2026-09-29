@@ -198,7 +198,11 @@ smith judge outstanding --task epic-1/task-1 --session <session-id>
 fields, `declared_artifact` and `round` — that first field is the whole
 convention: a dispatch that names a file it will write owes that file, and a
 coder's dispatch names none and owes nothing. There is no list of judge roles
-anywhere. `--provider`/`--model-tier` default to `claude`/`frontier`.
+anywhere. `--provider`/`--model-tier` default to `claude`/`frontier`. When
+the declared file is already on disk — the documented paths are reused round
+after round — the dispatch also records its mtime as
+`artifact_mtime_at_dispatch`, which is what lets the report tell last round's
+file from this round's.
 
 `--model` does **not** default, and is the one flag here you cannot skip. It is
 a dispatch like any other, so P9-23's required `model` dimension applies (§2b),
@@ -208,7 +212,7 @@ check` two placeholders to compare and let it report "ok" on an asymmetry
 nobody arranged — which is the failure that item exists to prevent, arriving
 through the other door.
 
-`judge report` reads the declared file, refuses it three distinct ways, and
+`judge report` reads the declared file, refuses it five distinct ways, and
 emits `judge-reported` with `agent_role`, `round`, `artifact_path` and
 `finding_count`. Its own printed result carries that event's `event_id` too
 — the same id `smith event tail` would show at line-1, printed here instead
@@ -220,6 +224,7 @@ so a command chained after it (e.g. `audit record --causal-parent`, §5 of
 | `judges.artifact-missing` | The turn ended without the file | Re-poke the agent — recovery was six for six across waves 3–4 |
 | `judges.artifact-unparseable` | The file is prose, not JSON | The agent narrated instead of reporting; re-dispatch, don't read the prose as a verdict |
 | `judges.artifact-not-a-list` | Parses, but is not a findings array | It wrote some other shape. An empty review is `[]`, written out |
+| `judges.artifact-stale` | The file was not written during this turn: its mtime is not later than the turn's `dispatch_decision`, or it was already there at dispatch and its mtime has not moved since | An earlier round's report, or a placeholder left behind — the judge did not report. Re-poke it; never `touch` the file to get past this. The same check runs when `gate run --evidence` closes the turn, and a `--no-findings` attestation reads no file so skips it |
 | `judges.artifact-invalid-evidence` | A list, but one or more items don't match `finding-evidence.schema.json` — only checked for `reviewer`, `grader`'s `--found-by grader` evidence path, and `security-reviewer` when the task id is an ordinary per-task id, not an audit axis (`<audit-id>.<axis>`) | Named by index and field in the error; the agent guessed field names instead of reporting the real shape. `[]` always passes — an empty review has nothing to validate |
 
 The grader is the exception the table allows for: its declared artifact is
@@ -234,10 +239,12 @@ grader's turn the way `--evidence` closes a reviewer's.
 while it is non-empty**, so it is a loop condition, not just a report. The
 printed object echoes the `--task`/`--session` it answered for, so an empty
 `outstanding` array is never mistaken for "nothing to check" or misread as a
-round number:
+round number. Each turn carries `dispatchedAt`, the dispatch's `ts` its
+artifact must postdate, and `artifactMtimeAtDispatch`, null when no file was
+there yet:
 
 ```json
-{"taskId":"epic-1/task-1","sessionId":"<session-id>","outstanding":[{"taskId":"epic-1/task-1","role":"security-reviewer","round":1,"declaredArtifact":"/abs/path/task-1.security.json","reported":false,"reportedArtifact":null,"attested":false}],"count":1}
+{"taskId":"epic-1/task-1","sessionId":"<session-id>","outstanding":[{"taskId":"epic-1/task-1","role":"security-reviewer","round":1,"declaredArtifact":"/abs/path/task-1.security.json","reported":false,"reportedArtifact":null,"attested":false,"dispatchedAt":"2026-09-29T10:15:02.114Z","artifactMtimeAtDispatch":null}],"count":1}
 ```
 
 Re-dispatching the same role opens a new round and supersedes the old one, so a

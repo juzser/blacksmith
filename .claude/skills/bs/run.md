@@ -183,9 +183,16 @@ playbooks are written to prevent.
     smith epic spec-review --epic <epic> --project <project-dir> \
       --plan factory/specs/active/<epic>/plan-vN.json \
       --reviewed-by spec-reviewer \
-      [--evidence state/results/<epic>.spec-review-close-vN.json] \
+      --evidence state/results/<epic>.spec-review-close-vN.json \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
+
+    `--evidence` is required unless you pass `--no-findings` instead, and
+    the two are exclusive: a reviewer that found nothing writes `[]` to that
+    path, and `--no-findings` is the operator attesting a review that ran
+    outside the factory — recorded as `attested_by: operator`, never read as
+    a file. A missing flag is refused (`cli.missing-flag`), because an empty
+    review read from an absent file is how a capped reviewer closed clean.
 
     Its `dispatch_decision` — and step 14's, and the planner's when it
     renders a verdict — goes against the reserved `<epic>/integration` ref,

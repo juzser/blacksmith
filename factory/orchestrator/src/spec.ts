@@ -370,6 +370,12 @@ export interface SpecReviewInput {
   reviewedByProvider?: string;
   /** Evidence, no identity: each item must name the criterion it is against. */
   evidence: readonly FindingEvidence[];
+  /**
+   * The operator attests the review found nothing, in place of an evidence
+   * file. Recorded as `attested_by: operator` so an empty review is never
+   * mistaken for one whose file said so (issue #249).
+   */
+  noFindings?: boolean;
 }
 
 /**
@@ -434,6 +440,7 @@ export async function recordSpecReview(
           : { reviewed_by_provider: input.reviewedByProvider }),
         finding_ids: findingIds,
         finding_count: findingIds.length,
+        ...(input.noFindings === true ? { attested_by: 'operator' } : {}),
       },
     },
     opts,

@@ -137,13 +137,15 @@ event it just appended — pass that straight through as `audit record`'s
 `--causal-parent` on the second line, rather than reading the log for it.
 
 `--role security-reviewer` on both lines for the security axis, as at
-dispatch. `judge report` refuses three ways — `judges.artifact-missing` (the judge
+dispatch. `judge report` refuses four ways — `judges.artifact-missing` (the judge
 ended on a plan and wrote nothing: re-poke it, and
 `smith judge outstanding --session <session-id> --task <audit-id>.<axis>`
 exits 1 while the file is still owed, so it is the loop condition),
 `judges.artifact-unparseable` (it narrated), `judges.artifact-not-a-list`
 (some other shape; only `--role grader` may hand in a verdict document
-instead of a list). `audit record` then refuses the evidence itself —
+instead of a list), `judges.artifact-stale` (the file predates this turn's
+dispatch, or sat unchanged since it: a previous audit's file at the same
+path is not this one's report — re-poke the judge). `audit record` then refuses the evidence itself —
 `audit.evidence-carries-identity` (the judge set `fingerprint`,
 `status`, `axis`, `audit_id`, `ts`, `epic` or `same_as`, which are the
 store's to mint), `audit.evidence-incomplete` (a `failure_scenario` leg

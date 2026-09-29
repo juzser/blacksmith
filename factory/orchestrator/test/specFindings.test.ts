@@ -1227,6 +1227,41 @@ describe('spec-scoped findings (P9-9)', () => {
       });
     });
 
+    // Issue #249: an empty review is either an evidence file the reviewer
+    // wrote, or the operator saying so. The log keeps the two apart, the way
+    // `judge report --no-findings` does.
+    it('marks a no-findings review as an operator attestation, and a file-backed one not', async () => {
+      await recordSpecReview(
+        {
+          epicId: 'envkit',
+          planVersion: 2,
+          headSha: OLD_SHA,
+          reviewedBy: 'spec-reviewer',
+          evidence: [],
+        },
+        rootCtx(),
+        { stateDir },
+      );
+      await recordSpecReview(
+        {
+          epicId: 'envkit',
+          planVersion: 2,
+          headSha: HEAD_SHA,
+          reviewedBy: 'spec-reviewer',
+          evidence: [],
+          noFindings: true,
+        },
+        rootCtx(),
+        { stateDir },
+      );
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const payloads = events
+        .filter((e) => e.record.event_type === SPEC_REVIEW_EVENT)
+        .map((e) => e.record.payload);
+      expect(payloads[0]).not.toHaveProperty('attested_by');
+      expect(payloads[1]).toMatchObject({ attested_by: 'operator', finding_count: 0 });
+    });
+
     it('raises the review evidence as spec findings and names them on the record', async () => {
       const record = await recordSpecReview(
         {
