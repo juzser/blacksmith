@@ -58,7 +58,7 @@ describe('SKILL.md states the plain-language rule once, in "Talking to the opera
 
   it('asks for the current state to be restated in the operator’s terms', () => {
     expect(body).toMatch(/restat/i);
-    expect(body).toMatch(/wave \d of \d/i);
+    expect(body).toMatch(/\d of \d/i);
   });
 
   it('asks for multi-step replies to be numbered', () => {

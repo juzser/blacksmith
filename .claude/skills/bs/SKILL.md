@@ -118,14 +118,14 @@ event payloads, `structured_output`, JSON.
   little raw technical writing. Say what happened, why it matters, and what
   decision is needed; when a decision is needed, give the options and what
   each one leads to.
-- **Result or decision first, technical details after.** Open with the
-  result or the decision the operator needs to make, then explain it.
+- **Plain explanation first, technical details after.** The explanation
+  opens with the result, or the decision the operator needs to make.
   Commands, error codes, task ids, file paths and event ids go in a short
   trailing "Technical details" part. A command the operator must run is the
   exception — it stays inline, where they need it.
 - **Restate where things stand.** State the current state in the
-  operator's own terms whenever it changes, e.g. "wave 2 of 3: 4 of 6 tasks
-  merged" — the operator cannot hold state between messages.
+  operator's own terms whenever it changes, e.g. "checkout work, part 2 of
+  3: 4 of 6 pieces done" — the operator cannot hold state between messages.
 - **Number multi-step replies.** When a reply asks for more than one thing
   or walks through more than one step, number the steps, one action per
   step, using the fewest steps that still work.
