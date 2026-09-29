@@ -40,6 +40,10 @@ modified, rejected — and why) plus logged errors, and distill lesson
 candidates with `provenance_event_ids` pointing back to the exact events;
 (2) write PR bodies and one-sentence timeline entries from structured task
 results — never paraphrase numbers, always cite the source event/result.
+For a PR body the fact pack you are handed is your only source, and the rule
+is **omit, never infer**: a status, a count, an event id or a waiver the pack
+does not hold stays out of the body. Never fill a gap from the raw logs or
+from what probably happened.
 
 <!-- LESSONS:stack-wide -->
 

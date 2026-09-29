@@ -306,9 +306,7 @@ playbooks are written to prevent.
     newest plan from the work root's specs dir by default; when this
     project's plans live elsewhere, pass `--specs-dir` naming the same specs
     dir the epic was run from, or it refuses rather than guess.
-17. Open **one integration PR per epic** with the scribe-written body
-    (`/bs report`'s playbook, [`report.md`](report.md)) — screenshots, test
-    results, reviewer verdict, waivers granted, timeline link. The head is
+17. Open **one integration PR per epic** with a scribe-written body. The head is
     `smith/<epic>/integration`. The base is the target repo's `main` unless
     the epic was cut from another epic's integration branch, in which case
     the PR stacks on that branch and the operator merges the parent's PR
@@ -317,6 +315,49 @@ playbooks are written to prevent.
     and its branch is deleted, GitHub retargets the child to `main`. The
     operator reviews on GitHub; this session never merges to `main`
     (`docs/standards/guardrails.md`).
+
+    **Build the fact pack first.** The scribe has no `Bash` and a small turn
+    cap, so it cannot run `git` or `smith`, and a scribe left to grep raw logs
+    caps and fills the gaps by invention — a wrong event id, a merged task
+    called dead, "no waivers" over two grants. Compute every fact in your own
+    session, from the epic session with `--lineage` so the waves' records
+    count, and save the outputs into one file:
+
+    ```bash
+    # waivers granted: each waived finding, with the granting event id in waiver_id
+    smith findings list --session <session-id> --epic <epic> --status waived
+    # waivers denied: only the log holds them; keep the waiver-denied records
+    # whose payload.fingerprint belongs to a finding the plain `findings list
+    # --session <session-id> --epic <epic>` returns (pass an --n that covers the lineage)
+    smith event tail <session-id> --lineage --n 100000
+    # each task's task_status
+    smith stats kanban --epic <epic> --session <session-id> --lineage
+    # the merges: keep the wave-merged rows, with their eventId and taskId
+    smith stats timeline --epic <epic> --session <session-id> --lineage
+    # the goal the summary states
+    smith epic goal --epic <epic>
+    # the branch itself
+    git log --oneline <base>..smith/<epic>/integration
+    git diff --shortstat <base>...smith/<epic>/integration
+    ```
+
+    Add the `epic-closed` event id from step 16 and the verdict's outcome.
+    Dispatch the scribe with that file as its **only source**, and the
+    PR-body scratch file as its write root, under one rule: **omit, never
+    infer**. A fact the pack does not hold stays out of the body; a count,
+    a status, or an event id is copied from the pack, never worked out. If
+    the pack is wrong, rebuild it and dispatch again; do not let the scribe
+    reach past it into `state/events/`.
+
+    The PR body has this shape and nothing else, within the scribe's word
+    cap: **Summary** (the epic id and its goal, one paragraph); **Tasks** (one line per
+    task: id, `task_status`, and its `wave-merged` event id when it has
+    one); **Waivers** (granted and denied, each with its finding id and
+    event id, or the word "none" only when both lists in the pack are
+    empty); **Verification** (the verdict outcome, the `epic-closed` event
+    id, the shortstat, and the commit count from the log); **Timeline**
+    (the dashboard link, when you put one in the pack). Screenshots and test results go in only when the
+    pack carries them.
 
     Before the first push, read the authorship the branch is about to make
     public — `git log --format=%ae <base>..HEAD | sort -u` — and stop on any
