@@ -46,7 +46,8 @@ assume — and when a cited file is not there, say so instead of substituting a
 remembered number.
 
 Every write command needs an event-log envelope: `--session <id>
---plan-version <n> --causal-parent <event-id> [--actor operator]`. Open a
+--plan-version <n> --causal-parent <event-id> [--actor operator]` (`wave-runner`
+inside a wave session — its agent template has the rule). Open a
 session with `smith session start <session-id>` if one isn't already
 running — it writes the root and prints the event id everything else hangs
 off as `--causal-parent`. Run it once: it refuses a session that already
@@ -84,6 +85,20 @@ compute the next id by adding one: under fan-out the events between yours
 belong to sibling tasks, and a `--causal-parent` you guessed will name a
 real event that is not the parent, which validates and quietly mis-shapes
 the lineage.
+
+Parse that output by key, never by a regex over the raw text: several
+verbs' payloads echo a parent id right beside the new one (`record`'s own
+`causal_parent`), so a pattern grepped for the id's shape can just as
+easily match the parent's as yours. Read the id field the command's own
+output names — most name it `event_id`; `smith epic close`, `smith
+integration check`, `smith epic goal-check` and `smith epic spec-review`
+name it `eventId` instead, and `smith crossfind run` names it
+`reconciled_event_id`. Check a new command's actual output before assuming
+any of these, and read it with `jq -r '.event_id // .eventId'` rather than
+a hand-rolled pattern. Capture the output to a file or a variable before
+you parse it, too: piping a write verb straight into its consumer means a
+broken pipe on the reading end can kill the process after the append
+already committed, and a naive retry then double-appends.
 
 ## Playbooks
 

@@ -31,7 +31,9 @@ both:
   there. The epic session then carries the admission and the result rather
   than every turn in between — which is the point, because an epic outlives
   its waves, and a window spent on this wave's dispatches is a window the
-  epic does not have for the wave after next (D13).
+  epic does not have for the wave after next (D13). Every event you write in
+  that session carries `--actor wave-runner` — `.claude/agents/wave-runner.md`'s
+  Constraints has the rule and the check it satisfies.
 
 After any `error-logged` this wave writes — a worker that died, a judge turn
 that failed, a gate refusal recorded as an error — or a `smith gate run`
@@ -195,6 +197,12 @@ one thing this playbook never asks you to.
    --causal-parent ...` (schema check → grader verdict → tests → coverage
    evidence → findings intake → severity decision,
    `docs/guide/operator-guide/queue-and-gate.md` §5).
+   - `checks.json`'s unit check must be the project's full test command,
+     never a hand-picked list of files — `gate run` runs each check command
+     literally, with no narrowing of its own. Narrowing by changed files is
+     `smith queue run --select-test-cmd` (`factory/orchestrator/src/testSelect.ts`),
+     a queue-tier flag `--batch` refuses; it does not reach `checks.json`. A
+     scoped-down unit check is how red tests have merged before.
    - `--grader` takes step 6's file, latest round. A criterion that came back
      `fail` or `partial` blocks before any check command runs — the outcome is
      `blocked` with `reason: "grader-fail"`, and the payload's
