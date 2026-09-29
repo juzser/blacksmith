@@ -84,7 +84,9 @@ moved, and only the rationale records why. An amendment that names no `--sites`
 is rejected: a finding names where a defect was *noticed*, and the amendment
 has to answer where the shape *lives* (D-123). It also refuses to cite a `diff`
 finding — that one says the code is wrong, and a new plan version is not how a
-diff defect gets fixed.
+diff defect gets fixed. A denied `diff` finding whose owning task has merged
+takes the follow-up route instead: `.claude/skills/bs/waivers.md` step 4 is
+the procedure.
 
 `--sites` is not checked for completeness — nothing can check that. What it
 does is record the author's answer, and split it: any named site that no task
