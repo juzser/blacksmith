@@ -203,6 +203,34 @@ describe('checkTesterIsolation', () => {
     expect(report.checks[0]?.status).toBe('ok');
   });
 
+  // A hand-written error event may carry only `agent_role` (the dispatch's
+  // own key) and not `agent` (task-result-recorded's, and this reader's
+  // historical one) -- delegation.ts and agents-registry.ts both already
+  // accept either key for this same event type. `actor` is 'system' here
+  // (whoever logged the error on the tester's behalf), so the old
+  // agent-only read would fall through to that instead of the role the
+  // payload does name, and read this as the tester never having reported.
+  it('accepts an error-logged that names the role only as agent_role', () => {
+    const coder = dispatch('coder');
+    const tester = dispatch('tester');
+    const n = seq++;
+    const errored: StoredEvent = {
+      event_id: `sess-1#${n}`,
+      record: {
+        session_id: 'sess-1',
+        actor: 'system',
+        event_type: 'error-logged',
+        task_id: 'T-1',
+        plan_version: 1,
+        causal_parent: 'sess-1#0',
+        ts: at(n),
+        payload: { agent_role: 'tester', error: 'timeout', severity: 'S2' },
+      },
+    };
+    const report = run([coder, tester, errored, testgate()]);
+    expect(report.checks[0]?.status).toBe('ok');
+  });
+
   it('refuses a coder and a tester logged under one agent id', () => {
     const events = [
       dispatch('coder', { agentId: 'agent-7' }),

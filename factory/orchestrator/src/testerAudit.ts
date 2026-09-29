@@ -47,18 +47,40 @@ import { taskIdsMatch } from './taskId.js';
 const TEST_GATE_EVENT = 'testgate-result';
 
 /**
- * How a dispatched agent's turn is recorded as over, and which payload field
- * names the role that ended it. Falling back to the record's `actor` is not a
- * nicety: the older half of the log names the role there and nowhere else,
- * and reading only the payload would report those runs as testers that never
- * reported — an `unverifiable` about evidence the log is holding.
+ * How a dispatched agent's turn is recorded as over, and which payload
+ * field(s) name the role that ended it, tried in order. Falling back to the
+ * record's `actor` is not a nicety: the older half of the log names the role
+ * there and nowhere else, and reading only the payload would report those
+ * runs as testers that never reported — an `unverifiable` about evidence the
+ * log is holding.
+ *
+ * `error-logged` tries `agent` before `agent_role`: this reader's own
+ * historical key first, `agent_role` (the dispatch's) as the fallback for a
+ * hand-written event that only carries that one — the same either-key
+ * reading delegation.ts and agents-registry.ts already give this event type.
+ * Each of the three readers keeps its own historical key first rather than
+ * all agreeing on one order, since `agent` and `agent_role` were each the
+ * only key some reader ever had for this event type before the other was
+ * added as a fallback.
  */
-const TERMINAL_ROLE_EVENTS: Record<string, string> = {
-  'task-result-recorded': 'agent',
-  'error-logged': 'agent',
-  'judge-reported': 'agent_role',
-  'judge-verdict': 'agent',
+const TERMINAL_ROLE_EVENTS: Record<string, readonly string[]> = {
+  'task-result-recorded': ['agent'],
+  'error-logged': ['agent', 'agent_role'],
+  'judge-reported': ['agent_role'],
+  'judge-verdict': ['agent'],
 };
+
+/** The first of `keys` that names a non-empty string in `payload`, or null. */
+function firstPayloadString(
+  payload: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = payloadString(payload, key);
+    if (value !== null) return value;
+  }
+  return null;
+}
 
 export type TesterCheckStatus = 'ok' | 'violation' | 'unverifiable' | 'not-applicable';
 
@@ -142,10 +164,10 @@ export function readTerminalRoleRecords(events: readonly StoredEvent[]): Termina
   const records: TerminalRoleRecord[] = [];
   for (const stored of events) {
     const record = stored.record;
-    const field = TERMINAL_ROLE_EVENTS[record.event_type];
-    if (!field) continue;
+    const fields = TERMINAL_ROLE_EVENTS[record.event_type];
+    if (!fields) continue;
     const payload = (record.payload ?? {}) as Record<string, unknown>;
-    const role = payloadString(payload, field) ?? record.actor;
+    const role = firstPayloadString(payload, fields) ?? record.actor;
     if (!role) continue;
     records.push({
       eventId: stored.event_id,
