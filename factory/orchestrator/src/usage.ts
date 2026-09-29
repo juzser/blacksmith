@@ -102,7 +102,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '<project-dir>',
     flags: `--epic <epic-id> [--except <fp[,fp...]>] [--plan <plan.json>] [--specs-dir <dir>] ${EVENTS_DIR}`,
     summary:
-      "Append a fixed line for every carried finding the epic's newest plan still claims; list the rest as deferred. Run from the epic-close step.",
+      "Append a fixed line for every carried finding a task in the epic's newest plan still claims, or a superseded task's change already merged; list the rest as deferred. Run from the epic-close step.",
   },
   {
     command: 'audit close',

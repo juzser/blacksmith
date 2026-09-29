@@ -20,7 +20,7 @@ import {
   recordAudit,
   resolveAudit,
 } from '../src/audit.js';
-import { type EventRecord, readEvents, startSession } from '../src/events.js';
+import { appendEvent, type EventRecord, readEvents, startSession } from '../src/events.js';
 import type { EventContext } from '../src/findings.js';
 import { SPECS_ACTIVE_DIR } from '../src/paths.js';
 import type { PlanFile, TaskSpecRecord } from '../src/plan.js';
@@ -668,6 +668,89 @@ describe('the audit verbs', () => {
       expect(again.appended).toEqual([fingerprint]);
       expect(again.suppressed).toEqual([]);
       expect(only(foldAuditStore(readAuditStore(project))).status).toBe('raised');
+    });
+
+    describe('a task superseded after its change already merged', () => {
+      /**
+       * A one-task plan whose only task is `superseded` -- as if a later
+       * replan narrowed the epic to a test-only follow-up after this task's
+       * branch had already landed. `livePlanTasks` drops it entirely, so
+       * `planClaiming` (a `todo` task) cannot stand in for this fixture.
+       */
+      function supersededPlanClaiming(...claims: string[]): PlanFile {
+        return {
+          epic_id: input.epicId,
+          version: 2,
+          status: 'active',
+          tasks: [
+            {
+              task_id: `${input.epicId}/task-1`,
+              plan_version: 2,
+              task_status: 'superseded',
+              claims,
+            } as TaskSpecRecord,
+          ],
+          edges: [],
+        };
+      }
+
+      /** Record that `taskId`'s branch landed on the integration branch, the way the merge queue's `emitWaveMerged` does. */
+      async function waveMerged(sessionId: string, causalParent: string, taskId: string): Promise<void> {
+        await appendEvent(
+          {
+            session_id: sessionId,
+            actor: 'system',
+            event_type: 'wave-merged',
+            task_id: taskId,
+            plan_version: 1,
+            causal_parent: causalParent,
+            payload: { task_ids: [taskId] },
+          },
+          opts(),
+        );
+      }
+
+      it('marks a finding fixed when the superseded task that claimed it already merged', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        await waveMerged(SESSION, `${SESSION}#0`, `${input.epicId}/task-1`);
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [fingerprint], already: [], deferred: [] });
+        expect(only(foldAuditStore(readAuditStore(project))).status).toBe('fixed');
+      });
+
+      it('leaves a finding deferred when the task that claimed it was superseded before it ever merged', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+        // No wave-merged event: the operator narrowed the plan on purpose,
+        // and that scoping decision must not be erased (D-41/P9-24).
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [], already: [], deferred: [fingerprint] });
+        expect(only(foldAuditStore(readAuditStore(project))).status).toBe('accepted');
+      });
+
+      it('counts a merge recorded in a child session that continues this one, the way a wave runner logs it', async () => {
+        const fingerprint = await raiseOne();
+        await decideAudit(project, { fingerprint, decision: 'accept' }, ctx, opts());
+        await cutAudit(project, input, ctx, opts());
+
+        const waveSession = 'sess-audit-1-wave-1';
+        const waveRoot = await startSession(waveSession, { stateDir, continues: `${SESSION}#0` });
+        await waveMerged(waveSession, waveRoot.event_id, `${input.epicId}/task-1`);
+
+        const resolved = await resolveAudit(project, input.epicId, ctx, opts(), {
+          plan: supersededPlanClaiming('src/foo.ts'),
+        });
+        expect(resolved).toMatchObject({ fixed: [fingerprint], already: [], deferred: [] });
+      });
     });
   });
 
