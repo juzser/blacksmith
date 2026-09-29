@@ -125,6 +125,29 @@ describe('judges.ts', () => {
     });
   });
 
+  // `uiux` is a real judge in practice — wave.md's steps 5-7 bracket its
+  // visual pass with `smith judge dispatch`/`smith judge report` exactly like
+  // grader, reviewer, verifier and security-reviewer — but it is not one of
+  // JUDGE_ROLES's six (that set means "owes a declared-artifact line and a
+  // blocked Stop", and uiux's artifact is never that array shape). Dispatch
+  // and report still have to open and close a turn for it.
+  describe('uiux dispatch/report (not a JUDGE_ROLES member, still opens a turn)', () => {
+    it('a uiux dispatch opens a turn and judge report --role uiux closes it', async () => {
+      await dispatch({ role: 'uiux', artifactPath: path.join(artifactDir, 'uiux.json') });
+      const open = await turns();
+      expect(open).toHaveLength(1);
+      expect(open[0]).toMatchObject({ role: 'uiux', round: 1 });
+
+      const report = await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true },
+        ctx(),
+        opts(),
+      );
+      expect(report.attested).toBe(true);
+      expect(outstandingJudges(await turns())).toEqual([]);
+    });
+  });
+
   describe('foldJudgeTurns', () => {
     it('opens one outstanding turn per dispatch that declared an artifact', async () => {
       await dispatch();
