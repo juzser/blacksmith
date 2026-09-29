@@ -46,7 +46,7 @@ import {
   specReviewBlockers,
   taskSuccessors,
 } from './spec.js';
-import { TERMINAL_OK_TASK_STATUSES } from './taskStatus.js';
+import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from './taskStatus.js';
 import {
   auditWaveConcurrency,
   WAVE_VERDICTS,
@@ -142,13 +142,18 @@ function resolveSupersededRow(
  * Why one amend-pending obligation id has not discharged (#251). Only the
  * explanation: the decision that the id is outstanding is made beside
  * `satisfiedBy` in summarizeEpic and this never feeds back into it.
+ * `successorId` is set when the named id was superseded and the reason is
+ * about the row its successor chain resolved to.
  */
 type ObligationReason =
   | { kind: 'pending' }
   | { kind: 'no-row' }
   | { kind: 'chain-unresolved' }
   | { kind: 'successor-pending'; successorId: string; status: string }
-  | { kind: 'below-version'; successorId: string | undefined; status: string; landedAt: number };
+  | { kind: 'below-version'; successorId?: string; status: string; landedAt: number }
+  | { kind: 'no-plan-version'; successorId?: string; status: string }
+  | { kind: 'unversioned-amendment'; successorId?: string; status: string }
+  | { kind: 'ended'; successorId?: string; status: string };
 
 interface OutstandingObligation {
   id: string;
@@ -156,50 +161,87 @@ interface OutstandingObligation {
 }
 
 /**
+ * Terminal statuses that did not end well, apart from `superseded` (which is
+ * resolved through its successor instead). Derived from the two declared sets
+ * so a status classified there is classified here too.
+ */
+function endedNotOk(status: string): boolean {
+  return (
+    TERMINAL_TASK_STATUSES.has(status) &&
+    !TERMINAL_OK_TASK_STATUSES.has(status) &&
+    status !== SUPERSEDED_TASK_STATUS
+  );
+}
+
+/**
  * The blocker for an amend-pending finding with outstanding obligations. Ids
  * that are simply not landed yet keep the original "waiting on" wording, so
- * the common case reads exactly as before; every other id is named with the
- * reason it cannot land as things stand.
+ * the common case reads exactly as before; every other id follows, in
+ * obligation order, with the reason it cannot land as things stand.
  */
 function describeOutstandingObligations(
   findingId: string,
   version: number | undefined,
   outstanding: readonly OutstandingObligation[],
 ): string {
+  const target = version === undefined ? 'a recorded plan version' : `v${version}`;
   const waiting = outstanding.filter((o) => o.reason.kind === 'pending').map((o) => o.id);
   const parts: string[] = [];
   if (waiting.length > 0)
-    parts.push(`waiting on ${waiting.join(', ')} to land terminal-OK at v${version} or later`);
+    parts.push(
+      version === undefined
+        ? `waiting on ${waiting.join(', ')} to land terminal-OK`
+        : `waiting on ${waiting.join(', ')} to land terminal-OK at v${version} or later`,
+    );
   for (const { id, reason } of outstanding) {
+    if (reason.kind === 'pending') continue;
+    if (reason.kind === 'no-row') {
+      parts.push(`${id} has no task row in the event log, so nothing can land it as things stand`);
+      continue;
+    }
+    if (reason.kind === 'chain-unresolved') {
+      parts.push(
+        `${id} is superseded, but its successor chain does not resolve, so it cannot land as things stand`,
+      );
+      continue;
+    }
+    const subject = reason.successorId ?? id;
+    const via = reason.successorId === undefined ? '' : `${id} is superseded by ${subject}; `;
     switch (reason.kind) {
-      case 'pending':
-        break;
-      case 'no-row':
-        parts.push(`${id} has no task row in the event log, so nothing can land it`);
-        break;
-      case 'chain-unresolved':
-        parts.push(
-          `${id} is superseded, but its successor chain does not resolve, so it can never land`,
-        );
-        break;
       case 'successor-pending':
+        parts.push(`${via}${subject} has not landed terminal-OK (status: ${reason.status})`);
+        break;
+      case 'below-version':
         parts.push(
-          `${id} is superseded by ${reason.successorId}; ${reason.successorId} has not landed ` +
-            `terminal-OK (status: ${reason.status})`,
+          `${via}${subject} landed ${reason.status} at v${reason.landedAt}, below plan ` +
+            `${target}, so it needs a re-cut`,
         );
         break;
-      case 'below-version': {
-        const landedId = reason.successorId ?? id;
-        const via = reason.successorId === undefined ? '' : `${id} is superseded by ${landedId}; `;
+      case 'no-plan-version':
         parts.push(
-          `${via}${landedId} landed ${reason.status} at v${reason.landedAt}, below plan ` +
-            `v${version}, so it needs a re-cut`,
+          `${via}${subject} landed ${reason.status} but carries no plan version, so it cannot ` +
+            `be checked against ${target}`,
         );
         break;
-      }
+      case 'unversioned-amendment':
+        parts.push(
+          `${via}${subject} landed ${reason.status}, but there is no amendment plan version ` +
+            'to check it against',
+        );
+        break;
+      case 'ended':
+        parts.push(
+          `${via}${subject} ended ${reason.status} and will not land as things stand without ` +
+            'a retry or a re-cut',
+        );
+        break;
     }
   }
-  return `Finding "${findingId}" is amend-pending on plan v${version}: ${parts.join('; ')}.`;
+  const head =
+    version === undefined
+      ? 'is amend-pending but records no plan version, so no landing can discharge it as things stand'
+      : `is amend-pending on plan v${version}`;
+  return `Finding "${findingId}" ${head}: ${parts.join('; ')}.`;
 }
 
 /**
@@ -837,9 +879,12 @@ export function summarizeEpic(
               row !== undefined && row.taskStatus === SUPERSEDED_TASK_STATUS
                 ? (resolveSupersededRow(epicId, row.taskId, tasks, successors) ?? row)
                 : row;
+            // Terminal-OK is shared by the discharge test and the reasons
+            // below; `landed` itself is unchanged.
+            const landedOk =
+              evidenceRow !== undefined && TERMINAL_OK_TASK_STATUSES.has(evidenceRow.taskStatus);
             const landed =
-              evidenceRow !== undefined &&
-              TERMINAL_OK_TASK_STATUSES.has(evidenceRow.taskStatus) &&
+              landedOk &&
               version !== undefined &&
               evidenceRow.planVersion !== null &&
               evidenceRow.planVersion >= version;
@@ -851,38 +896,35 @@ export function summarizeEpic(
             if (landed) return [];
             // #251: which ids are outstanding is decided above and nowhere
             // else; this only says why, so the blocker stops calling an id
-            // "waiting" when it can never land as things stand.
-            if (row === undefined) return [{ id, reason: { kind: 'no-row' } }];
+            // "waiting" when it cannot land as things stand.
+            if (row === undefined || evidenceRow === undefined)
+              return [{ id, reason: { kind: 'no-row' } }];
             if (row.taskStatus === SUPERSEDED_TASK_STATUS && evidenceRow === row)
               return [{ id, reason: { kind: 'chain-unresolved' } }];
-            const successorId = evidenceRow === row ? undefined : evidenceRow?.taskId;
-            if (
-              evidenceRow !== undefined &&
-              TERMINAL_OK_TASK_STATUSES.has(evidenceRow.taskStatus) &&
-              version !== undefined &&
-              evidenceRow.planVersion !== null &&
-              evidenceRow.planVersion < version
-            )
+            const via = evidenceRow === row ? {} : { successorId: evidenceRow.taskId };
+            const status = evidenceRow.taskStatus;
+            if (landedOk && evidenceRow.planVersion === null)
+              return [{ id, reason: { kind: 'no-plan-version', ...via, status } }];
+            if (landedOk && version === undefined)
+              return [{ id, reason: { kind: 'unversioned-amendment', ...via, status } }];
+            if (landedOk && evidenceRow.planVersion !== null)
               return [
                 {
                   id,
                   reason: {
                     kind: 'below-version',
-                    successorId,
-                    status: evidenceRow.taskStatus,
+                    ...via,
+                    status,
                     landedAt: evidenceRow.planVersion,
                   },
                 },
               ];
-            if (successorId !== undefined && evidenceRow !== undefined)
+            if (endedNotOk(status)) return [{ id, reason: { kind: 'ended', ...via, status } }];
+            if (evidenceRow !== row)
               return [
                 {
                   id,
-                  reason: {
-                    kind: 'successor-pending',
-                    successorId,
-                    status: evidenceRow.taskStatus,
-                  },
+                  reason: { kind: 'successor-pending', successorId: evidenceRow.taskId, status },
                 },
               ];
             return [{ id, reason: { kind: 'pending' } }];
