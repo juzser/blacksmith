@@ -966,7 +966,11 @@ const FORCE_PUSH_RE = /(--force(-with-lease)?\b|(^|\s)-[a-zA-Z]*f[a-zA-Z]*(\s|$)
 
 function checkForcePush(command: string, policy: GuardrailPolicy): PolicyViolation | null {
   if (!isGitSubcommand(command, 'push')) return null;
-  if (!FORCE_PUSH_RE.test(command)) return null;
+  // Read per push segment, as rule 1 does: a `-f` or `--force` belonging to
+  // another command in the chain (`rm -f`, `git worktree remove --force`)
+  // says nothing about the push.
+  const pushSegments = gitSegmentsFor(command, 'push').filter((s) => !STASH_PUSH_RE.test(s));
+  if (!pushSegments.some((segment) => FORCE_PUSH_RE.test(segment))) return null;
   return violation(requireRule(policy, 'force-push'));
 }
 

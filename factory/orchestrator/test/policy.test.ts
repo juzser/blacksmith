@@ -413,6 +413,33 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(d.allowed).toBe(true);
   });
 
+  // The flag is read from the push segment only. A chain is several commands,
+  // and a `-f` or `--force` that belongs to a different one of them says
+  // nothing about the push: `rm -f`, `grep -f` and `git worktree remove
+  // --force` chained next to a plain push used to be refused as a force push.
+  it.each([
+    ['git push origin feature && rm -f x'],
+    ['git push origin feature; grep -f patterns.txt log'],
+    ['git push origin feature && git worktree remove --force ../wt'],
+    ['rm -f x && git push origin feature'],
+    ['git push origin feature | tee out --force-with-lease-note'],
+    ['git stash push -f && git push origin feature'],
+  ])('allows %s — the force flag belongs to another segment', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it.each([
+    ['git push -f origin feature && echo done'],
+    ['git push --force origin feature; ls'],
+    ['git push --force-with-lease origin feature && rm -f x'],
+    ['ls && git push -f origin feature'],
+    ['git push origin feature && git push --force origin other'],
+  ])('still denies %s — the push segment itself forces', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
   it('allows a branch name that merely contains "force" as a substring, not a flag', () => {
     const d = evaluateCommand(
       ctx({ command: 'git push origin feature-force', branch: 'feature-force' }),
