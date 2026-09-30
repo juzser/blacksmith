@@ -205,6 +205,18 @@ export const FREE_EVENT_TYPES: FreeEventType[] = [
     reason:
       "The integration PR the orchestrator opens at run.md step 17, appended through `smith event append` under `<epic>/integration` with the PR number, repo, refs and shas in the payload. No src path opens a PR \u2014 `gh` runs in the operator's session, never in the factory \u2014 so no dimension declares it, and like operator-note it can only be named here by hand. It is the last event of a finished epic and the one the timeline must not lose: it names the deliverable the whole run was for.",
   },
+  {
+    eventType: 'operator-feedback-recorded',
+    writtenBy: 'src',
+    reason:
+      "A comment the operator leaves mid-run on one task, from the dashboard or from GitHub (feedback.ts recordFeedback, `smith feedback record`). Not operator-note: the payload is structured (kind, source, an external_id for de-duplicating a synced GitHub comment) rather than free text, but what it decides about the task \u2014 bounce it back to its coder, or open a follow-up \u2014 is a later PR's playbook wiring, so no gate_event value fits it yet.",
+  },
+  {
+    eventType: 'operator-feedback-resolved',
+    writtenBy: 'src',
+    reason:
+      'The other half of the same pair (feedback.ts resolveFeedback, `smith feedback resolve`): what became of one recorded comment \u2014 bounced, turned into a follow-up task, or dismissed. Payload-shaped like operator-feedback-recorded rather than tagged through PAYLOAD_DIMENSION_MAP, because resolution is a triage outcome on a comment, not a gate outcome on a task.',
+  },
 ];
 
 export interface UnemittedEventType {

@@ -53,6 +53,7 @@ import {
   type SessionLog,
   type StoredEvent,
 } from '../events.js';
+import { foldOperatorFeedback } from '../feedback.js';
 import {
   findingScope,
   foldFindingsDetailed,
@@ -139,6 +140,7 @@ const ALL_TABLES = [
   schema.artifacts,
   schema.milestones,
   schema.issue_reports,
+  schema.operatorFeedback,
 ] as const;
 
 /** Delete every row in every projection table (full "drop" for rebuild()). */
@@ -166,6 +168,9 @@ function clearSession(db: SmithDb, sessionId: string): void {
   // those tables whole (D-199, D-200, and the continuation case projectTasks()
   // describes). Deleting by session_id here would delete a row this session
   // raised and another session has since approved, closed or worked on.
+  // `operator_feedback` is absent for the same reason: a comment recorded here
+  // can be resolved from a later, continuing session, so
+  // projectOperatorFeedback() owns that table whole too.
 }
 
 /**
@@ -1630,6 +1635,42 @@ function projectLessons(handle: DbHandle, events: readonly StoredEvent[]): void 
 }
 
 /**
+ * Fully replace the operator_feedback table from EVERY session's log at
+ * once, in one causal order (mergeSessionLogs) — the same shape as
+ * projectLessons() above, and for the same reason: a comment recorded in one
+ * session's log is routinely resolved (bounced, or turned into a follow-up
+ * task) from a later, continuing session, so the table's primary key is the
+ * feedback id, not (session, feedback) — one global key, one global fold.
+ * feedback.ts's foldOperatorFeedback() already resolves a `resolved` event
+ * against the `recorded` row it belongs to; this only re-inserts the result.
+ */
+function projectOperatorFeedback(handle: DbHandle, events: readonly StoredEvent[]): void {
+  handle.db.transaction((txDb) => {
+    txDb.delete(schema.operatorFeedback).run();
+    for (const row of foldOperatorFeedback(events)) {
+      txDb
+        .insert(schema.operatorFeedback)
+        .values({
+          id: row.feedbackId,
+          taskId: row.taskId,
+          sessionId: row.sessionId,
+          body: row.body,
+          kind: row.kind,
+          source: row.source,
+          externalId: row.externalId,
+          author: row.author,
+          recordedAt: row.recordedAt,
+          recordedEventId: row.recordedEventId,
+          resolvedAt: row.resolvedAt,
+          resolution: row.resolution,
+          followUpTaskId: row.followUpTaskId,
+        })
+        .run();
+    }
+  });
+}
+
+/**
  * finding_id -> (raised ts, most-recent-transition ts, the raising event's id),
  * read straight off the log. The event id is what a quarantine report hands the
  * operator to grep for (D-141) — a finding id alone does not locate the record
@@ -1927,6 +1968,7 @@ export async function rebuild(
     projectTasks(handle, merged, opts);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
+    projectOperatorFeedback(handle, merged);
     projectMilestones(handle, opts);
     return {
       sessionsProcessed: sessionIds.length,
@@ -1945,10 +1987,11 @@ export async function rebuild(
  * replaces only its rows, leaving every other session's projection intact.
  * Safe to call repeatedly while a session is still running (tailing).
  *
- * The four tables that are not session-scoped are rewritten whole on every
+ * The five tables that are not session-scoped are rewritten whole on every
  * call: `milestones` from roadmap.md, and — from every session's log, which is
  * why this reads more than the one session it re-folds — `tasks`
- * (projectTasks()), `lessons` (D-199) and `findings` (D-200).
+ * (projectTasks()), `lessons` (D-199), `findings` (D-200) and
+ * `operator_feedback` (projectOperatorFeedback(), same shape).
  */
 export async function apply(
   dbPath: string = STATE_DB_PATH,
@@ -1979,6 +2022,7 @@ export async function apply(
     projectTasks(handle, merged, opts);
     const skippedFindings = projectFindings(handle, merged, opts);
     projectLessons(handle, merged);
+    projectOperatorFeedback(handle, merged);
     projectMilestones(handle, opts);
     return {
       sessionsProcessed: 1,
