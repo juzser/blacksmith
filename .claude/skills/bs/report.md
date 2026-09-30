@@ -8,8 +8,8 @@ duties, v3.2)"), plus running the scheduler first — a report that omits
 pending proposals lets them sit invisible instead of surfacing them.
 
 1. **Ask what the factory is answerable for, then run the scheduler.**
-   `smith projects list` reads the roadmap's `- project:` bullets — the
-   register `smith new` writes to — and prints the factory itself plus every
+   `bs projects list` reads the roadmap's `- project:` bullets — the
+   register `bs new` writes to — and prints the factory itself plus every
    project it built that has a checkout, ending in the `--project` line to
    pass on. Do not assemble that list from memory: the maintenance pass
    reads one lockfile per flag and reports one proposal per repo, so a repo
@@ -17,9 +17,9 @@ pending proposals lets them sit invisible instead of surfacing them.
    mentioned. (The daemon raises `unwatched-project` for a child project with
    a checkout that is left off the line — not for the factory itself, which is in
    the pass by default, and not for a declared project with no checkout at
-   all, which `smith projects list` marks with `?` instead of leaving it
+   all, which `bs projects list` marks with `?` instead of leaving it
    off the printed list. The two surfaces no longer answer the same
-   question.) Then run `smith scheduler run
+   question.) Then run `bs scheduler run
    [--dry] --session <id> [--project <dir>...]` with those flags — a
    deterministic pass over the event log, it never dispatches an agent
    itself (`factory/policies/scheduler.yml`, architecture §12). Read its
@@ -42,7 +42,7 @@ pending proposals lets them sit invisible instead of surfacing them.
      where the planner reads the living spec/analytics/recheck outcomes
      and proposes new epics — the operator's tick is required regardless
      of confidence, same as any other plan sign-off.
-2. **Ask who may say yes.** `smith scheduler admit --session <id>
+2. **Ask who may say yes.** `bs scheduler admit --session <id>
    [--project <dir>...]`, with the same flag line step 1 printed, re-reads
    the same proposals and classifies
    each one `auto` or `operator` against `scheduler.yml`'s `autonomy:`
@@ -66,9 +66,9 @@ pending proposals lets them sit invisible instead of surfacing them.
      `confidence_floor` is an operator decision about standing policy, not
      a way past one proposal — and a `security-surface` denial is the one
      nothing in the file can lift.
-3. Gather `smith stats overview [--session <id>]` and `smith stats roadmap
+3. Gather `bs stats overview [--session <id>]` and `bs stats roadmap
    [--session <id>]` (milestone progress + budget burn per milestone).
-4. **Read back the disagreements.** `smith judge escalations --session
+4. **Read back the disagreements.** `bs judge escalations --session
    <id>` folds the lineage for `quorum-decision` events whose latest word
    was `escalate` — a gate finding, an epic verdict or a plan critique the
    cross-provider quorum could not settle. It exits `1` on an open
@@ -83,7 +83,7 @@ pending proposals lets them sit invisible instead of surfacing them.
    `mode: shadow` disagreement, which the gate outcome never reported to
    anyone). Resolving one is an operator reading, never this session
    deciding on its own which provider was right.
-5. **Read back the parallelism.** `smith wave audit --session <id>
+5. **Read back the parallelism.** `bs wave audit --session <id>
    [--epic <id>]` folds every `wave-admitted` against the
    `dispatch_decision` intervals underneath it and says whether a wave
    admitted N wide actually *ran* N wide. `wave check` only ever certified
@@ -101,7 +101,7 @@ pending proposals lets them sit invisible instead of surfacing them.
    JSON plus step 2's admissions as input: shipped / in-flight / blocked /
    budget burn / next milestone / **N rechecks pending, M maintenance
    bumps auto-schedulable** (never silently dropped), ≤300 words, linking
-   into the dashboard (`smith ui serve`'s URL) — never paraphrase numbers
+   into the dashboard (`bs ui serve`'s URL) — never paraphrase numbers
    the query didn't return.
 7. This fires automatically on a weekly cadence and immediately on any
    milestone completion (architecture §12) — for an ad hoc `/bs report`,
@@ -114,7 +114,7 @@ pending proposals lets them sit invisible instead of surfacing them.
 
 **Provider calibration note (Phase 8).** While any provider in
 `factory/policies/crosscheck.yml` is still `mode: shadow`, run
-`smith stats providers [--session <id>] [--since <iso-date>]` alongside the
+`bs stats providers [--session <id>] [--since <iso-date>]` alongside the
 scheduler pass and fold a one-line mention into the digest when a provider
 has accumulated enough runs to review (`runs`, `verdicts`, `agreementRate`,
 `schemaFailureRate`, `transportFailureRate`, `failuresByCode` per provider —

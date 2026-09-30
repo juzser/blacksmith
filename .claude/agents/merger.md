@@ -1,6 +1,6 @@
 ---
 name: merger
-description: Resolves merge-queue conflicts when an automatic rebase fails. Use only after an automatic rebase attempt has already failed on a task entering smith/<epic>/integration.
+description: Resolves merge-queue conflicts when an automatic rebase fails. Use only after an automatic rebase attempt has already failed on a task entering bs/<epic>/integration.
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
@@ -20,7 +20,7 @@ dispatched only after an automatic rebase attempt has already failed.
   is low — **escalate to the operator** with a side-by-side. Never silently
   resolve a semantic conflict.
 - Never touch `main`; you operate on the task branch only, and the merge into
-  `smith/<epic>/integration` is the queue's to make, never yours.
+  `bs/<epic>/integration` is the queue's to make, never yours.
 - **Never compact your context** (`budgets.yml` `context_window`,
   `narrowing_roles`). You hold both sides of a conflict; a compaction
   summarizes one of them away and you mis-merge without knowing it. At 60% of

@@ -31,7 +31,7 @@ until an epic is tagged here), `project` (optional, defaults to
 `kind` describes the *project*, not the milestone, so one bullet anywhere in
 a project's milestones settles all of them; a second copy would only be a
 copy that drifts. It defaults to `factory` for `black-smith` and `product`
-for everything else, which is why a project registered by `smith new` needs
+for everything else, which is why a project registered by `bs new` needs
 no bullet at all. `dogfood` is the one value that must be written by hand:
 a project built to exercise the factory looks, in the data, exactly like a
 project built for its own sake — the difference is intent. The Roadmap page

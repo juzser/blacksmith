@@ -60,9 +60,9 @@ mark them `serialize-always` and give overlapping tasks a dependency edge
 instead of concurrent claims.
 
 Before signing, read the slicing back from the project, not from the plan:
-`smith claims impact --plan <plan.json> <every task id> --repo <project-dir>`
+`bs claims impact --plan <plan.json> <every task id> --repo <project-dir>`
 names each import edge that crosses between tasks the plan gave no
-dependency, and `smith wave schedule <plan.json> --repo <project-dir>` says
+dependency, and `bs wave schedule <plan.json> --repo <project-dir>` says
 how wide the plan can ever run. Every crossing the first reports is one of
 three things, and the plan says which:
 

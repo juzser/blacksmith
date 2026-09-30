@@ -33,7 +33,7 @@ The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
 This is checked, not trusted: the dispatcher fingerprints the worktree before
-you start and re-checks it after you return (`smith worktree verify`). A tree
+you start and re-checks it after you return (`bs worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
@@ -44,7 +44,7 @@ edit does not save a round-trip, it costs the whole one.
 Review the diff + its blast radius (callers/callees of changed code) within
 the epic's claims — not a style pass. Style and naming belong to the project's
 linter, which is whatever `factory/policies/stack.yml` answers for `lint`
-(`smith stack show` prints it). Where that answer is `none`, nothing else is
+(`bs stack show` prints it). Where that answer is `none`, nothing else is
 going to catch them, so they go in as `S4-nit` rather than get swallowed.
 
 | Severity | Blocks merge | Classes |

@@ -4,18 +4,18 @@ One part of [the operator guide](../operator-guide.md). Section numbers
 are the guide's, not this file's: `§5` means the same thing here as it
 does wherever else this repo cites it.
 
-## 3. `smith worktree create`
+## 3. `bs worktree create`
 
 ```bash
-smith worktree create ../my-project epic-1 task-1
+bs worktree create ../my-project epic-1 task-1
 ```
 
 ```json
-{"worktreeDir":"/abs/path/.wt/my-project/task-1","branch":"smith/epic-1/task-1","epic":"epic-1","taskId":"task-1"}
+{"worktreeDir":"/abs/path/.wt/my-project/task-1","branch":"bs/epic-1/task-1","epic":"epic-1","taskId":"task-1"}
 ```
 
 Creates `<project-parent>/.wt/<project>/<task-id>` on branch
-`smith/<epic>/<task-id>`, cut fresh from `smith/<epic>/integration`'s current
+`bs/<epic>/<task-id>`, cut fresh from `bs/<epic>/integration`'s current
 head every time (`worktree.yml`). The worktree is a **sibling** of the project,
 never a child: each one is a full checkout carrying the project's own tool
 config, and six of them under the root made `pnpm lint` at the integration root
@@ -24,14 +24,14 @@ exit 1 on nested root configs while all six per-task lint gates were green
 used to produce `../my-project/../my-project/wt/<task>` on disk while the
 printed path claimed otherwise (D-40).
 
-Nothing requires the project to sit anywhere in particular. `smith new` puts
+Nothing requires the project to sit anywhere in particular. `bs new` puts
 one beside this clone when no `--target-dir` says otherwise; `projectDir` is
 read as a path, so a clone anywhere on disk works, and because the worktree is
 a sibling it is created beside that clone rather than under this repo.
 
-`smith worktree stale <projectDir> <epic>` lists worktrees
+`bs worktree stale <projectDir> <epic>` lists worktrees
 that should have been cleaned up (a stale worktree is a bug, not a feature);
-`smith worktree rm <projectDir> <epic> <taskId>` removes one after merge.
+`bs worktree rm <projectDir> <epic> <taskId>` removes one after merge.
 
 Either spelling of a task id works throughout — `task-1` and
 `<epic>/task-1` name the same worktree, as they already named the same
@@ -40,7 +40,7 @@ branch. `stale` prints the bare form, and that is the form `rm` takes
 one directory deeper, under `.wt/<project>/<epic>/<task>`; `rm` cannot reach
 those, and they need `git worktree remove` by absolute path once.
 
-## 3a. `smith worktree fingerprint` / `verify` — the judge-immutability guard
+## 3a. `bs worktree fingerprint` / `verify` — the judge-immutability guard
 
 Six roles — reviewer, verifier, grader, spec-reviewer, security-reviewer,
 uiux — are read-only in their templates and hold `Bash` in fact
@@ -50,9 +50,9 @@ edit the code it was judging" was a sentence in a prompt. Now it is a check:
 fingerprint the worktree before dispatching the judge, verify it after.
 
 ```bash
-smith worktree fingerprint /abs/path/.wt/my-project/task-1 > before.json
+bs worktree fingerprint /abs/path/.wt/my-project/task-1 > before.json
 # ... dispatch the judge ...
-smith worktree verify /abs/path/.wt/my-project/task-1 --before before.json
+bs worktree verify /abs/path/.wt/my-project/task-1 --before before.json
 ```
 
 ```json
@@ -60,7 +60,7 @@ smith worktree verify /abs/path/.wt/my-project/task-1 --before before.json
 {"unchanged":true,"drift":[],"violation":null}
 ```
 
-**Exit 1 on drift**, unlike `smith security triggers`. A fired security
+**Exit 1 on drift**, unlike `bs security triggers`. A fired security
 trigger is a dispatch instruction; a moved worktree is a violation, and the
 judge's result is not trustworthy once it edited what it judged. Treat it the
 way you treat `contract.claim-violation`: discard the verdict, re-dispatch on
@@ -95,7 +95,7 @@ That is the price of a check this cheap, and it is pinned by a test
 (`immutability.test.ts`, "cannot see an edit the judge reverted
 byte-for-byte") so nobody discovers it by surprise.
 
-## 3b. `smith prompt wrap` / `smith research check` — ingested text is data
+## 3b. `bs prompt wrap` / `bs research check` — ingested text is data
 
 The researcher holds `WebFetch`/`WebSearch`, and its brief is what a planner or
 coder then acts on. Diffs, issue bodies and dependency READMEs reach judge
@@ -110,7 +110,7 @@ mandatory (an unlabelled block is not labelled) and `--kind` is a closed list:
 `commit-message`, `log`, `file-excerpt`. Pass `-` as the file to read stdin.
 
 ```bash
-smith prompt wrap fetched.txt --kind web-fetch --source https://example.com/docs/env
+bs prompt wrap fetched.txt --kind web-fetch --source https://example.com/docs/env
 ```
 
 Given a payload that tries to close the fence and keep going:
@@ -137,7 +137,7 @@ digest, text}` when you want to record what was wrapped.
 advice:
 
 ```bash
-smith research check --brief state/results/task-1.json
+bs research check --brief state/results/task-1.json
 ```
 
 ```json
@@ -168,7 +168,7 @@ than reporting `ok`, because a brief that cannot be read has not been checked.
 What this does **not** do is make ingested text safe. It makes it *labelled*.
 The rest is the receiving template's job, which is why coder, planner, reviewer
 and security-reviewer each carry the rule in their own words.
-## 3c. `smith judge dispatch` / `report` / `outstanding` — a dispatched judge must report back
+## 3c. `bs judge dispatch` / `report` / `outstanding` — a dispatched judge must report back
 
 The fingerprint guard above answers "did the judge touch what it judged". This
 pair answers the earlier question: **did the judge report at all**.
@@ -185,13 +185,13 @@ never "the agent said something" — and the path is declared before the run, so
 nobody picks the finish line after seeing how the turn went.
 
 ```bash
-smith judge dispatch --task epic-1/task-1 --role security-reviewer --round 1 \
+bs judge dispatch --task epic-1/task-1 --role security-reviewer --round 1 \
   --artifact /abs/path/task-1.security.json --model claude-opus-5 \
   --session <session-id> --causal-parent <event-id>
 # ... dispatch the judge, telling it to write exactly that path ...
-smith judge report --task epic-1/task-1 --role security-reviewer \
+bs judge report --task epic-1/task-1 --role security-reviewer \
   --session <session-id> --causal-parent <event-id>
-smith judge outstanding --task epic-1/task-1 --session <session-id>
+bs judge outstanding --task epic-1/task-1 --session <session-id>
 ```
 
 `judge dispatch` writes an ordinary `dispatch_decision` with two extra payload
@@ -207,7 +207,7 @@ file from this round's.
 `--model` does **not** default, and is the one flag here you cannot skip. It is
 a dispatch like any other, so P9-23's required `model` dimension applies (§2b),
 and this verb is how the reviewer and the verifier of `crosscheck.yml`'s
-`finder_ne_critic` pair reach the log. A defaulted id would give `smith dispatch
+`finder_ne_critic` pair reach the log. A defaulted id would give `bs dispatch
 check` two placeholders to compare and let it report "ok" on an asymmetry
 nobody arranged — which is the failure that item exists to prevent, arriving
 through the other door.
@@ -215,7 +215,7 @@ through the other door.
 `judge report` reads the declared file, refuses it five distinct ways, and
 emits `judge-reported` with `agent_role`, `round`, `artifact_path` and
 `finding_count`. Its own printed result carries that event's `event_id` too
-— the same id `smith event tail` would show at line-1, printed here instead
+— the same id `bs event tail` would show at line-1, printed here instead
 so a command chained after it (e.g. `audit record --causal-parent`, §5 of
 `.claude/skills/bs/audit.md`) can use it straight off stdout:
 
@@ -270,7 +270,7 @@ Two shortcuts, both on `gate run` (§5):
   error (`cli.no-findings-needs-role`), not an attestation for a role called
   "true".
 
-### `smith judge escalations` — the disagreement nobody read back
+### `bs judge escalations` — the disagreement nobody read back
 
 `judge outstanding` answers *which judge still owes me a file*. This one
 answers the question next to it, which the log could always have answered and
@@ -278,7 +278,7 @@ no command asked: **which cross-provider disagreements is the operator still
 owed?**
 
 ```bash
-smith judge escalations --session <session-id>
+bs judge escalations --session <session-id>
 ```
 
 Every quorum writes a `quorum-decision` event, from whichever of the three
@@ -338,6 +338,6 @@ from its own case and the gating pool is one — so **every** finding escalates
 as `insufficient-providers` and the quorum decides nothing (the arithmetic is
 spelled out in `docs/runbooks/providers.md`). A command that answered "clean"
 in that configuration would be reporting the absence of a check as the absence
-of a problem. `smith judge preflight` (`docs/runbooks/providers.md` §1)
+of a problem. `bs judge preflight` (`docs/runbooks/providers.md` §1)
 tells you the same thing before the run; this one tells you what it already
 cost.

@@ -68,11 +68,11 @@ describe('run-cli.ts (built binary: smith-run)', () => {
     return invocationFile;
   }
 
-  it('--help explains why this is not `smith harness run`, and exits 0', () => {
+  it('--help explains why this is not `bs harness run`, and exits 0', () => {
     const run = runSmithRun(['--help']);
     expect(run.status).toBe(0);
-    expect(run.stdout).toContain('Usage: smith-run');
-    expect(run.stdout).toContain('smith harness run');
+    expect(run.stdout).toContain('Usage: bs-run');
+    expect(run.stdout).toContain('bs harness run');
     expect(run.stdout).toContain('§18 rule 3');
   });
 

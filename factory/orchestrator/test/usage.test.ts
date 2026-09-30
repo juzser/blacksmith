@@ -305,12 +305,12 @@ describe('flagSpecFor', () => {
 
 describe('usageLine', () => {
   it('reads as the line that would have worked', () => {
-    expect(usageLine(usageFor('plan validate'))).toBe('smith plan validate <plan.json>');
+    expect(usageLine(usageFor('plan validate'))).toBe('bs plan validate <plan.json>');
   });
 
   it('shows the flag shape alongside the positionals', () => {
     const line = usageLine(usageFor('gate run'));
-    expect(line.startsWith('smith gate run ')).toBe(true);
+    expect(line.startsWith('bs gate run ')).toBe(true);
     expect(line).toContain('--session');
   });
 
@@ -357,7 +357,7 @@ describe('usageText', () => {
 
   it('names the namespaces so an operator can ask for a narrower listing', () => {
     const text = usageText();
-    expect(text).toContain('smith <namespace> --help');
+    expect(text).toContain('bs <namespace> --help');
   });
 
   it('refuses a namespace that does not exist rather than printing nothing', () => {

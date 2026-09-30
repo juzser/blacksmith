@@ -19,8 +19,8 @@ a second copy is a copy that drifts.
 ## Reading the answers
 
 ```bash
-smith stack show     # the parsed answers, as JSON
-smith stack check    # what the shipped templates do with each one
+bs stack show        # the parsed answers, as JSON
+bs stack check       # what the shipped templates do with each one
 ```
 
 `stack show` is the parse, not the file: it applies the defaults for anything
@@ -29,14 +29,14 @@ is what the scaffolder and the agents actually see.
 
 ## Three verdicts
 
-`smith stack check` prints one verdict per answer, and exits 1 only on the
+`bs stack check` prints one verdict per answer, and exits 1 only on the
 third.
 
 | Verdict | Meaning |
 | --- | --- |
 | `honoured` | `factory/scaffold/` implements this answer. |
 | `recorded` | Nothing in the scaffold reads it; the agents do. |
-| `refused` | `smith new` stops rather than scaffolding something else. |
+| `refused` | `bs new` stops rather than scaffolding something else. |
 
 **`recorded` is not a failure.** `database: postgres` does not make the
 scaffolder write migrations — it makes the planner and the coder know what
@@ -47,12 +47,12 @@ check they would learn to ignore, which is worse than no check.
 **`refused` is a refusal, not a substitution.** The failure mode this exists
 to prevent: answering `frontend: react` at install time and being handed a Vue
 project, which reads as the factory ignoring the interview it just ran.
-`requireScaffoldable` runs before `smith new` creates a directory, so a
+`requireScaffoldable` runs before `bs new` creates a directory, so a
 refusal leaves nothing behind to clean up.
 
 ## What the templates honour today
 
-Measured, not aspirational — `smith stack check` derives this from the same
+Measured, not aspirational — `bs stack check` derives this from the same
 table the scaffolder branches on:
 
 - `language: typescript` — `factory/scaffold/base` is a TypeScript package.
@@ -99,7 +99,7 @@ template can only be correct for one combination of those, and the one it used
 to ship was `@import 'tailwindcss'` over a private kit's tokens — both
 unconditional.
 
-Nothing regenerates it. After `smith new`, it is the project's file.
+Nothing regenerates it. After `bs new`, it is the project's file.
 
 ## Directory conventions (scaffold)
 
@@ -108,7 +108,7 @@ Nothing regenerates it. After `smith new`, it is the project's file.
 ├── AGENTS.md          # thin router (progressive disclosure)
 ├── mcp.manifest.json  # declared MCP surface (mcp.md) — added at the mcp milestone
 ├── src/               # app code (claims-friendly: one feature = one subtree)
-│   ├── mcp/           # MCP server + tools/ (`smith mcp init`, never hand-rolled)
+│   ├── mcp/           # MCP server + tools/ (`bs mcp init`, never hand-rolled)
 │   └── styles/        # generated entry, then yours (UI projects)
 ├── test/              # unit mirrors src/; e2e/ for the e2e suite
 ├── design/            # vendored design system, when one is named (UI projects)
@@ -116,7 +116,7 @@ Nothing regenerates it. After `smith new`, it is the project's file.
 ```
 
 `src/mcp/` and the manifest arrive late, at the mandatory
-`<project> — mcp surface` milestone — not at `smith new`. See
+`<project> — mcp surface` milestone — not at `bs new`. See
 [mcp.md](mcp.md) for why, and for the rules the surface has to pass.
 
 ## Non-negotiables, which are not stack answers

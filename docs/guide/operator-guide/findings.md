@@ -4,15 +4,15 @@ One part of [the operator guide](../operator-guide.md). Section numbers
 are the guide's, not this file's: `§5` means the same thing here as it
 does wherever else this repo cites it.
 
-## 6. `smith findings list`
+## 6. `bs findings list`
 
 ```bash
-smith findings list --session <session-id> [--task <task-id>] [--epic <epic>] [--status <finding_status>] [--severity <severity>] [--category <finding_category>]
+bs findings list --session <session-id> [--task <task-id>] [--epic <epic>] [--status <finding_status>] [--severity <severity>] [--category <finding_category>]
 ```
 
 Returns the **current state** of every finding raised in that session — a
 fold over `finding-raised`/`finding-transitioned` events, not a mutable
-store. `smith findings transition <findingId> <newStatus> --session ... 
+store. `bs findings transition <findingId> <newStatus> --session ... 
 --plan-version ... --causal-parent ...` moves a finding through its legal
 state machine (`raised → confirmed → fix-pending → fix-landed →
 fix-verified`, with `waived`/`expired` reachable as terminal branches per
@@ -23,12 +23,12 @@ fix-verified`, with `waived`/`expired` reachable as terminal branches per
 The **amendment edges are not typeable**, and the command refuses them by name
 (D-136). `amend-pending` and `amended` are both gated on evidence a command
 line cannot carry: the task ids an amendment owes come off a plan diff, and the
-proof they landed comes off the task fold. `smith plan amend` computes the
-first, `smith epic close` the second — see §6a. Typing them by hand would be
+proof they landed comes off the task fold. `bs plan amend` computes the
+first, `bs epic close` the second — see §6a. Typing them by hand would be
 the unchecked claim D-127 closed, so the table lists them and this verb does
 not offer them.
 
-## 6a. Spec findings + `smith plan amend` — when the plan is what is wrong
+## 6a. Spec findings + `bs plan amend` — when the plan is what is wrong
 
 Every verb above records a finding against a diff, and a finding against a
 diff blocks the diff. The envkit epic deadlocked on the case that breaks:
@@ -42,7 +42,7 @@ A spec finding is the other route. It says the plan is wrong, so it blocks the
 plan:
 
 ```bash
-smith findings raise --scope spec --plan factory/specs/active/epic-1/plan-v1.json \
+bs findings raise --scope spec --plan factory/specs/active/epic-1/plan-v1.json \
   --evidence spec-findings.json --found-by spec-reviewer \
   --session <session-id> --causal-parent <event-id>
 ```
@@ -57,13 +57,13 @@ that never moved.
 
 The finding is owned by `<epic>/integration`, never by whoever claims the file
 it cites. It mints no follow-up task and triggers no reattribution, and
-`smith gate run` reports it in `specFindings` without failing the diff. That
+`bs gate run` reports it in `specFindings` without failing the diff. That
 is the whole point: no task's diff can contain the fix.
 
 The fix is a new plan version:
 
 ```bash
-smith plan amend --plan factory/specs/active/epic-1/plan-v1.json \
+bs plan amend --plan factory/specs/active/epic-1/plan-v1.json \
   --findings f-epic-1-integration-1a2b3c4d,f-epic-1-integration-5e6f7a8b \
   --rationale "criterion-3 mandated multi-line quoted values that criterion-1's ParseIssueCode freeze made unfixable; v2 drops the multi-line clause" \
   --sites src/parse.ts,src/lex.ts \
@@ -105,10 +105,10 @@ appends `plan-version-created` naming each finding and the criterion it moved,
 and transitions those findings to **`amend-pending`** — carrying the task ids
 the new version added or superseded as the obligation each finding now waits
 on. `amend-pending` is not the exit; it is the promise. The exit is `amended`,
-and only `smith epic close` writes it, after computing which of those task ids
+and only `bs epic close` writes it, after computing which of those task ids
 actually landed at that plan version or later. An amendment that obligates
 nothing would discharge its finding the moment it was written, which is D-127,
-and is why neither edge can be typed at `smith findings transition`.
+and is why neither edge can be typed at `bs findings transition`.
 
 `--changes` takes the same `{added, supersede, newEdges}` shape `nextVersion`
 uses. Omitting it used to be legal — a criterion reworded without moving a
@@ -121,7 +121,7 @@ The amendment writes the version and the finding transitions, **not the tasks
 it added**. Ingest the new version before anything is scheduled against it:
 
 ```bash
-smith plan ingest factory/specs/active/epic-1/plan-v2.json \
+bs plan ingest factory/specs/active/epic-1/plan-v2.json \
   --session <session-id> --plan-version 2 --causal-parent <event-id>
 ```
 
@@ -157,7 +157,7 @@ worker just read that code and you did not (D-123).
 The node that dispatched it records the request. This writes no plan version:
 
 ```bash
-smith plan propose --plan factory/specs/active/epic-1/plan-v1.json \
+bs plan propose --plan factory/specs/active/epic-1/plan-v1.json \
   --task epic-1/task-1b-parse-quotes --proposed-by coder \
   --request worker-request.json \
   --session envkit-quotes --causal-parent envkit-quotes#0
@@ -197,7 +197,7 @@ by an existing waiver (D-196).
 What is waiting:
 
 ```bash
-smith plan proposals --session envkit-quotes [--epic epic-1] [--status open]
+bs plan proposals --session envkit-quotes [--epic epic-1] [--status open]
 ```
 
 `--status` is `open`, `approved`, `rejected` or **`stale`**. Stale is the
@@ -224,11 +224,11 @@ have answered the wrong question.
 Answering is one command each:
 
 ```bash
-smith plan approve envkit-quotes#2 --plan factory/specs/active/epic-1/plan-v1.json \
+bs plan approve envkit-quotes#2 --plan factory/specs/active/epic-1/plan-v1.json \
   --decided-by operator [--rationale "the parser is right and the criterion is not"] \
   --session envkit-quotes --causal-parent envkit-quotes#2
 
-smith plan reject envkit-quotes#2 --decided-by operator \
+bs plan reject envkit-quotes#2 --decided-by operator \
   --rationale "criterion-1 is right; the parser is what is wrong" \
   --session envkit-quotes --causal-parent envkit-quotes#2
 ```
@@ -264,7 +264,7 @@ case for and a rejection is the only place the case against gets written down.
 A rejection refutes the finding and cuts no version.
 
 Both decisions write `spec-change-decided`, which is what closes the proposal.
-`smith daemon` reports an unanswered one — `attention` when the worker called
+`bs daemon` reports an unanswered one — `attention` when the worker called
 it `blocking` and `info` when it did not (`docs/runbooks/ops.md`). In the log,
 an approval is four events in this order: `spec-change-proposed`,
 `plan-version-created`, `finding-transitioned`, `spec-change-decided` — the

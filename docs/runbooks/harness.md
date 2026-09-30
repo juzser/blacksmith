@@ -1,12 +1,12 @@
-# Runbook — the worker harness port (`smith harness`, `smith-run`)
+# Runbook — the worker harness port (`bs harness`, `bs-run`)
 
 Operator procedure for `factory/policies/harness.yml`: what a harness is, the
 shipped default, reading and writing a policy, rendering an invocation, and
-actually spawning one with `smith-run`. Companion to
+actually spawning one with `bs-run`. Companion to
 [`../specs/black-smith-architecture.md`](../specs/black-smith-architecture.md)
 §18 and §19; commands assume a built CLI (`pnpm run build` →
 `factory/orchestrator/dist/cli.js` and `factory/orchestrator/dist/run-cli.js`,
-substitute `smith`/`smith-run` if linked).
+substitute `bs`/`bs-run` if linked).
 
 ## 1. Two axes, one file each
 
@@ -21,10 +21,10 @@ only one of them had a config seam before this port existed:
 `dispatch_decision` still records who answered and with what weight, never
 what ran the turn. That second half is this file.
 
-## 2. `smith harness list` — what this box can serve
+## 2. `bs harness list` — what this box can serve
 
 ```bash
-smith harness list
+bs harness list
 ```
 
 No `--policy` means `factory/policies/harness.yml`, the shipped default
@@ -45,22 +45,22 @@ that this harness serves; see §4 for what makes a judge role show up there
 at all.)
 
 `--policy <file>` reads a different policy file instead — the same shape
-`smith stack show --policy <file>` uses, and the one a custom harness (§6)
+`bs stack show --policy <file>` uses, and the one a custom harness (§6)
 is written and tested against before it becomes the default.
 
-## 3. `smith harness plan` — render, never start
+## 3. `bs harness plan` — render, never start
 
 ```bash
-smith harness plan --role coder --task epic-1/task-3 \
+bs harness plan --role coder --task epic-1/task-3 \
   --prompt-file state/prompts/p.md --worktree ../wt/task-3
 ```
 
 Renders a `WorkerInvocation` and prints it. **It does not start anything** —
-architecture §18 rule 3, "nothing that observes may dispatch": `smith` only
+architecture §18 rule 3, "nothing that observes may dispatch": `bs` only
 ever renders, because an observer that could also dispatch would end up
 reading its own output back as evidence a turn happened. The invocation is
 the whole answer; starting the process it describes is §19's separate
-concern (§5, `smith-run`).
+concern (§5, `bs-run`).
 
 Flags: `--harness <name>` (defaults to the policy's `default:`),
 `--role <role>` and `--task <id>` (required), `--prompt-file <path>`
@@ -79,7 +79,7 @@ with no `-C`/`--add-dir` in `args` at all — a turn with no worktree still
 renders:
 
 ```bash
-smith harness plan --harness codex-cli --role coder --task epic-1/task-3 \
+bs harness plan --harness codex-cli --role coder --task epic-1/task-3 \
   --prompt-file state/prompts/p.md --worktree ../wt/task-3 --schema result
 ```
 
@@ -113,7 +113,7 @@ invocation for a judge role with a worktree unless the harness's policy entry
 declares `judge_args` this factory can read as read-only:
 
 ```bash
-smith harness plan --harness some-cli-harness-with-no-judge-args \
+bs harness plan --harness some-cli-harness-with-no-judge-args \
   --role reviewer --task epic-1/task-3 --prompt-file p.md --worktree ../wt/task-3
 ```
 
@@ -124,7 +124,7 @@ smith harness plan --harness some-cli-harness-with-no-judge-args \
 `judge_args` is the escape valve, and it is enforced by the OS or the tool
 itself, not by this factory: codex's `-s read-only`, claude's
 `--disallowedTools Write,Edit,MultiEdit,NotebookEdit`. Both shipped `cli`
-harnesses declare one of those, which is why `smith harness list` (§2) lists
+harnesses declare one of those, which is why `bs harness list` (§2) lists
 judge roles like `reviewer` under `codex-cli`/`claude-cli`.
 
 **The flags are read, not counted.** A non-empty `judge_args` is not on its
@@ -159,26 +159,26 @@ Which roles are judges is read once, from `guardrails.yml` through
 file.
 
 An `in-process` judge is inside the trust boundary already: it reads under a
-`smith sandbox open` lease, which is why `sandboxRequired: true` shows up on
+`bs sandbox open` lease, which is why `sandboxRequired: true` shows up on
 an in-process judge invocation with a worktree, rather than the caller having
 to remember to open one.
 
-## 5. `smith-run` — the thing that actually starts a harness
+## 5. `bs-run` — the thing that actually starts a harness
 
-`smith harness plan` stops at the invocation. Something still has to spawn
-it, and that something is deliberately **not** a `smith` verb — §18 rule 3
+`bs harness plan` stops at the invocation. Something still has to spawn
+it, and that something is deliberately **not** a `bs` verb — §18 rule 3
 again, this time about the executable boundary rather than the code path:
-`smith` never becomes the process whose own exit code and stdout it would
+`bs` never becomes the process whose own exit code and stdout it would
 then read back as evidence a turn ran.
 
 ```bash
-smith harness plan --harness codex-cli --role coder --task epic-1/task-3 \
+bs harness plan --harness codex-cli --role coder --task epic-1/task-3 \
   --prompt-file state/prompts/p.md --worktree ../wt/task-3 --schema result \
   > /tmp/invocation.json
-smith-run /tmp/invocation.json
+bs-run /tmp/invocation.json
 ```
 
-`smith-run` reads one already-rendered `WorkerInvocation` (a file path, or
+`bs-run` reads one already-rendered `WorkerInvocation` (a file path, or
 `-` for stdin), spawns it, and prints a `RunOutcome` as JSON — exit code,
 signal, whether it timed out or hit the output-size cap, the parsed answer,
 schema validation (when the invocation names a schema), normalised token
@@ -204,13 +204,13 @@ Exit codes:
 | `3` | timed out, or exceeded the output size cap |
 
 An `in-process` invocation is refused outright — it names an `Agent`-tool
-subagent turn, and there is no separate binary for `smith-run` to spawn:
+subagent turn, and there is no separate binary for `bs-run` to spawn:
 
 ```
 smith-run: Invocation for role "coder" is in-process (harness "claude-code") — smith-run starts programs, not Agent-tool subagents. In-process harnesses run inside the orchestrator session itself and have no separate binary for smith-run to spawn.
 ```
 
-**`smith-run` opens no event log, no `state/`, no DB.** It is the library
+**`bs-run` opens no event log, no `state/`, no DB.** It is the library
 half (`runInvocation()` in `factory/orchestrator/src/runner.ts`) plus a thin
 CLI wrapper (`run-cli.ts`) around `spawnCapped()` — the same detached,
 group-killed spawn `cli-transport.ts` uses for external judges, reused here
@@ -227,8 +227,8 @@ harness is an operator decision, not a side effect of adding a seam. Write a
 policy file anywhere and name it:
 
 ```bash
-smith harness list --policy factory/policies/my-harness.yml
-smith harness plan --policy factory/policies/my-harness.yml \
+bs harness list --policy factory/policies/my-harness.yml
+bs harness plan --policy factory/policies/my-harness.yml \
   --harness my-cli --role coder --task epic-1/task-3 --prompt-file p.md
 ```
 
@@ -278,21 +278,21 @@ runner as a literal argument and starting the harness in the wrong directory.
   itself, is `pass --schema <name>`.
 - **`harness.unknown-tier`** — `--tier` (or `WorkerTurnRequest.tier`) named
   something other than `frontier`, `mid`, or `small`.
-- **`smith-run` exits 1 with a `spawnError`** — the harness `command` is not
+- **`bs-run` exits 1 with a `spawnError`** — the harness `command` is not
   on `PATH`, or the invocation's `cwd`/`worktree` does not exist. The printed
   `RunOutcome.spawnError` names the underlying error (e.g. `ENOENT`).
-- **`smith-run` exits 1 with `spawnError: null` and a nonzero `exitCode`,
+- **`bs-run` exits 1 with `spawnError: null` and a nonzero `exitCode`,
   or a `harness_error`** — either the harness process itself exited
   non-zero, or it exited 0 but its own output reported a failure (a codex
   top-level `error` event, or claude's `is_error: true`); `RunOutcome.answer`
   can still be non-empty in the second case if the harness reported partial
   progress before the failure.
-- **`smith-run` exits 3** — either the process ran past
+- **`bs-run` exits 3** — either the process ran past
   `invocation.budget.timeout_ms` (or its `--timeout-ms` override) and the
   whole process group was killed, or its combined output passed
   `budget.max_output_bytes`. Both are reported on the `RunOutcome`
   (`timedOut` / `sizeExceeded`), not only through the exit code.
 - **A rendered `cli` invocation looks right but the harness never runs
-  anything** — remember `smith harness plan` never starts it. Pipe the
-  printed invocation into `smith-run` (§5), or hand it to whatever else in
+  anything** — remember `bs harness plan` never starts it. Pipe the
+  printed invocation into `bs-run` (§5), or hand it to whatever else in
   your own tooling is meant to spawn it.

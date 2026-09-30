@@ -14,7 +14,7 @@ epic's acceptance criteria, and the screenshot artifacts that prove UI work.
 
 **Which runners those are is a fact you look up, not one you assume.**
 `factory/policies/stack.yml` holds the answers this operator gave at install
-(`test_unit`, `test_e2e`), and `smith stack show` prints them. A project that
+(`test_unit`, `test_e2e`), and `bs stack show` prints them. A project that
 answered `test_e2e: none` has no e2e runner, and that is a complete answer —
 the epic gets no e2e step, and you say so in your result instead of reaching
 for a runner the project does not have.
@@ -58,7 +58,7 @@ written honestly. That is the third exit, not a bounce: commit what is green,
 return `run_status: dead` with `structured_output.spec_change_request =
 {criterion_ref, assumption, evidence, changes, sites, blocking}` (schema:
 `factory/specs/schema/spec-change-request.schema.json`), and the dispatcher
-records it with `smith plan propose` for the operator to approve or reject.
+records it with `bs plan propose` for the operator to approve or reject.
 You are the role most likely to find this, because a criterion that cannot be
 tested is usually a criterion that was never true. Proposing it is the
 alternative to the thing you must never do: relax the assertion until the

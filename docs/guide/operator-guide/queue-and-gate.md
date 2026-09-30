@@ -4,13 +4,13 @@ One part of [the operator guide](../operator-guide.md). Section numbers
 are the guide's, not this file's: `§5` means the same thing here as it
 does wherever else this repo cites it.
 
-## 4. `smith queue run`
+## 4. `bs queue run`
 
 Drives a set of already-merged-locally task branches through the serial
 merge queue for one epic:
 
 ```bash
-smith queue run epic-1 \
+bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
   --tasks tasks.json
@@ -25,19 +25,19 @@ first non-`merged` outcome and exits `1`; prints the full outcome array
 either way.
 
 `--test-cmd` runs in the task's worktree with this process's environment
-minus every `SMITH_*` variable, and the gate's own check commands run the
+minus every `BS_*` variable, and the gate's own check commands run the
 same way. A command the factory launches on a project's behalf belongs to
-the project: every `SMITH_*` variable in the factory's process was set for
-that process, and `SMITH_HOME` in particular would move the project's work
+the project: every `BS_*` variable in the factory's process was set for
+that process, and `BS_HOME` in particular would move the project's work
 root onto the factory's own clone — a suite that asserts its own layout then
 fails on how it was invoked rather than on the branch, and anything it
 writes to state lands in the factory's live `state/`.
 
 The strip is a rule rather than a list of names, so it does not go stale
-when a `SMITH_*` variable is added. It applies to the operator switches too:
-if you mean `SMITH_CROSSCHECK_OFFLINE=1` for the command being run rather
+when a `BS_*` variable is added. It applies to the operator switches too:
+if you mean `BS_CROSSCHECK_OFFLINE=1` for the command being run rather
 than for the factory running it, state it in the command
-(`--test-cmd 'SMITH_CROSSCHECK_OFFLINE=1 pnpm test'`), which is what
+(`--test-cmd 'BS_CROSSCHECK_OFFLINE=1 pnpm test'`), which is what
 `docs/runbooks/providers.md` means by passing it per command. The shell
 applies anything the command string sets after this strip.
 
@@ -51,7 +51,7 @@ also not passing `--session` — the file's order is all there is.
 The certification comes first because a rebase, a test run and a merge all
 "succeed" against a branch that carries nothing — that is D-30, and §5a
 tells the whole story. A task whose worktree is dirty or whose branch is
-not ahead of `smith/<epic>/integration` returns `nothing-to-merge` and is
+not ahead of `bs/<epic>/integration` returns `nothing-to-merge` and is
 never rebased, so the uncommitted work is still sitting exactly where the
 agent left it when you go look.
 
@@ -64,7 +64,7 @@ holds for `--batch`, one check per batch group rather than per task, and
 for `integration check`, whose envelope is checked before any check runs.
 
 The queue never changes which branch `--project` has checked out. The merge
-runs in whichever worktree already has `smith/<epic>/integration` out — the
+runs in whichever worktree already has `bs/<epic>/integration` out — the
 project directory itself or a linked worktree — and, when none does, with no
 working tree at all: `git merge-tree` builds the merged tree, `commit-tree`
 makes the merge commit and `update-ref` moves the branch only if it has not
@@ -76,7 +76,7 @@ uncommitted tracked changes, the queue does not merge into it: it logs
 `{"outcome":"integration-dirty","worktree":...,"dirty":[...]}`. Commit or
 stash there and re-run.
 
-### 4a. `smith queue adopt` — the merge that happened without the queue
+### 4a. `bs queue adopt` — the merge that happened without the queue
 
 `wave-merged` is the only event the projector folds to `completed`, and
 `queue run` writes it only for merges it made itself. So an epic merged by
@@ -85,7 +85,7 @@ hand has landed tasks and an empty log, and the only way to close it was to
 That was D-137, found on `envkit-mcp-followup` with four such tasks.
 
 ```bash
-smith queue adopt task-4 \
+bs queue adopt task-4 \
   --project ../my-project \
   --merge-commit 9f2c1ab \
   --plan plans/epic-1.json \
@@ -93,7 +93,7 @@ smith queue adopt task-4 \
 ```
 
 It does not take your word for it. Before writing anything it checks, in
-this order, that `smith/<epic>/integration` and the task's branch both
+this order, that `bs/<epic>/integration` and the task's branch both
 exist, that `--merge-commit` names a commit, that the commit is a merge,
 that the merge is reachable from the integration branch, that the branch
 head is one of the merge's parents, and that the branch carries a commit
@@ -117,7 +117,7 @@ pay for the whole suite: the honest thing, and a quadratic one. `--select-test-c
 narrows the *gate*, never the contract.
 
 ```bash
-smith queue run epic-1 \
+bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
   --select-test-cmd "pnpm vitest run {files}" \
@@ -126,7 +126,7 @@ smith queue run epic-1 \
 
 After the rebase — so the change set is the task's commits replayed on the
 current integration head — the queue diffs the worktree against
-`smith/<epic>/integration`, builds the same symbol graph `smith claims impact`
+`bs/<epic>/integration`, builds the same symbol graph `bs claims impact`
 uses, and walks `dependents` out from the changed files until the frontier
 stops growing. Whatever test files that reaches is what runs, through your
 template with `{files}` replaced by the shell-quoted list.
@@ -174,7 +174,7 @@ and get less total work done for it — so `--batch` does not add lanes, it
 shrinks the number of suite runs:
 
 ```bash
-smith queue run epic-1 \
+bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
   --tasks tasks.json \
@@ -225,7 +225,7 @@ whole. `--batch` combines both ideas for a single-machine CPU-bound suite: a
 batch is a group of claim-disjoint tasks rather than everything queued, and
 bisection narrows a red group down to the task that is actually guilty of it.
 
-## 5. `smith gate run`
+## 5. `bs gate run`
 
 The composed gate pipeline for one task: **schema check → artifact check →
 commit check → deps check → outstanding-judge check → grader verdict → tests →
@@ -249,14 +249,14 @@ for nothing. The expensive step is the one nobody should pay for while any of
 those is true.
 
 Two of these are opt-in by construction. A task that never used
-`smith judge dispatch` (§3c) has an empty dispatch set, so that check is a pure
+`bs judge dispatch` (§3c) has an empty dispatch set, so that check is a pure
 no-op for it; a gate run with no `--grader` file skips the rubric stage the same
 way, which is the pre-D-34 pipeline.
 
 ```bash
-smith gate run epic-1/task-1 \
+bs gate run epic-1/task-1 \
   --worktree ../.wt/my-project/task-1 \
-  --base smith/epic-1/integration \
+  --base bs/epic-1/integration \
   --checks checks.json \
   --result result.json \
   --grader state/results/epic-1-task-1.grader-r1.json \
@@ -316,23 +316,23 @@ smith gate run epic-1/task-1 \
   reviewer/verifier, matching `finding.schema.json` minus the computed
   `fingerprint`.
 - `--base` — the ref the merge queue will merge this branch into, normally
-  `smith/<epic>/integration`. Optional, and the one flag whose absence
+  `bs/<epic>/integration`. Optional, and the one flag whose absence
   costs you something: see §5a.
 - `--session`/`--plan-version`/`--causal-parent` are required on every
   gate/findings/waivers command — they're the event-log envelope
   (`session_id`, `plan_version`, `causal_parent`). `--causal-parent` must
   reference a real prior event in that session's log, so a session from
-  scratch starts with `smith session start <session-id>`, which writes the
+  scratch starts with `bs session start <session-id>`, which writes the
   root and prints the event id the next command hangs off. `session-start`
   is the only event type allowed a `null` causal_parent, and the only one
   allowed to name a parent in a *different* session (see §5a and §5b).
 
-**Putting your own words in the log.** `smith prompt record <file|-> --session
+**Putting your own words in the log.** `bs prompt record <file|-> --session
 <id> --causal-parent <event-id>` appends a `user_prompt` holding what you
 typed, verbatim, and prints its event id:
 
 ```
-$ smith prompt record - --session sess-1 --causal-parent 'sess-1#0' <<'EOF'
+$ bs prompt record - --session sess-1 --causal-parent 'sess-1#0' <<'EOF'
 Build the widget and fix the flaky import.
 EOF
 {"event_id":"sess-1#1","record":{...}}
@@ -344,13 +344,13 @@ and without the edge a reader can only guess which request a piece of work
 answers. Whitespace-only text is refused rather than written, since a blank
 row is indistinguishable from a real prompt once it is in the log.
 
-**Leaving a comment on a running task.** `smith feedback record --task <id>
+**Leaving a comment on a running task.** `bs feedback record --task <id>
 --body <text>|--body-file <file> --session <id> --causal-parent <event-id>`
 appends an `operator-feedback-recorded` event and prints the event id
 alongside a generated `feedback_id`:
 
 ```
-$ smith feedback record --task epic-1/task-1 \
+$ bs feedback record --task epic-1/task-1 \
   --body 'Please fix the flaky test.' --kind must-fix --source cli \
   --session sess-1 --causal-parent 'sess-1#1'
 {"event_id":"sess-1#2","feedback_id":"fb-...","deduped":false}
@@ -364,12 +364,12 @@ appends nothing, with `deduped: true` on the repeat. A whitespace-only
 `--body`/`--body-file` is refused the same way `prompt record` refuses one,
 with `feedback.empty-body`.
 
-`smith feedback pending --session <id> [--task <id>] [--epic <id>]` is a
+`bs feedback pending --session <id> [--task <id>] [--epic <id>]` is a
 read: it lists the session lineage's unresolved feedback, each entry naming a
 `suggestedAction` — `follow-up` once the task's status is closed to further
 work (`completed`, `superseded`, `waived`), `bounce` otherwise.
 
-`smith feedback resolve --feedback <id> --resolution
+`bs feedback resolve --feedback <id> --resolution
 bounced|follow-up|dismissed --session <id> --causal-parent <event-id>
 [--follow-up-task <id>]` appends `operator-feedback-resolved` and prints the
 stored record. It refuses a feedback id nothing recorded, or one already
@@ -408,7 +408,7 @@ block the merge queue, it queues an operator question (§8 below).
 | `blocked` (`reason: "artifacts-missing"`) | A declared artifact is outside `state/artifacts/<task-id>/` or absent | Never reaches tests; `artifactIssues` names each path and which of the two it is |
 | `blocked` (`reason: "not-committed"`) | There is no commit here to score — see §5a | Never reaches tests; bounce to the coder to commit |
 | `blocked` (`reason: "deps-missing"`) | The worktree declares dependencies but has no `node_modules/.bin` of its own | Never reaches tests; run `pnpm install` in the worktree and re-gate |
-| `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes — re-poke it, then `smith judge report` (§3c) |
+| `blocked` (`reason: "judges-outstanding"`) | A judge was dispatched and never reported | Never reaches tests; `outstandingJudges[]` names each role and the file it owes — re-poke it, then `bs judge report` (§3c) |
 | `blocked` (`reason: "grader-invalid"`) | The grader's file is not shaped like a verdict (wrong place, missing evidence, round > 2) | Never reaches tests; re-run the grading pass — the diff has not been judged |
 | `blocked` (`reason: "grader-fail"`) | A criterion came back `fail`/`partial`, or the grading run was `dead` | Never reaches tests; bounce to coder with the named gaps, or to the planner at round 2 |
 | `blocked` (`reason: "tests-failed"`) | A check command exited non-zero | Bounce to coder on the same branch |
@@ -445,7 +445,7 @@ Two consequences worth knowing before you see them:
   asked"), not `0` (meaning "the branch is empty"). Pass the epic's
   integration branch on every real gate run.
 
-`smith queue run` applies the same certificate independently, before it
+`bs queue run` applies the same certificate independently, before it
 rebases, and returns `{"outcome":"nothing-to-merge","reason":...,"dirty":[...]}`
 with a `contract.uncommitted-work` error in the log. The gate refusing is
 the fast feedback; the queue refusing is the guarantee — a task that merges
@@ -475,7 +475,7 @@ the project's `package.json` declares dependencies at all:
 check that decided there was nothing to check is a check that happened, and
 the log has to be able to tell that apart from one that never ran.
 
-## 5b. One epic across several sessions — `smith event lineage`
+## 5b. One epic across several sessions — `bs event lineage`
 
 An epic bigger than the orchestrator's context window is finished by
 starting a **new session** that continues the old one, not by shrinking the
@@ -485,24 +485,24 @@ names an event in the previous session's log as its `causal_parent`.
 ```bash
 # The last thing the old session logged — anything in its log works as the
 # anchor; the last event is the honest one.
-smith event tail epic-7-session-1 --n 1
+bs event tail epic-7-session-1 --n 1
 
 # Open the continuation. Cross-session parents are allowed ONLY here, on the
 # session root — every event after this one chains inside its own session.
-smith session start epic-7-session-2 --continues 'epic-7-session-1#412'
+bs session start epic-7-session-2 --continues 'epic-7-session-1#412'
 
 # Read the tree. `lineage` is every session a lineage-wide fold reads;
 # `continued_by` is the half below you; `depth` counts the ancestry alone,
 # so depth 1 still means "this session started fresh".
-smith event lineage epic-7-session-2
+bs event lineage epic-7-session-2
 # {"session":"epic-7-session-2","lineage":[...],"depth":2,
 #  "root":"epic-7-session-1","continued_by":[]}
 
 # Tail the EPIC, not the session that happens to be running.
-smith event tail epic-7-session-2 --lineage --n 40
+bs event tail epic-7-session-2 --lineage --n 40
 ```
 
-Plain `smith event tail` shows only the named session, which after a split
+Plain `bs event tail` shows only the named session, which after a split
 is the newest slice of the epic and nothing before it — `--lineage` folds
 the whole chain root-first and then takes the last `n`. The timeline
 projection follows the same edge: a causal chain that runs back through the
@@ -523,16 +523,16 @@ be gating on work it does not own.
 
 ```bash
 # From the epic: the round. `continued_by` names the waves.
-smith event lineage epic-7-session-1
+bs event lineage epic-7-session-1
 # {"lineage":["epic-7-session-1","wave-a","wave-b"],"depth":1,
 #  "continued_by":["wave-a","wave-b"]}
 
 # From a wave: its own ancestry, not its sibling's.
-smith event lineage wave-a
+bs event lineage wave-a
 # {"lineage":["epic-7-session-1","wave-a"],"depth":2,"continued_by":[]}
 ```
 
-**`--lineage` on the raw log has a twin on the projection.** Every `smith
+**`--lineage` on the raw log has a twin on the projection.** Every `bs
 stats` page takes `--session`, and `--session` alone is a question about the
 window rather than about the epic: after a split, `stats kanban --epic epic-7
 --session epic-7-session-2` returns the tasks session 2 recorded and says
@@ -542,15 +542,15 @@ chain instead.
 
 ```bash
 # Half the epic — whatever the second window happened to record.
-smith stats kanban --epic epic-7 --session epic-7-session-2
+bs stats kanban --epic epic-7 --session epic-7-session-2
 
 # The epic. --lineage widens every stats page the same way.
-smith stats kanban --epic epic-7 --session epic-7-session-2 --lineage
+bs stats kanban --epic epic-7 --session epic-7-session-2 --lineage
 ```
 
 It resolves the chain off the projection, so it needs a `--db` and nothing
 else — no access to the log directory, which is why the dashboard can draw the
-same scope. It walks the same tree `smith event lineage` does: what this
+same scope. It walks the same tree `bs event lineage` does: what this
 session continues, plus everything that continued it. It stops at the first
 ancestor the projection has not folded yet, so a partial `db rebuild` narrows
 the answer rather than failing it. And it needs a `--session` to widen — on
@@ -585,7 +585,7 @@ Two errors are worth recognising on sight:
 |---|---|
 | `events.cross-session-parent-not-root` | Pointed a mid-session event at another session. Only `session-start` may cross; re-anchor the chain locally. |
 | `events.unknown-causal-session` | Named a session with no log at all — nearly always a typo'd session id, since the message prints the path it looked for. |
-| `events.session-already-started` | Ran `smith session start` on a session that already has a log. A log has one root; the message names the last event in it, which is the `--causal-parent` you wanted. |
+| `events.session-already-started` | Ran `bs session start` on a session that already has a log. A log has one root; the message names the last event in it, which is the `--causal-parent` you wanted. |
 
 **Read `on_timeline` on every append receipt.** `event_type` is a free string
 here on purpose: a closed list at write time would reject an event nobody had
@@ -597,7 +597,7 @@ what used to be missing was any word to you that your event had landed on the
 far side of the line. So the receipt now says so, and stderr says it louder:
 
 ```
-$ smith event append '{"session_id":"sess-1","actor":"operator",
+$ bs event append '{"session_id":"sess-1","actor":"operator",
     "event_type":"plan-approved","plan_version":1,"causal_parent":"sess-1#0","payload":{}}'
 warning: event_type "plan-approved" is not read by the operator timeline. sess-1#1 is
 written and durable, but timeline() filters it out under every filter. …
@@ -608,7 +608,7 @@ The same receipt covers the other thing this side cannot refuse: a
 `session-start` appended into a log that already has a root. `causal_parent:
 null` is precisely what the rule permits, so the write is valid and durable —
 but `event lineage` and the timeline both take the *first* root, so nothing
-will ever read the second one. stderr says so and points at `smith session
+will ever read the second one. stderr says so and points at `bs session
 start`, which is the side that can refuse.
 
 Exit stays 0 — the write succeeded, and refusing it is exactly what the open
@@ -621,19 +621,19 @@ matching entry in the event-type lint, which will demand a reason.
 
 ### Following a log as it grows — `--follow`
 
-`smith event tail` answers and exits, which is the right shape for a question
+`bs event tail` answers and exits, which is the right shape for a question
 and the wrong one for a wave you are watching. `--follow` prints the backlog
 and then keeps printing, a record at a time, until you interrupt it:
 
 ```bash
 # The last 20 records, then every record after them, as they land.
-smith event tail epic-7-session-2 --follow
+bs event tail epic-7-session-2 --follow
 
 # Scoped exactly like the one-shot form: the epic, one task, a wider window.
-smith event tail epic-7-session-2 --lineage --task task-4 --n 50 --follow
+bs event tail epic-7-session-2 --lineage --task task-4 --n 50 --follow
 
 # One record per line is one record per reader.
-smith event tail epic-7-session-2 --follow |
+bs event tail epic-7-session-2 --follow |
   jq -c 'select(.record.event_type == "gate_result")'
 ```
 
@@ -649,15 +649,15 @@ and it remembers the record *ids* it has printed rather than a count:
 `--lineage` merges several logs by timestamp, so a record appended now can
 sort **behind** one already on your screen, and a stream cannot un-print. ^C
 ends it. So does the reader going away, the way it ends `tail -f`:
-`smith event tail … --follow | head -5` finds the closed pipe on the next
+`bs event tail … --follow | head -5` finds the closed pipe on the next
 record it would have printed, and exits 0 then rather than writing an error
 line.
 
 The daemon is the other half of this: `--follow` watches one log as it is
-written, and `smith daemon run` watches every log for the things that only a
+written, and `bs daemon run` watches every log for the things that only a
 fold can see (§11 of [lessons and the daemon](lessons-and-daemon.md)).
 
-## 5c. `smith coverage check` — evidence that names the file the criterion names
+## 5c. `bs coverage check` — evidence that names the file the criterion names
 
 A coverage check that exits 0 is not, by itself, evidence about any particular
 file. The v8 text reporter **suppresses rows for files at 100% on every
@@ -680,7 +680,7 @@ reporter: ['text', 'text-summary', 'json-summary'],
 The same evidence, without staging a gate run:
 
 ```bash
-smith coverage check <worktree-dir> [--plan <plan.json> --task <task-id>] [--summary <path>]
+bs coverage check <worktree-dir> [--plan <plan.json> --task <task-id>] [--summary <path>]
 ```
 
 Real output, run at this repo's root after `pnpm exec vitest run coverage.test --coverage`:
@@ -728,7 +728,7 @@ machine-readable artifact is the D-40 condition itself. The fix is one line in
 coverage check is untouched by any of this: no evidence field, no event, no
 block.
 
-## 5d. `smith results record` — projecting a Result with no gate to run it through
+## 5d. `bs results record` — projecting a Result with no gate to run it through
 
 Not every worker gets a worktree to certify or tests to run.
 `.claude/skills/bs/wave.md`'s tester (step 5) returns a `Result` with
@@ -736,11 +736,11 @@ Not every worker gets a worktree to certify or tests to run.
 artifacts never reached the projector (the `${event_id}#${index}` rows the UI
 reads).
 
-`smith results record` is the schema-check → task-result-recorded →
+`bs results record` is the schema-check → task-result-recorded →
 artifact-check third of `gate run`, exposed on its own:
 
 ```bash
-smith results record --task epic-1/task-1 --result result.json \
+bs results record --task epic-1/task-1 --result result.json \
   --agent tester --provider claude --model-tier mid \
   --session <session-id> --plan-version 1 --causal-parent <event-id>
 ```

@@ -84,7 +84,7 @@ pnpm test:ui       # UI vitest
 pnpm test:server   # server vitest (runs build:server first)
 ```
 
-`pnpm install` runs `prepare`, which builds the orchestrator — so `smith` is
+`pnpm install` runs `prepare`, which builds the orchestrator — so `bs` is
 on `node factory/orchestrator/dist/cli.js` from a fresh clone without a
 separate build step.
 
@@ -149,11 +149,11 @@ has a section per change kind. The map:
 
 Committed does not mean hand-editable. These are outputs:
 
-- `factory/policies/lessons.md` — written by `smith lessons compile`.
+- `factory/policies/lessons.md` — written by `bs lessons compile`.
 - `ui/e2e/__screenshots__/**.png` — written by `pnpm test:e2e`. Commit only
   the ones your change actually altered; revert the rest.
-- `factory/specs/roadmap.md` milestone rows touched by `smith new` /
-  `smith mcp init`.
+- `factory/specs/roadmap.md` milestone rows touched by `bs new` /
+  `bs mcp init`.
 
 And these are runtime state, gitignored, never hand-edited, safe to delete:
 `state/`, `workspaces/`, `.agents/generated/` ([`AGENTS.md`](AGENTS.md)
@@ -231,7 +231,7 @@ Do not open a public issue for a vulnerability — see
 
 Never commit a secret. `.env.example` is the only committed env file and it
 carries a secret's variable **name**, never its value (only the non-secret
-`SMITH_*` tuning knobs carry a value: their shipped default). The event logger redacts
+`BS_*` tuning knobs carry a value: their shipped default). The event logger redacts
 credential-shaped strings before write; do not rely on that instead of not
 writing them.
 

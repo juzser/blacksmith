@@ -4,7 +4,7 @@ One part of [the operator guide](../operator-guide.md). Section numbers
 are the guide's, not this file's: `§5` means the same thing here as it
 does wherever else this repo cites it.
 
-## 7. `smith plan quorum` + `smith epic verdict`
+## 7. `bs plan quorum` + `bs epic verdict`
 
 The gate raises its own quorum cases; these two are the ones you invoke.
 Both rest on a quorum whose reach is a fact about your box.
@@ -15,12 +15,12 @@ the only configuration that reaches `min_providers: 2`. Hold one of the two
 and the gating pool is a pool of one once the finder is excluded: no
 quorum, no second gating `judge-verdict` row, and the outcome rests on the
 native verdict alone (`docs/runbooks/providers.md`). Hold neither and no
-external runs at all. `smith judge preflight` says beforehand whether a
+external runs at all. `bs judge preflight` says beforehand whether a
 provider you switched on can be called at all, and
-`SMITH_CROSSCHECK_OFFLINE=1` forces every external off for one command.
+`BS_CROSSCHECK_OFFLINE=1` forces every external off for one command.
 
 ```bash
-smith plan quorum --plan <draft.json> --plan-version 1 \
+bs plan quorum --plan <draft.json> --plan-version 1 \
   --session <session-id> --causal-parent <event-id> [--confidence 0.7] \
   [--out <file>]
 ```
@@ -75,7 +75,7 @@ fail-closed case — exactly one active external provider can never form a
 quorum, because `finder_ne_critic` excludes the native claimant.
 
 ```bash
-smith epic verdict --epic epic-1 --project ../my-project \
+bs epic verdict --epic epic-1 --project ../my-project \
   --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
@@ -93,15 +93,15 @@ final — an epic with non-terminal tasks or open blocking findings is
 ```
 
 Exit 1 means `hold` — the epic is not ready, so the PR waits. Its events
-are stamped with the reserved `<epic>/integration` ref; `smith plan
+are stamped with the reserved `<epic>/integration` ref; `bs plan
 quorum`'s use `<epic>/plan-v<n>`. Neither ref is a task, and neither ever
 shows up as a kanban card.
 
 `--project` is required, and the reason is the whole of §7a below: the
-verdict reads the current head of `smith/<epic>/integration` so it can tell
+verdict reads the current head of `bs/<epic>/integration` so it can tell
 whether the recorded integration-root check still covers the branch.
 
-## 7a. `smith integration check` — the only command that sees the branch
+## 7a. `bs integration check` — the only command that sees the branch
 
 Every gate in this factory runs inside a task worktree. Schema, tests, lint,
 review: all of them are claims about a worktree, none about the branch those
@@ -113,14 +113,14 @@ happened because a human typed it.
 This is that run, made a logged fact:
 
 ```bash
-git -C ../my-project checkout smith/epic-1/integration
-smith integration check --epic epic-1 --project ../my-project \
+git -C ../my-project checkout bs/epic-1/integration
+bs integration check --epic epic-1 --project ../my-project \
   --checks checks.json \
   --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
 `checks.json` is the same `[{"name":..., "cmd":..., "timeout_ms":...}]` shape
-`smith gate run --checks` takes, `timeout_ms` included (optional, per check,
+`bs gate run --checks` takes, `timeout_ms` included (optional, per check,
 overrides the shared five-minute default, at most 2147483647). Unlike the task gate, every check
 runs even after one fails (`--run-all false` opts back into
 short-circuiting) — closing an epic, you want the whole picture in one pass.
@@ -132,16 +132,16 @@ your working tree for you is not this command's business), and a dirty tree
 (the checks would certify something that is not the branch).
 
 ```json
-{"epicId":"epic-1","branch":"smith/epic-1/integration","headSha":"8962df9...","pass":false,"results":[{"name":"lint","pass":false,"exitCode":1,"tail":"Found a nested root configuration..."}],"eventId":"sess-1#42","ts":"2026-08-07T09:00:00.000Z"}
+{"epicId":"epic-1","branch":"bs/epic-1/integration","headSha":"8962df9...","pass":false,"results":[{"name":"lint","pass":false,"exitCode":1,"tail":"Found a nested root configuration..."}],"eventId":"sess-1#42","ts":"2026-08-07T09:00:00.000Z"}
 ```
 
 Exit 1 means the assembled branch is broken; raise a finding and fix it as a
 task. The record is pinned to the head sha it ran against, so a merge landing
-afterwards makes it stale — and `smith epic verdict` then holds with
+afterwards makes it stale — and `bs epic verdict` then holds with
 `is stale: it ran against <sha>, and … is now at <sha>` rather than trusting
 a green that has outlived its truth.
 
-## 7b. `smith epic close` — the verdict, written down
+## 7b. `bs epic close` — the verdict, written down
 
 `epic verdict` is a probe: free, read-only, re-runnable, and it writes nothing
 in the default zero-cost configuration. That is deliberate, and it left the
@@ -151,7 +151,7 @@ verdict was ever run (D-43). `epic close` is the verb that makes the close a
 fact.
 
 ```bash
-smith epic close --epic epic-1 --project ../my-project \
+bs epic close --epic epic-1 --project ../my-project \
   --session <session-id> --plan-version <n> --causal-parent <event-id>
 ```
 
@@ -187,7 +187,7 @@ the same lineage the verdict already read:
 
 `widest` reads "4 tasks admitted at the widest, 1 ever in flight at once" —
 which is the shape of an epic that declared parallelism and then ran its plan
-one task at a time. `smith wave audit` could always say that, and `smith wave
+one task at a time. `bs wave audit` could always say that, and `bs wave
 schedule` could say it before the run, but both are commands somebody has to
 remember to type against a state dir that outlives nothing; the close is the
 one moment no epic skips. `null` here means nobody measured — it is projected
@@ -202,7 +202,7 @@ is a wave in `unobserved` — tasks that were admitted with no dispatch on recor
 at all, which is a declaration with no work behind it.
 
 Because it never blocks, nothing about measuring it is allowed to block either.
-`smith wave audit` *refuses* a `wave-admitted` event that names no tasks, which
+`bs wave audit` *refuses* a `wave-admitted` event that names no tasks, which
 is right for the command whose whole job is to judge that record; here the same
 refusal would take down the close over a fact that decides nothing. So it is
 caught and reported instead, in `problem`:
@@ -214,7 +214,7 @@ caught and reported instead, in `problem`:
 Read those zeros as *nobody counted*, not as *nothing happened*: when `problem`
 is set the counts beside it were never measured. The judge is told the record
 could not be read rather than handed a confident `Waves admitted: 0`, and the
-epic still closes. Fix the malformed event and the next `smith epic verdict`
+epic still closes. Fix the malformed event and the next `bs epic verdict`
 reads it — the close does not need re-running to learn the width, because the
 width was never what the close turned on.
 
@@ -225,7 +225,7 @@ minting a fresh log whose first line is "this epic is closed" (D-45):
 {"error":{"code":"epic.unknown-session","message":"Refusing to close \"epic-doc\" against session \"no-such\", which has no event log: the close would be the first line of a log nobody is reading.","details":{"epicId":"epic-doc","sessionId":"no-such"}}}
 ```
 
-After `smith db apply`, the epic leaves `epicsInFlight` and appears in
+After `bs db apply`, the epic leaves `epicsInFlight` and appears in
 `closedEpics` — including in the override case above, where the epic's own task
 is still `todo`:
 
@@ -236,11 +236,11 @@ is still `todo`:
 A closed epic stays selectable in the Kanban and Flow epic pickers — a close
 makes the board historical, not unreachable.
 
-One close speaks for one epic. `smith epic width` (§7f) reads every close in
+One close speaks for one epic. `bs epic width` (§7f) reads every close in
 the state dir back and answers the question no single close can — whether this
 factory builds in parallel, or has been narrow all along.
 
-## 7c. `smith epic spec-review` — reading the plan against the code that exists
+## 7c. `bs epic spec-review` — reading the plan against the code that exists
 
 The spec-reviewer runs before the code is written, which is the only time it
 can stop a bad plan cheaply — and the only time it cannot possibly see the
@@ -249,7 +249,7 @@ that two criteria contradicted each other. So there is a second dispatch, at
 epic close, against composite behaviour:
 
 ```bash
-smith epic spec-review --epic epic-1 --project ../my-project \
+bs epic spec-review --epic epic-1 --project ../my-project \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --reviewed-by spec-reviewer [--reviewed-by-provider anthropic:claude-opus-5] \
   (--evidence spec-findings.json | --no-findings) \
@@ -264,14 +264,14 @@ review that ran outside the factory, and the event records it as
 passing both with `cli.incompatible-flags`: an absent `--evidence` used to read as a clean
 review, which is how a reviewer that never wrote its file closed clean.
 
-It reads the head of `smith/<epic>/integration` itself and pins the record to
+It reads the head of `bs/<epic>/integration` itself and pins the record to
 it — like `integration check`, and for the same reason: a review is evidence
 about the commit it read and nothing else. With no such branch it **refuses**
 (`cli.no-integration-branch`), because a review pinned to a head nobody could
 read is a review nothing can be shown to cover.
 
 The event is written even when the evidence is empty. "Ran and was clean,"
-"never ran," and "the tier waived it" are three different facts, and `smith
+"never ran," and "the tier waived it" are three different facts, and `bs
 epic verdict` keeps them apart: an epic with no closing spec review on
 record is **held**, unless its effort tier is `small` (§0a) and the live
 plan is still v1 — never amended, so never shown a defect a review would
@@ -295,9 +295,9 @@ with no readable plan file casts no plan vote at all, the same scope line
 plan directory, and holding them on an absent file would make them unclosable.
 
 It exits **0 even when it raises findings**: the review ran, and what it found
-blocks the plan, not this command. `smith plan amend` (§6a) is what answers it,
+blocks the plan, not this command. `bs plan amend` (§6a) is what answers it,
 and the amended plan then needs a fresh review, because the version this one
-read no longer exists — `smith epic verdict` holds the epic until that fresh
+read no longer exists — `bs epic verdict` holds the epic until that fresh
 review lands:
 
 ```
@@ -306,7 +306,7 @@ epic's live plan is v5. Whatever the amendment changed has been reviewed
 against no spec at all.
 ```
 
-## 7d. `smith crossfind` — a second eye, not a second vote
+## 7d. `bs crossfind` — a second eye, not a second vote
 
 Everything in §7 is **subtractive**. A quorum is handed a claim the native
 reviewer already raised and asked whether it survives; the strongest thing it
@@ -315,13 +315,13 @@ cannot reach a bug the native reviewer's context never surfaced — nothing
 outside that context is asked to look.
 
 `independent_finder` in `crosscheck.yml` is the other direction, and
-`smith crossfind` is how you drive it. A finder on a different vendor reads
+`bs crossfind` is how you drive it. A finder on a different vendor reads
 the diff in a fresh context and returns its own evidence; the two lists are
 then reconciled.
 
 ```bash
-smith crossfind run --task epic-1/task-1 \
-  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
+bs crossfind run --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref bs/epic-1/integration...task-1 \
   --session <id> --plan-version <n> --causal-parent <event-id>
 ```
 
@@ -367,18 +367,18 @@ package.
 See the exact bytes first:
 
 ```bash
-smith crossfind request --task epic-1/task-1 \
-  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1
+bs crossfind request --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref bs/epic-1/integration...task-1
 ```
 
 It prints the `JudgeRequest` and sends nothing. With `send_diff: false` it
 refuses — and that refusal is the useful answer, because it tells you the
 switch is still off.
 
-`smith crossfind reconcile --task <id> --native <findings.json> --independent
+`bs crossfind reconcile --task <id> --native <findings.json> --independent
 <runs.json>` does the reconciliation over two files you already have: no
 provider, no cost, no event. It is pure, so it answers under
-`SMITH_CROSSCHECK_OFFLINE` as well.
+`BS_CROSSCHECK_OFFLINE` as well.
 
 `run` and `reconcile` exit **1 when the result would change a gate**, which
 under `mode: shadow` is never, because nothing it says applies. Both write
@@ -394,7 +394,7 @@ voting on a claim, so one provider is enough to raise — §7's fail-closed
 "one active provider changes nothing" is a property of the quorum rule, not
 of this block.
 
-## 7e. `smith epic goal-check` — the plan against the goal it was cut from
+## 7e. `bs epic goal-check` — the plan against the goal it was cut from
 
 Every gate up to here reads text the planner produced. The spec review reads
 the plan; the task gates read the diffs the plan asked for; the epic verdict
@@ -407,7 +407,7 @@ The spec-vs-goal check reads the one reference the planner did not write: the
 list first — the split is done here, not left to the judge:
 
 ```bash
-smith epic goal --epic epic-1 [--roadmap-path factory/specs/roadmap.md]
+bs epic goal --epic epic-1 [--roadmap-path factory/specs/roadmap.md]
 ```
 
 ```json
@@ -423,7 +423,7 @@ It writes nothing — no event, no finding. Hand a judge the clause list and the
 plan, take back one verdict per clause, in the goal's order, and record it:
 
 ```bash
-smith epic goal-check --epic epic-1 \
+bs epic goal-check --epic epic-1 \
   --plan factory/specs/active/epic-1/plan-v1.json \
   --coverage /tmp/coverage.json \
   --checked-by spec-reviewer [--checked-by-provider google:gemini-2.5-pro] \
@@ -446,7 +446,7 @@ tasks — a clause credited to a task the plan does not have is refused
 (`goal-check.unknown-task`), because a clause delivered by a task that does not
 exist is a clause nothing delivers. `uncovered` mints an **S2-major**
 spec-scoped finding against the plan file itself, which no task diff can close:
-`smith plan amend` (§6a) is the only answer. `out-of-scope` is the one verdict
+`bs plan amend` (§6a) is the only answer. `out-of-scope` is the one verdict
 that makes a clause disappear, so it demands a `reason` and that reason is
 printed back to the epic judge verbatim — it is what an operator most needs to
 read.
@@ -456,9 +456,9 @@ findings and then names a phantom task on the third clause writes neither
 finding and no event: a half-recorded check of a check that never finished is
 worse than no check.
 
-**This gate fails closed on a missing goal, and that is the point.** `smith
+**This gate fails closed on a missing goal, and that is the point.** `bs
 epic verdict` holds an epic with no check on record; it also holds one whose
-owning milestone states no `- goal:` line at all, and `smith epic goal-check`
+owning milestone states no `- goal:` line at all, and `bs epic goal-check`
 **refuses to run** there (`cli.no-epic-goal`) rather than record a check
 against nothing. There is deliberately no `not-required` escape hatch — the MCP
 surface gate has one because an epic can honestly owe no manifest, while "no
@@ -494,10 +494,10 @@ check ran, and what it found blocks the plan, not this command. And like it,
 the event is written even when every clause is covered: "ran and was clean" and
 "never ran" are different facts, and only the first one closes an epic.
 
-## 7f. `smith epic width` — does this factory build in parallel?
+## 7f. `bs epic width` — does this factory build in parallel?
 
 ```bash
-smith epic width [--session <session-id>] [--state-dir <dir>]
+bs epic width [--session <session-id>] [--state-dir <dir>]
 ```
 
 Reads, never writes. Every command in §2 answers half a question about one
@@ -568,7 +568,7 @@ Exit 2 with an empty `epics` list, or with every epic in `unmeasured`, is the
 state a fresh factory is in, and it says so rather than passing:
 
 ```json
-{"hint":"No close read here carried a width. Either these epics were closed before `smith epic close` recorded one, or the closes were written by hand — close a current epic with `smith epic close`, or read a live log back with `smith wave audit --session <id>`."}
+{"hint":"No close read here carried a width. Either these epics were closed before `bs epic close` recorded one, or the closes were written by hand — close a current epic with `bs epic close`, or read a live log back with `bs wave audit --session <id>`."}
 ```
 
 "Every epic closed narrow" and "no epic was ever measured" are opposite states

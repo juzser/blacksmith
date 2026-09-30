@@ -7,13 +7,13 @@ on demand knows only what is in the log, never whether anyone was reading it.
 
 ## 1. Ask the watcher
 
-`smith daemon status [--dir <dir>]`. It prints JSON and **exits 1 whenever a
+`bs daemon status [--dir <dir>]`. It prints JSON and **exits 1 whenever a
 current daemon is not watching** — that is the health check doing its job,
 not a command that failed, so never report the non-zero exit as an error.
 Four readings:
 
 - `running: false` — nothing holds the lock. A fine steady state if the
-  operator never started one (`smith daemon start` if they want one): say so
+  operator never started one (`bs daemon start` if they want one): say so
   in a clause and go to step 2, which folds the log live anyway. What you
   must not do is render `lastTick` as though it were current.
 - `stale: true` — a daemon holds the lock and has published nothing for
@@ -38,7 +38,7 @@ its own and needs no decision.
 
 ## 2. Fold the log
 
-`smith stats overview [--session <id>]`. Render the JSON as a short digest,
+`bs stats overview [--session <id>]`. Render the JSON as a short digest,
 field for field — never invent numbers the query didn't return:
 
 - **Live agents**: `liveAgents` grouped by role/model/provider,
@@ -46,9 +46,9 @@ field for field — never invent numbers the query didn't return:
   ▲/▼ note).
 - **Budget**: `tokensByEpic`, called out as "X% of the epic cap" — the cap
   for the epic's effort tier in `budgets.yml` (4M small / 16M medium / 32M
-  huge; `smith budget alarm` prints the cap it judged each epic against) — flag any epic ≥70% (`budgets.yml` `alarm_ratio`).
+  huge; `bs budget alarm` prints the cap it judged each epic against) — flag any epic ≥70% (`budgets.yml` `alarm_ratio`).
   `tokensByEpic` counts recorded spend only, so it is a floor: say "at least
-  X%", and run `smith budget alarm <session>` for the projection that prices
+  X%", and run `bs budget alarm <session>` for the projection that prices
   the dispatches nothing recorded a Result for.
 - **In flight**: `epicsInFlight`, `recentDispatches` (last 10).
 - **Alerts**: `alerts.escalations` and `alerts.pendingWaivers` — call these

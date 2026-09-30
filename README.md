@@ -125,7 +125,7 @@ provider.
 **The log is the source of truth**
 
 Every prompt, dispatch, gate result and error is an append-only event on disk.
-The dashboard is a projection of that log, and `smith db rebuild` reconstructs
+The dashboard is a projection of that log, and `bs db rebuild` reconstructs
 the entire database from the log alone. Nothing the factory did exists only in
 a chat transcript.
 
@@ -168,18 +168,18 @@ and two inside Claude Code:
 /plugin install blacksmith@blacksmith
 ```
 
-Then `smith init` in the project you want it to work on. That creates
+Then `bs init` in the project you want it to work on. That creates
 `.blacksmith/` beside your code — the event log, your epic plans, a roadmap and
-a `stack.yml` to answer — and writes nothing anywhere else; `SMITH_HOME` moves
+a `stack.yml` to answer — and writes nothing anywhere else; `BS_HOME` moves
 that root if you want one home for several projects. You now have `/bs`.
 
 **Both halves are required.** The package
 ([`@juzser/blacksmith`](https://www.npmjs.com/package/@juzser/blacksmith)) is the
-deterministic `smith` CLI; the plugin is `/bs` and the fourteen agent roles it
-dispatches. `smith` alone never gives you `/bs`, because Claude Code loads
+deterministic `bs` CLI; the plugin is `/bs` and the fourteen agent roles it
+dispatches. `bs` alone never gives you `/bs`, because Claude Code loads
 skills from a project's `.claude/`, your `~/.claude/`, or a plugin — never from
-`node_modules` — and a `/bs` with no `smith` on PATH can run nothing. Take
-`latest`: `0.1.0` predates `smith init` and keeps state inside its own install
+`node_modules` — and a `/bs` with no `bs` on PATH can run nothing. Take
+`latest`: `0.1.0` predates `bs init` and keeps state inside its own install
 directory, which the next `npm i` replaces.
 
 <details>
@@ -204,7 +204,7 @@ project's is whatever branch you have out. `claude plugin disable blacksmith`
 settles it.
 
 The dashboard is clone-only because `ui/` is in neither the tarball nor the
-plugin, so `smith ui serve` answers `ui.not-built` in an install and means it.
+plugin, so `bs ui serve` answers `ui.not-built` in an install and means it.
 Enforcement is clone-only because this repo's `.claude/settings.json` deny
 rules and its policy hook resolve paths against a checkout; the plugin ships no
 `hooks/hooks.json` and loads neither (`Hooks (0)`), since a `/bs` that asked
@@ -233,9 +233,9 @@ would rather drive it yourself, it is three commands:
 ```bash
 $EDITOR factory/policies/stack.yml   # your stack answers: language, frontend,
                                      # database, deploy target. `none` is fine.
-smith stack check                    # which answers the templates honour,
+bs stack check                       # which answers the templates honour,
                                      # which they only record, which they refuse
-smith new my-app --target-dir ~/code/my-app     # add --ui for a frontend
+bs new my-app --target-dir ~/code/my-app        # add --ui for a frontend
 ```
 
 The last call scaffolds (TS strict, Biome, Vitest, CI), installs, runs the
@@ -278,7 +278,7 @@ it is the ordinary loop: `/bs plan` against that epic, then `/bs run`, and
 closing the epic marks its findings fixed. There is no audit-specific run
 path; the command's value is the insight and the ranking.
 
-Underneath it is the `smith audit` family — `open`, `record`, `consolidate`,
+Underneath it is the `bs audit` family — `open`, `record`, `consolidate`,
 `decide`, `cut`, `resolve`, `close` — and
 [`docs/specs/audit-command-scope.md`](docs/specs/audit-command-scope.md) is the
 contract each of them keeps.
@@ -300,10 +300,10 @@ Day to day, from a Claude Code session opened in this repo:
 | `/bs lessons` | Review pending lesson candidates |
 | `/bs report` | Render the scribe's progress digest |
 
-Each of those is a playbook, not a script: the deterministic half is a `smith`
-command you can run yourself — `smith --help` lists all of them — and the
+Each of those is a playbook, not a script: the deterministic half is a `bs`
+command you can run yourself — `bs --help` lists all of them — and the
 judgment half is a Claude Code session the playbook dispatches. That is also
-the line between the two installs: the `smith` half travels in the package, the
+the line between the two installs: the `bs` half travels in the package, the
 playbooks are read from a clone.
 
 → **[The operator loop](docs/guide/operator-loop.md)** — the six steps, in the
@@ -319,7 +319,7 @@ v1. From there the loop admits a wave whose path claims do not overlap, sends
 researcher and UI/UX work ahead of code where the epic needs it, runs a coder
 and a tester in a worktree, grades the result against its own acceptance
 criteria, then puts it through the gates and a serial merge queue into
-`smith/<epic>/integration`. One epic, one integration PR, merged by you.
+`bs/<epic>/integration`. One epic, one integration PR, merged by you.
 
 → The pipeline diagram and the reasoning behind each stage:
 **[architecture §3 — The loop](docs/specs/black-smith-architecture.md#3-the-loop)**.
@@ -353,9 +353,9 @@ a public issue.
 
 ## The dashboard
 
-Optional, and deliberately small: `/bs ui` (or `smith ui serve`) binds eleven
+Optional, and deliberately small: `/bs ui` (or `bs ui serve`) binds eleven
 read-only pages to `127.0.0.1`. They are a projection of the event log and
-nothing else — `smith db rebuild` reconstructs them from it, `smith stats`
+nothing else — `bs db rebuild` reconstructs them from it, `bs stats`
 prints the same facts in a terminal, and nothing you click there dispatches an
 agent. The factory runs without ever opening it.
 
@@ -388,13 +388,13 @@ shows you. It is part of the clone, not of the package.
 
 Phases 1–9 are built and merged: loop runner, worktree engine, gates, state and
 analytics, dashboard, self-extension, cross-provider judges, hardening. Phase 10
-is half in: `smith daemon` watches the factory in the background and its ops
+is half in: `bs daemon` watches the factory in the background and its ops
 runbook is written; the hosted UI stays deferred. Beside the phases, `/bs audit`
 is built: an existing project can be read on four axes and one epic cut from
 what you accept.
 
 The CLI is on npm as `@juzser/blacksmith`, at `0.4.0` — two binaries,
-`smith` and `smith-run`, the second (since `0.2.0`) being what runs a
+`bs` and `bs-run`, the second (since `0.2.0`) being what runs a
 rendered turn on a `cli` harness such as Codex. `0.1.1` was the first version that ran beside
 you and knew it was a package, rather than out of the clone-shaped install
 `0.1.0` was. The package is the binaries and what they
@@ -426,7 +426,7 @@ version in
 | [`docs/specs/plugin-port-scope.md`](docs/specs/plugin-port-scope.md) | How `/bs` runs without a clone, and what the plugin leaves behind |
 | [`docs/guide/dashboard.md`](docs/guide/dashboard.md) | The dashboard tour |
 | [`docs/runbooks/providers.md`](docs/runbooks/providers.md) | Setting up the cross-provider judges |
-| [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `smith daemon` unattended |
+| [`docs/runbooks/ops.md`](docs/runbooks/ops.md) | Running `bs daemon` unattended |
 | [`docs/README.md`](docs/README.md) | Everything else, one line each |
 
 Agents read [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) instead — this

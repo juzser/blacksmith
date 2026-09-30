@@ -21,28 +21,29 @@ This repo is self-governing: its rules live here, not in any other repo.
 | Per-agent constraints (compiled from interview) | `docs/standards/agent-constraints.md` |
 | Guardrails: secrets/env, git, deploy (S1 on violation) | `docs/standards/guardrails.md` |
 | Policies: taxonomy, budgets, severity, worktree, crosscheck | `factory/policies/` |
-| Agent templates — one per role, for every harness: Claude Code reads them in place, `smith harness plan` hands the same file to a cli harness | `.claude/agents/` |
+| Agent templates — one per role, for every harness: Claude Code reads them in place, `bs harness plan` hands the same file to a cli harness | `.claude/agents/` |
 | Approved lessons (injected into agents) | `factory/policies/lessons.md` |
 | Loop runner + worktree engine (taxonomy/schemas/events/plan/claims/worktree/queue/cli, TS strict + Vitest) | `factory/orchestrator/` |
 | Operator console (`/bs new\|mcp\|plan\|run\|audit\|status\|ui\|waivers\|lessons\|report`) — the router; one playbook per verb beside it | `.claude/skills/bs/SKILL.md` |
 | The dispatch contract every `/bs` playbook dispatches under | `.claude/skills/bs/dispatch.md` |
 | `/bs run` — the epic tier (`run.md`) and steps 2-10, one wave, thrown away when it lands (`wave.md`) | `.claude/skills/bs/run.md`, `.claude/skills/bs/wave.md` |
 | Operator guide — the index only; the guide is one file per question under `docs/guide/operator-guide/`, and its `§` numbers are guide-wide, so read the part a cite names | `docs/guide/operator-guide.md` |
-| New-project scaffolder (`smith new`) | `factory/scaffold/`, `factory/orchestrator/src/scaffold.ts` |
-| Recheck/maintenance/growth scheduler (`smith scheduler run`) | `factory/orchestrator/src/scheduler.ts`, `factory/policies/scheduler.yml` |
-| Lessons pipeline (novelty gate, compile, `smith dream`) | `factory/orchestrator/src/lessons.ts` |
-| Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `smith judge preflight`, `smith judge run`, `smith stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
-| Who may dispatch, and what they owe for it (`smith delegation check`) | `factory/policies/delegation.yml`, `factory/orchestrator/src/delegation.ts` |
-| Which program holds a worker turn — in-process Agent tool or a `cli` harness such as Codex (`smith harness list\|plan` renders, `smith-run` starts) | `factory/policies/harness.yml`, `factory/orchestrator/src/harness.ts`, `src/runner.ts`, `docs/runbooks/harness.md` |
-| Background watcher (`smith daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
+| New-project scaffolder (`bs new`) | `factory/scaffold/`, `factory/orchestrator/src/scaffold.ts` |
+| Recheck/maintenance/growth scheduler (`bs scheduler run`) | `factory/orchestrator/src/scheduler.ts`, `factory/policies/scheduler.yml` |
+| Lessons pipeline (novelty gate, compile, `bs dream`) | `factory/orchestrator/src/lessons.ts` |
+| Cross-provider judges (Codex/DeepSeek transports, quorum, shadow-mode calibration; `bs judge preflight`, `bs judge run`, `bs stats providers`) | `factory/orchestrator/src/providers/`, `src/quorum.ts`, `src/crosscheck.ts`, `factory/policies/crosscheck.yml`, `docs/runbooks/providers.md` |
+| Who may dispatch, and what they owe for it (`bs delegation check`) | `factory/policies/delegation.yml`, `factory/orchestrator/src/delegation.ts` |
+| Which program holds a worker turn — in-process Agent tool or a `cli` harness such as Codex (`bs harness list\|plan` renders, `bs-run` starts) | `factory/policies/harness.yml`, `factory/orchestrator/src/harness.ts`, `src/runner.ts`, `docs/runbooks/harness.md` |
+| Background watcher (`bs daemon run\|start\|status\|stop`) — folds the log on an interval, never dispatches | `factory/orchestrator/src/daemon.ts`, `docs/runbooks/ops.md` |
 | Which spec is a contract, a scope, or a record of the past — the records (`D-nnn`, `P9-n`, `FD-n`) are cited by id and never loaded whole | `docs/specs/README.md` |
 | Everything else under `docs/` and `factory/policies/` — one line per file, with who it is for | `docs/README.md` |
 
 ## Operating rules
 
-- **Branches.** All work on `smith/<epic>/integration` integration branches
-  (git ref constraint: `smith/<epic>` cannot coexist with
-  `smith/<epic>/<task-id>`); tasks on `smith/<epic>/<task-id>`. Never push to
+- **Branches.** All work on `bs/<epic>/integration` integration branches
+  (git ref constraint: `bs/<epic>` cannot coexist with
+  `bs/<epic>/<task-id>`); tasks on `bs/<epic>/<task-id>`. An epic opened
+  before the `bs` rename keeps its `smith/` prefix to the end. Never push to
   `main`; `main` changes only via a reviewed PR. Never force-push at all — a
   branch you have pushed is append-only, and republishing rewritten history
   is the operator's call, not an agent's.
@@ -51,7 +52,7 @@ This repo is self-governing: its rules live here, not in any other repo.
   worktree is a sibling of the project directory rather than a child of it
   (D-42), so it follows the project wherever that directory is: the shape is
   always `<project-parent>/.wt/<project>/<task-id>`, which for a project
-  beside this repo — where `smith new` puts one — is outside this repo too.
+  beside this repo — where `bs new` puts one — is outside this repo too.
 - **Load-bearing rules.** Ten invariants in `docs/specs/black-smith-architecture.md`
   §18 are the ones a change may not break. They are not style: each names the
   module that breaks and the claim the factory stops being able to make. A diff

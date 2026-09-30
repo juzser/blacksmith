@@ -5,4 +5,4 @@ implementation itself lives at
 [`factory/orchestrator/src/scheduler.ts`](../orchestrator/src/scheduler.ts)
 (TS strict + Vitest project rootDir, per `tsconfig.json`) alongside the rest
 of the loop runner. Policy knobs: [`factory/policies/scheduler.yml`](../policies/scheduler.yml).
-CLI: `smith scheduler run [--dry] [--project <dir>]`.
+CLI: `bs scheduler run [--dry] [--project <dir>]`.

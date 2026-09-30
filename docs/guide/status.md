@@ -18,19 +18,19 @@ dashboard's Roadmap page parses.
 | 2. Skeleton + contracts | Repo layout, JSON Schemas, taxonomy, 12 agent templates | Built, merged |
 | 3. Loop runner + worktree engine | Plan versions, claims validation, worktree lifecycle, serial merge queue, event log | Built, merged |
 | 4. Gates | Schema check, test gate, severity policy, waiver flow (CLI) | Built, merged |
-| 5. State + analytics | SQLite projections, `smith db` / `smith stats` | Built, merged |
+| 5. State + analytics | SQLite projections, `bs db` / `bs stats` | Built, merged |
 | 6. UI | Overview, Timeline, Kanban, Roadmap, Flow, Lessons, Errors, Analytics | Built, merged |
 | 7. Self-extension | Scaffolder, `/bs` operator skill, scheduler, lessons compilation | Built, merged |
 | 8. Cross-provider judges | Codex/DeepSeek adapters, quorum policy, shadow-mode calibration, an independent finder that can raise a finding and not only drop one | Built, merged — ships `codex: enabled: auto, mode: active` and `deepseek: enabled: auto, mode: active` (deepseek promoted out of shadow 2026-09-14); a box that resolves both reaches `min_providers: 2`, a box that resolves one does not |
 | 9. Hardening | Escalation ladders, budget alarms, same-mistake KPI, MCP surface standard, prompt-injection fencing, cross-session event edges | Built, merged |
-| 10. Deployment + ops | A background watcher (`smith daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
+| 10. Deployment + ops | A background watcher (`bs daemon`) and its ops runbook; a Cloudflare port of the UI | Watcher + runbook built; the Cloudflare port stays deferred |
 
 Two things sit beside the phases rather than inside one. **`/bs audit`** is
 built: an existing project is read on four axes from a detached worktree,
 the findings are ranked, the operator decides at a hard stop, and one epic is
 cut — [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md)
 is the contract. And the **CLI is on npm** as `@juzser/blacksmith`: the
-`smith` binary and everything it reads at runtime — policies, schemas,
+`bs` binary and everything it reads at runtime — policies, schemas,
 scaffold templates, agent role files, migrations. Not the dashboard and not
 the docs. **`/bs` ships beside it, as a plugin**, because it is a Claude Code
 skill and a session looks for one in a project's `.claude/`, in `~/.claude/`
@@ -42,16 +42,16 @@ same `.claude/` a clone uses. Install both halves — the package is the
 deterministic verbs, the plugin is the loop that drives them. What the plugin
 deliberately does not carry is the dashboard and this repo's own enforcement;
 [`../specs/plugin-port-scope.md`](../specs/plugin-port-scope.md) is the
-record. Installed, `smith`
+record. Installed, `bs`
 writes under `.blacksmith/` in the directory you run it from, or wherever
-`SMITH_HOME` points — true of every release since `0.1.1`; the registry
+`BS_HOME` points — true of every release since `0.1.1`; the registry
 carries `0.4.0`.
-`0.1.0`, the release before it, predates `smith init`, ships no roadmap for
-`smith new` to read, and keeps state inside its own install directory.
+`0.1.0`, the release before it, predates `bs init`, ships no roadmap for
+`bs new` to read, and keeps state inside its own install directory.
 
 ## The five things to know before you rely on it
 
-**1. The daemon watches; it does not drive.** `smith daemon` (Phase 10) runs
+**1. The daemon watches; it does not drive.** `bs daemon` (Phase 10) runs
 in the background and tells you what the factory needs — budget alarms, agents
 that never came back, rechecks and cadences that are due — so knowing no longer
 requires an open session. Running still does: `/bs run <epic>` is a playbook
@@ -63,14 +63,14 @@ from the CLI. An always-on loop that *dispatches* is not built, and is not a
 line the daemon is allowed to cross. See
 [`../runbooks/ops.md`](../runbooks/ops.md).
 
-**2. Some checks only run when you run them.** `smith integration check` is
+**2. Some checks only run when you run them.** `bs integration check` is
 the only check that sees the *assembled* integration branch, and it is
 operator-invoked. Same for the closing spec review, with one carve-out: at
 effort tier `small` (§0a), a plan still at v1 — never amended — waives it
 outright, and the verdict records that as a skip rather than a hold (see
-[operator-guide §7c](operator-guide/closing-an-epic.md#7c-smith-epic-spec-review--reading-the-plan-against-the-code-that-exists)).
+[operator-guide §7c](operator-guide/closing-an-epic.md#7c-bs-epic-spec-review--reading-the-plan-against-the-code-that-exists)).
 Skipping either check when the tier didn't waive it no longer buys a green
-epic — `smith epic verdict` holds without them — but nothing runs them on
+epic — `bs epic verdict` holds without them — but nothing runs them on
 your behalf.
 
 **3. Two cross-provider judges run, and both of them vote.**
@@ -90,11 +90,11 @@ escalates with that vendor's rationale attached instead of being decided.
 `auto` on both keeps the file honest on every box: no binary and no key
 means no external judge and nothing to edit. The key may live in this clone's gitignored `.env`, which
 the CLI reads at start and never lets override one already exported.
-`smith judge preflight` says beforehand which of the two this box can reach.
+`bs judge preflight` says beforehand which of the two this box can reach.
 See [`../runbooks/providers.md`](../runbooks/providers.md).
 
 **4. The epic cap blocks at admission; nothing stops a dispatch mid-flight.**
-`smith wave check` now refuses to admit a wave whose declared cost will not
+`bs wave check` now refuses to admit a wave whose declared cost will not
 fit under the epic's remaining headroom in
 [`budgets.yml`](../../factory/policies/budgets.yml), and refuses one that
 would put more tasks in flight than `max_in_flight_tasks` allows. That is the
@@ -107,7 +107,7 @@ What is still true: the per-task token cap is *designed* to report
 rather than block — a self-policed cap becomes pressure on the work being
 measured — and the loop runner does not hard-stop a dispatch that is already
 running, at either cap. An epic can still cross its cap by overrunning inside
-an admitted wave; `smith budget alarm` and `smith escalation check` are what
+an admitted wave; `bs budget alarm` and `bs escalation check` are what
 tell you, after the fact.
 
 **5. A worker can argue with the spec, but only you can change it.** A plan
@@ -116,7 +116,7 @@ What is new is the third exit: a worker that finds the criterion itself wrong
 stops and returns a `spec_change_request` — the criterion, the assumption it
 makes, the evidence against it, the diff it proposes, and every other site with
 the same shape. That is a *proposal*. It moves no plan file, and no worker,
-judge or scheduler can approve it: `smith plan approve` is an operator command,
+judge or scheduler can approve it: `bs plan approve` is an operator command,
 and approving is what calls `plan amend` with no guard relaxed. An unanswered
 proposal is a queue item the daemon reports, and a blocking one is a stalled
 task. See

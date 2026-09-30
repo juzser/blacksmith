@@ -34,7 +34,7 @@ The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
 This is checked, not trusted: the dispatcher fingerprints the worktree before
-you start and re-checks it after you return (`smith worktree verify`). A tree
+you start and re-checks it after you return (`bs worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
@@ -115,7 +115,7 @@ as invalid.
 
 ## What the gate does with this file
 
-`smith gate run --grader <file>` reads it, ahead of the test gate
+`bs gate run --grader <file>` reads it, ahead of the test gate
 (`docs/guide/operator-guide/queue-and-gate.md` §5). The verdict is read from
 `.structured_output`, so a file that puts it anywhere else blocks the gate
 rather than being ignored. Any

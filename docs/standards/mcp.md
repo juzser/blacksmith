@@ -20,9 +20,9 @@ is the alternative: **one file an operator reads to know exactly what an
 agent can do with this project**, and a server that cannot do anything the
 file does not admit.
 
-The surface is due at the *end* of a project, not at `smith new`. Scaffolding
+The surface is due at the *end* of a project, not at `bs new`. Scaffolding
 it on day one would produce a manifest declaring nothing — a rubber stamp,
-which is the failure mode this standard exists to prevent. `smith mcp init`
+which is the failure mode this standard exists to prevent. `bs mcp init`
 is therefore its own command, run when the tools are known.
 
 ## Protocol
@@ -133,7 +133,7 @@ Read-only is the default and the only class that ships without a signature.
 
 ## Enforcement
 
-1. **`smith mcp init <project>`** layers `factory/scaffold/mcp/` onto an
+1. **`bs mcp init <project>`** layers `factory/scaffold/mcp/` onto an
    already-scaffolded project (`src/mcp/`, `test/mcp/`, root
    `mcp.manifest.json`, plus an `mcp:serve` script and the SDK dependency),
    and appends the `<project> — mcp surface` milestone to
@@ -157,13 +157,13 @@ Read-only is the default and the only class that ships without a signature.
    the standard states and nothing enforces — see step 4 for why the
    epic-close gate is the wrong host, and `dogfood-mcp-close.md`'s D-115 for
    the gate that would be the right one.
-3. **`smith mcp check <project>`** renders the verdict — `checkManifest()`'s
+3. **`bs mcp check <project>`** renders the verdict — `checkManifest()`'s
    violations plus MCP-M1/M2 — as `{ rule, path, message }` with the ids
    above, and **exits 1 when any of them fire** so CI needs no output parsing.
    A project with no `mcp.manifest.json` at all is refused
    (`mcp.no-surface`), not reported as a red: "your surface is broken" and
    "you have no surface" are different answers, and collapsing them would let
-   `smith mcp init` be skipped and then waived away as one more violation.
+   `bs mcp init` be skipped and then waived away as one more violation.
 
    **Which checkout it grades** (D-133): `--target-dir` if given, else the
    checkout the caller is standing in — `<root>/<project>` or any
@@ -176,10 +176,10 @@ Read-only is the default and the only class that ships without a signature.
    epic the two
    checkouts hold different manifests, and an `ok: true` that does not say
    which file it parsed is not a verdict about the work under review.
-4. **`smith epic close` refuses while the check is red** for an epic under
+4. **`bs epic close` refuses while the check is red** for an epic under
    the `mcp surface` milestone. An epic counts as under it when the
    milestone's `epics:` list names it **or** when the epic id equals the
-   milestone id — the convention `smith mcp init` sets up, so a project that
+   milestone id — the convention `bs mcp init` sets up, so a project that
    never hand-edited its roadmap is still gated. The match is deliberately not
    "every epic in the project": the gate belongs to the epic that owes the
    surface, and widening it would block unrelated epics — including ones that
@@ -211,14 +211,14 @@ Read-only is the default and the only class that ships without a signature.
 Step 4 was in place but **unreachable** from the day it shipped until
 2026-08-13. `registerMcpMilestone()` wrote `- epics: []` and
 `resolveMcpSurface()` decided the surface was due by looking for the epic in
-that list, so it matched nothing and `smith epic close` skipped the MCP gate
+that list, so it matched nothing and `bs epic close` skipped the MCP gate
 for every project — silently, since a not-required surface is a legitimate,
-unremarkable state. It surfaced in the second dogfood: `smith epic close
+unremarkable state. It surfaced in the second dogfood: `bs epic close
 --epic envkit-mcp-surface` refused on eleven blockers and not one of them was
 an MCP rule. The suite had been green throughout, because every test handed
 `resolveMcpSurface()` an `epics: [...]` written by hand — the writer and the
 reader were each covered, and nothing composed them. That composition is now
-`test/mcp.test.ts`'s "fires for the epic the milestone `smith mcp init`
+`test/mcp.test.ts`'s "fires for the epic the milestone `bs mcp init`
 actually writes", alongside one test pinned to this repo's own shipped
 roadmap. **A gate whose applicability is decided by a field the tool
 initializes to the disabling value is off, however carefully the rest of it is
@@ -226,7 +226,7 @@ written** — and the tests that would have caught it are the ones that run the
 two halves together.
 
 `checkManifest` is
-deliberately pure and filesystem-free so that `smith mcp check` and the
+deliberately pure and filesystem-free so that `bs mcp check` and the
 epic-close gate render identical *manifest* verdicts — a gate that needs a
 working directory behaves differently in CI than on a laptop. The two verdicts
 are identical on the manifest and differ by design on the roadmap: only the
@@ -245,7 +245,7 @@ which is why MCP-P3 forbids depending on either today.
 whose `LATEST_PROTOCOL_VERSION` is `2026-07-28`, bump `MCP_PROTOCOL_REVISION`
 in `factory/orchestrator/src/mcp.ts`, the `const` in
 `factory/specs/schema/mcp-manifest.schema.json`, and the scaffold manifest —
-one commit, three files. Existing projects fail `smith mcp check` on MCP-P1
+one commit, three files. Existing projects fail `bs mcp check` on MCP-P1
 until they bump too, which is the intended pressure: a pin that nobody is
 forced off is a pin that rots.
 

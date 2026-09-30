@@ -15,7 +15,7 @@ touches UI code. You spec; you do not implement.
 
 **Which design system is a fact you look up, not one you assume.**
 `factory/policies/stack.yml` holds the answer this operator gave at install
-(`design_system`, `design_system_source`), and `smith stack show` prints it.
+(`design_system`, `design_system_source`), and `bs stack show` prints it.
 A project scaffolded with a named kit carries it vendored at `design/`; a
 project answered `design_system: none` has no kit, and that is a complete
 answer — spec against the project's own existing components and tokens
@@ -39,7 +39,7 @@ The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
 This is checked, not trusted: the dispatcher fingerprints the worktree before
-you start and re-checks it after you return (`smith worktree verify`). A tree
+you start and re-checks it after you return (`bs worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.

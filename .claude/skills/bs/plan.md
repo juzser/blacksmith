@@ -11,8 +11,8 @@ one — and it scales steps 3–4 below plus most of `/bs run`. Ask, do not
 recall:
 
 ```bash
-smith effort show --effort <small|medium|huge>   # no plan file exists yet
-smith effort show --plan factory/specs/active/<epic>/plan-vN.json
+bs effort show --effort <small|medium|huge>      # no plan file exists yet
+bs effort show --plan factory/specs/active/<epic>/plan-vN.json
 ```
 
 `profile` is what this epic buys, and every step below that a tier touches
@@ -49,7 +49,7 @@ there means "not looked at", not "looked at and clean".
    back tagged to one of them:
 
    1. Claims and dependency edges, cross-checked against
-      `smith claims impact`.
+      `bs claims impact`.
    2. TDD-ability -- a named failing test per task, before its code.
    3. Nonfunctional and security clauses.
    4. Budget and diff-cap fit.
@@ -57,8 +57,8 @@ there means "not looked at", not "looked at and clean".
    6. From round 2 on, only the previous round's findings plus any task
       that changed since then.
 
-   When `size.small` reads true on the draft (`smith wave schedule` or
-   `smith plan ingest`'s `parallelism.size`, run against the draft plan
+   When `size.small` reads true on the draft (`bs wave schedule` or
+   `bs plan ingest`'s `parallelism.size`, run against the draft plan
    file), recommend effort tier `small` -- single-pass spec review -- to
    the operator unless a security trigger floors it first, and say why in
    the same message: a plan that cannot spread past a few tasks and a
@@ -74,7 +74,7 @@ there means "not looked at", not "looked at and clean".
    confidence) for you:
 
    ```bash
-   smith plan quorum --plan <the draft's plan.json> --plan-version <n> \
+   bs plan quorum --plan <the draft's plan.json> --plan-version <n> \
      --session <session-id> --causal-parent <event-id> \
      --confidence <your own 0–1 confidence in this plan> \
      --project <project-dir> \
@@ -113,10 +113,10 @@ there means "not looked at", not "looked at and clean".
    "planner: autonomy — spec sign-off per epic").
 6. On approval, write task specs to
    `factory/specs/active/<epic>/plan-v1.json` and validate:
-   `smith plan validate factory/specs/active/<epic>/plan-v1.json` must
+   `bs plan validate factory/specs/active/<epic>/plan-v1.json` must
    report `{"valid":true}` before anything else touches this plan. Write the
    tier onto the plan file as a top-level `"effort": "<tier>"` — that is
-   where `/bs run` reads it, and `smith plan amend` carries it into
+   where `/bs run` reads it, and `bs plan amend` carries it into
    v(n+1) so a re-plan is not a fresh choice. Omit the field to take the
    policy default; a value that is not `small`/`medium`/`huge` fails
    validation rather than degrading to it.
@@ -125,7 +125,7 @@ there means "not looked at", not "looked at and clean".
    against it:
 
    ```bash
-   smith wave schedule factory/specs/active/<epic>/plan-v1.json \
+   bs wave schedule factory/specs/active/<epic>/plan-v1.json \
      --session <session-id> --repo <project-dir>
    ```
 
@@ -158,7 +158,7 @@ there means "not looked at", not "looked at and clean".
    Beside the schedule, the read that names what it only counts:
 
    ```bash
-   smith claims impact --plan factory/specs/active/<epic>/plan-v1.json \
+   bs claims impact --plan factory/specs/active/<epic>/plan-v1.json \
      <task-id>... --repo <project-dir>
    ```
 
@@ -166,8 +166,8 @@ there means "not looked at", not "looked at and clean".
    at; `promised` holds the ones a producer's `keeps_exports` already
    answers, which the schedule admits and the diff is later checked against.
 7. Log the sign-off itself as a decision checkpoint (this is exactly what
-   `smith dream`'s "plan sign-off" extraction looks for, `lessons.ts`):
-   `smith event append '{"session_id":"...","actor":"operator",
+   `bs dream`'s "plan sign-off" extraction looks for, `lessons.ts`):
+   `bs event append '{"session_id":"...","actor":"operator",
    "event_type":"plan-version-created","plan_version":1,
    "causal_parent":"...","payload":{"epic_id":"<epic>","version":1,
    "note":"<operator's own words>"}}'`.
@@ -176,7 +176,7 @@ there means "not looked at", not "looked at and clean".
    the sign-off event:
 
    ```bash
-   smith plan ingest factory/specs/active/<epic>/plan-v1.json --project <project-dir> \
+   bs plan ingest factory/specs/active/<epic>/plan-v1.json --project <project-dir> \
      --session <session-id> --plan-version 1 --causal-parent <sign-off event id>
    ```
 

@@ -1,8 +1,12 @@
 /**
- * `.env.example` lists every SMITH_* tuning knob at its shipped default, so
+ * `.env.example` lists every BS_* tuning knob at its shipped default, so
  * the default now lives in two places: budgets.yml (or the agent template's
  * `maxTurns:`) and this file. This guard is what keeps the second copy from
  * drifting off the first.
+ *
+ * The file spells the current `BS_` names; the code's constants still carry
+ * the legacy `SMITH_` spelling, which `readEnv` treats as the same variable.
+ * `legacy()` maps the one onto the other for comparison.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -11,11 +15,13 @@ import { syncAgentMaxTurns } from '../src/agentsSync.js';
 import { BUDGET_ENV_VARS, type BudgetPolicy, parseBudgetPolicy } from '../src/budgets.js';
 import { AGENTS_DIR, BUDGETS_POLICY_PATH, REPO_ROOT } from '../src/paths.js';
 
+const legacy = (name: string): string => name.replace(/^BS_/, 'SMITH_');
+
 const assignments = readFileSync(path.join(REPO_ROOT, '.env.example'), 'utf8')
   .split('\n')
-  .map((line) => /^(SMITH_[A-Z0-9_]+)=(.*)$/.exec(line))
+  .map((line) => /^(BS_[A-Z0-9_]+)=(.*)$/.exec(line))
   .filter((m): m is RegExpExecArray => m !== null)
-  .map((m) => ({ name: m[1] as string, value: m[2] as string }));
+  .map((m) => ({ name: legacy(m[1] as string), value: m[2] as string }));
 
 const MAXTURNS = 'SMITH_MAXTURNS_';
 const budgetLines = assignments.filter((a) => !a.name.startsWith(MAXTURNS));
@@ -50,6 +56,13 @@ const BUDGET_DEFAULT: Record<string, (p: BudgetPolicy) => number | null> = {
   SMITH_TASK_AUDITOR_CAP_TOKENS: (p) => p.task.auditor.capTokens,
 };
 
+describe('.env.example names', () => {
+  it('spells every knob BS_*, set or commented, never the legacy SMITH_*', () => {
+    const text = readFileSync(path.join(REPO_ROOT, '.env.example'), 'utf8');
+    expect(text.split('\n').filter((line) => /^(# ?)?SMITH_[A-Z0-9_]+=/.test(line))).toEqual([]);
+  });
+});
+
 describe('.env.example budget knobs', () => {
   it('lists exactly the budget names the code accepts, once each', () => {
     const names = budgetLines.map((a) => a.name);
@@ -72,16 +85,17 @@ describe('.env.example per-tier budget knobs', () => {
   const commented = new Set(
     text
       .split('\n')
-      .map((line) => /^# ?(SMITH_[A-Z0-9_]+)=/.exec(line)?.[1])
-      .filter((name): name is string => name !== undefined),
+      .map((line) => /^# ?(BS_[A-Z0-9_]+)=/.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined)
+      .map(legacy),
   );
 
   const commentedValue = new Map(
     text
       .split('\n')
-      .map((line) => /^# ?(SMITH_[A-Z0-9_]+)=(.*)$/.exec(line))
+      .map((line) => /^# ?(BS_[A-Z0-9_]+)=(.*)$/.exec(line))
       .filter((m): m is RegExpExecArray => m !== null)
-      .map((m) => [m[1] as string, m[2] as string]),
+      .map((m) => [legacy(m[1] as string), m[2] as string]),
   );
 
   it("shows each tier variant at that tier's budgets.yml value (empty where null)", () => {
@@ -114,7 +128,7 @@ describe('.env.example maxTurns knobs', () => {
     .map((f) => f.slice(0, -'.md'.length))
     .sort();
 
-  it('has exactly one SMITH_MAXTURNS_* line per role template, and none for a non-role', () => {
+  it('has exactly one BS_MAXTURNS_* line per role template, and none for a non-role', () => {
     const names = maxTurnsLines.map((a) => a.name);
     expect(new Set(names).size).toBe(names.length);
     expect([...names].sort()).toEqual(
@@ -133,7 +147,7 @@ describe('.env.example maxTurns knobs', () => {
     }
   });
 
-  it('is a no-op for `smith agents sync` on the shipped templates', () => {
+  it('is a no-op for `bs agents sync` on the shipped templates', () => {
     const env = Object.fromEntries(maxTurnsLines.map((a) => [a.name, a.value]));
     const report = syncAgentMaxTurns({ agentsDir: AGENTS_DIR, env, dryRun: true });
     expect(report.changes.length).toBe(templates.length);

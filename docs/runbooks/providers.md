@@ -4,7 +4,7 @@ Operator procedure for `factory/policies/crosscheck.yml`'s Phase 8 providers:
 key/auth setup, enabling, shadow-mode calibration, promotion, the independent
 finder, rollback, cost, and security. Companion to `docs/specs/black-smith-architecture.md` §6 and
 `docs/guide/operator-guide.md`; commands assume a built CLI
-(`pnpm run build` → `factory/orchestrator/dist/cli.js`, substitute `smith`
+(`pnpm run build` → `factory/orchestrator/dist/cli.js`, substitute `bs`
 if linked).
 
 **These two are worked examples, not the supported set.** Nothing in the
@@ -116,7 +116,7 @@ whatever you configure.
   {"error":{"code":"provider.missing-api-key","message":"Environment variable \"DEEPSEEK_API_KEY\" is not set (required for provider \"deepseek\").","details":{"provider":"deepseek","envVar":"DEEPSEEK_API_KEY"}}}
   ```
 
-### Checking both before you spend a call — `smith judge preflight`
+### Checking both before you spend a call — `bs judge preflight`
 
 Everything above is only knowable after the fact by default: a provider
 whose precondition is unmet still gets invoked on every quorum trigger,
@@ -152,7 +152,7 @@ Three things it deliberately does **not** do:
   without spending a call, which is what §3's calibration pass is for.
 - **It never prints a key.** Only the variable *name* is reported, per
   `docs/standards/guardrails.md` "No secrets in outputs".
-- **It ignores `SMITH_CROSSCHECK_OFFLINE`.** That switch forces every
+- **It ignores `BS_CROSSCHECK_OFFLINE`.** That switch forces every
   provider off at load time (§2), which would hide the exact
   misconfiguration this command exists to find. The switch is reported as
   `offlineSwitch` instead, so a run under it is still legible.
@@ -205,7 +205,7 @@ codex:
 and the file is checked in — so `true` there is a claim about every clone
 that will ever read it. That is not a hypothetical: the day codex was first
 promoted with a flat `enabled: true`, CI — a box with no `codex` binary —
-started failing `smith judge preflight`'s soundness check, correctly, for a
+started failing `bs judge preflight`'s soundness check, correctly, for a
 line that was true where it was typed.
 
 `auto` resolves against the same precondition §1 reports on, evaluated on
@@ -250,16 +250,16 @@ host in the pipeline:
 | --- | --- | --- |
 | any S1/S2 finding, before it blocks a task | `src/gate.ts` `intakeAndDecide()` | automatic, on every gate intake |
 | same-mistake findings (`judgment.same-mistake`) | `src/gate.ts` `intakeAndDecide()` | automatic, on every gate intake |
-| epic-level final verdict, before the integration PR opens | `src/epic.ts` `runEpicVerdict()` | `smith epic verdict` |
-| planner verdicts below the confidence threshold | `src/planQuorum.ts` `runPlanQuorum()` | `smith plan quorum` |
+| epic-level final verdict, before the integration PR opens | `src/epic.ts` `runEpicVerdict()` | `bs epic verdict` |
+| planner verdicts below the confidence threshold | `src/planQuorum.ts` `runPlanQuorum()` | `bs plan quorum` |
 
 The two gate triggers fire on their own; the two new hosts are commands
 the operator (or the `/bs` skill) runs at the right moment — nothing polls
-for them. A `smith stats providers` run only reflects the cases that were
+for them. A `bs stats providers` run only reflects the cases that were
 actually raised, so a clean report means "no disagreement in the cases that
 ran", not "every epic was cross-checked".
 
-`smith plan quorum` is **critique-only**: it never rewrites a plan, and
+`bs plan quorum` is **critique-only**: it never rewrites a plan, and
 exit 1 means only "an operator must look before approving this plan". Its
 three `plan_quorum` triggers are evaluated deterministically before any
 provider is called (`mechanical_oracles_first`): epic budget at or above
@@ -287,7 +287,7 @@ Sanity-check a single provider directly, without touching the event log or
 quorum, before turning it loose on real epics:
 
 ```bash
-smith judge run --provider codex --request request.json
+bs judge run --provider codex --request request.json
 ```
 
 `request.json` is a `JudgeRequest` (`factory/orchestrator/src/providers/
@@ -341,7 +341,7 @@ message that names the shape it got.
 ### Turning every provider off without editing the file
 
 ```bash
-SMITH_CROSSCHECK_OFFLINE=1 smith gate run ...
+BS_CROSSCHECK_OFFLINE=1 bs gate run ...
 ```
 
 Set to anything non-empty, it forces every provider except `kind: native`
@@ -386,7 +386,7 @@ Calibration loop:
 2. Review the numbers:
 
    ```bash
-   smith stats providers [--session <id>] [--since 2026-07-01]
+   bs stats providers [--session <id>] [--since 2026-07-01]
    ```
 
    ```json
@@ -438,7 +438,7 @@ Calibration loop:
 3. `/bs report`'s digest surfaces a one-line provider-calibration note
    while any provider is still `mode: shadow` (`.claude/skills/bs/report.md`)
    — no separate dashboard page ships for this in Phase 8 (CLI-only,
-   `smith stats providers`; a UI page is explicitly out of scope here).
+   `bs stats providers`; a UI page is explicitly out of scope here).
 
 ## 4. Promotion
 
@@ -462,7 +462,7 @@ not a bug. To actually let the quorum overturn findings you need **two**
 active external providers (or a finding whose `found_by_provider` is an
 external provider, which puts native back in the pool).
 
-`smith judge preflight` (§1) checks this arithmetic for you: one active
+`bs judge preflight` (§1) checks this arithmetic for you: one active
 external with `min_providers: 2` is reported as a problem, because that
 configuration pays a gating provider's bill for a shadow provider's
 influence.
@@ -481,7 +481,7 @@ quorum_rule:
 ```
 
 Declared, the same sentence is reported under `notes` instead of
-`problems`, and `smith judge preflight` stops exiting 1. It silences that
+`problems`, and `bs judge preflight` stops exiting 1. It silences that
 one advisory and nothing else: a provider enabled where it cannot be called
 is still a problem, and `gating.canDecide` still reports `false`, because
 nothing about the arithmetic changed — only whether the command treats a
@@ -493,13 +493,13 @@ Leave it unset (the shipped default) if you have not made that choice. It
 is not a way to make one active provider gate; there is no such way short
 of a second provider.
 
-### Reading back what that arithmetic cost — `smith judge escalations`
+### Reading back what that arithmetic cost — `bs judge escalations`
 
-`smith judge preflight` tells you *before* the run that a one-active-external
+`bs judge preflight` tells you *before* the run that a one-active-external
 configuration cannot gate. This tells you afterwards what it produced:
 
 ```bash
-smith judge escalations --session <session-id>
+bs judge escalations --session <session-id>
 ```
 
 It folds the lineage for `quorum-decision` events whose latest word was
@@ -592,7 +592,7 @@ A critic judges a **claim**, so §2's tier can send a summary and a failure
 scenario and never the source. A finder cannot — it has nothing to read but
 the diff. Shipping worktree source to a third-party API is a decision no
 code in this repo has standing to make quietly, so it is a switch, it ships
-`false`, and `smith crossfind run` **refuses** rather than falling back to a
+`false`, and `bs crossfind run` **refuses** rather than falling back to a
 diffless "find bugs" prompt that would invent findings.
 
 `max_diff_bytes` refuses rather than truncates, for the same reason: half a
@@ -601,8 +601,8 @@ diff produces confident findings about code that is not there.
 See exactly what would leave the machine before anything does:
 
 ```bash
-smith crossfind request --task epic-1/task-1 \
-  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1
+bs crossfind request --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref bs/epic-1/integration...task-1
 ```
 
 It prints the `JudgeRequest` and sends nothing. With `send_diff: false` it
@@ -614,8 +614,8 @@ still off.
 Same arc as §3, one command:
 
 ```bash
-smith crossfind run --task epic-1/task-1 \
-  --diff /tmp/task-1.diff --diff-ref smith/epic-1/integration...task-1 \
+bs crossfind run --task epic-1/task-1 \
+  --diff /tmp/task-1.diff --diff-ref bs/epic-1/integration...task-1 \
   --session <id> --causal-parent <event-id>
 ```
 
@@ -630,7 +630,7 @@ under shadow mode that is always 0, because nothing it says applies.
 
 To reconcile two lists you already have — no provider, no cost, no event —
 use `crossfind reconcile`, which takes the native findings and saved finder
-runs as files. It is pure, so it answers under `SMITH_CROSSCHECK_OFFLINE`
+runs as files. It is pure, so it answers under `BS_CROSSCHECK_OFFLINE`
 too.
 
 ### Promotion, and what it costs
@@ -660,7 +660,7 @@ Two levers, same file, same "operator edit, never a runtime write" rule:
   a box that happens to have the binary — that is the whole difference
   between `false` and `auto`.
 
-There is a third lever that is not this file: `SMITH_CROSSCHECK_OFFLINE=1`
+There is a third lever that is not this file: `BS_CROSSCHECK_OFFLINE=1`
 (§2) does what `enabled: false` on every provider does, for one command,
 without an edit to revert afterwards. Reach for it when the problem is
 urgent and you want no chance of leaving a toggle flipped; reach for the
@@ -673,7 +673,7 @@ Either edit takes effect on the next case; nothing to restart.
 - **Codex** runs on the ChatGPT subscription via `codex exec` (no
   per-token API billing) — the whole point of the CLI-transport choice
   over an API transport for this provider (design decision, Phase 8 brief).
-  Cost shows up as subscription usage, not a line item `smith stats`
+  Cost shows up as subscription usage, not a line item `bs stats`
   tracks; watch your ChatGPT plan's own usage limits if you fan out Codex
   judges heavily.
 - **DeepSeek** bills per token on the API, but at an order of magnitude
@@ -684,7 +684,7 @@ Either edit takes effect on the next case; nothing to restart.
   the medium tier). `raw_usage`
   on each `JudgeResult` (`input_tokens`/`output_tokens`, when the API
   reports them) is available for cost accounting if you want to fold it
-  into `smith stats analytics`'s cost-by-provider view later — not wired in
+  into `bs stats analytics`'s cost-by-provider view later — not wired in
   by Phase 8 (YAGNI: no cost dashboard was asked for).
 
 ## 8. Security notes
@@ -703,7 +703,7 @@ Either edit takes effect on the next case; nothing to restart.
   string before it's ever included in an error's `details` (belt-and-
   suspenders — most gateways don't echo credentials back, but this transport
   doesn't rely on that).
-- **A skipped provider leaves no trace, so `SMITH_CROSSCHECK_OFFLINE` is an
+- **A skipped provider leaves no trace, so `BS_CROSSCHECK_OFFLINE` is an
   operator switch, not an environment setting.** `runQuorumCase()` skips a
   disabled provider before `recordJudgeRun()`, so nothing in the event log
   distinguishes "this provider was never invoked" from "this provider was
@@ -713,7 +713,7 @@ Either edit takes effect on the next case; nothing to restart.
   `enabled: auto, mode: active`, so on a box that has the binary there *is*
   an active external — it just cannot reach `min_providers: 2` on findings
   claude raised, and `computeQuorum()` escalates either way (§4). The moment
-  a second provider is enabled, an ambient `SMITH_CROSSCHECK_OFFLINE` in a
+  a second provider is enabled, an ambient `BS_CROSSCHECK_OFFLINE` in a
   gating environment would silently downgrade real quorum cases back to
   native-only. So: pass it per command, and before you enable a second
   provider, check for it in the environment that runs the gate.
@@ -785,7 +785,7 @@ feature existed — unavailable, or its own transport, never a silent
 OpenRouter call nobody asked for.
 
 A substituted provider's config carries `via: 'openrouter'`
-(`ApiProviderConfig.via`), and both the event log and `smith judge preflight`
+(`ApiProviderConfig.via`), and both the event log and `bs judge preflight`
 say so — "codex via openrouter, model openai/gpt-6-sol" — rather than
 reporting a plain `codex` run that quietly used a different vendor
 underneath.
@@ -850,9 +850,9 @@ Which commands actually thread a `projectDir` through to
 `loadCrosscheckPolicy()` — and so read the project overlay at all — is not
 every command that loads the policy; see 9d.
 
-### 9d. Asking the operator — `smith judge preflight --project <dir>`
+### 9d. Asking the operator — `bs judge preflight --project <dir>`
 
-`smith judge preflight` (§1) takes a `--project <dir>` flag: with it, the
+`bs judge preflight` (§1) takes a `--project <dir>` flag: with it, the
 report reflects the project overlay exactly as a real run would use it,
 substitution included; without it, only env and the shipped policy apply.
 

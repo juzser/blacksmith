@@ -295,8 +295,8 @@ describe('the playbooks actually ask for the tier', () => {
   it('makes `/bs plan` choose a tier, and `/bs run` read the one it chose', () => {
     expect(plan).not.toBe('');
     expect(run).not.toBe('');
-    expect(plan).toContain('smith effort show');
-    expect(run).toContain('smith effort show');
+    expect(plan).toContain('bs effort show');
+    expect(run).toContain('bs effort show');
   });
 
   it('tells both playbooks to read `effective`, not what was asked for', () => {
@@ -332,7 +332,7 @@ describe('the playbooks actually ask for the tier', () => {
 
   it('promises the operator guide documents the verb it tells them to run', () => {
     const guide = readFileSync(path.join(REPO_ROOT, 'docs/guide/operator-guide/setup.md'), 'utf8');
-    expect(guide).toContain('smith effort show');
+    expect(guide).toContain('bs effort show');
     expect(guide).toContain('factory/policies/effort.yml');
   });
 });

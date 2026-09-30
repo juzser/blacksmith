@@ -3,10 +3,10 @@
 Every project leaving the factory ships an MCP surface
 (`docs/standards/mcp.md`). It is due **late** — at the mandatory
 `<project> — mcp surface` milestone, once the tools worth exposing are known.
-Running this at `smith new` time would produce a manifest declaring nothing,
+Running this at `bs new` time would produce a manifest declaring nothing,
 which is the rubber stamp the standard exists to prevent.
 
-1. Run `smith mcp init <project>`. It layers `src/mcp/`, `test/mcp/`, and a
+1. Run `bs mcp init <project>`. It layers `src/mcp/`, `test/mcp/`, and a
    root `mcp.manifest.json` onto the already-scaffolded project, merges the
    `mcp:serve` script and the pinned SDK dependency into its `package.json`,
    and appends the `mcp surface` milestone to `factory/specs/roadmap.md`.
@@ -22,8 +22,8 @@ which is the rubber stamp the standard exists to prevent.
    `main`) are not allowed at all (mcp.md MCP-S3). A signed `destructive` tool
    is permission to act inside the project, never a way around an operator
    gate.
-4. Run `smith mcp check <project>` before closing anything under that
+4. Run `bs mcp check <project>` before closing anything under that
    milestone. Exit 0 means green; exit 1 prints one `{ rule, path, message }`
-   per violation. `smith epic close` runs the same check and refuses while it
+   per violation. `bs epic close` runs the same check and refuses while it
    is red — the only way past it is `--override-rationale`, which is the
    operator's call and their name in the event log, never yours.

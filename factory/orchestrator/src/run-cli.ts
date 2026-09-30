@@ -11,11 +11,11 @@ import { warnIfLegacyName } from './cliName.js';
 import type { WorkerInvocation } from './harness.js';
 import { type RunOutcome, runInvocation } from './runner.js';
 
-const HELP = `Usage: smith-run <invocation.json | -> [--prompt-file <path>] [--timeout-ms <n>] [--out <file>]
+const HELP = `Usage: bs-run <invocation.json | -> [--prompt-file <path>] [--timeout-ms <n>] [--out <file>]
 
-Spawns ONE already-rendered worker invocation (the JSON \`smith harness plan\`
-prints) and reports what happened as JSON. This is not \`smith harness run\`:
-\`smith\` only ever renders an invocation and never starts it (§18 rule 3,
+Spawns ONE already-rendered worker invocation (the JSON \`bs harness plan\`
+prints) and reports what happened as JSON. This is not \`bs harness run\`:
+\`bs\` only ever renders an invocation and never starts it (§18 rule 3,
 "nothing that observes may dispatch"), so starting the process an invocation
 describes lives in its own binary instead.
 
