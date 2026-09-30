@@ -274,7 +274,10 @@ describe('judgePreflight()', () => {
     expect(process.env.SMITH_CROSSCHECK_OFFLINE).toBeTruthy();
     process.env.BS_CROSSCHECK_OFFLINE = '';
     try {
-      const report = await preflight('bs-offline', NATIVE + apiProvider('ds', 'shadow', ABSENT_KEY));
+      const report = await preflight(
+        'bs-offline',
+        NATIVE + apiProvider('ds', 'shadow', ABSENT_KEY),
+      );
       expect(report.offlineSwitch).toBe(false);
     } finally {
       delete process.env.BS_CROSSCHECK_OFFLINE;

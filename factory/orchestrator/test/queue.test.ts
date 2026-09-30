@@ -208,13 +208,7 @@ describe('step', () => {
     );
 
     const taskHead = git(projectDir, ['rev-parse', task.branch]);
-    const parents = git(projectDir, [
-      'rev-list',
-      '--parents',
-      '-n',
-      '1',
-      'bs/epic-1/integration',
-    ])
+    const parents = git(projectDir, ['rev-list', '--parents', '-n', '1', 'bs/epic-1/integration'])
       .split(' ')
       .slice(1);
     expect(parents).toEqual([integrationBefore, taskHead]);
@@ -1019,9 +1013,7 @@ describe('batchStep', () => {
     // d dropped at certify, before any test, not a phantom red assumed for it.
     expect(result.suiteRuns).toBe(3);
     expect(git(projectDir, ['show', 'bs/epic-1/integration:c.txt'])).toBe('c-edited');
-    expect(git(projectDir, ['show', 'bs/epic-1/integration:shared.txt'])).toBe(
-      'concurrent-edit',
-    );
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:shared.txt'])).toBe('concurrent-edit');
   });
 
   // The rebase leaves every task's branch on top of the base the batch

@@ -474,7 +474,7 @@ describe('env overrides on top of budgets.yml', () => {
       );
     });
 
-    it('is detected as an override when set via BS_EPIC_CAP_TOKENS, reported under the knob\'s budgets.yml name', () => {
+    it("is detected as an override when set via BS_EPIC_CAP_TOKENS, reported under the knob's budgets.yml name", () => {
       // envValue()'s BS_/SMITH_ aliasing is transparent to supplierFor(): the
       // name reported is still the field's own (still-SMITH_-prefixed) name,
       // not whichever spelling happened to supply the value at runtime.

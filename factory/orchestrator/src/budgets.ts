@@ -19,8 +19,8 @@
 // no plan in hand gets effort.yml's `default_tier`.
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
-import { readEnv } from './env.js';
 import { EFFORT_TIERS, type EffortTier, isEffortTier } from './effortTiers.js';
+import { readEnv } from './env.js';
 import { SmithError } from './errors.js';
 import { BUDGETS_POLICY_PATH, EFFORT_POLICY_PATH } from './paths.js';
 

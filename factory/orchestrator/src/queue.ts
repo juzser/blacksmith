@@ -854,7 +854,10 @@ function isAncestor(projectDir: string, ancestor: string, descendant: string): b
  */
 export async function adopt(task: AdoptTask, opts: AdoptOptions): Promise<AdoptOutcome> {
   const { projectDir } = opts;
-  const integrationBranch = integrationBranchName(opts.epic, epicBranchPrefix(projectDir, opts.epic));
+  const integrationBranch = integrationBranchName(
+    opts.epic,
+    epicBranchPrefix(projectDir, opts.epic),
+  );
 
   for (const ref of [integrationBranch, task.branch]) {
     if (!resolveCommit(projectDir, ref)) {

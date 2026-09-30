@@ -190,7 +190,12 @@ export function syncAgentMaxTurns(
     }
     const existing = byRole.get(parsed.legacyName);
     if (existing?.isBs && !parsed.isBs) continue;
-    byRole.set(parsed.legacyName, { role, env: name, to: positiveInt(name, raw), isBs: parsed.isBs });
+    byRole.set(parsed.legacyName, {
+      role,
+      env: name,
+      to: positiveInt(name, raw),
+      isBs: parsed.isBs,
+    });
   }
   const requested = [...byRole.values()].sort((a, b) => a.role.localeCompare(b.role));
 

@@ -317,7 +317,7 @@ describe('worktree.ts - legacy `smith/` prefix continuity', () => {
     expect(result.branch).toBe('bs/epic-2/task-1');
   });
 
-  it('listStale matches a legacy epic\'s own smith/ worktrees, not bs/', () => {
+  it("listStale matches a legacy epic's own smith/ worktrees, not bs/", () => {
     git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
     const t1 = createTaskWorktree(projectDir, 'epic-1', 'task-1');
 

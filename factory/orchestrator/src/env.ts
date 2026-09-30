@@ -16,8 +16,12 @@ export function readEnv(
   env: Readonly<Record<string, string | undefined>>,
   name: string,
 ): string | undefined {
-  const bsName = name.startsWith(LEGACY_PREFIX) ? `${BS_PREFIX}${name.slice(LEGACY_PREFIX.length)}` : name;
-  const legacyName = name.startsWith(BS_PREFIX) ? `${LEGACY_PREFIX}${name.slice(BS_PREFIX.length)}` : name;
+  const bsName = name.startsWith(LEGACY_PREFIX)
+    ? `${BS_PREFIX}${name.slice(LEGACY_PREFIX.length)}`
+    : name;
+  const legacyName = name.startsWith(BS_PREFIX)
+    ? `${LEGACY_PREFIX}${name.slice(BS_PREFIX.length)}`
+    : name;
   const bsValue = env[bsName];
   if (bsValue !== undefined) return bsValue;
   return env[legacyName];

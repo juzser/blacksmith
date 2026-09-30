@@ -73,7 +73,10 @@ function branchHead(projectDir: string, branch: string): string | null {
  * the sha in.
  */
 export function integrationHeadSha(projectDir: string, epicId: string): string | null {
-  return branchHead(projectDir, integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)));
+  return branchHead(
+    projectDir,
+    integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
+  );
 }
 
 /** Last-wins fold: the most recent recorded check for this epic, or null. */
