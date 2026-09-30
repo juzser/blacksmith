@@ -354,6 +354,44 @@ describe('db/queries.ts', () => {
         wave.sqlite.close();
       }
     });
+
+    // Task 3 (dispatch reason fallback): the Overview card's fallback line
+    // ("<role> on <task> · round N") needs the round a redispatch is on —
+    // agents.round, joined in by dispatch event id (agents.id IS the dispatch
+    // event id, agents-registry.ts's foldAgents()).
+    it('carries the dispatch round for the UI’s no-reason fallback line', async () => {
+      const session = 'sess-round';
+      const ts = '2030-02-01T00:00:00.000Z';
+      const taskId = 'epic-9/task-round';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', ts, { task_id: taskId }, session) +
+          tiedLine(
+            'dispatch_decision',
+            ts,
+            {
+              task_id: taskId,
+              agent_role: 'coder',
+              provider: 'claude',
+              model_tier: 'mid',
+              round: 2,
+            },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'round.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const built = openDb(dbPath);
+      try {
+        const dispatch = overview(built.db).recentDispatches.find((d) => d.taskId === taskId);
+        expect(dispatch?.round).toBe(2);
+      } finally {
+        built.sqlite.close();
+      }
+    });
   });
 
   describe('the pending-waiver count and the roster it is about', () => {

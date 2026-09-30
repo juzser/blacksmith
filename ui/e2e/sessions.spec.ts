@@ -278,7 +278,7 @@ test.describe('Sessions', () => {
     // and nowhere else.
     await expect(page.locator('.ds-banner')).toHaveCount(1);
     await expect(page.locator('.ds-banner')).toContainText(
-      '1 working agent with no session on this canvas (coder · sess-gone)',
+      '1 working agent with no session on this canvas (Builder · sess-gone)',
     );
 
     // The sr-only alternative describes the drawn graph, not the payload.

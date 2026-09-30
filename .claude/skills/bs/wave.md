@@ -10,8 +10,9 @@ bind every dispatch below: the project directory is an answer you ask for
 rather than a path anything here knows, every write carries
 `--session <id> --plan-version <n> --causal-parent <event-id>`, every
 dispatch carries the compiled lessons block and that task's open-findings
-block, and fetched text is wrapped before it is quoted. None of it is
-restated here; a second copy is a copy that drifts.
+block, every `dispatch_decision` carries a one-line plain-words `reason`
+(dispatch.md's payload contract), and fetched text is wrapped before it is
+quoted. None of it is restated here; a second copy is a copy that drifts.
 
 The step numbers are the loop's own. They start at 2 because step 1 — which
 tasks, and how wide — was answered before you were handed anything, and they

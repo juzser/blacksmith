@@ -1,6 +1,7 @@
 // Kanban §5.3 status-column folding: reconciles taxonomy.yml's 12-value
 // task_status against §10's 5-column board. `failed`/`superseded` are
 // terminal/replaced, hidden from the default board (design-spec.md §5.3).
+import { roleLabel } from './roleLabels.js';
 import { isTaskOver } from './taxonomy.js';
 
 export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'Completed'] as const;
@@ -168,8 +169,10 @@ export interface AgentChipLike {
 }
 
 export interface AgentChip {
-  /** `role · tier`, or the role alone when the dispatch named no tier. */
+  /** Friendly `role · tier` (Task 2: roleLabel()), or the label alone when the dispatch named no tier. */
   label: string;
+  /** Raw `role · tier` — the taxonomy string, kept reachable as a title tooltip. */
+  title: string;
   /** Somebody is on the task right now: IdentityChip's pulsing dot. */
   live: boolean;
   /** Nobody is on the task any more: the chip names who did the work, muted. */
@@ -197,7 +200,10 @@ export function agentChip(task: AgentChipLike): AgentChip | null {
   // stays rather than being muted on a guess.
   const settled = isTaskOver(task.taskStatus);
   return {
-    label: `${task.agentRole}${task.agentModelTier ? ` · ${task.agentModelTier}` : ''}`,
+    label: task.agentModelTier
+      ? `${roleLabel(task.agentRole)} · ${task.agentModelTier}`
+      : roleLabel(task.agentRole),
+    title: `${task.agentRole}${task.agentModelTier ? ` · ${task.agentModelTier}` : ''}`,
     live: task.agentActivity === 'working' && !settled,
     gone: task.agentActivity === null || settled,
   };

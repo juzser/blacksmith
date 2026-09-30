@@ -7,6 +7,7 @@ import {
   costPerTaskBy,
   formatRate,
   formatTokens,
+  hasMultipleProviders,
   latestSameMistakeRate,
   quorumRows,
   recheckPassRate,
@@ -234,9 +235,31 @@ describe('lib/analytics.ts — formatTokens', () => {
     expect(formatTokens(null)).toBe('—');
   });
 
-  it('renders a measured cost with its unit', () => {
+  it('renders a measured cost with its unit, compacted past a thousand', () => {
     expect(formatTokens(0)).toBe('0 tok');
-    expect(formatTokens(1234)).toBe('1234 tok');
+    expect(formatTokens(1234)).toBe('1.2K tok');
+  });
+});
+
+// "Cost per task by provider" is a comparison chart: with one provider on
+// the whole factory (the common case — most projects only ever run claude),
+// a single bar answers a question nobody asked and just repeats the
+// "Cost per task" StatCard next to it. Hidden entirely rather than shown
+// empty, matching D-31's rule that a card says nothing rather than a claim
+// with no denominator.
+describe('lib/analytics.ts — hasMultipleProviders', () => {
+  it('is false for zero or one provider', () => {
+    expect(hasMultipleProviders([])).toBe(false);
+    expect(hasMultipleProviders([{ label: 'claude', value: 100 }])).toBe(false);
+  });
+
+  it('is true once a second provider has data', () => {
+    expect(
+      hasMultipleProviders([
+        { label: 'claude', value: 100 },
+        { label: 'codex', value: 50 },
+      ]),
+    ).toBe(true);
   });
 });
 
@@ -298,6 +321,15 @@ describe('AnalyticsPage.vue — §5.8 cost cards source their numbers from lib/a
     expect(SFC).toMatch(/title="Cost per task by model tier"/);
     expect(SFC).toMatch(/title="Cost per task by provider"/);
     expect(SFC).not.toMatch(/label="Total tokens by provider"/);
+  });
+
+  it('hides the by-provider card entirely under a single provider', () => {
+    expect(SFC).toContain('hasMultipleProviders(');
+    // The whole Card is gated, not just its chart — an operator on a
+    // one-provider project should never see the title either.
+    expect(SFC).toMatch(
+      /<Card v-if="hasMultipleProviders\(costByProviderData\)" title="Cost per task by provider"/,
+    );
   });
 });
 

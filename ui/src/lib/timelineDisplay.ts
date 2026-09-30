@@ -2,6 +2,8 @@
 // grouping by EVENT KIND only, never status — actual outcome renders as a
 // Lozenge (taxonomy.ts) alongside it, never via tint alone.
 import type { TimelineEntry } from './api.js';
+import { taskLabel } from './format.js';
+import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
 
 export type RowTint = 'blue' | 'slate' | 'lilac';
@@ -98,8 +100,10 @@ function groupLabel(members: TimelineNode[]): string {
   const shown = ranked
     .slice(0, LABEL_ROLE_CAP)
     // `×1` on a role that appears once is noise the header count already
-    // covers; the role is named, and that is the whole fact about it.
-    .map(([role, n]) => (n > 1 ? `${role} ×${n}` : role));
+    // covers; the role is named, and that is the whole fact about it. The
+    // friendly label is only a display step — counting/ranking above stays
+    // on the raw taxonomy string so the order doesn't move underneath it.
+    .map(([role, n]) => (n > 1 ? `${roleLabel(role)} ×${n}` : roleLabel(role)));
   const rest = ranked.length - shown.length;
   const roles = rest > 0 ? [...shown, `+${rest} more`] : shown;
   return `${members.length} dispatches — ${roles.join(', ')}`;
@@ -455,6 +459,17 @@ function judgeFailureLabel(code: unknown): string {
   return typeof code === 'string' && code !== '' ? `failed: ${code}` : 'failed';
 }
 
+/** Task 3 (dispatch reason fallback): writers put the reason under other keys
+ * than `reason` — the same chain the projector applies server-side, so a row
+ * reads the same whether or not the DB has been rebuilt since. */
+function dispatchReasonText(p: Record<string, unknown>): string | null {
+  for (const key of ['reason', 'rationale', 'note', 'why'] as const) {
+    const v = p[key];
+    if (typeof v === 'string' && v.trim() !== '') return v.trim();
+  }
+  return null;
+}
+
 /** One-line title per event kind — falls back to the event_type itself for kinds this dashboard doesn't special-case. */
 export function titleFor(entry: TimelineEntry): string {
   const p = entry.payload as Record<string, unknown>;
@@ -475,8 +490,10 @@ export function titleFor(entry: TimelineEntry): string {
       if (body === undefined) return kind || 'Operator note';
       return kind ? `${kind} — ${String(body)}` : String(body);
     }
-    case 'dispatch_decision':
-      return `Dispatched ${String(p.agent_role ?? 'agent')} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${p.reason ? ` — ${String(p.reason)}` : ''}`;
+    case 'dispatch_decision': {
+      const reason = dispatchReasonText(p);
+      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? ` — ${reason}` : ''}`;
+    }
     case 'schema-check-result':
       return `Schema check — ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
     case 'deps-check-result':
@@ -670,5 +687,5 @@ export function titleFor(entry: TimelineEntry): string {
 }
 
 export function metaFor(entry: TimelineEntry): string {
-  return entry.taskId ? `${entry.taskId} · ${entry.eventType}` : entry.eventType;
+  return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
 }

@@ -141,18 +141,92 @@ export function pluralize(
 }
 
 /**
- * "2000 tok" — or, when one or more of the summed results has
+ * `[how many of this unit make the next one, the suffix it renders as]` —
+ * same shape as RELATIVE_UNITS above, one tier per order of magnitude.
+ *
+ * The operator finds raw token integers (a 6-7 digit number is common past a
+ * handful of tasks) too technical to read at a glance, so every place that
+ * renders a bare count goes through this one formatter rather than each
+ * call site rounding its own way. One decimal, and a trailing ".0" is
+ * dropped ("5K", not "5.0K") so a round number does not read as more
+ * precise than it is.
+ */
+const COMPACT_NUMBER_TIERS: Array<[number, string]> = [
+  [1_000_000_000, 'B'],
+  [1_000_000, 'M'],
+  [1_000, 'K'],
+];
+
+export function formatCompactNumber(n: number): string {
+  const abs = Math.abs(n);
+  const sign = n < 0 ? -1 : 1;
+  for (const [index, [threshold, suffix]] of COMPACT_NUMBER_TIERS.entries()) {
+    if (abs < threshold) continue;
+
+    let roundedAbs = Math.round((abs / threshold) * 10) / 10;
+    let effectiveSuffix = suffix;
+    // Rounding can carry a value up to the next tier's floor (999950 rounds
+    // to "1000K"); when it does, and a next tier up exists, re-derive the
+    // rounded magnitude against that tier instead. B has no tier above it,
+    // so "1000B" stands.
+    const nextTier = COMPACT_NUMBER_TIERS[index - 1];
+    if (roundedAbs >= 1000 && nextTier) {
+      const [nextThreshold, nextSuffix] = nextTier;
+      roundedAbs = Math.round((abs / nextThreshold) * 10) / 10;
+      effectiveSuffix = nextSuffix;
+    }
+
+    const value = sign * roundedAbs;
+    const str = Number.isInteger(value) ? String(value) : value.toFixed(1);
+    return `${str}${effectiveSuffix}`;
+  }
+  return String(n);
+}
+
+/**
+ * "2K tok" — or, when one or more of the summed results has
  * `token_usage: { measured: false }` (issue #220), a floor rather than an
- * exact total: "≥2000 tok · 3 not measured". `tokensSpent` must already be
+ * exact total: "≥2K tok · 3 not measured". `tokensSpent` must already be
  * the sum over the results that DID report usage; this only decides how to
  * caption it. A sum of nothing but unmeasured results renders "not measured"
  * — never "0 tok", which would read as "we spent nothing" rather than
- * "nobody counted".
+ * "nobody counted". The exact integer is not lost — callers keep it in a
+ * `title` tooltip — this only decides the headline text.
  */
 export function formatMeasuredTokens(tokensSpent: number, unmeasured: number): string {
-  if (unmeasured === 0) return `${tokensSpent} tok`;
+  if (unmeasured === 0) return `${formatCompactNumber(tokensSpent)} tok`;
   if (tokensSpent === 0) return 'not measured';
-  return `≥${tokensSpent} tok · ${unmeasured} not measured`;
+  return `≥${formatCompactNumber(tokensSpent)} tok · ${unmeasured} not measured`;
+}
+
+/**
+ * A label short enough to sit on one dashboard row without wrapping or
+ * fighting a sibling column for space — roughly the width design-spec's
+ * single-line Row/Card titles budget elsewhere (summarize()'s own
+ * sentence-length cap, above, lands in the same range).
+ */
+const SHORT_TASK_LABEL_MAX = 60;
+
+/**
+ * "Readme merge trim" — a human label for a bare taskId, for the rows that
+ * have nothing better (queries.ts's `tasks` table carries no `title`; where
+ * one is available and short enough, it wins over the derived slug).
+ *
+ * taskId is `<epic>/task-<n>-<slug>` (or occasionally just the slug, with no
+ * epic segment): this takes the last path segment, drops the leading
+ * `task-<n>-` ordinal so "task-29-readme-merge-trim" reads as the work, not
+ * its position in the plan, then turns the remaining dashes into spaces and
+ * capitalizes the first letter. The raw id is not lost — callers keep it in
+ * a `title` tooltip.
+ */
+export function taskLabel(taskId: string, title?: string): string {
+  const trimmedTitle = title?.trim();
+  if (trimmedTitle && trimmedTitle.length <= SHORT_TASK_LABEL_MAX) return trimmedTitle;
+
+  const lastSegment = taskId.split('/').pop() ?? taskId;
+  const slug = lastSegment.replace(/^task-\d+-/, '');
+  const spaced = slug.replace(/-/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /**

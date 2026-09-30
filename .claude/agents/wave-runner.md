@@ -30,6 +30,8 @@ grants `Agent`. You dispatch the workers of one wave and nothing else.
   write verbs fall back to when `--actor` is omitted (a few, like judge
   dispatch and quorum recording, try the session owner's role first and
   reach `system` only if that lookup itself comes back empty).
+- **Every `dispatch_decision` you write also carries a one-line, plain-words
+  `reason`** — dispatch.md's payload contract, not restated here.
 - **`--continues` is what makes your log the epic's log.** Every deciding read
   at the epic tier folds the lineage, so a dispatch you record is visible from
   the epic session that admitted you and is not visible from a sibling wave's.

@@ -850,6 +850,9 @@ export interface RecentDispatch {
   modelTier: string;
   taskId: string | null;
   reason: string | null;
+  /** Task 3 (dispatch reason fallback): which attempt this was, for the
+   * Overview card's derived line when there is no reason to show instead. */
+  round: number;
 }
 
 const RECENT_DISPATCHES_LIMIT = 10;
@@ -1318,18 +1321,37 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   // them left the rows in the ascending order they arrived in: the ten this
   // then kept were the *oldest* ten of the burst, under a heading that says
   // recent.
-  const recentDispatches: RecentDispatch[] = inLogOrder(scopedDispatches)
+  const recentDispatchRows = inLogOrder(scopedDispatches)
     .reverse()
-    .slice(0, RECENT_DISPATCHES_LIMIT)
-    .map((d) => ({
-      eventId: d.eventId,
-      ts: d.ts,
-      agentRole: d.agentRole,
-      provider: d.provider,
-      modelTier: d.modelTier,
-      taskId: d.taskId,
-      reason: d.reason,
-    }));
+    .slice(0, RECENT_DISPATCHES_LIMIT);
+  // agents.id IS the dispatch event id (agents-registry.ts's foldAgents()),
+  // so a direct id lookup finds the round regardless of whether that agent
+  // is still live or has since gone terminal.
+  const roundByEventId = new Map(
+    recentDispatchRows.length > 0
+      ? db
+          .select({ id: agents.id, round: agents.round })
+          .from(agents)
+          .where(
+            inArray(
+              agents.id,
+              recentDispatchRows.map((d) => d.eventId),
+            ),
+          )
+          .all()
+          .map((a) => [a.id, a.round])
+      : [],
+  );
+  const recentDispatches: RecentDispatch[] = recentDispatchRows.map((d) => ({
+    eventId: d.eventId,
+    ts: d.ts,
+    agentRole: d.agentRole,
+    provider: d.provider,
+    modelTier: d.modelTier,
+    taskId: d.taskId,
+    reason: d.reason,
+    round: roundByEventId.get(d.eventId) ?? 1,
+  }));
 
   let projects: ProjectOverviewSummary[] | undefined;
   if (scope.project === undefined) {

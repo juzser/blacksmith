@@ -113,7 +113,9 @@ test.describe('Timeline', () => {
     // D-255 a third), and that is the shape a real run has: the chip promotes
     // every dispatch in the log to a root, so one run holds whatever roles the
     // log dispatched, busiest first, and only a repeated role carries a count.
-    await expect(header).toHaveText(/^\d+ dispatches — coder ×\d+, verifier ×\d+, reviewer$/);
+    await expect(header).toHaveText(
+      /^\d+ dispatches — Builder ×\d+, Finding checker ×\d+, Code reviewer$/,
+    );
     // Asserted against the rows it turns out to hold rather than a fixture
     // constant — the count is the fold's own claim, and the seeded log spans
     // two fixtures that neither owns the other's dispatch count.

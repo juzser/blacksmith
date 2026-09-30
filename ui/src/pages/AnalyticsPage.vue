@@ -21,6 +21,7 @@ import {
   costPerTaskBy,
   formatRate,
   formatTokens,
+  hasMultipleProviders,
   latestSameMistakeRate,
   quorumRows,
   recheckPassRate,
@@ -65,6 +66,12 @@ const avgCostPerTask = computed(() => costPerTask(costBuckets.value));
 const avgCostHint = computed(() =>
   avgCostPerTask.value === null ? 'no usage recorded' : 'avg tokens',
 );
+// formatTokens() compacts the StatCard's headline ("1.2K tok"); the exact
+// integer it rounds away is kept here as a `title` tooltip (StatCard
+// forwards an unclaimed `title` onto its root element).
+const avgCostPerTaskTitle = computed(() =>
+  avgCostPerTask.value === null ? undefined : `${avgCostPerTask.value} tok per task`,
+);
 const sameMistakeValue = computed(() =>
   formatRate(latestSameMistakeRate(data.value?.sameMistakeRateByDay ?? [])),
 );
@@ -107,6 +114,7 @@ const throughputLine = computed(() =>
         <StatCard
           label="Cost per task"
           :value="formatTokens(avgCostPerTask)"
+          :title="avgCostPerTaskTitle"
           icon="coins"
           tint="amber"
           :hint="avgCostHint"
@@ -127,7 +135,7 @@ const throughputLine = computed(() =>
         <EmptyState v-if="canClaimEmpty(!!data, costByTierData.length)" icon="bar-chart-3" inline>No task results yet.</EmptyState>
         <BarChart v-else :bars="costByTierData" label="Tokens per task by model tier" />
       </Card>
-      <Card title="Cost per task by provider">
+      <Card v-if="hasMultipleProviders(costByProviderData)" title="Cost per task by provider">
         <EmptyState v-if="canClaimEmpty(!!data, costByProviderData.length)" icon="bar-chart-3" inline>No task results yet.</EmptyState>
         <BarChart v-else :bars="costByProviderData" label="Tokens per task by provider" />
       </Card>

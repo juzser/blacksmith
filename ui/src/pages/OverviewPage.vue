@@ -73,6 +73,7 @@ import {
   fetchOverview,
   type LiveAgentEntry,
   type OverviewResult,
+  type RecentDispatch,
   type RunningSession,
 } from '../lib/api.js';
 import {
@@ -81,6 +82,7 @@ import {
   formatMeasuredTokens,
   formatRelative,
   pluralize,
+  taskLabel,
 } from '../lib/format.js';
 import {
   byRuntimeDesc,
@@ -94,6 +96,7 @@ import {
   sessionActivity,
 } from '../lib/liveness.js';
 import { nothingPending, type PendingReviewCounts, pendingClauses } from '../lib/pendingReview.js';
+import { roleLabel } from '../lib/roleLabels.js';
 
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
@@ -214,6 +217,30 @@ const budgetUsedLabel = computed(() => {
   const unmeasured = epics.reduce((s, e) => s + e.unmeasured, 0);
   return formatMeasuredTokens(spent, unmeasured);
 });
+
+// formatMeasuredTokens() now compacts its headline ("2.1M tok"); the exact
+// integer it rounds away is kept here as a `title` tooltip, same reasoning
+// as budgetUsedLabel above.
+const budgetUsedTitle = computed(() => {
+  const epics = data.value?.tokensByEpic ?? [];
+  const spent = epics.reduce((s, e) => s + e.tokensSpent, 0);
+  const unmeasured = epics.reduce((s, e) => s + e.unmeasured, 0);
+  return unmeasured > 0 ? `${spent} tok spent · ${unmeasured} not measured` : `${spent} tok spent`;
+});
+
+// Task 3 (dispatch reason fallback): projector.ts's own reason ?? rationale
+// ?? note ?? why chain (factory/orchestrator/src/db/projector.ts) still
+// leaves a genuine null on rows nobody wrote any of those keys for. Rather
+// than admit there is nothing to say, name what actually happened — role,
+// task and attempt number are always known even when the free-text reason
+// is not.
+function dispatchReasonText(d: RecentDispatch): string {
+  if (d.reason) return d.reason;
+  const who = roleLabel(d.agentRole);
+  return d.taskId
+    ? `${who} on ${taskLabel(d.taskId)} · round ${d.round}`
+    : `${who} · round ${d.round}`;
+}
 
 // Operator directive (running-only): the dashboard shows what is working
 // and says what it is not showing. A `live` registry row is not proof of
@@ -550,6 +577,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
           <StatCard
             label="Budget used"
             :value="budgetUsedLabel"
+            :title="budgetUsedTitle"
             icon="coins"
             tint="amber"
             :delta="data.budgetUsedPctPointDelta1h === null ? undefined : `${signed(Math.round(data.budgetUsedPctPointDelta1h))}pp`"
@@ -635,7 +663,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
                   :title="`started ${formatDateTime(a.dispatchedAt)}`"
                   :aria-label="
                     a.taskId
-                      ? `${a.agentRole} on ${a.modelTier}, working on ${a.taskId}, running ${formatElapsed(a.dispatchedAt, now)}, opens task detail`
+                      ? `${roleLabel(a.agentRole)} on ${a.modelTier}, working on ${a.taskId}, running ${formatElapsed(a.dispatchedAt, now)}, opens task detail`
                       : undefined
                   "
                 >
@@ -643,7 +671,12 @@ const bsCommands = computed<CommandHintItem[]>(() => {
                     class="live-agent-entry__dot live-agent-entry__dot--working"
                     aria-hidden="true"
                   />
-                  <IdentityChip :id="a.agentRole" :label="`${a.agentRole} · ${a.modelTier}`" live />
+                  <IdentityChip
+                    :id="a.agentRole"
+                    :label="`${roleLabel(a.agentRole)} · ${a.modelTier}`"
+                    :title="`${a.agentRole} · ${a.modelTier}`"
+                    live
+                  />
                   <span class="live-agent-entry__task">{{ agentScopeLabel(a) }}</span>
                   <span class="live-agent-entry__elapsed">{{
                     formatElapsed(a.dispatchedAt, now)
@@ -744,14 +777,18 @@ const bsCommands = computed<CommandHintItem[]>(() => {
           <Row
             v-for="d in data.recentDispatches"
             :key="d.eventId"
-            :title="`${d.agentRole} → ${d.modelTier}/${d.provider}`"
-            :meta="`${d.reason ?? 'no reason given'} · ${formatRelative(d.ts, now)}`"
+            :title="`${roleLabel(d.agentRole)} → ${d.modelTier}/${d.provider}`"
+            :meta="`${dispatchReasonText(d)} · ${formatRelative(d.ts, now)}`"
             :clickable="!!d.taskId"
             :aria-label="d.taskId ? `Open task ${d.taskId}` : undefined"
             @activate="d.taskId && router.push(`/tasks/${encodeURIComponent(d.taskId)}`)"
           >
             <template #trailing>
-              <IdentityChip :id="d.agentRole" :label="`${d.agentRole} · ${d.modelTier}`" />
+              <IdentityChip
+                :id="d.agentRole"
+                :label="`${roleLabel(d.agentRole)} · ${d.modelTier}`"
+                :title="`${d.agentRole} · ${d.modelTier}`"
+              />
             </template>
           </Row>
         </RowList>

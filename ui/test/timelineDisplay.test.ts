@@ -11,6 +11,7 @@ import {
   iconFor,
   KIND_OPTIONS,
   matchesKind,
+  metaFor,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
@@ -62,6 +63,75 @@ describe('lib/timelineDisplay.ts', () => {
     const e = entry({ eventType: 'dispatch_decision', payload: { agent_role: 'coder' } });
     expect(iconFor(e)).toBe('send');
     expect(tintFor(e)).toBe('slate');
+  });
+
+  // Task 2 (friendly role labels): the row's own title text names the role
+  // too, alongside the IdentityChip TimelineRow.vue already labels — both
+  // should read "Builder", never the raw taxonomy string "coder".
+  it('titles a dispatch_decision with the friendly role label', () => {
+    const e = entry({
+      eventType: 'dispatch_decision',
+      payload: { agent_role: 'coder', model_tier: 'mid', provider: 'anthropic' },
+    });
+    expect(titleFor(e)).toBe('Dispatched Builder (mid/anthropic)');
+  });
+
+  // Task 3 (dispatch reason fallback): writers put the reason under other
+  // keys than `reason` — the same fallback chain the projector now applies
+  // server-side (reason ?? rationale ?? note ?? why, strings only, trimmed)
+  // is applied here too, so a rebuilt-vs-not-yet-rebuilt row reads the same.
+  describe('dispatch_decision reason fallback chain', () => {
+    const base = { agent_role: 'coder', model_tier: 'mid', provider: 'anthropic' };
+
+    it('prefers reason when present', () => {
+      const e = entry({
+        eventType: 'dispatch_decision',
+        payload: { ...base, reason: 'fix the bug' },
+      });
+      expect(titleFor(e)).toBe('Dispatched Builder (mid/anthropic) — fix the bug');
+    });
+
+    it('falls back to rationale, then note, then why', () => {
+      expect(
+        titleFor(
+          entry({ eventType: 'dispatch_decision', payload: { ...base, rationale: 'a rationale' } }),
+        ),
+      ).toBe('Dispatched Builder (mid/anthropic) — a rationale');
+      expect(
+        titleFor(entry({ eventType: 'dispatch_decision', payload: { ...base, note: 'a note' } })),
+      ).toBe('Dispatched Builder (mid/anthropic) — a note');
+      expect(
+        titleFor(entry({ eventType: 'dispatch_decision', payload: { ...base, why: 'a why' } })),
+      ).toBe('Dispatched Builder (mid/anthropic) — a why');
+    });
+
+    it('trims whitespace and skips a blank string in favour of the next key', () => {
+      expect(
+        titleFor(
+          entry({
+            eventType: 'dispatch_decision',
+            payload: { ...base, reason: '   ', rationale: '  a rationale  ' },
+          }),
+        ),
+      ).toBe('Dispatched Builder (mid/anthropic) — a rationale');
+    });
+
+    it('ignores a non-string value at a key and keeps looking', () => {
+      expect(
+        titleFor(
+          entry({
+            eventType: 'dispatch_decision',
+            payload: { ...base, reason: 42, note: 'a note' },
+          }),
+        ),
+      ).toBe('Dispatched Builder (mid/anthropic) — a note');
+    });
+
+    it('names no reason at all when none of the four keys carry one', () => {
+      expect(titleFor(entry({ eventType: 'dispatch_decision', payload: base }))).toBe(
+        'Dispatched Builder (mid/anthropic)',
+      );
+    });
   });
 
   it('picks shield-check for a passing gate-outcome, shield-alert for blocked', () => {
@@ -918,26 +988,28 @@ describe('lib/timelineDisplay.ts', () => {
         node('d4', 'coder'),
         node('d5', 'reviewer'),
       ]);
-      expect(groupAt(items, 0).label).toBe('5 dispatches — coder ×3, reviewer ×2');
+      expect(groupAt(items, 0).label).toBe('5 dispatches — Builder ×3, Code reviewer ×2');
     });
 
     // `×1` on four of five roles is noise, and the count is already in the
     // header. A role that appears once is named once.
     it('drops the multiplier for a role that appears once, and caps a long list', () => {
       const once = groupDispatches([node('a', 'coder'), node('b', 'coder'), node('c', 'tester')]);
-      expect(groupAt(once, 0).label).toBe('3 dispatches — coder ×2, tester');
+      expect(groupAt(once, 0).label).toBe('3 dispatches — Builder ×2, Tester');
 
       const many = groupDispatches(
         ['coder', 'coder', 'reviewer', 'tester', 'planner', 'scribe'].map((r, i) =>
           node(`m${i}`, r),
         ),
       );
-      expect(groupAt(many, 0).label).toBe('6 dispatches — coder ×2, planner, reviewer, +2 more');
+      expect(groupAt(many, 0).label).toBe(
+        '6 dispatches — Builder ×2, Planner, Code reviewer, +2 more',
+      );
     });
 
     it("falls back to the row's own word for a dispatch with no role", () => {
       const items = groupDispatches([node('a', null), node('b', null), node('c', null)]);
-      expect(groupAt(items, 0).label).toBe('3 dispatches — agent ×3');
+      expect(groupAt(items, 0).label).toBe('3 dispatches — Agent ×3');
     });
 
     // The id is the key the expand/collapse Set holds. Roots render newest
@@ -991,5 +1063,25 @@ describe('lib/timelineDisplay.ts', () => {
       expect(inner.every((i) => i.kind === 'entry')).toBe(true);
       expect(ids(inner)).toEqual(['d1', 'd2', 'd3']);
     });
+  });
+});
+
+// Task 4 (humanized task label helper): metaFor() is the row's second line
+// ("<date> · <meta>", rendered as plain text by TimelineRow.vue — not a
+// tooltip), and it showed the bare taskId. taskLabel() humanizes the id's
+// slug; TimelineRow.vue keeps the raw id reachable in a title tooltip.
+describe('lib/timelineDisplay.ts metaFor()', () => {
+  it('humanizes a taskId rather than showing the raw slug', () => {
+    const e = entry({
+      eventType: 'gate-outcome',
+      taskId: 'epic-9/task-29-readme-merge-trim',
+      payload: {},
+    });
+    expect(metaFor(e)).toBe('Readme merge trim · gate-outcome');
+  });
+
+  it('falls back to the bare event type when there is no task', () => {
+    const e = entry({ eventType: 'session-start', taskId: null, payload: {} });
+    expect(metaFor(e)).toBe('session-start');
   });
 });

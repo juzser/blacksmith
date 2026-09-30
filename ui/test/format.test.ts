@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatBudgetPct,
+  formatCompactNumber,
   formatElapsed,
   formatMeasuredTokens,
   formatRelative,
   pluralize,
   summarize,
+  taskLabel,
 } from '../src/lib/format.js';
 
 describe('lib/format.ts formatRelative()', () => {
@@ -145,16 +147,107 @@ describe('lib/format.ts formatElapsed()', () => {
 // spend total that includes one or more unmeasured results is a floor, not
 // an exact figure — it must never read the same as a fully-measured total.
 describe('lib/format.ts formatMeasuredTokens()', () => {
-  it('renders a plain count when every result was measured', () => {
-    expect(formatMeasuredTokens(2000, 0)).toBe('2000 tok');
+  it('renders a compact count when every result was measured', () => {
+    expect(formatMeasuredTokens(2000, 0)).toBe('2K tok');
   });
 
   it('renders a floor plus the unmeasured count when spend is a mix', () => {
-    expect(formatMeasuredTokens(2000, 3)).toBe('≥2000 tok · 3 not measured');
+    expect(formatMeasuredTokens(2000, 3)).toBe('≥2K tok · 3 not measured');
   });
 
   it('renders "not measured" rather than "0 tok" when nothing was measured', () => {
     expect(formatMeasuredTokens(0, 3)).toBe('not measured');
+  });
+
+  it('keeps small counts exact — no suffix below a thousand', () => {
+    expect(formatMeasuredTokens(999, 0)).toBe('999 tok');
+  });
+});
+
+// The operator finds the dashboard too technical: a raw 6-7 digit token
+// integer is noise next to the story it tells ("this task cost about 12M
+// tokens"), so every rendered count goes through one compact formatter
+// rather than each call site rolling its own rounding.
+describe('lib/format.ts formatCompactNumber()', () => {
+  it('renders sub-thousand counts exactly, no suffix', () => {
+    expect(formatCompactNumber(999)).toBe('999');
+    expect(formatCompactNumber(0)).toBe('0');
+  });
+
+  it('renders thousands with one decimal, dropping a trailing .0', () => {
+    expect(formatCompactNumber(1234)).toBe('1.2K');
+    expect(formatCompactNumber(5000)).toBe('5K');
+  });
+
+  it('renders millions with one decimal', () => {
+    expect(formatCompactNumber(12345678)).toBe('12.3M');
+  });
+
+  it('renders billions with a B suffix', () => {
+    expect(formatCompactNumber(2_500_000_000)).toBe('2.5B');
+    expect(formatCompactNumber(1_000_000_000)).toBe('1B');
+  });
+
+  // A value that rounds up to 1000 within its tier used to render "1000K"
+  // instead of promoting to the next tier up ("1M") — the rounded display
+  // value, not the raw magnitude, decides which tier a number belongs to.
+  describe('boundary values that round up into the next tier', () => {
+    it('promotes a K value that rounds to 1000 up to 1M', () => {
+      expect(formatCompactNumber(999_950)).toBe('1M');
+    });
+
+    it('does not promote a K value that rounds to 999.9', () => {
+      expect(formatCompactNumber(999_949)).toBe('999.9K');
+    });
+
+    it('promotes an M value that rounds to 1000 up to 1B', () => {
+      expect(formatCompactNumber(999_994_999)).toBe('1B');
+    });
+
+    it('promotes a negative K value that rounds to -1000 up to -1M', () => {
+      expect(formatCompactNumber(-999_950)).toBe('-1M');
+    });
+
+    it('renders exactly 999 with no suffix', () => {
+      expect(formatCompactNumber(999)).toBe('999');
+    });
+
+    it('renders exactly 1000 as 1K', () => {
+      expect(formatCompactNumber(1000)).toBe('1K');
+    });
+  });
+});
+
+// OverviewPage's "Recent dispatch decisions" and Timeline both show a bare
+// taskId when nothing better is on hand (queries.ts's `tasks` table carries
+// no title). taskLabel() is the one place that turns
+// "epic-x/task-29-readme-merge-trim" into "Readme merge trim" so neither
+// page re-derives the slug rules inline (D-221).
+describe('lib/format.ts taskLabel()', () => {
+  it('derives a label from the id when no title is given', () => {
+    expect(taskLabel('epic-x/task-29-readme-merge-trim')).toBe('Readme merge trim');
+  });
+
+  it('strips a leading task-<n>- prefix even without an epic path segment', () => {
+    expect(taskLabel('task-3-fix-lint')).toBe('Fix lint');
+  });
+
+  it('prefers a short, non-empty title over the derived slug', () => {
+    expect(taskLabel('epic-x/task-29-readme-merge-trim', 'Merge trim')).toBe('Merge trim');
+  });
+
+  it('falls back to the derived slug when the title is empty', () => {
+    expect(taskLabel('epic-x/task-29-readme-merge-trim', '')).toBe('Readme merge trim');
+  });
+
+  it('falls back to the derived slug when the title is too long to be a label', () => {
+    const longTitle =
+      'Rewrite the entire onboarding flow end to end including every edge case we can think of';
+    expect(taskLabel('epic-x/task-29-readme-merge-trim', longTitle)).toBe('Readme merge trim');
+  });
+
+  it('handles an id with no task- prefix by just spacing and capitalizing it', () => {
+    expect(taskLabel('cleanup-orphan-rows')).toBe('Cleanup orphan rows');
   });
 });
 

@@ -235,7 +235,23 @@ interface DispatchPayload {
   model_tier?: string;
   spec_ref?: string;
   reason?: string;
+  rationale?: string;
+  note?: string;
+  why?: string;
   parent_prompt_id?: string;
+}
+
+/** Task 3 (dispatch reason fallback): writers put the reason under other
+ * keys than `reason` — the dashboard's "Recent dispatch decisions" showed
+ * "no reason given" on almost every row because of it. Same chain as the
+ * UI's own fallback (ui/src/lib/timelineDisplay.ts's dispatchReasonText):
+ * no shared lib between the two runtimes, so it's kept in step by hand. */
+function dispatchReasonText(p: DispatchPayload): string | null {
+  for (const key of ['reason', 'rationale', 'note', 'why'] as const) {
+    const v = p[key];
+    if (typeof v === 'string' && v.trim() !== '') return v.trim();
+  }
+  return null;
 }
 
 interface ErrorPayload {
@@ -1311,7 +1327,7 @@ export function projectSession(
             provider: p.provider,
             modelTier: p.model_tier,
             specRef: p.spec_ref ?? null,
-            reason: p.reason ?? null,
+            reason: dispatchReasonText(p),
             parentPromptId: p.parent_prompt_id ?? null,
             causalParent: record.causal_parent,
             project: record.project ?? projectForRef(eventTask),

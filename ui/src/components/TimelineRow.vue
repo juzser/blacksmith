@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import type { TimelineEntry } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
+import { roleLabel } from '../lib/roleLabels.js';
 import { findingStatusTone, severityTone } from '../lib/taxonomy.js';
 import { iconFor, metaFor, tintFor, titleFor } from '../lib/timelineDisplay.js';
 import Icon from './ds/Icon.vue';
@@ -56,7 +57,8 @@ const dispatchAgent = computed(() => {
   if (!p.agent_role) return null;
   return {
     role: p.agent_role,
-    label: p.model_tier ? `${p.agent_role} · ${p.model_tier}` : p.agent_role,
+    label: p.model_tier ? `${roleLabel(p.agent_role)} · ${p.model_tier}` : roleLabel(p.agent_role),
+    title: p.model_tier ? `${p.agent_role} · ${p.model_tier}` : p.agent_role,
   };
 });
 
@@ -101,9 +103,14 @@ const clickable = computed(
         </component>
         <Lozenge v-if="severity" :tone="severityTone(severity).tone" :variant="severityTone(severity).variant">{{ severity }}</Lozenge>
         <Lozenge v-if="findingStatus" :tone="findingStatusTone(findingStatus)">{{ findingStatus }}</Lozenge>
-        <IdentityChip v-if="dispatchAgent" :id="dispatchAgent.role" :label="dispatchAgent.label" />
+        <IdentityChip
+          v-if="dispatchAgent"
+          :id="dispatchAgent.role"
+          :label="dispatchAgent.label"
+          :title="dispatchAgent.title"
+        />
       </div>
-      <span class="timeline-row__meta">{{ formatDateTime(entry.ts) }} · {{ meta }}</span>
+      <span class="timeline-row__meta" :title="entry.taskId ?? undefined">{{ formatDateTime(entry.ts) }} · {{ meta }}</span>
     </div>
   </div>
 </template>

@@ -7,6 +7,7 @@
 // neither tsc nor biome here, so this module is the only place these numbers
 // can be tested.
 import type { CostBucket, ProviderAgreementStat, RecheckOutcome, SameMistakeDay } from './api.js';
+import { formatCompactNumber } from './format.js';
 import { taskOutcome } from './taxonomy.js';
 
 /**
@@ -120,9 +121,22 @@ export function costPerTask(buckets: readonly CostBucket[]): number | null {
   return measuredTasks > 0 ? Math.round(tokens / measuredTasks) : null;
 }
 
-/** "1234 tok" — or an em dash when no task reported any usage to divide. */
+/** "1.2K tok" — or an em dash when no task reported any usage to divide. */
 export function formatTokens(tokens: number | null): string {
-  return tokens === null ? '—' : `${tokens} tok`;
+  return tokens === null ? '—' : `${formatCompactNumber(tokens)} tok`;
+}
+
+/**
+ * Whether "Cost per task by provider" has anything worth comparing. Most
+ * projects run a single provider end to end, so a lone bar answers a
+ * question nobody asked and just repeats the "Cost per task" StatCard next
+ * to it — the card is hidden entirely below two providers rather than drawn
+ * with one bar (D-31: no claim with nothing to contrast it against).
+ */
+export function hasMultipleProviders(
+  costByProviderData: readonly { label: string; value: number }[],
+): boolean {
+  return costByProviderData.length >= 2;
 }
 
 /** One rendered line of the Analytics rail's "Cross-check quorum" card. */

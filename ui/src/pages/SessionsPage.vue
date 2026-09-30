@@ -62,6 +62,7 @@ import {
   SESSION_ACTIVE_WITHIN_MS,
   type SessionActivity,
 } from '../lib/liveness.js';
+import { roleLabel } from '../lib/roleLabels.js';
 import {
   AGENT_VISIBLE_CAP,
   bandsPerRowFor,
@@ -391,7 +392,7 @@ function goToTask(taskId: string | null) {
          a stalled one is counted in the summary, not named here. -->
     <Banner v-if="orphans.agents.length > 0" tone="warning">
       {{ pluralize(orphans.agents.length, 'working agent') }} with no session on this canvas
-      ({{ orphans.agents.map((a) => `${a.agentRole} · ${a.sessionId}`).join(', ') }}).
+      ({{ orphans.agents.map((a) => `${roleLabel(a.agentRole)} · ${a.sessionId}`).join(', ') }}).
       Either no terminal event was recorded for
       {{ orphans.agents.length === 1 ? 'it' : 'them' }}, or the run belongs to a project
       outside the current scope. Not drawn: the canvas has nowhere honest to put
@@ -501,7 +502,7 @@ function goToTask(taskId: string | null) {
               :title="`started ${formatDateTime(node.agent.dispatchedAt)}`"
               :aria-label="
                 node.agent.taskId
-                  ? `${node.agent.agentRole} on ${node.agent.modelTier}, ${node.activity}, task ${node.agent.taskId}, running ${formatElapsed(node.agent.dispatchedAt, graphNow)}, opens task detail`
+                  ? `${roleLabel(node.agent.agentRole)} on ${node.agent.modelTier}, ${node.activity}, task ${node.agent.taskId}, running ${formatElapsed(node.agent.dispatchedAt, graphNow)}, opens task detail`
                   : undefined
               "
               @click="goToTask(node.agent.taskId)"
@@ -514,7 +515,8 @@ function goToTask(taskId: string | null) {
                 />
                 <IdentityChip
                   :id="node.agent.agentRole"
-                  :label="`${node.agent.agentRole} · ${node.agent.modelTier}`"
+                  :label="`${roleLabel(node.agent.agentRole)} · ${node.agent.modelTier}`"
+                  :title="`${node.agent.agentRole} · ${node.agent.modelTier}`"
                   :live="node.activity === 'working'"
                 />
                 <Lozenge :tone="AGENT_TONE[node.activity as AgentActivity]">
@@ -578,7 +580,7 @@ function goToTask(taskId: string | null) {
             <tr v-for="a in g.agents" :key="a.id">
               <td>{{ g.session.sessionId }}</td>
               <td>{{ formatRelative(g.session.lastEventAt, graphNow) }}</td>
-              <td>{{ a.agentRole }} · {{ a.modelTier }}</td>
+              <td>{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}</td>
               <td>{{ agentActivity(a, graphNow) }}</td>
               <td>{{ agentScopeLabel(a) }}</td>
               <td>{{ formatElapsed(a.dispatchedAt, graphNow) }}</td>

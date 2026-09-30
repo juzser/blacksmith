@@ -224,20 +224,29 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
   });
 
   it('labels role · tier, and role alone when the dispatch named no tier', () => {
-    expect(agentChip(task({ agentActivity: 'working' }))?.label).toBe('coder · mid');
-    expect(agentChip(task({ agentModelTier: null }))?.label).toBe('coder');
+    // Task 2 (friendly role labels): the visible label reads "Builder", the
+    // taxonomy string ("coder") is roleLabel()'s input, not its output.
+    expect(agentChip(task({ agentActivity: 'working' }))?.label).toBe('Builder · mid');
+    expect(agentChip(task({ agentModelTier: null }))?.label).toBe('Builder');
+  });
+
+  it('keeps the raw role · tier reachable as a title, alongside the friendly label', () => {
+    expect(agentChip(task({ agentActivity: 'working' }))?.title).toBe('coder · mid');
+    expect(agentChip(task({ agentModelTier: null }))?.title).toBe('coder');
   });
 
   it('pulses only for an agent that is working now', () => {
     expect(agentChip(task({ agentActivity: 'working' }))).toEqual({
-      label: 'coder · mid',
+      label: 'Builder · mid',
+      title: 'coder · mid',
       live: true,
       gone: false,
     });
     // Stalled is still somebody: the registry has no terminal event, only
     // the clock says it should have — the chip stays but stops breathing.
     expect(agentChip(task({ agentActivity: 'stalled' }))).toEqual({
-      label: 'coder · mid',
+      label: 'Builder · mid',
+      title: 'coder · mid',
       live: false,
       gone: false,
     });
@@ -247,7 +256,8 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
     // A reviewing task whose coder has returned and whose reviewer is not
     // yet dispatched: the chip names who did the work, and nobody is on it.
     expect(agentChip(task({ taskStatus: 'reviewing' }))).toEqual({
-      label: 'coder · mid',
+      label: 'Builder · mid',
+      title: 'coder · mid',
       live: false,
       gone: true,
     });
@@ -268,7 +278,8 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
     expect(over.length).toBeGreaterThan(0);
     for (const taskStatus of over) {
       expect(agentChip(task({ taskStatus, agentActivity: 'working' }))).toEqual({
-        label: 'coder · mid',
+        label: 'Builder · mid',
+        title: 'coder · mid',
         live: false,
         gone: true,
       });
@@ -280,7 +291,8 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
     // operator sees the agent the registry says is there, rather than a card
     // muted on the strength of a status this build has never heard of.
     expect(agentChip(task({ taskStatus: 'invented-tomorrow', agentActivity: 'working' }))).toEqual({
-      label: 'coder · mid',
+      label: 'Builder · mid',
+      title: 'coder · mid',
       live: true,
       gone: false,
     });
