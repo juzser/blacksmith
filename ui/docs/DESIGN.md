@@ -300,6 +300,21 @@ None of these composables changed for DS0 — the kit swap is presentational.
   `from '.*kit/'` reference exists outside `kit/` itself) — so Playwright
   has nothing of this kit's to exercise yet. That arrives with the first
   page-wiring PR.
+- **Mobile overflow menu's page view options and "Open desktop view" are
+  out of DS1 scope.** ds-spec.md §3.1 describes the ≤640px overflow menu as
+  also carrying page-specific view options and a way back to the desktop
+  layout; DS1 only wires the shell-level controls (Pause, theme, Settings)
+  that `LiveIndicator` already owns. Page view options belong to each page's
+  own DS; "Open desktop view" has no viewport-override mechanism yet.
+  Deferred, not dropped.
+- **Roadmap's epic-block session scoping is out of DS1 scope.** ds-spec.md
+  §3 scopes the topbar session picker into Activity and "the epic block on
+  Work → Roadmap"; DS1 makes the picker visible on both routes
+  (`SESSION_SCOPABLE_ROUTES` in `lib/sessionScope.ts`) but `RoadmapPage.vue`
+  does not yet read `useSessionContext()` — there is no epic block to scope
+  yet. Likewise the picker's derived run titles and its 25-cap "Show more"
+  affordance are unbuilt; `sessionOptions()` today just truncates at the cap
+  silently. Both belong to the DS that builds the epic block.
 
 ## Verification
 

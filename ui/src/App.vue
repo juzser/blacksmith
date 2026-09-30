@@ -95,9 +95,10 @@ function onSwitchProject(value: string) {
   setProject(value || undefined);
 }
 
-// Session picker (topbar). Same IFF as the project switcher, and the same
-// reason for keeping the route set in a lib: shown exactly where a page reads
-// the scope. SESSION_SCOPABLE_ROUTES is the eight pages that do.
+// Session picker (topbar, ds-spec.md §3): visible only on Activity and
+// Roadmap, decoupled from which pages read the URL's ?session scope (those
+// keep reading it regardless, so a deep link into any of them still filters —
+// see sessionScope.ts's SESSION_SCOPABLE_ROUTES doc comment).
 const showSessionPicker = computed(() => SESSION_SCOPABLE_ROUTES.has(String(route.name)));
 const sessionList = ref<{ sessionId: string; workingAgentCount: number }[]>([]);
 const sessionSelectOptions = computed<SessionOption[]>(() =>

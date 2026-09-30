@@ -291,48 +291,30 @@ function readsSessionScope(pageFile: string): boolean {
   return readFileSync(join(SRC, 'pages', pageFile), 'utf8').includes('useSessionContext');
 }
 
-describe('D-264: the session picker is shown exactly where the scope is read', () => {
-  // The same IFF that D-216 cost us for the project switcher, asserted before
-  // it costs us anything: a picker on a page that ignores the scope is a
-  // control that does nothing, and a page that reads a scope no control on it
-  // can set is a filter the operator cannot clear.
-  it('shows the picker on every route whose page reads the scope', () => {
-    const shouldScope = routedPages()
-      .filter(([, page]) => readsSessionScope(page))
-      .map(([name]) => name);
-    expect(shouldScope.filter((name) => !SESSION_SCOPABLE_ROUTES.has(name))).toEqual([]);
+describe('topbar session picker visibility (ds-spec.md §3): Activity and Work -> Roadmap only', () => {
+  // DS1 narrows the picker to two routes (superseding D-264's page-reads-scope
+  // IFF for *visibility* specifically). Pages that still read the URL scope
+  // keep doing so unconditionally, so a deep link into them keeps filtering
+  // even with no control on screen to set it.
+  it('shows the picker on exactly the Activity and Roadmap routes', () => {
+    expect([...SESSION_SCOPABLE_ROUTES].sort()).toEqual(['roadmap', 'timeline']);
   });
 
-  it('hides the picker on every route whose page ignores the scope', () => {
-    const shouldNotScope = routedPages()
-      .filter(([, page]) => !readsSessionScope(page))
-      .map(([name]) => name);
-    expect(shouldNotScope.filter((name) => SESSION_SCOPABLE_ROUTES.has(name))).toEqual([]);
-  });
-
-  it('names no route that router.ts does not define', () => {
+  it('names only routes router.ts defines', () => {
     const known = new Set(routedPages().map(([name]) => name));
     expect([...SESSION_SCOPABLE_ROUTES].filter((name) => !known.has(name))).toEqual([]);
   });
 
-  it('reaches at least the pages whose endpoints spread sessionScope(c)', () => {
-    // Not one page per endpoint: roadmap and lessons take the param upstream
-    // but read as repo-wide artifacts, the projects hub is the one page whose
-    // job is to be above every scope, and /api/sessions is the picker's own
-    // feed, which no page owns. Stated as a floor so a page cannot quietly
-    // drop out of the set.
-    for (const name of [
-      'overview-global',
-      'overview-project',
-      'sessions',
-      'timeline',
-      'kanban',
-      'flow',
-      'errors',
-      'analytics',
-    ]) {
-      expect([...SESSION_SCOPABLE_ROUTES]).toContain(name);
-    }
+  it('does not require every scope-reading page to also carry the picker: hidden routes still read the URL scope for deep links', () => {
+    const stillReading = [
+      'KanbanPage.vue',
+      'FlowPage.vue',
+      'ErrorsPage.vue',
+      'AnalyticsPage.vue',
+      'SessionsPage.vue',
+      'OverviewPage.vue',
+    ].filter((page) => !readsSessionScope(page));
+    expect(stillReading).toEqual([]);
   });
 });
 

@@ -71,34 +71,18 @@ export const SCOPE_WIDTH_OPTIONS: readonly SessionOption[] = [
 export const SESSION_OPTION_CAP = 25;
 
 /**
- * Which routes show the topbar session picker (App.vue).
+ * Which routes show the topbar session picker (App.vue), per ds-spec.md §3:
+ * "no session picker in the topbar globally -- it is scoped into Activity
+ * and the epic block on Work -> Roadmap only".
  *
- * Same IFF as SCOPABLE_ROUTES, for the same reason and stated before it costs
- * anything: a page shows the picker if and only if it consumes the scope.
- * Shown but unread is a control that does nothing; read but unsettable is a
- * filter the operator can neither see nor clear, which is what D-216 was.
- * sessionScope.test.ts derives the expected set from router.ts plus the page
- * sources and fails on drift.
- *
- * Not one page per endpoint. Three that accept the param are deliberately
- * absent: Roadmap and Lessons take it upstream but read as repo-wide
- * artifacts -- a milestone's progress is not a property of the run that
- * happened to advance it -- and the Projects hub is the one page whose job is
- * to sit above every scope there is. The eleventh, /api/sessions, is this
- * picker's own feed and belongs to no page at all.
+ * This is visibility only, not the old IFF with page-level scope consumption
+ * (D-216's original rule, kept until DS1): several other pages still call
+ * useSessionContext() and still read `?session` off the URL so a deep link
+ * into them keeps filtering, they just no longer surface a control that sets
+ * it. Roadmap is the opposite case -- newly shown, not yet a scope consumer;
+ * its epic-block session scoping is out of DS1 (deferred, see DESIGN.md).
  */
-export const SESSION_SCOPABLE_ROUTES: ReadonlySet<string> = new Set([
-  'overview-global',
-  'overview-project',
-  // The headline case: a screenful of dispatched wave-runners, and the only
-  // question worth asking of it is "which of these belong to my epic".
-  'sessions',
-  'timeline',
-  'kanban',
-  'flow',
-  'errors',
-  'analytics',
-]);
+export const SESSION_SCOPABLE_ROUTES: ReadonlySet<string> = new Set(['timeline', 'roadmap']);
 
 /** What sessionOptions() needs off a RunningSession. Structural, so the
  *  overview payload satisfies it without being imported. */
