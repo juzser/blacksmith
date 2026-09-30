@@ -22,6 +22,8 @@ describe('kit/MobileTabBar.vue', () => {
   });
 
   it('prefers shortLabel over label, not CSS truncation (ds-spec.md §3)', () => {
-    expect(TABBAR).toMatch(/<span class="bs-tabbar__label">{{ it\.shortLabel \?\? it\.label }}<\/span>/);
+    expect(TABBAR).toMatch(
+      /<span class="bs-tabbar__label">{{ it\.shortLabel \?\? it\.label }}<\/span>/,
+    );
   });
 });

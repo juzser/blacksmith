@@ -19,8 +19,14 @@ const props = withDefaults(
     items: NavItem[];
     activeId?: string;
     collapsed?: boolean;
+    // Off-canvas Sheet copy (App.vue) has no icon-only rail state to toggle,
+    // and a focusable IconButton there would eat the Sheet's first Escape via
+    // its own focus-visible Tooltip (Tooltip.vue's capture-phase Escape
+    // listener wins the race against useModalFocus.ts's close handler) --
+    // so the Sheet instance opts out while the persistent rail keeps it.
+    showCollapseToggle?: boolean;
   }>(),
-  { collapsed: false },
+  { collapsed: false, showCollapseToggle: true },
 );
 const emit = defineEmits<{ select: [id: string] }>();
 
@@ -54,7 +60,7 @@ function toggleCollapsed() {
       </span>
       <span v-if="!effectiveCollapsed" class="bs-side__word">Blacksmith</span>
       <IconButton
-        v-if="!collapsed"
+        v-if="!collapsed && showCollapseToggle"
         :icon="effectiveCollapsed ? PanelLeftOpen : PanelLeftClose"
         :label="effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
         size="sm"

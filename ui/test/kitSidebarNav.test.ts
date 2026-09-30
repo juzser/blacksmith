@@ -41,14 +41,17 @@ describe('kit/SidebarNav.vue', () => {
   });
 
   it('only offers the toggle at >=1024px, where the viewport is not already forcing collapse', () => {
-    expect(SIDEBAR).toMatch(/<IconButton\s+v-if="!collapsed"/);
+    expect(SIDEBAR).toMatch(/<IconButton\s+v-if="!collapsed && showCollapseToggle"/);
+  });
+
+  it("the off-canvas Sheet copy can opt out of the toggle: it has no icon-only state to toggle, and a focusable IconButton there would eat the Sheet's first Escape via its own focus-visible tooltip", () => {
+    expect(SIDEBAR).toMatch(/showCollapseToggle\?:\s*boolean/);
+    expect(SIDEBAR).toMatch(/showCollapseToggle:\s*true/);
   });
 
   it('flips icon and label between Collapse sidebar and Expand sidebar', () => {
     expect(SIDEBAR).toMatch(/:icon="effectiveCollapsed \? PanelLeftOpen : PanelLeftClose"/);
-    expect(SIDEBAR).toMatch(
-      /:label="effectiveCollapsed \? 'Expand sidebar' : 'Collapse sidebar'"/,
-    );
+    expect(SIDEBAR).toMatch(/:label="effectiveCollapsed \? 'Expand sidebar' : 'Collapse sidebar'"/);
   });
 
   it('persists the manual choice to localStorage, wrapped in try/catch', () => {

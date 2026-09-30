@@ -162,7 +162,12 @@ const projection = computed(() => projectionNotice(pulse.value));
       @select="selectNav"
     />
     <Sheet v-if="!isPhoneWidth" :open="sheetOpen" @close="sheetOpen = false">
-      <SidebarNav :items="NAV_ITEMS" :active-id="activeId" @select="selectNav" />
+      <SidebarNav
+        :items="NAV_ITEMS"
+        :active-id="activeId"
+        :show-collapse-toggle="false"
+        @select="selectNav"
+      />
     </Sheet>
 
     <div class="app-shell__main">

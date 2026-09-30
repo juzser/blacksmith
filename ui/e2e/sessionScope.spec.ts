@@ -44,7 +44,15 @@ test.describe('Session scope', () => {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} offers the picker`).toBeVisible();
     }
-    for (const path of ['/sessions', '/kanban', '/flow', '/errors', '/analytics', '/projects', '/lessons']) {
+    for (const path of [
+      '/sessions',
+      '/kanban',
+      '/flow',
+      '/errors',
+      '/analytics',
+      '/projects',
+      '/lessons',
+    ]) {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} does not`).toHaveCount(0);
     }

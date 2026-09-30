@@ -155,6 +155,8 @@ test.describe('Overview', () => {
     // has done whatever it does to `error` -- so the assertion below lands
     // inside the in-flight window rather than racing it.
     const refetch = page.waitForRequest('**/api/overview*');
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await refetch;
 

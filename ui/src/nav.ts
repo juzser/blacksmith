@@ -8,6 +8,12 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: House, route: '/overview' },
   { id: 'work', label: 'Work', icon: Kanban, route: '/kanban' },
   { id: 'activity', label: 'Activity', icon: Activity, route: '/timeline' },
-  { id: 'cost-quality', label: 'Cost & quality', shortLabel: 'Cost', icon: Coins, route: '/analytics' },
+  {
+    id: 'cost-quality',
+    label: 'Cost & quality',
+    shortLabel: 'Cost',
+    icon: Coins,
+    route: '/analytics',
+  },
   { id: 'lessons', label: 'Lessons', icon: Lightbulb, route: '/lessons' },
 ];
