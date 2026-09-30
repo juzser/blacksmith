@@ -435,9 +435,14 @@ event can close). The readers take it from either place, but only the
 top-level field is indexed — write it there.
 
 The `dispatch_decision` payload is `{agent_role, provider, model_tier, model}`
-— all four required, the write is rejected without them. `model` is the
-concrete id (`claude-opus-5`, `gpt-5-codex`, or `<command>:default` for a CLI
-provider that genuinely does not know), and it is what makes
+— all four required, the write is rejected without them. Carry a `reason`
+too: one line, plain words, on why this dispatch is happening. It is not
+rejected without one, so writers drift onto `rationale`/`note`/`why` for the
+same idea and the dashboard's Overview page falls back to a derived
+role/task/round line the moment `reason` itself is empty — a fallback, not a
+substitute for saying what actually happened. `model` is the concrete id
+(`claude-opus-5`, `gpt-5-codex`, or `<command>:default` for a CLI provider
+that genuinely does not know), and it is what makes
 crosscheck.yml's `finder_ne_critic` checkable instead of aspirational: the
 tier cannot distinguish opus from fable, so until this field existed *"did
 the spec-reviewer run on the planner's own model?"* had no answer in the log.
