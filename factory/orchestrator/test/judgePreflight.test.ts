@@ -267,6 +267,20 @@ describe('judgePreflight()', () => {
     expect(report.problems).toHaveLength(1);
   });
 
+  it('prefers BS_CROSSCHECK_OFFLINE over the legacy SMITH_CROSSCHECK_OFFLINE test/setup.ts sets', async () => {
+    // bs-rename, operator decision 3: BS_CROSSCHECK_OFFLINE is the current
+    // name and wins when both are set -- even set to empty, which is how a
+    // caller turns the switch back off despite the suite-wide legacy default.
+    expect(process.env.SMITH_CROSSCHECK_OFFLINE).toBeTruthy();
+    process.env.BS_CROSSCHECK_OFFLINE = '';
+    try {
+      const report = await preflight('bs-offline', NATIVE + apiProvider('ds', 'shadow', ABSENT_KEY));
+      expect(report.offlineSwitch).toBe(false);
+    } finally {
+      delete process.env.BS_CROSSCHECK_OFFLINE;
+    }
+  });
+
   it('reports the native provider as configuration-free', async () => {
     const report = await preflight('native', NATIVE);
     expect(report.providers).toEqual([

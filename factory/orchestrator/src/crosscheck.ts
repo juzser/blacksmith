@@ -14,6 +14,7 @@
 // field that actually selects behavior).
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
+import { readEnv } from './env.js';
 import { SmithError } from './errors.js';
 import { CROSSCHECK_POLICY_PATH } from './paths.js';
 import { apiKeyPresent, commandOnPath } from './preconditions.js';
@@ -755,8 +756,9 @@ export function parseCrosscheckPolicy(
 }
 
 /**
- * Reads the policy, honouring `SMITH_CROSSCHECK_OFFLINE`: set it to anything
- * non-empty and no external provider can be invoked, whatever the file says.
+ * Reads the policy, honouring `BS_CROSSCHECK_OFFLINE` (or its legacy
+ * `SMITH_CROSSCHECK_OFFLINE` fallback): set it to anything non-empty and no
+ * external provider can be invoked, whatever the file says.
  *
  * The switch is read here rather than passed down from each call site because
  * the property it protects is process-wide — "this process makes no judge
@@ -769,6 +771,6 @@ export function loadCrosscheckPolicy(
   options: CrosscheckLoadOptions = {},
 ): CrosscheckPolicy {
   return parseCrosscheckPolicy(readFileSync(filePath, 'utf8'), {
-    offline: options.offline ?? Boolean(process.env.SMITH_CROSSCHECK_OFFLINE),
+    offline: options.offline ?? Boolean(readEnv(process.env, 'SMITH_CROSSCHECK_OFFLINE')),
   });
 }
