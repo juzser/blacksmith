@@ -733,3 +733,146 @@ Either edit takes effect on the next case; nothing to restart.
   `runCliJudge`/`runApiJudge` return a schema-validated JSON value
   (`JudgeResult.output`); nothing downstream ever executes provider output
   as code (trust boundary, architecture §6).
+
+## 9. OpenRouter — substitution and extra judges
+
+OpenRouter (`https://openrouter.ai/api/v1`) speaks the same OpenAI
+chat/completions wire format `api-transport.ts` already sends, so it needs no
+new transport module. `crosscheck.ts` uses that one connection for two
+different jobs (operator decision 1, OpenRouter brief).
+
+### 9a. Substitute for a default provider that cannot run here
+
+Codex needs a `codex login` session; DeepSeek needs `DEEPSEEK_API_KEY`. On a
+box where one of those is missing, and `OPENROUTER_API_KEY` **is** set, that
+provider runs through OpenRouter instead of going unavailable — same
+provider name, same `mode`, same gating power, only the transport and model
+underneath change:
+
+```yaml
+codex:
+  enabled: auto
+  mode: active
+  openrouter_fallback:
+    model: openai/gpt-6-sol
+```
+
+`openrouter_fallback.model` is the only new field; it is data, not code, and
+the shipped policy carries one entry per default external provider. Both
+were picked against the public catalog (`curl -s
+https://openrouter.ai/api/v1/models`, no key needed) on 2026-09-30:
+
+- **`codex` → `openai/gpt-6-sol`** — an exact match for the id `codex exec -m
+  gpt-6-sol` pins, so the substitute is literally the same model, not an
+  approximation.
+- **`deepseek` → `deepseek/deepseek-v4-pro`** — an exact match for the id
+  `deepseek-v4-pro` pins above, so the substitute is literally the same
+  model, not an approximation. DeepSeek's own `/models` listing dropped
+  `deepseek-reasoner` (live check of `/models`, 2026-09-30; a call naming it is now
+  silently answered by `deepseek-flash` instead of erroring), and
+  `deepseek-v4-pro` is its current reasoning-tier model. Re-check the
+  catalog before trusting this pairing long after the date above;
+  OpenRouter's id list is not versioned against this repo.
+
+Substitution is eligible when all four hold: the provider is not declared
+`enabled: false` outright (an explicit opt-out is never overridden — that
+stays the one way to refuse a substitute, the same as it is the one way to
+refuse the provider itself); its own precondition failed on this box (`codex`
+not on `PATH`, or the api provider's `api_key_env` unset); the policy names
+an `openrouter_fallback.model` for it; and `OPENROUTER_API_KEY` is set here.
+Miss any one of those and the provider resolves exactly as it did before this
+feature existed — unavailable, or its own transport, never a silent
+OpenRouter call nobody asked for.
+
+A substituted provider's config carries `via: 'openrouter'`
+(`ApiProviderConfig.via`), and both the event log and `smith judge preflight`
+say so — "codex via openrouter, model openai/gpt-6-sol" — rather than
+reporting a plain `codex` run that quietly used a different vendor
+underneath.
+
+### 9b. Extra judges reachable via OpenRouter
+
+Beyond the two defaults, `OPENROUTER_MODELS` (a comma-separated list of
+OpenRouter model ids, read from the process environment or `WORK_ROOT/.env`)
+adds further providers — a Gemini or Qwen model, for instance — with no
+policy edit:
+
+```
+OPENROUTER_MODELS=google/gemini-3-pro,qwen/qwen4-max
+```
+
+Each id becomes a provider named `openrouter:<model>` (deterministic, so a
+repeated run of the same env names the same provider), `enabled: auto`
+(resolves against `OPENROUTER_API_KEY` being set, same as any other api
+provider's precondition), `mode: shadow` — calibration rule §3 applies to
+these exactly as to codex or deepseek: an extra judge earns gating power by
+being promoted, not by being added. Promote one the same way as §4, from a
+project or policy overlay (9c) that sets `mode: active` for its
+`openrouter:<model>` name.
+
+### 9c. Config precedence — project overlay, env, shipped policy
+
+Three sources feed a provider's final config, highest precedence first
+(operator decision 2):
+
+1. **Project** — `<project-dir>/.blacksmith/crosscheck.yml`. The one file
+   under a project's own `.blacksmith/` directory (alongside
+   `findings.jsonl` and `audit.json`) that can move the needle on providers
+   without touching this repo. Only a `providers:` map is legal here — merged
+   by provider name over env and the shipped policy — because quorum rules
+   and everything else stay repo policy:
+
+   ```yaml
+   providers:
+     openrouter:google/gemini-3-pro:
+       mode: active       # promote an extra judge for this project
+     codex:
+       enabled: false      # opt this project out of codex (and its substitute)
+   ```
+
+   Any other top-level key — `quorum_rule`, `independent_finder`, anything —
+   is refused loudly (`crosscheck.invalid-overlay`) rather than silently
+   ignored, so a typo here never quietly reaches past what this file is
+   allowed to change.
+2. **Env** — `OPENROUTER_API_KEY` (enables substitution and any
+   `openrouter:*` provider) and `OPENROUTER_MODELS` (9b).
+3. **Shipped policy** — `factory/policies/crosscheck.yml` in this repo.
+
+The merge is field by field, per provider name, project overriding env
+overriding policy — a project overlay that sets only `mode: active` on a
+provider the shipped policy already fully describes changes just that one
+field, not the rest of the entry. The highest layer that set any field of a
+provider is reported (`configSource: 'project' | 'env' | 'policy'`), so a
+preflight or event-log read knows the first file to open; fields that layer
+left unset still come from the layers below it.
+
+Which commands actually thread a `projectDir` through to
+`loadCrosscheckPolicy()` — and so read the project overlay at all — is not
+every command that loads the policy; see 9d.
+
+### 9d. Asking the operator — `smith judge preflight --project <dir>`
+
+`smith judge preflight` (§1) takes a `--project <dir>` flag: with it, the
+report reflects the project overlay exactly as a real run would use it,
+substitution included; without it, only env and the shipped policy apply.
+
+Two moments call it with `--project` and stop to ask when the gating pool
+cannot decide — fewer active external providers than
+`quorum_rule.min_providers` after substitution, or a provider the project
+config names but that still cannot be reached:
+
+- **Install** (`INSTALL.md`'s cross-provider section, and the stack
+  interview when a project is being set up fresh).
+- **The start of every `/bs run`** (`.claude/skills/bs/run.md`), so a
+  project that drifts out of a workable configuration — a rotated key, a
+  provider quietly disabled upstream — is caught before an epic spends a
+  call on a quorum it cannot complete, not after.
+
+The offer at that stop is the same in both places, per
+`.claude/skills/bs/SKILL.md`'s "Talking to the operator" rules (options with
+confidence %, not restated here): add an OpenRouter key, add a model, pick
+which providers to run with, or continue without cross-check. Not every
+command that loads the crosscheck policy accepts `--project` yet — where one
+doesn't, it reads env and the shipped policy only, and that gap is called out
+at the call site rather than silently narrowing what "ask the operator"
+covers.

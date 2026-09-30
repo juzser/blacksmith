@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -420,6 +420,115 @@ describe('judgePreflight()', () => {
       );
       const report = await preflightOn(broken);
       expect(report.problems.some((p) => p.includes('no-such-judge-binary'))).toBe(true);
+    });
+  });
+
+  describe('OpenRouter substitution reporting', () => {
+    const OPENROUTER_KEY = 'OPENROUTER_API_KEY';
+
+    afterEach(() => {
+      delete process.env[OPENROUTER_KEY];
+    });
+
+    it('reports a substituted provider as via openrouter, with the real model id, and status ok', async () => {
+      process.env[OPENROUTER_KEY] = 'sk-or-not-a-real-key';
+      const report = await preflight(
+        'substituted',
+        `${NATIVE}  codex:
+    kind: api
+    transport: cli
+    command: smith-no-such-binary-6f3a1c
+    enabled: auto
+    mode: active
+    model_tier: mid
+    openrouter_fallback:
+      model: openai/gpt-6-sol
+`,
+      );
+      const codex = report.providers.find((p) => p.provider === 'codex');
+      expect(codex).toMatchObject({
+        transport: 'api',
+        enabled: true,
+        status: 'ok',
+        via: 'openrouter',
+      });
+      expect(codex?.detail).toContain('via openrouter');
+      expect(codex?.detail).toContain('openai/gpt-6-sol');
+      // Substitution keeps the provider's own mode and gating power (operator
+      // decision 1a) -- it must count toward the active pool exactly as the
+      // original codex entry would have.
+      expect(report.gating.activeExternal).toEqual(['codex']);
+    });
+
+    it('never substitutes when OPENROUTER_API_KEY is unset, and says so plainly', async () => {
+      delete process.env[OPENROUTER_KEY];
+      const report = await preflight(
+        'no-substitute',
+        `${NATIVE}  codex:
+    kind: api
+    transport: cli
+    command: smith-no-such-binary-6f3a1c
+    enabled: auto
+    mode: active
+    model_tier: mid
+    openrouter_fallback:
+      model: openai/gpt-6-sol
+`,
+      );
+      const codex = report.providers.find((p) => p.provider === 'codex');
+      expect(codex).toMatchObject({ enabled: false, status: 'not-applicable' });
+      expect(codex?.via).toBeUndefined();
+    });
+  });
+
+  describe('config source reporting', () => {
+    it('reports "policy" for a provider only the shipped/hand-authored document declared', async () => {
+      const report = await preflight(
+        'policy-source',
+        NATIVE + apiProvider('ds', 'shadow', PRESENT_KEY),
+      );
+      expect(report.providers.find((p) => p.provider === 'ds')?.configSource).toBe('policy');
+    });
+  });
+
+  describe('--project overlay', () => {
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await mkdtemp(path.join(tmpdir(), 'smith-preflight-project-'));
+    });
+
+    afterEach(async () => {
+      await rm(dir, { recursive: true, force: true });
+    });
+
+    it('merges the project overlay when projectDir is given, and reports configSource project', async () => {
+      await mkdir(path.join(dir, '.blacksmith'), { recursive: true });
+      await writeFile(
+        path.join(dir, '.blacksmith', 'crosscheck.yml'),
+        'providers:\n  ds: { enabled: false }\n',
+      );
+      const file = path.join(dir, 'crosscheck.yml');
+      await writeFile(file, NATIVE + apiProvider('ds', 'shadow', PRESENT_KEY));
+
+      const report = judgePreflight(file, { projectDir: dir });
+      expect(report.providers.find((p) => p.provider === 'ds')).toMatchObject({
+        enabled: false,
+        status: 'not-applicable',
+        configSource: 'project',
+      });
+    });
+
+    it('ignores the overlay file entirely when no projectDir is given', async () => {
+      const file = path.join(dir, 'crosscheck-no-project.yml');
+      await writeFile(file, NATIVE + apiProvider('ds', 'shadow', PRESENT_KEY));
+
+      const report = judgePreflight(file);
+      expect(report.providers.find((p) => p.provider === 'ds')).toMatchObject({
+        enabled: true,
+        status: 'ok',
+        configSource: 'policy',
+      });
     });
   });
 });

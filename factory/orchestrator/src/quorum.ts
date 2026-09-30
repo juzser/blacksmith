@@ -61,6 +61,13 @@ export interface ExternalJudgeRun {
   provider: string;
   mode: ProviderRunMode;
   outcome: JudgeRunOutcome;
+  /**
+   * Set when this run went out through OpenRouter in place of the provider's
+   * own transport (operator decision 1a). Threaded from the resolved
+   * `ApiProviderConfig.via` by runQuorumCase() into recordJudgeRun(), which
+   * puts it in the dispatch `reason` prose and the verdict payload alike.
+   */
+  via?: 'openrouter';
 }
 
 export interface QuorumCase {
@@ -321,7 +328,7 @@ export async function recordJudgeRun(
         provider: input.run.provider,
         model_tier: input.modelTier,
         model: input.model,
-        reason: `cross-provider judge (${input.run.mode})`,
+        reason: `cross-provider judge (${input.run.mode})${input.run.via === 'openrouter' ? ' via openrouter' : ''}`,
       },
     },
     opts,
@@ -355,6 +362,7 @@ export async function recordJudgeRun(
         model: input.model,
         kind: input.kind,
         mode: input.run.mode,
+        via: input.run.via ?? null,
         ok,
         verdict: ok ? verdict?.verdict : null,
         rationale: ok
@@ -516,7 +524,12 @@ export async function runQuorumCase(
       };
     }
 
-    const run: ExternalJudgeRun = { provider: providerName, mode: config.mode, outcome };
+    const run: ExternalJudgeRun = {
+      provider: providerName,
+      mode: config.mode,
+      outcome,
+      via: config.transport === 'api' ? config.via : undefined,
+    };
     external.push(run);
     await recordJudgeRun(
       {

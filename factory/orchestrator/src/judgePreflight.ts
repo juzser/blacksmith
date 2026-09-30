@@ -28,7 +28,13 @@
 // locally: is the key set, is the binary on PATH, and does the arithmetic of
 // the promotions add up.
 import { readFileSync } from 'node:fs';
-import { type CrosscheckPolicy, type ProviderConfig, parseCrosscheckPolicy } from './crosscheck.js';
+import {
+  type CrosscheckPolicy,
+  loadProjectProviderOverlay,
+  type ProviderConfig,
+  type ProviderConfigSource,
+  parseCrosscheckPolicy,
+} from './crosscheck.js';
 import { readEnv } from './env.js';
 import { CROSSCHECK_POLICY_PATH } from './paths.js';
 import { apiKeyPresent, commandOnPath } from './preconditions.js';
@@ -58,6 +64,16 @@ export interface ProviderPreflight {
   precondition: string | null;
   status: PreconditionStatus;
   detail: string;
+  /**
+   * Set when this provider is currently running through OpenRouter in place
+   * of its own transport (operator decision 1a) -- its own precondition was
+   * unmet and OPENROUTER_API_KEY substituted an equivalent model in. `detail`
+   * names the real model id; this field is what a caller checks without
+   * parsing prose.
+   */
+  via?: 'openrouter';
+  /** Which config layer decided this provider: project overlay, env (`OPENROUTER_MODELS`), or the shipped/hand-authored policy. Absent for the native provider, which has no layers to source from. */
+  configSource?: ProviderConfigSource;
 }
 
 export interface PreflightGating {
@@ -117,6 +133,7 @@ function inspect(config: ProviderConfig): ProviderPreflight {
     kind: config.kind,
     enabled: config.enabled,
     mode: config.mode,
+    configSource: config.configSource,
   } as const;
 
   if (config.transport === 'api') {
@@ -131,6 +148,22 @@ function inspect(config: ProviderConfig): ProviderPreflight {
           config.enabledSource === 'auto'
             ? `enabled: auto, and ${config.apiKeyEnv} is unset here, so this box does not use it. Set the key to switch it on; nothing to edit.`
             : `Disabled in the policy, so ${config.apiKeyEnv} is not read.`,
+      };
+    }
+    // Substitution keeps the provider's own name, mode and gating power
+    // (operator decision 1a) -- only the transport target and model changed
+    // underneath it, so this reads as the same provider succeeding, not a
+    // new one appearing.
+    if (config.via === 'openrouter') {
+      return {
+        ...base,
+        transport: 'api',
+        precondition: config.apiKeyEnv,
+        status: set ? 'ok' : 'unmet',
+        via: 'openrouter',
+        detail: set
+          ? `Running via openrouter as ${config.model}: its own precondition is unmet on this box, and ${config.apiKeyEnv} is set.`
+          : `Running via openrouter as ${config.model}, but ${config.apiKeyEnv} is unset or empty. Every quorum trigger will spend a call that cannot be sent, and record it as provider.missing-api-key.`,
       };
     }
     return {
@@ -168,15 +201,32 @@ function inspect(config: ProviderConfig): ProviderPreflight {
   };
 }
 
+export interface JudgePreflightOptions {
+  /**
+   * `<project-dir>/.blacksmith/crosscheck.yml`, merged over env and the
+   * shipped policy (config source 1, operator decision 2). Absent means this
+   * preflight reads the policy file alone, same as a call site with no
+   * project dir to hand it -- see the call-site survey in the OpenRouter
+   * brief's report for which ones that is.
+   */
+  projectDir?: string;
+}
+
 /**
  * Read the policy as written and report what it would cost and buy. Pure
  * except for `process.env` and PATH lookups; appends nothing and calls nobody.
  */
-export function judgePreflight(policyPath: string = CROSSCHECK_POLICY_PATH): JudgePreflight {
+export function judgePreflight(
+  policyPath: string = CROSSCHECK_POLICY_PATH,
+  options: JudgePreflightOptions = {},
+): JudgePreflight {
   // parseCrosscheckPolicy with `offline: false` rather than
   // loadCrosscheckPolicy: see `offlineSwitch` above.
   const policy: CrosscheckPolicy = parseCrosscheckPolicy(readFileSync(policyPath, 'utf8'), {
     offline: false,
+    providerOverlay: options.projectDir
+      ? loadProjectProviderOverlay(options.projectDir)
+      : undefined,
   });
   const providers = Object.values(policy.providers)
     .map(inspect)

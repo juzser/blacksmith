@@ -67,6 +67,44 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
   });
 });
 
+test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
+  // DS1 moved the shell onto kit components whose look lives entirely in
+  // bs-tokens.css + bs-primitives.css. With neither imported the shell still
+  // mounts, every role-based assertion above still passes, and the operator
+  // gets a column of unstyled text — so assert the CSS itself took effect.
+  test('bs-* tokens resolve on :root, per theme', async ({ page }) => {
+    await page.goto('/kanban');
+    const token = (name: string) =>
+      page.evaluate(
+        (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(),
+        name,
+      );
+    const light = await token('--bs-surface');
+    expect(light).not.toBe('');
+    expect(await token('--bs-text')).not.toBe('');
+
+    await page.evaluate(() => document.documentElement.classList.add('dark'));
+    const dark = await token('--bs-surface');
+    expect(dark).not.toBe('');
+    expect(dark).not.toBe(light);
+  });
+
+  test('the sidebar is laid out by bs-primitives, not the UA default', async ({ page }) => {
+    await page.goto('/kanban');
+    const side = page.locator('nav.bs-side');
+    await expect(side).toBeVisible();
+    const style = await side.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { display: s.display, flexDirection: s.flexDirection, width: s.width };
+    });
+    // A bare <nav> is display:block and as wide as its container.
+    expect(style.display).toBe('flex');
+    expect(style.flexDirection).toBe('column');
+    // --bs-sidebar-width is 15rem = 240px.
+    expect(style.width).toBe('240px');
+  });
+});
+
 test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
   test('SidebarNav lists the 5 shell items and marks the active one', async ({ page }) => {
     await page.goto('/kanban');

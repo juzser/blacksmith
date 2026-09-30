@@ -77,6 +77,7 @@ there means "not looked at", not "looked at and clean".
    smith plan quorum --plan <the draft's plan.json> --plan-version <n> \
      --session <session-id> --causal-parent <event-id> \
      --confidence <your own 0–1 confidence in this plan> \
+     --project <project-dir> \
      --out <scratch>/quorum-v<n>.json
    ```
 
@@ -86,7 +87,10 @@ there means "not looked at", not "looked at and clean".
    exist. (`--epic <epic>` instead of `--plan` critiques a version already
    filed.) The draft's own `epic_id`/`version` must be the ones the command
    names, or it refuses (`plan.identity-mismatch`) rather than record one
-   plan's identity with another plan's triggers. `--out` keeps the outcome
+   plan's identity with another plan's triggers. `--project <project-dir>`
+   has no worktree to derive from at this step — no task has one yet — so
+   name it directly, or a `<project-dir>/.blacksmith/crosscheck.yml` overlay
+   never reaches the providers this quorum weighs. `--out` keeps the outcome
    — three rationales of several kB each — where step 5 can hand it to the
    operator whole instead of quoting a terminal.
 

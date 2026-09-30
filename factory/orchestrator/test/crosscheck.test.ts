@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CrosscheckError,
+  crosscheckOverlayPath,
   loadCrosscheckPolicy,
+  loadProjectProviderOverlay,
   type ProviderConfig,
   parseCrosscheckPolicy,
 } from '../src/crosscheck.js';
@@ -31,7 +36,7 @@ describe('crosscheck.ts', () => {
       kind: 'api',
       transport: 'api',
       baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-reasoner',
+      model: 'deepseek-v4-pro',
       apiKeyEnv: 'DEEPSEEK_API_KEY',
     });
     for (const [name, config] of Object.entries(policy.providers)) {
@@ -104,7 +109,7 @@ providers:
     transport: api
     enabled: true
     base_url: https://api.deepseek.com
-    model: deepseek-reasoner
+    model: deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
 `;
 
@@ -610,5 +615,200 @@ providers:
 
     const emptied = parseCrosscheckPolicy(withPolicy('plan_quorum:\n  security_cases: []\n'));
     expect(emptied.planQuorum.securityCases).toEqual([]);
+  });
+
+  const OPENROUTER_KEY = 'OPENROUTER_API_KEY';
+  const NO_SUCH_COMMAND = 'smith-no-such-binary-6f3a1c';
+
+  const withOpenrouterCodex = (extra = ''): string =>
+    `providers:\n  claude: { kind: native, enabled: true }\n  codex:\n    kind: api\n    transport: cli\n    command: ${NO_SUCH_COMMAND}\n    enabled: auto\n    mode: active\n    openrouter_fallback:\n      model: openai/gpt-6-sol\n${extra}`;
+
+  const withOpenrouterDeepseek = (extra = ''): string =>
+    `providers:\n  claude: { kind: native, enabled: true }\n  deepseek:\n    kind: api\n    transport: api\n    base_url: https://api.deepseek.com\n    model: deepseek-v4-pro\n    api_key_env: DEEPSEEK_API_KEY\n    enabled: auto\n    mode: active\n    openrouter_fallback:\n      model: deepseek/deepseek-v4-pro\n${extra}`;
+
+  describe('OpenRouter substitution and extra judges', () => {
+    afterEach(() => {
+      delete process.env[OPENROUTER_KEY];
+      delete process.env.OPENROUTER_MODELS;
+      delete process.env.DEEPSEEK_API_KEY;
+    });
+
+    it('substitutes a cli provider via openrouter when its own precondition is unmet and OPENROUTER_API_KEY is set', () => {
+      delete process.env[OPENROUTER_KEY];
+      const withoutKey = parseCrosscheckPolicy(withOpenrouterCodex());
+      expect(withoutKey.providers.codex).toMatchObject({ enabled: false, transport: 'cli' });
+
+      process.env[OPENROUTER_KEY] = 'sk-or-not-a-real-key';
+      const withKey = parseCrosscheckPolicy(withOpenrouterCodex());
+      expect(withKey.providers.codex).toMatchObject({
+        name: 'codex',
+        kind: 'api',
+        transport: 'api',
+        enabled: true,
+        mode: 'active',
+        model: 'openai/gpt-6-sol',
+        apiKeyEnv: OPENROUTER_KEY,
+        via: 'openrouter',
+      });
+    });
+
+    it('substitutes an api provider via openrouter when its own key is missing and OPENROUTER_API_KEY is set', () => {
+      delete process.env.DEEPSEEK_API_KEY;
+      process.env[OPENROUTER_KEY] = 'sk-or-not-a-real-key';
+      const policy = parseCrosscheckPolicy(withOpenrouterDeepseek());
+      expect(policy.providers.deepseek).toMatchObject({
+        transport: 'api',
+        enabled: true,
+        mode: 'active',
+        model: 'deepseek/deepseek-v4-pro',
+        apiKeyEnv: OPENROUTER_KEY,
+        via: 'openrouter',
+      });
+    });
+
+    it('does not substitute when neither the provider key nor OPENROUTER_API_KEY is set', () => {
+      delete process.env.DEEPSEEK_API_KEY;
+      delete process.env[OPENROUTER_KEY];
+      const policy = parseCrosscheckPolicy(withOpenrouterDeepseek());
+      expect(policy.providers.deepseek).toMatchObject({ enabled: false, transport: 'api' });
+      expect((policy.providers.deepseek as unknown as Record<string, unknown>).via).toBeUndefined();
+    });
+
+    it('does not substitute a provider explicitly disabled, even when OPENROUTER_API_KEY is set', () => {
+      process.env[OPENROUTER_KEY] = 'sk-or-not-a-real-key';
+      const policy = parseCrosscheckPolicy(
+        withOpenrouterCodex().replace('enabled: auto', 'enabled: false'),
+      );
+      expect(policy.providers.codex).toMatchObject({ enabled: false, transport: 'cli' });
+      expect((policy.providers.codex as unknown as Record<string, unknown>).via).toBeUndefined();
+    });
+
+    it('OPENROUTER_MODELS adds extra shadow judges named openrouter:<model>', () => {
+      process.env.OPENROUTER_MODELS = 'google/gemini-9-flash, qwen/qwen4-64b';
+      const policy = parseCrosscheckPolicy(
+        'providers:\n  claude: { kind: native, enabled: true }\n',
+      );
+      expect(policy.providers['openrouter:google/gemini-9-flash']).toMatchObject({
+        kind: 'api',
+        transport: 'api',
+        mode: 'shadow',
+        model: 'google/gemini-9-flash',
+        apiKeyEnv: OPENROUTER_KEY,
+      });
+      expect(policy.providers['openrouter:qwen/qwen4-64b']).toMatchObject({
+        mode: 'shadow',
+        model: 'qwen/qwen4-64b',
+      });
+    });
+
+    it('adds no extra provider when OPENROUTER_MODELS is unset (hermetic default)', () => {
+      delete process.env.OPENROUTER_MODELS;
+      const policy = parseCrosscheckPolicy(
+        'providers:\n  claude: { kind: native, enabled: true }\n',
+      );
+      expect(Object.keys(policy.providers)).toEqual(['claude']);
+    });
+
+    it('an env-added judge can be promoted to active by a providerOverlay entry', () => {
+      process.env.OPENROUTER_MODELS = 'google/gemini-9-flash';
+      const policy = parseCrosscheckPolicy(
+        'providers:\n  claude: { kind: native, enabled: true }\n',
+        {
+          providerOverlay: { 'openrouter:google/gemini-9-flash': { mode: 'active' } },
+        },
+      );
+      expect(policy.providers['openrouter:google/gemini-9-flash']).toMatchObject({
+        mode: 'active',
+      });
+    });
+
+    it('providerOverlay beats env and the shipped document for a shared provider name (project > env > shipped)', () => {
+      process.env[OPENROUTER_KEY] = 'sk-or-not-a-real-key';
+      const policy = parseCrosscheckPolicy(withOpenrouterCodex(), {
+        providerOverlay: { codex: { enabled: false } },
+      });
+      // The project overlay says false, so codex stays off even though
+      // OPENROUTER_API_KEY would otherwise route it through the fallback.
+      expect(policy.providers.codex).toMatchObject({ enabled: false, transport: 'cli' });
+    });
+
+    it('providerOverlay can add a brand-new provider the shipped policy never named', () => {
+      const policy = parseCrosscheckPolicy(
+        'providers:\n  claude: { kind: native, enabled: true }\n',
+        {
+          providerOverlay: {
+            gemini: {
+              kind: 'api',
+              transport: 'api',
+              enabled: true,
+              mode: 'shadow',
+              base_url: 'https://openrouter.ai/api/v1',
+              model: 'google/gemini-9-flash',
+              api_key_env: OPENROUTER_KEY,
+            },
+          },
+        },
+      );
+      expect(policy.providers.gemini).toMatchObject({
+        mode: 'shadow',
+        model: 'google/gemini-9-flash',
+      });
+    });
+  });
+
+  describe('project overlay file (.blacksmith/crosscheck.yml)', () => {
+    let projectDir: string;
+
+    beforeEach(async () => {
+      projectDir = await mkdtemp(path.join(tmpdir(), 'smith-crosscheck-overlay-'));
+    });
+
+    afterEach(async () => {
+      await rm(projectDir, { recursive: true, force: true });
+      delete process.env[OPENROUTER_KEY];
+    });
+
+    it('crosscheckOverlayPath points at <project>/.blacksmith/crosscheck.yml', () => {
+      expect(crosscheckOverlayPath(projectDir)).toBe(
+        path.join(path.resolve(projectDir), '.blacksmith', 'crosscheck.yml'),
+      );
+    });
+
+    it('returns {} when the overlay file does not exist', () => {
+      expect(loadProjectProviderOverlay(projectDir)).toEqual({});
+    });
+
+    it('rejects a top-level key other than providers, loudly', async () => {
+      await mkdir(path.join(projectDir, '.blacksmith'), { recursive: true });
+      await writeFile(
+        path.join(projectDir, '.blacksmith', 'crosscheck.yml'),
+        'providers:\n  codex: { enabled: false }\nquorum_rule:\n  min_providers: 1\n',
+      );
+      expect(() => loadProjectProviderOverlay(projectDir)).toThrow(CrosscheckError);
+      expect(() => loadProjectProviderOverlay(projectDir)).toThrow(/quorum_rule/);
+    });
+
+    it('loadCrosscheckPolicy(path, {projectDir}) merges the overlay file over the shipped policy', async () => {
+      await mkdir(path.join(projectDir, '.blacksmith'), { recursive: true });
+      await writeFile(
+        path.join(projectDir, '.blacksmith', 'crosscheck.yml'),
+        'providers:\n  codex: { enabled: false }\n',
+      );
+
+      process.env[OPENROUTER_KEY] = 'sk-or-not-a-real-key';
+      const policyFile = path.join(projectDir, 'shipped-crosscheck.yml');
+      await writeFile(policyFile, withOpenrouterCodex());
+
+      // offline: false so this exercises the overlay merge, not the
+      // separate (and separately tested) SMITH_CROSSCHECK_OFFLINE switch.
+      const policy = loadCrosscheckPolicy(policyFile, { projectDir, offline: false });
+      // The project overlay drops codex explicitly, so even with
+      // OPENROUTER_API_KEY set it must not be substituted back in.
+      expect(policy.providers.codex).toMatchObject({
+        enabled: false,
+        enabledSource: 'declared',
+        transport: 'cli',
+      });
+    });
   });
 });

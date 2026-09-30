@@ -12,12 +12,28 @@
 // backward compatibility with the Phase-1 scaffold (it predates the transport
 // split and no longer carries meaning on its own — `transport` is now the
 // field that actually selects behavior).
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { readEnv } from './env.js';
 import { SmithError } from './errors.js';
 import { CROSSCHECK_POLICY_PATH } from './paths.js';
 import { apiKeyPresent, commandOnPath } from './preconditions.js';
+
+/**
+ * OpenRouter (https://openrouter.ai/api/v1) speaks the same OpenAI
+ * chat/completions wire format api-transport.ts already sends, so it plays
+ * two roles here without a new transport module:
+ *
+ * - Substitute: a default external provider (codex, deepseek) whose own
+ *   precondition is unmet on this box runs through OpenRouter instead, using
+ *   `openrouter_fallback.model` from crosscheck.yml — same provider name,
+ *   mode and gating power, `via: 'openrouter'` recorded for the log.
+ * - Extra judge: `OPENROUTER_MODELS` (comma-separated model ids) synthesizes
+ *   additional `openrouter:<model>` providers, `mode: shadow` by default.
+ */
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+const OPENROUTER_API_KEY_ENV = 'OPENROUTER_API_KEY';
 
 export class CrosscheckError extends SmithError {}
 
@@ -46,6 +62,15 @@ export interface NativeProviderConfig {
  */
 export type EnabledSource = 'declared' | 'auto' | 'offline';
 
+/**
+ * Which config layer decided this provider's fields, highest precedence
+ * first: `project` (`<project-dir>/.blacksmith/crosscheck.yml`), `env`
+ * (`OPENROUTER_MODELS`-synthesized), or `policy` (the shipped/hand-authored
+ * document itself). Attached by parseCrosscheckPolicy() after parseProvider()
+ * returns, so it reports the source without parseProvider needing to know it.
+ */
+export type ProviderConfigSource = 'project' | 'env' | 'policy';
+
 export interface CliProviderConfig {
   name: string;
   kind: 'api';
@@ -58,6 +83,7 @@ export interface CliProviderConfig {
   args: string[];
   /** Optional: a CLI judge usually runs whatever model its own binary defaults to. See providerModel(). */
   model?: string;
+  configSource?: ProviderConfigSource;
 }
 
 export interface ApiProviderConfig {
@@ -78,6 +104,15 @@ export interface ApiProviderConfig {
    * window, so a cap here is a bound on what one verdict may cost.
    */
   maxTokens?: number;
+  configSource?: ProviderConfigSource;
+  /**
+   * Set when this config replaced a default external provider whose own
+   * precondition was unmet (missing key / binary not on PATH) with an
+   * equivalent OpenRouter model, per operator decision 1a. The provider keeps
+   * its original name, mode and gating power; only the transport target and
+   * model id changed underneath it.
+   */
+  via?: 'openrouter';
 }
 
 export type ProviderConfig = NativeProviderConfig | CliProviderConfig | ApiProviderConfig;
@@ -201,7 +236,7 @@ export function providerModel(config: ProviderConfig): string {
   return config.model;
 }
 
-interface RawProviderYaml {
+export interface RawProviderYaml {
   kind?: string;
   transport?: string;
   /** `boolean` or the string `auto`; anything else is refused by parseEnabled. */
@@ -215,6 +250,12 @@ interface RawProviderYaml {
   api_key_env?: string;
   response_format_json_object?: boolean;
   max_tokens?: number;
+  /**
+   * The OpenRouter model to substitute when this provider's own precondition
+   * is unmet and OPENROUTER_API_KEY is set (operator decision 1a). Data, not
+   * code — factory/policies/crosscheck.yml carries the ids for codex/deepseek.
+   */
+  openrouter_fallback?: { model?: string; response_format_json_object?: boolean };
 }
 
 interface RawPlanQuorumYaml {
@@ -533,6 +574,19 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
       );
     }
     const command = quorumString(`providers.${name}.command`, raw.command);
+    // Computed unconditionally (not only under `auto`) so a substitution
+    // decision below can ask "can this provider run as declared" even when
+    // the file says `enabled: true` outright.
+    const preconditionMet = commandOnPath(command);
+    if (shouldSubstituteViaOpenrouter(declared, preconditionMet, raw.openrouter_fallback)) {
+      return substituteViaOpenrouter(
+        name,
+        mode,
+        modelTier,
+        raw.openrouter_fallback as { model?: string; response_format_json_object?: boolean },
+        enabledSource,
+      );
+    }
     return {
       name,
       kind: 'api',
@@ -541,7 +595,7 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
       // binary runnable here. Not whether it is authenticated -- only a real
       // call knows that, so `auto` can still resolve true on a box where
       // `codex login` was never run, and the quorum records the failure.
-      enabled: declared === 'auto' ? commandOnPath(command) : declared,
+      enabled: declared === 'auto' ? preconditionMet : declared,
       enabledSource,
       mode,
       modelTier,
@@ -563,13 +617,24 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
       );
     }
     const apiKeyEnv = quorumString(`providers.${name}.api_key_env`, raw.api_key_env);
+    // Computed unconditionally for the same reason as the cli branch above.
+    const preconditionMet = apiKeyPresent(apiKeyEnv);
+    if (shouldSubstituteViaOpenrouter(declared, preconditionMet, raw.openrouter_fallback)) {
+      return substituteViaOpenrouter(
+        name,
+        mode,
+        modelTier,
+        raw.openrouter_fallback as { model?: string; response_format_json_object?: boolean },
+        enabledSource,
+      );
+    }
     return {
       name,
       kind: 'api',
       transport: 'api',
       // Set and non-empty, which is all that is knowable without spending a
       // call; whether the key is VALID is not.
-      enabled: declared === 'auto' ? apiKeyPresent(apiKeyEnv) : declared,
+      enabled: declared === 'auto' ? preconditionMet : declared,
       enabledSource,
       mode,
       modelTier,
@@ -591,6 +656,107 @@ function parseProvider(name: string, raw: RawProviderYaml): ProviderConfig {
     `Provider "${name}" is not kind: native and has no recognized transport (got "${String(raw.transport)}").`,
     { provider: name, transport: raw.transport },
   );
+}
+
+/**
+ * Operator decision 1a's eligibility rule: a provider substitutes through
+ * OpenRouter when it is not explicitly turned off (`enabled: false` stays an
+ * opt-out, whether the reason is cost, policy, or "I don't want a
+ * substitute"), its own precondition failed on this box, the policy names a
+ * fallback model for it, and OPENROUTER_API_KEY is actually set here.
+ */
+function shouldSubstituteViaOpenrouter(
+  declared: boolean | 'auto',
+  preconditionMet: boolean,
+  fallback: RawProviderYaml['openrouter_fallback'],
+): fallback is { model?: string; response_format_json_object?: boolean } {
+  return (
+    declared !== false &&
+    !preconditionMet &&
+    Boolean(fallback) &&
+    apiKeyPresent(OPENROUTER_API_KEY_ENV)
+  );
+}
+
+function substituteViaOpenrouter(
+  name: string,
+  mode: ProviderMode,
+  modelTier: string,
+  fallback: { model?: string; response_format_json_object?: boolean },
+  enabledSource: EnabledSource,
+): ApiProviderConfig {
+  const model = quorumString(
+    `providers.${name}.openrouter_fallback.model`,
+    fallback.model as string,
+  );
+  return {
+    name,
+    kind: 'api',
+    transport: 'api',
+    enabled: true,
+    enabledSource,
+    mode,
+    modelTier,
+    baseUrl: OPENROUTER_BASE_URL,
+    model,
+    apiKeyEnv: OPENROUTER_API_KEY_ENV,
+    responseFormatJsonObject: fallback.response_format_json_object ?? true,
+    via: 'openrouter',
+  };
+}
+
+/**
+ * `OPENROUTER_MODELS` (comma-separated OpenRouter model ids) synthesizes
+ * extra judges, operator decision 1b: `openrouter:<model>` as the provider
+ * name (deterministic, so a repeated run of the same env names the same
+ * provider), `mode: shadow` unless a project/policy overlay promotes it.
+ */
+function envOpenrouterProviders(): Record<string, RawProviderYaml> {
+  const raw = (process.env.OPENROUTER_MODELS ?? '').trim();
+  if (!raw) return {};
+  const providers: Record<string, RawProviderYaml> = {};
+  for (const model of raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)) {
+    providers[`openrouter:${model}`] = {
+      kind: 'api',
+      transport: 'api',
+      enabled: 'auto',
+      mode: 'shadow',
+      model_tier: DEFAULT_MODEL_TIER,
+      base_url: OPENROUTER_BASE_URL,
+      model,
+      api_key_env: OPENROUTER_API_KEY_ENV,
+    };
+  }
+  return providers;
+}
+
+/** `<project-dir>/.blacksmith/crosscheck.yml` — mirrors auditStorePath()'s STORE_DIR pattern in audit.ts. */
+export function crosscheckOverlayPath(projectDir: string): string {
+  return path.join(path.resolve(projectDir), '.blacksmith', 'crosscheck.yml');
+}
+
+/**
+ * The per-project overlay (config source 1, highest precedence): only a
+ * `providers:` map is legal here, merged by provider name over env and the
+ * shipped policy. Quorum rules and everything else stay repo policy, so any
+ * other top-level key is refused loudly rather than silently ignored.
+ */
+export function loadProjectProviderOverlay(projectDir: string): Record<string, RawProviderYaml> {
+  const filePath = crosscheckOverlayPath(projectDir);
+  if (!existsSync(filePath)) return {};
+  const doc = (parseYaml(readFileSync(filePath, 'utf8')) ?? {}) as Record<string, unknown>;
+  const extraKeys = Object.keys(doc).filter((key) => key !== 'providers');
+  if (extraKeys.length > 0) {
+    throw new CrosscheckError(
+      'crosscheck.invalid-overlay',
+      `${filePath} may only set "providers" -- rejected ${extraKeys.map((key) => JSON.stringify(key)).join(', ')}. Quorum rules and every other crosscheck.yml knob stay repo policy; only which providers run is a per-project decision.`,
+      { file: filePath, keys: extraKeys },
+    );
+  }
+  return (doc.providers as Record<string, RawProviderYaml> | undefined) ?? {};
 }
 
 /**
@@ -708,6 +874,16 @@ export interface CrosscheckLoadOptions {
    * working copy happens to carry. See loadCrosscheckPolicy() for the switch.
    */
   offline?: boolean;
+  /**
+   * Config sources 1 (project) and 2 (env), already resolved to a raw
+   * provider map and merged in below the shipped/hand-authored document
+   * (source 3), field by field, project beating env beating shipped
+   * (operator decision 2). Resolving `projectDir` to a file read stays one
+   * layer up — loadCrosscheckPolicy() and judgePreflight() each do it via
+   * loadProjectProviderOverlay() — so this function keeps working on plain
+   * YAML text for the test fixtures that already call it that way.
+   */
+  providerOverlay?: Record<string, RawProviderYaml>;
 }
 
 export function parseCrosscheckPolicy(
@@ -718,10 +894,30 @@ export function parseCrosscheckPolicy(
   if (!doc.providers || Object.keys(doc.providers).length === 0) {
     throw new CrosscheckError('crosscheck.invalid-policy', 'crosscheck.yml has no providers.');
   }
+  const declaredProviders = doc.providers;
+
+  const envProviders = envOpenrouterProviders();
+  const overlay = options.providerOverlay ?? {};
+  const names = new Set<string>([
+    ...Object.keys(declaredProviders),
+    ...Object.keys(envProviders),
+    ...Object.keys(overlay),
+  ]);
 
   const providers: Record<string, ProviderConfig> = {};
-  for (const [name, raw] of Object.entries(doc.providers)) {
-    const config = parseProvider(name, raw ?? {});
+  for (const name of names) {
+    const fromPolicy = declaredProviders[name];
+    const fromEnv = envProviders[name];
+    const fromOverlay = overlay[name];
+    const merged: RawProviderYaml = {
+      ...(fromPolicy ?? {}),
+      ...(fromEnv ?? {}),
+      ...(fromOverlay ?? {}),
+    };
+    const configSource: ProviderConfigSource = fromOverlay ? 'project' : fromEnv ? 'env' : 'policy';
+
+    const parsed = parseProvider(name, merged);
+    const config: ProviderConfig = parsed.kind === 'native' ? parsed : { ...parsed, configSource };
     providers[name] =
       options.offline && config.kind !== 'native'
         ? // The switch is the decider now, and says so: a reader that saw
@@ -768,9 +964,11 @@ export function parseCrosscheckPolicy(
  */
 export function loadCrosscheckPolicy(
   filePath: string = CROSSCHECK_POLICY_PATH,
-  options: CrosscheckLoadOptions = {},
+  options: CrosscheckLoadOptions & { projectDir?: string } = {},
 ): CrosscheckPolicy {
+  const { projectDir, ...rest } = options;
   return parseCrosscheckPolicy(readFileSync(filePath, 'utf8'), {
-    offline: options.offline ?? Boolean(readEnv(process.env, 'SMITH_CROSSCHECK_OFFLINE')),
+    offline: rest.offline ?? Boolean(readEnv(process.env, 'SMITH_CROSSCHECK_OFFLINE')),
+    providerOverlay: projectDir ? loadProjectProviderOverlay(projectDir) : rest.providerOverlay,
   });
 }
