@@ -1120,17 +1120,27 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
 
   // Escalations: task rows the projector parked at `escalated`
   // (db/projector.ts's error-logged handling, `coordination.*` errors).
+  // Dispatches for every escalated task are fetched in one query, not one
+  // per task, and grouped by taskId below.
+  const escalatedTaskIds = taskRows.filter((t) => t.taskStatus === 'escalated').map((t) => t.taskId);
+  const lastDispatchByTask = new Map<string, typeof dispatches.$inferSelect>();
+  if (escalatedTaskIds.length > 0) {
+    const dispatchRows = inLogOrder(
+      db.select().from(dispatches).where(inArray(dispatches.taskId, escalatedTaskIds)).all(),
+    );
+    for (const d of dispatchRows) {
+      if (d.taskId) lastDispatchByTask.set(d.taskId, d);
+    }
+  }
   for (const t of taskRows) {
     if (t.taskStatus !== 'escalated') continue;
-    const lastDispatch = inLogOrder(
-      db.select().from(dispatches).where(eq(dispatches.taskId, t.taskId)).all(),
-    ).at(-1);
+    const lastDispatch = lastDispatchByTask.get(t.taskId);
     rows.push({
       id: `escalation:${t.taskId}`,
       kind: 'escalation',
       title: taskDisplayText(t),
       description: lastDispatch ? `Escalated while dispatched as ${lastDispatch.agentRole}` : null,
-      project: t.project,
+      project: projectOf(t.project),
       taskId: t.taskId,
       createdAt: t.updatedAt,
     });
@@ -1157,7 +1167,7 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
       kind: 'waiver',
       title: t ? taskDisplayText(t) : taskId,
       description: `${count} finding${count === 1 ? '' : 's'} awaiting a waiver decision`,
-      project: latest.project ?? t?.project ?? null,
+      project: projectOf(latest.project ?? t?.project ?? null),
       taskId,
       createdAt: latest.raisedAt,
     });

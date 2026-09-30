@@ -8,6 +8,7 @@ import { openDb, rebuild } from '../../src/db/projector.js';
 import {
   analytics,
   artifactById,
+  DEFAULT_PROJECT,
   errorsPage,
   flowGraph,
   inboxRows,
@@ -1490,6 +1491,14 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     expect(rows[0]?.title.length).toBeGreaterThan(0);
   });
 
+  it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
+    const rows = inboxRows(handle.db);
+    expect(rows[0]?.project).toBe(DEFAULT_PROJECT);
+    const scoped = inboxRows(handle.db, { project: DEFAULT_PROJECT });
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
+  });
+
   it('adds a per-task pending-waiver row and a pending lesson-candidate row, sorted escalation < waiver < lesson_candidate', async () => {
     const ctx: EventContext = {
       sessionId: SESSION_ID,
@@ -1544,7 +1553,9 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
       const rows = inboxRows(fresh.db);
       expect(rows.map((r) => r.kind)).toEqual(['escalation', 'waiver', 'lesson_candidate']);
       const waiverRow = rows.find((r) => r.kind === 'waiver');
-      expect(waiverRow).toMatchObject({ taskId: TASK_1 });
+      expect(waiverRow).toMatchObject({ taskId: TASK_1, project: DEFAULT_PROJECT });
+      const scoped = inboxRows(fresh.db, { project: DEFAULT_PROJECT });
+      expect(scoped.some((r) => r.kind === 'waiver' && r.taskId === TASK_1)).toBe(true);
       const lessonRow = rows.find((r) => r.kind === 'lesson_candidate');
       expect(lessonRow).toMatchObject({ taskId: null, project: null });
       expect(lessonRow?.title).toContain('linter');
