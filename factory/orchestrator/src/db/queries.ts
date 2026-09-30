@@ -1150,7 +1150,9 @@ export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
   // (db/projector.ts's error-logged handling, `coordination.*` errors).
   // Dispatches for every escalated task are fetched in one query, not one
   // per task, and grouped by taskId below.
-  const escalatedTaskIds = taskRows.filter((t) => t.taskStatus === 'escalated').map((t) => t.taskId);
+  const escalatedTaskIds = taskRows
+    .filter((t) => t.taskStatus === 'escalated')
+    .map((t) => t.taskId);
   const lastDispatchByTask = new Map<string, typeof dispatches.$inferSelect>();
   if (escalatedTaskIds.length > 0) {
     const dispatchRows = inLogOrder(

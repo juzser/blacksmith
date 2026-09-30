@@ -145,14 +145,6 @@
 .ds-btn--link:hover {
   text-decoration: underline;
 }
-.ds-btn--inverse {
-  background: var(--ds-btn-fg, var(--ds-surface));
-  color: var(--ds-btn-ground, var(--ds-text));
-  border-color: transparent;
-}
-.ds-btn--inverse:hover {
-  opacity: 0.88;
-}
 .ds-btn--default-size {
   height: var(--ds-control-height);
   gap: var(--ds-space-1-5);
