@@ -72,7 +72,7 @@ import {
   taskIdsMatch,
 } from '../taskId.js';
 import { TERMINAL_TASK_STATUSES } from '../taskStatus.js';
-import { RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
+import { LEGACY_BRANCH_PREFIX, RESERVED_TASK_ID, taskBranchName } from '../worktree.js';
 import * as schema from './schema.js';
 
 // No ProjectorError: the projector never throws. A record it cannot fold in
@@ -433,9 +433,15 @@ function readClaims(raw: unknown): string[] | undefined {
   return raw.every((c) => typeof c === 'string') ? (raw as string[]) : undefined;
 }
 
+// Fills in `branch` for a `task-added` written before taskEvents.ts's
+// `addedPayload` carried that field at all — every such event predates the
+// field, so it was written by a build that only ever knew `smith/`, never
+// `bs/`. Defaulting to `BRANCH_PREFIX` here would assert a branch
+// `worktree create` never cut for that task; `LEGACY_BRANCH_PREFIX` is the
+// one prefix that build could have used.
 function branchFor(epicId: string | null, taskId: string): string | null {
   if (!epicId) return null;
-  return taskBranchName(epicId, taskId);
+  return taskBranchName(epicId, taskId, LEGACY_BRANCH_PREFIX);
 }
 
 /**

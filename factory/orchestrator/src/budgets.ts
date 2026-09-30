@@ -20,6 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { EFFORT_TIERS, type EffortTier, isEffortTier } from './effortTiers.js';
+import { readEnv } from './env.js';
 import { SmithError } from './errors.js';
 import { BUDGETS_POLICY_PATH, EFFORT_POLICY_PATH } from './paths.js';
 
@@ -516,7 +517,7 @@ export const ALL_BUDGET_ENV_NAMES: readonly string[] = Object.freeze(
 type Env = Readonly<Record<string, string | undefined>>;
 
 function envValue(env: Env, name: string): string | null {
-  const value = env[name];
+  const value = readEnv(env, name);
   return value === undefined || value === '' ? null : value;
 }
 

@@ -139,6 +139,26 @@ providers:
         expect(config.enabled, `${name} must not be invokable from a test`).toBe(false);
       }
     });
+
+    // bs-rename, operator decision 3: BS_CROSSCHECK_OFFLINE is the current
+    // name, SMITH_CROSSCHECK_OFFLINE still works as a fallback, and BS_ wins
+    // when both are set.
+    it('is also forced off by BS_CROSSCHECK_OFFLINE, which wins over SMITH_CROSSCHECK_OFFLINE', () => {
+      const previousBs = process.env.BS_CROSSCHECK_OFFLINE;
+      const previousSmith = process.env.SMITH_CROSSCHECK_OFFLINE;
+      process.env.BS_CROSSCHECK_OFFLINE = '1';
+      delete process.env.SMITH_CROSSCHECK_OFFLINE;
+      try {
+        for (const [name, config] of Object.entries(loadCrosscheckPolicy().providers)) {
+          if (config.kind === 'native') continue;
+          expect(config.enabled, name).toBe(false);
+        }
+      } finally {
+        if (previousBs === undefined) delete process.env.BS_CROSSCHECK_OFFLINE;
+        else process.env.BS_CROSSCHECK_OFFLINE = previousBs;
+        if (previousSmith !== undefined) process.env.SMITH_CROSSCHECK_OFFLINE = previousSmith;
+      }
+    });
   });
 
   it('defaults mode to shadow and model_tier to mid when absent', () => {

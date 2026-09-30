@@ -43,6 +43,26 @@ describe('testgate.ts', () => {
     }
   });
 
+  it("runs a check without the factory's own BS_ variables", async () => {
+    // Same strip, current name: `BS_HOME` is exactly as much the factory's
+    // own namespace as `SMITH_HOME` was, and letting it through would move
+    // WORK_ROOT off the worktree the same way.
+    const before = process.env.BS_HOME;
+    process.env.BS_HOME = tmpdir();
+    try {
+      const result = await run(
+        [{ name: 'env', cmd: '! env | grep -q "^BS_" && test -n "$PATH"' }],
+        {
+          cwd: process.cwd(),
+        },
+      );
+      expect(result.pass).toBe(true);
+    } finally {
+      if (before === undefined) delete process.env.BS_HOME;
+      else process.env.BS_HOME = before;
+    }
+  });
+
   let cwd: string;
 
   beforeEach(async () => {

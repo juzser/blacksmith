@@ -172,7 +172,7 @@ there means "not looked at", not "looked at and clean".
    the sign-off event:
 
    ```bash
-   smith plan ingest factory/specs/active/<epic>/plan-v1.json \
+   smith plan ingest factory/specs/active/<epic>/plan-v1.json --project <project-dir> \
      --session <session-id> --plan-version 1 --causal-parent <sign-off event id>
    ```
 

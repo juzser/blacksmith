@@ -131,6 +131,18 @@ describe('resolveWorkRoot', () => {
       );
     }
   });
+
+  // bs-rename, operator decision 3: BS_HOME is the current name, SMITH_HOME
+  // still works as a fallback, and BS_HOME wins when both are set.
+  it('prefers BS_HOME to SMITH_HOME when both are set', () => {
+    expect(
+      paths.resolveWorkRoot(install, cwd, { BS_HOME: '/srv/bs', SMITH_HOME: '/srv/smith' }, false),
+    ).toBe('/srv/bs');
+  });
+
+  it('reads BS_HOME as a fallback-free equal of SMITH_HOME when SMITH_HOME is unset', () => {
+    expect(paths.resolveWorkRoot(install, cwd, { BS_HOME: '/srv/bs' }, false)).toBe('/srv/bs');
+  });
 });
 
 describe('the work root', () => {

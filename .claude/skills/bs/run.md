@@ -143,7 +143,7 @@ playbooks are written to prevent.
     on it**, whichever step cut it:
 
     ```bash
-    smith plan ingest factory/specs/active/<epic>/plan-v<n+1>.json \
+    smith plan ingest factory/specs/active/<epic>/plan-v<n+1>.json --project <project-dir> \
       --session <session-id> --plan-version <n+1> --causal-parent <event-id>
     ```
 

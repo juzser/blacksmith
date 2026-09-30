@@ -448,6 +448,41 @@ describe('env overrides on top of budgets.yml', () => {
       }),
     ).toEqual(['SMITH_TASK_CODER_CAP_TOKENS']);
   });
+
+  // bs-rename, operator decision 3: BS_<X> is the current name for every one
+  // of these knobs, SMITH_<X> still works as a fallback, and BS_ wins when
+  // both are set -- through the same envValue() chokepoint, so this holds
+  // for every documented knob, not only the one exercised here.
+  describe('BS_ names (bs-rename)', () => {
+    it('accepts BS_EPIC_CAP_TOKENS in place of SMITH_EPIC_CAP_TOKENS', () => {
+      const policy = applyBudgetEnv(base, { BS_EPIC_CAP_TOKENS: '5000000' });
+      expect(policy.epic.capTokens).toBe(5_000_000);
+    });
+
+    it('prefers BS_EPIC_CAP_TOKENS over SMITH_EPIC_CAP_TOKENS when both are set', () => {
+      const policy = applyBudgetEnv(base, {
+        BS_EPIC_CAP_TOKENS: '5000000',
+        SMITH_EPIC_CAP_TOKENS: '9000000',
+      });
+      expect(policy.epic.capTokens).toBe(5_000_000);
+    });
+
+    it('honours a BS_ tier-suffixed name the same way as its SMITH_ equivalent', () => {
+      const huge = parseBudgetPolicy('', 'huge');
+      expect(applyBudgetEnv(huge, { BS_EPIC_CAP_TOKENS_HUGE: '32000001' }).epic.capTokens).toBe(
+        32_000_001,
+      );
+    });
+
+    it("is detected as an override when set via BS_EPIC_CAP_TOKENS, reported under the knob's budgets.yml name", () => {
+      // envValue()'s BS_/SMITH_ aliasing is transparent to supplierFor(): the
+      // name reported is still the field's own (still-SMITH_-prefixed) name,
+      // not whichever spelling happened to supply the value at runtime.
+      expect(budgetEnvOverrides(base, { BS_EPIC_CAP_TOKENS: '5000000' })).toEqual([
+        'SMITH_EPIC_CAP_TOKENS',
+      ]);
+    });
+  });
 });
 
 describe('env overrides beat the tier', () => {

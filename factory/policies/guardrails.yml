@@ -36,9 +36,11 @@ protected_branches:
   # history-rewrite rule only (rule 5) — worktree.yml's
   # `integration_branch.pattern`: a leaf ref "smith/<epic>" cannot coexist
   # with "smith/<epic>/<task-id>" refs in real git (D/F ref conflict), so the
-  # shape is "smith/<epic>/integration", never a bare "smith/<epic>".
+  # shape is "smith/<epic>/integration", never a bare "smith/<epic>". Both
+  # prefixes are listed (bs-rename, operator decision 2/3): new epics
+  # integrate on bs/, but one already under way on smith/ stays there.
   names: [main, master]
-  patterns: ["smith/*/integration"]
+  patterns: ["bs/*/integration", "smith/*/integration"]
 
 catch_up_remotes:
   # rule 3's one exception: the remotes a protected branch is allowed to

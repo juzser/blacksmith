@@ -142,6 +142,21 @@ describe('the published package', () => {
     expect(isShipped(manifest.bin.smith as string)).toBe(true);
   });
 
+  it('declares bs/bs-run alongside the deprecated smith/smith-run aliases, all shipped', () => {
+    // bs-rename, operator decision 3: bs/bs-run are the current names, and
+    // smith/smith-run keep working as deprecated aliases of the very same
+    // scripts -- so every one of the four keys must resolve to a shipped
+    // file, and the two pairs must point at the same target apiece.
+    expect(manifest.bin.bs).toBe(manifest.bin.smith);
+    expect(manifest.bin['bs-run']).toBe(manifest.bin['smith-run']);
+    for (const name of ['bs', 'bs-run', 'smith', 'smith-run']) {
+      expect(manifest.bin[name], `package.json#bin is missing "${name}"`).toBeDefined();
+      expect(isShipped(manifest.bin[name] as string), `${name} -> ${manifest.bin[name]}`).toBe(
+        true,
+      );
+    }
+  });
+
   it('ships every root paths.ts reads, and ships none it writes', () => {
     // This check used to hold a hand-written list of the six roots somebody
     // remembered, and `ROADMAP_PATH` was simply not in it -- so 0.1.0 shipped

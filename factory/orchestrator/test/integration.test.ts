@@ -33,7 +33,7 @@ describe('integration.ts', () => {
   let stateDir: string;
   const sessionId = 'sess-integration';
   const epicId = 'epic-1';
-  const branch = 'smith/epic-1/integration';
+  const branch = 'bs/epic-1/integration';
 
   const ctx = () => ({
     sessionId,
@@ -231,5 +231,25 @@ describe('integration.ts', () => {
     expect(latest?.pass).toBe(true);
     expect(latest?.headSha).toBe(second.headSha);
     expect(latestIntegrationCheck(events, 'other-epic')).toBe(null);
+  });
+
+  // Operator decision 3 (bs-rename): an epic that already integrates on
+  // smith/ keeps reading and checking that branch, not a bs/ branch that
+  // was never created for it.
+  it('resolves the legacy smith/ integration branch for an epic already on it', async () => {
+    const legacyEpicId = 'epic-legacy';
+    git(projectDir, ['branch', `smith/${legacyEpicId}/integration`]);
+
+    expect(integrationHeadSha(projectDir, legacyEpicId)).toBe(
+      git(projectDir, ['rev-parse', `smith/${legacyEpicId}/integration`]),
+    );
+
+    git(projectDir, ['checkout', '-q', `smith/${legacyEpicId}/integration`]);
+    const outcome = await runIntegrationCheck(
+      { epicId: legacyEpicId, projectDir, checks: [{ name: 'lint', cmd: 'true' }] },
+      { ...ctx(), causalParent: `${sessionId}#0` },
+      { stateDir },
+    );
+    expect(outcome.branch).toBe(`smith/${legacyEpicId}/integration`);
   });
 });

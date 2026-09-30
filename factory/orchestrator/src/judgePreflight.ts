@@ -29,6 +29,7 @@
 // the promotions add up.
 import { readFileSync } from 'node:fs';
 import { type CrosscheckPolicy, type ProviderConfig, parseCrosscheckPolicy } from './crosscheck.js';
+import { readEnv } from './env.js';
 import { CROSSCHECK_POLICY_PATH } from './paths.js';
 import { apiKeyPresent, commandOnPath } from './preconditions.js';
 
@@ -77,11 +78,12 @@ export interface PreflightGating {
 export interface JudgePreflight {
   policyPath: string;
   /**
-   * Whether SMITH_CROSSCHECK_OFFLINE is set in this environment. Reported
-   * rather than applied: the question this command answers is "is the policy
-   * sound", and the switch is a per-command override that says nothing about
-   * the file. Applying it would report every external as disabled and hide
-   * exactly the misconfiguration being looked for.
+   * Whether BS_CROSSCHECK_OFFLINE (or its legacy SMITH_CROSSCHECK_OFFLINE
+   * fallback) is set in this environment. Reported rather than applied: the
+   * question this command answers is "is the policy sound", and the switch
+   * is a per-command override that says nothing about the file. Applying it
+   * would report every external as disabled and hide exactly the
+   * misconfiguration being looked for.
    */
   offlineSwitch: boolean;
   providers: ProviderPreflight[];
@@ -227,7 +229,7 @@ export function judgePreflight(policyPath: string = CROSSCHECK_POLICY_PATH): Jud
 
   return {
     policyPath,
-    offlineSwitch: Boolean(process.env.SMITH_CROSSCHECK_OFFLINE),
+    offlineSwitch: Boolean(readEnv(process.env, 'SMITH_CROSSCHECK_OFFLINE')),
     providers,
     gating: { activeExternal, shadowExternal, minProviders, canDecide, detail },
     problems,

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readEnv } from './env.js';
 
 // factory/orchestrator/src/paths.ts -> repo root is three levels up.
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -51,9 +52,10 @@ const WORK_DIR_NAME = '.blacksmith';
  *
  * Pure, and exported for the test: the constants below call it once at module
  * load, but the install case can only be stated by a test that passes its own
- * roots in. `env.SMITH_HOME` wins outright; otherwise a clone keeps writing
- * into itself, and an install writes beside the operator instead of into
- * `node_modules/@juzser/blacksmith`, which the next `npm i` replaces wholesale.
+ * roots in. `BS_HOME` (or its legacy `SMITH_HOME` fallback) wins outright;
+ * otherwise a clone keeps writing into itself, and an install writes beside
+ * the operator instead of into `node_modules/@juzser/blacksmith`, which the
+ * next `npm i` replaces wholesale.
  *
  * The layout *under* the root is identical in both cases on purpose. A path
  * like `state/events/<session>.jsonl` is spelled in runbooks, in agent
@@ -66,9 +68,10 @@ export function resolveWorkRoot(
   env: Readonly<Record<string, string | undefined>>,
   isClone: boolean,
 ): string {
-  const declared = env.SMITH_HOME?.trim();
-  // An empty `SMITH_HOME=` is how an unset variable gets spelled by accident in
-  // a shell profile or a CI matrix; resolved literally it would mean cwd.
+  const declared = readEnv(env, 'BS_HOME')?.trim();
+  // An empty `BS_HOME=`/`SMITH_HOME=` is how an unset variable gets spelled by
+  // accident in a shell profile or a CI matrix; resolved literally it would
+  // mean cwd.
   if (declared) return path.resolve(cwd, declared);
   return isClone ? repoRoot : path.join(cwd, WORK_DIR_NAME);
 }

@@ -954,6 +954,8 @@ describe('db/queries.ts', () => {
         resolution: 'follow-up',
         followUpTaskId: 'epic-1/task-5',
       });
+      // Fixture task-added payload carries no `branch` field: legacy
+      // fallback, not the current `bs` default (bs-rename part 1).
       expect(detail?.branch).toBe(`smith/${EPIC_ID}/task-1`);
     });
 
