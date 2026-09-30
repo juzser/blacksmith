@@ -14,11 +14,11 @@
 # provider does not fail loudly; it spends a doomed call on every quorum
 # trigger, has it caught, and leaves a failure row that reads like an outage.
 # So turn on the one you actually have — a one-line edit, runbook §2, and
-# `smith judge preflight` says beforehand whether it will work.
+# `bs judge preflight` says beforehand whether it will work.
 # Full setup/calibration/promotion procedure: docs/runbooks/providers.md.
 #
 # Shadow mode (Phase 8 design decision): `mode: shadow` means a provider's
-# verdicts are RECORDED (judge-verdict events, `smith stats providers`) but
+# verdicts are RECORDED (judge-verdict events, `bs stats providers`) but
 # have ZERO gating power — quorum.ts falls back to the native verdict alone
 # whenever no provider in a case is `mode: active`. Flipping a provider to
 # `mode: active` in this file (an operator edit, never a runtime write) is
@@ -62,7 +62,7 @@ providers:
     # that dispatches a quorum trigger. Without either the CLI transport still
     # spawns, fails, and quorum.ts records a provider error per trigger —
     # caught, so nothing gates on it, but it is latency and noise.
-    # `smith judge preflight` checks the first half locally; only a real call
+    # `bs judge preflight` checks the first half locally; only a real call
     # can check the second.
     # `auto`, not `true`. This is the one field in the file that describes a
     # MACHINE, and the file is checked in, so `true` here would be a claim
@@ -77,7 +77,7 @@ providers:
     # session still spends a call per trigger and records the failure.
     #
     # Turned on for THIS box, 2026-09-02, by the operator who owns it: `codex`
-    # resolves on PATH and `codex login` is done, both checked by `smith judge
+    # resolves on PATH and `codex login` is done, both checked by `bs judge
     # preflight` and by a real `codex exec` call. Rollback for one box is
     # `enabled: false` here, which `auto` never overrides.
     enabled: auto
@@ -130,7 +130,7 @@ providers:
     # Without it api-transport.ts throws `Environment variable "DEEPSEEK_API_KEY"
     # is not set` on every quorum trigger; quorum.ts catches it, so the gate
     # holds on the native verdict alone, but each trigger records a provider
-    # error. `smith judge preflight` reports the name it looked for and never
+    # error. `bs judge preflight` reports the name it looked for and never
     # the value it found, so it is safe to run anywhere.
     #
     # `auto`, not `true`, for the same reason codex is: this file is checked in
@@ -233,7 +233,7 @@ quorum_rule:
   # deciding with two opinions in front of them rather than one — which is the
   # whole point of the file — not an automatic override.
   #
-  # It silences one advisory in `smith judge preflight` and nothing else. A
+  # It silences one advisory in `bs judge preflight` and nothing else. A
   # provider enabled where it cannot be called is still a problem, and
   # `gating.canDecide` still reports false, because it is false.
   accept_non_gating_actives: true
@@ -242,7 +242,7 @@ asymmetric_roles:
   finder_ne_critic: true
   critic_mandate: refute, not confirm
   # The machine-readable form of finder_ne_critic (P9-23). Each pair says
-  # "this critic must not run on that finder's own model"; `smith dispatch
+  # "this critic must not run on that finder's own model"; `bs dispatch
   # check <session>` asserts it against the event log after the fact, using
   # the `model` field every dispatch_decision now carries. Without this list
   # the rule was unenforceable prose: it named no roles.
@@ -267,13 +267,13 @@ role_isolation:
   #
   # The only evidence of a separate turn the event log can hold is a separate
   # `dispatch_decision`, written by the node that dispatched, never by an agent
-  # about itself. `smith tester check <session>` asserts that against the log
+  # about itself. `bs tester check <session>` asserts that against the log
   # after the fact, per `testgate-result`.
   #
   # That reading survives delegation.yml granting `Agent` because of what the
   # grant costs: a grantee must open its own session first, so its dispatches
   # are its own log's, and no grant may hand a role its own auditor from the
-  # `pairs` below. `smith delegation check` enforces both, which is what keeps
+  # `pairs` below. `bs delegation check` enforces both, which is what keeps
   # a widened grant from quietly disarming this file.
   #
   # One entry, and it is meant to stay one until a second role starts grading
@@ -327,7 +327,7 @@ independent_finder:
   # summary and the failure scenario and never the source. A finder cannot: it
   # has nothing to read but the diff. Shipping worktree source to a third-party
   # API is a decision no code in this repo has standing to make quietly, so it
-  # is a switch, it ships false, and `smith crossfind run` REFUSES rather than
+  # is a switch, it ships false, and `bs crossfind run` REFUSES rather than
   # falling back to a diffless "find bugs" prompt that would invent findings.
   send_diff: false
   max_diff_bytes: 120000 # refuse rather than truncate: half a diff produces confident findings about code that is not there

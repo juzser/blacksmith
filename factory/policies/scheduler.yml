@@ -1,7 +1,7 @@
 # Blacksmith — scheduler policy
 #
 # Knobs for `factory/orchestrator/src/scheduler.ts` (architecture §12
-# "Recheck scheduling" + "Scheduled growth passes"; `smith scheduler run`).
+# "Recheck scheduling" + "Scheduled growth passes"; `bs scheduler run`).
 # A deterministic pass over the event log that only ever emits PROPOSAL
 # events — it never dispatches an agent or widens scope on its own.
 
@@ -50,7 +50,7 @@ lessons:
 autonomy:
   # Who says yes to what this pass proposes. The scheduler decides WHAT is
   # due; this block decides what may proceed without an operator tick, and
-  # `smith scheduler admit` (src/autonomy.ts) applies it. That command still
+  # `bs scheduler admit` (src/autonomy.ts) applies it. That command still
   # enacts nothing — it prints the classification so it can be read and
   # argued with before anything moves.
   #
@@ -71,7 +71,7 @@ autonomy:
   # or the enable marker classifies operator and never reaches the merge at
   # all. The loop may merge what it builds; it may not merge what bounds it.
   #
-  # None of those six is enforced by code yet, because `smith loop` does not
+  # None of those six is enforced by code yet, because `bs loop` does not
   # exist yet. Until it does, this block's `enabled: true` still only governs
   # dispatch, and the merge is performed by whoever is driving the session.
   enabled: true
@@ -82,7 +82,7 @@ autonomy:
   # says. The list is a ceiling, never a floor.
   #
   # `error-report` — the daemon proposing that an error the log holds with
-  # no `issue-reported` event be filed (`smith issues report`) — is left out
+  # no `issue-reported` event be filed (`bs issues report`) — is left out
   # on purpose, and listing it would not change that either. Filing writes
   # to an external issue tracker under an authenticated `gh` token whose
   # scope includes `repo`, and this block's standing decision is that

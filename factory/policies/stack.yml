@@ -2,7 +2,7 @@
 #
 # What the operator answered when they installed this clone (INSTALL.md
 # Step 6, "The stack interview"). Read by `factory/orchestrator/src/stack.ts`
-# via `smith stack show`, and through it by the scaffolder and by every agent
+# via `bs stack show`, and through it by the scaffolder and by every agent
 # that needs to know what this operator builds with.
 #
 # This file used to be a document. `docs/standards/stack.md` shipped one
@@ -13,20 +13,20 @@
 # question would otherwise put words in the operator's mouth.
 #
 # Not every answer is executable. The shipped templates implement a subset —
-# `smith stack check` prints which of your answers they honour and which are
-# recorded for the agents to read but not built into `smith new`. Nothing here
-# silently pretends: an answer the templates cannot honour makes `smith new`
+# `bs stack check` prints which of your answers they honour and which are
+# recorded for the agents to read but not built into `bs new`. Nothing here
+# silently pretends: an answer the templates cannot honour makes `bs new`
 # refuse rather than scaffold something else.
 
 # ── Language ────────────────────────────────────────────────────────
 # What the coder writes. `typescript` is the only value the shipped templates
-# scaffold; any other value is recorded, and `smith new` refuses rather than
+# scaffold; any other value is recorded, and `bs new` refuses rather than
 # handing you a TypeScript project you did not ask for.
 language: typescript # typescript | javascript | python | go | rust | other
 
 # ── Frontend ────────────────────────────────────────────────────────
 # `none` is the default because most projects are not UI projects, and the
-# base template is a plain library. `smith new --ui` needs a value the
+# base template is a plain library. `bs new --ui` needs a value the
 # templates implement — today that is `vue` and nothing else.
 frontend: none # none | vue | react | svelte | solid | vite-vanilla | other
 
