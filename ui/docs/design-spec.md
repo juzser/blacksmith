@@ -1,5 +1,17 @@
 # Blacksmith Dashboard — UI/UX Design Spec
 
+## Superseded
+
+This document's Primitive inventory and any HDS-kit-specific component
+description (the `ds-` prefixed kit under `ui/src/components/ds/` and
+`ui/src/styles/ds-tokens.css` / `ds-components.css`) is superseded by
+[`DESIGN.md`](./DESIGN.md), which describes the BS kit (`ui/src/components/kit/`,
+`bs-tokens.css`, `bs-primitives.css`) that replaced it 2026-09-30. The rest of
+this spec (§2 responsive floor, §7 announcement/live-region conventions, §9
+date format, and everything else not about component inventory) is still
+accurate and kept here as a historical/product reference — see `DESIGN.md`
+for the current kit.
+
 ## 0. Scope-gate note and spec gaps (read first)
 
 **Adoption status.** `black-smith` has **no row in `knowledge/design-system/adopters.md`** and **no `docs/DESIGN.md`** yet — by the uiux scope gate, that makes it out of scope today. However, `black-smith-architecture.md` §10 explicitly commits to adoption ("the `black-smith` repo is added to `knowledge/design-system/adopters.md` so uiux/reviewer gating applies"), and this dispatch was made expressly to produce the spec that grounds that adoption. I proceeded on that basis, but **landing this feature must include, in the same PR**: the `adopters.md` row (variant `dashboard`, tokens copy path, version 3.0.0) and `ui/docs/DESIGN.md` from `adoption/DESIGN-md-template.md`, populated from §6 below. Until both land, `black-smith` is not a real adopter per the registry's own rule.
