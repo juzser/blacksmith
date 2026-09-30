@@ -15,7 +15,9 @@ const SFC = readFileSync(
 describe('TimelineRow.vue — role labels', () => {
   it('imports roleLabel and routes dispatchAgent.label through it', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
-    expect(SFC).toMatch(/label: p\.model_tier \? `\$\{roleLabel\(p\.agent_role\)\} · \$\{p\.model_tier\}`/);
+    expect(SFC).toMatch(
+      /label: p\.model_tier \? `\$\{roleLabel\(p\.agent_role\)\} · \$\{p\.model_tier\}`/,
+    );
   });
 
   it('keeps the raw role · tier as a title tooltip on the dispatch agent chip', () => {

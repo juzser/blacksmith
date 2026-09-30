@@ -37,11 +37,15 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
 describe('TaskDetailPage.vue — role labels', () => {
   it('imports roleLabel and routes agentChipLabel through it', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
-    expect(SFC).toMatch(/function agentChipLabel\(role: string, modelTier: string \| null\): string \{\s*const label = roleLabel\(role\);/);
+    expect(SFC).toMatch(
+      /function agentChipLabel\(role: string, modelTier: string \| null\): string \{\s*const label = roleLabel\(role\);/,
+    );
   });
 
   it('keeps the raw role · tier as a title tooltip via agentChipTitle', () => {
-    expect(SFC).toContain('function agentChipTitle(role: string, modelTier: string | null): string {');
+    expect(SFC).toContain(
+      'function agentChipTitle(role: string, modelTier: string | null): string {',
+    );
     expect(SFC).toMatch(/:title="agentChipTitle\(a\.agentRole, a\.modelTier\)"/);
   });
 

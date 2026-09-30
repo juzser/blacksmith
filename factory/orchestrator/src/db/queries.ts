@@ -1320,7 +1320,9 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
   // them left the rows in the ascending order they arrived in: the ten this
   // then kept were the *oldest* ten of the burst, under a heading that says
   // recent.
-  const recentDispatchRows = inLogOrder(scopedDispatches).reverse().slice(0, RECENT_DISPATCHES_LIMIT);
+  const recentDispatchRows = inLogOrder(scopedDispatches)
+    .reverse()
+    .slice(0, RECENT_DISPATCHES_LIMIT);
   // agents.id IS the dispatch event id (agents-registry.ts's foldAgents()),
   // so a direct id lookup finds the round regardless of whether that agent
   // is still live or has since gone terminal.

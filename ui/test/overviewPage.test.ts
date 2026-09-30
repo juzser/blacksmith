@@ -49,7 +49,9 @@ describe('OverviewPage.vue — role labels', () => {
 
   it('labels the recent-dispatch row title and its trailing chip', () => {
     expect(SFC).toContain('roleLabel(d.agentRole)');
-    expect(SFC).toMatch(/:title="`\$\{roleLabel\(d\.agentRole\)\} → \$\{d\.modelTier\}\/\$\{d\.provider\}`"/);
+    expect(SFC).toMatch(
+      /:title="`\$\{roleLabel\(d\.agentRole\)\} → \$\{d\.modelTier\}\/\$\{d\.provider\}`"/,
+    );
     expect(SFC).toMatch(/:label="`\$\{roleLabel\(d\.agentRole\)\} · \$\{d\.modelTier\}`"/);
   });
 });

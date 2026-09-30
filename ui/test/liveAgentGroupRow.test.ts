@@ -15,9 +15,7 @@ const SFC = readFileSync(
 describe('LiveAgentGroupRow.vue — role labels', () => {
   it('imports roleLabel and routes the group chip label through it', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
-    expect(SFC).toMatch(
-      /:label="`\$\{roleLabel\(group\.agentRole\)\} · \$\{group\.modelTier\}`"/,
-    );
+    expect(SFC).toMatch(/:label="`\$\{roleLabel\(group\.agentRole\)\} · \$\{group\.modelTier\}`"/);
   });
 
   it('keeps the raw role · tier as a title tooltip on the group chip', () => {

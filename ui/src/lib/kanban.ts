@@ -200,7 +200,9 @@ export function agentChip(task: AgentChipLike): AgentChip | null {
   // stays rather than being muted on a guess.
   const settled = isTaskOver(task.taskStatus);
   return {
-    label: task.agentModelTier ? `${roleLabel(task.agentRole)} · ${task.agentModelTier}` : roleLabel(task.agentRole),
+    label: task.agentModelTier
+      ? `${roleLabel(task.agentRole)} · ${task.agentModelTier}`
+      : roleLabel(task.agentRole),
     title: `${task.agentRole}${task.agentModelTier ? ` · ${task.agentModelTier}` : ''}`,
     live: task.agentActivity === 'working' && !settled,
     gone: task.agentActivity === null || settled,

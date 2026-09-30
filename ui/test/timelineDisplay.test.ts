@@ -84,7 +84,10 @@ describe('lib/timelineDisplay.ts', () => {
     const base = { agent_role: 'coder', model_tier: 'mid', provider: 'anthropic' };
 
     it('prefers reason when present', () => {
-      const e = entry({ eventType: 'dispatch_decision', payload: { ...base, reason: 'fix the bug' } });
+      const e = entry({
+        eventType: 'dispatch_decision',
+        payload: { ...base, reason: 'fix the bug' },
+      });
       expect(titleFor(e)).toBe('Dispatched Builder (mid/anthropic) — fix the bug');
     });
 
