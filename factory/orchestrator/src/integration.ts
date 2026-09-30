@@ -3,7 +3,7 @@ import { appendEvent, type EventOpts, type StoredEvent, validateEventEnvelope } 
 import type { EventContext } from './findings.js';
 import { runGit as git } from './git.js';
 import { type CheckCommand, type CheckResult, run } from './testgate.js';
-import { integrationBranchName, RESERVED_TASK_ID } from './worktree.js';
+import { epicBranchPrefix, integrationBranchName, RESERVED_TASK_ID } from './worktree.js';
 
 /**
  * D-42/P9-26, second half. Moving the worktrees outside the project root
@@ -65,13 +65,15 @@ function branchHead(projectDir: string, branch: string): string | null {
 }
 
 /**
- * The current head of `smith/<epic>/integration`, or null when the epic has
- * no integration branch (never planned, never dispatched, wrong --epic).
- * Read here rather than inside epic.ts so the verdict stays git-free and
- * purely a fold over events — the CLI passes the sha in.
+ * The current head of `<prefix>/<epic>/integration` (`bs/` for a new epic,
+ * `smith/` for one that already integrates there — epicBranchPrefix decides
+ * which), or null when the epic has no integration branch (never planned,
+ * never dispatched, wrong --epic). Read here rather than inside epic.ts so
+ * the verdict stays git-free and purely a fold over events — the CLI passes
+ * the sha in.
  */
 export function integrationHeadSha(projectDir: string, epicId: string): string | null {
-  return branchHead(projectDir, integrationBranchName(epicId));
+  return branchHead(projectDir, integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)));
 }
 
 /** Last-wins fold: the most recent recorded check for this epic, or null. */
@@ -126,7 +128,7 @@ export async function runIntegrationCheck(
   );
 
   const { epicId, projectDir } = input;
-  const branch = integrationBranchName(epicId);
+  const branch = integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId));
 
   // testgate.run([]) returns pass: true for an empty list — correct there
   // (a task claiming no checks has nothing to short-circuit), and a silent
