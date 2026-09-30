@@ -18,7 +18,10 @@ describe('kit/MobileTabBar.vue', () => {
 
   it('renders icon above label, not an accent colour', () => {
     expect(TABBAR).toMatch(/<Icon :icon="it\.icon" :size="20" \/>/);
-    expect(TABBAR).toMatch(/<span class="bs-tabbar__label">{{ it\.label }}<\/span>/);
     expect(TABBAR).not.toMatch(/--bs-accent/);
+  });
+
+  it('prefers shortLabel over label, not CSS truncation (ds-spec.md §3)', () => {
+    expect(TABBAR).toMatch(/<span class="bs-tabbar__label">{{ it\.shortLabel \?\? it\.label }}<\/span>/);
   });
 });

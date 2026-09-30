@@ -42,6 +42,9 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
     await page.goto('/timeline');
     await expect(page.locator('.ds-skeleton')).toHaveCount(0);
 
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+
     // Timeline's own poll is 15s away; this resolves in milliseconds.
     const refetch = page.waitForRequest('**/api/timeline*');
     await page.getByRole('button', { name: 'Refresh now' }).click();
@@ -83,7 +86,9 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     await expect(page.locator('.bs-mtopbar')).toBeVisible();
     const tabbar = page.getByRole('navigation', { name: 'Primary' });
     await expect(tabbar).toBeVisible();
-    for (const label of ['Home', 'Work', 'Activity', 'Cost & quality', 'Lessons']) {
+    // MobileTabBar uses the short label ("Cost", not "Cost & quality") — DS1
+    // has no room for the full label at 375px (ds-spec.md §3).
+    for (const label of ['Home', 'Work', 'Activity', 'Cost', 'Lessons']) {
       await expect(tabbar.getByRole('button', { name: label })).toBeVisible();
     }
     await expect(tabbar.getByRole('button', { name: 'Work' })).toHaveAttribute(

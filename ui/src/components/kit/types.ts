@@ -17,6 +17,8 @@ export interface TableColumn {
 export interface NavItem {
   id: string;
   label: string;
+  /** MobileTabBar's 375px label when it differs from `label` (ds-spec.md §3). */
+  shortLabel?: string;
   icon: Component;
   route: string;
 }

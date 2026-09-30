@@ -21,8 +21,12 @@ describe('kit/LiveIndicator.vue', () => {
   });
 
   it('Refresh is aria-disabled while a refresh it triggered is still pending', () => {
-    expect(LIVE).toMatch(/:disabled="pending"/);
     expect(LIVE).toMatch(/pending\.value = true/);
+  });
+
+  it('Refresh is aria-disabled while live, per ds-spec.md §2.2 (enabled once paused)', () => {
+    expect(LIVE).toMatch(/:disabled="pending \|\| live"/);
+    expect(LIVE).toMatch(/if \(pending\.value \|\| props\.live\) return;/);
   });
 
   it('Settings has no settings surface yet, so it stays permanently disabled', () => {

@@ -24,10 +24,12 @@ const statusLabel = computed(() => (props.live ? 'Live' : 'Paused'));
 // flight — a brief debounce so a second click cannot queue a second refetch
 // on top of one already running. Reset on a short timer rather than an actual
 // promise: triggerGlobalRefresh() (usePoll.ts) is fire-and-forget by design,
-// it has no completion to await.
+// it has no completion to await. It is also aria-disabled while live is on
+// (ds-spec.md §2.2): the shared poll/stream already keeps data current, so a
+// manual refresh only makes sense once updates are paused.
 const pending = ref(false);
 function onRefresh() {
-  if (pending.value) return;
+  if (pending.value || props.live) return;
   pending.value = true;
   emit('refresh');
   setTimeout(() => {
@@ -53,7 +55,7 @@ function onRefresh() {
       :icon="RefreshCw"
       label="Refresh now"
       size="sm"
-      :disabled="pending"
+      :disabled="pending || live"
       @click="onRefresh"
     />
     <IconButton

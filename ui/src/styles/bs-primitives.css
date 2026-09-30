@@ -1305,13 +1305,14 @@
   flex: 1;
   min-width: var(--bs-touch);
   border: 0;
+  border-top: 2px solid transparent;
   background: transparent;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
   cursor: pointer;
 }
 .bs-tabbar__item[aria-current='page'] {
-  background: var(--bs-surface-selected);
+  border-top-color: var(--bs-text);
   color: var(--bs-text);
   font-weight: var(--bs-font-weight-medium);
 }
