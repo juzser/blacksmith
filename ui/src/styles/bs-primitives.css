@@ -617,3 +617,209 @@
   font-weight: var(--bs-font-weight-semibold);
   flex-shrink: 0;
 }
+
+/* Dialog / AlertDialog (§2.1, WAI-ARIA Dialog pattern) — AlertDialog wraps
+   Dialog and adds no CSS of its own, same as the old kit. Ported from
+   ds-components.css's .ds-dialog* 1:1 on values (radius/shadow/z-index), the
+   one deliberate addition being the bs-fade entrance (ds-dialog never had
+   one; this kit's design decision extends it to dialog/popover/toast alike,
+   not just toast). */
+.bs-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: color-mix(in srgb, var(--bs-text) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--bs-space-4);
+}
+.bs-dialog {
+  position: relative;
+  z-index: 56;
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--bs-surface);
+  border-radius: var(--bs-radius-lg);
+  box-shadow: var(--bs-shadow-lg);
+  padding: var(--bs-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
+}
+.bs-dialog--sm {
+  max-width: 420px;
+}
+.bs-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
+.bs-dialog__title {
+  font-size: var(--bs-text-xl);
+  font-weight: var(--bs-font-weight-semibold);
+}
+.bs-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+.bs-dialog__desc {
+  color: var(--bs-text-subtle);
+}
+.bs-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--bs-space-2);
+}
+
+/* Popover (§2.1, light-weight anchored panel) — ported from .ds-popover*
+   1:1 on values; z-index 45 matches this file's own documented scale
+   (Tooltip's header comment above: "topbar 10 < popover 45 < sheet 40/50 <
+   dialog 55/56 < toast 70"). */
+.bs-popover {
+  position: relative;
+  display: inline-block;
+}
+.bs-popover__panel {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + var(--bs-space-1));
+  right: 0;
+  min-width: 240px;
+  padding: var(--bs-space-3);
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  box-shadow: var(--bs-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
+}
+
+/* Toast (§2.1) — deliberately inverted surface: background/color swap so a
+   toast reads as "inverse of the current theme" regardless of light/dark
+   (ported from ds-components.css's own bug-fix comment on .ds-toast: an
+   earlier version referenced --ds-inverse-surface/--ds-inverse-text, tokens
+   that were never declared anywhere and always silently fell back to
+   --ds-text/--ds-surface — this bs- version uses --bs-text/--bs-surface
+   directly, no phantom inverse tokens to begin with). IconButton's dismiss
+   button needs tone="inverse" here (see IconButton.vue) because its default
+   colour/hover assume a normal, non-inverted surface. */
+.bs-toast-region {
+  position: fixed;
+  bottom: var(--bs-space-4);
+  right: var(--bs-space-4);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-3);
+  min-width: 240px;
+  padding: var(--bs-space-3) var(--bs-space-3) var(--bs-space-3) var(--bs-space-4);
+  background: var(--bs-text);
+  color: var(--bs-surface);
+  border-radius: var(--bs-radius-sm);
+  box-shadow: var(--bs-shadow-lg);
+  font-size: var(--bs-text-sm);
+  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
+}
+.bs-toast > span {
+  flex: 1;
+}
+
+/* Tabs (§2.1, WAI-ARIA Tabs pattern, roving tabindex). Ported from
+   .ds-tabs* 1:1 on values; :focus-visible uses this kit's new box-shadow
+   ring (see .bs-iconbtn/.bs-btn/.bs-input above) instead of the old kit's
+   outline-based one — no --bs-focus-width token exists here. */
+.bs-tabs__list {
+  display: flex;
+  gap: var(--bs-space-1);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-tabs__tab {
+  padding: var(--bs-space-2) var(--bs-space-3);
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.bs-tabs__tab[aria-selected='true'] {
+  color: var(--bs-text);
+  border-bottom-color: var(--bs-accent);
+}
+.bs-tabs__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-tabs__panel {
+  padding-top: var(--bs-space-4);
+}
+
+/* Table (§2.1/§2.3) — .bs-tablewrap is the bordered/rounded outer frame
+   (ds/Table.vue's `bordered` prop toggles it); `compact` tightens cell
+   padding via whole-step --bs-space-* tokens (no half-step tokens exist in
+   this scale, unlike the old kit's --ds-space-1-5/2-5 used by Row/RowList,
+   which Table absorbs per ds-spec.md §2.3 line 449: "folded into Table in
+   compact density — two components doing one job"). Comfortable cells:
+   --bs-space-2 var(--bs-space-3) (8px/12px), matching the old kit's own
+   .ds-table td/th padding. Compact cells: --bs-space-1 var(--bs-space-2)
+   (4px/8px), the next whole step down — closest available substitute for
+   the old half-step compact padding, a minor scale simplification. */
+.bs-tablewrap {
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  overflow: hidden;
+}
+.bs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--bs-text-sm);
+}
+.bs-table th {
+  text-align: left;
+  padding: var(--bs-space-2) var(--bs-space-3);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  background: var(--bs-surface-sunken);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-table td {
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-table--compact th,
+.bs-table--compact td {
+  padding: var(--bs-space-1) var(--bs-space-2);
+}
+.bs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.bs-table th[data-numeric='true'],
+.bs-table td[data-numeric='true'] {
+  text-align: right;
+}
+.bs-table tbody tr[data-clickable='true'] {
+  cursor: pointer;
+}
+.bs-table tbody tr[data-clickable='true']:hover {
+  background: var(--bs-surface-sunken);
+}
+.bs-table__empty {
+  padding: var(--bs-space-5) var(--bs-space-3);
+  text-align: center;
+  color: var(--bs-text-subtle);
+}
