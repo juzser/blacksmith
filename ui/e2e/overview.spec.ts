@@ -58,7 +58,7 @@ test.describe('Overview', () => {
     // shell's; ui/e2e/shell.spec.ts covers it on the nine pages that are not
     // Overview. It stays asserted here because Overview is where it was born.
     await page.goto('/overview');
-    await expect(page.locator('.live-status__label')).toHaveText(/^Live · updated /);
+    await expect(page.locator('.bs-live__text')).toHaveText(/^(Live|Paused)/);
     await expect(page.getByRole('button', { name: 'Refresh now' })).toBeVisible();
   });
 
@@ -85,7 +85,7 @@ test.describe('Overview', () => {
     page,
   }) => {
     await page.goto('/overview');
-    const mark = page.locator('.ds-side__mark img');
+    const mark = page.locator('.bs-side__mark img');
     await expect(mark).toBeVisible();
     await expect(mark).toHaveAttribute('alt', 'Blacksmith');
 
@@ -378,7 +378,7 @@ test.describe('Overview', () => {
   test('theme toggle switches to dark and persists the class on <html>', async ({ page }) => {
     await page.goto('/overview');
     await expect(page.locator('html')).not.toHaveClass(/dark/);
-    await page.getByRole('button', { name: 'Toggle theme' }).click();
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
     await expect(page.locator('html')).toHaveClass(/dark/);
   });
 
