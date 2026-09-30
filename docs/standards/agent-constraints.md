@@ -32,10 +32,12 @@
 
 ### Effort discipline (anti-over-engineering, defaults applied 2026-08-03)
 
-- **Token cap: 150k per task.** Hitting the cap is not failure — the coder
+- **Token cap per task, sized per effort tier** (`budgets.yml`: coder
+  220k at medium, half at small, double at huge). Hitting the cap is not failure — the coder
   stops, reports what's done, and the task returns to the planner for
   re-scoping (`budget-exceeded`, no retry at the same scope).
-- **Diff cap: ≤400 changed lines** per task, excluding lockfiles/generated
+- **Diff cap: ≤700 changed lines** per medium-tier task (350 small, 1400
+  huge), excluding lockfiles/generated
   files. Projected overrun → stop and return to planner to split; a merged
   diff over cap fails the gate.
 - **Strict YAGNI.** Code exactly the acceptance criteria. A new abstraction
@@ -228,10 +230,11 @@ M-3).
 
 ## budgets (factory-wide)
 
-- **Per-epic cap: 4,000,000 tokens** (planner + all workers + judges).
-  Raised from 2,000,000 by operator decision on 2026-08-11 — the reasoning,
-  and the two things the raise does not fix, sit beside the number in
-  `budgets.yml`. Alarm at 70% (2.8M): planner must re-plan remaining work to
+- **Per-epic cap, per effort tier: 4M small / 16M medium / 32M huge**
+  (planner + all workers + judges). Raised from 2,000,000 by operator
+  decision on 2026-08-11 and sized per tier on 2026-09-29 after the largest
+  measured medium-tier dogfood epic spent about 7.3M — the reasoning sits
+  beside the number in `budgets.yml`. Alarm at 70% (11.2M at medium): planner must re-plan remaining work to
   fit or ask. Epics that can't fit are split into multiple epics at spec time.
 - Concurrency: **uncapped by default** (2026-08-05). Parallelism is bounded by
   the path-claim graph — disjoint claims fan out, overlapping claims get a
@@ -261,7 +264,7 @@ M-3).
   re-read on demand.
 - **Compaction never resets a budget.** Tokens spent before it still count
   against the task/epic caps in `budgets.yml`; compacting is not a way around
-  the 150k coder cap.
+  the coder cap.
 - **One compaction per task.** A second means the task is over-scoped: stop
   and return `economy.budget-exceeded` to the planner for splitting, exactly
   as a token-cap hit does. Chained compactions are how a session quietly

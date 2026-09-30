@@ -6,7 +6,8 @@
 # What is mechanical, and what is a request (P9-18, 2026-08-08; `failed_rounds`
 # added P9-32 and `alarm_ratio` P9-33, both 2026-08-10; `max_in_flight_tasks`
 # added 2026-08-26, the same day `epic.cap_tokens` grew a reader that actually
-# blocks). Exactly six numbers here reach a runtime host:
+# blocks). Exactly six kinds of number here reach a runtime host — each one
+# sized per effort tier, see "Effort tiers" below:
 #
 #   * `epic.cap_tokens` — three readers now, and only the newest of them
 #     blocks. planQuorum's budget trigger sums *declared* task budgets against
@@ -32,7 +33,10 @@
 #     `task:` block's coverage of the roles the factory actually dispatches is
 #     load-bearing and not merely documentary.
 #   * a task's `tokens` — compared at the gate against the result's
-#     `token_usage.total_tokens`.
+#     `token_usage.total_tokens`. The per-role caps under `task:` are what
+#     `smith budget alarm` and `smith wave check` charge a dispatch nothing has
+#     measured yet, and what the dispatch harness hands a CLI turn as its
+#     `cap_tokens`.
 #   * a task's `diff_lines` — compared at the gate against a real
 #     `git diff --numstat` (src/diffstat.ts), lockfiles and generated output
 #     excluded.
@@ -68,6 +72,40 @@
 # agent-interviews.md M-4 had called it inert), and a plan cannot raise or
 # lower a role's ceiling. So plan validation rejects it as a task budget
 # field, and the dispatch prompt restates the template's number verbatim.
+# It is one number per template, not per tier: a template cannot know the
+# epic it will be dispatched into, so each `maxTurns` is sized as the ceiling
+# for the huge tier (raised 2026-09-29, measured on eight medium-tier dogfood
+# epics, 2026-09-14..29). The token caps below are what scale down for a
+# smaller epic; the turn ceiling does not.
+#
+# Effort tiers (2026-09-29). Every token and diff number in this file is sized
+# per effort tier — effort.yml's small / medium / huge: the tier the epic
+# runs at, i.e. its plan's `effort` raised by effort.yml's `security_floor`
+# when a live task trips a security trigger, and effort.yml's `default_tier`
+# (medium) when there is no plan in hand or it names none. One source of
+# truth, one scale:
+#
+#   * `epic.cap_tokens` is an explicit triplet, because an epic's size is not
+#     a straight multiple of its tasks'.
+#   * every `task:` number is declared once, at medium, and multiplied by
+#     `task_tier_scale` for the tier: small 0.5x, huge 2x.
+#   * `epic.alarm_ratio` is a ratio and is the same at every tier.
+#
+# Per-box env overrides (`.env`, or an exported value, which beats it). Each
+# number that a box may want to move has an env name — SMITH_EPIC_CAP_TOKENS,
+# SMITH_TASK_<ROLE>_CAP_TOKENS, … listed in .env.example — and each name has a
+# `_SMALL`, `_MEDIUM` and `_HUGE` variant. For an epic of a given tier the
+# precedence is, highest first:
+#
+#   1. the variant for that tier, e.g. SMITH_EPIC_CAP_TOKENS_HUGE;
+#   2. the bare name, e.g. SMITH_EPIC_CAP_TOKENS, which applies to every tier
+#      that has no variant of its own set;
+#   3. the number in this file for that tier.
+#
+# An env value beats the tier: a bare name pins one number for every tier. A
+# malformed value in any variant — even one for a tier not in play — is
+# refused with `budgets.invalid-env`. `smith wave check` and `smith budget
+# alarm` name the variables that moved a number, never their values.
 #
 # No concurrency cap on cost grounds, by design (removed 2026-08-05). Workers
 # run in isolated worktrees on disjoint path claims, so parallelism is bounded
@@ -83,7 +121,22 @@
 # nothing about what bounds spend.
 
 epic:
-  cap_tokens: 4000000        # planner + all workers + judges, one epic.
+  cap_tokens:                # planner + all workers + judges, one epic.
+    small: 4000000
+    medium: 16000000
+    huge: 32000000
+                              # 2026-09-29: per tier. Medium is 16M, the cap
+                              # the operator's own box had already been
+                              # running by env override; the largest measured
+                              # medium epic (eight medium-tier dogfood epics,
+                              # 2026-09-14..29) spent about 7.3M, so 16M
+                              # carries it with the alarm at 11.2M. Small
+                              # keeps the old single number, 4M; huge is 32M.
+                              # This is also the per-epic override follow-up
+                              # (1) below asked for, in the only form a
+                              # policy file can give it: an epic's `effort`
+                              # picks its cap.
+                              # Earlier history:
                               # Raised from 2,000,000 by operator decision on
                               # 2026-08-11 (dogfood-mcp-1), which is the
                               # operator answer the `alarm_ratio` note below
@@ -112,7 +165,8 @@ epic:
                               # waste as well as work. A cap sized from a
                               # badly-run epic is a ceiling measured at the
                               # wrong place.
-  alarm_ratio: 0.7           # at 2.8M tokens: planner must re-plan remaining
+  alarm_ratio: 0.7           # same at every tier (small: 2.8M, medium:
+                              # 11.2M, huge: 22.4M). At that point: planner must re-plan remaining
                               # work to fit, or ask the operator. Epics that
                               # cannot fit are split at spec time, never
                               # silently extended (extension is always an
@@ -136,12 +190,27 @@ epic:
                               # the epic's tasks in flight (admitted, not yet
                               # merged) than this number at once.
 
+task_tier_scale:
+  # Multiplies every `task:` number below for an epic of that tier. Not the
+  # epic cap, which is declared per tier above.
+  small: 0.5
+  medium: 1
+  huge: 2
+
 task:
+  # Medium-tier numbers; `task_tier_scale` gives the small and huge ones.
   # Defaults a planner sizes a task's own `budget` block against. The task's
   # declared numbers are what the gate checks; these are the shape of a
   # reasonable declaration, not a second cap applied on top.
+  #
+  # Sized 2026-09-29 from the p90 tokens per dispatch measured on eight
+  # medium-tier dogfood epics, 2026-09-14..29, rounded up. Before that the
+  # coder cap was 150k (10 of 36 measured coder dispatches over it), the four
+  # judges shared one 40k bucket (31 of 32 spec-reviewer dispatches over it),
+  # researcher was 60k, and planner, tester, security-reviewer and auditor had
+  # no cap at all, which left every epic that used one unverifiable.
   coder:
-    cap_tokens: 150000       # Second reader, added 2026-08-26: `smith wave
+    cap_tokens: 220000       # Second reader, added 2026-08-26: `smith wave
                              # check` prices a task that exists only in the
                              # event log at this number. A follow-up minted by
                              # `findings raise` has claims but no declared
@@ -159,17 +228,37 @@ task:
                              # still refused — the schema requires that field,
                              # so its absence is a plan that never passed
                              # `smith plan validate`.
-    cap_diff_lines: 400      # excludes lockfiles/generated files
+    cap_diff_lines: 700      # excludes lockfiles/generated files. Measured
+                             # p50 316 / p90 727 lines (was 400); small 350,
+                             # huge 1400.
+  tester:
+    cap_tokens: 60000        # p90 55k
+  planner:
+    cap_tokens: 110000       # p90 103k
   researcher:
-    cap_tokens: 60000
-  judges:                    # spec-reviewer, reviewer, verifier, grader
-    cap_tokens: 40000
-  # Not priced here, and dispatched anyway: security-reviewer, merger, tester,
-  # uiux, planner, scribe. `smith budget alarm` cannot put a number on those
-  # dispatches, so an epic that used one is reported unverifiable rather than
-  # under — the omission is visible instead of free. Left unpriced on purpose
-  # until there is real spend data to size them from; inventing a cap would
-  # make the projection look complete without making it true.
+    cap_tokens: 80000        # p90 74k (was 60k)
+  spec-reviewer:
+    cap_tokens: 170000       # p90 168k (was the shared 40k judges bucket)
+  grader:
+    cap_tokens: 110000       # p90 105k (was 40k)
+  reviewer:
+    cap_tokens: 60000        # p90 56k (was 40k)
+  verifier:
+    cap_tokens: 40000        # p90 25k (unchanged)
+  security-reviewer:
+    cap_tokens: 80000        # p90 77k
+  auditor:
+    cap_tokens: 90000        # p90 89k
+  # The old shared `judges:` bucket is gone. A policy file that still carries
+  # `judges: {cap_tokens: N}` has N read for spec-reviewer, reviewer, verifier
+  # and grader wherever it does not name that role itself.
+  #
+  # Not priced here, and dispatched anyway: merger, uiux, scribe, wave-runner.
+  # `smith budget alarm` cannot put a number on those dispatches, so an epic
+  # that used one is reported unverifiable rather than under — the omission is
+  # visible instead of free. Left unpriced on purpose until there is real spend
+  # data to size them from; inventing a cap would make the projection look
+  # complete without making it true.
 
 pre_code_budget:
   # researcher + uiux together, before any code is written for the epic
@@ -193,7 +282,7 @@ context_window:
                                # quietly loses the contract it was given.
   counts_against_budget: true  # tokens spent before a compaction still count
                                # against the caps above — compacting is not a
-                               # way around the 150k coder cap.
+                               # way around the coder cap.
   compacting_roles: [planner, coder, tester, researcher, uiux, scribe]
   narrowing_roles: [reviewer, verifier, grader, spec-reviewer, security-reviewer, merger, auditor]
   # narrowing_roles hold evidence rather than build on it: a judge that compacts

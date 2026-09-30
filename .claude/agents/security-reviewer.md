@@ -4,7 +4,7 @@ description: Deep security review of a task diff — conditional dispatch only. 
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 45
 hooks:
   Stop:
     - hooks: [{type: command, command: "[ -f \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" ] && \"$CLAUDE_PROJECT_DIR/.claude/hooks/judge-stop.sh\" || exit 0"}]

@@ -84,7 +84,7 @@ smith harness plan --harness codex-cli --role coder --task epic-1/task-3 \
 ```
 
 ```json
-{"harness":"codex-cli","role":"coder","taskId":"epic-1/task-3","access":"worker","promptFile":"state/prompts/p.md","worktree":"../wt/task-3","sandboxRequired":false,"kind":"cli","command":"codex","args":["exec","--json","--color","never","--skip-git-repo-check","-","-s","workspace-write","--output-schema","/abs/path/factory/specs/schema/result.schema.json"],"cwd":"../wt/task-3","envAllowlist":["HOME","PATH","CODEX_HOME"],"template":".claude/agents/coder.md","output":"codex-json","model":null,"tier":"mid","schema":"result","stdin":"prompt","budget":{"timeout_ms":1800000,"max_output_bytes":2097152,"cap_tokens":150000}}
+{"harness":"codex-cli","role":"coder","taskId":"epic-1/task-3","access":"worker","promptFile":"state/prompts/p.md","worktree":"../wt/task-3","sandboxRequired":false,"kind":"cli","command":"codex","args":["exec","--json","--color","never","--skip-git-repo-check","-","-s","workspace-write","--output-schema","/abs/path/factory/specs/schema/result.schema.json"],"cwd":"../wt/task-3","envAllowlist":["HOME","PATH","CODEX_HOME"],"template":".claude/agents/coder.md","output":"codex-json","model":null,"tier":"mid","schema":"result","stdin":"prompt","budget":{"timeout_ms":1800000,"max_output_bytes":2097152,"cap_tokens":220000}}
 ```
 
 `--output-schema` is last because it comes from `schema_args`, appended after

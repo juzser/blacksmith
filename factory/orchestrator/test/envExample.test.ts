@@ -22,8 +22,16 @@ const budgetLines = assignments.filter((a) => !a.name.startsWith(MAXTURNS));
 const maxTurnsLines = assignments.filter((a) => a.name.startsWith(MAXTURNS));
 
 // Parsed, not loaded: loadBudgetPolicy lays the running process's env on top,
-// and this compares against the committed file alone.
-const shipped = parseBudgetPolicy(readFileSync(BUDGETS_POLICY_PATH, 'utf8'));
+// and this compares against the committed file alone. One policy per tier.
+const policyText = readFileSync(BUDGETS_POLICY_PATH, 'utf8');
+const shippedByTier = {
+  small: parseBudgetPolicy(policyText, 'small'),
+  medium: parseBudgetPolicy(policyText, 'medium'),
+  huge: parseBudgetPolicy(policyText, 'huge'),
+} as const;
+const TIERS = ['small', 'medium', 'huge'] as const;
+const shippedText = (value: number | null | undefined): string =>
+  value === null || value === undefined ? '' : String(value);
 
 const BUDGET_DEFAULT: Record<string, (p: BudgetPolicy) => number | null> = {
   SMITH_EPIC_CAP_TOKENS: (p) => p.epic.capTokens,
@@ -31,8 +39,15 @@ const BUDGET_DEFAULT: Record<string, (p: BudgetPolicy) => number | null> = {
   SMITH_EPIC_MAX_IN_FLIGHT_TASKS: (p) => p.epic.maxInFlightTasks,
   SMITH_TASK_CODER_CAP_TOKENS: (p) => p.task.coder.capTokens,
   SMITH_TASK_CODER_CAP_DIFF_LINES: (p) => p.task.coder.capDiffLines,
+  SMITH_TASK_TESTER_CAP_TOKENS: (p) => p.task.tester.capTokens,
+  SMITH_TASK_PLANNER_CAP_TOKENS: (p) => p.task.planner.capTokens,
   SMITH_TASK_RESEARCHER_CAP_TOKENS: (p) => p.task.researcher.capTokens,
-  SMITH_TASK_JUDGES_CAP_TOKENS: (p) => p.task.judges.capTokens,
+  SMITH_TASK_SPEC_REVIEWER_CAP_TOKENS: (p) => p.task['spec-reviewer'].capTokens,
+  SMITH_TASK_GRADER_CAP_TOKENS: (p) => p.task.grader.capTokens,
+  SMITH_TASK_REVIEWER_CAP_TOKENS: (p) => p.task.reviewer.capTokens,
+  SMITH_TASK_VERIFIER_CAP_TOKENS: (p) => p.task.verifier.capTokens,
+  SMITH_TASK_SECURITY_REVIEWER_CAP_TOKENS: (p) => p.task['security-reviewer'].capTokens,
+  SMITH_TASK_AUDITOR_CAP_TOKENS: (p) => p.task.auditor.capTokens,
 };
 
 describe('.env.example budget knobs', () => {
@@ -43,12 +58,52 @@ describe('.env.example budget knobs', () => {
     expect(Object.keys(BUDGET_DEFAULT).sort()).toEqual([...BUDGET_ENV_VARS].sort());
   });
 
-  it("carries each one at budgets.yml's value (empty where budgets.yml says null)", () => {
+  // A bare name pins every tier, so a copied .env.example that set one would
+  // flatten small and huge onto the medium number. Each ships empty.
+  it('ships every bare name empty, so copying the file overrides nothing', () => {
     for (const { name, value } of budgetLines) {
+      expect(value, name).toBe('');
+    }
+  });
+});
+
+describe('.env.example per-tier budget knobs', () => {
+  const text = readFileSync(path.join(REPO_ROOT, '.env.example'), 'utf8');
+  const commented = new Set(
+    text
+      .split('\n')
+      .map((line) => /^# ?(SMITH_[A-Z0-9_]+)=/.exec(line)?.[1])
+      .filter((name): name is string => name !== undefined),
+  );
+
+  const commentedValue = new Map(
+    text
+      .split('\n')
+      .map((line) => /^# ?(SMITH_[A-Z0-9_]+)=(.*)$/.exec(line))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => [m[1] as string, m[2] as string]),
+  );
+
+  it("shows each tier variant at that tier's budgets.yml value (empty where null)", () => {
+    for (const name of BUDGET_ENV_VARS) {
       const read = BUDGET_DEFAULT[name];
       expect(read, name).toBeDefined();
-      const expected = read?.(shipped);
-      expect(value, name).toBe(expected === null || expected === undefined ? '' : String(expected));
+      for (const tier of TIERS) {
+        const variant = `${name}_${tier.toUpperCase()}`;
+        expect(commentedValue.get(variant), variant).toBe(shippedText(read?.(shippedByTier[tier])));
+      }
+    }
+  });
+
+  it('lists every budget name with its _SMALL / _MEDIUM / _HUGE variant, commented out', () => {
+    for (const name of BUDGET_ENV_VARS) {
+      for (const suffix of ['_SMALL', '_MEDIUM', '_HUGE']) {
+        expect(commented.has(`${name}${suffix}`), `${name}${suffix}`).toBe(true);
+        expect(
+          assignments.some((a) => a.name === `${name}${suffix}`),
+          `${name}${suffix}`,
+        ).toBe(false);
+      }
     }
   });
 });

@@ -4,7 +4,7 @@ description: Writes a UI spec grounded in the project's design system before any
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
-maxTurns: 15
+maxTurns: 25
 ---
 
 # UI/UX

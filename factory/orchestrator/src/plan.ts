@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import path from 'node:path';
 import { type TaskBudget, unreadTaskBudgetFields } from './budgets.js';
 import { type ClaimedTask, claimCoversPath } from './claims.js';
+import { EFFORT_TIERS, type EffortTier, isEffortTier } from './effortTiers.js';
 import { SmithError } from './errors.js';
 import { topoSort } from './graph.js';
 import { SPECS_ACTIVE_DIR } from './paths.js';
@@ -36,21 +37,11 @@ export type TaskSpecRecord = Record<string, unknown> & {
   plan_version: number;
 };
 
-/**
- * How much judgment an epic buys, cheapest first — factory/policies/effort.yml
- * declares what each tier means; this is only the closed list of names, kept
- * here beside the `PlanFile.effort` field it types. effort.ts is the semantic
- * owner and re-exports these; it cannot own the list itself, because plan.ts
- * would then have to import it to validate a plan and effort.ts already
- * (transitively) imports plan.ts.
- */
-export const EFFORT_TIERS = ['small', 'medium', 'huge'] as const;
-
-export type EffortTier = (typeof EFFORT_TIERS)[number];
-
-export function isEffortTier(value: unknown): value is EffortTier {
-  return typeof value === 'string' && (EFFORT_TIERS as readonly string[]).includes(value);
-}
+// The closed list of effort tier names, re-exported beside the
+// `PlanFile.effort` field it types. It lives in the leaf module
+// effortTiers.ts because budgets.ts sizes its caps by it too, and plan.ts
+// already imports budgets.ts.
+export { EFFORT_TIERS, type EffortTier, isEffortTier };
 
 export interface PlanFile {
   epic_id: string;

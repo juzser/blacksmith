@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // loader the binary uses cannot drift away from the file when the cap is
 // retuned. FOLLOW_TICK_MS is the same move for a clock: a test that waits out
 // two polls has to wait out the poll the binary actually uses.
-import { BUDGET_ENV_VARS, loadBudgetPolicy } from '../src/budgets.js';
+import { ALL_BUDGET_ENV_NAMES, loadBudgetPolicy } from '../src/budgets.js';
 import { ISSUE_CANDIDATE_EVENT_TYPES } from '../src/errorIssues.js';
 import { FOLLOW_TICK_MS } from '../src/events.js';
 import { resolveRepoAtDir } from '../src/gh.js';
@@ -55,7 +55,7 @@ function runCli(
   // harness has to be the one place that stays hermetic. Blank every budget
   // var first, then let explicit overrides win, same order the CLI resolves
   // them in.
-  const blankBudgetEnv = Object.fromEntries(BUDGET_ENV_VARS.map((name) => [name, '']));
+  const blankBudgetEnv = Object.fromEntries(ALL_BUDGET_ENV_NAMES.map((name) => [name, '']));
   const run = runProcess('node', [CLI_PATH, ...args], {
     env: { ...process.env, ...blankBudgetEnv, ...envOverrides },
     ...(stdin === undefined ? {} : { input: stdin }),
@@ -4979,6 +4979,77 @@ describe('cli.ts (built binary)', () => {
         );
       });
 
+      // The epic cap is per effort tier (budgets.yml `epic.cap_tokens`), and
+      // the tier is the plan's `effort` after effort.yml's security floor
+      // (this plan trips no trigger). The same wave, the same policy
+      // file: a small epic cannot afford it, a medium one can.
+      it("refuses against the cap of the plan's effort tier, not the default tier", async () => {
+        const { sessionId: policyName } = await session();
+        const budgetPolicy = path.join(scratchDir, `${policyName}-tiered-budgets.yml`);
+        await writeFile(
+          budgetPolicy,
+          'epic:\n  cap_tokens:\n    small: 5000\n    medium: 50000\n    huge: 100000\n' +
+            '  alarm_ratio: 0.7\n  max_in_flight_tasks: null\n',
+        );
+        // One session per tier: wave check under --session admits only the
+        // live tasks of an ingested plan, and the two plans share an epic id
+        // and version, so each is ingested into a session of its own.
+        const tiered = async (effort: string) => {
+          const { sessionId, eventsDir } = await session();
+          const planPath = path.join(scratchDir, `${sessionId}-${effort}-plan.json`);
+          await writeFile(
+            planPath,
+            JSON.stringify({
+              ...PLAN,
+              effort,
+              tasks: PLAN.tasks.map((task) => ({
+                ...task,
+                budget: { tokens: 3000, diff_lines: 100 },
+              })),
+            }),
+          );
+          ingest(planPath, sessionId, eventsDir);
+          return (env: Record<string, string> = {}) =>
+            runCli(
+              [
+                'wave',
+                'check',
+                planPath,
+                'task-1',
+                'task-2',
+                '--session',
+                sessionId,
+                '--causal-parent',
+                `${sessionId}#0`,
+                '--state-dir',
+                eventsDir,
+                '--budget-policy',
+                budgetPolicy,
+              ],
+              env,
+            );
+        };
+        const checkSmall = await tiered('small');
+        const checkMedium = await tiered('medium');
+
+        const small = checkSmall();
+        expect(small.status).toBe(1);
+        expect(JSON.parse(small.stdout).budget).toMatchObject({
+          status: 'refused',
+          capTokens: 5000,
+          waveTokens: 6000,
+        });
+
+        // A per-tier env override for this tier beats the file.
+        const raised = checkSmall({ SMITH_EPIC_CAP_TOKENS_SMALL: '7000' });
+        expect(JSON.parse(raised.stdout).budget).toMatchObject({ capTokens: 7000 });
+        expect(JSON.parse(raised.stdout).budget.status).not.toBe('refused');
+
+        const medium = checkMedium();
+        expect(JSON.parse(medium.stdout).budget).toMatchObject({ capTokens: 50000 });
+        expect(JSON.parse(medium.stdout).budget.status).not.toBe('refused');
+      });
+
       // Same shape as `epic close` (D-43/P9-27): a machine refusal a human may
       // override, and the log then carries the machine's verdict AND the
       // human's reason — not a silently admitted wave that reads afterward as
@@ -5153,7 +5224,7 @@ describe('cli.ts (built binary)', () => {
         // 1000 from the fixture plan's task-1, plus the coder cap for the one
         // nothing declared. Read off the policy so the assertion cannot drift
         // from budgets.yml, but pinned as a sum so a silent 0 would fail.
-        const coderCap = loadBudgetPolicy().task.coder.capTokens;
+        const coderCap = loadBudgetPolicy(undefined, {}).task.coder.capTokens;
         expect(parsed.budget.waveTokens).toBe(1000 + coderCap);
         expect(
           tail(sessionId, eventsDir).filter((r) => r.event_type === 'wave-admitted'),

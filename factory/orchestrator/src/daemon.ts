@@ -31,6 +31,7 @@ import { type BudgetPolicy, loadBudgetPolicy } from './budgets.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
 import type { DbOpts } from './db/projector.js';
 import { apply, foldTasks, rebuild } from './db/projector.js';
+import { epicBudgetPolicies } from './epicBudget.js';
 import { summariseEpicWidth, UNMEASURED_HINT } from './epicWidth.js';
 import type { ResolveProjectForTaskRef } from './errorIssues.js';
 import { SmithError } from './errors.js';
@@ -38,6 +39,7 @@ import { listSessionIds, mergeSessionLogs, parseEventId, type StoredEvent } from
 import { type AgedFinding, ageFindings, type FindingMemory, memoryOf } from './findingAge.js';
 import { LogCache } from './logCache.js';
 import { STATE_DAEMON_DIR, STATE_DB_PATH, STATE_EVENTS_DIR } from './paths.js';
+import type { PlanOpts } from './plan.js';
 import { type ProjectRef, unwatchedProjects } from './projects.js';
 import { FACTORY_PROJECT } from './roadmap.js';
 import {
@@ -174,7 +176,13 @@ function admitFor(
 
 export interface InspectOptions {
   now?: Date;
+  /**
+   * One policy for every epic, when injected. Absent, each epic is judged
+   * against budgets.yml sized for its own effort tier, read off its latest
+   * plan in `planOpts`' specs dir.
+   */
   budgetPolicy?: BudgetPolicy;
+  planOpts?: PlanOpts;
   schedulerPolicy?: SchedulerPolicy;
   staleHours?: number;
   /**
@@ -256,7 +264,13 @@ export function inspectSession(
   opts: InspectOptions = {},
 ): DaemonFinding[] {
   const now = opts.now ?? new Date();
+  // An injected policy judges every epic; otherwise each epic is judged
+  // against budgets.yml sized for its own plan's effort tier.
   const budgetPolicy = opts.budgetPolicy ?? loadBudgetPolicy();
+  const policyForEpic =
+    opts.budgetPolicy === undefined
+      ? epicBudgetPolicies(opts.planOpts === undefined ? {} : { planOpts: opts.planOpts })
+      : undefined;
   const schedulerPolicy = opts.schedulerPolicy ?? loadSchedulerPolicy();
   const staleHours = opts.staleHours ?? DEFAULT_STALE_HOURS;
   const findings: DaemonFinding[] = [];
@@ -272,7 +286,10 @@ export function inspectSession(
     if (typeof epicId === 'string') closedEpics.add(epicId);
   }
 
-  const budget = checkBudgetAlarm(events, budgetPolicy, { sessionId });
+  const budget = checkBudgetAlarm(events, budgetPolicy, {
+    sessionId,
+    ...(policyForEpic ? { policyForEpic } : {}),
+  });
   for (const epic of budget.epics) {
     // `under` is the only status that is an answer rather than a question.
     if (epic.status === 'under') continue;
@@ -805,6 +822,7 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     now,
     admission,
     ...(opts.budgetPolicy === undefined ? {} : { budgetPolicy: opts.budgetPolicy }),
+    ...(opts.planOpts === undefined ? {} : { planOpts: opts.planOpts }),
     ...(opts.schedulerPolicy === undefined ? {} : { schedulerPolicy: opts.schedulerPolicy }),
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
     ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),
@@ -1331,6 +1349,7 @@ export async function runDaemon(opts: RunDaemonOptions): Promise<DaemonRun> {
   const tickOptions: TickOptions = {
     ...(opts.now === undefined ? {} : { now: opts.now }),
     ...(opts.budgetPolicy === undefined ? {} : { budgetPolicy: opts.budgetPolicy }),
+    ...(opts.planOpts === undefined ? {} : { planOpts: opts.planOpts }),
     ...(opts.schedulerPolicy === undefined ? {} : { schedulerPolicy: opts.schedulerPolicy }),
     ...(opts.staleHours === undefined ? {} : { staleHours: opts.staleHours }),
     ...(opts.projectDirs === undefined ? {} : { projectDirs: opts.projectDirs }),

@@ -1,9 +1,9 @@
-import { loadBudgetPolicy } from './budgets.js';
 import {
   type CrosscheckPolicy,
   loadCrosscheckPolicy,
   type PlanQuorumPolicy,
 } from './crosscheck.js';
+import { budgetPolicyForPlan } from './epicBudget.js';
 import { appendEvent, type EventOpts } from './events.js';
 import type { EventContext } from './findings.js';
 import {
@@ -565,7 +565,11 @@ export async function runPlanQuorum(
     );
   }
   const policy = input.crosscheck?.policy ?? loadCrosscheckPolicy();
-  const epicCapTokens = input.epicCapTokens ?? loadBudgetPolicy().epic.capTokens;
+  // The cap for the tier this plan runs at: its own `effort` after the
+  // security floor (default_tier when it names none).
+  const epicCapTokens =
+    input.epicCapTokens ??
+    budgetPolicyForPlan(plan, { securityPolicy: policy.planQuorum }).epic.capTokens;
   const triggers = evaluatePlanQuorumTriggers(plan, policy.planQuorum, epicCapTokens, {
     plannerConfidence: input.plannerConfidence,
   });

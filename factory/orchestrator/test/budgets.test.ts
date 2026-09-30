@@ -3,25 +3,32 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  ALL_BUDGET_ENV_NAMES,
   applyBudgetEnv,
   BUDGET_ENV_VARS,
   BudgetError,
   budgetEnvOverrides,
   checkTaskBudget,
+  LEGACY_BUDGET_ENV_VARS,
   loadBudgetPolicy,
+  PRICED_ROLES,
   parseBudgetPolicy,
+  resolveBudgetTier,
+  roleCapTokens,
   TASK_BUDGET_FIELD_READERS,
   unreadTaskBudgetFields,
 } from '../src/budgets.js';
+import { loadEffortPolicy } from '../src/effort.js';
 import { BUDGETS_POLICY_PATH } from '../src/paths.js';
 
 describe('budgets.ts', () => {
   it('parses the real repo budgets.yml', () => {
-    const policy = loadBudgetPolicy();
-    // Raised from 2,000,000 by operator decision 2026-08-11; see the comment
-    // on budgets.yml's `epic.cap_tokens` for the measurement behind it.
+    const policy = loadBudgetPolicy(undefined, {});
+    // The medium (default) tier. Raised from 2,000,000 on 2026-08-11 and to a
+    // per-tier triplet on 2026-09-29; see budgets.yml's `epic.cap_tokens`.
+    expect(policy.tier).toBe('medium');
     expect(policy.epic).toEqual({
-      capTokens: 4_000_000,
+      capTokens: 16_000_000,
       alarmRatio: 0.7,
       maxInFlightTasks: null,
     });
@@ -29,7 +36,7 @@ describe('budgets.ts', () => {
 
   it('loadBudgetPolicy() reads the same file BUDGETS_POLICY_PATH points to', () => {
     const text = readFileSync(BUDGETS_POLICY_PATH, 'utf8');
-    expect(parseBudgetPolicy(text)).toEqual(loadBudgetPolicy());
+    expect(parseBudgetPolicy(text)).toEqual(loadBudgetPolicy(undefined, {}));
   });
 
   it('defaults epic.cap_tokens to the conservative floor, NOT to the repo cap', () => {
@@ -43,7 +50,145 @@ describe('budgets.ts', () => {
       alarmRatio: 0.7,
       maxInFlightTasks: null,
     });
-    expect(loadBudgetPolicy().epic.capTokens).not.toEqual(policy.epic.capTokens);
+    expect(loadBudgetPolicy(undefined, {}).epic.capTokens).not.toEqual(policy.epic.capTokens);
+  });
+});
+
+describe('tier-scaled budgets', () => {
+  // The tier is the epic's plan `effort` (effort.yml). budgets.yml declares
+  // the medium task numbers once plus a scale, and the epic cap as an
+  // explicit triplet.
+
+  it('picks the small, medium and huge numbers from the shipped budgets.yml', () => {
+    const small = loadBudgetPolicy(undefined, {}, 'small');
+    const medium = loadBudgetPolicy(undefined, {}, 'medium');
+    const huge = loadBudgetPolicy(undefined, {}, 'huge');
+    expect([small.tier, medium.tier, huge.tier]).toEqual(['small', 'medium', 'huge']);
+    expect([small.epic.capTokens, medium.epic.capTokens, huge.epic.capTokens]).toEqual([
+      4_000_000, 16_000_000, 32_000_000,
+    ]);
+    expect(small.task.coder).toEqual({ capTokens: 110_000, capDiffLines: 350 });
+    expect(medium.task.coder).toEqual({ capTokens: 220_000, capDiffLines: 700 });
+    expect(huge.task.coder).toEqual({ capTokens: 440_000, capDiffLines: 1400 });
+    expect(small.task['spec-reviewer'].capTokens).toBe(85_000);
+    expect(huge.task['spec-reviewer'].capTokens).toBe(340_000);
+    // The alarm ratio and the fan-out cap are not sized by tier.
+    expect(small.epic.alarmRatio).toBe(medium.epic.alarmRatio);
+    expect(huge.epic.maxInFlightTasks).toBe(medium.epic.maxInFlightTasks);
+  });
+
+  it('declares one medium cap per priced role, the judges split apart', () => {
+    expect(loadBudgetPolicy(undefined, {}, 'medium').task).toEqual({
+      coder: { capTokens: 220_000, capDiffLines: 700 },
+      tester: { capTokens: 60_000 },
+      planner: { capTokens: 110_000 },
+      researcher: { capTokens: 80_000 },
+      'spec-reviewer': { capTokens: 170_000 },
+      grader: { capTokens: 110_000 },
+      reviewer: { capTokens: 60_000 },
+      verifier: { capTokens: 40_000 },
+      'security-reviewer': { capTokens: 80_000 },
+      auditor: { capTokens: 90_000 },
+    });
+  });
+
+  it('falls back to effort.yml default_tier when the tier is absent or unknown', () => {
+    const defaultTier = loadEffortPolicy().defaultTier;
+    const expected = loadBudgetPolicy(undefined, {}, defaultTier);
+    for (const tier of [undefined, null, '', 'enormous', 'Medium', 3]) {
+      expect(resolveBudgetTier(tier)).toBe(defaultTier);
+      expect(loadBudgetPolicy(undefined, {}, tier)).toEqual(expected);
+    }
+    expect(parseBudgetPolicy('').tier).toBe(defaultTier);
+  });
+
+  it('scales every task number by the declared scale, and reads a scalar epic cap for every tier', () => {
+    const yml =
+      'epic:\n  cap_tokens: 1000\ntask_tier_scale:\n  small: 0.25\n  medium: 1\n  huge: 3\n' +
+      'task:\n  coder:\n    cap_tokens: 1000\n    cap_diff_lines: 100\n  planner:\n    cap_tokens: 10\n';
+    const small = parseBudgetPolicy(yml, 'small');
+    const huge = parseBudgetPolicy(yml, 'huge');
+    expect(small.epic.capTokens).toBe(1000);
+    expect(huge.epic.capTokens).toBe(1000);
+    expect(small.task.coder).toEqual({ capTokens: 250, capDiffLines: 25 });
+    expect(huge.task.coder).toEqual({ capTokens: 3000, capDiffLines: 300 });
+    expect(huge.task.planner.capTokens).toBe(30);
+  });
+
+  it('refuses an epic cap triplet that leaves a tier out, and an unreadable scale', () => {
+    expect(() =>
+      parseBudgetPolicy('epic:\n  cap_tokens:\n    small: 1\n    medium: 2\n', 'huge'),
+    ).toThrow(/epic\.cap_tokens\.huge/);
+    expect(() => parseBudgetPolicy('task_tier_scale:\n  small: half\n', 'small')).toThrow(
+      BudgetError,
+    );
+  });
+
+  it('refuses an unknown key in an epic cap triplet, naming it', () => {
+    const yml = 'epic:\n  cap_tokens:\n    small: 1\n    medium: 2\n    huge: 3\n    hughe: 4\n';
+    for (const tier of ['small', 'medium', 'huge']) {
+      expect(() => parseBudgetPolicy(yml, tier)).toThrow(BudgetError);
+      expect(() => parseBudgetPolicy(yml, tier)).toThrow(/"hughe"/);
+    }
+  });
+
+  it('refuses an effort.yml whose default_tier is missing or misspelled, re-reading it each call', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'budget-default-tier-'));
+    const file = path.join(dir, 'effort.yml');
+    try {
+      writeFileSync(file, 'default_tier: huge\n');
+      expect(resolveBudgetTier(undefined, file)).toBe('huge');
+      writeFileSync(file, 'default_tier: small\n');
+      expect(resolveBudgetTier(undefined, file)).toBe('small');
+      writeFileSync(file, 'default_tier: meduim\n');
+      expect(() => resolveBudgetTier(undefined, file)).toThrow(BudgetError);
+      expect(() => resolveBudgetTier(undefined, file)).toThrow(/default_tier/);
+      writeFileSync(file, 'security_floor: medium\n');
+      expect(() => resolveBudgetTier(undefined, file)).toThrow(/default_tier/);
+      expect(() => resolveBudgetTier(undefined, path.join(dir, 'missing.yml'))).toThrow(
+        BudgetError,
+      );
+      // A named tier never needs the default.
+      expect(resolveBudgetTier('small', path.join(dir, 'missing.yml'))).toBe('small');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('per-role judge caps', () => {
+  it('prices each judge from its own cap, not one shared bucket', () => {
+    const policy = loadBudgetPolicy(undefined, {}, 'medium');
+    expect(roleCapTokens(policy, 'spec-reviewer')).toBe(170_000);
+    expect(roleCapTokens(policy, 'grader')).toBe(110_000);
+    expect(roleCapTokens(policy, 'reviewer')).toBe(60_000);
+    expect(roleCapTokens(policy, 'verifier')).toBe(40_000);
+    expect(roleCapTokens(policy, 'security-reviewer')).toBe(80_000);
+    expect(roleCapTokens(policy, 'auditor')).toBe(90_000);
+  });
+
+  it('prices planner and tester, and leaves the roles budgets.yml does not name unpriced', () => {
+    const policy = loadBudgetPolicy(undefined, {}, 'medium');
+    expect(roleCapTokens(policy, 'planner')).toBe(110_000);
+    expect(roleCapTokens(policy, 'tester')).toBe(60_000);
+    for (const role of ['merger', 'uiux', 'scribe', 'wave-runner', 'nobody']) {
+      expect(roleCapTokens(policy, role)).toBeNull();
+    }
+    expect([...PRICED_ROLES].sort()).toEqual(Object.keys(policy.task).sort());
+  });
+
+  it('still reads a legacy `task.judges` bucket for the four judges it named', () => {
+    const policy = parseBudgetPolicy(
+      'task:\n  judges:\n    cap_tokens: 12345\n  grader:\n    cap_tokens: 999\n',
+      'medium',
+    );
+    expect(policy.task['spec-reviewer'].capTokens).toBe(12345);
+    expect(policy.task.reviewer.capTokens).toBe(12345);
+    expect(policy.task.verifier.capTokens).toBe(12345);
+    // A role the file names itself beats the bucket.
+    expect(policy.task.grader.capTokens).toBe(999);
+    // The bucket never named these.
+    expect(policy.task['security-reviewer'].capTokens).toBe(80_000);
   });
 });
 
@@ -79,18 +224,15 @@ describe('epic.max_in_flight_tasks', () => {
 
 describe('per-role caps (P9-18)', () => {
   it('models the caps budgets.yml declares, so they can be compared to something', () => {
-    const policy = loadBudgetPolicy();
-    expect(policy.task).toEqual({
-      coder: { capTokens: 150_000, capDiffLines: 400 },
-      researcher: { capTokens: 60_000 },
-      judges: { capTokens: 40_000 },
-    });
+    const policy = loadBudgetPolicy(undefined, {});
+    expect(policy.task.coder).toEqual({ capTokens: 220_000, capDiffLines: 700 });
+    expect(policy.task.researcher).toEqual({ capTokens: 80_000 });
     expect(policy.preCodeBudget).toEqual({ shareOfEpicBudgetMax: 0.15 });
   });
 
   it('falls back to the documented numbers when the blocks are absent', () => {
     const policy = parseBudgetPolicy('epic:\n  cap_tokens: 10\n');
-    expect(policy.task.coder).toEqual({ capTokens: 150_000, capDiffLines: 400 });
+    expect(policy.task.coder).toEqual({ capTokens: 220_000, capDiffLines: 700 });
     expect(policy.preCodeBudget.shareOfEpicBudgetMax).toBe(0.15);
   });
 });
@@ -194,7 +336,7 @@ describe('checkTaskBudget (P9-18)', () => {
     const policy = parseBudgetPolicy('escalation_ladder:\n  rungs: []\n');
     expect(policy.epic.capTokens).toBe(2_000_000);
     expect(policy.epic.alarmRatio).toBe(0.7);
-    expect(policy.task.coder.capDiffLines).toBe(400);
+    expect(policy.task.coder.capDiffLines).toBe(700);
     expect(policy.preCodeBudget.shareOfEpicBudgetMax).toBe(0.15);
   });
 });
@@ -214,7 +356,24 @@ describe('env overrides on top of budgets.yml', () => {
       ['SMITH_TASK_CODER_CAP_TOKENS', '200000', (p) => p.task.coder.capTokens, 200_000],
       ['SMITH_TASK_CODER_CAP_DIFF_LINES', '600', (p) => p.task.coder.capDiffLines, 600],
       ['SMITH_TASK_RESEARCHER_CAP_TOKENS', '90000', (p) => p.task.researcher.capTokens, 90_000],
-      ['SMITH_TASK_JUDGES_CAP_TOKENS', '55000', (p) => p.task.judges.capTokens, 55_000],
+      ['SMITH_TASK_TESTER_CAP_TOKENS', '61000', (p) => p.task.tester.capTokens, 61_000],
+      ['SMITH_TASK_PLANNER_CAP_TOKENS', '111000', (p) => p.task.planner.capTokens, 111_000],
+      [
+        'SMITH_TASK_SPEC_REVIEWER_CAP_TOKENS',
+        '171000',
+        (p) => p.task['spec-reviewer'].capTokens,
+        171_000,
+      ],
+      ['SMITH_TASK_GRADER_CAP_TOKENS', '112000', (p) => p.task.grader.capTokens, 112_000],
+      ['SMITH_TASK_REVIEWER_CAP_TOKENS', '62000', (p) => p.task.reviewer.capTokens, 62_000],
+      ['SMITH_TASK_VERIFIER_CAP_TOKENS', '41000', (p) => p.task.verifier.capTokens, 41_000],
+      [
+        'SMITH_TASK_SECURITY_REVIEWER_CAP_TOKENS',
+        '81000',
+        (p) => p.task['security-reviewer'].capTokens,
+        81_000,
+      ],
+      ['SMITH_TASK_AUDITOR_CAP_TOKENS', '91000', (p) => p.task.auditor.capTokens, 91_000],
     ];
     expect(cases.map(([name]) => name).sort()).toEqual([...BUDGET_ENV_VARS].sort());
     for (const [name, value, read, expected] of cases) {
@@ -271,7 +430,7 @@ describe('env overrides on top of budgets.yml', () => {
     expect(
       budgetEnvOverrides(base, {
         SMITH_EPIC_CAP_TOKENS: '5000000',
-        SMITH_TASK_JUDGES_CAP_TOKENS: '',
+        SMITH_TASK_GRADER_CAP_TOKENS: '',
         SMITH_UNRELATED: '1',
       }),
     ).toEqual(['SMITH_EPIC_CAP_TOKENS']);
@@ -288,6 +447,100 @@ describe('env overrides on top of budgets.yml', () => {
         SMITH_TASK_CODER_CAP_TOKENS: String(base.task.coder.capTokens + 1),
       }),
     ).toEqual(['SMITH_TASK_CODER_CAP_TOKENS']);
+  });
+});
+
+describe('env overrides beat the tier', () => {
+  it('an unsuffixed value wins over every tier budgets.yml declares', () => {
+    for (const tier of ['small', 'medium', 'huge']) {
+      const policy = loadBudgetPolicy(
+        undefined,
+        { SMITH_EPIC_CAP_TOKENS: '7000000', SMITH_TASK_AUDITOR_CAP_TOKENS: '123' },
+        tier,
+      );
+      expect(policy.epic.capTokens).toBe(7_000_000);
+      expect(policy.task.auditor.capTokens).toBe(123);
+    }
+  });
+});
+
+describe('per-tier env overrides (<NAME>_SMALL / _MEDIUM / _HUGE)', () => {
+  const small = parseBudgetPolicy('', 'small');
+  const medium = parseBudgetPolicy('', 'medium');
+  const huge = parseBudgetPolicy('', 'huge');
+
+  it('accepts a suffixed name for every budget name, and nothing unsuffixed beyond them', () => {
+    for (const name of BUDGET_ENV_VARS) {
+      for (const suffix of ['_SMALL', '_MEDIUM', '_HUGE']) {
+        expect(ALL_BUDGET_ENV_NAMES).toContain(`${name}${suffix}`);
+      }
+    }
+    for (const name of LEGACY_BUDGET_ENV_VARS) expect(ALL_BUDGET_ENV_NAMES).toContain(name);
+  });
+
+  it('a suffixed var beats the unsuffixed one for its own tier', () => {
+    const env = { SMITH_EPIC_CAP_TOKENS: '5000000', SMITH_EPIC_CAP_TOKENS_HUGE: '32000001' };
+    expect(applyBudgetEnv(huge, env).epic.capTokens).toBe(32_000_001);
+    expect(
+      applyBudgetEnv(medium, {
+        SMITH_TASK_CODER_CAP_DIFF_LINES: '500',
+        SMITH_TASK_CODER_CAP_DIFF_LINES_MEDIUM: '650',
+      }).task.coder.capDiffLines,
+    ).toBe(650);
+  });
+
+  it('an unsuffixed var still applies to a tier without a suffixed var of its own', () => {
+    const env = { SMITH_EPIC_CAP_TOKENS: '5000000', SMITH_EPIC_CAP_TOKENS_HUGE: '32000001' };
+    expect(applyBudgetEnv(small, env).epic.capTokens).toBe(5_000_000);
+    expect(applyBudgetEnv(medium, env).epic.capTokens).toBe(5_000_000);
+  });
+
+  it('a suffixed var for another tier does not leak into this one', () => {
+    const env = { SMITH_EPIC_CAP_TOKENS_SMALL: '1000', SMITH_TASK_GRADER_CAP_TOKENS_HUGE: '9' };
+    expect(applyBudgetEnv(medium, env)).toEqual(medium);
+    expect(applyBudgetEnv(huge, env).epic.capTokens).toBe(huge.epic.capTokens);
+    expect(applyBudgetEnv(huge, env).task.grader.capTokens).toBe(9);
+    expect(applyBudgetEnv(small, env).task.grader.capTokens).toBe(small.task.grader.capTokens);
+  });
+
+  it('refuses an invalid suffixed value the same way, even for a tier not in play', () => {
+    for (const [name, value] of [
+      ['SMITH_EPIC_CAP_TOKENS_MEDIUM', '4M'],
+      ['SMITH_EPIC_CAP_TOKENS_HUGE', '4M'],
+      ['SMITH_EPIC_ALARM_RATIO_SMALL', '80%'],
+    ] as const) {
+      try {
+        applyBudgetEnv(medium, { [name]: value });
+        expect.unreachable();
+      } catch (err) {
+        expect(err).toBeInstanceOf(BudgetError);
+        expect((err as BudgetError).code).toBe('budgets.invalid-env');
+        expect((err as Error).message).toContain(name);
+      }
+    }
+  });
+
+  it('lists the name that actually supplied the tier value', () => {
+    expect(
+      budgetEnvOverrides(huge, {
+        SMITH_EPIC_CAP_TOKENS: '5000000',
+        SMITH_EPIC_CAP_TOKENS_HUGE: '32000001',
+        SMITH_EPIC_CAP_TOKENS_SMALL: '1',
+      }),
+    ).toEqual(['SMITH_EPIC_CAP_TOKENS_HUGE']);
+    expect(budgetEnvOverrides(small, { SMITH_EPIC_CAP_TOKENS_HUGE: '32000001' })).toEqual([]);
+  });
+
+  it('reads the legacy judges bucket name below the per-role names', () => {
+    const policy = applyBudgetEnv(medium, {
+      SMITH_TASK_JUDGES_CAP_TOKENS: '55000',
+      SMITH_TASK_GRADER_CAP_TOKENS: '66000',
+    });
+    expect(policy.task['spec-reviewer'].capTokens).toBe(55_000);
+    expect(policy.task.reviewer.capTokens).toBe(55_000);
+    expect(policy.task.verifier.capTokens).toBe(55_000);
+    expect(policy.task.grader.capTokens).toBe(66_000);
+    expect(policy.task.auditor.capTokens).toBe(medium.task.auditor.capTokens);
   });
 });
 

@@ -90,6 +90,6 @@ merge_queue:
     enabled: true
     max_lines_per_layer: 200
     note: >
-      workers emit small stacked layers (within the 400-line task diff cap)
-      rather than monolithic diffs; the queue lands stacks in dependency
+      workers emit small stacked layers (within the task diff cap,
+      budgets.yml `task.coder.cap_diff_lines`) rather than monolithic diffs; the queue lands stacks in dependency
       order (GitHub native stacked PRs).

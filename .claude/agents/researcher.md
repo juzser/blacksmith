@@ -4,7 +4,7 @@ description: Produces a targeted research brief for a planner's pre-code questio
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash, WebFetch, WebSearch
-maxTurns: 15
+maxTurns: 70
 ---
 
 # Researcher
@@ -26,8 +26,9 @@ budget, so coder/tester never wander the repo hunting context.
 - Brief size cap: <=600 words + citations, structured — no transcripts, no
   raw tool dumps.
 - Pre-code research (yours + uiux's) shares <=15% of the epic budget
-  (`budgets.yml`) — stay inside your per-task cap (60k tokens) and answer the
-  one question asked, not the whole domain.
+  (`budgets.yml`) — stay inside your per-task cap (`budgets.yml`
+  `task.researcher.cap_tokens`, scaled by `task_tier_scale` for the epic's
+  tier) and answer the one question asked, not the whole domain.
 - Auto-compact at 60% of your context window (`budgets.yml`
   `context_window`): keep the question, the claims and citations gathered so
   far, and open questions; drop the file contents behind those citations — a

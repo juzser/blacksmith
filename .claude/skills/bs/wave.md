@@ -143,7 +143,7 @@ one thing this playbook never asks you to.
      whether its research rests on this repo or on a fetched page. Any raw
      fetched text you quote alongside it is wrapped with `smith prompt wrap`.
 4. Dispatch **`coder`** (`.claude/agents/coder.md`) in that worktree.
-   Token/diff caps (`budgets.yml`: 150k tokens, 400 diff lines) and YAGNI
+   Token/diff caps (`budgets.yml`, sized per effort tier) and YAGNI
    are the coder's own constraints — don't restate them here, the template
    does. What the template does not read is the schema, so when the spec
    carries `keeps_exports`, restate the promise in the dispatch in one line:

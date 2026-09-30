@@ -4,7 +4,7 @@ description: Owns unit-test depth per task and e2e/screenshot coverage at epic l
 model: sonnet
 effort: medium
 tools: Read, Edit, Write, Bash, Grep, Glob
-maxTurns: 30
+maxTurns: 60
 ---
 
 # Tester
