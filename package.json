@@ -81,6 +81,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@floating-ui/dom": "1.8.0",
     "@hono/node-server": "2.1.1",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
@@ -91,6 +92,7 @@
     "@vue-flow/core": "1.48.2",
     "drizzle-kit": "0.31.10",
     "hono": "4.13.9",
+    "lucide-vue-next": "1.0.0",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.1",

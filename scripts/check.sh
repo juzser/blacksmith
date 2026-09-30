@@ -456,6 +456,15 @@ if command -v pnpm >/dev/null 2>&1; then
     FAIL=1
   fi
 
+  # ds-spec.md §2.5, DS0: "A lint check in DS0 flags an <IconButton> without
+  # label and any icon-only <button>/<a> without aria-label."
+  if python3 scripts/design/lint_icon_only.py ui/src; then
+    echo "OK   scripts/design/lint_icon_only.py ui/src"
+  else
+    echo "FAIL scripts/design/lint_icon_only.py ui/src"
+    FAIL=1
+  fi
+
   # Where Chromium lives depends on who installed it. The dev container pins
   # it at $PLAYWRIGHT_BROWSERS_PATH/chromium — the same path
   # ui/playwright.config.ts hands to launchOptions. Everywhere else (macOS,

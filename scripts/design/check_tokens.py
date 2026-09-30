@@ -61,11 +61,14 @@ import sys
 from pathlib import Path
 
 SCAN_EXTS = {".vue", ".css"}
-TOKEN_FILES = ("ds-tokens.css", "ds-components.css")
+# Both the old HDS-derived kit and the new BS kit (ds-spec.md §0): the old
+# pages still import ds-tokens.css/ds-components.css until DS9 drops them,
+# so this PR scans both pairs rather than swapping one for the other.
+TOKEN_FILES = ("ds-tokens.css", "ds-components.css", "bs-tokens.css", "bs-primitives.css")
 
-DEFINE_RE = re.compile(r"(--ds-[\w-]+)\s*:")
-JS_DEFINE_RE = re.compile(r"""['"](--ds-[\w-]+)['"]\s*:""")
-REF_RE = re.compile(r"var\(\s*(--ds-[\w-]+)")
+DEFINE_RE = re.compile(r"(--(?:ds|bs)-[\w-]+)\s*:")
+JS_DEFINE_RE = re.compile(r"""['"](--(?:ds|bs)-[\w-]+)['"]\s*:""")
+REF_RE = re.compile(r"var\(\s*(--(?:ds|bs)-[\w-]+)")
 DYNAMIC_SUFFIX = "$"  # a template-literal interpolation continues the token name
 ALLOW = "ds-allow-undefined-token"
 
