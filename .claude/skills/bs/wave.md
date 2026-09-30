@@ -174,6 +174,12 @@ one thing this playbook never asks you to.
      was admitted.
 5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
    coverage and epic-level e2e/screenshots.
+   - The moment it returns, project its result: `smith results record --task
+     <task-id> --result <tester-result.json> --agent tester --provider <name>
+     --model-tier <tier> --session ... --plan-version N --causal-parent ...`.
+     `--agent` stamps the envelope, token_usage included, as `gate run` does. The tester has no worktree for step 7's gate and no
+     tests of its own to run, so it never reaches `gate run` — without this,
+     its screenshots sit in the result file and never reach the task page.
    - Then the **uiux visual pass**, but only when all three hold: the task
      is UI-affecting, the tester actually returned screenshot artifacts, and
      step 3 wrote a uiux spec for this task (agent-interviews.md N-6). Miss
