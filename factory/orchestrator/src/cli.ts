@@ -237,6 +237,8 @@ import { computeNextWave, liveWaveTasks, type NextWaveInput } from './waveNext.j
 import { initWorkRoot } from './workroot.js';
 import {
   createTaskWorktree,
+  epicBranchPrefix,
+  integrationBranchName,
   listStale,
   RESERVED_TASK_ID,
   removeTaskWorktree,
@@ -2386,7 +2388,7 @@ async function main(): Promise<number> {
       if (cutIntermediate !== undefined) {
         throw new SmithError(
           'worktree.chain-intermediate-cut',
-          `${epic}/${taskId} cannot be cut --from ${epic}/${from}: ${epic}/${cutIntermediate} sits between them and already has its own branch (${taskBranchName(epic, cutIntermediate)}), so its commits would be silently dropped; rerun with --from ${cutIntermediate} instead.`,
+          `${epic}/${taskId} cannot be cut --from ${epic}/${from}: ${epic}/${cutIntermediate} sits between them and already has its own branch (${taskBranchName(epic, cutIntermediate, epicBranchPrefix(projectDir, epic))}), so its commits would be silently dropped; rerun with --from ${cutIntermediate} instead.`,
           { epic, taskId, from, intermediate: cutIntermediate },
         );
       }
@@ -2815,7 +2817,7 @@ async function main(): Promise<number> {
       // the merge — and adopt any task with it, which is the forgery the whole
       // verb exists to prevent. Deriving it from the plan-resolved id means the
       // branch and the id it is logged under cannot disagree.
-      { taskId, branch: taskBranchName(plan.epic_id, taskId) },
+      { taskId, branch: taskBranchName(plan.epic_id, taskId, epicBranchPrefix(projectDir, plan.epic_id)) },
       {
         projectDir,
         epic: plan.epic_id,
@@ -3805,6 +3807,7 @@ async function main(): Promise<number> {
       {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
+        integrationBranch: integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
         // D-126: the live plan is a voter. Without this the roster is the
@@ -3837,6 +3840,7 @@ async function main(): Promise<number> {
       {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
+        integrationBranch: integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
         planOpts: planOptsFromFlags(flags),
@@ -3891,9 +3895,10 @@ async function main(): Promise<number> {
     // read would produce a review nothing can be shown to cover.
     const headSha = integrationHeadSha(projectDir, epicId);
     if (headSha === null) {
+      const branch = integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId));
       throw new SmithError(
         'cli.no-integration-branch',
-        `Could not read the head of smith/${epicId}/integration in ${projectDir}. The closing spec review reads the assembled branch, so there is nothing to review yet.`,
+        `Could not read the head of ${branch} in ${projectDir}. The closing spec review reads the assembled branch, so there is nothing to review yet.`,
         { epicId, projectDir },
       );
     }

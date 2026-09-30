@@ -5847,7 +5847,7 @@ describe('cli.ts (built binary)', () => {
       runOrThrow('git', ['commit', '-q', '-am', 'edit a'], { cwd: worktreeDir });
 
       // Merged with no queue anywhere near it — the case this verb is for.
-      runOrThrow('git', ['checkout', '-q', 'smith/epic-1/integration'], { cwd: projectDir });
+      runOrThrow('git', ['checkout', '-q', 'bs/epic-1/integration'], { cwd: projectDir });
       runOrThrow('git', ['merge', '--no-ff', branch, '-m', 'merged by hand'], { cwd: projectDir });
       const sha = runOrThrow('git', ['rev-parse', 'HEAD'], { cwd: projectDir }).stdout.trim();
       return { projectDir, branch, sha };
@@ -11881,7 +11881,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from2/task-1',
+          'bs/epic-from2/task-1',
           path.join(scratchDir, 'wt', 'from2-pred'),
           'main',
         ],
@@ -11903,7 +11903,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(status, stdout).toBe(0);
       const result = JSON.parse(stdout);
-      expect(result.branch).toBe('smith/epic-from2/task-1-v2');
+      expect(result.branch).toBe('bs/epic-from2/task-1-v2');
     });
 
     // The bug this pins: a plan amended twice before the intermediate
@@ -11956,7 +11956,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from3/task-1',
+          'bs/epic-from3/task-1',
           path.join(scratchDir, 'wt', 'from3-pred'),
           'main',
         ],
@@ -11978,7 +11978,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(status, stdout).toBe(0);
       const result = JSON.parse(stdout);
-      expect(result.branch).toBe('smith/epic-from3/task-1-v3');
+      expect(result.branch).toBe('bs/epic-from3/task-1-v3');
     });
 
     // A logged chain existing at all must not loosen the check into "any task
@@ -12076,7 +12076,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from5/task-1',
+          'bs/epic-from5/task-1',
           path.join(scratchDir, 'wt', 'from5-pred'),
           'main',
         ],
@@ -12090,7 +12090,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from5/task-5-mid',
+          'bs/epic-from5/task-5-mid',
           path.join(scratchDir, 'wt', 'from5-mid'),
           'main',
         ],
@@ -12130,7 +12130,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(accepted.status, accepted.stdout).toBe(0);
       const result = JSON.parse(accepted.stdout);
-      expect(result.branch).toBe('smith/epic-from5/task-5-final');
+      expect(result.branch).toBe('bs/epic-from5/task-5-final');
     });
   });
 

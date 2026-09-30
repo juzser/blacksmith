@@ -635,6 +635,7 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -657,6 +658,7 @@ describe('an epic split across sessions cannot launder its findings (D-119)', ()
           {
             epicId,
             integrationHeadSha: HEAD_SHA,
+            integrationBranch: `bs/${epicId}/integration`,
             mcp: MCP_SURFACE_NOT_REQUIRED,
             goal: goalStatus(),
             effort: alwaysEffort(),

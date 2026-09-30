@@ -160,9 +160,10 @@ const GIT_OUTPUT_MAX_BUFFER = 32 * 1024 * 1024;
 /**
  * The declared diff cap is only worth writing down if something measures the
  * real diff. This does: committed work on a task branch, against the
- * integration branch it was cut from (`smith/<epic>/<task-id>` ->
- * `smith/<epic>/integration`, the same convention `collectCommittedChanges`
- * relies on), or against an explicit `baseRef`.
+ * integration branch it was cut from (`<prefix>/<epic>/<task-id>` ->
+ * `<prefix>/<epic>/integration`, the same convention `collectCommittedChanges`
+ * relies on — `<prefix>` is `bs` or the legacy `smith`, echoed back from the
+ * task branch itself), or against an explicit `baseRef`.
  *
  * It throws rather than returning zero when it cannot measure. A zero that
  * means "no diff" and a zero that means "I could not look" are the same number
@@ -214,7 +215,11 @@ export function measureDiff(
   return { baseRef, diffLines, excludedLines, unmeasuredFiles, files };
 }
 
-const TASK_BRANCH_PATTERN = /^smith\/(?<epic>[^/]+)\/(?<task>[^/]+)$/;
+// Operator decision 2 (bs-rename): a task branch is cut under whichever
+// prefix its integration branch already used — bs/ for a new epic, smith/
+// for one that still integrates there — so the base ref this derives must
+// echo the same prefix back, not hardcode the new one.
+const TASK_BRANCH_PATTERN = /^(?<prefix>smith|bs)\/(?<epic>[^/]+)\/(?<task>[^/]+)$/;
 
 function deriveBaseRef(worktreeDir: string): string {
   let branch: string;
@@ -235,13 +240,15 @@ function deriveBaseRef(worktreeDir: string): string {
     );
   }
 
-  const epic = TASK_BRANCH_PATTERN.exec(branch)?.groups?.epic;
-  if (epic === undefined) {
+  const groups = TASK_BRANCH_PATTERN.exec(branch)?.groups;
+  const epic = groups?.epic;
+  const prefix = groups?.prefix;
+  if (epic === undefined || prefix === undefined) {
     throw new DiffstatError(
       'diffstat.cannot-derive-base-ref',
-      `Branch "${branch}" does not follow smith/<epic>/<task-id>, so there is no integration branch to diff against. Pass an explicit baseRef.`,
+      `Branch "${branch}" does not follow <smith|bs>/<epic>/<task-id>, so there is no integration branch to diff against. Pass an explicit baseRef.`,
       { branch, worktreeDir },
     );
   }
-  return `smith/${epic}/integration`;
+  return `${prefix}/${epic}/integration`;
 }
