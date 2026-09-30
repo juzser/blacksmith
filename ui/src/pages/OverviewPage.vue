@@ -215,6 +215,16 @@ const budgetUsedLabel = computed(() => {
   return formatMeasuredTokens(spent, unmeasured);
 });
 
+// formatMeasuredTokens() now compacts its headline ("2.1M tok"); the exact
+// integer it rounds away is kept here as a `title` tooltip, same reasoning
+// as budgetUsedLabel above.
+const budgetUsedTitle = computed(() => {
+  const epics = data.value?.tokensByEpic ?? [];
+  const spent = epics.reduce((s, e) => s + e.tokensSpent, 0);
+  const unmeasured = epics.reduce((s, e) => s + e.unmeasured, 0);
+  return unmeasured > 0 ? `${spent} tok spent · ${unmeasured} not measured` : `${spent} tok spent`;
+});
+
 // Operator directive (running-only): the dashboard shows what is working
 // and says what it is not showing. A `live` registry row is not proof of
 // work — rows stay live until a terminal event closes them, and the factory
@@ -550,6 +560,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
           <StatCard
             label="Budget used"
             :value="budgetUsedLabel"
+            :title="budgetUsedTitle"
             icon="coins"
             tint="amber"
             :delta="data.budgetUsedPctPointDelta1h === null ? undefined : `${signed(Math.round(data.budgetUsedPctPointDelta1h))}pp`"

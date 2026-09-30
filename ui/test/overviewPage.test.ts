@@ -21,4 +21,13 @@ describe('OverviewPage.vue — Budget used card sources its label from lib/forma
   it('reduces tokensByEpic nowhere in the template', () => {
     expect(SFC).not.toMatch(/tokensByEpic\.reduce/);
   });
+
+  // Task 1 (compact token numbers): the StatCard headline is now compacted
+  // ("1.2K tok" rather than "1234 tok"), so the exact integer the operator
+  // might still want is kept as a `title` tooltip (StatCard forwards an
+  // unclaimed `title` onto its root element).
+  it('keeps the exact spend available as a title tooltip', () => {
+    expect(SFC).toContain('budgetUsedTitle');
+    expect(SFC).toMatch(/<StatCard[^>]*:title="budgetUsedTitle"/s);
+  });
 });
