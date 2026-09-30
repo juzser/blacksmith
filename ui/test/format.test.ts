@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatAbsolute,
   formatBudgetPct,
   formatCompactNumber,
+  formatCompactValue,
   formatElapsed,
   formatMeasuredTokens,
   formatRelative,
+  formatRelativeVerbose,
   pluralize,
   summarize,
   taskLabel,
@@ -277,5 +280,76 @@ describe('lib/format.ts formatBudgetPct()', () => {
 
   it('renders "not measured" rather than a fabricated "0%" when nothing was measured', () => {
     expect(formatBudgetPct(0, 1000, 3)).toBe('not measured');
+  });
+});
+
+// kit/RelativeTime.vue's tooltip text (ds-spec.md §2.1: "the absolute time
+// ('30 Sep 2026, 14:07:12') in a Tooltip"). Distinct from formatDateTime()
+// above (design-spec.md §9's numeric DD/MM/YYYY, no seconds) — that shape
+// stays put for pages that already render it.
+describe('lib/format.ts formatAbsolute()', () => {
+  // Timezone-naive (no "Z"/offset) ISO literals: per the JS Date spec these
+  // parse as local time, same as the .getHours()-style local getters
+  // formatAbsolute() itself (and formatDate()/formatTime() above) use — so
+  // the expected string is stable under any TZ the test runner happens to
+  // sit in, unlike a "Z" literal compared against a local-time render.
+  it("renders the spec's exact example shape: day, short month, year, comma, HH:MM:SS", () => {
+    expect(formatAbsolute('2026-09-30T14:07:12')).toBe('30 Sep 2026, 14:07:12');
+  });
+
+  it('zero-pads hours, minutes and seconds but not the day of month', () => {
+    expect(formatAbsolute('2026-09-05T09:03:01')).toBe('5 Sep 2026, 09:03:01');
+  });
+
+  it('returns the raw input for an unparseable date', () => {
+    expect(formatAbsolute('not-a-date')).toBe('not-a-date');
+  });
+});
+
+// kit/RelativeTime.vue's visible text (ds-spec.md §2.1: renders "5 min ago" /
+// "2 h ago" / "3 d ago"; ds-review.html's rendered .tip-trigger text matches
+// exactly, e.g. "5 min ago", "2 h ago", "8 s ago"). Same tiering as
+// formatRelative() above, but spaced, and "min" spelled out rather than "m" —
+// formatRelative() itself is left alone since Roadmap's mini-timeline and
+// Timeline rows already render its "5m ago" shape and are outside DS0 (§5).
+describe('lib/format.ts formatRelativeVerbose()', () => {
+  const now = '2026-08-04T12:00:00.000Z';
+
+  it('renders "just now" for sub-5-second gaps', () => {
+    expect(formatRelativeVerbose('2026-08-04T11:59:58.000Z', now)).toBe('just now');
+  });
+
+  it('renders a bare few-seconds gap as "N s ago", not "just now"', () => {
+    expect(formatRelativeVerbose('2026-08-04T11:59:52.000Z', now)).toBe('8 s ago');
+  });
+
+  it('spells minutes as "min", not "m"', () => {
+    expect(formatRelativeVerbose('2026-08-04T11:55:00.000Z', now)).toBe('5 min ago');
+  });
+
+  it('renders hours and days with a space before the unit', () => {
+    expect(formatRelativeVerbose('2026-08-04T10:00:00.000Z', now)).toBe('2 h ago');
+    expect(formatRelativeVerbose('2026-08-02T12:00:00.000Z', now)).toBe('2 d ago');
+  });
+});
+
+// kit/CompactNumber.vue (ds-spec.md §2.1: `value`, `unit?: "tok"` renders
+// "1.2M tokens", "127K", "43"). The "tok" prop value is the enum literal
+// (matches the spec's own type spelling); the word it renders is spelled out
+// in full ("tokens"), which is a deliberate difference from
+// formatMeasuredTokens() above — a narrower, already-shipped budget-caption
+// formatter whose "tok" abbreviation stays put for its own call sites.
+describe('lib/format.ts formatCompactValue()', () => {
+  it('renders the bare compact number when no unit is given', () => {
+    expect(formatCompactValue(127_000)).toBe('127K');
+    expect(formatCompactValue(43)).toBe('43');
+  });
+
+  it('appends " tokens" (spelled out) when unit is "tok"', () => {
+    expect(formatCompactValue(1_200_000, 'tok')).toBe('1.2M tokens');
+  });
+
+  it('appends the unit word to a small, unsuffixed number too', () => {
+    expect(formatCompactValue(43, 'tok')).toBe('43 tokens');
   });
 });
