@@ -566,6 +566,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked.',
   },
   {
+    command: 'results record',
+    positionals: '',
+    flags: `--task <task-id> --result <result.json> [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    summary:
+      "Project a worker's Result on its own, with no worktree to certify and no tests to run: schema-check, task-result-recorded, artifact-check. Wave.md's tester has no gate to run one through; this is how its screenshots reach the dashboard the moment it finishes. Exit 1 when blocked.",
+  },
+  {
     command: 'coverage check',
     positionals: '<worktree-dir>',
     flags: '[--plan <plan.json> --task <task-id>] [--summary <path>]',
