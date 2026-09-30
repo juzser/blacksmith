@@ -56,4 +56,10 @@ describe('NeedsYouInbox.vue', () => {
   it('marks the pressed filter chip for assistive tech', () => {
     expect(SRC).toMatch(/:aria-pressed="filter === f\.id/);
   });
+
+  it('labels each action link with its verb and the row title, not just "Open"/"Review" (F5)', () => {
+    expect(SRC).toMatch(
+      /<RouterLink[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{r\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"/,
+    );
+  });
 });

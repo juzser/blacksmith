@@ -111,6 +111,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             <RouterLink
               class="bs-btn bs-btn--sm"
               :class="isPhoneWidth && gi === 0 && ri === 0 ? 'bs-btn--primary' : 'bs-btn--secondary'"
+              :aria-label="`${INBOX_KIND[r.kind].action}: ${r.title}`"
               :to="inboxActionTarget(r)"
             >
               {{ INBOX_KIND[r.kind].action }}
