@@ -506,3 +506,101 @@
 .bs-card--lg .bs-card__footer {
   padding: 0 var(--bs-space-5) var(--bs-space-5);
 }
+
+/* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
+   "unchanged contract from the old kit"; only the look changes: bs- tokens,
+   the same focus-visible ring as .bs-btn. */
+.bs-input,
+.bs-textarea,
+.bs-select {
+  width: 100%;
+  padding: var(--bs-space-2) var(--bs-space-3);
+  background: var(--bs-surface);
+  color: var(--bs-text);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-sm);
+  font-size: var(--bs-text-base);
+  line-height: var(--bs-leading-base);
+  outline: none;
+  transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-input::placeholder,
+.bs-textarea::placeholder {
+  color: var(--bs-text-subtlest);
+}
+.bs-input:hover,
+.bs-textarea:hover,
+.bs-select:hover {
+  border-color: var(--bs-border-bold);
+}
+.bs-input:focus-visible,
+.bs-textarea:focus-visible,
+.bs-select:focus-visible {
+  border-color: var(--bs-focus-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-input:disabled,
+.bs-textarea:disabled,
+.bs-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bs-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* RadioGroup (§2.1) — ported unchanged contract. */
+.bs-radiogroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-base);
+  color: var(--bs-text);
+  cursor: pointer;
+}
+
+/* Chip (§2.1) — border+dot identity pattern ported from
+   ui/src/components/IdentityChip.vue; colour never carries the label text
+   (contrast), only the border and the decorative dot/avatar swatch. */
+.bs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  padding: var(--bs-space-1) var(--bs-space-2);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-full);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  text-decoration: none;
+  background: var(--bs-surface);
+}
+.bs-chip--assignee:hover {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+}
+.bs-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  flex-shrink: 0;
+}
+.bs-chip__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+  font-size: 10px;
+  font-weight: var(--bs-font-weight-semibold);
+  flex-shrink: 0;
+}
