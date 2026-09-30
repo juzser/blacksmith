@@ -3511,6 +3511,34 @@ async function main(): Promise<number> {
     return outcome.outcome === 'blocked' ? 1 : 0;
   }
 
+  // The tester's screenshots reach the dashboard the moment the tester
+  // finishes, not only at the next `gate run`. wave.md's tester has no
+  // worktree to certify and no tests to run, so it was never handed to
+  // `gate run` at all — and its declared artifacts never reached the
+  // projector (`${event_id}#${index}` rows in db/projector.ts). This is the
+  // schema-check/task-result-recorded/artifact-check third of `gate run`
+  // exposed on its own, over the same `recordTaskResult` (gate.ts) rather
+  // than a second copy of either check, and it never emits `gate-outcome`:
+  // epic.ts's ungated-task check (D-138) treats that event as proof a full
+  // gate ran, and a lean Result projection is not one.
+  if (namespace === 'results' && action === 'record') {
+    const { recordTaskResult } = await import('./gate.js');
+    const taskId = requireFlag(flags, 'task');
+    const result = readJsonFile<unknown>(requireFlag(flags, 'result'));
+    const ctx = eventContextFromFlags(flags);
+    const outcome = await recordTaskResult(
+      {
+        taskId,
+        result,
+        ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+      },
+      ctx,
+      eventOptsFromFlags(flags),
+    );
+    printJson(outcome);
+    return outcome.outcome === 'blocked' ? 1 : 0;
+  }
+
   // D-40/P9-25: the gate's coverage evidence, without staging a gate run.
   // This is the verb the D-40 investigation wanted and did not have — it took
   // a coverage re-run on the pre-task-4 integration branch to establish what

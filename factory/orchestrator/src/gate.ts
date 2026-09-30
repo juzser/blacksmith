@@ -10,7 +10,7 @@ import { type CommitCertificate, certifyCommit } from './commit.js';
 import { type CoverageEvidence, collectCoverageEvidence } from './coverage.js';
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from './crosscheck.js';
 import { DiffstatError, measureDiff } from './diffstat.js';
-import { appendEvent, type EventOpts, readLineageEvents } from './events.js';
+import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import {
   type Finding,
   findingScope,
@@ -288,8 +288,8 @@ async function emit(
   taskId: string,
   ctx: GateContext,
   opts: EventOpts,
-): Promise<void> {
-  await appendEvent(
+): Promise<StoredEvent> {
+  return appendEvent(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',
@@ -361,10 +361,10 @@ async function recordResult(
   taskId: string,
   ctx: GateContext,
   opts: EventOpts,
-): Promise<void> {
+): Promise<{ eventId: string; deduped: boolean }> {
   const hash = resultHash(result);
   const events = await readLineageEvents(ctx.sessionId, opts);
-  for (const { record } of events) {
+  for (const { event_id, record } of events) {
     if (record.event_type !== TASK_RESULT_EVENT_TYPE) continue;
     // Matched, not compared: the same task reaches the log under both
     // spellings — whoever appended a result stamped what they typed, and
@@ -375,9 +375,128 @@ async function recordResult(
     // Re-hashed from the stored payload, not carried on it: the payload is the
     // Result verbatim (db/projector.ts reads it as one), and a hash field
     // wedged in beside it would be a Result that no longer validates.
-    if (resultHash(record.payload) === hash) return;
+    if (resultHash(record.payload) === hash) return { eventId: event_id, deduped: true };
   }
-  await emit(TASK_RESULT_EVENT_TYPE, result as Record<string, unknown>, taskId, ctx, opts);
+  const stored = await emit(
+    TASK_RESULT_EVENT_TYPE,
+    result as Record<string, unknown>,
+    taskId,
+    ctx,
+    opts,
+  );
+  return { eventId: stored.event_id, deduped: false };
+}
+
+/**
+ * The schema-check / task-result-recorded / artifact-check half of
+ * `runGate` — the part of the pipeline that is true about a Result before any
+ * gate-specific refusal (tests, findings, commit certification) asks its
+ * question — exposed on its own for a caller with no worktree to certify and
+ * no tests to run.
+ *
+ * `smith results record` is that caller: wave.md's tester produces a Result
+ * with screenshot artifacts and is never run through `gate run` at all, so
+ * those artifacts never reached the projector (`${event_id}#${index}` rows in
+ * db/projector.ts) until now. This function reuses `recordResult` and
+ * `checkArtifacts` rather than re-deriving either, and deliberately stops
+ * short of `finalize` — it never emits `gate-outcome`, because epic.ts's
+ * ungated-task check (D-138) treats that event as proof a full gate ran, and
+ * a lean result projection is not one.
+ *
+ * Idempotent the same way `runGate` is: `recordResult`'s content-hash dedup
+ * means a byte-identical re-run mints no new event, and since the projector
+ * keys artifact rows off the event id, no new event means no duplicated
+ * artifact rows either.
+ */
+export interface RecordTaskResultInput {
+  taskId: string;
+  /** Worker's structured Result, checked against result.schema.json before anything else runs. */
+  result: unknown;
+  /** Where artifact homes live; defaults to `state/artifacts` (P9-22). */
+  artifactsDir?: string;
+}
+
+export type RecordTaskResultOutcome =
+  | {
+      outcome: 'recorded';
+      taskId: string;
+      eventId: string;
+      /** True when this call matched a Result already on the log byte-for-byte and minted no new event. */
+      deduped: boolean;
+    }
+  | {
+      outcome: 'blocked';
+      taskId: string;
+      reason: 'schema-invalid' | 'artifacts-missing';
+      /** `[]` rather than absent when the block is the other reason — an absent field and an empty one must not both mean "no errors". */
+      schemaErrors: ValidationIssue[];
+      artifactIssues: ArtifactIssue[];
+    };
+
+export async function recordTaskResult(
+  input: RecordTaskResultInput,
+  ctx: GateContext,
+  opts: EventOpts = {},
+): Promise<RecordTaskResultOutcome> {
+  const { taxonomy, schemas } = resolveTaxonomyAndSchemas(opts);
+
+  const schemaResult = validateRecord(schemas, taxonomy, 'result', input.result);
+  await emit(
+    'schema-check-result',
+    { valid: schemaResult.valid, errors: schemaResult.valid ? [] : schemaResult.errors },
+    input.taskId,
+    ctx,
+    opts,
+  );
+  if (!schemaResult.valid) {
+    return {
+      outcome: 'blocked',
+      taskId: input.taskId,
+      reason: 'schema-invalid',
+      schemaErrors: schemaResult.errors,
+      artifactIssues: [],
+    };
+  }
+
+  // The worker's Result is a fact about a run that already happened, so it is
+  // recorded before the artifact check can block on it (P9-12) — a tester
+  // whose screenshot path was wrong still ran, and the projector should see
+  // the Result even when the artifact check below refuses it.
+  const recorded = await recordResult(input.result, input.taskId, ctx, opts);
+
+  const artifacts = (input.result as { artifacts?: ArtifactDecl[] }).artifacts ?? [];
+  const artifactCheck = checkArtifacts(artifacts, {
+    taskId: input.taskId,
+    artifactsDir: input.artifactsDir,
+  });
+  await emit(
+    'artifact-check-result',
+    {
+      ok: artifactCheck.ok,
+      checked: artifactCheck.checked,
+      home: artifactCheck.home,
+      issues: artifactCheck.issues,
+    },
+    input.taskId,
+    ctx,
+    opts,
+  );
+  if (!artifactCheck.ok) {
+    return {
+      outcome: 'blocked',
+      taskId: input.taskId,
+      reason: 'artifacts-missing',
+      schemaErrors: [],
+      artifactIssues: artifactCheck.issues,
+    };
+  }
+
+  return {
+    outcome: 'recorded',
+    taskId: input.taskId,
+    eventId: recorded.eventId,
+    deduped: recorded.deduped,
+  };
 }
 
 interface IntakeResult {

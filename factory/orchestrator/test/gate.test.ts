@@ -13,7 +13,7 @@ import type {
 } from '../src/crosscheck.js';
 import { appendEvent, readEvents } from '../src/events.js';
 import { type FindingDraft, type RaiseFindingInput, SPEC_FINDING_SCOPE } from '../src/findings.js';
-import { type GateInput, runGate } from '../src/gate.js';
+import { type GateInput, recordTaskResult, runGate } from '../src/gate.js';
 import { recordJudgeDispatch, recordJudgeReport } from '../src/judges.js';
 import type { LessonRule } from '../src/severity.js';
 import { emitFollowUpTask } from '../src/taskEvents.js';
@@ -2383,5 +2383,177 @@ describe('gate.ts budget check (P9-18)', () => {
     expect(outcome.outcome).toBe('blocked');
     expect(outcome.budgetCheck?.overruns).toHaveLength(1);
     expect(await budgetEvent()).toMatchObject({ status: 'checked' });
+  });
+});
+
+// `smith results record`: the tester's screenshots reaching the dashboard the
+// moment the tester finishes, not only at the gate. wave.md only ever handed
+// the coder's result.json to `gate run`; a tester's result.json never touches
+// a gate at all, so its declared artifacts never reached the projector.
+// `recordTaskResult` is the schema-check + task-result-recorded +
+// artifact-check half of `runGate`, with no worktree to certify and no tests
+// to run — it reuses `recordResult`/`checkArtifacts` rather than re-deriving
+// either, and it never emits `gate-outcome`: epic.ts's ungated-task check
+// (D-138) treats that event as proof a full gate ran, and this is not one.
+describe('recordTaskResult', () => {
+  let stateDir: string;
+  let artifactsDir: string;
+  const sessionId = 'sess-record-result';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-record-result-'));
+    artifactsDir = await mkdtemp(path.join(tmpdir(), 'smith-record-result-art-'));
+    await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(artifactsDir, { recursive: true, force: true });
+  });
+
+  const ctx = () => ({ sessionId, planVersion: 1, causalParent: `${sessionId}#0` });
+
+  it('records a valid result and reports the event id it was written under', async () => {
+    const outcome = await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ task_id: 'epic-1/task-2' }) },
+      ctx(),
+      { stateDir },
+    );
+    expect(outcome).toMatchObject({
+      outcome: 'recorded',
+      taskId: 'epic-1/task-2',
+      deduped: false,
+    });
+    if (outcome.outcome !== 'recorded') throw new Error('unreachable');
+    expect(outcome.eventId).toMatch(/^sess-record-result#\d+$/);
+
+    const events = await readEvents(sessionId, { stateDir });
+    const recorded = events.filter((e) => e.record.event_type === 'task-result-recorded');
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.event_id).toBe(outcome.eventId);
+  });
+
+  it('blocks on a schema-invalid result and writes no task-result-recorded', async () => {
+    const outcome = await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ run_status: 'not-a-real-status' }) },
+      ctx(),
+      { stateDir },
+    );
+    expect(outcome).toMatchObject({ outcome: 'blocked', reason: 'schema-invalid' });
+    if (outcome.outcome !== 'blocked') throw new Error('unreachable');
+    expect(outcome.schemaErrors.length).toBeGreaterThan(0);
+
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.some((e) => e.record.event_type === 'task-result-recorded')).toBe(false);
+  });
+
+  it('blocks on an artifact outside the task home, but the Result is still recorded (P9-12)', async () => {
+    const outcome = await recordTaskResult(
+      {
+        taskId: 'epic-1/task-2',
+        result: resultFixture({
+          task_id: 'epic-1/task-2',
+          artifacts: [{ type: 'screenshot', path: '/tmp/probe-fail-shot.png' }],
+        }),
+        artifactsDir,
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(outcome).toMatchObject({ outcome: 'blocked', reason: 'artifacts-missing' });
+    if (outcome.outcome !== 'blocked') throw new Error('unreachable');
+    expect(outcome.artifactIssues).toHaveLength(1);
+    expect(outcome.artifactIssues[0]).toMatchObject({ problem: 'outside-home' });
+
+    // The Result itself is a fact about a run that already happened (P9-12):
+    // an artifact under the wrong path does not undo the fact the tester ran.
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.some((e) => e.record.event_type === 'task-result-recorded')).toBe(true);
+  });
+
+  it('projects an artifact declared inside the task home', async () => {
+    const home = path.join(artifactsDir, 'epic-1', 'task-2');
+    await mkdir(home, { recursive: true });
+    await writeFile(path.join(home, 'screen.png'), 'not-really-a-png');
+
+    const outcome = await recordTaskResult(
+      {
+        taskId: 'epic-1/task-2',
+        result: resultFixture({
+          task_id: 'epic-1/task-2',
+          artifacts: [{ type: 'screenshot', path: 'screen.png' }],
+        }),
+        artifactsDir,
+      },
+      ctx(),
+      { stateDir },
+    );
+    expect(outcome.outcome).toBe('recorded');
+  });
+
+  it('is idempotent: a byte-identical re-run writes no second event and hands back the first id', async () => {
+    const first = await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ task_id: 'epic-1/task-2' }) },
+      ctx(),
+      { stateDir },
+    );
+    const second = await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ task_id: 'epic-1/task-2' }) },
+      ctx(),
+      { stateDir },
+    );
+    if (first.outcome !== 'recorded' || second.outcome !== 'recorded') {
+      throw new Error('unreachable');
+    }
+    expect(second.eventId).toBe(first.eventId);
+    expect(first.deduped).toBe(false);
+    expect(second.deduped).toBe(true);
+
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.filter((e) => e.record.event_type === 'task-result-recorded')).toHaveLength(1);
+  });
+
+  it('records a second time when the tester genuinely ran again', async () => {
+    await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ task_id: 'epic-1/task-2' }) },
+      ctx(),
+      { stateDir },
+    );
+    const second = await recordTaskResult(
+      {
+        taskId: 'epic-1/task-2',
+        result: resultFixture({
+          task_id: 'epic-1/task-2',
+          token_usage: { input_tokens: 900, output_tokens: 90, total_tokens: 990 },
+        }),
+      },
+      ctx(),
+      { stateDir },
+    );
+    if (second.outcome !== 'recorded') throw new Error('unreachable');
+    expect(second.deduped).toBe(false);
+
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.filter((e) => e.record.event_type === 'task-result-recorded')).toHaveLength(2);
+  });
+
+  it('never emits a gate-outcome — it is a projection, not a gate (epic.ts D-138 ungated-task check)', async () => {
+    await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ task_id: 'epic-1/task-2' }) },
+      ctx(),
+      { stateDir },
+    );
+    const events = await readEvents(sessionId, { stateDir });
+    expect(events.some((e) => e.record.event_type === 'gate-outcome')).toBe(false);
   });
 });
