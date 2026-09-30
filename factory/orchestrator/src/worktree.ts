@@ -4,7 +4,7 @@ import { runGit as git } from './git.js';
 
 export class WorktreeError extends SmithError {}
 
-/** The task-id segment reserved for an epic's integration branch (smith/<epic>/integration) —
+/** The task-id segment reserved for an epic's integration branch (<prefix>/<epic>/integration) —
  * never a real task. Exported for db/projector.ts's foldTasks() guard and epic.ts's
  * runEpicVerdict(), both of which need to recognise `<epic>/integration` as non-task. */
 export const RESERVED_TASK_ID = 'integration';
@@ -29,7 +29,10 @@ function localBranchExists(projectDir: string, branch: string): boolean {
  * branch, so a cut hop's commits would otherwise vanish silently).
  */
 export function taskBranchExists(projectDir: string, epic: string, taskId: string): boolean {
-  return localBranchExists(projectDir, taskBranchName(epic, taskId));
+  return localBranchExists(
+    projectDir,
+    taskBranchName(epic, taskId, epicBranchPrefix(projectDir, epic)),
+  );
 }
 
 /**
@@ -113,14 +116,43 @@ export function taskWorktreeDir(projectDir: string, epic: string, taskId: string
   return path.join(path.dirname(project), '.wt', path.basename(project), bareTaskId(epic, taskId));
 }
 
-/** `smith/<epic>/integration` — the one branch an epic assembles onto. Exported for
- * integration.ts, which runs the check suite against it (D-42/P9-26). */
-export function integrationBranchName(epic: string): string {
-  return `smith/${epic}/integration`;
+/** The branch prefix every new epic gets (bs-rename operator decision 1). */
+export const BRANCH_PREFIX = 'bs';
+
+/** The prefix `BRANCH_PREFIX` replaced. Still recognised so an epic already
+ * cut under it keeps landing new branches there (operator decision 3) rather
+ * than splitting one epic's worktrees across two branch families. */
+export const LEGACY_BRANCH_PREFIX = 'smith';
+
+/**
+ * Which prefix THIS epic's factory branches use: `smith` when
+ * `smith/<epic>/integration` already exists locally, `bs` otherwise —
+ * including for a brand-new epic, which has neither yet. Git-aware on
+ * purpose: this is the one place that decides, so integrationBranchName and
+ * taskBranchName can stay pure string joins driven by whatever prefix their
+ * caller resolved (or hands the bs default straight through, for the
+ * git-free callers — taskEvents.ts and db/projector.ts's fallback — that
+ * have no projectDir to ask).
+ */
+export function epicBranchPrefix(projectDir: string, epic: string): string {
+  return localBranchExists(projectDir, `${LEGACY_BRANCH_PREFIX}/${epic}/${RESERVED_TASK_ID}`)
+    ? LEGACY_BRANCH_PREFIX
+    : BRANCH_PREFIX;
+}
+
+/** `<prefix>/<epic>/integration` — the one branch an epic assembles onto.
+ * `prefix` defaults to BRANCH_PREFIX (`bs`); a caller with a projectDir
+ * passes `epicBranchPrefix(projectDir, epic)` to get the epic's actual
+ * prefix, legacy `smith/` included. Exported for integration.ts, which runs
+ * the check suite against it (D-42/P9-26). */
+export function integrationBranchName(epic: string, prefix: string = BRANCH_PREFIX): string {
+  return `${prefix}/${epic}/integration`;
 }
 
 /**
- * `smith/<epic>/<bare-task-id>` — the branch convention, defined once.
+ * `<prefix>/<epic>/<bare-task-id>` — the branch convention, defined once.
+ * `prefix` defaults to BRANCH_PREFIX (`bs`) for the same reason as
+ * integrationBranchName above.
  *
  * D-23/P9-12: exported because three places need to agree on it — this module
  * (which creates the branch), taskEvents.ts's `task-added` (which declares it
@@ -130,15 +162,19 @@ export function integrationBranchName(epic: string): string {
  *
  * A task_id already embeds its epic ("epic-7/task-142", findings.ts's
  * convention) so strip that prefix before rejoining — concatenating epic +
- * full task_id double-embeds it (smith/epic-7/epic-7/task-142). The CLI hands
+ * full task_id double-embeds it (bs/epic-7/epic-7/task-142). The CLI hands
  * this whatever the operator typed, so both shapes really do arrive.
  */
-export function taskBranchName(epic: string, taskId: string): string {
-  return `smith/${epic}/${bareTaskId(epic, taskId)}`;
+export function taskBranchName(
+  epic: string,
+  taskId: string,
+  prefix: string = BRANCH_PREFIX,
+): string {
+  return `${prefix}/${epic}/${bareTaskId(epic, taskId)}`;
 }
 
 function ensureIntegrationBranch(projectDir: string, epic: string): string {
-  const branch = integrationBranchName(epic);
+  const branch = integrationBranchName(epic, epicBranchPrefix(projectDir, epic));
   if (!localBranchExists(projectDir, branch)) {
     const defaultBranch = detectDefaultBranch(projectDir);
     git(projectDir, ['branch', branch, defaultBranch]);
@@ -171,11 +207,12 @@ export interface CreateTaskWorktreeOpts {
  * sibling of whatever directory the project was handed as, never a path of
  * this module's own choosing, so a project outside this clone keeps its
  * worktrees outside it too (see taskWorktreeDir)
- * on branch smith/<epic>/<task-id>.
+ * on branch <prefix>/<epic>/<task-id>, where <prefix> is epicBranchPrefix's
+ * answer for this epic (`bs`, or `smith` for an epic already cut under it).
  *
- * Without `opts.from`, cut from the CURRENT head of smith/<epic>/integration
+ * Without `opts.from`, cut from the CURRENT head of <prefix>/<epic>/integration
  * (creating the integration branch from the default branch first if it
- * doesn't exist yet). With `opts.from`, cut from smith/<epic>/<from> instead
+ * doesn't exist yet). With `opts.from`, cut from <prefix>/<epic>/<from> instead
  * — the predecessor's branch, commits and all — and integration is never
  * consulted.
  */
@@ -193,12 +230,13 @@ export function createTaskWorktree(
     );
   }
 
-  const branch = taskBranchName(epic, taskId);
+  const prefix = epicBranchPrefix(projectDir, epic);
+  const branch = taskBranchName(epic, taskId, prefix);
   const worktreeDir = taskWorktreeDir(projectDir, epic, taskId);
 
   let sourceBranch: string;
   if (opts.from !== undefined) {
-    sourceBranch = taskBranchName(epic, opts.from);
+    sourceBranch = taskBranchName(epic, opts.from, prefix);
     if (!localBranchExists(projectDir, sourceBranch)) {
       throw new WorktreeError(
         'worktree.from-missing',
@@ -218,7 +256,7 @@ export function createTaskWorktree(
 /** Remove a task's worktree and its local branch after it has merged. */
 export function removeTaskWorktree(projectDir: string, epic: string, taskId: string): void {
   const worktreeDir = taskWorktreeDir(projectDir, epic, taskId);
-  const branch = taskBranchName(epic, taskId);
+  const branch = taskBranchName(epic, taskId, epicBranchPrefix(projectDir, epic));
 
   try {
     git(projectDir, ['worktree', 'remove', worktreeDir]);
@@ -275,12 +313,13 @@ function parseWorktreePorcelain(output: string): PorcelainEntry[] {
 }
 
 /**
- * List task worktrees whose branch is fully merged into smith/<epic>/integration.
+ * List task worktrees whose branch is fully merged into <prefix>/<epic>/integration.
  * Reports only — never deletes.
  */
 export function listStale(projectDir: string, epic: string): StaleWorktree[] {
-  const integrationBranch = integrationBranchName(epic);
-  const prefix = `smith/${epic}/`;
+  const branchPrefix = epicBranchPrefix(projectDir, epic);
+  const integrationBranch = integrationBranchName(epic, branchPrefix);
+  const prefix = `${branchPrefix}/${epic}/`;
 
   const porcelain = git(projectDir, ['worktree', 'list', '--porcelain']);
   const entries = parseWorktreePorcelain(porcelain);
