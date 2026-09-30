@@ -18,14 +18,16 @@ you your own event log. Do not put it on a public interface.
 
 <table>
 <tr>
-<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/overview-desktop-dark.png" width="100%" alt="Overview page: a 'Needs you' banner reading '1 waiver pending, 1 task escalated', counters for active agents, budget used, epics in flight and alerts, and a 'Now running' list of two live sessions" /></td>
+<td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/home-desktop-dark.png" width="100%" alt="Home page: a Needs you inbox grouped by project with one action per row, Running now cards per project with agents working, epics in flight and token spend, and a list of what the factory decided recently" /></td>
 <td width="50%"><img src="../../ui/e2e/__screenshots__/phase-6b/flow-desktop-dark.png" width="100%" alt="Flow page: task cards arranged in three columns labelled Wave 0 (6 tasks), Wave 1 (2 tasks) and Wave 2 (1 task), joined by dashed dependency edges" /></td>
 </tr>
 <tr valign="top">
-<td><b>Overview</b> — the one screen that asks something of you. The
-<code>Needs you</code> banner counts pending waivers and escalated tasks;
-under it, live agent count, budget burn, epics in flight, and what is running
-right now. Everything else is the factory reporting in.</td>
+<td><b>Home</b> (<code>/overview</code>, and where <code>/</code> lands) — the
+one screen that asks something of you. The <code>Needs you</code> inbox lists
+every pending waiver, escalated task and lesson candidate, grouped by project,
+each with one action; under it, what is running per project, what the factory
+decided recently, and budget burn. Everything else is the factory reporting
+in.</td>
 <td><b>Flow</b> — the plan as waves. Waves are layers of the dependency graph;
 a wave is only admitted once its tasks' path claims are pairwise disjoint,
 which is what lets everything in a column run at the same time.</td>
@@ -57,11 +59,10 @@ for step 6 of <a href="operator-loop.md">the operator loop</a>.</td>
 </tr>
 </table>
 
-Five more pages carry the rest:
+Four more pages carry the rest:
 
 | Page | What it is for |
 |---|---|
-| **Projects** (`/projects`) | The default route. Every project the factory knows about; picking one scopes the other pages to it. |
 | **Sessions** (`/sessions`) | Every orchestrator session, including the cross-session parent edges that let one epic span several. |
 | **Timeline** (`/timeline`) | The event log itself, grouped by dispatch — every prompt, dispatch, error and gate result, in order. |
 | **Roadmap** (`/roadmap`) | Milestone progress, parsed from [`factory/specs/roadmap.md`](../../factory/specs/roadmap.md) and joined with real task and token counts. |

@@ -50,7 +50,7 @@ test.describe('Session scope', () => {
       '/flow',
       '/errors',
       '/analytics',
-      '/projects',
+      '/overview',
       '/lessons',
     ]) {
       await page.goto(path);

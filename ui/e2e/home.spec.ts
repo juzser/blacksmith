@@ -1,0 +1,282 @@
+import { FIXTURE_NOW_ISO } from './fixtureClock.js';
+import { expect, type Page, test } from './harness.js';
+import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+
+// Home (ds-spec.md §4.1): Overview and Projects merged into one page. The
+// numbers and sentences are unit-tested in ui/test/homeView.test.ts and the
+// grouping in ui/test/inbox.test.ts; this suite is the only layer that runs
+// the templates, so it asserts what reaches the screen.
+
+const minutesAgo = (minutes: number): string =>
+  new Date(Date.parse(FIXTURE_NOW_ISO) - minutes * 60_000).toISOString();
+
+// One row of each kind, across two projects plus the project-less group, so
+// the grouping, the per-kind tag and the per-kind action are all on screen.
+const INBOX_ROWS = [
+  {
+    id: 'esc-1',
+    kind: 'escalation',
+    title: 'Checkout flow',
+    description: 'Tester found a failing refund path; the task stays blocked until you choose.',
+    project: 'black-smith',
+    taskId: 'epic-1/task-3-checkout',
+    createdAt: minutesAgo(5),
+  },
+  {
+    id: 'waiver-1',
+    kind: 'waiver',
+    title: 'Show fee',
+    description: null,
+    project: 'demo-hub',
+    taskId: 'epic-9/task-2-show-fee',
+    createdAt: minutesAgo(30),
+  },
+  {
+    id: 'lesson-1',
+    kind: 'lesson_candidate',
+    title: 'Run the full suite before a gate check',
+    description: null,
+    project: null,
+    taskId: null,
+    createdAt: minutesAgo(90),
+  },
+];
+
+async function serveInbox(page: Page, rows: unknown[]): Promise<void> {
+  await page.route('**/api/inbox*', (route) => route.fulfill({ json: { rows } }));
+}
+
+const PHONE = { width: 375, height: 812 };
+
+test.describe('Home', () => {
+  test('/ lands on Home, with a11y basics', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/overview$/);
+    await expect(page.locator('h1')).toHaveText('Home');
+    await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
+    await expect(page.getByRole('navigation', { name: 'Primary' })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toBeVisible();
+  });
+
+  test('the retired /projects link keeps its project scope on Home', async ({ page }) => {
+    await page.goto('/projects?project=demo-hub');
+    await expect(page).toHaveURL(/\/p\/demo-hub\/overview$/);
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(
+      'demo-hub · Home',
+    );
+  });
+
+  test('lays out the sections in order, what needs you first', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(page.getByRole('heading', { level: 2 })).toHaveText([
+      'Needs you',
+      'Running now',
+      'What the factory decided recently',
+      'Budget',
+    ]);
+  });
+
+  test('Running now has one card per project with work in flight, linked to Work', async ({
+    page,
+  }) => {
+    await page.goto('/overview');
+    const view = page.getByRole('link', { name: 'View black-smith in Work' });
+    await expect(view).toHaveAttribute('href', '/kanban?project=black-smith');
+    await expect(page.getByText('2 epics in flight')).toBeVisible();
+    await expect(page.getByText('epic in flights')).toHaveCount(0);
+    // envkit is declared but has nothing running: no card for it.
+    await expect(page.getByRole('link', { name: 'View envkit in Work' })).toHaveCount(0);
+  });
+
+  test('a project declared before its first task is still selectable from the topbar', async ({
+    page,
+  }) => {
+    // The fixture roadmap's third phase declares `envkit` and nothing else.
+    await page.goto('/overview');
+    await expect(
+      page.getByLabel('Project', { exact: true }).locator('option', { hasText: 'envkit' }),
+    ).toHaveCount(1);
+  });
+
+  test('an epic seen in flight and then closed shows under Just finished', async ({ page }) => {
+    let served = 0;
+    await page.route('**/api/overview*', async (route) => {
+      served += 1;
+      const response = await route.fetch();
+      const body = await response.json();
+      if (served === 1) {
+        body.epicsInFlight = [...body.epicsInFlight, 'epic-just-done'];
+      } else {
+        body.closedEpics = [
+          {
+            epicId: 'epic-just-done',
+            closedBy: 'operator',
+            machineVerdict: null,
+            machineReason: null,
+            overrideRationale: null,
+            blockers: [],
+            closedAt: minutesAgo(2),
+          },
+          ...body.closedEpics,
+        ];
+      }
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto('/overview');
+    await expect(page.getByText('Just finished')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await expect(page.getByText('Just finished')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'epic-just-done' })).toHaveAttribute(
+      'href',
+      '/kanban?epic=epic-just-done',
+    );
+  });
+
+  test('a failed overview fetch never renders as an idle factory', async ({ page }) => {
+    await page.route('**/api/overview*', (route) => route.abort('failed'));
+    await page.goto('/overview');
+    await expect(page.getByText('Could not load Home.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
+
+    await expect(page.getByText('Nothing is running right now.')).toHaveCount(0);
+    await expect(page.getByText('No decisions yet.')).toHaveCount(0);
+  });
+
+  // D-226: the error clears on success, not on attempt, so a refresh still in
+  // flight against a dead server never makes the page look healthy.
+  test('a failing refresh never takes the error banner off the screen', async ({ page }) => {
+    let served = 0;
+    await page.route('**/api/overview*', async (route) => {
+      served += 1;
+      if (served === 1) {
+        await route.abort('failed');
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 12_000));
+      await route.abort('failed').catch(() => {});
+    });
+    await page.goto('/overview');
+    await expect(page.getByText('Could not load Home.')).toBeVisible();
+
+    const refetch = page.waitForRequest('**/api/overview*');
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await refetch;
+
+    await expect(page.getByText('Could not load Home.')).toBeVisible();
+  });
+
+  test('a failed inbox fetch never claims nothing needs you', async ({ page }) => {
+    await page.route('**/api/inbox*', (route) => route.abort('failed'));
+    await page.goto('/overview');
+    await expect(page.getByText('Could not load what needs you.')).toBeVisible();
+    await expect(page.getByText('Nothing needs you right now.')).toHaveCount(0);
+  });
+
+  test('the sidebar brand mark is the project logo, decoded and not a broken image', async ({
+    page,
+  }) => {
+    await page.goto('/overview');
+    const mark = page.locator('.bs-side__mark img');
+    await expect(mark).toBeVisible();
+    await expect(mark).toHaveAttribute('alt', 'Blacksmith');
+    // toBeVisible() passes on a broken <img> too; naturalWidth proves it decoded.
+    const naturalWidth = await mark.evaluate((el) => (el as HTMLImageElement).naturalWidth);
+    expect(naturalWidth).toBeGreaterThan(0);
+  });
+
+  test('theme toggle switches to dark and persists the class on <html>', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+      test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto('/overview');
+        await expect(page.locator('h1')).toHaveText('Home');
+        await settleForShot(page, page.getByRole('link', { name: 'View black-smith in Work' }));
+        await shoot(page, `home-${vpName}-${theme}`);
+      });
+    }
+  }
+});
+
+test.describe('Home: Needs you inbox', () => {
+  test('desktop: groups by project, project-less rows last, one action per row', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('.bs-inbox__group-head')).toHaveText([
+      'black-smith · 1',
+      'demo-hub · 1',
+      'All projects · 1',
+    ]);
+    await expect(
+      inbox.getByText('Tester found a failing refund path', { exact: false }),
+    ).toBeVisible();
+    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveAttribute(
+      'href',
+      '/tasks/epic-1%2Ftask-3-checkout',
+    );
+    const reviews = inbox.getByRole('link', { name: 'Review' });
+    await expect(reviews).toHaveCount(2);
+    await expect(reviews.last()).toHaveAttribute('href', '/lessons');
+
+    // The filter chips narrow the list and say which one is pressed.
+    const waivers = inbox.getByRole('button', { name: 'Waivers' });
+    await waivers.click();
+    await expect(waivers).toHaveAttribute('aria-pressed', 'true');
+    await expect(inbox.locator('.bs-inbox__group-head')).toHaveText(['demo-hub · 1']);
+  });
+
+  test('desktop: a scoped Home shows only that project', async ({ page }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/p/demo-hub/overview');
+    await expect(page.locator('.bs-inbox__group-head')).toHaveText(['demo-hub · 1']);
+  });
+
+  test('375px: no filter chips, groups fold with the first open, one primary action', async ({
+    page,
+  }) => {
+    await serveInbox(page, INBOX_ROWS);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+
+    const inbox = page.locator('section.bs-inbox');
+    await expect(inbox.locator('details.bs-inbox__group')).toHaveCount(3);
+    await expect(inbox.getByRole('group', { name: 'Filter what needs you' })).toHaveCount(0);
+    await expect(inbox.locator('details.bs-inbox__group').first()).toHaveAttribute('open', '');
+    await expect(inbox.locator('details.bs-inbox__group').nth(1)).not.toHaveAttribute('open', '');
+    await expect(inbox.locator('.bs-btn--primary')).toHaveCount(1);
+    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveClass(/bs-btn--primary/);
+
+    // A folded group opens from its summary.
+    await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();
+    await expect(inbox.getByText('Show fee')).toBeVisible();
+  });
+
+  for (const [vpName, viewport] of [
+    ['desktop', VIEWPORTS.desktop],
+    ['375px', PHONE],
+  ] as const) {
+    test(`${vpName}: empty inbox says nothing needs you`, async ({ page }) => {
+      await serveInbox(page, []);
+      await page.setViewportSize(viewport);
+      await page.goto('/overview');
+      await expect(page.getByText('Nothing needs you right now.')).toBeVisible();
+      await expect(page.locator('.bs-inbox__group')).toHaveCount(0);
+    });
+  }
+});
