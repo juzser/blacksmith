@@ -1117,6 +1117,7 @@
 .bs-side__head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--bs-space-2);
   padding: var(--bs-space-2) var(--bs-space-3);
   height: var(--bs-topbar-height);
