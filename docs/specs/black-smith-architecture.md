@@ -220,9 +220,9 @@ merge time.**
    out-of-claim edits fail the gate (error `contract.claim-violation`) and
    bounce back to the coder.
 2. **One worktree per task.** `<project-parent>/.wt/<project>/<task-id>/` on
-   branch `smith/<epic>/<task-id>`, created fresh from the integration branch
-   head (git ref constraint: `smith/<epic>` cannot coexist with
-   `smith/<epic>/<task-id>` — see point 3), deleted after merge. Nothing
+   branch `bs/<epic>/<task-id>`, created fresh from the integration branch
+   head (git ref constraint: `bs/<epic>` cannot coexist with
+   `bs/<epic>/<task-id>` — see point 3), deleted after merge. Nothing
    long-lived; a stale worktree is a bug. The worktree is a **sibling** of the
    project, not a child of it: a worktree is a full checkout carrying the
    project's own tool config, and inside the root that is an extra root config
@@ -230,12 +230,12 @@ merge time.**
    epic's `pnpm lint` red at the integration root while all six per-task lint
    gates were green, because from inside a worktree the siblings are not
    descendants).
-3. **Integration branch per epic.** `smith/<epic>/integration` in the target
-   repo (git ref constraint: `smith/<epic>` cannot coexist with
-   `smith/<epic>/<task-id>`, so the integration branch is a sibling under the
-   epic's ref prefix, not a leaf at `smith/<epic>` itself). Workers never
+3. **Integration branch per epic.** `bs/<epic>/integration` in the target
+   repo (git ref constraint: `bs/<epic>` cannot coexist with
+   `bs/<epic>/<task-id>`, so the integration branch is a sibling under the
+   epic's ref prefix, not a leaf at `bs/<epic>` itself). Workers never
    touch `main`.
-4. **Merge queue, serial.** Completed tasks merge into `smith/<epic>/integration` one at a
+4. **Merge queue, serial.** Completed tasks merge into `bs/<epic>/integration` one at a
    time: rebase onto current head → run test gate → merge. If rebase conflicts
    (possible when a claim was serialized but files drifted): (a) automatic
    rebase attempt, which `git rebase --abort`s on conflict rather than leaving
@@ -311,7 +311,7 @@ JSON per schema), so any model that can honor the contract can serve.
   OpenAI-compatible API transport, both schema-validating + one-retry
   disciplined (`crosscheck.yml`'s `transport: cli|api` field selects which).
   Every provider additionally carries `mode: shadow|active`: `shadow`
-  verdicts are recorded (`judge-verdict` events, `smith stats providers`)
+  verdicts are recorded (`judge-verdict` events, `bs stats providers`)
   but have **zero gating power** — `src/quorum.ts`'s `computeQuorum()` falls
   back to the native verdict alone whenever no provider in a case is
   `active`. Promoting a provider is an operator edit of `crosscheck.yml`
@@ -347,7 +347,7 @@ Two storage layers, one source of truth:
   `'black-smith'`, never the event writer (`events.ts` persists exactly
   what it's given).
 - **`task_id` is `<epic>/<task>`, and the epic is a field, not a parse**
-  (D-49/P9-10). The plan mints qualified ids and `smith/<epic>/<task>` branch
+  (D-49/P9-10). The plan mints qualified ids and `bs/<epic>/<task>` branch
   names are cut from them, so a qualified id *is* an epic assertion. But an id
   with no `/` names no epic at all: `taskId.ts` answers `null` for it rather
   than the whole string, and `requireEpicOfTaskId` throws
@@ -537,7 +537,7 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       always logged, including when the
                   #                       project declares nothing to install
                   # judges-outstanding  — a judge this task dispatched through
-                  #                       `smith judge dispatch` never reported
+                  #                       `bs judge dispatch` never reported
                   #                       back, so the gate refuses to score an
                   #                       unknown: a missing `--evidence` reads
                   #                       identically whether the judge found
@@ -571,7 +571,7 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       acceptance criterion is about has not
                   #                       answered it (D-40, P9-25)
                   # integration-check   — the check suite run at the PROJECT
-                  #                       ROOT against smith/<epic>/integration,
+                  #                       ROOT against bs/<epic>/integration,
                   #                       pinned to the head sha it covers.
                   #                       Every other gate event above is a
                   #                       claim about a task worktree; this is
@@ -657,10 +657,10 @@ error:
                  # (planner, scribe) wrote outside its declared write root
                  # (P9-3); shipped as a code before it was a class
                  # judge-mutation — a read-only judge moved the worktree it
-                 # was judging (P9-5, `smith worktree verify`)
+                 # was judging (P9-5, `bs worktree verify`)
                  # uncited-claim — a researcher finding with no citation, or a
                  # citation that is neither a repo path with a line number nor
-                 # a URL actually fetched (P9-6, `smith research check`)
+                 # a URL actually fetched (P9-6, `bs research check`)
                  # unsourced-recommendation — a brief's recommendation names no
                  # finding, or names one the brief does not carry, so what came
                  # from fetched text is invisible (P9-6)
@@ -946,12 +946,12 @@ mutating the live graph:
   mid-flight blocker. A worker that finds an acceptance criterion the code
   contradicts returns a `spec_change_request` in `structured_output` —
   `{criterion_ref, assumption, evidence, changes, sites, blocking}` — and the
-  dispatcher records it with `smith plan propose`. That writes a
+  dispatcher records it with `bs plan propose`. That writes a
   `spec-change-proposed` event and raises the finding the amendment will
   later cite, and it writes **no plan version**: the proposal is data, not a
-  command. `smith plan proposals` lists what is waiting with its diff;
-  `smith plan approve <id>` runs `plan amend` with the worker's own finding,
-  sites and rationale — one command, no guard relaxed — and `smith plan
+  command. `bs plan proposals` lists what is waiting with its diff;
+  `bs plan approve <id>` runs `plan amend` with the worker's own finding,
+  sites and rationale — one command, no guard relaxed — and `bs plan
   reject <id>` refutes the finding with the operator's reasons. Approval is
   what calls the amendment; the version is still cut by `plan amend` alone,
   so every version stays immutable and every one of them is in the log. A
@@ -968,7 +968,7 @@ mutating the live graph:
   code, and may spawn deep research — this is how the project re-examines
   itself over time instead of only moving forward. Thresholds N/T/confidence
   are policy, not hardcoded: `factory/policies/scheduler.yml`'s `recheck:`
-  block (defaults: 5 merges, 14 days, 0.6 confidence) — `smith scheduler run
+  block (defaults: 5 merges, 14 days, 0.6 confidence) — `bs scheduler run
   [--dry]` computes proposals over the event log and, unless `--dry`, emits
   a `recheck-proposed` event per candidate; it never dispatches an agent
   itself.
@@ -984,7 +984,7 @@ mutating the live graph:
   proposal itself). Product-growth proposals **always** wait for an
   operator tick regardless of confidence — the factory may propose scope,
   never widen it on its own.
-- **Autonomy admission** (`factory/orchestrator/src/autonomy.ts`, `smith
+- **Autonomy admission** (`factory/orchestrator/src/autonomy.ts`, `bs
   scheduler admit`). The scheduler decides *what is due*; `scheduler.yml`'s
   `autonomy:` block decides *what may proceed without an operator tick*, and
   the command applies it and prints the result. It enacts nothing — no event
@@ -1016,11 +1016,11 @@ mutating the live graph:
 
 ## 13. PR flow (outcome review)
 
-1. Task PRs target the integration branch `smith/<epic>/integration`
+1. Task PRs target the integration branch `bs/<epic>/integration`
    (internal, auto-merged by the queue after gates; git ref constraint:
-   `smith/<epic>` cannot coexist with `smith/<epic>/<task-id>`, §5 point 3).
+   `bs/<epic>` cannot coexist with `bs/<epic>/<task-id>`, §5 point 3).
 2. When the epic's acceptance criteria pass, the factory opens **one
-   integration PR** `smith/<epic>/integration` → `main` of the target repo
+   integration PR** `bs/<epic>/integration` → `main` of the target repo
    containing:
    - spec summary + acceptance-criteria checklist (auto-checked),
    - **screenshots / short capture of the feature** (tester's Playwright
@@ -1043,7 +1043,7 @@ time — consistency is what lets small models work reliably across projects
   deviate only with a written justification attached to the epic spec.
 - **`factory/scaffold/`** — the new-repo template implementing the standard:
   pre-wired lint/test/CI, `AGENTS.md` router, HDS adoption kit when the
-  project has UI, claims-friendly directory layout. `smith new <project>`
+  project has UI, claims-friendly directory layout. `bs new <project>`
   instantiates it, then installs and runs the project's own gates in `ci.yml`'s
   order before the first commit, reporting `toolchain: verified|failed|skipped`
   and exiting 1 on a red one — so no epic has to open with a serial
@@ -1123,13 +1123,13 @@ each mapped to a Blacksmith mechanism:
    second. Local-only; Cloudflare port when stable.
 7. **Self-extension** — inferred tasks + confidence policy, scheduler,
    rechecks, lessons compilation loop. **Built (2026-08-04, in review):**
-   `factory/scaffold/` + `smith new`, `factory/orchestrator/src/scheduler.ts`
-   (`smith scheduler run [--dry]`, `factory/policies/scheduler.yml`),
-   `factory/orchestrator/src/lessons.ts` (novelty gate, `smith lessons
-   candidates`/`compile`, `smith dream [--since]`), and the `.claude/
+   `factory/scaffold/` + `bs new`, `factory/orchestrator/src/scheduler.ts`
+   (`bs scheduler run [--dry]`, `factory/policies/scheduler.yml`),
+   `factory/orchestrator/src/lessons.ts` (novelty gate, `bs lessons
+   candidates`/`compile`, `bs dream [--since]`), and the `.claude/
    skills/bs/SKILL.md` operator console tying the deterministic mechanics
    above to the agent templates. Dispatch itself is skill-guided from the
-   operator's Claude Code session; the Phase 10 `smith daemon` is a standalone
+   operator's Claude Code session; the Phase 10 `bs daemon` is a standalone
    background process, but a watcher — it folds the log and reports, and never
    dispatches (`docs/guide/operator-guide/limitations.md` "Limitations
    today",
@@ -1208,7 +1208,7 @@ not in the diff — it is in every verdict the factory issued afterwards.
    `db/projector.ts` is the only writer of the tables in `db/schema.ts`, and
    `rebuild()` replays every log from scratch to the same rows. *Breaks:* any
    state that is written to the projection and not derivable from
-   `state/events/*.jsonl` is a fact with no provenance — `smith stats`,
+   `state/events/*.jsonl` is a fact with no provenance — `bs stats`,
    the dashboard and the gate would each be entitled to a different answer,
    and no replay could settle which was right.
 
@@ -1231,7 +1231,7 @@ not in the diff — it is in every verdict the factory issued afterwards.
    `delegation.ts` states the reading every "did two different turns happen?"
    check depends on: two `dispatch_decision` events mean two turns only while
    an agent cannot write a dispatch about itself. A grantee opens its own
-   session first. *Breaks:* `smith tester check` reports a tester's turn that
+   session first. *Breaks:* `bs tester check` reports a tester's turn that
    was really the coder's, and the gate stays green on evidence the graded
    party produced.
 
@@ -1300,7 +1300,7 @@ config entry, not a rewrite of dispatch.
 **The port renders an invocation; it never starts one.** `planWorkerTurn()`
 returns a `WorkerInvocation` — in-process (a `subagent_type` and the template
 it comes from) or cli (argv, cwd, and an env allowlist) — and the caller
-spawns it. This is §18 rule 3 applied to the CLI itself: `smith` observes, and
+spawns it. This is §18 rule 3 applied to the CLI itself: `bs` observes, and
 an observer that could dispatch would read its own output back as evidence
 that a turn happened.
 
@@ -1321,7 +1321,7 @@ tool in hand, and the lease is what stops it from writing; a cli judge with
 revocation cannot improve on. Rule 6's fingerprint-before-and-after still runs
 either way, because a read-only flag is what the harness promises, not what
 this factory has watched happen. An in-process judge does read the worktree —
-under a `smith sandbox open` lease, which the invocation states as
+under a `bs sandbox open` lease, which the invocation states as
 `sandboxRequired` rather than leaving to the playbook to remember. Which
 roles are judges is read from `guardrails.yml` through `policy.ts`, never
 copied: a second list would drift, and the direction it drifts in is a judge
@@ -1337,14 +1337,14 @@ when `--policy` is not given, and `source: 'default'` on the rendered result
 says which one that was; `paths.test.ts` holds the constant and the file to
 each other so neither can go stale alone. An operator who wants a third
 harness, or a different default, writes a policy file anywhere and names it —
-`smith harness list --policy <file>`, the shape `smith stack show` already
+`bs harness list --policy <file>`, the shape `bs stack show` already
 uses — rather than editing this one's prose.
 
-**`smith-run` starts what `smith` only ever describes.** `planWorkerTurn()`
+**`bs-run` starts what `bs` only ever describes.** `planWorkerTurn()`
 renders a `WorkerInvocation` and stops there (§18 rule 3, "nothing that
-observes may dispatch") — `smith` never becomes the thing whose own output it
-would later read back as evidence a turn happened. `smith-run` is a separate
-executable, not a `smith` verb, for exactly that reason: it takes one
+observes may dispatch") — `bs` never becomes the thing whose own output it
+would later read back as evidence a turn happened. `bs-run` is a separate
+executable, not a `bs` verb, for exactly that reason: it takes one
 already-rendered invocation, spawns it, and prints what happened as JSON. It
 opens no event log, no `state/`, no DB — `runInvocation()`, the one function
 in `src/runner.ts` it calls, imports nothing under `src/db/`, `src/events.ts`
@@ -1353,9 +1353,9 @@ invocation is what it starts; an `in-process` one it refuses, because that
 shape is an `Agent`-tool subagent turn with no separate binary to spawn.
 
 ```
-smith harness list
-smith harness plan --role coder --task epic-1/task-3 --prompt-file state/prompts/p.md --worktree ../wt/task-3
-smith-run invocation.json
+bs harness list
+bs harness plan --role coder --task epic-1/task-3 --prompt-file state/prompts/p.md --worktree ../wt/task-3
+bs-run invocation.json
 ```
 
 Env is an allowlist of variable **names**. A rendered invocation is printed as

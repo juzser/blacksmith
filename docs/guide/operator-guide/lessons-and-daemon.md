@@ -23,16 +23,16 @@ does wherever else this repo cites it.
    point (a coder gets claim-path-scoped rules at dispatch; a merger gets
    integration rules at queue time) — never as one global preamble.
 
-Built (Phase 7): `smith dream [--since]` is the "dreaming pass"
+Built (Phase 7): `bs dream [--since]` is the "dreaming pass"
 (`factory/orchestrator/src/lessons.ts`'s `extractDecisionCheckpoints`);
 `checkNovelty()` is the novelty-gate scorer (deterministic word-shingle
 Jaccard similarity, not SAGE's embedding-density check — the "uncertain →
 one LLM merge step" middle tier from step 3 above is a documented future
-upgrade, never built). `smith lessons candidates`/`approve`/`reject`/
+upgrade, never built). `bs lessons candidates`/`approve`/`reject`/
 `compile` are the CLI side of steps 4–5; the Lessons UI page (§10) is the
 operator-facing side of the same review.
 
-Step 5's injection half is `smith lessons for-dispatch <role> [--plan
+Step 5's injection half is `bs lessons for-dispatch <role> [--plan
 plan-vN.json --task <task-id>]` (Phase 9, P9-2): it reads the compiled
 `factory/policies/lessons.md` — approved lessons only, never a candidate —
 filters it to the scopes that role's template declares through its
@@ -69,11 +69,11 @@ re-scopes them or edits one to name a role.
 
 **Raising a lesson by hand.** `dream` only sees four checkpoint shapes (plan
 sign-off, waiver decision, escalation, gate block), so a rule you distilled
-yourself by reading a whole run has no way in through it. Use `smith lessons
-raise` (P9-34) rather than `smith event append`:
+yourself by reading a whole run has no way in through it. Use `bs lessons
+raise` (P9-34) rather than `bs event append`:
 
 ```
-smith lessons raise \
+bs lessons raise \
   --statement "A constraint stated only in a prompt is a request." \
   --lesson-type rule --lesson-scope stack-wide \
   --provenance dogfood-envkit-1#1 --provenance-session dogfood-envkit-1 \
@@ -106,7 +106,7 @@ against the finding's category. That is usually what you want for a broad
 principle — a category paired with `claim_path: **` fires on every finding of
 that category in the repo — but it should be a choice, not a surprise.
 
-After approving, run `smith db apply --session <id>` before
+After approving, run `bs db apply --session <id>` before
 `lessons candidates`/`compile`/`stats lessons`: appending an event does not
 write to SQLite, and those verbs read the projection, so a freshly-approved
 lesson is invisible to them until you do.
@@ -133,7 +133,7 @@ The knob is `lessons.novelty_length_aware` in `factory/policies/scheduler.yml`
 (default `true`); there is no CLI flag, because `--novelty-threshold` already
 sets a one-run bar in the units you are thinking in.
 
-**Approval is the second door, and it is now gated too (P9-34).** `smith
+**Approval is the second door, and it is now gated too (P9-34).** `bs
 lessons approve --statement "..."` rewrites the text on the way into memory, so
 it runs the same novelty gate `raise` runs, against the same corpus, before
 either event is written. A duplicate edit exits 1 with `lessons.edit-not-novel`
@@ -148,7 +148,7 @@ Three things follow from where the check sits:
   on the `lesson-edited` payload as `novelty_override: true` with
   `novelty_score` and `duplicate_of`, so a bypass reads as a decision in the log
   rather than as an absence of one. The exit code stays 1.
-- **Only text going *into* memory is scored.** `smith lessons reject` (and any
+- **Only text going *into* memory is scored.** `bs lessons reject` (and any
   transition to `superseded`) returns `novelty: null` — scoring a statement on
   its way out answers nothing.
 
@@ -176,7 +176,7 @@ knowing before you click:
   You cannot approve a lesson into a different session's history by accident.
 - **A duplicate edit is refused with no override in the UI.** The error names
   the lesson it duplicates and its score. If you genuinely mean to keep the
-  duplicate, do it from the CLI with `smith lessons approve --statement ...
+  duplicate, do it from the CLI with `bs lessons approve --statement ...
   --accept-duplicate` — which records the override on the event. That
   asymmetry is intentional: overriding the memory gate should take a
   deliberate act, not a second click.
@@ -204,7 +204,7 @@ flagged. Note also that the polarity check only runs on a pair that is
 this one: a rule that flatly contradicts an approved one in different words is
 never flagged, because the two are never compared in the first place.
 
-## 10a. `smith kpi same-mistake` — the rate, and whether it could have been anything else
+## 10a. `bs kpi same-mistake` — the rate, and whether it could have been anything else
 
 Architecture §9.7 names one quality target for the whole lessons pipeline: the
 same-mistake rate should be **monotonically decreasing**. The mechanism to
@@ -235,7 +235,7 @@ event log distinguishes none of them:
    dispatch and read by agents — they just can never be a *same mistake*. (An
    `agent-role`/`case-type` entry naming no selector is not injected either;
    `lessons for-dispatch` warns about those separately — see D-129 above.)
-3. **The gate ran without lessons.** `--lessons` on `smith gate run` is
+3. **The gate ran without lessons.** `--lessons` on `bs gate run` is
    optional. A gate holding an empty list decides `same_mistake: false` for
    every finding it sees.
 
@@ -276,7 +276,7 @@ is not a target.
 Only days on which the gate decided at least one finding become windows. A day
 whose every intake carried `decisions: []` goes to `silentDays` and never
 becomes a rate-0 datapoint — the gate saying "I found nothing to decide" is not
-the gate saying "I found things and none repeated" (D-31). `smith stats
+the gate saying "I found things and none repeated" (D-31). `bs stats
 analytics` used to report the second for the first; its `rate` field is now
 `null` on such a day rather than `0`.
 
@@ -292,15 +292,15 @@ count.
 Four of those seven intakes decided nothing at all. Every one of the fourteen
 approved lessons is category-less, so the numerator was pinned at zero by the
 corpus rather than by the factory's conduct — and one calendar day is no trend
-regardless. `smith stats analytics` reports the same session as a clean 0.00%.
+regardless. `bs stats analytics` reports the same session as a clean 0.00%.
 That is the false clean this command exists to refuse.
 
 ### Getting to a readable number
 
 - **Give the file-scoped rules a `finding_category`.** Nothing else moves
-  `reach.escalating` off zero. `smith lessons raise --finding-category` already
+  `reach.escalating` off zero. `bs lessons raise --finding-category` already
   warns when you omit one on a file-scoped rule (§10).
-- **Pass `--lessons` to every `smith gate run`.** From now on the gate records
+- **Pass `--lessons` to every `bs gate run`.** From now on the gate records
   what it held, so a blind run is visible in the log instead of indistinguishable
   from a clean one. Every intake already on disk predates that field and is
   counted as a hole, deliberately.
@@ -318,7 +318,7 @@ That is the false clean this command exists to refuse.
 - A per-session read. An epic spanning sessions needs one call per session
   (§5b); there is no cross-session roll-up.
 
-## 10b. `smith lessons audit` — which entries still earn their place
+## 10b. `bs lessons audit` — which entries still earn their place
 
 `kpi same-mistake` above reads the corpus as one number. This verb reads it
 entry by entry, and it exists because a lessons file only ever grows: every
@@ -397,27 +397,27 @@ a bug the audit found in itself — it is the state of the corpus, and it is why
 `status` is `unverifiable` rather than `clean`: a corpus that cannot fire is
 not a corpus that is working.
 
-The fix is upstream, in what `smith dream` and the scribe write: a checkpoint
+The fix is upstream, in what `bs dream` and the scribe write: a checkpoint
 distilled without a `finding_category` compiles to an entry the severity gate
 can never reach. Until those entries carry one, `kpi same-mistake` above is
 reading a number the corpus could not have moved.
 
-## 11. `smith daemon` — the same folds, without an open session
+## 11. `bs daemon` — the same folds, without an open session
 
 Everything above is a command you run. Most of them answer a question that has
 a shelf life: is the epic over its cap, did an agent that was dispatched ever
 come back, is a recheck due. Asking them means being at the terminal.
 
 ```bash
-smith daemon start                  # detached, logs to state/daemon/daemon.log
-smith daemon status                 # exit 1 unless one is watching and current
-smith daemon stop
-smith daemon run                    # the same loop in the foreground: one report line per tick
-smith daemon run --once             # one tick in the foreground, for cron
+bs daemon start                     # detached, logs to state/daemon/daemon.log
+bs daemon status                    # exit 1 unless one is watching and current
+bs daemon stop
+bs daemon run                       # the same loop in the foreground: one report line per tick
+bs daemon run --once                # one tick in the foreground, for cron
 ```
 
-A tick reads the event log, runs the same folds `smith budget alarm` (§9a) and
-`smith scheduler run --dry` run plus the live-agent fold behind `/bs status`,
+A tick reads the event log, runs the same folds `bs budget alarm` (§9a) and
+`bs scheduler run --dry` run plus the live-agent fold behind `/bs status`,
 refreshes the SQLite read-model the dashboard serves, writes the result to
 `state/daemon/status.json`, and prints it — one line per tick, on the stdout
 that `start` redirects into `daemon.log`, so `tail -f` on that file shows
@@ -450,7 +450,7 @@ log it only ever reads. It cannot merge, cannot touch a worktree, and cannot
 spend a token.
 
 Findings a scheduler proposal stands behind also carry the `admission` that
-`smith scheduler admit` renders, and the report counts them as `autoAdmitted`
+`bs scheduler admit` renders, and the report counts them as `autoAdmitted`
 and `operatorHeld`. That is the split a morning triage actually turns on: how
 much of the list a `/bs report` wave drains on its own, and how much of it is
 yours whatever you do. `auto` remains a statement about policy — the daemon

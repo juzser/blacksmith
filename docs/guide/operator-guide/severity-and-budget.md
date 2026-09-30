@@ -16,14 +16,14 @@ does wherever else this repo cites it.
 Waiver batching:
 
 ```bash
-smith waivers pending epic-1 --session <session-id>
+bs waivers pending epic-1 --session <session-id>
 ```
 
 Returns every S3/S4 finding for the epic that has **no** waiver decision
 yet — a finding already granted or denied never resurfaces. Answer with:
 
 ```bash
-smith waivers apply decisions.json --session <session-id> --plan-version 1 --causal-parent <event-id> --actor operator
+bs waivers apply decisions.json --session <session-id> --plan-version 1 --causal-parent <event-id> --actor operator
 ```
 
 `--actor` is not decoration. The Timeline page's **Decisions** toggle shows a
@@ -67,7 +67,7 @@ quality KPI: same-mistake rate should trend to zero.
   (11.2M at medium): the planner must re-plan
   remaining work to fit, or ask you. Epics that can't fit are split into
   multiple epics at spec time — the cap is never silently extended. Checked
-  by `smith budget alarm` (§9a); until 2026-08-10 nothing checked it at all.
+  by `bs budget alarm` (§9a); until 2026-08-10 nothing checked it at all.
 - **Per-task caps (coder), medium tier: 220,000 tokens, ≤700 changed diff
   lines** (excluding lockfiles/generated files); half at small, double at
   huge. Every other priced role (tester, planner, researcher, the four judges,
@@ -88,15 +88,15 @@ quality KPI: same-mistake rate should trend to zero.
      logged.
   3. 3 failed rounds → escalate to you.
 
-  Asserted against the log by `smith escalation check` (§2c) — the rungs
+  Asserted against the log by `bs escalation check` (§2c) — the rungs
   carry a machine-readable `failed_rounds`/`enforce` half beside this prose.
 
 (`factory/policies/budgets.yml`)
 
 **Per-box overrides.** Each number above can be replaced on one machine without
-editing `budgets.yml`: `SMITH_EPIC_CAP_TOKENS`, `SMITH_EPIC_ALARM_RATIO`,
-`SMITH_EPIC_MAX_IN_FLIGHT_TASKS`, `SMITH_TASK_CODER_CAP_TOKENS`,
-`SMITH_TASK_CODER_CAP_DIFF_LINES` and one `SMITH_TASK_<ROLE>_CAP_TOKENS` per
+editing `budgets.yml`: `BS_EPIC_CAP_TOKENS`, `BS_EPIC_ALARM_RATIO`,
+`BS_EPIC_MAX_IN_FLIGHT_TASKS`, `BS_TASK_CODER_CAP_TOKENS`,
+`BS_TASK_CODER_CAP_DIFF_LINES` and one `BS_TASK_<ROLE>_CAP_TOKENS` per
 priced role, set in `.env` or exported (an exported value beats `.env`). Each
 name also comes with `_SMALL`, `_MEDIUM` and `_HUGE` variants. Highest first:
 the tier's suffixed name, then the bare name (which pins every tier), then
@@ -105,12 +105,12 @@ empty and every tier variant commented out at its `budgets.yml` default. This is
 per box, not per epic: while set, it applies to every epic that box runs. Every
 verb reads the policy through one loader, so an override reaches all of them.
 Integers must be positive and the ratio must lie in (0, 1]; anything else stops
-the verb with `budgets.invalid-env`, naming the variable. `smith budget alarm`
-and `smith wave check` add `budgetEnvOverrides` — the names, never the values,
+the verb with `budgets.invalid-env`, naming the variable. `bs budget alarm`
+and `bs wave check` add `budgetEnvOverrides` — the names, never the values,
 of the knobs whose value differs from `budgets.yml` — so a report never passes
 off a box's number as the committed one.
 
-## 9a. `smith budget alarm` — the alarm, counted instead of remembered
+## 9a. `bs budget alarm` — the alarm, counted instead of remembered
 
 `epic.alarm_ratio` sat in `budgets.yml` from Phase 1 with no reader. It parsed
 into `BudgetPolicy`, a unit test asserted it, and no production path ever
@@ -188,7 +188,7 @@ what was spent buys back the "ceiling" by giving up the budget.
 On the `envkit-config-loader` dogfood epic, the plan's declared task budgets
 summed to 545,000 against a 2,000,000 cap — 27%, comfortably under the 1.4M
 alarm — while the run's real projection was over 1,150,000 and its true cost
-higher still. `smith plan quorum`'s budget trigger sums *declared* budgets, so
+higher still. `bs plan quorum`'s budget trigger sums *declared* budgets, so
 the one automated check meant to catch "this plan is too expensive" measures the
 smaller half of the bill. `at-risk` is the status for exactly that shape: the
 visible half reads clear while the whole bill does not.
@@ -209,7 +209,7 @@ and exited 0. That is the false clean this command exists to refuse.
 
 ### Limits, stated plainly
 
-- It reads the log; it does not stop anything. `smith daemon` re-runs the same
+- It reads the log; it does not stop anything. `bs daemon` re-runs the same
   fold on an interval so an alarm reaches you without an open session
   ([`../runbooks/ops.md`](../../runbooks/ops.md)), but it does not dispatch and so
   cannot refuse the next wave either — acting on `alarm` is still your call.

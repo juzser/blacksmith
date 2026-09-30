@@ -11,8 +11,8 @@ does wherever else this repo cites it.
   operator runs `/bs new|plan|run|status|ui|waivers|lessons|report` in a
   Claude Code session inside this repo, and that session follows the skill's
   playbooks: it dispatches planner/coder/tester/reviewer/etc. sessions from
-  `.claude/agents/` itself and drives them through the real `smith` commands
-  in sequence. Phase 10 adds `smith daemon`
+  `.claude/agents/` itself and drives them through the real `bs` commands
+  in sequence. Phase 10 adds `bs daemon`
   ([`../runbooks/ops.md`](../../runbooks/ops.md)): a standalone background
   process that folds the event log on an interval and reports budget alarms,
   agents that never came back, and rechecks and cadences that are due, so
@@ -29,10 +29,10 @@ does wherever else this repo cites it.
   is not a line the watcher is allowed to cross on its own.
 - **Nothing runs the integration-root check for you, and it is the only
   check that sees the assembled branch.** Every automatic gate runs inside a
-  task worktree (§7a). `smith integration check` is operator-invoked, and it
-  needs the project already checked out on `smith/<epic>/integration` — it
+  task worktree (§7a). `bs integration check` is operator-invoked, and it
+  needs the project already checked out on `bs/<epic>/integration` — it
   refuses to move or clean your working tree. Skipping it no longer buys you
-  a green epic, though: `smith epic verdict` holds without a current passing
+  a green epic, though: `bs epic verdict` holds without a current passing
   record (D-42/P9-26).
 - **A spec finding needs a judge dispatched to find it, and the closing spec
   review is operator-invoked.** `--scope spec`, `plan amend` and `epic
@@ -40,17 +40,17 @@ does wherever else this repo cites it.
   nothing decides on its own that a criterion is wrong — a spec-reviewer
   session has to be dispatched and its evidence handed to the CLI. As with the
   integration-root check, skipping the closing review no longer buys a green
-  epic: `smith epic verdict` holds an epic that has none, or whose review read
+  epic: `bs epic verdict` holds an epic that has none, or whose review read
   an older head (D-33/P9-9).
-- **The scheduler proposes, it never dispatches.** `smith scheduler run
+- **The scheduler proposes, it never dispatches.** `bs scheduler run
   [--dry]` (architecture §12) emits `recheck-proposed`/
   `maintenance-proposed`/`growth-review-due` events on a deterministic
   pass over the event log — turning a proposal into a real dispatch is
   still a `/bs plan`/`/bs run` the operator (or their session) initiates.
-- **`smith scheduler admit` says who may say yes, and still says only
+- **`bs scheduler admit` says who may say yes, and still says only
   that.** It re-reads the same proposals and classifies each `auto` or
   `operator` against `scheduler.yml`'s `autonomy:` block, appending no
-  event and starting no agent. `smith daemon` reports the same verdict per
+  event and starting no agent. `bs daemon` reports the same verdict per
   finding (§11), which is reporting and not a second answer: both call
   `autonomy.ts`, so the unattended surface cannot drift from the one you type. An `auto` classification removes the
   operator's *tick*, not the gates: the work still goes through `/bs run`'s
@@ -62,14 +62,14 @@ does wherever else this repo cites it.
   whitelist says — the claims are folded out of the event log, so a recheck
   that names only an opaque task id is still matched on what it touches.
 - **The lessons loop's "distillation" step is a manual dispatch.**
-  `smith dream [--since]` extracts decision checkpoints into raw candidate
+  `bs dream [--since]` extracts decision checkpoints into raw candidate
   events tagged `needs_distillation: true`; turning one into a checkable,
   principle-level statement means dispatching a `scribe` session by hand
   today (`/bs lessons`'s playbook), not an automatic pass.
 - **Cross-provider judges gate only on a box where both vendors resolve, and
   two of the four triggers only fire when you run a command.** Phase 8 ships
   both transports (Codex via `codex exec`, DeepSeek via its
-  OpenAI-compatible API), the quorum engine, `smith judge run`, and `smith
+  OpenAI-compatible API), the quorum engine, `bs judge run`, and `bs
   stats providers`. `crosscheck.yml` ships
   `codex: enabled: auto, mode: active` and
   `deepseek: enabled: auto, mode: active`, so a box holding the binary and
@@ -82,13 +82,13 @@ does wherever else this repo cites it.
   being decided, which is what `accept_non_gating_actives` buys and all it
   buys. Widening past that — the quorum rule itself, or the independent
   finder — is an operator decision, not a default
-  (`docs/runbooks/providers.md`). `smith judge preflight` checks, without
+  (`docs/runbooks/providers.md`). `bs judge preflight` checks, without
   spending a call, that a provider you switched on can be reached at all.
   All four `quorum_triggers` now have a
   host, but only two are automatic: an S1/S2 finding before it blocks and a
   same-mistake finding, both from `gate.ts`'s `intakeAndDecide()`. The other
-  two are operator-invoked — `smith epic verdict` (`epic.ts`) before an
-  integration PR opens, and `smith plan quorum` (`planQuorum.ts`) on a
+  two are operator-invoked — `bs epic verdict` (`epic.ts`) before an
+  integration PR opens, and `bs plan quorum` (`planQuorum.ts`) on a
   plan — and **nothing runs them for you**; skip the command and that epic
   or plan simply was not cross-checked.
 - **The independent finder stays off even after you enable a provider.**
@@ -98,5 +98,5 @@ does wherever else this repo cites it.
   because it is the one call that would send the diff rather than a claim, and
   `send_diff: false` is a second lock on the same door. Turning it on is two
   edits and a decision about which vendor sees this repository's source; until
-  you make it, `smith crossfind run` refuses and no diff leaves the machine
+  you make it, `bs crossfind run` refuses and no diff leaves the machine
   (§7d).

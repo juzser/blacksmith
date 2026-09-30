@@ -44,7 +44,7 @@ prompt declares under the factory's `state/audit/`, which lives outside the
 worktree and outside the audited project.
 
 This is checked, not trusted: the dispatcher fingerprints the worktree before
-you start and re-checks it after you return (`smith worktree verify`). A tree
+you start and re-checks it after you return (`bs worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the axis on a clean worktree, so the
 one-line edit does not save a round-trip, it costs the whole one.
@@ -106,7 +106,7 @@ the suite, a timing, a query plan, a bundle size — and say which it was.
 
 ## Output contract
 
-You return **evidence**, not findings. `smith audit record` fingerprints each
+You return **evidence**, not findings. `bs audit record` fingerprints each
 item, folds it against what earlier audits already raised, and gives it a
 status. What you write is the input to that, not the result.
 
@@ -133,7 +133,7 @@ exactly these five keys:
   Outside 0..1 is `audit.confidence-out-of-range`.
 
 **Never set `fingerprint`, `status`, `axis`, `audit_id`, `ts`, `epic` or
-`same_as`.** The store mints all of them and `smith audit record` refuses the
+`same_as`.** The store mints all of them and `bs audit record` refuses the
 whole file as `audit.evidence-carries-identity` if one is present — the axis
 is already known from the prompt that dispatched you, and the fingerprint is
 what deduplicates your item against the same finding from the last audit.

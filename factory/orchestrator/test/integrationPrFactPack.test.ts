@@ -51,7 +51,7 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
 
   it('computes each fact with a real command', () => {
     // one pass over the log: grants, denials, merges, the close, the resolve
-    expect(prose).toMatch(/smith event tail \S+ --lineage --n \S+/);
+    expect(prose).toMatch(/bs event tail \S+ --lineage --n \S+/);
     for (const type of [
       'waiver-granted',
       'waiver-denied',
@@ -63,12 +63,12 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
       expect(prose).toContain(type);
     }
     // the fingerprint map: the epic's findings, unfiltered
-    expect(prose).toMatch(/smith findings list --session \S+ --epic \S+/);
+    expect(prose).toMatch(/bs findings list --session \S+ --epic \S+/);
     // the goal, with the roadmap flag for a roadmap outside this repo
-    expect(prose).toMatch(/smith epic goal --epic \S+/);
+    expect(prose).toMatch(/bs epic goal --epic \S+/);
     expect(prose).toContain('--roadmap-path');
     // the branch itself
-    expect(prose).toMatch(/git log --oneline \S+\.\.smith\/<epic>\/integration/);
+    expect(prose).toMatch(/git log --oneline \S+\.\.bs\/<epic>\/integration/);
     expect(prose).toMatch(/git diff --shortstat/);
   });
 
@@ -80,7 +80,7 @@ describe('run.md step 17 hands the scribe a fact pack (#252)', () => {
 
   it('reads no SQLite projection', () => {
     // stats kanban / stats timeline read a projection that can be stale.
-    expect(prose).not.toMatch(/smith stats (kanban|timeline)/);
+    expect(prose).not.toMatch(/(?:bs|smith) stats (kanban|timeline)/);
     expect(prose).toMatch(/summary\.tasks/);
   });
 

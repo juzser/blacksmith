@@ -12,10 +12,10 @@ pnpm run build   # tsc -> factory/orchestrator/dist/
 ```
 
 Every example uses `node factory/orchestrator/dist/cli.js <namespace> <action>
-...`. If you've linked the package (`pnpm link`), substitute `smith` for
+...`. If you've linked the package (`pnpm link`), substitute `bs` for
 `node factory/orchestrator/dist/cli.js`.
 
-## 0a. `smith effort show` — how much judgment this epic buys
+## 0a. `bs effort show` — how much judgment this epic buys
 
 Effort is a per-**epic** tier, not a per-project setting: the same repo runs a
 `small` internal-tool epic and a `huge` one. It is chosen at `/bs plan` time,
@@ -25,8 +25,8 @@ computes which one applies and what it buys, so nobody has to remember the
 table:
 
 ```bash
-smith effort show --effort small            # before a plan file exists
-smith effort show --plan factory/specs/active/epic-1/plan-v1.json
+bs effort show --effort small               # before a plan file exists
+bs effort show --plan factory/specs/active/epic-1/plan-v1.json
 ```
 
 ```json
@@ -39,7 +39,7 @@ smith effort show --plan factory/specs/active/epic-1/plan-v1.json
   "specReviewRounds":"single-pass","planQuorum":"when-triggered",
   "graderRounds":1,"verifierSeverities":["S1-stop-the-line"],
   "verifierS3SpotCheckRatio":0,"closingSpecReview":"when-plan-amended"},
- "invariants":["the gate pipeline — schema check, grader verdict, tests, coverage evidence, findings intake, severity decision (`smith gate run`)", "…7 more"]}
+ "invariants":["the gate pipeline — schema check, grader verdict, tests, coverage evidence, findings intake, severity decision (`bs gate run`)", "…7 more"]}
 ```
 
 **Exit code is 0 whenever the command can answer** — a tier is a plan for the
@@ -91,18 +91,18 @@ chose: `flag` (a `--effort` that beats the plan file), `plan`, or `default`
 (nobody chose, and `defaultTier` applies). `--policy` and `--crosscheck` point
 at alternate policy files for a what-if.
 
-## 0b. `smith new` — the project the factory builds in
+## 0b. `bs new` — the project the factory builds in
 
 The factory does not build inside itself. Everything from §1 on assumes a
 **target project** that already exists somewhere else on disk, with its own git
 history and its own gates. This is the one-time step that creates it.
 
-Your stack answers come first, because `smith new` reads them rather than
+Your stack answers come first, because `bs new` reads them rather than
 asking:
 
 ```bash
-smith stack show    # what factory/policies/stack.yml currently answers
-smith stack check   # which of those answers the shipped templates honour
+bs stack show       # what factory/policies/stack.yml currently answers
+bs stack check      # which of those answers the shipped templates honour
 ```
 
 ```json
@@ -117,12 +117,12 @@ smith stack check   # which of those answers the shipped templates honour
 twice. Those answers reach the agents — the planner and the coder are told
 what you build with — but nothing in `factory/scaffold/` implements them, so
 the scaffold will not contain them. A `refused` answer is different: it makes
-`smith new` exit **1 before creating anything**, and `ok` goes false. That is
+`bs new` exit **1 before creating anything**, and `ok` goes false. That is
 the whole point — `frontend: react` does not get you the Vue frontend the
 templates do ship.
 
 ```bash
-smith new my-app --target-dir ~/code/my-app     # --ui adds the frontend
+bs new my-app --target-dir ~/code/my-app        # --ui adds the frontend
 ```
 
 ```json
@@ -165,7 +165,7 @@ brand-new repository is an operator action — `guardrails.md` forbids an agent
 session from doing either, and `/bs new` prints them for you to run rather
 than running them.
 
-The MCP surface is **not** part of this step. `smith mcp init <project>` layers
+The MCP surface is **not** part of this step. `bs mcp init <project>` layers
 it on later, at the mandatory `<project> — mcp surface` milestone, once the
 tools worth exposing are known; running it on day one would produce a manifest
 declaring nothing, which is the rubber stamp the standard exists to prevent
@@ -175,7 +175,7 @@ What ships out of the factory carries no trace of it: no dependency on this
 repo, no Blacksmith-shaped config, no docs about the loop that built it — one
 `Built by Blacksmith` line in the project's README, and that is all.
 
-## 1. Plan JSON → `smith plan validate`
+## 1. Plan JSON → `bs plan validate`
 
 A plan file is one **immutable plan version** for an epic: `epic_id`,
 `version`, `status`, an array of `tasks` (each a full
@@ -184,7 +184,7 @@ A plan file is one **immutable plan version** for an epic: `epic_id`,
 `task_status`), and `edges`.
 
 ```bash
-smith plan validate factory/specs/active/epic-1/plan-v1.json
+bs plan validate factory/specs/active/epic-1/plan-v1.json
 ```
 
 ```json
@@ -197,6 +197,6 @@ validation returns the AJV error list under `errors` (same pattern
 `wave check`, `gate run`, etc. use throughout — the CLI's convention is
 "structured JSON out, exit code carries pass/fail").
 
-`smith plan diff <v1.json> <v2.json>` renders the diff between two plan
+`bs plan diff <v1.json> <v2.json>` renders the diff between two plan
 versions — the re-planning decision itself, reviewable in the timeline
 (architecture §12).

@@ -13,7 +13,7 @@ Two inside a Claude Code session:
 /plugin install blacksmith@blacksmith
 ```
 
-Then `smith init` in the project you want it to work on, and you have `/bs`.
+Then `bs init` in the project you want it to work on, and you have `/bs`.
 Both halves are required and they are different things —
 [Which install](#which-install) says why.
 
@@ -103,33 +103,37 @@ check `pnpm install`'s output rather than assuming this repo still needs none.
 | | **The install — package + plugin** | **A clone** |
 |---|---|---|
 | Command | the block at the top of this file | Part 2 below |
-| You get | the `smith` CLI and `/bs`, in whichever project you run `smith init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
+| You get | the `bs` CLI and `/bs`, in whichever project you run `bs init` in | the whole factory: CLI, `/bs`, dashboard, its own tests and gates |
 | State lives in | `.blacksmith/` in your project | the checkout itself |
 | Upgrading | `npm i -g @juzser/blacksmith@latest`, then `claude plugin marketplace update blacksmith` | `git pull` |
-| Not included | the dashboard (`smith ui serve`), `scripts/check.sh`, the repo's own suite | — |
+| Not included | the dashboard (`bs ui serve`), `scripts/check.sh`, the repo's own suite | — |
 
 Take the install unless you are hacking on Blacksmith itself.
 
-### The install — `smith` and `/bs`
+### The install — `bs` and `/bs`
 
-Two halves, and you need both. The package is the deterministic `smith` CLI
+Two halves, and you need both. The package is the deterministic `bs` CLI
 every playbook calls. The plugin is `/bs` and the fourteen agent roles it
 dispatches — a router and ten playbooks under `.claude/skills/bs/` that a
-session reads and follows. `smith` alone never gives you `/bs`: Claude Code
+session reads and follows. `bs` alone never gives you `/bs`: Claude Code
 loads skills from a project's `.claude/`, from `~/.claude/`, or from a plugin,
 never from `node_modules`, which is where an install puts the tarball's copy.
-And a `/bs` with no `smith` on PATH can run nothing.
+And a `/bs` with no `bs` on PATH can run nothing.
+
+The command used to be `smith`. `smith` and `smith-run` still work as
+deprecated aliases of `bs` and `bs-run`, each printing one notice to stderr,
+and will be removed in a future release.
 
 **Take `latest`** — `0.4.0`. `0.1.1` was the first release that knew it is a
 package.
-`0.1.0` has no `smith init`, ships no roadmap for `smith new` to read, and
+`0.1.0` has no `bs init`, ships no roadmap for `bs new` to read, and
 keeps state inside its own install directory, which the next `npm install`
 replaces.
 
 ```bash
 npm i -g @juzser/blacksmith
 cd /path/to/your-project
-smith init
+bs init
 ```
 
 ```
@@ -206,7 +210,7 @@ live inside the checkout — `factory/orchestrator/src/paths.ts` resolves both
 relative to the repo root — while the projects it builds land *beside* the
 clone, with their worktrees beside them. So put the clone somewhere you're
 happy to keep it, in a directory you're happy to see projects appear in.
-`smith init` has nothing to do here and says so: in a clone the work root and
+`bs init` has nothing to do here and says so: in a clone the work root and
 the package are one directory, which is what makes the two installs one
 codebase.
 
@@ -281,7 +285,7 @@ support policy:
   guard hook is wired into Claude Code as
   `$CLAUDE_PROJECT_DIR/.claude/hooks/guard.sh` (`.claude/settings.json`) —
   with no bash on `PATH` the safety hook cannot run at all. The *rules* are no
-  longer the blocker: they moved into TypeScript behind `smith policy hook`,
+  longer the blocker: they moved into TypeScript behind `bs policy hook`,
   and what is left in bash is a short transport shim. Porting it is the
   smallest of these three problems, but it is not done.
 - The test gate spawns each check `detached: true` and kills the whole **POSIX
@@ -332,7 +336,7 @@ pnpm run build                          # tsc -> factory/orchestrator/dist/
 node factory/orchestrator/dist/cli.js --help
 ```
 
-**Expect:** the `smith` usage banner listing the command namespaces.
+**Expect:** the `bs` usage banner listing the command namespaces.
 
 Until this step has run there is no policy layer for `.claude/hooks/guard.sh`
 to consult, so it escalates every `Bash` call to you for approval rather than
@@ -368,7 +372,7 @@ mean PyYAML was not found. Neither is a passing install.
 ### Step 5 — The stack interview
 
 Blacksmith has to know what this operator builds with — the planner grounds
-task specs in it, the coder writes against it, and `smith new` scaffolds from
+task specs in it, the coder writes against it, and `bs new` scaffolds from
 it. It ships the answers that assume least: a TypeScript library, no
 frontend, no database, no design system. This step replaces them with real
 ones.
@@ -408,19 +412,19 @@ node factory/orchestrator/dist/cli.js stack check
 
 There are three verdicts, and only one of them is a problem:
 
-- **`honoured`** — `factory/scaffold/` builds it. `smith new` produces it.
+- **`honoured`** — `factory/scaffold/` builds it. `bs new` produces it.
 - **`recorded`** — nothing in the scaffold reads this answer; the agents do.
   `database: postgres` does not make the scaffolder write migrations, it makes
   the planner and the coder know what they are writing against. Green on
   purpose: an operator whose stack is wider than the template tree has not
   misconfigured anything, and a check that went red for them is a check they
   would learn to ignore.
-- **`refused`** — `smith new` will stop rather than scaffold something else,
+- **`refused`** — `bs new` will stop rather than scaffold something else,
   and `stack check` exits 1. Either change the answer or accept that this kind
   of project gets scaffolded by hand.
 
 That refusal is the point of running the interview at all. Answer
-`frontend: react` and `smith new --ui` stops, naming the answer and the file;
+`frontend: react` and `bs new --ui` stops, naming the answer and the file;
 it does not quietly hand over the Vue project the templates happen to ship and
 let you discover the substitution afterwards.
 
@@ -442,36 +446,39 @@ claude --version
 Without it, the CLI and the gate still work — you simply cannot dispatch the
 agents that do the work.
 
-### Step 7 — Link the `smith` command *(optional)*
+### Step 7 — Link the `bs` command *(optional)*
 
 ```bash
 pnpm link --global     # or a global install
 ```
 
 Turns `node factory/orchestrator/dist/cli.js plan validate ...` into
-`smith plan validate ...`. Every example in the docs works either way. This
+`bs plan validate ...`. Every example in the docs works either way. This
 one writes outside the clone, so an agent must ask first.
 
 The registry package is the other route to the same command: `npm i -g
 @juzser/blacksmith` (or `npx @juzser/blacksmith` for one call) gives you
-`smith` with no clone at all. It is the CLI, what it reads and the `/bs`
+`bs` with no clone at all. It is the CLI, what it reads and the `/bs`
 playbooks, not the dashboard or the docs — README "From npm" says exactly
 where that line falls — and an agent running this file must ask before that
 install too.
 
-Installed that way, `smith` writes under `.blacksmith/` in the directory you
+Installed that way, `bs` writes under `.blacksmith/` in the directory you
 run it from rather than into its own package directory, which the next
 `npm i -g` would replace wholesale. That covers `state/`,
 `factory/specs/active/` and the `.env` Part 3 tells you to write. Set
-`SMITH_HOME` to point all of it somewhere fixed instead:
+`BS_HOME` to point all of it somewhere fixed instead:
 
 ```bash
-export SMITH_HOME=~/.blacksmith      # one home for several projects
+export BS_HOME=~/.blacksmith         # one home for several projects
 ```
 
 A clone ignores the question: it keeps writing into itself, as it always has,
-unless `SMITH_HOME` says otherwise. The layout under the root is the same
+unless `BS_HOME` says otherwise. The layout under the root is the same
 either way, so every `state/...` path in these docs stays true.
+
+Every `BS_*` variable in these docs was `SMITH_*` before the rename, and the
+old name still works as a fallback: `BS_<X>` wins when both are set.
 
 ---
 
@@ -522,7 +529,7 @@ decision an operator makes once, not a per-box switch.
   map, the highest-precedence of the three config sources. Full mechanism
   and precedence: `docs/runbooks/providers.md` §9.
 - **Then check it before a gate does.**
-  `smith judge preflight [--project <dir>]` reports, without spending a
+  `bs judge preflight [--project <dir>]` reports, without spending a
   call, whether each enabled provider — a substituted or OpenRouter-only one
   included — can be reached from here: the key's variable name, never its
   value, whether the CLI is on PATH, and (with `--project`) whether the
@@ -536,7 +543,7 @@ decision an operator makes once, not a per-box switch.
   resolves off, no external judge is ever called, no spend, no transport
   failures, the gate runs on the native verdict alone. To force that for one
   command on a box where a provider *is* switched on, pass
-  `SMITH_CROSSCHECK_OFFLINE=1`.
+  `BS_CROSSCHECK_OFFLINE=1`.
 
 The full procedure — setup, shadow-mode calibration, promotion, rollback,
 OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
@@ -545,7 +552,7 @@ OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ## Part 4 — Verify the install
 
-For the package and the plugin, two commands answer it: `smith --help` lists
+For the package and the plugin, two commands answer it: `bs --help` lists
 every command and namespace, and `claude plugin details blacksmith` reports
 `Skills (1)` and `Agents (14)`. If both do, you are installed; the rest of
 this part is the clone's.
@@ -567,7 +574,7 @@ policy/schema half needs it), and `CI=true` turns the "pnpm not on `PATH`"
 half must not report green. A second job installs Chromium and runs
 `pnpm test:e2e`, uploading the screenshots as a build artifact.
 
-Then take the CLI for a walk. `smith --help` lists every command and
+Then take the CLI for a walk. `bs --help` lists every command and
 namespace; [`docs/guide/operator-loop.md`](docs/guide/operator-loop.md) is the
 short version of what you actually do, and
 [`docs/guide/operator-guide.md`](docs/guide/operator-guide.md) is the deep

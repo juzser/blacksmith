@@ -60,8 +60,8 @@
   `{criterion_ref, assumption, evidence, changes, sites, blocking}`, schema at
   `factory/specs/schema/spec-change-request.schema.json` — rather than coding
   to its own reading of what the spec meant. The dispatcher records it with
-  `smith plan propose`; that writes no plan version, and the operator's
-  `smith plan approve` is what cuts one. This is rung three of the escalation
+  `bs plan propose`; that writes no plan version, and the operator's
+  `bs plan approve` is what cuts one. This is rung three of the escalation
   ladder made reachable from inside a task: without it a wrong criterion has
   only two outcomes, a worker quietly widening it or a coder bounced a defect
   it has nothing to fix (D-33).
@@ -146,7 +146,7 @@ them. A bare `"S2"` is not a taxonomy value and is rejected at mint time
 
 Set in the frontmatter of every `.claude/agents/*.md`. `model:` names the
 Claude Code model; the *tier* is what the escalation ladder, `harness.yml`
-and `smith harness plan` speak (taxonomy.yml `model_tier`: opus → frontier,
+and `bs harness plan` speak (taxonomy.yml `model_tier`: opus → frontier,
 sonnet → mid, haiku → small, derived from `model:` — never a second key).
 Recorded from the roster verification interview (`agent-interviews.md` M-1 →
 M-3).
@@ -179,8 +179,8 @@ M-3).
   higher figure. Read-only judges sit at 15, the planner at 40, the coder
   at 100, the tester at 30, the wave-runner at 60 — raise the template, not
   the prompt, when a role keeps being cut short. To raise it on one box only,
-  set `SMITH_MAXTURNS_<ROLE>` (`.env.example` lists one per role) and run
-  `smith agents sync`: it rewrites the template's `maxTurns:` line in place,
+  set `BS_MAXTURNS_<ROLE>` (`.env.example` lists one per role) and run
+  `bs agents sync`: it rewrites the template's `maxTurns:` line in place,
   a local edit left uncommitted by design, and `--reset` puts back the value
   committed at git HEAD. Still per role, never per task.
 
@@ -198,20 +198,20 @@ M-3).
 - **Nesting is no longer blocked by the event log** (P9-7, 2026-08-08). A
   `session-start` may name a `causal_parent` in *another* session's log, so
   "session A's decision at event X spawned this one" is expressible and reads
-  back — `smith event lineage <session-id>` prints the chain root-first and
-  `smith event tail <session-id> --lineage` tails the epic rather than the
+  back — `bs event lineage <session-id>` prints the chain root-first and
+  `bs event tail <session-id> --lineage` tails the epic rather than the
   newest session. A cross-session parent on any other event type is still
   `events.cross-session-parent-not-root`, so each session keeps exactly one
   entry edge and the log stays a tree of sessions rather than a graph.
 - **A grantee must open its own session before it dispatches** (D13 step 3,
   2026-09-03). That is what reconciles a grant with the first rule: a
-  dispatched agent that runs `smith session start <id> --continues <the
+  dispatched agent that runs `bs session start <id> --continues <the
   dispatch event id>` *is* a dispatching node with a log of its own, and its
   dispatches chain back to the epic that admitted it rather than crowding
-  into the epic's own log under someone else's name. `smith delegation check
+  into the epic's own log under someone else's name. `bs delegation check
   <session-id>` asserts it lineage-wide and is fail-closed: a grantee that
   has not opened its log yet reads `unverifiable`, not `ok`.
-- **A grant may not hand a role its own judge.** `smith delegation check`
+- **A grant may not hand a role its own judge.** `bs delegation check`
   refuses a grant that lets a role dispatch itself, its auditor from
   `crosscheck.yml` `role_isolation.pairs`, or its critic from
   `asymmetric_roles.pairs`. Without that, widening one list would silently

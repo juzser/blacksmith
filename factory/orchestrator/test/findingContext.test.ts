@@ -470,7 +470,7 @@ describe('the dispatch contract actually asks for this block', () => {
 
   it('names the verb an orchestrator has to run before a worktree dispatch', () => {
     expect(contract).not.toBe('');
-    expect(contract).toContain('smith findings for-dispatch');
+    expect(contract).toContain('bs findings for-dispatch');
   });
 
   it('spells out both delimiters, so a spliced block can be found and replaced', () => {

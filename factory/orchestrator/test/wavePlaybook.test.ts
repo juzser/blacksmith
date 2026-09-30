@@ -4,10 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { REPO_ROOT } from '../src/paths.js';
 import { WAVE_VERDICTS } from '../src/waveConcurrency.js';
 
-// wave.md must instruct the wave to audit its own parallelism (`smith wave
+// wave.md must instruct the wave to audit its own parallelism (`bs wave
 // audit --session ... --epic ...`) at two call points -- once at the end of
 // step 4's coder fan-out, before step 5's tester dispatch, and again before
-// merge-queue admission (`smith queue run`) -- and name every WAVE_VERDICTS
+// merge-queue admission (`bs queue run`) -- and name every WAVE_VERDICTS
 // outcome somewhere in that instruction so a reader knows what the audit can
 // come back saying.
 
@@ -23,38 +23,38 @@ function stepsSection(text: string): string {
 }
 
 /**
- * Match `smith wave audit` across a line break or inside a fenced code
+ * Match `bs wave audit` across a line break or inside a fenced code
  * block, carrying both `--session` and `--epic` somewhere after it on the
  * same logical invocation (allowing wrapped lines and other flags between).
  * Whitespace between words (including a newline) collapses to \s+.
  */
 const WAVE_AUDIT_INVOCATION =
-  /smith\s+wave\s+audit\b(?:[^\n]|\n(?!\n))*?--session\b(?:[^\n]|\n(?!\n))*?--epic\b|smith\s+wave\s+audit\b(?:[^\n]|\n(?!\n))*?--epic\b(?:[^\n]|\n(?!\n))*?--session\b/g;
+  /bs\s+wave\s+audit\b(?:[^\n]|\n(?!\n))*?--session\b(?:[^\n]|\n(?!\n))*?--epic\b|bs\s+wave\s+audit\b(?:[^\n]|\n(?!\n))*?--epic\b(?:[^\n]|\n(?!\n))*?--session\b/g;
 
 describe('wave.md instructs the wave to audit its own parallelism', () => {
   const fullText = readFileSync(WAVE_MD_PATH, 'utf8');
   const steps = stepsSection(fullText);
 
-  it('names a `smith wave audit --session ... --epic ...` invocation in the steps section', () => {
+  it('names a `bs wave audit --session ... --epic ...` invocation in the steps section', () => {
     const matches = steps.match(WAVE_AUDIT_INVOCATION);
     expect(
       matches,
-      'expected at least one smith wave audit --session ... --epic ... invocation',
+      'expected at least one bs wave audit --session ... --epic ... invocation',
     ).not.toBeNull();
     expect((matches ?? []).length).toBeGreaterThan(0);
   });
 
-  it('runs `smith wave audit` before the first `smith queue run` in the steps section', () => {
+  it('runs `bs wave audit` before the first `bs queue run` in the steps section', () => {
     const auditMatch = steps.match(WAVE_AUDIT_INVOCATION);
     expect(auditMatch).not.toBeNull();
     const auditIndex = steps.search(WAVE_AUDIT_INVOCATION);
-    const queueRunIndex = steps.indexOf('smith queue run');
+    const queueRunIndex = steps.indexOf('bs queue run');
     expect(auditIndex).toBeGreaterThanOrEqual(0);
     expect(queueRunIndex).toBeGreaterThanOrEqual(0);
     expect(auditIndex).toBeLessThan(queueRunIndex);
   });
 
-  it("runs `smith wave audit` a second time, at the end of step 4's fan-out, before step 5's tester dispatch", () => {
+  it("runs `bs wave audit` a second time, at the end of step 4's fan-out, before step 5's tester dispatch", () => {
     // Anchor on step 5's own numbered marker: stable across reflow of step 4's
     // prose, and the spec's call point (a) is "the end of step 4's fan-out",
     // i.e. anywhere before step 5 begins.
@@ -62,12 +62,12 @@ describe('wave.md instructs the wave to audit its own parallelism', () => {
     expect(step5Index).toBeGreaterThan(0);
     const beforeStep5 = steps.slice(0, step5Index);
     const matches = beforeStep5.match(WAVE_AUDIT_INVOCATION);
-    expect(matches, 'expected a smith wave audit invocation before step 5').not.toBeNull();
+    expect(matches, 'expected a bs wave audit invocation before step 5').not.toBeNull();
     expect((matches ?? []).length).toBeGreaterThan(0);
   });
 
   it('does not count a prose mention of "wave audit" lacking both flags as satisfying the requirement', () => {
-    // A bare mention of "wave audit" in prose (no `smith`, no flags) must not
+    // A bare mention of "wave audit" in prose (no `bs`, no flags) must not
     // match the invocation pattern used above.
     const proseOnly = 'the wave audit result is discussed here, but not invoked';
     expect(proseOnly.match(WAVE_AUDIT_INVOCATION)).toBeNull();

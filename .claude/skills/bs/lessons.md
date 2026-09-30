@@ -3,7 +3,7 @@
 [`dispatch.md`](dispatch.md) binds every agent this playbook dispatches;
 none of it is restated here.
 
-1. `smith lessons candidates [--session <id>] [--db state/smith.db]
+1. `bs lessons candidates [--session <id>] [--db state/smith.db]
    [--state-dir <dir>]` — pending candidates with their statement, type,
    scope, and evidence/provenance event ids. `--state-dir` matters whenever
    `--session` is given: it is validated against that event log the same
@@ -12,7 +12,7 @@ none of it is restated here.
 2. Present each to the operator. Approve, edit, or reject is **always**
    their call — nothing here self-modifies an agent
    (architecture §9.4, the memory-poisoning safety boundary).
-   - **Approve**: `smith lessons approve <lesson-id> --session <id>
+   - **Approve**: `bs lessons approve <lesson-id> --session <id>
      --plan-version <n> --causal-parent <event-id> --actor operator
      [--note "<why>"]`.
    - **Edit then approve**: add `--statement`, `--lesson-type` and/or
@@ -37,7 +37,7 @@ none of it is restated here.
      applied*: surface it, do not retry it. The UI's Edit action runs the
      same gate since P9-36 — but it has no `--accept-duplicate` control, so
      a duplicate the operator decides to keep has to come back to the CLI.
-   - **Reject**: `smith lessons reject <lesson-id> …` — transitions to
+   - **Reject**: `bs lessons reject <lesson-id> …` — transitions to
      `invalidated`, the same status the UI's reject action uses
      (`ui/server/src/app.ts`'s `/reject` route); there is no separate
      operator-rejection status in taxonomy.yml's `lesson_status`.
@@ -46,8 +46,8 @@ none of it is restated here.
      means raising it again with its own provenance — the command refuses
      `lessons.illegal-transition` rather than rewriting the decision.
 3. Rebuild the projection so the change is visible:
-   `smith db apply --db state/smith.db --session <id>`.
-4. Periodically run `smith dream [--since <iso-date>]` to extract new raw
+   `bs db apply --db state/smith.db --session <id>`.
+4. Periodically run `bs dream [--since <iso-date>]` to extract new raw
    candidates from decision checkpoints (plan sign-offs, waiver decisions,
    escalations, gate blocks) before this review — it needs the same
    `--session/--plan-version/--causal-parent` envelope. Candidates it
@@ -56,7 +56,7 @@ none of it is restated here.
    checkable, principle-level statement before presenting it, rather than
    showing the operator raw event text.
 5. Once a batch is approved, recompile the committed file:
-   `smith lessons compile [--session <id>] [--db state/smith.db]` —
+   `bs lessons compile [--session <id>] [--db state/smith.db]` —
    regenerates `factory/policies/lessons.md` from every `approved` lesson,
    sectioned by scope (architecture §9.5). Entry preservation is
    insertions-only: an entry already there with no store row (hand-
@@ -70,11 +70,11 @@ none of it is restated here.
    `## <scope>` heading and its first `### ` entry is dropped — don't
    hand-edit either expecting it to survive a compile.
    Commit the regenerated file — it is the file every later dispatch reads
-   (`smith lessons for-dispatch`), so an approved-but-uncompiled lesson
+   (`bs lessons for-dispatch`), so an approved-but-uncompiled lesson
    reaches nobody.
 6. After a compile — or whenever `lessons.md` has grown enough that nobody
    reads it — ask which entries still earn their place:
-   `smith lessons audit <session-id> [--lessons <file>] [--state-dir <dir>]`.
+   `bs lessons audit <session-id> [--lessons <file>] [--state-dir <dir>]`.
    It **recommends only**; every removal is still the operator's call, the
    same boundary step 2 draws. Read the two evidence classes apart
    (operator-guide/lessons-and-daemon.md §10b): `retire`/`unreachable` is

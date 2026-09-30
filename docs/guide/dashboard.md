@@ -2,11 +2,11 @@
 
 A local, read-only view of what the factory is doing. Nothing you click here
 dispatches an agent — the dashboard is a *projection* of the append-only event
-log, and `smith db rebuild` reconstructs the whole thing from that log alone.
+log, and `bs db rebuild` reconstructs the whole thing from that log alone.
 
 ```bash
 pnpm build:server && pnpm build:ui   # -> ui/server/dist + ui/dist
-smith ui serve                       # http://127.0.0.1:4680
+bs ui serve                          # http://127.0.0.1:4680
 ```
 
 From a Claude Code session, `/bs ui` does the same and prints the URL.
@@ -85,7 +85,7 @@ The projection is disposable by design. `state/` is gitignored runtime
 output, and everything in it can be reconstructed:
 
 ```bash
-smith db rebuild        # drop the SQLite projection, replay the event log
+bs db rebuild           # drop the SQLite projection, replay the event log
 ```
 
 If the dashboard and the log ever disagree, the log wins. That property is

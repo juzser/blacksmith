@@ -1,8 +1,8 @@
 # `/bs new <project> [--ui]` — scaffold a target project
 
-1. Ask where the project should live, then run `smith new <project> [--ui]
+1. Ask where the project should live, then run `bs new <project> [--ui]
    [--target-dir <dir>]`. Without `--target-dir` it lands beside the clone, in
-   `<repo-parent>/<project>` — or, when `smith` is an installed package rather
+   `<repo-parent>/<project>` — or, when `bs` is an installed package rather
    than a clone, in the directory you run it from, never inside the package.
    Either way that is a default rather than a requirement —
    the answer becomes the `<project-dir>` every later command takes, so take
@@ -15,7 +15,7 @@
    bootstrap milestone in `factory/specs/roadmap.md` — all in one call.
    An answer the templates cannot build (`frontend: react`) makes it **refuse
    before creating anything**, rather than quietly handing over the frontend
-   they do ship. `smith stack check` says in advance which answers are
+   they do ship. `bs stack check` says in advance which answers are
    honoured, merely recorded, or refused.
 2. The gate run is `pnpm install` then `lint`, `typecheck`, `test:coverage`,
    `build` — `ci.yml`'s order, so the lockfile lands in the first commit and no

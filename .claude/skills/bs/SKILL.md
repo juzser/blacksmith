@@ -1,13 +1,13 @@
 ---
 name: bs
-description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from any Claude Code session that has Blacksmith installed — a clone of the repo, or the plugin plus the `smith` CLI from npm.
+description: Operator console for the Blacksmith factory — invoke as `/bs <subcommand>` (new, plan, run, audit, status, ui, waivers, lessons, report) to scaffold a project, plan or drive an epic through the loop, audit a project on four axes and cut an epic from what the operator accepts, check live status, open the dashboard, answer a waiver batch, triage lesson candidates, or get a progress digest. This file routes; each subcommand's playbook is a sibling file read when that verb runs. Use this whenever the operator wants to interact with Blacksmith itself, from any Claude Code session that has Blacksmith installed — a clone of the repo, or the plugin plus the `bs` CLI from npm.
 ---
 
 # /bs — Blacksmith operator console
 
 You (the orchestrator session running this skill) are the human's one interface
 to the factory. Every subcommand below is a **playbook**, not a script: the
-deterministic mechanics run through the real `smith` CLI, spelled `smith` in
+deterministic mechanics run through the real `bs` CLI, spelled `bs` in
 every command below — on PATH from `npm i -g @juzser/blacksmith`, or inside a
 clone `node factory/orchestrator/dist/cli.js` instead, `pnpm build` first if
 `dist/` is stale. The judgment steps — planning, spec review, coding, testing,
@@ -19,9 +19,9 @@ would let this file drift out of sync with the real contracts. Cite policy
 files (`factory/policies/*.yml`) rather than restating their numbers.
 
 **The project directory is an answer you ask for, not a path this file
-knows.** A project this factory builds is not part of it: `smith new` puts one
+knows.** A project this factory builds is not part of it: `bs new` puts one
 *outside* the factory when no `--target-dir` says otherwise (beside the clone
-if you run one, in the directory you ran an installed `smith` from), and
+if you run one, in the directory you ran an installed `bs` from), and
 nothing downstream reads that location — `workspaces/` inside the repo is
 still a legal answer, just no longer the assumed one. Every verb that touches
 the project's git takes the directory itself: `<project-dir>` as a positional
@@ -36,8 +36,8 @@ top of a run, and carry that one answer through every command below —
 do not all resolve the same way. Playbooks and agent templates are beside this
 file and always resolve. `factory/policies/*.yml`, the JSON Schemas and the
 scaffold are **read-only assets the CLI ships**: in a clone they are in the
-checkout, and in an install they are inside the package — ask `smith` rather
-than guessing, since `smith init` prints `repoRoot` (where they are) and
+checkout, and in an install they are inside the package — ask `bs` rather
+than guessing, since `bs init` prints `repoRoot` (where they are) and
 `workRoot` (where everything written goes) and is safe to re-run, keeping any
 file it already seeded. `docs/` and `AGENTS.md` are **clone-only**: they are in
 the repository and in no install, so a citation to one is a pointer for an
@@ -48,18 +48,18 @@ remembered number.
 Every write command needs an event-log envelope: `--session <id>
 --plan-version <n> --causal-parent <event-id> [--actor operator]` (`wave-runner`
 inside a wave session — its agent template has the rule). Open a
-session with `smith session start <session-id>` if one isn't already
+session with `bs session start <session-id>` if one isn't already
 running — it writes the root and prints the event id everything else hangs
 off as `--causal-parent`. Run it once: it refuses a session that already
 has a log, and names the last event in it so you have the anchor either way
 (`docs/guide/operator-guide/queue-and-gate.md` §5). To continue an epic in a
 new session,
-`smith session start <new-id> --continues <old-session>#<index>` (§5b). Once
-you have, pass `--lineage` alongside `--session` on every `smith stats` read:
+`bs session start <new-id> --continues <old-session>#<index>` (§5b). Once
+you have, pass `--lineage` alongside `--session` on every `bs stats` read:
 without it each page answers about the window you are standing in, not about
 the epic.
 
-**Record the operator's turn before you act on it**: `smith prompt record -
+**Record the operator's turn before you act on it**: `bs prompt record -
 --session <id> --causal-parent <event-id>` (heredoc the words in, or pass a
 file). It prints the event id — hang the dispatch it caused off that id as
 `--causal-parent`, and the timeline draws "this work happened because a
@@ -72,14 +72,14 @@ the factory — an epic outlasts your window. At 60% of it, compact: keep the
 session id, the last `causal_parent` event id, the epic + live plan version,
 which wave/step of the playbook you are on, and what is still open; drop
 dispatched agents' raw returns and raw CLI JSON. All of it is re-readable —
-`smith stats overview`, `smith event` and the task rows are the durable
+`bs stats overview`, `bs event` and the task rows are the durable
 memory, this transcript is not. Compact at 60%, not at 90%: the remaining
 budget is what you need to actually finish the wave.
 
-Concurrency and the event log: `smith` reads (`wave next`, `status`,
+Concurrency and the event log: `bs` reads (`wave next`, `status`,
 `budget alarm`) are free to run at any time. Writes to one session log are
 serialized by the log itself across processes, so a burst of parallel
-`smith` write-commands is safe — but each one's `event_id` comes back in
+`bs` write-commands is safe — but each one's `event_id` comes back in
 its own output, and **that is the only place to read it from**. Never
 compute the next id by adding one: under fan-out the events between yours
 belong to sibling tasks, and a `--causal-parent` you guessed will name a
@@ -90,9 +90,9 @@ Parse that output by key, never by a regex over the raw text: several
 verbs' payloads echo a parent id right beside the new one (`record`'s own
 `causal_parent`), so a pattern grepped for the id's shape can just as
 easily match the parent's as yours. Read the id field the command's own
-output names — most name it `event_id`; `smith epic close`, `smith
-integration check`, `smith epic goal-check` and `smith epic spec-review`
-name it `eventId` instead, and `smith crossfind run` names it
+output names — most name it `event_id`; `bs epic close`, `bs
+integration check`, `bs epic goal-check` and `bs epic spec-review`
+name it `eventId` instead, and `bs crossfind run` names it
 `reconciled_event_id`. Check a new command's actual output before assuming
 any of these, and read it with `jq -r '.event_id // .eventId'` rather than
 a hand-rolled pattern. Capture the output to a file or a variable before

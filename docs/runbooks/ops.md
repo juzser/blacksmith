@@ -1,4 +1,4 @@
-# Runbook — running the factory unattended (`smith daemon`)
+# Runbook — running the factory unattended (`bs daemon`)
 
 Operator procedure for Phase 10's background watcher: what it is, what it
 refuses to be, how to run it under launchd or systemd, the files it owns, the
@@ -6,12 +6,12 @@ health check, and how to stop it. Companion to
 [`../guide/operator-guide.md`](../guide/operator-guide.md) and
 [`../specs/black-smith-architecture.md`](../specs/black-smith-architecture.md)
 §12; commands assume a built CLI (`pnpm run build` →
-`factory/orchestrator/dist/cli.js`, substitute `smith` if linked).
+`factory/orchestrator/dist/cli.js`, substitute `bs` if linked).
 
 ## 1. What it is, and what it is not
 
 Before Phase 10, knowing what the factory needed meant keeping a session open
-and re-running `smith budget alarm`, `smith scheduler run --dry` and
+and re-running `bs budget alarm`, `bs scheduler run --dry` and
 `/bs status` by hand. The daemon removes that: it wakes on an interval, reads
 the event log, and publishes one report.
 
@@ -40,21 +40,21 @@ read at different times.
 ## 2. The verbs
 
 ```
-smith daemon run    [--interval <seconds>] [--once] [--dir <dir>]
+bs daemon run    [--interval <seconds>] [--once] [--dir <dir>]
                     [--project <dir>] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]
-smith daemon start  [--interval <seconds>] [--dir <dir>]
+bs daemon start  [--interval <seconds>] [--dir <dir>]
                     [--project <dir>] [--no-self] [--db <path>] [--no-db] [--state-dir <dir>]
-smith daemon status [--dir <dir>]
-smith daemon stop   [--dir <dir>]
+bs daemon status [--dir <dir>]
+bs daemon stop   [--dir <dir>]
 
-smith projects list [--roadmap <file>] [--json]
+bs projects list [--roadmap <file>] [--json]
 ```
 
 - **`run`** is the loop itself, in the foreground. This is what a service
   manager should execute — launchd and systemd want a process that stays in
   the foreground and dies when told to, which is exactly this. It prints one
   `TickReport` per tick, one JSON line each, as the tick lands — so
-  `smith daemon run | jq -c .attention` reads live, and so does a `tail -f`
+  `bs daemon run | jq -c .attention` reads live, and so does a `tail -f`
   on the `daemon.log` that `start` redirects the same stdout into. On
   `SIGTERM`/`^C` it closes with `{"ticks": <n>, "dir": ...}` and exits 0.
 - **`run --once`** ticks once and exits 0. This is the cron shape, and the
@@ -99,11 +99,11 @@ Flags worth knowing:
   tick. **Repeat it once per repo** — `--project workspaces/<child-repo>` adds
   one more project this clone built, and each repo gets its own finding.
   (`<child-repo>` is illustrative, not a checkout this repo currently
-  declares — `smith projects list` names the real ones, if any.) One repo
+  declares — `bs projects list` names the real ones, if any.) One repo
   without a lockfile costs you that repo's reading and nothing else.
 
-  You do not have to remember the list. `smith projects list` reads the
-  roadmap's `- project:` bullets — the register `smith new` writes to
+  You do not have to remember the list. `bs projects list` reads the
+  roadmap's `- project:` bullets — the register `bs new` writes to
   when it scaffolds a project — and prints the whole `--project` line for you
   to paste. A repo it names and this pass does not gets an
   `unwatched-project` finding, so forgetting one is loud rather than silent.
@@ -219,7 +219,7 @@ means the task cannot go further without the amendment, so an unanswered
 blocking proposal is a stalled task rather than a queue item. The finding says
 only that a decision is outstanding, which stays true whichever way it is
 answered; whether the proposal's diff has since been overtaken by a later plan
-version is a second question, and `smith plan proposals` is where it is asked.
+version is a second question, and `bs plan proposals` is where it is asked.
 
 `factory-width` is the one kind that deliberately reads **only the newest
 close**, and the reason is the severity rule above. Closes are immutable, so an
@@ -228,14 +228,14 @@ history would therefore raise the same `attention` on every tick for the life
 of the repo, over something nobody can go back and fix. An attention count that
 can never return to zero is worse than no count — it trains you to stop reading
 it. The newest close is a claim about *now*: it clears itself the moment a wide
-epic closes. The history is not lost, it is one `smith epic width` away (§7f of
+epic closes. The history is not lost, it is one `bs epic width` away (§7f of
 the operator guide), which folds every close and is the right place to ask
 whether the factory has been narrow for a month.
 
 Its `info` form is the opposite state of knowledge, not a milder version of the
 same one: closes exist and none of them recorded how wide it ran, so the factory
 cannot say whether it builds in parallel. That is work to schedule — close a
-current epic, or read a live log back with `smith wave audit` — and never an
+current epic, or read a live log back with `bs wave audit` — and never an
 alarm, because nothing here is known to be wrong.
 
 `unwatched-project` is the same rule applied to the flags rather than to the
@@ -247,7 +247,7 @@ and it clears the only way it should: add the flag. The daemon still reports
 nothing about a project the roadmap declares but that has no checkout on this
 machine, because there would be no lockfile to read and therefore no flag
 that could make the finding go away — an alarm nothing can ever clear is
-worse than no alarm. `smith projects list` is a different question, asked by
+worse than no alarm. `bs projects list` is a different question, asked by
 a human rather than an interval: it answers with the declared-and-missing
 project marked `?` (§2), because a checkout an operator went looking for is
 worth naming even when the daemon has nothing to alarm about.
@@ -291,7 +291,7 @@ replacement of `factory/specs/roadmap.md`, and a roadmap is a *declaration*,
 legible the day the repo is cloned. A tick with no session to fold therefore
 still refreshes it — otherwise an operator could write a roadmap, start the
 watcher, open the dashboard, and find the Roadmap view and the project switcher
-both empty until they happened to run `smith db rebuild` by hand. The refresh
+both empty until they happened to run `bs db rebuild` by hand. The refresh
 is a rebuild, which with an empty log clears nothing and projects the roadmap,
 and it stops being reachable the moment one session exists.
 
@@ -300,7 +300,7 @@ and it stops being reachable the moment one session exists.
 Findings that a scheduler proposal stands behind — `recheck`, `maintenance`,
 `growth-review` — also carry an `admission`, and the report carries
 `autoAdmitted` and `operatorHeld` beside `attention`. This is the same verdict
-`smith scheduler admit --session <id>` renders (operator guide, *Limitations
+`bs scheduler admit --session <id>` renders (operator guide, *Limitations
 today*; step 2 of the `/bs report` playbook), computed against the same two
 files and reported per finding instead of per session:
 
@@ -371,7 +371,7 @@ a live daemon's lock damaged out from under it, and the bytes cannot tell the
 two apart. So `run`, `start`, `status` and `stop` all refuse it with
 `daemon.unreadable-state`, naming the file and the reason, and none of them
 writes, signals or deletes anything. To recover, confirm that no
-`smith daemon run` process is using the directory, then delete the named file.
+`bs daemon run` process is using the directory, then delete the named file.
 A `status.json` that cannot be read is refused the same way by `status`.
 
 `status.json` is written tmp-then-rename, so a reader polling it never sees
@@ -389,14 +389,14 @@ cannot be read does not fail the tick either, for the same reason
 silence: the tick runs with an empty memory, files one `unreadable-state`
 finding naming the file (§3), and rewrites `findings.json` whole.
 
-`daemon.log` is only produced by `smith daemon start`, and **nothing rotates
+`daemon.log` is only produced by `bs daemon start`, and **nothing rotates
 it**. Under launchd or systemd, let the service manager own the output stream
 (§5) and this file never exists. If you do use `start` long-term, point
 `newsyslog`/`logrotate` at it, or restart the daemon periodically.
 
 ## 5. Running it under a service manager
 
-Prefer this to `smith daemon start`: a service manager restarts the daemon
+Prefer this to `bs daemon start`: a service manager restarts the daemon
 after a reboot or a crash, and owns log rotation.
 
 Both examples assume the repo is at `/srv/blacksmith` and the CLI has been
@@ -471,7 +471,7 @@ systemctl --user status blacksmith-daemon
 loginctl enable-linger "$USER"   # so it survives logout
 ```
 
-Under a service manager, do **not** also run `smith daemon start` — the lock
+Under a service manager, do **not** also run `bs daemon start` — the lock
 would refuse the second one anyway, which is the failure working as designed,
 but the error is easier to not cause than to diagnose.
 
@@ -486,11 +486,11 @@ invocations refuse rather than interleave.
 
 ## 6. Health check
 
-`smith daemon status` **exits 1 unless a daemon is watching and current**.
+`bs daemon status` **exits 1 unless a daemon is watching and current**.
 That is the whole probe — no JSON parsing in a shell script:
 
 ```bash
-smith daemon status >/dev/null || echo "blacksmith watcher is down"
+bs daemon status >/dev/null || echo "blacksmith watcher is down"
 ```
 
 Exit 0 takes two facts, not one: the lock names a live process, **and** that
@@ -511,7 +511,7 @@ historical output, with `dogfood-envkit-1` a sample session id rather than a
 live one:
 
 ```console
-$ smith daemon status
+$ bs daemon status
 {
   "running": true,
   "stale": false,
@@ -562,7 +562,7 @@ Three states a single boolean would hide:
 ## 7. Stopping it
 
 ```console
-$ smith daemon stop
+$ bs daemon stop
 {"stopped":true,"pid":96054}
 ```
 
@@ -572,7 +572,7 @@ reports `stopped: false` with the pid it cleared, and you learn the daemon was
 already gone rather than being told this call is what ended it:
 
 ```console
-$ smith daemon stop
+$ bs daemon stop
 {"stopped":false,"pid":4194304}
 ```
 
@@ -580,7 +580,7 @@ $ smith daemon stop
 
 Under a service manager, use the service manager (`launchctl bootout`,
 `systemctl --user stop`) — both send SIGTERM, which is the same path
-`smith daemon stop` uses. `kill -9` is the one thing to avoid: it skips the
+`bs daemon stop` uses. `kill -9` is the one thing to avoid: it skips the
 release and leaves a lock naming a dead pid. That is recoverable (the next
 `start` overwrites a stale lock, and `stop` clears it) but it costs you the
 final tick.
@@ -589,7 +589,7 @@ final tick.
 
 Phase 10's other half, the Cloudflare port of the UI, is **not** shipped and is
 not described here as if it were. The dashboard is local-only
-(`smith ui serve`, or `pnpm run dev:ui` for the Vite dev server), the two
+(`bs ui serve`, or `pnpm run dev:ui` for the Vite dev server), the two
 Cloudflare publish commands are deny-listed for agents by
 `.claude/settings.json`, and no deploy path has been designed. See
 [`../../factory/specs/roadmap.md`](../../factory/specs/roadmap.md) for the
@@ -609,7 +609,7 @@ look; the data is already current.
 | Path | Losing it costs |
 | --- | --- |
 | `state/events/*.jsonl` | Everything. The event log is the source of truth; every projection is derived from it. |
-| `state/smith.db` | Nothing permanent — rebuild with `smith db rebuild`. |
+| `state/smith.db` | Nothing permanent — rebuild with `bs db rebuild`. |
 | `state/artifacts/` | Reports and screenshots referenced from the timeline. |
 | `state/daemon/` | Nothing. The lock is transient and `status.json` is one tick old by design. |
 
@@ -621,7 +621,7 @@ reproducible from them.
 The daemon never opens an issue itself — section 3's `error-report-proposed`
 finding is a nudge, not an action (Files the daemon owns, §4, ignores it same
 as any other finding). The run is what acts: right after it writes an
-`error-logged` event, after a `gate-outcome` that `smith gate run` records
+`error-logged` event, after a `gate-outcome` that `bs gate run` records
 as `blocked`, or after a `task-added` whose payload sets `task_status:
 failed`, it calls the reporting verb, and that verb does not stop at the
 one candidate the run just reacted to — it re-reads the whole
@@ -634,19 +634,19 @@ in even though nothing ever wrote an `error-logged` event for it. This
 session's own preview run (below) shows two of the three sources,
 `error-logged` and `gate-outcome`, already queued for one tracker.
 
-**The command.** `smith issues report --session <id> [--epic <id>]
+**The command.** `bs issues report --session <id> [--epic <id>]
 [--since <iso>] [--state-dir <dir>] [--roadmap-path <file>]` is the only
 command that runs `gh`. It records an `issue-reported` event per candidate —
 `opened`, `commented`, or a skip/failure below — and a repeated call over the
 same error finds that record and moves on: it is safe to run twice.
-`smith issues preview` takes the same flags, prints the argv `gh` would run
+`bs issues preview` takes the same flags, prints the argv `gh` would run
 and the rendered body, and calls `gh` zero times — use it to see what a run
 would do before it does it.
 
 **The issue body carries metadata only**, never the raw event `detail`: task
 reference, error class, severity, session, epic, plan version, project,
 source, fingerprint, and a pointer to read the rest locally with
-`smith event tail <session> --lineage`. Nothing else — no stack trace, no
+`bs event tail <session> --lineage`. Nothing else — no stack trace, no
 log line, no environment value — crosses into the body or the follow-up
 comment, because both renderers build the text from a fixed field list
 rather than copying the source event's payload (see D-299 for why this

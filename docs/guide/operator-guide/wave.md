@@ -4,7 +4,7 @@ One part of [the operator guide](../operator-guide.md). Section numbers
 are the guide's, not this file's: `§5` means the same thing here as it
 does wherever else this repo cites it.
 
-## 2. `smith wave check`
+## 2. `bs wave check`
 
 Before dispatching a wave of tasks concurrently, validate that their claims
 are pairwise disjoint, that none share a `serialize_always_globs` hotspot
@@ -12,7 +12,7 @@ are pairwise disjoint, that none share a `serialize_always_globs` hotspot
 them after another:
 
 ```bash
-smith wave check factory/specs/active/epic-1/plan-v1.json epic-1/task-1 epic-1/task-2
+bs wave check factory/specs/active/epic-1/plan-v1.json epic-1/task-1 epic-1/task-2
 ```
 
 ```json
@@ -57,14 +57,14 @@ was ever admissible, and the gate said `valid: true` about each singleton it
 was handed. Claims no longer need to be narrowed to route around it; scope
 them to what the task writes.
 
-After a task runs, `smith claims check <worktree-dir> <spec.json>` classifies
+After a task runs, `bs claims check <worktree-dir> <spec.json>` classifies
 what that branch committed against the task's `claims[]`. The planner and the
 scribe have no claims — they write outside any worktree, on an ordinary branch,
 and hand their output back uncommitted — so they get the same classifier
 through a different collector (P9-3):
 
 ```bash
-smith claims check . --roots 'factory/specs/active/epic-1/**' --since "$BASE_SHA"
+bs claims check . --roots 'factory/specs/active/epic-1/**' --since "$BASE_SHA"
 ```
 
 Exit 0 means every changed path (staged, unstaged and untracked alike) is
@@ -75,7 +75,7 @@ takes a sha captured before the dispatch: the planner holds `Bash`, so it can
 commit its own work and leave a clean tree that a working-tree-only check would
 call a pass.
 
-### `smith wave next` — the wave you did not have to guess
+### `bs wave next` — the wave you did not have to guess
 
 `wave check` answers a closed question — may *these* task ids run together —
 and answers it well. But it only ever sees a set someone already picked, and
@@ -88,7 +88,7 @@ therefore had no command that computes parallelism; it had a command that
 declines to forbid it.
 
 ```bash
-smith wave next factory/specs/active/epic-1/plan-v1.json \
+bs wave next factory/specs/active/epic-1/plan-v1.json \
   --session <session-id> --repo <project-dir>
 ```
 
@@ -141,7 +141,7 @@ Exit 1 means work remains and none of it can start: a stall worth reporting,
 distinguished from the epic simply being finished, which is an empty `wave`
 with `remaining: 0`.
 
-### `smith wave audit` — did the wave that was admitted actually run wide?
+### `bs wave audit` — did the wave that was admitted actually run wide?
 
 `wave next` proposes a wave and `wave check` admits one. Both are statements
 about the future, and both are written before a single agent starts. Nothing
@@ -157,7 +157,7 @@ that pair per task gives the interval each task was actually running, and the
 most intervals overlapping at any instant is the width the wave really had.
 
 ```bash
-smith wave audit --session <session-id> [--epic epic-1] [--state-dir <dir>]
+bs wave audit --session <session-id> [--epic epic-1] [--state-dir <dir>]
 ```
 
 ```json
@@ -212,7 +212,7 @@ rather than as instantaneous: a wave audited mid-run reads as wide as it
 currently is, not as narrow as its finished work. The command writes nothing,
 so it is safe to ask at any moment and safe to ask twice.
 
-### `smith wave schedule` — how wide can this plan *ever* run?
+### `bs wave schedule` — how wide can this plan *ever* run?
 
 Three commands now bracket parallelism and all three take the plan as given.
 `wave check` says these tasks may run together. `wave next` says these are the
@@ -232,7 +232,7 @@ So this one replays the dispatcher against the plan. It calls the same
 and calls it again until nothing more can start.
 
 ```bash
-smith wave schedule factory/specs/active/epic-1/plan-v1.json \
+bs wave schedule factory/specs/active/epic-1/plan-v1.json \
   --session <session-id> --repo <project-dir>
 ```
 
@@ -350,7 +350,7 @@ not parse, a specifier it could not resolve. Holes are never fatal here, on
 purpose — failing a wave for the scanner's limits would teach operators to
 reach for the override, which costs more than the check was ever worth.
 
-### `smith claims impact` — the same two questions, asked directly
+### `bs claims impact` — the same two questions, asked directly
 
 The gate above runs inside `wave check`. The same machinery is a verb, in two
 forms, because the pre-run and post-run questions have genuinely different
@@ -359,7 +359,7 @@ answers.
 **Before dispatch, over declarations:**
 
 ```bash
-smith claims impact --plan factory/specs/active/epic-1/plan-v1.json task-a task-b
+bs claims impact --plan factory/specs/active/epic-1/plan-v1.json task-a task-b
 ```
 
 Identical to what `wave check` folds in — exit 1 on `coupled`, and the same
@@ -371,7 +371,7 @@ or a budget policy.
 **After the work, over a diff:**
 
 ```bash
-smith claims impact "$WORKTREE" factory/specs/active/epic-1/task-1.json
+bs claims impact "$WORKTREE" factory/specs/active/epic-1/task-1.json
 ```
 
 ```json
@@ -409,7 +409,7 @@ guess about an importer it cannot type; a promise was made to one — a type
 importer is exactly whom a signature change breaks — so the same text-level
 comparison is held to the stricter reading. The promise is read from the
 spec file: `keeps_exports` takes literal repo-relative paths inside the
-task's own claims, and `smith plan validate` refuses a glob or a path outside
+task's own claims, and `bs plan validate` refuses a glob or a path outside
 them.
 
 A worktree is a full checkout, so it is both halves of the question at once —

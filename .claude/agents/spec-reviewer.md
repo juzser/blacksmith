@@ -36,10 +36,10 @@ passed: the gates decided something, and it was not the criterion.
 Those two produce the same artifact and the same evidence shape. The
 difference is what you read alongside the spec, and that at close a finding
 you raise blocks the epic verdict until the planner amends the plan
-(`smith plan amend` cuts v(n+1) citing your finding) or the operator waives it.
+(`bs plan amend` cuts v(n+1) citing your finding) or the operator waives it.
 
 **The spec-vs-goal check**, also at close, and a *separate* dispatch —
-`smith dispatch check` refuses to let one session answer for both, because a
+`bs dispatch check` refuses to let one session answer for both, because a
 reader who has just argued the spec is sound is the worst reader to ask
 whether it was the right spec. Here the reference text is the only one in the
 epic the planner did not write: the `- goal:` line of the roadmap milestone
@@ -67,7 +67,7 @@ The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
 This is checked, not trusted: the dispatcher fingerprints the worktree before
-you start and re-checks it after you return (`smith worktree verify`). A tree
+you start and re-checks it after you return (`bs worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
@@ -170,7 +170,7 @@ so nothing you write can move it onto a task.
 `verdict` is `clean` only when the array is empty. A spec you would sign off
 "with minor notes" is not clean — write the notes as `S4-nit` evidence and let
 the planner decide. Clean is a result, not a failure to find anything: at close
-the operator records it either way (`smith epic spec-review`), because "ran and
+the operator records it either way (`bs epic spec-review`), because "ran and
 found nothing" and "never ran" are different facts and the epic verdict
 distinguishes them.
 
@@ -180,10 +180,10 @@ Different dispatch, different artifact. You return **coverage**, not evidence.
 The orchestrator still mints the finding — but it mints it from an `uncovered`
 verdict, not from prose you wrote.
 
-**1. Read the clause list.** `smith epic goal --epic <epic-id>` prints the
+**1. Read the clause list.** `bs epic goal --epic <epic-id>` prints the
 milestone that owns the epic, the goal text, the clauses, and a digest of the
 goal. The clause list is not yours to choose: the splitter is deterministic,
-and `smith epic goal-check` rejects a map whose clauses are not exactly that
+and `bs epic goal-check` rejects a map whose clauses are not exactly that
 list in exactly that order (`goal-check.clause-mismatch`). That is the point —
 a check that could quietly drop the clause it failed would grade nothing.
 
@@ -204,7 +204,7 @@ verbatim), `verdict`, and whichever of `taskIds`/`reason` the verdict demands:
   auditing the dismissal a month from now, not for yourself
 - `uncovered` — nothing in this plan delivers it. This mints an `S2-major`
   spec-scoped finding against the plan file, and `S2-major` is never waivable,
-  so the epic holds until `smith plan amend` cuts a version that covers it.
+  so the epic holds until `bs plan amend` cuts a version that covers it.
   You do not grade the severity: "this epic does not deliver a clause of the
   goal it exists for" is one kind of defect, not a spectrum
 
@@ -221,7 +221,7 @@ while leaving this one unasked.
 
 `verdict` is `covered` only when no clause came back `uncovered`; otherwise it
 is `uncovered`. Either way the operator records the result
-(`smith epic goal-check`), and a clean one matters more here than in the spec
+(`bs epic goal-check`), and a clean one matters more here than in the spec
 reviews: the epic gate fails **closed** on a missing check, so "ran and found
 every clause answered" and "never ran" are not near-neighbours — only the
 first of them lets the epic close.

@@ -36,7 +36,7 @@ This is an orchestrator that runs language-model agents against a git
 checkout. The interesting attack surface is the boundary between *untrusted
 text* and *things that execute*:
 
-- **Prompt injection through fetched or quoted text.** `smith prompt wrap`
+- **Prompt injection through fetched or quoted text.** `bs prompt wrap`
   exists to fence such text as data before it reaches a prompt
   (`wrapIngested`, `factory/orchestrator/src/provenance.ts`). A path where
   untrusted text reaches a dispatch unfenced is in scope.
@@ -48,9 +48,9 @@ text* and *things that execute*:
   a failing schema check, a failing test gate, or an unresolved S1/S2 finding.
 - **Judge integrity.** A read-only judge that can mutate the tree it is
   judging, reach the network, or influence its own verdict. The role sandbox
-  (`smith sandbox`, plus the `judge-*` rules in
+  (`bs sandbox`, plus the `judge-*` rules in
   [`factory/policies/guardrails.yml`](factory/policies/guardrails.yml))
-  refuses those commands up front, and `smith worktree fingerprint` / `verify`
+  refuses those commands up front, and `bs worktree fingerprint` / `verify`
   bracket the run to catch what a text matcher cannot see. Both halves are
   stated in
   [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "The role
@@ -64,14 +64,14 @@ text* and *things that execute*:
   [`docs/standards/guardrails.md`](docs/standards/guardrails.md) "No secrets
   in outputs".
 - **The guard hook.** `.claude/hooks/guard.sh` — a transport shim over
-  `dist/policyHook.js`, the same decision as `smith policy hook` — and the
+  `dist/policyHook.js`, the same decision as `bs policy hook` — and the
   deny list in `.claude/settings.json` block pushes to `main`, force-pushes,
   history rewriting, and unbounded deletion.
   A bypass is in scope, and so is a shim that fails *open*: when the policy
   layer cannot answer, the hook escalates to the operator and never emits an
   `allow` envelope, because a hook's `allow` outranks the operator's own deny
   list.
-- **The local dashboard.** `smith ui serve` binds a local HTTP server with
+- **The local dashboard.** `bs ui serve` binds a local HTTP server with
   write routes (waivers, lesson approve/reject). Anything that turns it into
   a remote-write surface is in scope.
 
@@ -101,7 +101,7 @@ text* and *things that execute*:
   `string` was passed where a `number` was declared. The rest of the
   mitigation is structural — UI logic lives in `ui/src/lib/*.ts`, which is
   type-checked, linted and unit-tested, and the SFCs stay thin.
-- **Per-task budget caps are advisory.** `smith wave check` refuses to admit
+- **Per-task budget caps are advisory.** `bs wave check` refuses to admit
   a wave whose declared cost would cross the epic's `cap_tokens`, so the epic
   cap in [`factory/policies/budgets.yml`](factory/policies/budgets.yml) is
   enforced before any of that wave's tokens are spent. The per-task caps are

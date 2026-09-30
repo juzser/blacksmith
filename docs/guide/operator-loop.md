@@ -29,7 +29,7 @@ is your console:
 
 One thing to know up front: those playbooks are dispatch instructions for
 your orchestrator session, **not a background daemon**. Nothing advances
-while the session is closed. `smith daemon` runs in the background and will
+while the session is closed. `bs daemon` runs in the background and will
 tell you what the factory needs while you are away, but it watches and never
 dispatches — see [Limitations today](operator-guide/limitations.md#limitations-today) and
 [the ops runbook](../runbooks/ops.md).
@@ -48,11 +48,11 @@ before there is anything to plan an epic against.
 #    design system, database, deploy target. `none` wherever you have no
 #    opinion yet; the defaults assume least.
 $EDITOR factory/policies/stack.yml
-smith stack check          # which answers the templates honour,
+bs stack check             # which answers the templates honour,
                            # which are only recorded, which make `new` refuse
 
 # 2. Scaffold. Lands in <repo-parent>/<project> unless you say otherwise.
-smith new my-app --target-dir ~/code/my-app        # add --ui for a frontend
+bs new my-app --target-dir ~/code/my-app           # add --ui for a frontend
 ```
 
 That one call copies the scaffold (TS strict, Biome, Vitest, CI), installs,
@@ -67,7 +67,7 @@ It refuses rather than improvises. An answer the shipped templates cannot
 build — `frontend: react` today — stops it **before anything is created**,
 instead of quietly handing you the frontend they do ship.
 
-The last two commands are yours. `smith new` prints `commands.ghRepoCreate`
+The last two commands are yours. `bs new` prints `commands.ghRepoCreate`
 and `commands.push` and does not run them: creating a remote and pushing a
 brand-new repo is an operator action, and no agent session here will do it for
 you.
@@ -118,7 +118,7 @@ The playbook is [`audit.md`](../../.claude/skills/bs/audit.md); the contract
 it keeps — what "writes nothing to the project" means, why consolidation
 clusters rather than merges, why a decline expires — is
 [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md). The
-verbs underneath are `smith audit open|record|consolidate|decide|cut|resolve|close`.
+verbs underneath are `bs audit open|record|consolidate|decide|cut|resolve|close`.
 
 ## 1. Say what you want — `/bs plan <goal>`
 
@@ -137,7 +137,7 @@ is "sign-off per epic, then free within budget"). This is the most leveraged
 minute in the loop — the spec is what every worker is held to for the rest of
 the epic.
 
-Changing a frozen plan is possible but deliberate: `smith plan amend` cuts a
+Changing a frozen plan is possible but deliberate: `bs plan amend` cuts a
 new version, and it refuses to run without a spec finding that forced it. No
 finding, no amendment.
 
@@ -148,15 +148,15 @@ the daemon watches, it does not dispatch). The scheduler admits a **wave**: task
 are disjoint and whose dependencies are satisfied. Each gets its own worktree
 and runs coder → tester → grader → the gate pipeline (schema check, cumulative
 tests, coverage evidence, reviewer, verifier). Whatever passes joins the
-serial merge queue into `smith/<epic>/integration`.
+serial merge queue into `bs/<epic>/integration`.
 
 A wide wave may run in a session of its own, or be handed to a `wave-runner`
 agent, so the epic's own window lasts to the end of the epic. You do not have
 to care which — every status read folds the whole lineage, so `/bs status` and
 the dashboard answer about the epic regardless of how many sessions it took.
-What keeps that honest is `smith delegation check <session-id>`: a dispatched
+What keeps that honest is `bs delegation check <session-id>`: a dispatched
 wave that did not open its own log fails it rather than reporting an empty
-wave ([operator-guide §2e](operator-guide/dispatch-audits.md#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)).
+wave ([operator-guide §2e](operator-guide/dispatch-audits.md#2e-bs-delegation-check--did-the-node-that-dispatched-own-its-log)).
 
 Want to look in? `/bs status` gives you live agent count, budget burn and epic
 phase; `/bs ui` serves the [dashboard](dashboard.md) if you would rather watch
@@ -183,7 +183,7 @@ the semantics from your chair are in
 
 ## 5. Review the PR — the one thing you must read
 
-One PR per epic, `smith/<epic>/integration` → your target repo's `main`. It
+One PR per epic, `bs/<epic>/integration` → your target repo's `main`. It
 arrives with the acceptance-criteria checklist, screenshots (desktop + mobile
 390px, light + dark, ≤4 per feature — [`docs/standards/stack.md`](../standards/stack.md)),
 test results and any waivers granted.
@@ -191,21 +191,21 @@ test results and any waivers granted.
 **You merge it. Blacksmith never does.** No agent can push to `main`, and that
 is enforced by the policy layer behind
 [`.claude/hooks/guard.sh`](../../.claude/hooks/guard.sh) plus branch
-protection, not by asking nicely. `smith policy check --command '<cmd>'`
+protection, not by asking nicely. `bs policy check --command '<cmd>'`
 answers what any of it would say, without running the command.
 
 ## 6. Teach it — `/bs lessons`
 
 Errors and decision checkpoints become lesson candidates. Approve, edit or
 reject them — in the UI's Lessons page or with
-`smith lessons approve|reject` — then `smith lessons compile` writes the
+`bs lessons approve|reject` — then `bs lessons compile` writes the
 approved ones into
 [`factory/policies/lessons.md`](../../factory/policies/lessons.md), from where
 they are injected into the matching agent's next dispatch.
 
 That is the loop that closes: a mistake made once becomes a constraint the
 next worker is handed. Whether it is working is a number —
-`smith kpi same-mistake` — and it is on the dashboard's Analytics page.
+`bs kpi same-mistake` — and it is on the dashboard's Analytics page.
 
 The review surface is built; the *cadence* is yours to set — nothing prompts
 you on a schedule.
@@ -215,7 +215,7 @@ you on a schedule.
 | You want | Read |
 |---|---|
 | The same loop with real commands and real output | [`operator-guide.md`](operator-guide.md) |
-| Every `smith` command | `smith --help`, or [`operator-guide.md`](operator-guide.md) |
+| Every `bs` command | `bs --help`, or [`operator-guide.md`](operator-guide.md) |
 | What the dashboard shows | [`dashboard.md`](dashboard.md) |
 | What is actually built vs. planned | [`status.md`](status.md) |
 | What an audit promises the project it reads | [`../specs/audit-command-scope.md`](../specs/audit-command-scope.md) |

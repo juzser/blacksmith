@@ -33,7 +33,7 @@ The only path you write is your own output artifact under `state/results/`,
 which lives outside the worktree.
 
 This is checked, not trusted: the dispatcher fingerprints the worktree before
-you start and re-checks it after you return (`smith worktree verify`). A tree
+you start and re-checks it after you return (`bs worktree verify`). A tree
 that moved — new file, edited file, staged change, commit, branch switch —
 discards your result and re-runs the pass on a clean worktree, so the one-line
 edit does not save a round-trip, it costs the whole one.
@@ -80,7 +80,7 @@ the evidence forces `confirmed`.
 
 You judge findings that already exist; you never mint one and you never write
 to the findings store yourself. The dispatcher applies your verdicts with
-`smith findings transition <finding-id> <status>`, and that command is what
+`bs findings transition <finding-id> <status>`, and that command is what
 emits the event.
 
 **1. Write your verdicts** to `state/results/<task-id>.verifier.json` — a JSON

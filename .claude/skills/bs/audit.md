@@ -10,7 +10,7 @@ until the hard stop in step 7**, and the operator decides it there. The
 output of a clean audit is one roadmap milestone and one epic spec, which
 `/bs plan` then plans like any other; the audit itself writes nothing into
 the project's working tree. The mechanics are the seven `audit` verbs of
-`smith` and the judgment is this file — an audit outlives the turn that starts it, so keep
+`bs` and the judgment is this file — an audit outlives the turn that starts it, so keep
 the `audit_id` the way you keep a session id.
 
 ## 1. Ask for the project directory once
@@ -20,14 +20,14 @@ nothing reads a cwd and nothing keeps a "current audit" on the side, so two
 audits on two projects cannot be confused. The project must be a git
 checkout; a directory this factory did not build is as auditable as one it
 did. Then `mkdir -p state/audit` in the factory's **work root** — the clone
-itself, or the `.blacksmith/` that `smith init` made beside your code; `smith
+itself, or the `.blacksmith/` that `bs init` made beside your code; `bs
 init` prints it as `workRoot`. The judges' artifacts live there, under runtime
 state, never under the project.
 
 ## 2. Open the audit
 
 ```bash
-smith audit open <project-dir> --session <session-id> --causal-parent <event-id>
+bs audit open <project-dir> --session <session-id> --causal-parent <event-id>
 ```
 
 It writes `<project-dir>/.blacksmith/audit.json` (the manifest: id,
@@ -54,7 +54,7 @@ inside the project, then retry.
 The four axes share one worktree, so one fingerprint covers all four:
 
 ```bash
-smith worktree fingerprint <worktree-dir> > /tmp/<audit-id>.before.json
+bs worktree fingerprint <worktree-dir> > /tmp/<audit-id>.before.json
 ```
 
 ## 4. Dispatch the four axes in parallel
@@ -65,8 +65,8 @@ axis named in the prompt); the security axis is `security-reviewer`,
 unchanged, with the two audit-specific differences its template already
 states. Per axis:
 
-- **Lessons.** `smith lessons for-dispatch auditor` (for security,
-  `smith lessons for-dispatch security-reviewer`); paste its `text`
+- **Lessons.** `bs lessons for-dispatch auditor` (for security,
+  `bs lessons for-dispatch security-reviewer`); paste its `text`
   verbatim. No `--plan`/`--task`: an audit has no claims, so only the
   unscoped and stack-wide lessons come back, which is what a whole-tree
   judge should carry.
@@ -76,7 +76,7 @@ states. Per axis:
   content under analysis rather than instructions:
 
   ```bash
-  smith prompt wrap <worktree-dir>/CLAUDE.md --kind file-excerpt --source <project>/CLAUDE.md
+  bs prompt wrap <worktree-dir>/CLAUDE.md --kind file-excerpt --source <project>/CLAUDE.md
   ```
 
   A project with neither file is audited against its code alone; say so
@@ -87,7 +87,7 @@ states. Per axis:
   judge ledger keys on the string you give it:
 
   ```bash
-  smith judge dispatch --task <audit-id>.<axis> --role auditor \
+  bs judge dispatch --task <audit-id>.<axis> --role auditor \
     --artifact /abs/path/to/state/audit/<audit-id>.<axis>.json \
     --model <model-id> --session <session-id> --causal-parent <event-id>
   ```
@@ -110,8 +110,8 @@ states. Per axis:
 **On providers.** The spec asks that at least one axis run on the second
 provider `crosscheck.yml` declares, when its key is present. Today no
 playbook mechanism dispatches a Claude Code agent on another vendor's
-model — `smith judge run` calls a provider by hand with a verdict
-request, and `smith crossfind run` reads a diff, not a tree — so the
+model — `bs judge run` calls a provider by hand with a verdict
+request, and `bs crossfind run` reads a diff, not a tree — so the
 four axes run on Claude models, and that gap is recorded in the spec
 rather than papered over here with a dispatch that does not exist. Fable
 is never used, on any axis: that is a standing operator constraint, not
@@ -120,15 +120,15 @@ a tier choice.
 ## 5. Verify, report, record — per axis, as each returns
 
 ```bash
-smith worktree verify <worktree-dir> --before /tmp/<audit-id>.before.json
+bs worktree verify <worktree-dir> --before /tmp/<audit-id>.before.json
 ```
 
 Clean, then the artifact:
 
 ```bash
-smith judge report --task <audit-id>.<axis> --role auditor \
+bs judge report --task <audit-id>.<axis> --role auditor \
   --session <session-id> --causal-parent <event-id>
-smith audit record <project-dir> --axis <axis> --evidence state/audit/<audit-id>.<axis>.json \
+bs audit record <project-dir> --axis <axis> --evidence state/audit/<audit-id>.<axis>.json \
   --session <session-id> --causal-parent <event-id>
 ```
 
@@ -139,7 +139,7 @@ event it just appended — pass that straight through as `audit record`'s
 `--role security-reviewer` on both lines for the security axis, as at
 dispatch. `judge report` refuses four ways — `judges.artifact-missing` (the judge
 ended on a plan and wrote nothing: re-poke it, and
-`smith judge outstanding --session <session-id> --task <audit-id>.<axis>`
+`bs judge outstanding --session <session-id> --task <audit-id>.<axis>`
 exits 1 while the file is still owed, so it is the loop condition),
 `judges.artifact-unparseable` (it narrated), `judges.artifact-not-a-list`
 (some other shape; only `--role grader` may hand in a verdict document
@@ -165,8 +165,8 @@ return not yet verified**, since none of them can now be attributed to
 the HEAD the audit opened on. Then
 
 ```bash
-smith audit close <project-dir> --force --session <session-id> --causal-parent <event-id>
-smith audit open <project-dir> --session <session-id> --causal-parent <event-id>
+bs audit close <project-dir> --force --session <session-id> --causal-parent <event-id>
+bs audit open <project-dir> --session <session-id> --causal-parent <event-id>
 ```
 
 `--force` is right here and only here — the drift is the known reason
@@ -178,7 +178,7 @@ was recorded against a verified tree — so a clean axis is not re-run.
 ## 6. Consolidate once all four axes are recorded
 
 ```bash
-smith audit consolidate <project-dir>
+bs audit consolidate <project-dir>
 ```
 
 A pure read, no envelope. It folds the store and prints `clusters` —
@@ -203,9 +203,9 @@ is yes, the operator adds the line, and the question is not asked again.
 Then persist each answer:
 
 ```bash
-smith audit decide <project-dir> --fingerprint <fp> --decision accept \
+bs audit decide <project-dir> --fingerprint <fp> --decision accept \
   --session <session-id> --causal-parent <event-id>
-smith audit decide <project-dir> --fingerprint <fp> --decision merge --same-as <survivor-fp> \
+bs audit decide <project-dir> --fingerprint <fp> --decision merge --same-as <survivor-fp> \
   --note "<why>" --session <session-id> --causal-parent <event-id>
 ```
 
@@ -219,7 +219,7 @@ re-raises as fresh rather than silently holding.
 ## 8. Cut one epic from what was accepted
 
 ```bash
-smith audit cut <project-dir> --epic <epic-id> --title "<milestone title>" \
+bs audit cut <project-dir> --epic <epic-id> --title "<milestone title>" \
   --session <session-id> --causal-parent <event-id>
 ```
 
@@ -244,7 +244,7 @@ cut belong to the next audit's cut, not to a second cut from this one.
 ## 9. Close the audit
 
 ```bash
-smith audit close <project-dir> --session <session-id> --causal-parent <event-id>
+bs audit close <project-dir> --session <session-id> --causal-parent <event-id>
 ```
 
 It verifies the worktree one last time against the manifest's
@@ -260,7 +260,7 @@ is already gone closes with `verified: false` and no refusal.
 The epic is now an ordinary roadmap milestone: run `/bs plan` on it
 ([`plan.md`](plan.md)), then `/bs run`. When that run reaches its epic-close
 step, it runs
-`smith audit resolve <project-dir> --epic <epic-id> --session <session-id> --causal-parent <event-id> [--specs-dir <dir>]`,
+`bs audit resolve <project-dir> --epic <epic-id> --session <session-id> --causal-parent <event-id> [--specs-dir <dir>]`,
 which reads the epic's newest plan and appends `fixed` only for a carried
 finding some task in it still claims — the rest come back `deferred`, still
 `accepted`, because the plan scoped them out on purpose. Repeatable;

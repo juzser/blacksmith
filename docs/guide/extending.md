@@ -17,8 +17,8 @@ To add one:
    frontmatter fields `name`, `description`, `model`, `tools`, and
    `maxTurns` — a positive integer that Claude Code enforces as the agent's
    turn ceiling, so leaving it out ships an uncapped role. Add a matching
-   `SMITH_MAXTURNS_<ROLE>` line to `.env.example` at the same value
-   (`test/envExample.test.ts` fails without one), so `smith agents sync`
+   `BS_MAXTURNS_<ROLE>` line to `.env.example` at the same value
+   (`test/envExample.test.ts` fails without one), so `bs agents sync`
    can override it per box. `description`
    should say what the role does
    *and* when to dispatch it — it's the routing signal, not just a label.
@@ -149,7 +149,7 @@ Then, in order:
 1. **Set the key** if it is an API provider. `api_key_env` names an
    environment variable; the value never enters this repo. Add the name to
    `.env.example` with no value, per `docs/standards/guardrails.md`.
-2. **Check it before you spend a call** — `smith judge preflight` reports
+2. **Check it before you spend a call** — `bs judge preflight` reports
    auth/reachability per enabled provider, and says nothing about providers
    you left off.
 3. **Start in `mode: shadow`.** Shadow verdicts are recorded and gate
@@ -157,7 +157,7 @@ Then, in order:
    against your codebase is unknown until you have measured it, and a judge
    promoted straight to `active` can block a correct task on day one.
 4. **Calibrate, then promote** to `mode: active` — the procedure, and what to
-   look for in `smith stats providers`, is
+   look for in `bs stats providers`, is
    [`docs/runbooks/providers.md`](../runbooks/providers.md).
 
 Rollback is the same file: `mode: shadow` removes its gating power,
@@ -173,7 +173,7 @@ Two things the transports assume, worth knowing before you debug one:
 - **A provider that fails is dropped, not fatal.** Quorum catches transport
   errors, files them as provider errors, and decides on whoever answered — so
   a misconfigured judge degrades the quorum instead of stopping the run. Check
-  `smith stats providers` if a judge seems to have no effect.
+  `bs stats providers` if a judge seems to have no effect.
 
 ## Change the taxonomy
 
@@ -252,7 +252,7 @@ appended.
 from the event log for fast UI/CLI queries (`sessions`, `tasks`, `edges`,
 `errors`, `lessons`, `reviews`, `waivers`, `artifacts`, `milestones`). It is
 derived state, never the source of truth — if the DB and the log ever
-disagree, the log wins and the DB gets rebuilt (`smith db rebuild`). Never
+disagree, the log wins and the DB gets rebuilt (`bs db rebuild`). Never
 write application logic that trusts the DB over the log; the DB exists purely
 so a dashboard query doesn't have to fold the entire NDJSON history on every
 page load.

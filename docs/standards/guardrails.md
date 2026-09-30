@@ -6,12 +6,12 @@
 > and the matchers in `factory/orchestrator/src/policy.ts`;
 > [`.claude/hooks/guard.sh`](../../.claude/hooks/guard.sh) is a transport
 > shim that pipes each guarded tool call into `dist/policyHook.js` — the same
-> decision `smith policy hook` makes, as an entry point that loads only what
+> decision `bs policy hook` makes, as an entry point that loads only what
 > deciding needs — and relays the answer. Violations are S1 ("stop the line")
 > unless stated otherwise.
 >
 > To ask what the rules would say about a command without running it:
-> `smith policy check --command '<cmd>'` — exit 1 means denied, and the output
+> `bs policy check --command '<cmd>'` — exit 1 means denied, and the output
 > names the rule. The matchers read command text, not intent, so they are
 > deliberately loose: they over-refuse at the edges rather than let a real
 > violation through. They live in tested TypeScript rather than as regexes in
@@ -116,7 +116,7 @@
 > `-am` the value follows, in `-ma` the value *is* `a`. Inside double quotes an
 > escaped `\"` belongs to the message rather than ending it.
 >
-> The second is the payload of `--command` on `smith policy check` itself. The
+> The second is the payload of `--command` on `bs policy check` itself. The
 > question above — *what would the rules say about this?* — was refused by the
 > rule it asked about, for every command worth asking about, which left the
 > documented dry run reachable only for commands that did not need it. The
@@ -170,7 +170,7 @@
   secrets for CI. Code references names, never values.
 - **`.env.example` is the only committed env file** — variable names and
   comments, and no secret value ever. The one exception is the non-secret
-  `SMITH_*` tuning knobs, which carry their shipped defaults (budgets.yml's
+  `BS_*` tuning knobs, which carry their shipped defaults (budgets.yml's
   numbers, the templates' `maxTurns`), held equal to those files by
   `test/envExample.test.ts`.
 - **Provider keys** (Codex, DeepSeek, any future judge) follow the same rule:
@@ -239,7 +239,7 @@
   operator controls, not a URL the hook has verified — which is why it is
   one entry long by default, and why widening it is a statement about the
   whole factory rather than a convenience.
-- **Merge queue only.** Task branches merge into `smith/<epic>/integration`
+- **Merge queue only.** Task branches merge into `bs/<epic>/integration`
   exclusively through the serial merge queue after gates pass — never by
   hand, never in parallel.
 - **Force-push is refused on every branch, not only the protected ones.**
@@ -253,7 +253,7 @@
   already published gets rewritten by the operator or not at all.
 - **No history rewrite on shared branches.** `rebase`/`commit --amend` are
   allowed only on a task branch before it enters the merge queue; never on
-  `smith/<epic>/integration` or `main` — `protected_branches.patterns` adds
+  `bs/<epic>/integration` or `main` — `protected_branches.patterns` adds
   the integration shape to the names for this rule alone. That freedom and
   the bullet above do not collide, because the rebase the merge queue runs
   happens inside the task's own worktree and is never pushed anywhere. A
@@ -300,7 +300,7 @@
 ## The role sandbox
 
 The orchestrator opens a lease over a worktree before handing it to a role
-that must not have the run of it (`smith sandbox open <dir> --role <role>
+that must not have the run of it (`bs sandbox open <dir> --role <role>
 --task <id> --session <id>`) and closes it when that role's output is filed.
 While the lease is open, further S1 rules apply to work done inside that
 directory, on top of everything above. Which rules depends on the role;
@@ -345,12 +345,12 @@ the same globs decide both a redirect target and a `file_path`.
 
 | Rule | What it refuses |
 | --- | --- |
-| `judge-sandbox-escape` | `smith sandbox` itself. A lease the leaseholder can lift is not a lease. |
+| `judge-sandbox-escape` | `bs sandbox` itself. A lease the leaseholder can lift is not a lease. |
 
 The lease is keyed by worktree path and matched by containment, so stepping
 two directories down stays inside it, and a command in a different worktree is
 untouched — an ordinary coder session in the same repo sees none of these
-rules. `smith sandbox status` lists what is currently open. `smith policy
+rules. `bs sandbox status` lists what is currently open. `bs policy
 check --sandbox <role>` answers what any of them would say without running
 anything.
 
@@ -360,7 +360,7 @@ reaches the network through `WebFetch`/`WebSearch` rather than through `Bash`.
 **What this is not.** It is not a container, a seccomp profile, or a read-only
 mount. It reads command text and tool arguments, so a write smuggled through
 an interpreter (`python3 -c`, opening a file for writing) is invisible to it
-and always will be. That is exactly why `smith worktree fingerprint`/`verify` stays in the
+and always will be. That is exactly why `bs worktree fingerprint`/`verify` stays in the
 pipeline behind it: the sandbox refuses up front the writes a matcher can see,
 the fingerprint catches after the fact the ones it cannot. Neither half is
 sold as the other.

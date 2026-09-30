@@ -15,7 +15,7 @@ epic. "Hand the wave over" below says how, and says the one thing that makes
 it safe.
 
 Ask the epic's effort tier once, at the top of the run, and keep the answer
-for the whole epic — `smith effort show --plan
+for the whole epic — `bs effort show --plan
 factory/specs/active/<epic>/plan-vN.json`. Step 13 here, and steps 3, 6 and 7
 of the wave playbook, each name the `profile` field that scales them; nothing
 else in either file moves. Read `effective`, not `requested`: a plan whose
@@ -23,7 +23,7 @@ live tasks fire a security trigger is floored, and running it at the tier the
 file asked for would be running it below the floor.
 
 Ask the cross-provider gate once too, at the top of the run and before any
-wave is admitted — `smith judge preflight --project <project-dir>`, the same
+wave is admitted — `bs judge preflight --project <project-dir>`, the same
 call INSTALL.md makes at setup. When it reports the gating pool cannot
 decide (fewer active external providers than `quorum_rule.min_providers`
 after OpenRouter substitution, or a provider the project's own
@@ -41,7 +41,7 @@ docs/runbooks/providers.md §9d.
    second with a set you picked by eye.
 
    ```bash
-   smith wave next factory/specs/active/<epic>/plan-vN.json \
+   bs wave next factory/specs/active/<epic>/plan-vN.json \
      --session <session-id> --repo <project-dir>
    ```
 
@@ -60,7 +60,7 @@ docs/runbooks/providers.md §9d.
 
    Then put that proposal through the gate that actually admits it:
 
-   `smith wave check factory/specs/active/<epic>/plan-vN.json <task-id>...`
+   `bs wave check factory/specs/active/<epic>/plan-vN.json <task-id>...`
    — claims must be pairwise disjoint and share no `worktree.yml`
    `serialize_always_globs` hotspot. A violation means cut a dependency
    edge and run the pair serially instead of forcing the wave.
@@ -82,7 +82,7 @@ docs/runbooks/providers.md §9d.
      tail of `wave` and re-check.
    - With `--session`, `wave check` admits only live tasks of an ingested
      plan. A plan version whose tasks the log never saw is refused
-     `cli.plan-not-ingested`: run `smith plan ingest` on it, then re-check.
+     `cli.plan-not-ingested`: run `bs plan ingest` on it, then re-check.
      An id with no task row is refused `plan.unknown-task`, and a task
      that is `completed`, `superseded` or `waived` is refused
      `cli.task-not-live`, naming each task and its status. Drop those ids.
@@ -108,7 +108,7 @@ would cost:
 - **Inline**, in this session, when the wave is small enough for this
   window. Read `wave.md` and work it here.
 - **In a session of its own**, when it is not, but you still want to drive
-  it yourself: `smith session start <wave-id> --continues <session-id>#<n>`,
+  it yourself: `bs session start <wave-id> --continues <session-id>#<n>`,
   where `<n>` is the index of the event that admitted this wave.
 - **Dispatched**, as the **`wave-runner`** agent, when the wave would eat
   the window this epic needs to reach its own end. It is the only role
@@ -130,12 +130,12 @@ to make (D13, D-266). What it does not buy is a shortcut. A wave session
 opened without `--continues` writes into a log nothing here reads, and the
 verbs below then report a wave that appears never to have run rather than
 failing — which is the same silence, arriving as a green. When you dispatched
-the wave rather than ran it, `smith delegation check <session-id>` is what
+the wave rather than ran it, `bs delegation check <session-id>` is what
 turns that silence into a red: a `wave-runner` that dispatched before opening
 its log, or against the wrong event, is `unverifiable` and exits 1.
 
 **Then check that it did.** Once the wave's tasks reach a terminal state,
-`smith wave audit --session <id> --epic <epic>` reads the log back and
+`bs wave audit --session <id> --epic <epic>` reads the log back and
 reports the width the wave actually ran at, not the width it was admitted
 at. Ask it with *this* session: it folds the lineage, so it sees the
 dispatches a wave session made under the admission this one wrote. Exit `1`
@@ -157,7 +157,7 @@ playbooks are written to prevent.
     on it**, whichever step cut it:
 
     ```bash
-    smith plan ingest factory/specs/active/<epic>/plan-v<n+1>.json --project <project-dir> \
+    bs plan ingest factory/specs/active/<epic>/plan-v<n+1>.json --project <project-dir> \
       --session <session-id> --plan-version <n+1> --causal-parent <event-id>
     ```
 
@@ -172,11 +172,11 @@ playbooks are written to prevent.
     branch**. Every gate up to here ran inside a task worktree, so every
     green you have so far is a green about a worktree — the envkit epic
     shipped six green lint gates on a branch whose `pnpm lint` exited 1
-    (D-42). Check out `smith/<epic>/integration` in the project first (this
+    (D-42). Check out `bs/<epic>/integration` in the project first (this
     command refuses to move your working tree, and refuses a dirty one):
 
     ```bash
-    smith integration check --epic <epic> --project <project-dir> \
+    bs integration check --epic <epic> --project <project-dir> \
       --checks <checks.json> \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
@@ -192,7 +192,7 @@ playbooks are written to prevent.
     check, the review and the close all claim to have verified a plan that
     no longer exists. One dogfooded product epic closed at v3 with its
     integration check and its closing spec review both stamped v1; the goal
-    check, passed the flag, said v3. Read the version off `smith plan ingest`'s receipt and
+    check, passed the flag, said v3. Read the version off `bs plan ingest`'s receipt and
     pass it every time.
 13. Dispatch the **`spec-reviewer`** again — this time against the code.
     The pre-code review at `/bs plan` step 3 read the spec against nothing;
@@ -204,7 +204,7 @@ playbooks are written to prevent.
     `criterion_ref` it is against — to:
 
     ```bash
-    smith epic spec-review --epic <epic> --project <project-dir> \
+    bs epic spec-review --epic <epic> --project <project-dir> \
       --plan factory/specs/active/<epic>/plan-vN.json \
       --reviewed-by spec-reviewer \
       --evidence state/results/<epic>.spec-review-close-vN.json \
@@ -236,12 +236,12 @@ playbooks are written to prevent.
     distinguishes them. It
     exits 0 even when it raises findings: what it found blocks the plan, not
     this command. A spec finding is unwaivable at S1/S2 and no task's diff can
-    contain the fix, so the answer is `smith plan amend --plan … --findings …
+    contain the fix, so the answer is `bs plan amend --plan … --findings …
     --rationale … --sites …` (§6a of the operator guide). `--sites` is every
     place that shape occurs, not only the file the finding was reported
     against — answer it before writing the changes, because it is the question
     that decides how much the amendment fixes (D-123). It cuts plan v(n+1):
-    ingest it (step 11's `smith plan ingest`), go back to step 11 with the new
+    ingest it (step 11's `bs plan ingest`), go back to step 11 with the new
     version, and re-run this review against the branch that results. Never
     record a spec defect as a coder failure; that is
     the deadlock this step exists to end.
@@ -252,20 +252,20 @@ playbooks are written to prevent.
     did not write. Get the clause list first (read-only, no event):
 
     ```bash
-    smith epic goal --epic <epic>
+    bs epic goal --epic <epic>
     ```
 
     Hand those clauses and the live plan to a **`spec-reviewer`** session —
     a fresh one, never the planner's, and never the same dispatch as step 13:
-    `smith dispatch check` refuses to let one dispatch answer for both.
+    `bs dispatch check` refuses to let one dispatch answer for both.
     Dispatch it *after* step 13's record is written, not alongside it — a
     dispatch that predates the previous record has already answered for that
     one, so two sessions fired up front leave this record unaccounted for and
-    `smith dispatch check` reports that record `unverifiable`. Take back one
+    `bs dispatch check` reports that record `unverifiable`. Take back one
     verdict per clause, in the goal's order, and record it:
 
     ```bash
-    smith epic goal-check --epic <epic> \
+    bs epic goal-check --epic <epic> \
       --plan factory/specs/active/<epic>/plan-vN.json \
       --coverage state/results/<epic>.goal-coverage-vN.json \
       --checked-by spec-reviewer \
@@ -275,8 +275,8 @@ playbooks are written to prevent.
     `covered` must name live plan task ids; `out-of-scope` must give a reason,
     and that reason is quoted back to the epic judge. `uncovered` mints an
     S2-major spec finding against the plan file — no task diff can contain
-    that fix, so the answer is `smith plan amend`, which cuts v(n+1) and sends
-    you back to step 11 — through `smith plan ingest`, as in step 13. The
+    that fix, so the answer is `bs plan amend`, which cuts v(n+1) and sends
+    you back to step 11 — through `bs plan ingest`, as in step 13. The
     command exits 0 even when it raises findings.
 
     **It refuses (`cli.no-epic-goal`) when the owning milestone states no
@@ -291,7 +291,7 @@ playbooks are written to prevent.
     integrable at all:
 
     ```bash
-    smith epic verdict --epic <epic> --project <project-dir> \
+    bs epic verdict --epic <epic> --project <project-dir> \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
@@ -320,7 +320,7 @@ playbooks are written to prevent.
     nothing; `epic close` is what makes it a fact in the log (D-43):
 
     ```bash
-    smith epic close --epic <epic> --project <project-dir> \
+    bs epic close --epic <epic> --project <project-dir> \
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
@@ -329,7 +329,7 @@ playbooks are written to prevent.
     yourself** — closing over a hold is the operator's call; ask for it and
     quote the blockers. If the epic was cut by `/bs audit`
     ([`audit.md`](audit.md) step 10), follow the close with
-    `smith audit resolve <project-dir> --epic <epic> --session <session-id> --causal-parent <event-id> [--specs-dir <dir>]`
+    `bs audit resolve <project-dir> --epic <epic> --session <session-id> --causal-parent <event-id> [--specs-dir <dir>]`
     so every finding this plan still claims is marked `fixed` in the
     project's audit store — the rest come back `deferred`, left exactly as
     they were, because the plan scoped them out on purpose. The store, not
@@ -338,17 +338,17 @@ playbooks are written to prevent.
     project's plans live elsewhere, pass `--specs-dir` naming the same specs
     dir the epic was run from, or it refuses rather than guess.
 17. Open **one integration PR per epic** with a scribe-written body. The head is
-    `smith/<epic>/integration`. The base is the target repo's `main` unless
+    `bs/<epic>/integration`. The base is the target repo's `main` unless
     the epic was cut from another epic's integration branch, in which case
     the PR stacks on that branch and the operator merges the parent's PR
-    first — a child epic cut from `smith/<parent>/integration` opens its PR
+    first — a child epic cut from `bs/<parent>/integration` opens its PR
     against that branch, behind the parent's PR; once the parent has merged
     and its branch is deleted, GitHub retargets the child to `main`. The
     operator reviews on GitHub; this session never merges to `main`
     (`docs/standards/guardrails.md`).
 
     **Build the fact pack first.** The scribe has no `Bash` and a small turn
-    cap, so it cannot run `git` or `smith`, and a scribe left to grep raw logs
+    cap, so it cannot run `git` or `bs`, and a scribe left to grep raw logs
     caps and fills the gaps by invention — a wrong event id, a merged task
     called dead, "no waivers" over two grants. Compute every fact in your own
     session, from the epic session with `--lineage` so the waves' records
@@ -359,14 +359,14 @@ playbooks are written to prevent.
 
     ```bash
     # one pass over the log (pass an --n that covers the whole lineage)
-    smith event tail <session-id> --lineage --n 100000
+    bs event tail <session-id> --lineage --n 100000
     # the fingerprint map: finding_id, task_id and fingerprint of the epic's findings
-    smith findings list --session <session-id> --epic <epic>
+    bs findings list --session <session-id> --epic <epic>
     # the goal the summary states
-    smith epic goal --epic <epic> [--roadmap-path <file>]
+    bs epic goal --epic <epic> [--roadmap-path <file>]
     # the branch itself
-    git log --oneline <base>..smith/<epic>/integration
-    git diff --shortstat <base>...smith/<epic>/integration
+    git log --oneline <base>..bs/<epic>/integration
+    git diff --shortstat <base>...bs/<epic>/integration
     ```
 
     From the `event tail` pass keep, each with its `event_id`:
@@ -448,7 +448,7 @@ playbooks are written to prevent.
     Append it by hand, under the reserved ref and the live plan version:
 
     ```bash
-    smith event append '{"session_id":"<session-id>","actor":"orchestrator","event_type":"integration-pr-opened","task_id":"<epic>/integration","plan_version":<n>,"causal_parent":"<event-id>","payload":{"step":17,"pr_url":"<url>","pr_number":<n>,"repo":"<owner>/<repo>","base_ref":"<base>","head_ref":"smith/<epic>/integration","head_sha":"<sha>","base_sha":"<sha>","commits":<n>,"changed_files":<n>,"additions":<n>,"deletions":<n>}}'
+    bs event append '{"session_id":"<session-id>","actor":"orchestrator","event_type":"integration-pr-opened","task_id":"<epic>/integration","plan_version":<n>,"causal_parent":"<event-id>","payload":{"step":17,"pr_url":"<url>","pr_number":<n>,"repo":"<owner>/<repo>","base_ref":"<base>","head_ref":"bs/<epic>/integration","head_sha":"<sha>","base_sha":"<sha>","commits":<n>,"changed_files":<n>,"additions":<n>,"deletions":<n>}}'
     ```
 
     The receipt says whether the timeline reads the type; it does, and it

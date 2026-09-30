@@ -5,10 +5,10 @@ are the guide's, not this file's: `§5` means the same thing here as it
 does wherever else this repo cites it.
 
 The five audits that ask whether the dispatches inside an admitted wave were
-real ones. Admitting the wave itself — `smith wave check` and its
+real ones. Admitting the wave itself — `bs wave check` and its
 neighbours — is [the wave part](wave.md), §2.
 
-## 2a. `smith security triggers` — the security-reviewer's dispatch condition
+## 2a. `bs security triggers` — the security-reviewer's dispatch condition
 
 The `security-reviewer` is conditional dispatch only, and its first trigger is
 "the task's claims touch a sensitive path". That used to mean reading
@@ -16,7 +16,7 @@ The `security-reviewer` is conditional dispatch only, and its first trigger is
 saying some tasks got a security review and others didn't (P9-4). Ask instead:
 
 ```bash
-smith security triggers --task factory/specs/active/epic-1/task-1.json
+bs security triggers --task factory/specs/active/epic-1/task-1.json
 ```
 
 ```json
@@ -51,11 +51,11 @@ spec (`--case <name>` overrides it); epic tags and scheduled rechecks have no
 home in the schema yet, so the operator asserts them:
 
 ```bash
-smith security triggers --task <spec.json> --epic-tag security --recheck
-smith security triggers --task <spec.json> --policy /path/to/other.yml
+bs security triggers --task <spec.json> --epic-tag security --recheck
+bs security triggers --task <spec.json> --policy /path/to/other.yml
 ```
 
-## 2b. `smith dispatch check` — was the critic actually adversarial?
+## 2b. `bs dispatch check` — was the critic actually adversarial?
 
 `crosscheck.yml`'s `asymmetric_roles.finder_ne_critic` has said since Phase 1
 that the spec-reviewer "never runs on the planner's own model" and the
@@ -69,7 +69,7 @@ alongside `model_tier`, and `crosscheck.yml` names the pairs it means instead
 of only asserting that pairs exist. So the rule became checkable:
 
 ```bash
-smith dispatch check <session-id> [--task <task-id>] [--policy <path>]
+bs dispatch check <session-id> [--task <task-id>] [--policy <path>]
 ```
 
 ```json
@@ -137,15 +137,15 @@ would turn "this dispatch cannot be checked" into "no such dispatch happened"
 ### Reviews that arrive without a dispatch (D-124)
 
 Critic work reaches the log by two routes, and this command reads both.
-`smith epic spec-review` appends `spec-review-recorded` and no dispatch
+`bs epic spec-review` appends `spec-review-recorded` and no dispatch
 record at all, so for a while a closing review nobody dispatched was not
 `unverifiable` here — it was *invisible*, the pair read `not-applicable`, and
 the report exited 0 on a session in which no critic had run.
 
 Two commands write critic work this way, and the audit's domain
 (`CRITIC_WORK_EVENTS` in `dispatchAudit.ts`) names both: `spec-review-recorded`
-from `smith epic spec-review`, reading `reviewed_by`, and
-`goal-check-recorded` from `smith epic goal-check` (§7e), reading `checked_by`.
+from `bs epic spec-review`, reading `reviewed_by`, and
+`goal-check-recorded` from `bs epic goal-check` (§7e), reading `checked_by`.
 The second was listed the day it was written rather than after its own D-124,
 because enumerating the domain is not documentation here — it *is* the check,
 and an event type missing from that map is a critic that can never be found
@@ -178,7 +178,7 @@ independent reviewer appears to have run.
 `criticWorkExamined` counts these records the way `dispatchesExamined` counts
 dispatches — separately, so neither number claims coverage the other supplied.
 
-## 2c. `smith escalation check` — did the ladder actually get climbed?
+## 2c. `bs escalation check` — did the ladder actually get climbed?
 
 `budgets.yml`'s `escalation_ladder` has said since Phase 1 that two failed
 rounds on a task escalate the model tier and three escalate to the operator,
@@ -192,7 +192,7 @@ The rungs now carry a machine-readable half — `failed_rounds` and a closed
 against the log:
 
 ```bash
-smith escalation check <session-id> [--task <task-id>] [--policy <path>]
+bs escalation check <session-id> [--task <task-id>] [--policy <path>]
 ```
 
 ```json
@@ -246,7 +246,7 @@ against it — Phase 9's own D-46 gap. Reading dispatches alone reported it as
 "never dispatched again, the rung was never exercised", which is a clean bill
 of health issued over a hole in the record. It now exits 1 and names the hole.
 
-## 2d. `smith tester check` — did a tester grade the code, or did the coder?
+## 2d. `bs tester check` — did a tester grade the code, or did the coder?
 
 `dispatch check` above asks whether the critic ran on a different *model*. For
 a tester that is the wrong question: a tester may legitimately run on the
@@ -258,12 +258,12 @@ The thing that separates those two cases in the log is not a model, it is a
 **turn**. A `dispatch_decision` is written by the node that dispatched and
 never by an agent about itself, so a second dispatch is the only evidence the
 log can hold that a second turn happened at all. (Who may be such a node is
-`delegation.yml`, asserted by [§2e](#2e-smith-delegation-check--did-the-node-that-dispatched-own-its-log)
+`delegation.yml`, asserted by [§2e](#2e-bs-delegation-check--did-the-node-that-dispatched-own-its-log)
 — run the two together.) `crosscheck.yml`'s `role_isolation.pairs` names the
 pair (one entry: `coder` / `tester`), and this asserts it per test gate:
 
 ```bash
-smith tester check <session-id> [--task <task-id>] [--policy <path>]
+bs tester check <session-id> [--task <task-id>] [--policy <path>]
 ```
 
 ```json
@@ -308,7 +308,7 @@ graded?" — not "did that tester write the tests". `role-write-scope` in
 `guardrails.yml` fences where a leased tester may write; the two checks are
 complementary, not substitutes.
 
-## 2e. `smith delegation check` — did the node that dispatched own its log?
+## 2e. `bs delegation check` — did the node that dispatched own its log?
 
 The two checks above both read *a second dispatch* as proof of *a second
 turn*. That reading has a premise: whoever writes a `dispatch_decision` owns
@@ -321,7 +321,7 @@ of spending its own window on it. This command is what keeps the premise true
 under that grant, and it asks two questions that fail apart:
 
 ```bash
-smith delegation check <session-id> [--task <task-id>] [--policy <path>] [--crosscheck <path>]
+bs delegation check <session-id> [--task <task-id>] [--policy <path>] [--crosscheck <path>]
 ```
 
 ```json
@@ -349,7 +349,7 @@ in one file would silently disarm a check in another.
 
 **`log` is the run.** Every grantee dispatch is matched against a
 `session-start` whose `causal_parent` is that dispatch's event id: that is what
-`smith session start <wave-id> --continues <dispatch-event-id>` writes. A
+`bs session start <wave-id> --continues <dispatch-event-id>` writes. A
 grantee that dispatched from inside the dispatcher's session, or dispatched a
 role outside its grant, is a `violation`.
 

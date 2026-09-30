@@ -53,13 +53,14 @@ const SHELL_OPERATORS = new Set(['|', '||', '&&', ';', '<', '>', '>>', '&', '#',
 /**
  * How a command line starts.
  *
- * Two spellings, because the docs have two. `smith` is the linked shim, and
+ * Two spellings, because the docs have two. `bs` is the linked shim (with
+ * `smith` its deprecated alias, still read so an old spelling is checked), and
  * `node <path>/cli.js` is what `docs/guide/operator-guide.md` declares
  * canonical for every example under `operator-guide/` — necessarily, since
- * the pre-install docs run before the shim exists. Anchoring on `smith` alone
+ * the pre-install docs run before the shim exists. Anchoring on `bs` alone
  * leaves the documents a new operator follows first outside the guard.
  */
-const INVOKED = /(?:^|[\s(;&$])(?:smith|node[ \t]+\S*cli\.js)(?=[ \t])/g;
+const INVOKED = /(?:^|[\s(;&$])(?:bs|smith|node[ \t]+\S*cli\.js)(?=[ \t])/g;
 
 /**
  * How a document declares a namespace it specifies but the CLI does not ship.
@@ -214,7 +215,7 @@ interface Problem {
 function problemsWith(invocation: Invocation, where: string): Problem[] {
   const [namespace, next] = invocation.words;
   if (namespace === undefined) return [];
-  const wrote = ['smith', ...invocation.words].join(' ');
+  const wrote = ['bs', ...invocation.words].join(' ');
   if (!NAMESPACES.has(namespace))
     return [{ where, wrote, reason: `"${namespace}" is not a namespace the CLI declares` }];
 
@@ -345,6 +346,13 @@ describe('parseInvocations', () => {
     ]);
   });
 
+  it('reads the bs command and the deprecated smith alias alike', () => {
+    expect(parseInvocations('`bs plan validate <path>` or `smith plan validate <path>`')).toEqual([
+      { line: 1, words: ['plan', 'validate'], flags: [] },
+      { line: 1, words: ['plan', 'validate'], flags: [] },
+    ]);
+  });
+
   it('reads the node …/cli.js spelling the pre-install docs are written in', () => {
     const preInstall = '`node factory/orchestrator/dist/cli.js stack check --json`';
     expect(parseInvocations(preInstall)).toEqual([
@@ -437,7 +445,7 @@ describe('plannedNamespaces', () => {
   });
 });
 
-describe('the documented smith commands are the shipped smith commands', () => {
+describe('the documented bs commands are the shipped bs commands', () => {
   it('names only commands and flags the CLI declares', () => {
     const problems = surface().flatMap(({ rel, invocations, planned }) =>
       invocations

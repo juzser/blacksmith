@@ -52,7 +52,7 @@ None.
 ## Generated artifacts
 
 <!-- Tick only what this PR legitimately touches. `factory/policies/lessons.md`
-     is written by `smith lessons compile`, and screenshots by the e2e suite —
+     is written by `bs lessons compile`, and screenshots by the e2e suite —
      neither is hand-editable (CONTRIBUTING.md § Generated files). -->
 
 - [ ] No generated file was hand-edited
