@@ -1110,9 +1110,13 @@ describe('db/projector.ts — a task-result-recorded whose artifacts is the lega
     expect(legacyRows.every((a) => a.type === 'file')).toBe(true);
   });
 
-  it('a map with a non-string value is not read as legacy and still reports a skip', async () => {
-    // A second, independent log: the object has one bad entry, so the whole
-    // map is held back rather than half-projected.
+  it.each([
+    // One bad entry: the whole map is held back rather than half-projected.
+    ['a map with a non-string value', { claude_half: 'scratchpad/r23/claude-half.json', repair_brief: 7 }],
+    // No entries at all: nothing says it was ever a name->path map.
+    ['an empty object', {}],
+  ])('%s is not read as legacy and still reports a skip', async (_label, artifacts) => {
+    // A second, independent log.
     const secondStateDir = await mkdtemp(
       path.join(tmpdir(), 'smith-projector-legacy-artifacts-mixed-events-'),
     );
@@ -1135,7 +1139,7 @@ describe('db/projector.ts — a task-result-recorded whose artifacts is the lega
           task_id: TASK_2,
           run_status: 'done',
           structured_output: {},
-          artifacts: { claude_half: 'scratchpad/r23/claude-half.json', repair_brief: 7 },
+          artifacts,
         },
       };
       await appendFile(

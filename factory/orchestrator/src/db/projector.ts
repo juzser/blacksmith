@@ -299,14 +299,14 @@ function describeShape(value: unknown): string {
  * requires — read it as the legacy shape it plainly is, rather than holding
  * it back forever behind a banner an operator can never clear.
  *
- * Only a plain object whose every value is a non-empty string counts: one
- * bad value (or the value itself, or any other non-array shape) still goes
+ * Only a non-empty plain object whose every value is a non-empty string
+ * counts: an empty object, one bad value, or any other non-array shape goes
  * through the loud skip below (D-141 — a loud undercount beats a crash).
  */
 function readLegacyArtifactsMap(value: unknown): Array<[string, string]> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const entries = Object.entries(value as Record<string, unknown>);
-  const allPaths = entries.every(([, v]) => typeof v === 'string' && v.length > 0);
+  const allPaths = entries.length > 0 && entries.every(([, v]) => typeof v === 'string' && v.length > 0);
   return allPaths ? (entries as Array<[string, string]>) : null;
 }
 
@@ -1402,8 +1402,8 @@ export function projectSession(
                   eventId: event_id,
                   ts: record.ts,
                   // Never 'screenshot': this is history from before artifacts
-                  // carried a type at all, so it must not fall into the task
-                  // page's screenshot gallery.
+                  // carried a type at all. An image path can still reach the
+                  // gallery by its extension, which is what it is.
                   type: 'file',
                   path: artifactPath,
                   description,
