@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -673,6 +673,54 @@ describe('ui/server app.ts', () => {
       const res = await handle.app.request(`/api/artifacts/${encodeURIComponent(artifactId)}`);
       expect(res.status).toBe(415);
       closeApp(handle);
+    });
+
+    it('404s a directory that carries an image extension', async () => {
+      const artifactId = await seedArtifact('keep.png', 'screenshot', 'x');
+      const file = path.join(artifactsDir, TASK_2, 'keep.png');
+      await rm(file);
+      await mkdir(file);
+      const handle = createApp({ dbPath, stateDir, roadmapPath, artifactsDir });
+      const res = await handle.app.request(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+      expect(res.status).toBe(404);
+      closeApp(handle);
+    });
+
+    it('413s an image larger than the size cap instead of buffering it', async () => {
+      const artifactId = await seedArtifact('big.png', 'screenshot', '0123456789');
+      const handle = createApp({
+        dbPath,
+        stateDir,
+        roadmapPath,
+        artifactsDir,
+        maxArtifactBytes: 9,
+      });
+      const res = await handle.app.request(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+      expect(res.status).toBe(413);
+      closeApp(handle);
+    });
+
+    it('404s when the file is swapped for a symlink after resolution', async () => {
+      const outside = await mkdtemp(path.join(tmpdir(), 'smith-app-outside-'));
+      await writeFile(path.join(outside, 'secret.png'), 'secret');
+      const artifactId = await seedArtifact('swap.png', 'screenshot', 'ok');
+      const file = path.join(artifactsDir, TASK_2, 'swap.png');
+      const handle = createApp({
+        dbPath,
+        stateDir,
+        roadmapPath,
+        artifactsDir,
+        // Runs between the containment check and the open: the race the
+        // route must not lose.
+        onArtifactResolved: async () => {
+          await rm(file);
+          await symlink(path.join(outside, 'secret.png'), file);
+        },
+      });
+      const res = await handle.app.request(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+      expect(res.status).toBe(404);
+      closeApp(handle);
+      await rm(outside, { recursive: true, force: true });
     });
   });
 

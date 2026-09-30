@@ -19,8 +19,9 @@
 // factory/orchestrator/dist/ build (`pnpm build`, run first) keeps every
 // path computation correct. See docs/standards/stack.md's directory
 // conventions — dist/ is gitignored/generated, never committed.
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { existsSync, constants as fsConstants, readdirSync, statSync } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type { Context } from 'hono';
@@ -78,6 +79,13 @@ const ARTIFACT_CONTENT_TYPE_BY_EXT: Record<string, string> = {
 };
 
 /**
+ * Largest artifact the route will read. A screenshot is well under this; a
+ * bigger file is refused rather than buffered, since the task page polls and
+ * one oversized declared path would otherwise be read into memory each time.
+ */
+const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
+
+/**
  * How often the change stream re-scans `state/events/` while at least one
  * client is connected. One second, not sub-second: the scan is a readdir plus
  * one stat per session, and a page that learns about an event 900ms late is
@@ -102,6 +110,13 @@ export interface AppOpts {
   specsDir?: string;
   /** Injection seam for tests; production is `state/artifacts`. */
   artifactsDir?: string;
+  /** Injection seam for tests; production is MAX_ARTIFACT_BYTES. */
+  maxArtifactBytes?: number;
+  /**
+   * Test-only hook run between resolving an artifact's path and opening it,
+   * so a test can stage the swap the open has to survive.
+   */
+  onArtifactResolved?: () => Promise<void>;
   /** Root of the built Vue app (ui/dist) to static-serve; omitted in tests (API-only). */
   uiDistDir?: string;
   /**
@@ -622,6 +637,7 @@ export function createApp(opts: AppOpts): AppHandle {
   // noveltyOptsFromFlags() is — a missing policy is an error, not a default.
   const lessonsPolicy = (opts.schedulerPolicy ?? loadSchedulerPolicy()).lessons;
   const artifactsDir = opts.artifactsDir ?? STATE_ARTIFACTS_DIR;
+  const maxArtifactBytes = opts.maxArtifactBytes ?? MAX_ARTIFACT_BYTES;
   // Spread into every clock-dependent query rather than resolved to a
   // default here: an absent pin must stay absent so each query reads the
   // wall clock per call (AppOpts.nowIso), not the instant the server booted.
@@ -842,10 +858,28 @@ export function createApp(opts: AppOpts): AppHandle {
     if (!resolved) return c.body(null, 404);
     const contentType = ARTIFACT_CONTENT_TYPE_BY_EXT[path.extname(resolved).toLowerCase()];
     if (!contentType) return c.body(null, 415);
-    const bytes = await readFile(resolved);
-    c.header('Content-Type', contentType);
-    c.header('X-Content-Type-Options', 'nosniff');
-    return c.body(bytes);
+    await opts.onArtifactResolved?.();
+    // resolveArtifactPath() returned the real path, so no component of it is
+    // a link. Open with O_NOFOLLOW and check the descriptor, not the path: a
+    // file swapped for a symlink after the check fails the open, and what is
+    // read is exactly what fstat() described.
+    let file: FileHandle;
+    try {
+      file = await open(resolved, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    } catch {
+      return c.body(null, 404);
+    }
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile()) return c.body(null, 404);
+      if (stat.size > maxArtifactBytes) return c.body(null, 413);
+      const bytes = await file.readFile();
+      c.header('Content-Type', contentType);
+      c.header('X-Content-Type-Options', 'nosniff');
+      return c.body(bytes);
+    } finally {
+      await file.close();
+    }
   });
 
   app.get('/api/lessons', (c) => c.json(lessonsPage(handle.db, sessionScope(c))));
