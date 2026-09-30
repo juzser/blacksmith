@@ -1006,7 +1006,7 @@ describe('findings.ts', () => {
       await raiseSpec();
       await expect(
         transition('finding-spec', 'amend-pending', rootCtx(), { stateDir }),
-      ).rejects.toThrow(/smith plan amend/);
+      ).rejects.toThrow(/bs plan amend/);
     });
 
     it('refuses to put a diff-scoped finding on the amendment path', async () => {

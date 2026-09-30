@@ -702,7 +702,7 @@ describe('mcpBlockers — what the epic-close gate refuses on', () => {
 
     it('sends an operator with no manifest to `smith mcp init`', () => {
       const blocker = unread('missing');
-      expect(blocker).toContain('smith mcp init');
+      expect(blocker).toContain('bs mcp init');
       expect(blocker).toContain('demo-mcp-surface');
     });
 
@@ -713,8 +713,8 @@ describe('mcpBlockers — what the epic-close gate refuses on', () => {
       const unreadable = unread('unreadable');
       expect(missing).not.toEqual(unreadable);
       expect(unreadable).toContain('refuses over an existing manifest');
-      expect(unreadable).toContain('smith mcp check');
-      expect(missing).not.toContain('smith mcp check');
+      expect(unreadable).toContain('bs mcp check');
+      expect(missing).not.toContain('bs mcp check');
     });
 
     it('is the remedy the code actually accepts — the loop, executed', () => {

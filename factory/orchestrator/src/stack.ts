@@ -235,7 +235,7 @@ function reportFor(field: string, value: string, source: string | null): StackAn
           field,
           value,
           support: 'refused',
-          note: `\`smith new\` refuses: factory/scaffold/base is TypeScript, and scaffolding it under a ${value} answer would hand you a project you did not ask for.`,
+          note: `\`bs new\` refuses: factory/scaffold/base is TypeScript, and scaffolding it under a ${value} answer would hand you a project you did not ask for.`,
         };
   }
   if (field === 'frontend') {
@@ -244,7 +244,7 @@ function reportFor(field: string, value: string, source: string | null): StackAn
         field,
         value,
         support: 'honoured',
-        note: '`smith new --ui` refuses until this names a framework.',
+        note: '`bs new --ui` refuses until this names a framework.',
       };
     }
     return value === 'vue'
@@ -253,7 +253,7 @@ function reportFor(field: string, value: string, source: string | null): StackAn
           field,
           value,
           support: 'refused',
-          note: `\`smith new --ui\` refuses: the UI template is Vue, and there is no ${value} template to layer instead.`,
+          note: `\`bs new --ui\` refuses: the UI template is Vue, and there is no ${value} template to layer instead.`,
         };
   }
   if (field === 'styling') {
@@ -271,7 +271,7 @@ function reportFor(field: string, value: string, source: string | null): StackAn
           field,
           value,
           support: 'refused',
-          note: `\`smith new --ui\` refuses: the UI template wires plain CSS or Tailwind, not ${value}.`,
+          note: `\`bs new --ui\` refuses: the UI template wires plain CSS or Tailwind, not ${value}.`,
         };
   }
   if (field === 'design_system') {
@@ -311,7 +311,7 @@ function reportFor(field: string, value: string, source: string | null): StackAn
           field,
           value,
           support: 'refused',
-          note: `design_system_source ${source} does not exist, so \`smith new --ui\` would vendor nothing while claiming ${value}.`,
+          note: `design_system_source ${source} does not exist, so \`bs new --ui\` would vendor nothing while claiming ${value}.`,
         };
   }
   const hardcoded = HARDCODED[field];
@@ -327,7 +327,7 @@ function reportFor(field: string, value: string, source: string | null): StackAn
           field,
           value,
           support: 'recorded',
-          note: `The templates hardcode ${hardcoded.value} in ${hardcoded.where}. The agents read ${value}; \`smith new\` still scaffolds ${hardcoded.value}.`,
+          note: `The templates hardcode ${hardcoded.value} in ${hardcoded.where}. The agents read ${value}; \`bs new\` still scaffolds ${hardcoded.value}.`,
         };
   }
   return {

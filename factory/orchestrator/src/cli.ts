@@ -1146,7 +1146,7 @@ async function refuseUnadmissibleTasks(
     const pending = [...new Set(gaps.map((g) => g.taskId))];
     throw new SmithError(
       'cli.plan-not-ingested',
-      `Plan "${plan.epic_id}" v${plan.version} has not been ingested into session "${sessionId}" (${pending.length} task(s) pending): run \`smith plan ingest\` on it first, then re-check.`,
+      `Plan "${plan.epic_id}" v${plan.version} has not been ingested into session "${sessionId}" (${pending.length} task(s) pending): run \`bs plan ingest\` on it first, then re-check.`,
       { epic: plan.epic_id, version: plan.version, session: sessionId, pending },
     );
   }
@@ -1281,7 +1281,7 @@ async function main(): Promise<number> {
   if (!runtime.supported) {
     // Prose on stderr so a human sees it even when stdout is piped into a
     // JSON parser; the structured form still goes to stdout for callers.
-    process.stderr.write(`smith: unsupported runtime\n${runtime.reason ?? ''}\n`);
+    process.stderr.write(`bs: unsupported runtime\n${runtime.reason ?? ''}\n`);
     printJson({ error: { code: 'unsupported-runtime', message: runtime.reason } });
     return 1;
   }
@@ -1802,7 +1802,7 @@ async function main(): Promise<number> {
     if (typedIds.length === 0) {
       throw new SmithError(
         'cli.empty-wave',
-        'Usage: smith wave check <plan.json> <task-id>... — a wave with no tasks is not a wave.',
+        'Usage: bs wave check <plan.json> <task-id>... — a wave with no tasks is not a wave.',
         { plan: plan.epic_id },
       );
     }
@@ -2310,7 +2310,7 @@ async function main(): Promise<number> {
       throw new DaemonError(
         'daemon.already-running',
         `A daemon (pid ${held.pid}, started ${held.startedAt}) already holds ${dir}. ` +
-          'Run `smith daemon stop` first, or `smith daemon status` to see what it last found.',
+          'Run `bs daemon stop` first, or `bs daemon status` to see what it last found.',
         { pid: held.pid, dir },
       );
     }
@@ -2966,7 +2966,7 @@ async function main(): Promise<number> {
         `warning: this session-start is ${result.event_id}, not ${result.record.session_id}#0 — ` +
           `session "${result.record.session_id}" was already open. The record is written and ` +
           'durable, but a log has one root and readers take the first, so nothing will read this ' +
-          'one. Use `smith session start`, which refuses instead of receipting, and chain off the ' +
+          'one. Use `bs session start`, which refuses instead of receipting, and chain off the ' +
           'event that is already there.\n',
       );
     }
@@ -3227,7 +3227,7 @@ async function main(): Promise<number> {
       if (positional.length === 0) {
         throw new SmithError(
           'cli.empty-wave',
-          'Usage: smith claims impact --plan <plan.json> <task-id>... — a wave with no tasks is not a wave.',
+          'Usage: bs claims impact --plan <plan.json> <task-id>... — a wave with no tasks is not a wave.',
           { plan: plan.epic_id },
         );
       }
@@ -3652,7 +3652,7 @@ async function main(): Promise<number> {
         throw new SmithError(
           'cli.no-findings-needs-role',
           '--no-findings names the judge role it attests for, e.g. --no-findings security-reviewer.',
-          { usage: 'smith gate run <task-id> --no-findings <role>' },
+          { usage: 'bs gate run <task-id> --no-findings <role>' },
         );
       }
       await recordJudgeReport({ taskId, role, noFindings: true }, ctx, eventOptsFromFlags(flags));
@@ -4249,14 +4249,14 @@ async function main(): Promise<number> {
     // order and lets the error name the verb that CAN take the edge.
     const AMENDMENT_ROUTES: Readonly<Record<string, string>> = {
       [AMEND_PENDING_STATUS]:
-        '`smith plan amend` puts every finding it cites into "amend-pending", with the task ids the new plan version added or superseded as the obligation',
+        '`bs plan amend` puts every finding it cites into "amend-pending", with the task ids the new plan version added or superseded as the obligation',
       [AMENDED_STATUS]:
-        '`smith epic close` computes which of those tasks actually landed and discharges the finding with that evidence',
+        '`bs epic close` computes which of those tasks actually landed and discharges the finding with that evidence',
     };
     if (newStatus in AMENDMENT_ROUTES) {
       throw new SmithError(
         'cli.amendment-edge-unreachable',
-        `"${newStatus}" is not reachable through "smith findings transition": the amendment path is entered and closed by the commands that can compute its evidence, never by hand. ${AMENDMENT_ROUTES[newStatus]}.`,
+        `"${newStatus}" is not reachable through "bs findings transition": the amendment path is entered and closed by the commands that can compute its evidence, never by hand. ${AMENDMENT_ROUTES[newStatus]}.`,
         { status: newStatus, findingId },
       );
     }

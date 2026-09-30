@@ -229,7 +229,7 @@ export async function resolveFeedback(
   if (!existing) {
     throw new FeedbackError(
       'feedback.unknown-feedback',
-      `No operator feedback '${input.feedbackId}' in session '${ctx.sessionId}''s lineage. Check the id, or record it first with 'smith feedback record'.`,
+      `No operator feedback '${input.feedbackId}' in session '${ctx.sessionId}''s lineage. Check the id, or record it first with 'bs feedback record'.`,
       { feedback_id: input.feedbackId, session_id: ctx.sessionId },
     );
   }

@@ -196,7 +196,7 @@ function inspect(config: ProviderConfig): ProviderPreflight {
     precondition: config.command,
     status: resolvable ? 'ok' : 'unmet',
     detail: resolvable
-      ? `${config.command} is executable on PATH. Whether it is authenticated is not knowable without spending a call — run "smith judge run --provider ${config.name}" to find out.`
+      ? `${config.command} is executable on PATH. Whether it is authenticated is not knowable without spending a call — run "bs judge run --provider ${config.name}" to find out.`
       : `${config.command} is not executable on PATH. Every quorum trigger will spend a call that cannot start.`,
   };
 }

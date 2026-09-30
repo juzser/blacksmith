@@ -552,7 +552,7 @@ async function requireProposal(
   if (found === undefined) {
     throw new SpecChangeError(
       'spec-change.unknown-proposal',
-      `No spec change proposal "${proposalId}" on this session's lineage. \`smith plan proposals\` lists what is there.`,
+      `No spec change proposal "${proposalId}" on this session's lineage. \`bs plan proposals\` lists what is there.`,
       { proposalId, sessionId: ctx.sessionId },
     );
   }

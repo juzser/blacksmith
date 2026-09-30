@@ -274,7 +274,7 @@ export function goalCheckBlockers(
 
   if (check === null) {
     return [
-      `Epic "${epicId}" has no spec-vs-goal check on record: nothing has asked whether its plan answers the goal milestone "${goal.milestoneId}" declares. Run \`smith epic goal-check --epic ${epicId}\`.`,
+      `Epic "${epicId}" has no spec-vs-goal check on record: nothing has asked whether its plan answers the goal milestone "${goal.milestoneId}" declares. Run \`bs epic goal-check --epic ${epicId}\`.`,
     ];
   }
 
@@ -330,7 +330,7 @@ export function goalCheckBlockers(
   const uncovered = check.coverage.filter((entry) => entry.verdict === 'uncovered');
   if (uncovered.length > 0) {
     return [
-      `The spec-vs-goal check for "${epicId}" left ${uncovered.length} goal clause(s) uncovered by plan v${check.planVersion}: ${uncovered.map((entry) => JSON.stringify(entry.clause)).join('; ')}. Answer them with \`smith plan amend\` — no task diff can contain the fix.`,
+      `The spec-vs-goal check for "${epicId}" left ${uncovered.length} goal clause(s) uncovered by plan v${check.planVersion}: ${uncovered.map((entry) => JSON.stringify(entry.clause)).join('; ')}. Answer them with \`bs plan amend\` — no task diff can contain the fix.`,
     ];
   }
 

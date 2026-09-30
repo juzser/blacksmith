@@ -610,7 +610,7 @@ function requireOpenAudit(projectDir: string): AuditManifest {
   if (manifest === undefined) {
     throw new AuditError(
       'audit.not-open',
-      `no audit is open on ${path.resolve(projectDir)}: run \`smith audit open\` first`,
+      `no audit is open on ${path.resolve(projectDir)}: run \`bs audit open\` first`,
       { projectDir: path.resolve(projectDir), manifestPath: auditManifestPath(projectDir) },
     );
   }
@@ -1113,7 +1113,7 @@ function renderSpec(
     `- **Epic id** — \`${input.epicId}\``,
     `- **Project** — \`${auditedProjectName(project)}\`; every worktree is placed beside the clone the run is handed (\`AGENTS.md\` "Worktrees").`,
     `- **Roadmap milestone** — \`${input.epicId}\` in \`factory/specs/roadmap.md\`.`,
-    `- **Provenance** — cut by \`smith audit cut\` from audit ${audits.join(', ')} (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}). Each finding carries this epic id in \`.blacksmith/findings.jsonl\`; \`smith audit resolve\` marks fixed only the ones a task in this plan still claims, and leaves the rest \`deferred\`.`,
+    `- **Provenance** — cut by \`bs audit cut\` from audit ${audits.join(', ')} (${findings.length} accepted finding${findings.length === 1 ? '' : 's'}: ${severityCounts(findings)}). Each finding carries this epic id in \`.blacksmith/findings.jsonl\`; \`bs audit resolve\` marks fixed only the ones a task in this plan still claims, and leaves the rest \`deferred\`.`,
     '',
     '## What this epic is',
     '',
@@ -1386,7 +1386,7 @@ export async function resolveAudit(
   if (carried.length === 0) {
     throw new AuditError(
       'audit.unknown-epic',
-      `no finding in ${auditStorePath(project)} carries epic ${epicId}: was it cut with \`smith audit cut\`?`,
+      `no finding in ${auditStorePath(project)} carries epic ${epicId}: was it cut with \`bs audit cut\`?`,
       { epic: epicId },
     );
   }

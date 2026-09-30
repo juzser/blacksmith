@@ -341,7 +341,7 @@ export function addMcpSurface(opts: McpSurfaceOptions): McpSurfaceResult {
   if (!existsSync(path.join(targetDir, 'package.json'))) {
     throw new McpError(
       'mcp.unknown-project',
-      `${targetDir} is not a scaffolded project (no package.json). Run \`smith new ${opts.projectName}\` first.`,
+      `${targetDir} is not a scaffolded project (no package.json). Run \`bs new ${opts.projectName}\` first.`,
       { targetDir, projectName: opts.projectName },
     );
   }
@@ -414,7 +414,7 @@ export function registerMcpMilestone(
     // in the roadmap itself which epic closes the milestone, the way
     // envkit-config-loader already does, instead of leaving it to convention.
     `- epics: [${id}]\n` +
-    '- goal: Declare and harden the MCP surface — `smith mcp check` green against ' +
+    '- goal: Declare and harden the MCP surface — `bs mcp check` green against ' +
     'docs/standards/mcp.md. Required before the final milestone can close.\n';
   writeFileSync(roadmapPath, `${text.trimEnd()}\n${block}`, 'utf8');
   return id;
@@ -450,7 +450,7 @@ export function checkRoadmapMcpMilestone(
       {
         rule: 'MCP-M1',
         path: `/milestones/${project}`,
-        message: `Project "${project}" has no \`${project}-${MCP_MILESTONE_SUFFIX}\` milestone. Run \`smith mcp init ${project}\` to register it.`,
+        message: `Project "${project}" has no \`${project}-${MCP_MILESTONE_SUFFIX}\` milestone. Run \`bs mcp init ${project}\` to register it.`,
       },
     ];
   }
@@ -614,7 +614,7 @@ export function runMcpCheck(opts: McpCheckOptions): McpCheckReport {
   if (!existsSync(manifestPath)) {
     throw new McpError(
       'mcp.no-surface',
-      `${manifestPath} does not exist. Run \`smith mcp init ${opts.projectName}\` before checking the surface.`,
+      `${manifestPath} does not exist. Run \`bs mcp init ${opts.projectName}\` before checking the surface.`,
       { manifestPath, projectName: opts.projectName },
     );
   }
@@ -756,8 +756,8 @@ export function mcpBlockers(epicId: string, status: McpSurfaceStatus): string[] 
   if (!status.check) {
     return [
       status.problem === 'unreadable'
-        ? `epic ${epicId} is under milestone ${milestone} but its MCP surface at ${manifest} exists and could not be read, so no verdict could be rendered — fix the manifest in place and run \`smith mcp check\` for the parser's own message. Do not re-run \`smith mcp init\`: it refuses over an existing manifest, because re-scaffolding would discard the declared tools and their operator sign-off.`
-        : `epic ${epicId} is under milestone ${milestone} but has no MCP surface at ${manifest} — run \`smith mcp init\` and declare it.`,
+        ? `epic ${epicId} is under milestone ${milestone} but its MCP surface at ${manifest} exists and could not be read, so no verdict could be rendered — fix the manifest in place and run \`bs mcp check\` for the parser's own message. Do not re-run \`bs mcp init\`: it refuses over an existing manifest, because re-scaffolding would discard the declared tools and their operator sign-off.`
+        : `epic ${epicId} is under milestone ${milestone} but has no MCP surface at ${manifest} — run \`bs mcp init\` and declare it.`,
     ];
   }
   return status.check.violations.map(

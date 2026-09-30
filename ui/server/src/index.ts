@@ -34,7 +34,7 @@ export function serve(opts: ServeOptions): ServerHandle {
   });
   const port = opts.port ?? DEFAULT_PORT;
   const server = nodeServe({ fetch: app.fetch, port, hostname: '127.0.0.1' });
-  process.stdout.write(`smith ui listening on http://127.0.0.1:${port}\n`);
+  process.stdout.write(`bs ui listening on http://127.0.0.1:${port}\n`);
 
   return {
     close: () => {

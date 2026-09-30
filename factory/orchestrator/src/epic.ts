@@ -993,7 +993,7 @@ export function summarizeEpic(
     ...ungated.map((t) =>
       t.gate.gateOutcome
         ? `Task "${t.taskId}" is recorded ${t.taskStatus} and has a gate-outcome, but no task-result-recorded for it exists in the log. \`gate run\` writes both for the task it grades, so this outcome was written by hand — it is a claim, not a gate.`
-        : `Task "${t.taskId}" is recorded ${t.taskStatus} with no gate-outcome in the log at all — nothing gated it. Run \`smith gate run\` for it, or supersede the record.`,
+        : `Task "${t.taskId}" is recorded ${t.taskStatus} with no gate-outcome in the log at all — nothing gated it. Run \`bs gate run\` for it, or supersede the record.`,
     ),
     ...findingBlockers,
     // A record the fold could not read is a finding of UNKNOWN status, and

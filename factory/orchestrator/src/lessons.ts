@@ -966,7 +966,7 @@ export function lessonsForDispatch(
   } catch {
     throw new LessonsError(
       'lessons.compiled-file-not-found',
-      `No compiled lessons at ${lessonsPath} — run \`smith lessons compile\`.`,
+      `No compiled lessons at ${lessonsPath} — run \`bs lessons compile\`.`,
       { role, lessonsPath },
     );
   }

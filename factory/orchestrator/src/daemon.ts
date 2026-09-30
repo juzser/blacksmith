@@ -365,8 +365,8 @@ export function inspectSession(
       detail:
         `${proposal.proposedBy} proposes amending ${proposal.criterionRef}: ${proposal.assumption} ` +
         `(${proposal.severity}, ${proposal.blocking ? 'blocking' : 'non-blocking'}, ` +
-        `${proposal.sites.length} site(s)). Answer it with \`smith plan approve ` +
-        `${proposal.proposalId}\` or \`smith plan reject ${proposal.proposalId}\`.`,
+        `${proposal.sites.length} site(s)). Answer it with \`bs plan approve ` +
+        `${proposal.proposalId}\` or \`bs plan reject ${proposal.proposalId}\`.`,
     });
   }
 
@@ -425,8 +425,8 @@ export function inspectSession(
           `Error ${proposal.fingerprint} in ${projectPhrase} ` +
           `(${proposal.errorClass}, task ${proposal.taskRef}, ${proposal.occurrences} occurrence(s)) ` +
           'has no issue-reported event. Report it with ' +
-          `\`smith issues report --session ${proposal.sessionId}\`; ` +
-          `\`smith issues preview --session ${proposal.sessionId}\` is the dry run.`,
+          `\`bs issues report --session ${proposal.sessionId}\`; ` +
+          `\`bs issues preview --session ${proposal.sessionId}\` is the dry run.`,
         ...(admission === undefined ? {} : { admission }),
       });
     }
@@ -534,8 +534,8 @@ export function inspectFactory(
           `The last epic this factory closed ran narrow: its widest wave was admitted for ` +
           `${newest.widest.declared} tasks and ${newest.widest.observed} ran ` +
           `(closed ${newest.closedAt}, ${width.serialized.length} of ${width.epics.length} ` +
-          'closes read here are narrow). `smith epic width` reads every close back; ' +
-          '`smith wave audit --session <id>` reads the waves behind a live one.',
+          'closes read here are narrow). `bs epic width` reads every close back; ' +
+          '`bs wave audit --session <id>` reads the waves behind a live one.',
       });
     } else if (width.hint === UNMEASURED_HINT) {
       // Work to schedule, not a fault: nothing here is known to be wrong. What
@@ -575,8 +575,8 @@ export function inspectFactory(
       detail:
         `${ref.self ? 'This clone' : `\`${ref.name}\`, built by this factory`} is not in ` +
         'this pass, so nothing is reading its lockfile and no maintenance ' +
-        `proposal can ever name it. Add \`--project ${ref.dir}\` to \`smith daemon ` +
-        'run|start` (and to `smith scheduler run|admit`). `smith projects list` ' +
+        `proposal can ever name it. Add \`--project ${ref.dir}\` to \`bs daemon ` +
+        'run|start` (and to `bs scheduler run|admit`). `bs projects list` ' +
         'prints the whole flag line.',
     });
   }
@@ -850,7 +850,7 @@ export async function runTick(opts: TickOptions = {}): Promise<TickReport> {
     subject: dbPath,
     detail:
       `The read-model refresh failed: ${errorMessage(err)}. The event log is unaffected — ` +
-      'it is the UI and `smith status` that are now stale.',
+      'it is the UI and `bs status` that are now stale.',
   });
 
   for (const [root, group] of leavesByRoot) {
@@ -997,7 +997,7 @@ function unreadableState(filePath: string, reason: string): DaemonError {
   return new DaemonError(
     'daemon.unreadable-state',
     `${filePath} exists but cannot be read (${reason}), so it is not treated as ` +
-      'absent. Confirm no `smith daemon run` process is using this directory, ' +
+      'absent. Confirm no `bs daemon run` process is using this directory, ' +
       'then delete the file.',
     { path: filePath, reason },
   );
@@ -1102,7 +1102,7 @@ export function acquireLock(
     throw new DaemonError(
       'daemon.already-running',
       `A daemon (pid ${incumbent.pid}, started ${incumbent.startedAt}) already holds ${file}. ` +
-        'Stop it with `smith daemon stop` before starting another.',
+        'Stop it with `bs daemon stop` before starting another.',
       { pid: incumbent.pid, lock_path: file },
     );
   }

@@ -345,7 +345,7 @@ describe('goalCheckBlockers', () => {
       TASK_B,
     ]);
     expect(blockers).toHaveLength(1);
-    expect(blockers[0]).toContain('smith epic goal-check');
+    expect(blockers[0]).toContain('bs epic goal-check');
   });
 
   it('holds a check that read a goal the roadmap no longer states', () => {
@@ -414,7 +414,7 @@ describe('goalCheckBlockers', () => {
     };
     const blockers = goalCheckBlockers(EPIC, status, 1, [TASK_A, TASK_B]);
     expect(blockers).toHaveLength(1);
-    expect(blockers[0]).toContain('smith plan amend');
+    expect(blockers[0]).toContain('bs plan amend');
     expect(blockers[0]).toContain(CLAUSES[1] as string);
   });
 
