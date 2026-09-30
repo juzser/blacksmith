@@ -52,7 +52,7 @@ describe('kit/Button.vue', () => {
   });
 
   it("renders the loading spinner from a real Lucide component, not a string icon name, matching Icon's icon prop contract", () => {
-    expect(BUTTON).toMatch(/import\s*\{\s*LoaderCircle\s*\}\s*from\s*'lucide-vue-next';/);
+    expect(BUTTON).toMatch(/import\s*\{\s*LoaderCircle\s*\}\s*from\s*'@lucide\/vue';/);
     expect(BUTTON).toMatch(/<Icon[^>]*:icon="LoaderCircle"/);
   });
 

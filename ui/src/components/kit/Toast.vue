@@ -3,7 +3,7 @@
 // this component only renders it. Deliberately inverted surface (see
 // .bs-toast's own comment in bs-primitives.css) — its dismiss IconButton
 // needs tone="inverse" or it renders a dim grey icon on the dark background.
-import { X } from 'lucide-vue-next';
+import { X } from '@lucide/vue';
 import { useToast } from '../../composables/useToast.js';
 import IconButton from './IconButton.vue';
 

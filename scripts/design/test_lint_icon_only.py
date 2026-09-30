@@ -58,21 +58,21 @@ class FindViolationsTests(unittest.TestCase):
 
     def test_lucide_component_used_directly_detected(self):
         text = (
-            "import { ChevronDown } from 'lucide-vue-next';\n"
+            "import { ChevronDown } from '@lucide/vue';\n"
             '<a href="/x"><ChevronDown /></a>'
         )
         self.assertEqual(len(find_violations(text, "f.vue")), 1)
 
     def test_lucide_component_used_directly_with_aria_label_clean(self):
         text = (
-            "import { ChevronDown } from 'lucide-vue-next';\n"
+            "import { ChevronDown } from '@lucide/vue';\n"
             '<a href="/x" aria-label="Expand"><ChevronDown /></a>'
         )
         self.assertEqual(find_violations(text, "f.vue"), [])
 
     def test_aliased_lucide_import_detected_by_local_name(self):
         text = (
-            "import { X as Close } from 'lucide-vue-next';\n" '<button @click="x"><Close /></button>'
+            "import { X as Close } from '@lucide/vue';\n" '<button @click="x"><Close /></button>'
         )
         self.assertEqual(len(find_violations(text, "f.vue")), 1)
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp, CircleAlert, Info, TriangleAlert } from 'lucide-vue-next';
+import { ChevronDown, ChevronUp, CircleAlert, Info, TriangleAlert } from '@lucide/vue';
 import { computed, ref } from 'vue';
 import Button from './Button.vue';
 import Icon from './Icon.vue';

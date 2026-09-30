@@ -36,6 +36,9 @@ importers:
       '@hono/node-server':
         specifier: 2.1.1
         version: 2.1.1(hono@4.13.9)
+      '@lucide/vue':
+        specifier: 1.49.0
+        version: 1.49.0(vue@3.5.43(typescript@7.0.2))
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0
@@ -63,9 +66,6 @@ importers:
       hono:
         specifier: 4.13.9
         version: 4.13.9
-      lucide-vue-next:
-        specifier: 1.0.0
-        version: 1.0.0(vue@3.5.43(typescript@7.0.2))
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
@@ -646,6 +646,11 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@lucide/vue@1.49.0':
+    resolution: {integrity: sha512-7xS5gYnLoIx0jlmlRE3Rb71fIHaNqhVBiKMpOlqrYt6nMPy3C/62HJHo5XNsV3HTK+9l3M0hXICrIA7S5v6y5Q==}
+    peerDependencies:
+      vue: '>=3.0.1'
 
   '@oxc-project/types@0.151.0':
     resolution: {integrity: sha512-J1yXrIlNDZVzE3ada310xeAw7nH8yCAyLPuUIsjKatFPmfn5bS1oW+cM+QsGOtVWd5nhSpbwZWx/rue+r5Z+PA==}
@@ -1501,12 +1506,6 @@ packages:
     resolution: {integrity: sha512-++gUqRDEvcnN6Zhqrr+y/CkVEHhlrR96vZn3nZZPYzMcBUyBtTKzB9NadClFIsIVSsu+3i9tfk/erqy9kAmt7Q==}
     engines: {node: '>=14'}
 
-  lucide-vue-next@1.0.0:
-    resolution: {integrity: sha512-V6SPvx1IHTj/UY+FrIYWV5faISsPSb8BnWSFDxAtezWKvWc9ZZ40PDrdu1/Qb5vg4lHWr1hs1BAMGVGm6V1Xdg==}
-    deprecated: Package deprecated. Please use @lucide/vue instead.
-    peerDependencies:
-      vue: '>=3.0.1'
-
   magic-string-ast@1.0.3:
     resolution: {integrity: sha512-CvkkH1i81zl7mmb94DsRiFeG9V2fR2JeuK8yDgS8oiZSFa++wWLEgZ5ufEOyLHbvSbD1gTRKv9NdX69Rnvr9JA==}
     engines: {node: '>=20.19.0'}
@@ -2140,6 +2139,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
+
+  '@lucide/vue@1.49.0(vue@3.5.43(typescript@7.0.2))':
+    dependencies:
+      vue: 3.5.43(typescript@7.0.2)
 
   '@oxc-project/types@0.151.0': {}
 
@@ -2819,10 +2822,6 @@ snapshots:
       mlly: 1.8.2
       pkg-types: 2.3.3
       quansync: 0.2.11
-
-  lucide-vue-next@1.0.0(vue@3.5.43(typescript@7.0.2)):
-    dependencies:
-      vue: 3.5.43(typescript@7.0.2)
 
   magic-string-ast@1.0.3:
     dependencies:

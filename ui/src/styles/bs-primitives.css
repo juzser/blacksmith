@@ -15,7 +15,7 @@
   }
 }
 
-/* Icon (§2.5) — sizing and stroke live on the lucide-vue-next component's
+/* Icon (§2.5) — sizing and stroke live on the @lucide/vue component's
    own props (Icon.vue); this class carries the two things that don't:
    "Vertical alignment: vertical-align: -3px at 16px beside 14px text" (§2.5,
    verbatim) needs the svg to stay an inline box, which is its UA default, so

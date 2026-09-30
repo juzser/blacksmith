@@ -17,9 +17,9 @@ other scripts/design/ gates:
      `aria-label` or `:aria-label`. A `<button>`/`<a>` wrapping an icon plus
      visible text is not icon-only and is not flagged (the text is already
      the accessible name). "Icon component" means `<Icon .../>` (the wrapper
-     every other kit component uses) or a lucide-vue-next component used
+     every other kit component uses) or a @lucide/vue component used
      directly — derived per file from its own
-     `import { X, Y } from 'lucide-vue-next'` line, so a bare `<X />` is
+     `import { X, Y } from '@lucide/vue'` line, so a bare `<X />` is
      caught even though it never goes through Icon.vue. Self-closing
      (`<Icon .../>`) and empty non-self-closing (`<Icon ...></Icon>`) both
      count as icon-only; either can appear in hand-written or
@@ -46,15 +46,15 @@ ICONBUTTON_TAG = re.compile(rf"<IconButton\b({ATTRS})/?>", re.MULTILINE)
 BUTTON_OR_A = re.compile(rf"<(button|a)\b({ATTRS})>(.*?)</\1>", re.DOTALL | re.IGNORECASE)
 LABEL_ATTR = re.compile(r"(?<![:\w-])(?::)?label\s*=")
 ARIA_LABEL_ATTR = re.compile(r"(?<![:\w-])(?::)?aria-label\s*=")
-LUCIDE_IMPORT = re.compile(r"import\s*\{([^}]*)\}\s*from\s*['\"]lucide-vue-next['\"]")
+LUCIDE_IMPORT = re.compile(r"import\s*\{([^}]*)\}\s*from\s*['\"]@lucide/vue['\"]")
 # Deliberately no ds-allow-* escape hatch here (unlike lint_hardcodes.py /
 # check_tokens.py): a missing accessible name on an icon-only control is
 # never a justified exception, only a missing label.
 
 
 def lucide_component_names(text):
-    """Local (possibly aliased) names a file's own lucide-vue-next import
-    binds — e.g. `import { ChevronDown, X as Close } from 'lucide-vue-next'`
+    """Local (possibly aliased) names a file's own @lucide/vue import
+    binds — e.g. `import { ChevronDown, X as Close } from '@lucide/vue'`
     yields {'ChevronDown', 'Close'}, matching what the template actually
     renders."""
     names = set()

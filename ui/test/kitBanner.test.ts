@@ -37,7 +37,7 @@ describe('kit/Banner.vue', () => {
   });
 
   it('uses kit/Icon.vue with real Lucide tone icons (Info/TriangleAlert/CircleAlert)', () => {
-    const importBlock = BANNER.match(/import\s*\{([^}]*)\}\s*from\s*'lucide-vue-next';/)?.[1] ?? '';
+    const importBlock = BANNER.match(/import\s*\{([^}]*)\}\s*from\s*'@lucide\/vue';/)?.[1] ?? '';
     expect(importBlock).toMatch(/\bInfo\b/);
     expect(importBlock).toMatch(/\bTriangleAlert\b/);
     expect(importBlock).toMatch(/\bCircleAlert\b/);

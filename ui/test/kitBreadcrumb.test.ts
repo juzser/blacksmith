@@ -28,7 +28,7 @@ describe('kit/Breadcrumb.vue', () => {
   });
 
   it('uses a real Lucide ChevronRight component, not the old string icon name', () => {
-    expect(BREADCRUMB).toMatch(/import\s*\{\s*ChevronRight\s*\}\s*from\s*'lucide-vue-next';/);
+    expect(BREADCRUMB).toMatch(/import\s*\{\s*ChevronRight\s*\}\s*from\s*'@lucide\/vue';/);
     expect(BREADCRUMB).toMatch(/<Icon[^>]*:icon="ChevronRight"[^>]*:size="14"/);
     expect(BREADCRUMB).not.toMatch(/name="chevron-right"/);
   });

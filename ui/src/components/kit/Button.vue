@@ -8,7 +8,7 @@
 // follow ds/Button.vue's existing convention (not itself a §2.1 prop, but a
 // plain <button> needs one to behave inside a <form>, same as the old kit).
 
-import { LoaderCircle } from 'lucide-vue-next';
+import { LoaderCircle } from '@lucide/vue';
 import type { Component } from 'vue';
 import { computed } from 'vue';
 import Icon from './Icon.vue';

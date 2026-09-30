@@ -61,7 +61,7 @@ restyled on `bs-tokens.css`, gate-checked, but not yet imported by any page.
 | Primitive | Notes |
 |---|---|
 | Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon` |
-| Icon | rebuilt on `lucide-vue-next` (the old kit's hand-kept `icons.ts` SVG registry is retired); `size: 14\|16\|20`, stroke 1.75 at 14/16, 1.5 at 20 |
+| Icon | rebuilt on `@lucide/vue` (the old kit's hand-kept `icons.ts` SVG registry is retired); `size: 14\|16\|20`, stroke 1.75 at 14/16, 1.5 at 20 |
 | IconButton | `label` required (no default — a missing one is a type error); additive `tone: default\|inverse` for controls on an inverted surface (Toast's dismiss button); `lint_icon_only.py` gate-enforces the label requirement on every call site, see "Gates wired" |
 | Tooltip | rebuilt on `@floating-ui/dom`; `mode: describe\|label`; hover after 300ms, focus immediately, Escape dismisses |
 | Tag | Lozenge's renamed successor (see "Status → Tag mapping"); `tone` covers the 7 status tones plus `neutral`; `variant: subtle\|bold\|outline` — `bold` reuses the tone's own text/subtle token pair as a solid fill (no third "-bold" token tier exists in `bs-tokens.css`) rather than inventing one, see Known deviations |

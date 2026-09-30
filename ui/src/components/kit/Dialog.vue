@@ -6,7 +6,7 @@
 // button is now an IconButton (§2.5's icon-only rule) instead of a raw
 // button+Icon pair.
 
-import { X } from 'lucide-vue-next';
+import { X } from '@lucide/vue';
 import { ref, useId } from 'vue';
 import { useModalFocus } from '../../composables/useModalFocus.js';
 import IconButton from './IconButton.vue';
