@@ -106,7 +106,7 @@ describe('db/queries.ts providerAgreement()', () => {
       {
         taskId: 't-3',
         modelTier: 'mid',
-        model: 'deepseek-reasoner',
+        model: 'deepseek-v4-pro',
         kind: 'verify',
         run: okRun('deepseek', 'confirm'),
         native,
@@ -118,7 +118,7 @@ describe('db/queries.ts providerAgreement()', () => {
       {
         taskId: 't-4',
         modelTier: 'mid',
-        model: 'deepseek-reasoner',
+        model: 'deepseek-v4-pro',
         kind: 'verify',
         run: failedRun('deepseek'),
         native,
@@ -176,7 +176,7 @@ describe('db/queries.ts providerAgreement()', () => {
         {
           taskId,
           modelTier: 'mid',
-          model: 'deepseek-reasoner',
+          model: 'deepseek-v4-pro',
           kind: 'verify',
           run: failedRun('deepseek'),
           native,
@@ -216,7 +216,7 @@ describe('db/queries.ts providerAgreement()', () => {
         {
           taskId,
           modelTier: 'mid',
-          model: 'deepseek-reasoner',
+          model: 'deepseek-v4-pro',
           kind: 'verify',
           run: failedRun('deepseek', 'shadow', 'provider.missing-api-key'),
           native,
@@ -229,7 +229,7 @@ describe('db/queries.ts providerAgreement()', () => {
       {
         taskId: 't-4',
         modelTier: 'mid',
-        model: 'deepseek-reasoner',
+        model: 'deepseek-v4-pro',
         kind: 'verify',
         run: failedRun('deepseek', 'shadow', 'provider.invalid-output'),
         native,
@@ -275,7 +275,7 @@ describe('db/queries.ts providerAgreement()', () => {
           provider: 'deepseek',
           agent: 'verifier',
           model_tier: 'mid',
-          model: 'deepseek-reasoner',
+          model: 'deepseek-v4-pro',
           ok: false,
           verdict: null,
           agreement_with_native: false,
@@ -374,7 +374,7 @@ describe('db/queries.ts providerAgreement()', () => {
       {
         taskId: 't-2',
         modelTier: 'mid',
-        model: 'deepseek-reasoner',
+        model: 'deepseek-v4-pro',
         kind: 'verify',
         run: failedRun('deepseek', 'shadow', 'provider.missing-api-key'),
         native,

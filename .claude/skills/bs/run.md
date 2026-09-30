@@ -22,6 +22,20 @@ else in either file moves. Read `effective`, not `requested`: a plan whose
 live tasks fire a security trigger is floored, and running it at the tier the
 file asked for would be running it below the floor.
 
+Ask the cross-provider gate once too, at the top of the run and before any
+wave is admitted — `smith judge preflight --project <project-dir>`, the same
+call INSTALL.md makes at setup. When it reports the gating pool cannot
+decide (fewer active external providers than `quorum_rule.min_providers`
+after OpenRouter substitution, or a provider the project's own
+`.blacksmith/crosscheck.yml` names but this box cannot reach), STOP and ask
+the operator before admitting a wave — per `.claude/skills/bs/SKILL.md`'s
+"Talking to the operator" rules (options carry a confidence %; not restated
+here): add an OpenRouter key, add a model, pick which providers to run with,
+or continue without cross-check. Skipping this is not a shortcut — steps 15
+and 16 spend a real judge call to find the same gap mid-run, after the epic's
+work is already done. Full substitution and precedence mechanism:
+docs/runbooks/providers.md §9d.
+
 1. Ask the graph how wide this wave can be, then ask the gate whether it may
    be that wide. Two commands, two different questions — do not skip to the
    second with a set you picked by eye.

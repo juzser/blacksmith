@@ -71,6 +71,7 @@ If you are a Claude Code session executing this runbook, these are binding:
 | **python3 + PyYAML** | `check.sh` parses the policy YAML and resolves every schema's `x-taxonomy` reference | the check gate |
 | Codex CLI *(optional)* | Phase 8 cross-provider judge — `codex exec --json`, ChatGPT-subscription auth, no API key | only if you enable `codex` |
 | `DEEPSEEK_API_KEY` in `.env` *(optional)* | Phase 8 API judge | only if you enable `deepseek` |
+| `OPENROUTER_API_KEY` in `.env` *(optional)* | substitutes for codex/deepseek when their own precondition is unmet, and/or adds further judge models | only if you want OpenRouter substitution or extra judges — see [Cross-provider judges](#cross-provider-judges-phase-8) |
 | Chromium for Playwright *(optional)* | `pnpm test:e2e` | UI e2e only — see [Known gaps](#known-platform-gaps) |
 
 <details>
@@ -491,33 +492,54 @@ See the first entry under [Known gaps](#known-platform-gaps) for why
 
 ### Cross-provider judges (Phase 8)
 
-Both external providers ship `enabled: false` in
-[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml), so
-neither is invoked until you switch on the one this machine actually has.
-Which of them that is — if either — is a fact about this box, not about the
-repo, which is why the repo does not guess. One you switch on arrives in
-`mode: shadow`: its verdicts are recorded and **gate nothing** until an
-operator promotes it to `mode: active`.
+Both external providers ship `enabled: auto` in
+[`factory/policies/crosscheck.yml`](factory/policies/crosscheck.yml): each
+resolves for itself, at parse time, against a fact about the box reading the
+file — `codex` on `PATH` switches codex on, `DEEPSEEK_API_KEY` switches
+deepseek on — so a box with neither calls neither, with no file edit needed
+either way. `mode`, unlike `enabled`, is not per-machine: it is whatever the
+committed file says, the same on every clone, so promoting a provider from
+`shadow` to `active` (`docs/runbooks/providers.md` §4) is a repo-wide
+decision an operator makes once, not a per-box switch.
 
 - **Codex** — install the Codex CLI and run `codex login` once on this
-  machine; auth is a ChatGPT subscription, no API key. Then set
-  `providers.codex.enabled: true` in that file.
+  machine; auth is a ChatGPT subscription, no API key. `enabled: auto`
+  picks it up with no file edit; only touch `providers.codex.enabled`
+  yourself if you want to force it on or off regardless of what this box has.
 - **DeepSeek** — put `DEEPSEEK_API_KEY` in `.env`. Copy `.env.example` as the
   starting point. `.env` is gitignored and the event logger redacts
-  credential-shaped values before write; never commit a key. Then set
-  `providers.deepseek.enabled: true`.
-- **Then check it before a gate does.** `smith judge preflight` reports,
-  without spending a call, whether each enabled provider can be reached from
-  here — the key's variable name, never its value, and whether the CLI is on
-  PATH. Exit 1 means something you switched on cannot answer.
-- **Skipping this is a supported choice, and the default.** Leave both
-  `enabled: false` and no external judge is ever called: no spend, no
-  transport failures, the gate on the native verdict alone. To force that for
-  one command on a box where a provider *is* switched on, pass
+  credential-shaped values before write; never commit a key. Same `auto`
+  behaviour as codex above.
+- **OpenRouter** — one key covers two cases. Put `OPENROUTER_API_KEY` in
+  `.env`. (a) If codex's or deepseek's own precondition is unmet here, that
+  provider runs through OpenRouter instead, keeping its own name, `mode`
+  and gating power — `openrouter_fallback.model` in `crosscheck.yml` names
+  the substitute, already set for both shipped providers. (b) Add
+  `OPENROUTER_MODELS` (comma-separated OpenRouter model ids) in `.env` to
+  bring in further judges, such as a Gemini or Qwen model. Each new judge
+  starts in shadow mode until promoted. A project can also add or override
+  providers via `<project-dir>/.blacksmith/crosscheck.yml`'s `providers:`
+  map, the highest-precedence of the three config sources. Full mechanism
+  and precedence: `docs/runbooks/providers.md` §9.
+- **Then check it before a gate does.**
+  `smith judge preflight [--project <dir>]` reports, without spending a
+  call, whether each enabled provider — a substituted or OpenRouter-only one
+  included — can be reached from here: the key's variable name, never its
+  value, whether the CLI is on PATH, and (with `--project`) whether the
+  project overlay changes any of that. Exit 1 means something configured
+  here cannot answer. Run this at the start of every `/bs run`, not only at
+  install (`.claude/skills/bs/run.md`) — the offer at that stop is the same
+  one: add a key, add a model, pick which providers to run with, or continue
+  without cross-check.
+- **Skipping all of this is a supported choice, and the default.** No key,
+  no CLI login, no `OPENROUTER_API_KEY`: every `enabled: auto` provider
+  resolves off, no external judge is ever called, no spend, no transport
+  failures, the gate runs on the native verdict alone. To force that for one
+  command on a box where a provider *is* switched on, pass
   `SMITH_CROSSCHECK_OFFLINE=1`.
 
-The full procedure — setup, shadow-mode calibration, promotion, rollback — is
-[`docs/runbooks/providers.md`](docs/runbooks/providers.md).
+The full procedure — setup, shadow-mode calibration, promotion, rollback,
+OpenRouter — is [`docs/runbooks/providers.md`](docs/runbooks/providers.md).
 
 ---
 

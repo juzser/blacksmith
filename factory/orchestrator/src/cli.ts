@@ -112,6 +112,7 @@ import {
   transition as transitionFinding,
 } from './findings.js';
 import type { CommandResult } from './gh.js';
+import { runGit } from './git.js';
 import { type ClauseCoverage, recordGoalCheck, resolveEpicGoal } from './goalCheck.js';
 import {
   loadHarnessPolicy,
@@ -362,6 +363,37 @@ function requireFlag(flags: Record<string, string>, name: string): string {
     throw new SmithError('cli.missing-flag', `Missing required flag --${name}.`, { flag: name });
   }
   return value;
+}
+
+/**
+ * Resolves the project directory an OPTIONAL --project reads its
+ * `.blacksmith/crosscheck.yml` overlay from, for the verbs where --project
+ * is not required outright (unlike `epic verdict`/`epic close`, D-42/P9-26).
+ * --project wins when given; otherwise, when a --worktree is present, its
+ * main checkout is derived, because a task worktree is a git-worktree
+ * SIBLING of the project rather than a child (`.wt/<project>/<task>`, per
+ * `taskWorktreeDir()`), so `path.dirname()` cannot recover it -- only git
+ * knows the common dir a worktree branches off of.
+ *
+ * Returns undefined when neither flag is present or the worktree is not a
+ * git checkout yet, which is deliberate: `loadCrosscheckPolicy()` already
+ * treats an absent projectDir as "no overlay", so callers that spread this
+ * in conditionally keep the env+shipped-policy behaviour unchanged rather
+ * than regressing every call site that has no project to give.
+ */
+function projectDirFromFlags(
+  flags: Record<string, string>,
+  worktreeFlagName = 'worktree',
+): string | undefined {
+  if (flags.project) return flags.project;
+  const worktreeDir = flags[worktreeFlagName];
+  if (!worktreeDir) return undefined;
+  try {
+    const gitCommonDir = runGit(worktreeDir, ['rev-parse', '--git-common-dir']);
+    return path.dirname(path.resolve(worktreeDir, gitCommonDir));
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1532,6 +1564,13 @@ async function main(): Promise<number> {
         ...(draft ? { plan: draft } : {}),
         ...(plannerConfidence !== undefined ? { plannerConfidence } : {}),
         planOpts: planOptsFromFlags(flags),
+        // Same reasoning as `epic verdict`/`epic close` (D-42/P9-26): an
+        // optional --project hands the quorum a project's
+        // .blacksmith/crosscheck.yml overlay (OpenRouter substitution/extra
+        // judges) rather than only the shipped policy. No worktree
+        // derivation here -- a plan critique has no task worktree to derive
+        // one from -- so an absent --project reads exactly as before.
+        crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir: flags.project }) },
       },
       ctx,
       eventOptsFromFlags(flags),
@@ -3505,6 +3544,14 @@ async function main(): Promise<number> {
     const { runGate } = await import('./gate.js');
     const [taskId] = requirePositionals(positional, usageFor('gate run')) as [string];
     const worktreeDir = requireFlag(flags, 'worktree');
+    // --project overrides; otherwise derived from --worktree, whose main
+    // checkout IS the project (a task worktree is a git-worktree sibling,
+    // `.wt/<project>/<task>`, not a child -- see projectDirFromFlags). Either
+    // way this reaches the gate's own crosscheck load below, so a project's
+    // .blacksmith/crosscheck.yml overlay (OpenRouter substitution/extra
+    // judges) governs the quorum a gate run can trigger, not just the
+    // shipped policy.
+    const projectDir = projectDirFromFlags(flags);
     const checks = readChecksFile(requireFlag(flags, 'checks'));
     // The result file has the same two intake shapes as findings below, and for
     // the same reason. With `--agent`, `--result` is the worker's half —
@@ -3638,6 +3685,7 @@ async function main(): Promise<number> {
         ...(graderVerdict !== undefined ? { graderVerdict } : {}),
         ...(budget ? { budget } : {}),
         ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+        crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir }) },
       },
       ctx,
       eventOptsFromFlags(flags),
@@ -3833,6 +3881,14 @@ async function main(): Promise<number> {
         // from a hole nobody filled -- resolved the same way `effort show`
         // resolves it, security floor included.
         effort: resolveEpicEffort(epicId, flags),
+        // --project is already required above; hand it to the crosscheck
+        // load too, so a project's .blacksmith/crosscheck.yml overlay
+        // (OpenRouter substitution/extra judges) is what the verdict's
+        // quorum actually reads, not just what preflight reports. No
+        // --policy override for this command (unlike judge preflight):
+        // the shipped/default path plus the project overlay is the only
+        // combination epic verdict has ever read.
+        crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir }) },
       },
       ctx,
       eventOptsFromFlags(flags),
@@ -3861,6 +3917,10 @@ async function main(): Promise<number> {
         // See `epic verdict` above: same tier resolution, so a close can
         // never waive a review its own verdict would have blocked on.
         effort: resolveEpicEffort(epicId, flags),
+        // Same reasoning as `epic verdict` above: the project overlay must
+        // reach the close's own crosscheck load too, not just the verdict
+        // it is closing over.
+        crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir }) },
         ...(flags['override-rationale'] !== undefined
           ? { overrideRationale: flags['override-rationale'] }
           : {}),
@@ -4596,7 +4656,7 @@ async function main(): Promise<number> {
     // Deliberately ahead of `judge run` in this file for the same reason it is
     // ahead of it in the runbook: an operator reaching for a calibration call
     // to find out why a provider keeps failing usually needed this instead.
-    const report = judgePreflight(flags.policy);
+    const report = judgePreflight(flags.policy, { projectDir: flags.project });
     printJson(report);
     return report.problems.length > 0 ? 1 : 0;
   }
@@ -4618,7 +4678,15 @@ async function main(): Promise<number> {
     // the split between them is the operator mandate made operable: `request`
     // shows exactly what would leave the machine WITHOUT sending it, `run`
     // sends it, and `reconcile` needs no provider at all.
-    const policy = loadCrosscheckPolicy(flags.policy);
+    //
+    // --project (or a --worktree to derive one from) reaches this load too,
+    // same as `gate run`/`plan quorum`/`epic verdict`. Only `run` can ever
+    // observe it: `independent_finder` -- the fragment `request`/`reconcile`
+    // read -- is a repo-policy knob a project overlay is structurally
+    // forbidden to touch (loadProjectProviderOverlay only ever merges
+    // `providers`), and `run` is the one call that hands runIndependentFinder
+    // the full policy, `providers` included.
+    const policy = loadCrosscheckPolicy(flags.policy, { projectDir: projectDirFromFlags(flags) });
 
     if (action === 'request') {
       // Read-only and network-free by construction: it builds the JudgeRequest
