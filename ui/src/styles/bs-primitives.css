@@ -1412,10 +1412,11 @@
   color: var(--bs-text-subtle);
   margin: 0;
 }
+/* list-item, not flex: flex drops the disclosure marker, and a closed group
+   must still read as openable. One line, so line-height gives the 44px. */
 summary.bs-inbox__group-head {
-  display: flex;
-  align-items: center;
-  min-height: var(--bs-touch);
+  display: list-item;
+  line-height: var(--bs-touch);
   cursor: pointer;
 }
 .bs-inbox__list {
@@ -1471,11 +1472,23 @@ summary.bs-inbox__group-head {
 }
 
 /* HomePage (ds-spec.md §4.1): stacked sections, project cards in a wrap
-   grid, one-line rows for Just finished and the decision list. */
+   grid, one-line rows for Just finished and the decision list. The BS kit
+   has no page container yet, so Home carries the §1 spacing table itself:
+   32px side gutter, 960px content width, 48px between sections; 16px
+   gutter on phone (§3.1 --bs-m-gutter). */
 .bs-home {
   display: flex;
   flex-direction: column;
-  gap: var(--bs-space-6);
+  gap: var(--bs-space-7);
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--bs-space-5) var(--bs-space-6);
+}
+@media (max-width: 640px) {
+  .bs-home {
+    padding: var(--bs-space-4) var(--bs-m-gutter);
+  }
 }
 .bs-home__section {
   display: flex;
