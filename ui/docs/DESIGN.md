@@ -55,8 +55,11 @@ this file is prescribed to the projects Blacksmith builds.
 
 Vendored under `ui/src/components/kit/`. This is the redesign spec's §2.1
 list, built in DS0 (four batches over 2026-09-30) except `SectionHeading`
-— see "Known deviations". Every row is additive and inert as of this PR:
-restyled on `bs-tokens.css`, gate-checked, but not yet imported by any page.
+— see "Known deviations". Restyled on `bs-tokens.css`, gate-checked. DS1
+(below) wires the shell-level rows (`SidebarNav`, `LiveIndicator`,
+`ProjectSwitcher`, `Sheet`, `Breadcrumb`, plus the mobile-only
+`MobileTopBar`/`MobileTabBar`) into `App.vue`; every other row stays
+additive and inert until a page-wiring PR imports it.
 
 | Primitive | Notes |
 |---|---|
@@ -115,11 +118,37 @@ page-wiring PR migrates a page off `ui/src/components/ds/` onto `kit/`.
 
 ## Reference pages (normative)
 
-None yet. DS0 is additive and inert: `ui/src/components/kit/*` exists,
-restyled on `bs-tokens.css`/`bs-primitives.css`, but no page in
-`ui/src/pages/` or `ui/src/App.vue` imports it — every existing page still
-renders through `ui/src/components/ds/`. This table gets its first row when
-the first page-wiring PR lands, per the redesign spec's §5 build order.
+None yet for page bodies. DS1 (below) wires the app shell — every page still
+renders through `ui/src/components/ds/` inside it, unchanged. This table
+gets its first row when a page-wiring PR migrates a page's own body onto
+`kit/`, per the redesign spec's §5 build order.
+
+## App shell (DS1)
+
+`ui/src/App.vue` is rebuilt on the BS kit (ds-spec.md §3, §3.1): `SidebarNav`
+(5 items — Home, Work, Activity, Cost & quality, Lessons — collapsible rail
+≥1024px, off-canvas `Sheet` <768px), a topbar (`Breadcrumb` driven by
+`router.ts`'s `meta.crumb`, `ProjectSwitcher`, `LiveIndicator` owning the
+single Refresh + pause/theme/settings controls), and a phone shell ≤640px
+(`MobileTopBar` + `MobileTabBar` + overflow menu). The 5 nav items route to
+the existing pages (Home → Overview, Work → Kanban, Activity → Timeline,
+Cost & quality → Analytics, Lessons → Lessons); every old route and deep
+link keeps working, and page bodies are unrestyled — DS1 is shell-only.
+
+`router.ts` carries `meta.crumb` on every named route so the topbar
+breadcrumb derives from the route the instant navigation happens, not from a
+page's fetched payload (§3's loading/empty/error pattern at shell level).
+`usePoll.ts` gained `setLive`/`getIsLive`, a module-level flag `LiveIndicator`
+Pause reads and writes, standing down the shared interval/stream triggers
+app-wide without touching manual Refresh.
+
+The old `ds/SidebarNav.vue`'s brand mark (`assets/brand/mark-96.png`) carries
+over into `kit/SidebarNav.vue` unchanged — DS1 did not intend to drop the
+app's identity mark, only the old two-clock topbar and per-page badges/
+categories, neither of which the redesign spec's shell prop table carries.
+
+The old `ds/` shell files (`ds/SidebarNav.vue`, the old `App.vue` topbar
+markup) stay in the tree; DS9 deletes them.
 
 ## Repo-specific patterns
 
@@ -271,6 +300,21 @@ None of these composables changed for DS0 — the kit swap is presentational.
   `from '.*kit/'` reference exists outside `kit/` itself) — so Playwright
   has nothing of this kit's to exercise yet. That arrives with the first
   page-wiring PR.
+- **Mobile overflow menu's page view options and "Open desktop view" are
+  out of DS1 scope.** ds-spec.md §3.1 describes the ≤640px overflow menu as
+  also carrying page-specific view options and a way back to the desktop
+  layout; DS1 only wires the shell-level controls (Pause, theme, Settings)
+  that `LiveIndicator` already owns. Page view options belong to each page's
+  own DS; "Open desktop view" has no viewport-override mechanism yet.
+  Deferred, not dropped.
+- **Roadmap's epic-block session scoping is out of DS1 scope.** ds-spec.md
+  §3 scopes the topbar session picker into Activity and "the epic block on
+  Work → Roadmap"; DS1 makes the picker visible on both routes
+  (`SESSION_SCOPABLE_ROUTES` in `lib/sessionScope.ts`) but `RoadmapPage.vue`
+  does not yet read `useSessionContext()` — there is no epic block to scope
+  yet. Likewise the picker's derived run titles and its 25-cap "Show more"
+  affordance are unbuilt; `sessionOptions()` today just truncates at the cap
+  silently. Both belong to the DS that builds the epic block.
 
 ## Verification
 

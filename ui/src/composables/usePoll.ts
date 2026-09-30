@@ -32,6 +32,22 @@ export function triggerGlobalRefresh(): void {
   refreshSignal.value += 1;
 }
 
+/**
+ * The app shell's Pause control (kit/LiveIndicator.vue). One switch for
+ * every usePoll() caller: false stands the interval and the stream/refresh
+ * watchers down without unmounting anything, so Resume needs no re-fetch
+ * logic of its own — the next tick or signal simply runs again.
+ */
+const isLive = ref(true);
+
+export function setLive(live: boolean): void {
+  isLive.value = live;
+}
+
+export function getIsLive() {
+  return isLive;
+}
+
 export interface PollOptions {
   /**
    * Keep the interval running even while the change stream is open. For a
@@ -53,6 +69,7 @@ export function usePoll(
   function start() {
     stop();
     timer = setInterval(() => {
+      if (!isLive.value) return;
       if (typeof document !== 'undefined' && document.hidden) return;
       // The stream carries the page while it is open, so the interval stands
       // down rather than being cleared. Keeping the timer alive is what makes
@@ -84,6 +101,8 @@ export function usePoll(
     start();
   }
 
+  // Manual refresh always runs, paused or not — Pause stands down the
+  // automatic triggers below, not an explicit "refresh now" click.
   watch(refreshSignal, () => {
     void callback();
   });
@@ -92,6 +111,7 @@ export function usePoll(
   // does no work, and handleVisibility() fires once on return, so nothing
   // heard while hidden is lost — it is collapsed into that one refetch.
   watch(advanceSignal, () => {
+    if (!isLive.value) return;
     if (typeof document !== 'undefined' && document.hidden) return;
     void callback();
   });

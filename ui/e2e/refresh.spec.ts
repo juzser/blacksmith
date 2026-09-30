@@ -124,6 +124,8 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
     const refetched = page.waitForResponse((r) => r.url().includes('/api/overview'), {
       timeout: 5000,
     });
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await refetched;
   });
@@ -142,6 +144,8 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
       await route.continue();
     });
     const inFlight = page.waitForRequest((r) => r.url().includes('/api/overview'));
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await inFlight;
 
@@ -160,6 +164,8 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
     const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'), {
       timeout: 5000,
     });
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await refetched;
   });
@@ -182,6 +188,8 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
       await route.continue();
     });
     const inFlight = page.waitForRequest((r) => r.url().includes('/api/flow'));
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await inFlight;
 
@@ -231,6 +239,8 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
       body.nodes[0].title = 'Refetched by the topbar';
       await route.fulfill({ response, json: body });
     });
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await expect(
       page.locator('.flow-node__title', { hasText: 'Refetched by the topbar' }),

@@ -140,6 +140,23 @@ export function formatRelativeVerbose(iso: string, nowIso?: string): string {
 }
 
 /**
+ * "Live" / "Live, last activity 5 min ago" / "Paused, last activity 5 min
+ * ago" — the same derivation kit/LiveIndicator.vue's own template composes
+ * inline (statusLabel + a conditional RelativeTime), factored out because
+ * kit/MobileTopBar.vue's liveness dot (ds-spec.md §3.1) needs the identical
+ * text as a plain string for its `aria-label`, not a live-ticking DOM node.
+ */
+export function formatLiveStatus(
+  live: boolean,
+  lastEventAt: string | null,
+  nowIso?: string,
+): string {
+  const label = live ? 'Live' : 'Paused';
+  if (!lastEventAt) return label;
+  return `${label}, last activity ${formatRelativeVerbose(lastEventAt, nowIso)}`;
+}
+
+/**
  * One-line label for a long free-text field.
  *
  * `/api/flow` nodes carry `title = tasks.objective` (db/queries.ts:1406), and

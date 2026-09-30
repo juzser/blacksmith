@@ -5,6 +5,7 @@ import {
   formatCompactNumber,
   formatCompactValue,
   formatElapsed,
+  formatLiveStatus,
   formatMeasuredTokens,
   formatRelative,
   formatRelativeVerbose,
@@ -330,6 +331,35 @@ describe('lib/format.ts formatRelativeVerbose()', () => {
   it('renders hours and days with a space before the unit', () => {
     expect(formatRelativeVerbose('2026-08-04T10:00:00.000Z', now)).toBe('2 h ago');
     expect(formatRelativeVerbose('2026-08-02T12:00:00.000Z', now)).toBe('2 d ago');
+  });
+});
+
+// kit/MobileTopBar.vue's liveness dot (ds-spec.md §3.1: "the LiveIndicator
+// dot only, with aria-label 'Live — last activity 5 min ago'"). Same
+// derivation LiveIndicator.vue's own template already does (statusLabel +
+// RelativeTime), factored out so the dot's aria-label cannot drift from the
+// text the full indicator shows on desktop.
+describe('lib/format.ts formatLiveStatus()', () => {
+  const now = '2026-08-04T12:00:00.000Z';
+
+  it('reads "Live" with no last-activity suffix when there is none', () => {
+    expect(formatLiveStatus(true, null, now)).toBe('Live');
+  });
+
+  it('reads "Paused" with no last-activity suffix when there is none', () => {
+    expect(formatLiveStatus(false, null, now)).toBe('Paused');
+  });
+
+  it('appends the last activity when present, live', () => {
+    expect(formatLiveStatus(true, '2026-08-04T11:55:00.000Z', now)).toBe(
+      'Live, last activity 5 min ago',
+    );
+  });
+
+  it('appends the last activity when present, paused', () => {
+    expect(formatLiveStatus(false, '2026-08-04T11:55:00.000Z', now)).toBe(
+      'Paused, last activity 5 min ago',
+    );
   });
 });
 

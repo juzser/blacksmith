@@ -39,19 +39,27 @@ async function firstSession(page: import('@playwright/test').Page): Promise<stri
 }
 
 test.describe('Session scope', () => {
-  test('offers the picker on the pages that read the scope, and nowhere else', async ({ page }) => {
-    for (const path of ['/sessions', '/timeline', '/kanban', '/flow', '/errors', '/analytics']) {
+  test('offers the picker only on Activity and Roadmap (ds-spec.md §3)', async ({ page }) => {
+    for (const path of ['/timeline', '/roadmap']) {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} offers the picker`).toBeVisible();
     }
-    for (const path of ['/projects', '/roadmap', '/lessons']) {
+    for (const path of [
+      '/sessions',
+      '/kanban',
+      '/flow',
+      '/errors',
+      '/analytics',
+      '/projects',
+      '/lessons',
+    ]) {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} does not`).toHaveCount(0);
     }
   });
 
   test('picking a run scopes the page and shows the width control', async ({ page }) => {
-    await page.goto('/sessions');
+    await page.goto('/timeline');
     await expect(page.locator(PICKER)).toBeVisible();
     // Hidden until there is a session to widen: the pair app.ts refuses is
     // not reachable from the UI, it is not merely discouraged.
@@ -59,35 +67,36 @@ test.describe('Session scope', () => {
 
     const session = await firstSession(page);
     const scoped = page.waitForRequest(
-      (r) => r.url().includes('/api/overview') && r.url().includes(`session=${session}`),
+      (r) => r.url().includes('/api/timeline') && r.url().includes(`session=${session}`),
     );
     await page.locator(PICKER).selectOption(session);
     await scoped;
 
     await expect(page).toHaveURL(new RegExp(`session=${session}`));
     await expect(page.locator(WIDTH)).toBeVisible();
-    // Still a page, not a 400: the canvas drew the run that was asked for.
-    await expect(page.locator('.session-node')).toHaveCount(1);
+    // Still a page, not a 400: the scoped fetch resolved and rendered.
+    await expect(page.locator('h1')).toHaveText('Timeline');
+    await expect(page.locator('.ds-banner')).toHaveCount(0);
   });
 
   test('widening asks for the lineage, and the server answers it', async ({ page }) => {
-    await page.goto('/sessions');
+    await page.goto('/timeline');
     const session = await firstSession(page);
     await page.locator(PICKER).selectOption(session);
     await expect(page.locator(WIDTH)).toBeVisible();
 
     const widened = page.waitForResponse(
-      (r) => r.url().includes('/api/overview') && r.url().includes('lineage=true'),
+      (r) => r.url().includes('/api/timeline') && r.url().includes('lineage=true'),
     );
     await page.locator(WIDTH).selectOption('lineage');
     expect((await widened).status(), 'app.ts accepts the pair the UI emits').toBe(200);
     await expect(page).toHaveURL(/lineage=true/);
-    await expect(page.locator('.session-node').first()).toBeVisible();
+    await expect(page.locator('h1')).toHaveText('Timeline');
     await expect(page.locator('.ds-banner')).toHaveCount(0);
   });
 
   test('clearing the run takes the widening with it', async ({ page }) => {
-    await page.goto('/sessions');
+    await page.goto('/timeline');
     const session = await firstSession(page);
     await page.locator(PICKER).selectOption(session);
     await expect(page.locator(WIDTH)).toBeVisible();

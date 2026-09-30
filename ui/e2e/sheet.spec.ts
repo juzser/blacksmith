@@ -1,5 +1,4 @@
 import { expect, type Page, test } from './harness.js';
-import { VIEWPORTS } from './helpers.js';
 
 /**
  * `aria-modal="true"` is a promise: everything outside this element is
@@ -14,8 +13,13 @@ import { VIEWPORTS } from './helpers.js';
  * assertions are written against the Sheet because that is where they were
  * missing, and phrased as behaviour ("focus is still inside") rather than as
  * a focusable-element count, so they survive a nav item being added.
+ *
+ * The Sheet only exists in the 641-767px band (ds-spec.md §3): below 640px
+ * the phone shell (MobileTopBar/MobileTabBar) replaces it entirely, with no
+ * hamburger to open it at all. 700px keeps this suite inside the Sheet's
+ * actual range instead of the phone-shell width the rest of e2e uses.
  */
-test.use({ viewport: VIEWPORTS.mobile });
+test.use({ viewport: { width: 700, height: 900 } });
 
 async function openSheet(page: Page) {
   await page.goto('/overview');

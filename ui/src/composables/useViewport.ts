@@ -1,7 +1,9 @@
 // Responsive breakpoints (design-spec.md §2): sidebar auto-collapses
 // <1024px, off-canvas Sheet <768px (repo-specific 390px floor override —
 // the Sheet/scroll approach already holds down to 390px, no extra
-// breakpoint needed for that floor itself).
+// breakpoint needed for that floor itself). §3.1 adds a third, narrower
+// breakpoint (--bs-bp-mobile, 640px) below which the shell itself swaps for
+// MobileTopBar/MobileTabBar rather than just collapsing the same chrome.
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 function useMediaQuery(query: string) {
@@ -27,6 +29,8 @@ export function useViewport() {
   // read as a number.
   const isCollapsedWidth = useMediaQuery('(max-width: 1023px)');
   const isMobileWidth = useMediaQuery('(max-width: 767px)');
+  // §3.1's --bs-bp-mobile (640px) is the phone-shell swap point.
+  const isPhoneWidth = useMediaQuery('(max-width: 640px)');
   // ds-allow-hardcode:end
-  return { isCollapsedWidth, isMobileWidth };
+  return { isCollapsedWidth, isMobileWidth, isPhoneWidth };
 }

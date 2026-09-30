@@ -1,27 +1,12 @@
-import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 
 /**
- * The app shell's own poll — design-spec.md §8's first bullet and §A.6.
- *
- * Everything here is a claim the unit tests cannot make. `lib/navBadges.ts` is
- * covered thoroughly as a fold over two pulses, but a fold that is correct and
- * never mounted still leaves the operator staring at a frozen server that
- * looks exactly like a quiet factory. What is asserted below is the wiring:
- * that the shell polls where a page does not, that its Refresh reaches the
- * page rather than only the pulse, and that a counter growing while you are
- * elsewhere actually reaches the rail.
+ * The app shell's own poll (design-spec.md §8's first bullet and §A.6), and
+ * DS1's shell wiring (ds-spec.md §3, §3.1) — the 5-item nav and the mobile
+ * shell at 375px. Everything here is a claim the unit tests cannot make: a
+ * `LiveIndicator` that is correct and never mounted still leaves the operator
+ * staring at a frozen server that looks exactly like a quiet factory.
  */
-
-/** `/api/pulse`'s shape (lib/api.ts `PulseResult`). */
-function pulseBody(events: number, errors: number, lessonsPending = 0) {
-  return {
-    lastEventAt: FIXTURE_NOW_ISO,
-    lastEventType: 'task.completed',
-    counts: { events, errors },
-    lessonsPending,
-  };
-}
 
 test.describe('App shell liveness (design-spec §A.6)', () => {
   test('reports the factory pulse on a page that is not Overview', async ({ page }) => {
@@ -29,9 +14,9 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
     // server that had stopped answering was indistinguishable from a factory
     // with nothing to do.
     await page.goto('/timeline');
-    const pulse = page.locator('.app-topbar__pulse');
-    await expect(pulse).toBeVisible();
-    await expect(pulse).toHaveText(/^last event (just now|\d+[smhd] ago)$/);
+    const live = page.locator('.bs-live');
+    await expect(live).toBeVisible();
+    await expect(live.locator('.bs-live__text')).toHaveText(/^(Live|Paused)/);
   });
 
   test('polls on a page that has no poll of its own', async ({ page }) => {
@@ -57,49 +42,69 @@ test.describe('App shell liveness (design-spec §A.6)', () => {
     await page.goto('/timeline');
     await expect(page.locator('.ds-skeleton')).toHaveCount(0);
 
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+
     // Timeline's own poll is 15s away; this resolves in milliseconds.
     const refetch = page.waitForRequest('**/api/timeline*');
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await refetch;
   });
 
-  test('badges a nav item whose counter grew while you were elsewhere', async ({ page }) => {
-    let served = 0;
-    await page.route('**/api/pulse*', async (route) => {
-      served += 1;
-      // Errors holds still while events climbs, so a rail that badged on
-      // "there are some" rather than "three arrived" fails here.
-      await route.fulfill({ json: pulseBody(served === 1 ? 10 : 13, 2) });
+  test('the Pause control stops usePoll driving further automatic refreshes', async ({ page }) => {
+    await page.goto('/lessons');
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await expect(page.getByRole('button', { name: 'Resume updates' })).toBeVisible();
+
+    let pulses = 0;
+    page.on('request', (r) => {
+      if (r.url().includes('/api/pulse')) pulses += 1;
     });
+    // usePoll's interval is 5s; if paused truly stands it down, nothing new
+    // arrives inside a window comfortably longer than one tick.
+    await page.waitForTimeout(6_000);
+    expect(pulses).toBe(0);
+  });
+});
 
-    await page.goto('/overview');
-
-    // The first pulse is a baseline, not an arrival: everything the log
-    // already held predates you opening the page, and badging it would greet
-    // every fresh session with a wall of numbers.
-    await expect(page.getByRole('button', { name: 'Timeline', exact: true })).toBeVisible();
-
-    await expect(page.getByRole('button', { name: 'Timeline, 3 new' })).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(page.getByRole('button', { name: 'Errors', exact: true })).toBeVisible();
+test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
+  test('SidebarNav lists the 5 shell items and marks the active one', async ({ page }) => {
+    await page.goto('/kanban');
+    const nav = page.getByRole('navigation', { name: 'Primary' });
+    for (const label of ['Home', 'Work', 'Activity', 'Cost & quality', 'Lessons']) {
+      await expect(nav.getByRole('button', { name: label })).toBeVisible();
+    }
+    await expect(nav.getByRole('button', { name: 'Work' })).toHaveAttribute('aria-current', 'page');
   });
 
-  test('clears a badge when you visit the page it was counting for', async ({ page }) => {
-    let served = 0;
-    await page.route('**/api/pulse*', async (route) => {
-      served += 1;
-      await route.fulfill({ json: pulseBody(served === 1 ? 10 : 13, 2) });
-    });
+  test('at 375px the shell swaps to MobileTopBar + MobileTabBar with the same 5 items', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/kanban');
 
-    await page.goto('/overview');
-    await expect(page.getByRole('button', { name: 'Timeline, 3 new' })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(page.locator('.bs-mtopbar')).toBeVisible();
+    const tabbar = page.getByRole('navigation', { name: 'Primary' });
+    await expect(tabbar).toBeVisible();
+    // MobileTabBar uses the short label ("Cost", not "Cost & quality") — DS1
+    // has no room for the full label at 375px (ds-spec.md §3).
+    for (const label of ['Home', 'Work', 'Activity', 'Cost', 'Lessons']) {
+      await expect(tabbar.getByRole('button', { name: label })).toBeVisible();
+    }
+    await expect(tabbar.getByRole('button', { name: 'Work' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
 
-    // Reading the page is what "seen" means. The count restarts from here,
-    // so the badge cannot come back for events you have already looked at.
-    await page.getByRole('button', { name: 'Timeline, 3 new' }).click();
-    await expect(page.getByRole('button', { name: 'Timeline', exact: true })).toBeVisible();
+  test('the breadcrumb updates immediately on navigation, before page data arrives', async ({
+    page,
+  }) => {
+    await page.goto('/kanban');
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('button', { name: 'Activity' })
+      .click();
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Activity');
   });
 });
