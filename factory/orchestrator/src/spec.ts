@@ -103,6 +103,12 @@ export interface SpecReviewRecord {
 export interface SpecReviewStatus {
   review: SpecReviewRecord | null;
   headSha: string | null;
+  /**
+   * `<prefix>/<epic>/integration` — `bs/` for a new epic, `smith/` for one
+   * that already integrates there. Resolved by cli.ts (epicBranchPrefix
+   * needs git) and handed in as data so this module stays git-free.
+   */
+  branch: string;
 }
 
 /** Last-wins fold: a re-review supersedes its predecessor, it does not stack. */
@@ -308,8 +314,7 @@ export function specReviewBlockers(
   planVersion: number | null,
   effort: ClosingReviewEffort,
 ): string[] {
-  const branch = `smith/${epicId}/${RESERVED_TASK_ID}`;
-  const { review, headSha } = status;
+  const { review, headSha, branch } = status;
 
   if (review === null) {
     if (effort.closingSpecReview === 'when-plan-amended' && planVersion === 1) {

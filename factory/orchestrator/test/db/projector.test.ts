@@ -108,6 +108,9 @@ describe('db/projector.ts', () => {
       epicId: EPIC_ID,
       caseTag: 'feature',
       taskStatus: 'completed',
+      // The fixture's task-added payloads carry no `branch` field, so this
+      // is `branchFor`'s legacy fallback, not the current `bs` default
+      // (bs-rename part 1).
       branch: `smith/${EPIC_ID}/task-1`,
       budgetTokens: 2000,
     });

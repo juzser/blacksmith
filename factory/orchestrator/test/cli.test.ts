@@ -26,7 +26,7 @@ import { resolveRepoAtDir } from '../src/gh.js';
 import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
 import { factoryProjects } from '../src/projects.js';
 import { SPEC_REVIEW_EVENT } from '../src/spec.js';
-import { assertExited, runOrThrow, runProcess, startProcess } from './helpers/process.js';
+import { assertExited, git, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
 // UI glue per stack.md); it is verified end-to-end here as a built binary,
@@ -216,6 +216,38 @@ describe('cli.ts (built binary)', () => {
       expect(err.code).toBe('cli.missing-positional');
       expect(err.message).toContain('<plan.json>');
       expect(err.message).toContain('smith plan validate <plan.json>');
+    });
+  });
+
+  // bs-rename, operator decision 3: `smith` keeps working as a deprecated
+  // alias of `bs`, both pointing at this same built cli.js -- npm/pnpm's
+  // `bin` field makes each an unextended symlink literally named after the
+  // key, which is what these recreate directly rather than trusting a real
+  // `pnpm install` to have run.
+  describe('smith/bs alias (bs-rename)', () => {
+    it('invoked as `smith` behaves identically but adds one deprecation line on stderr', async () => {
+      const legacyPath = path.join(scratchDir, 'smith');
+      await symlink(CLI_PATH, legacyPath);
+      const viaBs = runCli(['--help']);
+      const viaSmith = runProcess('node', [legacyPath, '--help']);
+      assertExited(viaSmith, 'smith --help (legacy alias)');
+      expect(viaSmith.status).toBe(viaBs.status);
+      // stdout is parsed as JSON by playbooks in other commands, so the
+      // deprecation notice must never land there, only on stderr.
+      expect(viaSmith.stdout).toBe(viaBs.stdout);
+      const lines = viaSmith.stderr.split('\n').filter((line) => line.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('smith');
+      expect(lines[0]).toContain('bs');
+      expect(lines[0]?.toLowerCase()).toContain('deprecat');
+    });
+
+    it('invoked as `bs` prints no deprecation line', async () => {
+      const currentPath = path.join(scratchDir, 'bs');
+      await symlink(CLI_PATH, currentPath);
+      const run = runProcess('node', [currentPath, '--help']);
+      assertExited(run, 'bs --help');
+      expect(run.stderr).toBe('');
     });
   });
 
@@ -4360,6 +4392,50 @@ describe('cli.ts (built binary)', () => {
       );
     });
 
+    // bs-rename part 1: `--project` resolves the branch prefix per epic, the
+    // same way `worktree create` does, instead of always declaring `bs/...`
+    // for an epic that already integrates on `smith/<epic>/integration`.
+    it('plan ingest --project: declares smith/... for an epic already on a legacy integration branch', async () => {
+      const { sessionId, eventsDir, planPath } = await session();
+      const projectRoot = await mkdtemp(path.join(tmpdir(), 'smith-cli-project-'));
+      const originDir = path.join(projectRoot, 'origin.git');
+      const projectDir = path.join(projectRoot, 'project');
+      try {
+        git(projectRoot, ['init', '-q', '--bare', '-b', 'main', originDir]);
+        git(projectRoot, ['clone', '-q', originDir, projectDir]);
+        git(projectDir, ['config', 'user.email', 'test@example.com']);
+        git(projectDir, ['config', 'user.name', 'Test']);
+        await writeFile(path.join(projectDir, 'README.md'), '# project\n');
+        git(projectDir, ['add', '.']);
+        git(projectDir, ['commit', '-q', '-m', 'init']);
+        git(projectDir, ['push', '-q', 'origin', 'main']);
+        git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+        const ingest = runCli([
+          'plan',
+          'ingest',
+          planPath,
+          '--project',
+          projectDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(ingest.status).toBe(0);
+
+        const added = tail(sessionId, eventsDir).filter((r) => r.event_type === 'task-added');
+        expect(added.map((r) => r.payload.branch)).toEqual([
+          'smith/epic-1/task-1',
+          'smith/epic-1/task-2',
+        ]);
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
+    });
+
     // D-254. The plan declares a DAG; before this the ingest wrote its nodes
     // and dropped its arrows, leaving the db's `edges` table empty in every
     // real session and the Flow page drawing a graph with no dependencies.
@@ -6023,7 +6099,7 @@ describe('cli.ts (built binary)', () => {
       runOrThrow('git', ['commit', '-q', '-am', 'edit a'], { cwd: worktreeDir });
 
       // Merged with no queue anywhere near it — the case this verb is for.
-      runOrThrow('git', ['checkout', '-q', 'smith/epic-1/integration'], { cwd: projectDir });
+      runOrThrow('git', ['checkout', '-q', 'bs/epic-1/integration'], { cwd: projectDir });
       runOrThrow('git', ['merge', '--no-ff', branch, '-m', 'merged by hand'], { cwd: projectDir });
       const sha = runOrThrow('git', ['rev-parse', 'HEAD'], { cwd: projectDir }).stdout.trim();
       return { projectDir, branch, sha };
@@ -12317,7 +12393,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from2/task-1',
+          'bs/epic-from2/task-1',
           path.join(scratchDir, 'wt', 'from2-pred'),
           'main',
         ],
@@ -12339,7 +12415,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(status, stdout).toBe(0);
       const result = JSON.parse(stdout);
-      expect(result.branch).toBe('smith/epic-from2/task-1-v2');
+      expect(result.branch).toBe('bs/epic-from2/task-1-v2');
     });
 
     // The bug this pins: a plan amended twice before the intermediate
@@ -12392,7 +12468,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from3/task-1',
+          'bs/epic-from3/task-1',
           path.join(scratchDir, 'wt', 'from3-pred'),
           'main',
         ],
@@ -12414,7 +12490,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(status, stdout).toBe(0);
       const result = JSON.parse(stdout);
-      expect(result.branch).toBe('smith/epic-from3/task-1-v3');
+      expect(result.branch).toBe('bs/epic-from3/task-1-v3');
     });
 
     // A logged chain existing at all must not loosen the check into "any task
@@ -12512,7 +12588,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from5/task-1',
+          'bs/epic-from5/task-1',
           path.join(scratchDir, 'wt', 'from5-pred'),
           'main',
         ],
@@ -12526,7 +12602,7 @@ describe('cli.ts (built binary)', () => {
           'worktree',
           'add',
           '-b',
-          'smith/epic-from5/task-5-mid',
+          'bs/epic-from5/task-5-mid',
           path.join(scratchDir, 'wt', 'from5-mid'),
           'main',
         ],
@@ -12566,7 +12642,7 @@ describe('cli.ts (built binary)', () => {
       ]);
       expect(accepted.status, accepted.stdout).toBe(0);
       const result = JSON.parse(accepted.stdout);
-      expect(result.branch).toBe('smith/epic-from5/task-5-final');
+      expect(result.branch).toBe('bs/epic-from5/task-5-final');
     });
   });
 

@@ -178,6 +178,22 @@ describe('measureDiff (P9-18, real git)', () => {
     );
   });
 
+  // Operator decision 2 (bs-rename): a task branch cut under the new bs/
+  // prefix must derive a bs/ integration branch, not the legacy smith/ one —
+  // the prefix a task branch was cut under is the prefix its integration
+  // branch already used.
+  it('derives a bs/ integration branch from a bs/ task branch', async () => {
+    git(repo, ['branch', 'bs/epic-2/integration']);
+    git(repo, ['checkout', '-q', '-b', 'bs/epic-2/task-1']);
+    await writeFile(path.join(repo, 'src.ts'), 'one\ntwo\nthree\nfour\n');
+    git(repo, ['commit', '-q', '-am', 'work']);
+
+    const measured = measureDiff(repo);
+
+    expect(measured.baseRef).toBe('bs/epic-2/integration');
+    expect(measured.diffLines).toBe(1);
+  });
+
   it('reports a non-git directory as a typed failure, not a raw shell error', async () => {
     const notARepo = path.join(root, 'elsewhere');
     await mkdir(notARepo);

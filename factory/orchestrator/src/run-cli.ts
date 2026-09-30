@@ -7,6 +7,7 @@
 // test in test/runner.test.ts).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { type FlagSpec, parseArgs } from './args.js';
+import { warnIfLegacyName } from './cliName.js';
 import type { WorkerInvocation } from './harness.js';
 import { type RunOutcome, runInvocation } from './runner.js';
 
@@ -61,6 +62,11 @@ function exitCodeFor(outcome: RunOutcome): number {
 }
 
 async function main(): Promise<number> {
+  // bs-rename, operator decision 3: a no-op unless argv[1]'s basename is the
+  // deprecated `smith-run`, in which case it writes one line to stderr,
+  // never stdout -- stdout carries the JSON RunOutcome.
+  warnIfLegacyName(process.argv[1], 'smith-run', 'bs-run');
+
   const argv = process.argv.slice(2);
   const parsed = parseArgs(argv, FLAG_SPEC);
 

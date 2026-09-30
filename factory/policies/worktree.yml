@@ -17,19 +17,24 @@ worktree:
   # Relative to whatever directory the project was handed as, never to this
   # clone: a project beside the repo keeps its worktrees beside the repo too.
   path_pattern: "<project-parent>/.wt/<project>/<task-id>"
-  branch_pattern: "smith/<epic>/<task-id>"
-  created_from: integration branch head (smith/<epic>/integration), fresh each time
+  # bs-rename, operator decision 2/3: bs/ is the current prefix for every new
+  # epic; one that already integrates on the legacy smith/ prefix keeps it
+  # for its whole life rather than switching mid-epic (integration_branch
+  # below).
+  branch_pattern: "bs/<epic>/<task-id>"
+  created_from: integration branch head (bs/<epic>/integration), fresh each time
   lifecycle: deleted after merge — a stale worktree is a bug
   one_worktree_per_task: true
 
 integration_branch:
-  # Phase-3 correction: a bare "smith/<epic>" ref cannot coexist with
-  # "smith/<epic>/<task-id>" refs — git's ref namespace is hierarchical, so a
+  # Phase-3 correction: a bare "bs/<epic>" ref cannot coexist with
+  # "bs/<epic>/<task-id>" refs — git's ref namespace is hierarchical, so a
   # leaf ref and a directory prefix of the same name conflict (D/F conflict,
   # confirmed against a real git repo while implementing worktree.ts). The
   # integration branch is therefore a sibling of task branches under the
-  # epic's ref prefix, not a leaf at "smith/<epic>" itself.
-  pattern: "smith/<epic>/integration"
+  # epic's ref prefix, not a leaf at "bs/<epic>" itself. An epic that already
+  # integrates on smith/<epic>/integration (legacy) keeps that prefix instead.
+  pattern: "bs/<epic>/integration"
   rule: workers never touch main/master; only the operator merges the
     integration PR into the target repo's main.
 
@@ -75,7 +80,8 @@ merge_queue:
   mode: serial
   order: dependency order (topological, per recorded edges)
   admission_steps:
-    - rebase task branch onto current smith/<epic>/integration head
+    - rebase task branch onto current integration branch head (bs/<epic>/integration,
+      or smith/<epic>/integration for a legacy epic)
     - run the cumulative regression gate (every previously merged task's
       tests in this epic, not just the incoming task)
     - admit on green; reject and bounce on red

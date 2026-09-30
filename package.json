@@ -33,6 +33,8 @@
   },
   "packageManager": "pnpm@9.3.0",
   "bin": {
+    "bs": "factory/orchestrator/dist/cli.js",
+    "bs-run": "factory/orchestrator/dist/run-cli.js",
     "smith": "factory/orchestrator/dist/cli.js",
     "smith-run": "factory/orchestrator/dist/run-cli.js"
   },
@@ -81,7 +83,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
+    "@floating-ui/dom": "1.8.0",
     "@hono/node-server": "2.1.1",
+    "@lucide/vue": "1.49.0",
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@types/better-sqlite3": "9.6.0",

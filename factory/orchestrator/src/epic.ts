@@ -601,6 +601,12 @@ export interface EpicPlanRoster {
 export interface IntegrationStatus {
   check: IntegrationCheckRecord | null;
   headSha: string | null;
+  /**
+   * `<prefix>/<epic>/integration` — `bs/` for a new epic, `smith/` for one
+   * that already integrates there. Resolved by cli.ts (epicBranchPrefix
+   * needs git) and handed in as data so this module stays git-free.
+   */
+  branch: string;
 }
 
 /**
@@ -614,8 +620,7 @@ export interface IntegrationStatus {
  * against the commit the branch is on now.
  */
 function integrationBlockers(epicId: string, integration: IntegrationStatus): string[] {
-  const branch = `smith/${epicId}/${RESERVED_TASK_ID}`;
-  const { check, headSha } = integration;
+  const { check, headSha, branch } = integration;
 
   if (check === null) {
     return [
@@ -1149,8 +1154,7 @@ export function epicVerdictJudgeRequest(summary: EpicSummary, budget: JudgeBudge
   // The assembled branch. `integrationBlockers` above holds the epic on every
   // shape but this one, so by the time a judge runs the check is present,
   // passing, and current — the refutable question left is what it RAN.
-  const branch = `smith/${summary.epicId}/${RESERVED_TASK_ID}`;
-  const { check, headSha } = summary.integration;
+  const { check, headSha, branch } = summary.integration;
   const integrationLines =
     check === null
       ? [`  There is no integration-root check on record for ${branch}.`]
@@ -1370,6 +1374,13 @@ export interface EpicVerdictInput {
    */
   integrationHeadSha: string | null;
   /**
+   * `<prefix>/<epic>/integration` — `bs/` for a new epic, `smith/` for one
+   * that already integrates there (epicBranchPrefix). REQUIRED for the same
+   * reason integrationHeadSha is: this module never shells out to git, so
+   * the caller states which branch the head above was read from.
+   */
+  integrationBranch: string;
+  /**
    * Whether this epic owes an MCP surface, and what its manifest says
    * (docs/standards/mcp.md step 4). REQUIRED for the same reason as
    * integrationHeadSha — cli.ts resolves it via resolveMcpSurface(); every
@@ -1511,6 +1522,7 @@ export async function runEpicVerdict(
     {
       check: latestIntegrationCheck(events, input.epicId),
       headSha: input.integrationHeadSha,
+      branch: input.integrationBranch,
     },
     input.mcp,
     // Folded from the log this call already read, and pinned to the same head
@@ -1519,6 +1531,7 @@ export async function runEpicVerdict(
     {
       review: latestSpecReview(events, input.epicId),
       headSha: input.integrationHeadSha,
+      branch: input.integrationBranch,
     },
     // Same shape, other axis: the recorded check comes from the log this call
     // already read, and the goal it is measured against comes from the

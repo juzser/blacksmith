@@ -52,6 +52,7 @@ import {
   type WaveTask,
   writeRootCheck,
 } from './claims.js';
+import { warnIfLegacyName } from './cliName.js';
 import { collectCoverageEvidence } from './coverage.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
 import {
@@ -238,6 +239,8 @@ import { computeNextWave, liveWaveTasks, type NextWaveInput } from './waveNext.j
 import { initWorkRoot } from './workroot.js';
 import {
   createTaskWorktree,
+  epicBranchPrefix,
+  integrationBranchName,
   listStale,
   RESERVED_TASK_ID,
   removeTaskWorktree,
@@ -1264,6 +1267,11 @@ async function nextWaveInputFrom(
 }
 
 async function main(): Promise<number> {
+  // bs-rename, operator decision 3: a no-op unless argv[1]'s basename is the
+  // deprecated `smith`, in which case it writes one line to stderr, never
+  // stdout -- stdout is parsed as JSON by playbooks.
+  warnIfLegacyName(process.argv[1], 'smith', 'bs');
+
   // Refuse an unsupported runtime before anything opens the database. The
   // native binding crashes lazily — `new Database()`, not import — so a check
   // here still runs, and a subcommand that happens to avoid SQLite must not
@@ -1589,7 +1597,12 @@ async function main(): Promise<number> {
     const plan = readJsonFile<PlanFile>(planFile);
     const ctx = eventContextFromFlags(flags);
     const opts = eventOptsFromFlags(flags);
-    const written = await emitTasksAdded(plan, ctx, opts);
+    // --project: an epic already integrating on `smith/<epic>/integration`
+    // (legacy continuity, worktree.ts's epicBranchPrefix) must have this
+    // v(n+1) ingest declare the same prefix `worktree create` will actually
+    // cut, not the plain `bs` default. Absent for a brand-new epic, which has
+    // no such branch to ask git about yet.
+    const written = await emitTasksAdded(plan, ctx, opts, flags.project);
     // D-254: the arrows, after the nodes. The plan declares a DAG and the
     // scheduler has always read it off the file, but nothing wrote it to the
     // log -- so the db's `edges` table was empty and every operator-facing
@@ -2425,7 +2438,7 @@ async function main(): Promise<number> {
       if (cutIntermediate !== undefined) {
         throw new SmithError(
           'worktree.chain-intermediate-cut',
-          `${epic}/${taskId} cannot be cut --from ${epic}/${from}: ${epic}/${cutIntermediate} sits between them and already has its own branch (${taskBranchName(epic, cutIntermediate)}), so its commits would be silently dropped; rerun with --from ${cutIntermediate} instead.`,
+          `${epic}/${taskId} cannot be cut --from ${epic}/${from}: ${epic}/${cutIntermediate} sits between them and already has its own branch (${taskBranchName(epic, cutIntermediate, epicBranchPrefix(projectDir, epic))}), so its commits would be silently dropped; rerun with --from ${cutIntermediate} instead.`,
           { epic, taskId, from, intermediate: cutIntermediate },
         );
       }
@@ -2854,7 +2867,10 @@ async function main(): Promise<number> {
       // the merge — and adopt any task with it, which is the forgery the whole
       // verb exists to prevent. Deriving it from the plan-resolved id means the
       // branch and the id it is logged under cannot disagree.
-      { taskId, branch: taskBranchName(plan.epic_id, taskId) },
+      {
+        taskId,
+        branch: taskBranchName(plan.epic_id, taskId, epicBranchPrefix(projectDir, plan.epic_id)),
+      },
       {
         projectDir,
         epic: plan.epic_id,
@@ -3853,6 +3869,7 @@ async function main(): Promise<number> {
       {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
+        integrationBranch: integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
         // D-126: the live plan is a voter. Without this the roster is the
@@ -3893,6 +3910,7 @@ async function main(): Promise<number> {
       {
         epicId,
         integrationHeadSha: integrationHeadSha(projectDir, epicId),
+        integrationBranch: integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId)),
         mcp: mcpSurfaceFor(epicId, projectDir, flags),
         goal: epicGoalFor(epicId, flags),
         planOpts: planOptsFromFlags(flags),
@@ -3951,9 +3969,10 @@ async function main(): Promise<number> {
     // read would produce a review nothing can be shown to cover.
     const headSha = integrationHeadSha(projectDir, epicId);
     if (headSha === null) {
+      const branch = integrationBranchName(epicId, epicBranchPrefix(projectDir, epicId));
       throw new SmithError(
         'cli.no-integration-branch',
-        `Could not read the head of smith/${epicId}/integration in ${projectDir}. The closing spec review reads the assembled branch, so there is nothing to review yet.`,
+        `Could not read the head of ${branch} in ${projectDir}. The closing spec review reads the assembled branch, so there is nothing to review yet.`,
         { epicId, projectDir },
       );
     }

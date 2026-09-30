@@ -1339,6 +1339,7 @@ describe('spec-scoped findings (P9-9)', () => {
           ts: '2026-08-08T00:00:00.000Z',
         },
         headSha: HEAD_SHA,
+        branch: 'bs/envkit/integration',
         ...overrides,
       };
     }
@@ -1524,7 +1525,7 @@ describe('spec-scoped findings (P9-9)', () => {
         eventId: 'sess-spec#1',
         ts: '2026-08-08T00:00:00.000Z',
       };
-      return { check, headSha: HEAD_SHA };
+      return { check, headSha: HEAD_SHA, branch: 'bs/envkit/integration' };
     }
 
     function okSpecReview(): SpecReviewStatus {
@@ -1539,6 +1540,7 @@ describe('spec-scoped findings (P9-9)', () => {
           ts: '2026-08-08T00:00:00.000Z',
         },
         headSha: HEAD_SHA,
+        branch: 'bs/envkit/integration',
       };
     }
 
@@ -1623,6 +1625,7 @@ describe('spec-scoped findings (P9-9)', () => {
         {
           review: null,
           headSha: HEAD_SHA,
+          branch: 'bs/envkit/integration',
         },
         okGoalCheck(),
         alwaysEffort(),
@@ -1683,7 +1686,7 @@ describe('spec-scoped findings (P9-9)', () => {
         [],
         okIntegration(),
         MCP_SURFACE_NOT_REQUIRED,
-        { review: null, headSha: HEAD_SHA },
+        { review: null, headSha: HEAD_SHA, branch: 'bs/envkit/integration' },
         okGoalCheck(1),
         smallEffort(),
         roster(1),
@@ -1700,7 +1703,7 @@ describe('spec-scoped findings (P9-9)', () => {
         [],
         okIntegration(),
         MCP_SURFACE_NOT_REQUIRED,
-        { review: null, headSha: HEAD_SHA },
+        { review: null, headSha: HEAD_SHA, branch: 'bs/envkit/integration' },
         okGoalCheck(),
         smallEffort(),
         roster(2),

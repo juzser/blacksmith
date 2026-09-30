@@ -9,7 +9,10 @@
  * that box's business, and `--reset` restores what git HEAD says.
  *
  * SMITH_MAXTURNS_<ROLE> names the role upper-cased with `-` as `_`
- * (spec-reviewer → SMITH_MAXTURNS_SPEC_REVIEWER).
+ * (spec-reviewer → SMITH_MAXTURNS_SPEC_REVIEWER). BS_MAXTURNS_<ROLE> is the
+ * current spelling of the same variable (bs-rename, operator decision 3);
+ * SMITH_MAXTURNS_<ROLE> still works as a fallback, and BS_ wins when both are
+ * set for the same role.
  */
 import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -20,9 +23,25 @@ import { AGENTS_DIR } from './paths.js';
 export class AgentsSyncError extends SmithError {}
 
 export const MAXTURNS_ENV_PREFIX = 'SMITH_MAXTURNS_';
+const BS_MAXTURNS_ENV_PREFIX = 'BS_MAXTURNS_';
 
 export function maxTurnsEnvName(role: string): string {
   return `${MAXTURNS_ENV_PREFIX}${role.toUpperCase().replaceAll('-', '_')}`;
+}
+
+/**
+ * Recognises a `SMITH_MAXTURNS_<ROLE>` or `BS_MAXTURNS_<ROLE>` env name, and
+ * maps either spelling to the legacy-style name `byEnv` (below) is keyed by.
+ */
+function parseMaxTurnsEnvName(name: string): { legacyName: string; isBs: boolean } | null {
+  if (name.startsWith(BS_MAXTURNS_ENV_PREFIX)) {
+    return {
+      legacyName: `${MAXTURNS_ENV_PREFIX}${name.slice(BS_MAXTURNS_ENV_PREFIX.length)}`,
+      isBs: true,
+    };
+  }
+  if (name.startsWith(MAXTURNS_ENV_PREFIX)) return { legacyName: name, isBs: false };
+  return null;
 }
 
 export interface MaxTurnsChange {
@@ -137,9 +156,10 @@ function apply(edits: PlannedEdit[], dryRun: boolean): MaxTurnsChange[] {
 }
 
 /**
- * Rewrite `maxTurns:` for every role whose SMITH_MAXTURNS_<ROLE> is set
- * (non-empty). Every name and value is checked, and every target file read,
- * before anything is written: one bad entry refuses the whole sync.
+ * Rewrite `maxTurns:` for every role whose BS_MAXTURNS_<ROLE> (or its legacy
+ * SMITH_MAXTURNS_<ROLE> fallback) is set (non-empty). Every name and value is
+ * checked, and every target file read, before anything is written: one bad
+ * entry refuses the whole sync.
  */
 export function syncAgentMaxTurns(
   options: { agentsDir?: string; env?: Env; dryRun?: boolean } = {},
@@ -150,12 +170,17 @@ export function syncAgentMaxTurns(
   const roles = listRoles(agentsDir);
   const byEnv = new Map(roles.map((role) => [maxTurnsEnvName(role), role]));
 
-  const requested: Array<{ role: string; env: string; to: number }> = [];
+  // Keyed by the legacy-style name, so a BS_ hit and a SMITH_ hit for the
+  // same role collide here rather than both queuing an edit. BS_MAXTURNS_
+  // always sorts before SMITH_MAXTURNS_ (`B` < `S`), so a later legacy hit
+  // for a role BS_ already claimed is dropped, not overwritten.
+  const byRole = new Map<string, { role: string; env: string; to: number; isBs: boolean }>();
   for (const name of Object.keys(env).sort()) {
-    if (!name.startsWith(MAXTURNS_ENV_PREFIX)) continue;
+    const parsed = parseMaxTurnsEnvName(name);
+    if (!parsed) continue;
     const raw = env[name];
     if (raw === undefined || raw === '') continue;
-    const role = byEnv.get(name);
+    const role = byEnv.get(parsed.legacyName);
     if (role === undefined) {
       throw new AgentsSyncError(
         'agents.unknown-role',
@@ -163,9 +188,16 @@ export function syncAgentMaxTurns(
         { variable: name, roles },
       );
     }
-    requested.push({ role, env: name, to: positiveInt(name, raw) });
+    const existing = byRole.get(parsed.legacyName);
+    if (existing?.isBs && !parsed.isBs) continue;
+    byRole.set(parsed.legacyName, {
+      role,
+      env: name,
+      to: positiveInt(name, raw),
+      isBs: parsed.isBs,
+    });
   }
-  requested.sort((a, b) => a.role.localeCompare(b.role));
+  const requested = [...byRole.values()].sort((a, b) => a.role.localeCompare(b.role));
 
   const edits = requested.map(({ role, env: name, to }): PlannedEdit => {
     const file = path.join(agentsDir, `${role}.md`);

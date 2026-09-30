@@ -747,9 +747,9 @@ export function classifyChanges(
  *
  * Collector A (P9-3): what this task branch committed, against the integration
  * branch it was cut from — derived from the branch naming convention
- * smith/<epic>/<task-id> -> smith/<epic>/integration (worktree.yml
- * `integration_branch.pattern`; a bare "smith/<epic>" ref cannot coexist with
- * "smith/<epic>/<task-id>" refs in real git — D/F ref conflict).
+ * <prefix>/<epic>/<task-id> -> <prefix>/<epic>/integration, prefix bs or legacy smith (worktree.yml
+ * `integration_branch.pattern`; a bare "<prefix>/<epic>" ref cannot coexist with
+ * "<prefix>/<epic>/<task-id>" refs in real git — D/F ref conflict).
  *
  * The convention is load-bearing here and that is fine: only an agent working
  * in a task worktree has a claims list, and only a task worktree is on such a
@@ -763,7 +763,7 @@ export function integrationBranchFor(worktreeDir: string): string {
   if (lastSlash === -1) {
     throw new ClaimsError(
       'claims.cannot-derive-integration-branch',
-      `Branch "${branch}" does not follow the smith/<epic>/<task-id> convention.`,
+      `Branch "${branch}" does not follow the bs/<epic>/<task-id> convention.`,
       { branch },
     );
   }

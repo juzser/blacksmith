@@ -21,6 +21,41 @@ export function formatDateTime(iso: string): string {
   return `${formatDate(iso)} ${formatTime(iso)}`;
 }
 
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/**
+ * "30 Sep 2026, 14:07:12" — the absolute-time text kit/RelativeTime.vue's
+ * Tooltip shows (ds-spec.md §2.1's own literal example). Distinct from
+ * formatDateTime() above (design-spec.md §9's "DD/MM/YYYY HH:MM", numeric
+ * month, no seconds) — that shape stays put for the pages that already
+ * render it; this one exists only for the new kit's RelativeTime tooltip,
+ * whose spec'd example needs a month name, a comma, and seconds none of the
+ * existing formatters produce.
+ */
+export function formatAbsolute(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = d.getDate();
+  const month = SHORT_MONTHS[d.getMonth()];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${day} ${month} ${d.getFullYear()}, ${hh}:${mi}:${ss}`;
+}
+
 /**
  * `[how many of this unit make the next one, the suffix it renders as]`.
  *
@@ -58,6 +93,46 @@ export function formatRelative(iso: string, nowIso?: string): string {
     if (diff < size) {
       const n = Math.floor(diff);
       return `${n}${suffix} ago`;
+    }
+    diff /= size;
+  }
+  return iso;
+}
+
+const RELATIVE_VERBOSE_UNITS: Array<[number, string]> = [
+  [60, 's'],
+  [60, 'min'],
+  [24, 'h'],
+  [7, 'd'],
+  [4.3452, 'w'],
+  [12, 'mo'],
+  [Number.POSITIVE_INFINITY, 'y'],
+];
+
+/**
+ * "5 min ago" / "2 h ago" / "3 d ago" — kit/RelativeTime.vue's visible text
+ * (ds-spec.md §2.1's own literal examples; ds-review.html's rendered
+ * .tip-trigger text matches exactly, e.g. "5 min ago", "2 h ago", "8 s ago").
+ * Same tiering as formatRelative() above (same thresholds, same "just now"
+ * <5s floor) but a different text shape: a space before "ago", and "min"
+ * spelled out rather than the bare "m" formatRelative() already ships to
+ * Roadmap's mini-timeline and Timeline rows. Kept as a second function
+ * rather than changing formatRelative() itself: that function's callers are
+ * outside DS0's scope (§5) and its own tests above pin the current "5m ago"
+ * shape against pages already live — changing it would be a breaking,
+ * out-of-scope behaviour change to already-shipped surfaces, not an
+ * additive one.
+ */
+export function formatRelativeVerbose(iso: string, nowIso?: string): string {
+  const then = new Date(iso).getTime();
+  const now = nowIso ? new Date(nowIso).getTime() : Date.now();
+  if (Number.isNaN(then)) return iso;
+  let diff = Math.max(0, (now - then) / 1000);
+  if (diff < 5) return 'just now';
+  for (const [size, suffix] of RELATIVE_VERBOSE_UNITS) {
+    if (diff < size) {
+      const n = Math.floor(diff);
+      return `${n} ${suffix} ago`;
     }
     diff /= size;
   }
@@ -181,6 +256,21 @@ export function formatCompactNumber(n: number): string {
     return `${str}${effectiveSuffix}`;
   }
   return String(n);
+}
+
+/**
+ * "1.2M tokens" / "127K" / "43" — kit/CompactNumber.vue (ds-spec.md §2.1:
+ * `value`, `unit?: "tok"`). The prop's own value is the short enum literal
+ * "tok" (matches the spec's type spelling), but the word it renders is
+ * spelled out in full ("tokens") — a deliberate difference from
+ * formatMeasuredTokens() below, a narrower, already-shipped budget-caption
+ * formatter whose "tok" abbreviation stays put for its own call sites. The
+ * unit, when given, is appended even to an unsuffixed small number (spec
+ * example "43" has no unit shown because that example passes none).
+ */
+export function formatCompactValue(value: number, unit?: 'tok'): string {
+  const n = formatCompactNumber(value);
+  return unit === 'tok' ? `${n} tokens` : n;
 }
 
 /**

@@ -1,0 +1,1038 @@
+/* Component CSS for the kit under ui/src/components/kit/ (ds-spec.md §2.1,
+   §2.5) — same two-file shape as the HDS-derived kit it sits beside
+   (ui/src/components/ds/ + ds-components.css) while that kit is still in
+   use by the old pages (§0/§5, "DS0 ... additive and inert"): bs-* class
+   names, bs-* tokens only, one stylesheet per kit so `lint_hardcodes.py`
+   and `check_tokens.py` can point at each independently. No page imports
+   ui/src/components/kit/ yet — see ui/docs/DESIGN.md, "Provenance". */
+
+@keyframes bs-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Icon (§2.5) — sizing and stroke live on the @lucide/vue component's
+   own props (Icon.vue); this class carries the two things that don't:
+   "Vertical alignment: vertical-align: -3px at 16px beside 14px text" (§2.5,
+   verbatim) needs the svg to stay an inline box, which is its UA default, so
+   nothing here overrides display; flex-shrink: 0 keeps it from being
+   squeezed when it lands inside a flex row (a tag, a button) — harmless
+   where it doesn't (vertical-align has no effect once a flex parent takes
+   over cross-axis alignment via align-items, e.g. .bs-iconbtn below; this
+   rule only does anything in normal inline flow, next to running text). */
+.bs-icon {
+  vertical-align: -3px;
+  flex-shrink: 0;
+}
+
+/* Tooltip (§2.5) — the trigger is an inline wrapper so it never changes the
+   layout of whatever it wraps (a button, a span of text, an icon). The
+   bubble is teleported to <body> and positioned by @floating-ui/dom
+   (Tooltip.vue sets top/left inline per computePosition()'s result), so
+   this file only carries its look, never its placement. z-index 60 matches
+   the old kit's documented scale (ds-components.css: "topbar 10 < popover
+   45 < sheet 40/50 < dialog 55/56 < toast 70") — above a dialog, below a
+   toast — which this PR does not redefine, only continues. */
+.bs-tooltip-trigger {
+  display: inline-flex;
+}
+.bs-tooltip-bubble {
+  position: fixed;
+  z-index: 60;
+  max-width: 280px;
+  padding: var(--bs-space-1) var(--bs-space-2);
+  background: var(--bs-tooltip-bg);
+  color: var(--bs-tooltip-text);
+  border: 1px solid var(--bs-tooltip-border);
+  border-radius: calc(var(--bs-radius-sm) + 2px);
+  font-size: var(--bs-text-xs);
+  line-height: var(--bs-leading-xs);
+  font-weight: var(--bs-font-weight-normal);
+  white-space: normal;
+  word-wrap: break-word;
+  box-shadow: var(--bs-shadow-md);
+  pointer-events: none;
+  animation: bs-fade var(--bs-duration-fast) var(--bs-ease-standard);
+}
+
+/* IconButton (§2.1) — icon colour rides on currentColor (Icon.vue never sets
+   colour explicitly, see its own comment), so it only needs setting here,
+   once, per state. sm is a flat 22px hit target with no border (§2.1); md is
+   28px with a border — this file has no --bs-control-height-equivalent
+   token, so both box sizes are literal px, same as the old kit's smallest
+   .ds-btn--icon-sm/--icon-xs sizes were before the box-sizing was pulled
+   into tokens. Focus/active/disabled states mirror .ds-btn's own
+   (ds-components.css): a focus-visible ring via color-mix, translateY(1px)
+   on press, pointer-events:none + reduced opacity when disabled —
+   [aria-disabled] rather than :disabled since IconButton.vue renders
+   aria-disabled, never the native attribute (a real disabled button cannot
+   take focus and could never show its tooltip). */
+.bs-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: var(--bs-radius-sm);
+  background: transparent;
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+  outline: none;
+  transition:
+    color var(--bs-duration-fast) var(--bs-ease-standard),
+    background var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-iconbtn:hover {
+  color: var(--bs-text);
+  background: var(--bs-surface-sunken);
+}
+.bs-iconbtn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-iconbtn:active:not([aria-disabled='true']) {
+  transform: translateY(1px);
+}
+.bs-iconbtn[aria-disabled='true'] {
+  pointer-events: none;
+  opacity: 0.5;
+}
+.bs-iconbtn--sm {
+  width: 22px;
+  height: 22px;
+  border: none;
+}
+.bs-iconbtn--md {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--bs-border);
+}
+/* inverse (Batch C, Toast's dismiss button) — mirrors the old kit's
+   .ds-toast__dismiss:hover rule verbatim (ds-components.css): colour rides
+   currentColor so it inherits whatever the inverted surface set (Toast sets
+   color: var(--bs-surface)), and hover is a currentColor-mix tint rather
+   than the default tone's --bs-surface-sunken (which assumes a normal,
+   non-inverted background). */
+.bs-iconbtn--inverse {
+  color: currentColor;
+}
+.bs-iconbtn--inverse:hover {
+  color: currentColor;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+/* CompactNumber (§2.1) — no bespoke type scale of its own (it inherits
+   whatever surrounding context it sits in, same as the design page's plain
+   .num spans); the one thing worth a shared rule is tabular-nums, so a
+   column of these numbers lines up digit-for-digit as they tick, matching
+   ds-review.html's own ".num, table, .tag, .meta { font-variant-numeric:
+   tabular-nums }" utility. RelativeTime needs no rule of its own: its <time>
+   sits inside Tooltip's already-styled .bs-tooltip-trigger wrapper. */
+.bs-compact-number {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes bs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Button (§2.1) — variant/size/icon/loading. `danger` is tinted, not a solid
+   fill: the old kit's `.ds-btn--destructive` (ds-components.css) reads
+   color-mix(...--ds-danger-bold 10%...) + --ds-danger-text, and this file has
+   no "-bold"-style solid-danger token to fill with instead, so the new kit
+   keeps the same tinted convention on its own --bs-tone-danger-text/-subtle
+   pair rather than inventing one. `primary` is the one variant allowed to
+   spend the accent colour on its own fill (§1, "Where accent stays: the
+   primary button..."). Height/radius steps (32/28px, 4px radius step) are
+   not spec'd numbers (§2.1 gives Button no pixel values, unlike IconButton
+   and ProgressRing) — chosen to continue .bs-iconbtn's own 28px "md" box
+   rather than invent an unrelated scale. Loading keeps the label in the DOM
+   (Button.vue only toggles bs-btn__label--hidden, never v-if's the slot
+   away) so the button's width does not change when the spinner replaces it:
+   the hidden label still occupies its layout box, position: relative on the
+   button plus position: absolute on the spinner stacks the two in that box
+   instead of the button reflowing. */
+.bs-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--bs-space-1);
+  white-space: nowrap;
+  font-weight: var(--bs-font-weight-medium);
+  border: 1px solid transparent;
+  border-radius: var(--bs-radius-sm);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition:
+    background var(--bs-duration-fast) var(--bs-ease-standard),
+    color var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-btn:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-btn:active:not([aria-disabled='true']) {
+  transform: translateY(1px);
+}
+.bs-btn[aria-disabled='true'] {
+  pointer-events: none;
+  opacity: 0.5;
+}
+.bs-btn--primary {
+  background: var(--bs-accent);
+  color: var(--bs-text-on-accent);
+}
+.bs-btn--primary:hover {
+  background: var(--bs-accent-hover);
+}
+.bs-btn--primary:active:not([aria-disabled='true']) {
+  background: var(--bs-accent-pressed);
+}
+.bs-btn--secondary {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+  border-color: var(--bs-border);
+}
+.bs-btn--secondary:hover {
+  background: var(--bs-surface-selected);
+}
+.bs-btn--ghost {
+  background: transparent;
+  color: var(--bs-text);
+}
+.bs-btn--ghost:hover {
+  background: var(--bs-surface-sunken);
+}
+.bs-btn--danger {
+  background: var(--bs-tone-danger-subtle);
+  color: var(--bs-tone-danger-text);
+}
+.bs-btn--danger:hover {
+  background: color-mix(in srgb, var(--bs-tone-danger-subtle) 60%, var(--bs-tone-danger-text) 12%);
+}
+.bs-btn--link {
+  background: transparent;
+  color: var(--bs-accent);
+  text-underline-offset: 4px;
+}
+.bs-btn--link:hover {
+  text-decoration: underline;
+}
+.bs-btn--md {
+  height: 32px;
+  padding: 0 var(--bs-space-3);
+  font-size: var(--bs-text-sm);
+}
+.bs-btn--sm {
+  height: 28px;
+  padding: 0 var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+}
+.bs-btn__spinner {
+  position: absolute;
+  animation: bs-spin 1s linear infinite;
+}
+.bs-btn__label--hidden {
+  /* opacity, not visibility: hidden — visibility: hidden removes an element
+     from the accessibility tree, which would leave the button with no
+     accessible name while loading (S2-4). opacity: 0 stays visually
+     invisible, keeps the label's layout box (so the width-lock trick above
+     still works), and — unlike visibility/display — is not pulled out of
+     the accessibility tree, so a screen reader still announces the label
+     alongside aria-busy="true". */
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bs-btn__spinner {
+    animation-duration: 2.5s;
+  }
+}
+
+/* Tag (§2.1, §2.5) — replaces the old kit's Lozenge. Colour (background,
+   text, border) all come from Tag.vue's own :style binding (three variants
+   reusing the same two --bs-tone-<tone>-text/-subtle tokens, see that
+   file's comment) — this file only carries shape and box geometry, which
+   is tone-independent. Pill radius on all three variants: the old kit's
+   .ds-loz gave --subtle/--bold a squarer --ds-radius-control and only
+   --outline the pill --ds-radius-pill, an inconsistency this file does not
+   carry forward — one shape reads as one component regardless of variant.
+   No sm/md split existed in the old kit (.ds-loz was a single fixed 20px
+   height); both new sizes share bs-tokens.css's smallest font-size token
+   (--bs-text-xs, 12px — there is no smaller one) with line-height: 1 and a
+   fixed box height, same structural convention as .ds-loz used, so the two
+   sizes differ only in height/padding, not type scale. */
+.bs-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--bs-space-1);
+  width: fit-content;
+  flex-shrink: 0;
+  border-radius: var(--bs-radius-full);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.bs-tag--subtle,
+.bs-tag--bold {
+  border: 1px solid transparent;
+}
+.bs-tag--outline {
+  border: 1px solid;
+}
+.bs-tag--md {
+  height: 20px;
+  padding: 0 var(--bs-space-2);
+}
+.bs-tag--sm {
+  height: 16px;
+  padding: 0 var(--bs-space-1);
+}
+
+/* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
+.bs-sep {
+  background: var(--bs-border);
+  flex-shrink: 0;
+}
+.bs-sep--h {
+  height: 1px;
+  width: 100%;
+}
+.bs-sep--v {
+  width: 1px;
+  align-self: stretch;
+}
+
+/* Skeleton — port of the old kit's .ds-skeleton, plus a new `shape` prop
+   (batch brief, fixes bug D-223: the old component had no circle shape, so
+   avatar placeholders had to fake one with an inline border-radius: 999px
+   at every call site instead of a real variant). line/block share the
+   default radius (settable via the `radius` prop, same as before); circle
+   always forces a full round via !important, since Skeleton.vue leaves
+   borderRadius out of its inline :style for that shape specifically so this
+   rule is never shadowed. */
+.bs-skeleton {
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+  animation: bs-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.bs-skeleton--circle {
+  border-radius: var(--bs-radius-full) !important;
+}
+@keyframes bs-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Breadcrumb — direct port of the old kit's .ds-crumbs, bs-* names only. */
+.bs-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  font-size: var(--bs-text-sm);
+}
+.bs-crumbs__current {
+  color: var(--bs-text);
+  font-weight: var(--bs-font-weight-medium);
+}
+.bs-crumbs__link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+.bs-crumbs__link:hover {
+  color: var(--bs-text);
+  text-decoration: underline;
+}
+
+/* PageHeader — direct port of the old kit's .ds-ph, bs-* names only. */
+.bs-ph {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bs-space-4);
+}
+.bs-ph__left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  min-width: 0;
+}
+.bs-ph__titlerow {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.bs-ph__title {
+  font-size: var(--bs-text-xl);
+  line-height: var(--bs-leading-xl);
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text);
+  margin: 0;
+}
+.bs-ph__desc {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  margin: 0;
+}
+.bs-ph__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  flex-shrink: 0;
+}
+
+/* EmptyState — new prop shape (title/body replace the old default slot,
+   icon is now required so there is no illustrationSrc fallback layout to
+   carry). Single centred layout only: the old .ds-empty--inline variant
+   is dropped along with the `inline` prop it served. */
+.bs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--bs-space-2);
+  padding: var(--bs-space-6) var(--bs-space-4);
+}
+.bs-empty__icon {
+  color: var(--bs-text-subtlest);
+}
+.bs-empty__title {
+  font-size: var(--bs-text-base);
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text);
+  margin: 0;
+}
+.bs-empty__body {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  margin: 0;
+  max-width: 40ch;
+}
+
+/* Banner — 3 tones only (info/warning/danger), the old kit's 4th tone
+   (success) is dropped to match ds-spec.md §2.1 literally. `collapsible`
+   is new: the toggle sits at the row's end, the slot content is hidden via
+   v-show (stays in the DOM) rather than v-if, so no layout jump on toggle. */
+.bs-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--bs-space-2);
+  padding: var(--bs-space-3) var(--bs-space-4);
+  border-radius: var(--bs-radius-md);
+}
+.bs-banner__icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.bs-banner__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--bs-space-2);
+  min-width: 0;
+  font-size: var(--bs-text-sm);
+}
+.bs-banner__content {
+  white-space: pre-line;
+}
+.bs-banner__toggle {
+  flex-shrink: 0;
+}
+
+/* Card — contract change from the old kit's boolean `padded`: padding is now
+   a 3-step scale (sm/md/lg) mapped onto --bs-space-*, and a new `interactive`
+   variant adds hover elevation + a focus-visible ring matching
+   .bs-iconbtn/.bs-btn's ring pattern. Header/body/footer slot structure is
+   unchanged from the old .ds-card. */
+.bs-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+}
+.bs-card--interactive {
+  cursor: pointer;
+  transition: box-shadow var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-card--interactive:hover {
+  box-shadow: var(--bs-shadow-md);
+}
+.bs-card--interactive:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-card__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  padding: var(--bs-space-4) var(--bs-space-4) 0;
+}
+.bs-card--sm .bs-card__header {
+  padding: var(--bs-space-3) var(--bs-space-3) 0;
+}
+.bs-card--lg .bs-card__header {
+  padding: var(--bs-space-5) var(--bs-space-5) 0;
+}
+.bs-card__headrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
+.bs-card__headend {
+  flex-shrink: 0;
+}
+.bs-card__title {
+  font-size: var(--bs-text-base);
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text);
+}
+.bs-card__desc {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-card__body {
+  padding: var(--bs-space-4);
+}
+.bs-card--sm .bs-card__body {
+  padding: var(--bs-space-3);
+}
+.bs-card--lg .bs-card__body {
+  padding: var(--bs-space-5);
+}
+.bs-card__footer {
+  padding: 0 var(--bs-space-4) var(--bs-space-4);
+}
+.bs-card--sm .bs-card__footer {
+  padding: 0 var(--bs-space-3) var(--bs-space-3);
+}
+.bs-card--lg .bs-card__footer {
+  padding: 0 var(--bs-space-5) var(--bs-space-5);
+}
+
+/* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
+   "unchanged contract from the old kit"; only the look changes: bs- tokens,
+   the same focus-visible ring as .bs-btn. */
+.bs-input,
+.bs-textarea,
+.bs-select {
+  width: 100%;
+  padding: var(--bs-space-2) var(--bs-space-3);
+  background: var(--bs-surface);
+  color: var(--bs-text);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-sm);
+  font-size: var(--bs-text-base);
+  line-height: var(--bs-leading-base);
+  outline: none;
+  transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-input::placeholder,
+.bs-textarea::placeholder {
+  color: var(--bs-text-subtlest);
+}
+.bs-input:hover,
+.bs-textarea:hover,
+.bs-select:hover {
+  border-color: var(--bs-border-bold);
+}
+.bs-input:focus-visible,
+.bs-textarea:focus-visible,
+.bs-select:focus-visible {
+  border-color: var(--bs-focus-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-input:disabled,
+.bs-textarea:disabled,
+.bs-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.bs-textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+/* RadioGroup (§2.1) — ported unchanged contract. */
+.bs-radiogroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-base);
+  color: var(--bs-text);
+  cursor: pointer;
+}
+
+/* Chip (§2.1) — border+dot identity pattern ported from
+   ui/src/components/IdentityChip.vue; colour never carries the label text
+   (contrast), only the border and the decorative dot/avatar swatch. */
+.bs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  padding: var(--bs-space-1) var(--bs-space-2);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-full);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  text-decoration: none;
+  background: var(--bs-surface);
+}
+.bs-chip--assignee:hover {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+}
+.bs-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  flex-shrink: 0;
+}
+.bs-chip__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+  font-size: 10px;
+  font-weight: var(--bs-font-weight-semibold);
+  flex-shrink: 0;
+}
+
+/* Dialog / AlertDialog (§2.1, WAI-ARIA Dialog pattern) — AlertDialog wraps
+   Dialog and adds no CSS of its own, same as the old kit. Ported from
+   ds-components.css's .ds-dialog* 1:1 on values (radius/shadow/z-index), the
+   one deliberate addition being the bs-fade entrance (ds-dialog never had
+   one; this kit's design decision extends it to dialog/popover/toast alike,
+   not just toast). */
+.bs-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: color-mix(in srgb, var(--bs-text) 40%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--bs-space-4);
+}
+.bs-dialog {
+  position: relative;
+  z-index: 56;
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--bs-surface);
+  border-radius: var(--bs-radius-lg);
+  box-shadow: var(--bs-shadow-lg);
+  padding: var(--bs-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
+}
+.bs-dialog--sm {
+  max-width: 420px;
+}
+.bs-dialog__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
+.bs-dialog__title {
+  font-size: var(--bs-text-xl);
+  font-weight: var(--bs-font-weight-semibold);
+}
+.bs-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+.bs-dialog__desc {
+  color: var(--bs-text-subtle);
+}
+.bs-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--bs-space-2);
+}
+
+/* Popover (§2.1, light-weight anchored panel) — ported from .ds-popover*
+   1:1 on values; z-index 45 matches this file's own documented scale
+   (Tooltip's header comment above: "topbar 10 < popover 45 < sheet 40/50 <
+   dialog 55/56 < toast 70"). */
+.bs-popover {
+  position: relative;
+  display: inline-block;
+}
+.bs-popover__panel {
+  position: absolute;
+  z-index: 45;
+  top: calc(100% + var(--bs-space-1));
+  right: 0;
+  min-width: 240px;
+  padding: var(--bs-space-3);
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  box-shadow: var(--bs-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
+}
+
+/* Toast (§2.1) — deliberately inverted surface: background/color swap so a
+   toast reads as "inverse of the current theme" regardless of light/dark
+   (ported from ds-components.css's own bug-fix comment on .ds-toast: an
+   earlier version referenced --ds-inverse-surface/--ds-inverse-text, tokens
+   that were never declared anywhere and always silently fell back to
+   --ds-text/--ds-surface — this bs- version uses --bs-text/--bs-surface
+   directly, no phantom inverse tokens to begin with). IconButton's dismiss
+   button needs tone="inverse" here (see IconButton.vue) because its default
+   colour/hover assume a normal, non-inverted surface. */
+.bs-toast-region {
+  position: fixed;
+  bottom: var(--bs-space-4);
+  right: var(--bs-space-4);
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-3);
+  min-width: 240px;
+  padding: var(--bs-space-3) var(--bs-space-3) var(--bs-space-3) var(--bs-space-4);
+  background: var(--bs-text);
+  color: var(--bs-surface);
+  border-radius: var(--bs-radius-sm);
+  box-shadow: var(--bs-shadow-lg);
+  font-size: var(--bs-text-sm);
+  animation: bs-fade var(--bs-duration-base) var(--bs-ease-standard);
+}
+.bs-toast > span {
+  flex: 1;
+}
+
+/* Tabs (§2.1, WAI-ARIA Tabs pattern, roving tabindex). Ported from
+   .ds-tabs* 1:1 on values; :focus-visible uses this kit's new box-shadow
+   ring (see .bs-iconbtn/.bs-btn/.bs-input above) instead of the old kit's
+   outline-based one — no --bs-focus-width token exists here. */
+.bs-tabs__list {
+  display: flex;
+  gap: var(--bs-space-1);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-tabs__tab {
+  padding: var(--bs-space-2) var(--bs-space-3);
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.bs-tabs__tab[aria-selected='true'] {
+  color: var(--bs-text);
+  border-bottom-color: var(--bs-accent);
+}
+.bs-tabs__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-tabs__panel {
+  padding-top: var(--bs-space-4);
+}
+
+/* Table (§2.1/§2.3) — .bs-tablewrap is the bordered/rounded outer frame
+   (ds/Table.vue's `bordered` prop toggles it); `compact` tightens cell
+   padding via whole-step --bs-space-* tokens (no half-step tokens exist in
+   this scale, unlike the old kit's --ds-space-1-5/2-5 used by Row/RowList,
+   which Table absorbs per ds-spec.md §2.3 line 449: "folded into Table in
+   compact density — two components doing one job"). Comfortable cells:
+   --bs-space-2 var(--bs-space-3) (8px/12px), matching the old kit's own
+   .ds-table td/th padding. Compact cells: --bs-space-1 var(--bs-space-2)
+   (4px/8px), the next whole step down — closest available substitute for
+   the old half-step compact padding, a minor scale simplification. */
+.bs-tablewrap {
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  overflow: hidden;
+}
+.bs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--bs-text-sm);
+}
+.bs-table th {
+  text-align: left;
+  padding: var(--bs-space-2) var(--bs-space-3);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  background: var(--bs-surface-sunken);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-table td {
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-table--compact th,
+.bs-table--compact td {
+  padding: var(--bs-space-1) var(--bs-space-2);
+}
+.bs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.bs-table th[data-numeric='true'],
+.bs-table td[data-numeric='true'] {
+  text-align: right;
+}
+.bs-table tbody tr[data-clickable='true'] {
+  cursor: pointer;
+}
+.bs-table tbody tr[data-clickable='true']:hover {
+  background: var(--bs-surface-sunken);
+}
+.bs-table__empty {
+  padding: var(--bs-space-5) var(--bs-space-3);
+  text-align: center;
+  color: var(--bs-text-subtle);
+}
+
+/* Progress (ds-spec.md §2.1 rows ProgressRing/ProgressBarMini/ProgressBar +
+   the "Progress tones and placement" paragraph). ProgressRing/ProgressBarMini
+   share tone/percent logic via kit/progressTone.ts; both read their fill
+   colour from an inline style, not a CSS class, since the tone is chosen at
+   runtime. ProgressBar's .bs-pbar/.bs-pbar__seg are new — no old-kit
+   predecessor or mockup markup exists for a stacked-segment bar (see the
+   component's own header comment) — sized to 6px to match ProgressBarMini's
+   track, the only height the spec gives for any Progress component.
+   `.pring`/`.trk`/`.fil`/`.pnum` were un-namespaced (S3-3 review finding) —
+   renamed to `.bs-pring`/`.bs-trk`/`.bs-fil`/`.bs-pnum` here. `.pmini`/
+   `.ptrack` are unchanged: the review finding named only
+   pring/trk/fil/pnum/pbar. */
+.bs-pring {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+}
+.bs-pring svg {
+  width: 20px;
+  height: 20px;
+  transform: rotate(-90deg);
+}
+.bs-pring .bs-trk {
+  fill: none;
+  stroke: var(--bs-border);
+  stroke-width: 2.5;
+}
+.bs-pring .bs-fil {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+/* ds-spec.md §2.1 ProgressRing row: "the % number sits to its right at
+   14px/400 --bs-text" — the ring's own pnum, not ProgressBarMini's (that one
+   is 12px per its own spec row, kept at --bs-text-xs below). Was
+   --bs-text-xs/--bs-text-subtle, matching pmini's rather than its own spec
+   row (S3-3). */
+.bs-pring .bs-pnum {
+  font-size: var(--bs-text-base);
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text);
+  font-variant-numeric: tabular-nums;
+}
+.pmini {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+}
+.pmini .ptrack {
+  display: inline-block;
+  width: 56px;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-border);
+  overflow: hidden;
+}
+.pmini .ptrack > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+.pmini .pnum {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.bs-pbar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-border);
+  overflow: hidden;
+}
+.bs-pbar__seg {
+  height: 100%;
+}
+
+/* Charts (BarChart/LineChart/Sparkline, ds-spec.md §2.1/§5) — ported from
+   the old kit's chart classes, renamed to the bs- prefix. The old
+   `var(--bs-radius-sm, 4px)` fallback is dropped: bs-tokens.css always
+   defines --bs-radius-sm, the old kit's didn't. `--bs-chart-1..6` replace
+   the old 8-token set — only chart-1 is ever referenced here since these
+   three components are still single-series by default; BarChart's stacked
+   path takes its per-series colour from the caller's `series[].tone`
+   instead, so the narrower set doesn't block anything. */
+.bs-chart {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-chart__takeaway {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+/* Sparkline's fixed 80x24 intrinsic size (design-spec.md §4) needs the
+   wrapper to stay inline/auto-width rather than the full-width column
+   layout the other two charts use — see Sparkline.vue's own comment. */
+.bs-chart--spark {
+  width: auto;
+  display: inline-flex;
+  gap: var(--bs-space-1);
+}
+.bs-chart__axisrow {
+  display: flex;
+  justify-content: space-between;
+}
+.bs-chart__axislabel {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+}
+.bs-chart__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+.bs-chart__gridline {
+  stroke: var(--bs-border);
+  stroke-width: 1;
+}
+.bs-chart__line {
+  fill: none;
+  stroke: var(--bs-chart-1);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bs-chart__point {
+  fill: var(--bs-surface-raised);
+  stroke: var(--bs-chart-1);
+  stroke-width: 1.5;
+}
+.bs-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+  width: 100%;
+}
+.bs-bars__plot {
+  display: flex;
+  align-items: stretch;
+  gap: var(--bs-space-2);
+  width: 100%;
+}
+.bs-bars__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--bs-space-1);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.bs-bars__track {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 4px;
+  width: 100%;
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+  overflow: hidden;
+}
+.bs-bars__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bs-chart-1);
+  border-radius: var(--bs-radius-sm) var(--bs-radius-sm) 0 0;
+}
+/* Stacked segments (BarChart's additive `stacked` path) set their own
+   height/bottom/background inline per-series — the shared base rule above
+   would round every segment's top corners, which only reads correctly for
+   the topmost one, so the stack modifier resets that back to square. */
+.bs-bars__bar--stack {
+  border-radius: 0;
+}
+.bs-bars__x {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+.bs-bars__v {
+  font-size: var(--bs-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--bs-text-subtlest);
+  flex-shrink: 0;
+}
+.bs-bars__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}

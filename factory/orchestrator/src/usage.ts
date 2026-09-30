@@ -170,8 +170,12 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'plan ingest',
     positionals: '<plan.json>',
-    flags: EVENTS_DIR,
-    summary: 'Record every task and dependency the plan declares, before any wave names them.',
+    flags: `[--project <dir>] ${EVENTS_DIR}`,
+    summary:
+      'Record every task and dependency the plan declares, before any wave names them. ' +
+      '--project resolves the branch prefix a legacy `smith/<epic>/integration` epic keeps ' +
+      'using, rather than declaring `bs/...` for a branch `worktree create` will cut as ' +
+      '`smith/...`.',
   },
   {
     command: 'wave check',

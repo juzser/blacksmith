@@ -61,11 +61,14 @@ import sys
 from pathlib import Path
 
 SCAN_EXTS = {".vue", ".css"}
-TOKEN_FILES = ("ds-tokens.css", "ds-components.css")
+# Both the old HDS-derived kit and the new BS kit (ds-spec.md §0): the old
+# pages still import ds-tokens.css/ds-components.css until DS9 drops them,
+# so this PR scans both pairs rather than swapping one for the other.
+TOKEN_FILES = ("ds-tokens.css", "ds-components.css", "bs-tokens.css", "bs-primitives.css")
 
-DEFINE_RE = re.compile(r"(--ds-[\w-]+)\s*:")
-JS_DEFINE_RE = re.compile(r"""['"](--ds-[\w-]+)['"]\s*:""")
-REF_RE = re.compile(r"var\(\s*(--ds-[\w-]+)")
+DEFINE_RE = re.compile(r"(--(?:ds|bs)-[\w-]+)\s*:")
+JS_DEFINE_RE = re.compile(r"""['"](--(?:ds|bs)-[\w-]+)['"]\s*:""")
+REF_RE = re.compile(r"var\(\s*(--(?:ds|bs)-[\w-]+)")
 DYNAMIC_SUFFIX = "$"  # a template-literal interpolation continues the token name
 ALLOW = "ds-allow-undefined-token"
 
@@ -105,7 +108,7 @@ def main(argv: list[str]) -> int:
     styles_dir = root / "styles"
     defined = collect_defined_tokens(root, styles_dir)
     if not defined:
-        print(f"FAIL: no --ds-* token declarations found under {styles_dir} "
+        print(f"FAIL: no --ds-*/--bs-* token declarations found under {styles_dir} "
               f"(expected {', '.join(TOKEN_FILES)})")
         return 1
 
@@ -146,13 +149,13 @@ def main(argv: list[str]) -> int:
                 violations += 1
 
     dynamic_note = f", {skipped_dynamic} dynamic (skipped)" if skipped_dynamic else ""
-    print(f"\nScanned {len(files)} file(s), {scanned_refs} var(--ds-...) reference(s){dynamic_note}, "
+    print(f"\nScanned {len(files)} file(s), {scanned_refs} var(--ds-.../--bs-...) reference(s){dynamic_note}, "
           f"{len(defined)} declared token(s).")
     if violations:
         print(f"FAIL: {violations} undefined token reference(s). Fix the token name, "
               f"declare it, or add a '{ALLOW}' comment for a justified exception.")
         return 1
-    print("OK: every var(--ds-...) reference resolves to a declared token.")
+    print("OK: every var(--ds-.../--bs-...) reference resolves to a declared token.")
     return 0
 
 

@@ -5,8 +5,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTaskWorktree,
+  epicBranchPrefix,
+  integrationBranchName,
   listStale,
   removeTaskWorktree,
+  taskBranchName,
   WorktreeError,
 } from '../src/worktree.js';
 import { git } from './helpers/process.js';
@@ -38,12 +41,12 @@ describe('worktree.ts', () => {
   it('creates the integration branch from the default branch on first use', () => {
     const result = createTaskWorktree(projectDir, 'epic-1', 'task-1');
 
-    expect(result.branch).toBe('smith/epic-1/task-1');
+    expect(result.branch).toBe('bs/epic-1/task-1');
     expect(existsSync(result.worktreeDir)).toBe(true);
     expect(result.worktreeDir).toBe(path.join(root, '.wt', 'project', 'task-1'));
 
     const branches = git(projectDir, ['branch', '--list']);
-    expect(branches).toContain('smith/epic-1/integration');
+    expect(branches).toContain('bs/epic-1/integration');
 
     const content = readFileSync(path.join(result.worktreeDir, 'README.md'), 'utf8');
     expect(content).toBe('# project\n');
@@ -82,7 +85,7 @@ describe('worktree.ts', () => {
     createTaskWorktree(projectDir, 'epic-1', 'task-1');
 
     // Advance the integration branch (simulating a prior merged task).
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
     await writeFile(path.join(projectDir, 'advance.txt'), 'advanced\n');
     git(projectDir, ['add', '.']);
     git(projectDir, ['commit', '-q', '-m', 'advance integration']);
@@ -101,23 +104,23 @@ describe('worktree.ts', () => {
 
     const successor = createTaskWorktree(projectDir, 'epic-1', 'task-1-v2', { from: 'task-1' });
 
-    expect(successor.branch).toBe('smith/epic-1/task-1-v2');
+    expect(successor.branch).toBe('bs/epic-1/task-1-v2');
     expect(existsSync(path.join(successor.worktreeDir, 'work.txt'))).toBe(true);
 
     // Ahead of integration: the predecessor's commit rode along.
     const integrationOut = git(projectDir, [
       'merge-base',
       '--is-ancestor',
-      'smith/epic-1/integration',
-      'smith/epic-1/task-1-v2',
+      'bs/epic-1/integration',
+      'bs/epic-1/task-1-v2',
     ]);
     expect(integrationOut).toBe('');
     expect(() =>
       git(projectDir, [
         'merge-base',
         '--is-ancestor',
-        'smith/epic-1/task-1-v2',
-        'smith/epic-1/integration',
+        'bs/epic-1/task-1-v2',
+        'bs/epic-1/integration',
       ]),
     ).toThrow();
   });
@@ -138,14 +141,14 @@ describe('worktree.ts', () => {
 
     // Merge the (unchanged) task branch into the integration branch so the
     // branch is fully merged and safe to delete.
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
-    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'smith/epic-1/task-1']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
+    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'bs/epic-1/task-1']);
 
     removeTaskWorktree(projectDir, 'epic-1', 'task-1');
 
     expect(existsSync(result.worktreeDir)).toBe(false);
     const branches = git(projectDir, ['branch', '--list']);
-    expect(branches).not.toContain('smith/epic-1/task-1');
+    expect(branches).not.toContain('bs/epic-1/task-1');
   });
 
   it('listStale reports fully-merged task worktrees without deleting them', async () => {
@@ -158,8 +161,8 @@ describe('worktree.ts', () => {
     git(t2.worktreeDir, ['add', '.']);
     git(t2.worktreeDir, ['commit', '-q', '-m', 'wip on task-2']);
 
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
-    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'smith/epic-1/task-1']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
+    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'bs/epic-1/task-1']);
 
     const stale = listStale(projectDir, 'epic-1');
     expect(stale.map((s) => s.taskId)).toEqual(['task-1']);
@@ -199,7 +202,7 @@ describe('worktree.ts - a qualified task id is the same task as its bare form', 
   it('puts a qualified task id in the same directory as its bare form', () => {
     const result = createTaskWorktree(projectDir, 'epic-1', 'epic-1/task-1');
 
-    expect(result.branch).toBe('smith/epic-1/task-1');
+    expect(result.branch).toBe('bs/epic-1/task-1');
     expect(result.worktreeDir).toBe(path.join(root, '.wt', 'project', 'task-1'));
     expect(existsSync(path.join(result.worktreeDir, 'README.md'))).toBe(true);
   });
@@ -207,20 +210,20 @@ describe('worktree.ts - a qualified task id is the same task as its bare form', 
   it('removes a worktree created from the other spelling of the same id', () => {
     const result = createTaskWorktree(projectDir, 'epic-1', 'epic-1/task-1');
 
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
-    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'smith/epic-1/task-1']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
+    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'bs/epic-1/task-1']);
 
     removeTaskWorktree(projectDir, 'epic-1', 'task-1');
 
     expect(existsSync(result.worktreeDir)).toBe(false);
-    expect(git(projectDir, ['branch', '--list'])).not.toContain('smith/epic-1/task-1');
+    expect(git(projectDir, ['branch', '--list'])).not.toContain('bs/epic-1/task-1');
   });
 
   it('round-trips the id listStale reports back into removeTaskWorktree', () => {
     const created = createTaskWorktree(projectDir, 'epic-1', 'epic-1/task-1');
 
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
-    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'smith/epic-1/task-1']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
+    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'bs/epic-1/task-1']);
 
     const stale = listStale(projectDir, 'epic-1');
     expect(stale.map((s) => s.taskId)).toEqual(['task-1']);
@@ -238,7 +241,7 @@ describe('worktree.ts - a qualified task id is the same task as its bare form', 
   it('keeps a leading segment that is not the epic, in both the branch and the path', () => {
     const result = createTaskWorktree(projectDir, 'epic-2', 'epic-1/task-1');
 
-    expect(result.branch).toBe('smith/epic-2/epic-1/task-1');
+    expect(result.branch).toBe('bs/epic-2/epic-1/task-1');
     expect(result.worktreeDir).toBe(path.join(root, '.wt', 'project', 'epic-1', 'task-1'));
 
     // And the id it reports still addresses the directory it reported.
@@ -246,5 +249,83 @@ describe('worktree.ts - a qualified task id is the same task as its bare form', 
     expect(stale.map((s) => s.taskId)).toEqual(['epic-1/task-1']);
     removeTaskWorktree(projectDir, 'epic-2', 'epic-1/task-1');
     expect(existsSync(result.worktreeDir)).toBe(false);
+  });
+});
+
+// Operator decision 3 (bs-rename part 1): the product's branch prefix changed
+// `smith` -> `bs`, but an epic already cut under `smith/<epic>/integration`
+// must keep landing new task branches there too — a mid-epic prefix switch
+// would split one epic's worktrees across two branch families. New epics,
+// with no `smith/<epic>/integration` yet, get `bs/` from their first branch.
+describe('worktree.ts - legacy `smith/` prefix continuity', () => {
+  let root: string;
+  let projectDir: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(tmpdir(), 'smith-worktree-prefix-'));
+    const originDir = path.join(root, 'origin.git');
+    projectDir = path.join(root, 'project');
+
+    git(root, ['init', '-q', '--bare', '-b', 'main', originDir]);
+    git(root, ['clone', '-q', originDir, projectDir]);
+    git(projectDir, ['config', 'user.email', 'test@example.com']);
+    git(projectDir, ['config', 'user.name', 'Test']);
+    await writeFile(path.join(projectDir, 'README.md'), '# project\n');
+    git(projectDir, ['add', '.']);
+    git(projectDir, ['commit', '-q', '-m', 'init']);
+    git(projectDir, ['push', '-q', 'origin', 'main']);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('a brand-new epic resolves the bs prefix', () => {
+    expect(epicBranchPrefix(projectDir, 'epic-1')).toBe('bs');
+    expect(integrationBranchName('epic-1')).toBe('bs/epic-1/integration');
+    expect(taskBranchName('epic-1', 'task-1')).toBe('bs/epic-1/task-1');
+  });
+
+  it('an epic whose integration branch already exists under smith/ keeps resolving to smith', () => {
+    git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+    expect(epicBranchPrefix(projectDir, 'epic-1')).toBe('smith');
+    expect(integrationBranchName('epic-1', epicBranchPrefix(projectDir, 'epic-1'))).toBe(
+      'smith/epic-1/integration',
+    );
+    expect(taskBranchName('epic-1', 'task-1', epicBranchPrefix(projectDir, 'epic-1'))).toBe(
+      'smith/epic-1/task-1',
+    );
+  });
+
+  it('createTaskWorktree cuts new task branches for a legacy epic under smith/, not bs/', () => {
+    git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+    const result = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+
+    expect(result.branch).toBe('smith/epic-1/task-1');
+    const branches = git(projectDir, ['branch', '--list']);
+    expect(branches).toContain('smith/epic-1/task-1');
+    expect(branches).not.toContain('bs/epic-1/task-1');
+  });
+
+  it('a sibling epic with no smith/ branch of its own still gets bs/, in the same project', () => {
+    git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+    const result = createTaskWorktree(projectDir, 'epic-2', 'task-1');
+
+    expect(result.branch).toBe('bs/epic-2/task-1');
+  });
+
+  it("listStale matches a legacy epic's own smith/ worktrees, not bs/", () => {
+    git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+    const t1 = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+
+    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['merge', '-q', '--no-ff', '-m', 'merge task-1', 'smith/epic-1/task-1']);
+
+    const stale = listStale(projectDir, 'epic-1');
+    expect(stale.map((s) => s.taskId)).toEqual(['task-1']);
+    expect(stale[0]?.worktreeDir).toBe(realpathSync(t1.worktreeDir));
   });
 });

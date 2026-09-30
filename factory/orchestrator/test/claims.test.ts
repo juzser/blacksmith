@@ -402,7 +402,7 @@ describe('postRunCheck', () => {
   it('still derives the integration branch from the branch name (collector split kept this)', async () => {
     git(['checkout', '-q', '-b', 'not-a-smith-branch']);
     expect(() => collectCommittedChanges(repoDir)).toThrowError(
-      /does not follow the smith\/<epic>\/<task-id> convention/,
+      /does not follow the bs\/<epic>\/<task-id> convention/,
     );
   });
 });

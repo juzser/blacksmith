@@ -182,9 +182,11 @@ function checkRecord(overrides: Partial<IntegrationCheckRecord> = {}): Integrati
   };
 }
 
+const INTEGRATION_BRANCH = 'bs/epic-1/integration';
+
 /** A passing check covering the current head — the only shape that clears the gate. */
 function okIntegration(): IntegrationStatus {
-  return { check: checkRecord(), headSha: HEAD_SHA };
+  return { check: checkRecord(), headSha: HEAD_SHA, branch: INTEGRATION_BRANCH };
 }
 
 /** A closing spec review pinned to the current head — the P9-9 counterpart of okIntegration(). */
@@ -200,6 +202,7 @@ function okSpecReview(): SpecReviewStatus {
       ts: '2026-01-01T00:00:00.000Z',
     },
     headSha: HEAD_SHA,
+    branch: INTEGRATION_BRANCH,
   };
 }
 
@@ -1474,7 +1477,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       'epic-1',
       readyTasks,
       [],
-      { check: null, headSha: HEAD_SHA },
+      { check: null, headSha: HEAD_SHA, branch: INTEGRATION_BRANCH },
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
       okGoalCheck(),
@@ -1498,6 +1501,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
           ],
         }),
         headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
       },
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
@@ -1518,6 +1522,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       {
         check: checkRecord({ headSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }),
         headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
       },
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
@@ -1537,6 +1542,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       {
         check: checkRecord(),
         headSha: null,
+        branch: INTEGRATION_BRANCH,
       },
       MCP_SURFACE_NOT_REQUIRED,
       okSpecReview(),
@@ -1544,7 +1550,7 @@ describe('epic.ts summarizeEpic — integration-root check (D-42/P9-26)', () => 
       alwaysEffort(),
     );
     expect(summary.mechanicallyReady).toBe(false);
-    expect(summary.blockers.some((b) => b.includes('smith/epic-1/integration'))).toBe(true);
+    expect(summary.blockers.some((b) => b.includes(INTEGRATION_BRANCH))).toBe(true);
   });
 });
 
@@ -1824,6 +1830,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -1879,6 +1886,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -1912,6 +1920,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: { policy: policyWith() },
@@ -1936,6 +1945,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: { policy: policyWith() },
@@ -1996,6 +2006,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: { policy: policyWith() },
@@ -2046,6 +2057,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           crosscheck: { policy: policyWith() },
@@ -2083,6 +2095,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           crosscheck: { policy: policyWith() },
@@ -2112,6 +2125,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: {
@@ -2146,6 +2160,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: {
@@ -2176,6 +2191,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: { policy: policyWith(codexProvider({ mode: 'active' })) },
@@ -2205,6 +2221,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         crosscheck: { policy: policyWith(codexProvider({ mode: 'shadow' })) },
@@ -2232,6 +2249,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2263,6 +2281,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2288,6 +2307,7 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2522,6 +2542,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2582,6 +2603,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2630,6 +2652,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2665,6 +2688,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2709,6 +2733,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2767,6 +2792,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       {
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         effort: alwaysEffort(),
@@ -2814,6 +2840,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -2840,6 +2867,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -2866,6 +2894,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         effort: alwaysEffort(),
         epicId,
         integrationHeadSha: HEAD_SHA,
+        integrationBranch: `bs/${epicId}/integration`,
         mcp: MCP_SURFACE_NOT_REQUIRED,
         goal: goalStatus(),
         overrideRationale: 'Blocker is a known carry-forward defect, tracked as D-99.',
@@ -2905,6 +2934,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           overrideRationale: '   ',
@@ -2926,6 +2956,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           overrideRationale: 'ship it',
@@ -2984,6 +3015,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3069,6 +3101,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3137,6 +3170,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3185,6 +3219,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3254,6 +3289,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3298,6 +3334,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
             effort: alwaysEffort(),
             epicId,
             integrationHeadSha: HEAD_SHA,
+            integrationBranch: `bs/${epicId}/integration`,
             mcp: MCP_SURFACE_NOT_REQUIRED,
             goal: goalStatus(),
           },
@@ -3330,6 +3367,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           overrideRationale: 'task-1 carry-forward tracked separately',
@@ -3371,6 +3409,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3387,6 +3426,7 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
         {
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: MCP_SURFACE_NOT_REQUIRED,
           goal: goalStatus(),
           effort: alwaysEffort(),
@@ -3565,6 +3605,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
           {
             epicId,
             integrationHeadSha: HEAD_SHA,
+            integrationBranch: `bs/${epicId}/integration`,
             mcp: redSurface(),
             goal: goalStatus(),
             effort: alwaysEffort(),
@@ -3585,6 +3626,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: redSurface(),
           goal: goalStatus(),
           overrideRationale: 'Surface ships next sprint; tracked as D-100.',
@@ -3618,6 +3660,7 @@ describe('epic.ts — the mcp surface gate (docs/standards/mcp.md step 4)', () =
           effort: alwaysEffort(),
           epicId,
           integrationHeadSha: HEAD_SHA,
+          integrationBranch: `bs/${epicId}/integration`,
           mcp: redSurface(),
           goal: goalStatus(),
           overrideRationale: 'Surface ships next sprint; tracked as D-100.',
@@ -3889,8 +3932,9 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
           ],
         }),
         headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
       });
-      expect(prompt).toContain('smith/epic-1/integration');
+      expect(prompt).toContain(INTEGRATION_BRANCH);
       expect(prompt).toContain(HEAD_SHA.slice(0, 8));
       expect(prompt).toContain('lint: passed (exit 0)');
       expect(prompt).toContain('test: passed (exit 0)');
@@ -3904,6 +3948,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
       const prompt = promptFor([doneTask()], [], {
         check: checkRecord({ results: [{ name: 'lint', pass: true, exitCode: 0, tail: '' }] }),
         headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
       });
       expect(prompt).toMatch(/1 command/);
     });
@@ -3925,6 +3970,7 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
           ],
         }),
         headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
       });
       expect(prompt).not.toContain('synthetic-not-a-real-secret');
       expect(prompt).not.toContain('214 passed');
@@ -3935,7 +3981,11 @@ describe('epic.ts epicVerdictJudgeRequest — refutable evidence (D-120)', () =>
     // missing check — stated anyway, because a prompt that silently omits the
     // block reads to the judge as an epic with nothing to say about its branch.
     it('says so when there is no check on record at all', () => {
-      const prompt = promptFor([doneTask()], [], { check: null, headSha: HEAD_SHA });
+      const prompt = promptFor([doneTask()], [], {
+        check: null,
+        headSha: HEAD_SHA,
+        branch: INTEGRATION_BRANCH,
+      });
       expect(prompt).toMatch(/no integration-root check/i);
     });
   });
