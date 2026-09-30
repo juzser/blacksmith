@@ -103,22 +103,22 @@ function isRunning(workingAgents: number, epics: string[]): boolean {
  */
 export function runningNowCards(o: OverviewResult, project?: string): RunningCard[] {
   if (project !== undefined) {
-    if (!isRunning(o.workingAgentCount, o.epicsInFlight)) return [];
+    if (!isRunning(o.workingAgentCount, o.epicsActivelyRunning)) return [];
     return [
       {
         project,
         workingAgents: o.workingAgentCount,
-        epics: o.epicsInFlight,
+        epics: o.epicsActivelyRunning,
         tokens: sumTokens(o.tokensByEpic),
       },
     ];
   }
   return (o.projects ?? [])
-    .filter((p) => isRunning(p.workingAgentCount, p.epicsInFlight))
+    .filter((p) => isRunning(p.workingAgentCount, p.epicsActivelyRunning))
     .map((p) => ({
       project: p.project,
       workingAgents: p.workingAgentCount,
-      epics: p.epicsInFlight,
+      epics: p.epicsActivelyRunning,
       tokens: { spent: p.tokensSpent, budget: p.tokensBudget, unmeasured: p.unmeasured },
     }));
 }

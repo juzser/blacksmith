@@ -1703,6 +1703,49 @@ describe('overview() — a task_status this build does not recognise', () => {
 
     expect(overview(handle.db).epicsInFlight).toEqual([EPIC_ID]);
   });
+
+  // DS2 review F1: `epicsInFlight` keeps the epic reachable on Kanban/Flow —
+  // asserted above — but Home's "Running now" must not present it as running
+  // when nothing is actually running in it. `epicsActivelyRunning` is the
+  // narrower signal Home reads for that.
+  it('drops an epic out of epicsActivelyRunning when its only open task is escalated, though it stays in epicsInFlight', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'escalated',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.epicsActivelyRunning).toEqual([]);
+  });
+
+  it('drops an epic out of epicsActivelyRunning when its only open task failed, though it stays in epicsInFlight', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'failed',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.epicsActivelyRunning).toEqual([]);
+  });
+
+  it('keeps an epic in epicsActivelyRunning when it has a truly open task alongside an escalated one', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'in-progress',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'escalated',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.epicsActivelyRunning).toEqual([EPIC_ID]);
+  });
 });
 
 // P9-37: the timeline's event-type allowlist is a hand-written copy of the

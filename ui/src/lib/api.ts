@@ -140,6 +140,8 @@ export interface ProjectOverviewSummary {
   /** Of `liveAgentCount`, the ones inside the 4h window — see RunningSession.workingAgentCount. */
   workingAgentCount: number;
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
+  epicsActivelyRunning: string[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
@@ -171,6 +173,8 @@ export interface OverviewResult {
   runningSessions: RunningSession[];
   /** Epics with non-terminal work and no `epic-closed` event. */
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
+  epicsActivelyRunning: string[];
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];

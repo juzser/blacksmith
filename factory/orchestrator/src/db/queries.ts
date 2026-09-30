@@ -462,6 +462,8 @@ export interface ProjectOverviewSummary {
   /** Of `liveAgentCount`, those dispatched within DEFAULT_STALE_HOURS of `nowIso` — see OverviewResult.workingAgentCount. */
   workingAgentCount: number;
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
+  epicsActivelyRunning: string[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
@@ -496,6 +498,8 @@ export interface OverviewResult {
   runningSessions: RunningSession[];
   /** Epics with non-terminal work AND no close on the log — see closedEpics. */
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
+  epicsActivelyRunning: string[];
   /** D-43/P9-27: every epic the log says was closed, newest close first. */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
@@ -1064,6 +1068,30 @@ function inFlightEpics(
 }
 
 /**
+ * The subset of `inFlightEpics()` an operator would call actually running:
+ * epics with a task in a truly open status, not merely one the projector
+ * still calls non-terminal. An epic whose only open task is `escalated` or
+ * `failed` stays in `inFlightEpics()` (it is still pickable on Kanban/Flow —
+ * see that function's doc), but it has nothing running and belongs in the
+ * inbox, not on the "Running now" card (ds-spec.md §4.1, DS2 review F1).
+ */
+function activeEpics(
+  taskRows: readonly { epicId: string | null; taskStatus: string }[],
+  closed: readonly ClosedEpic[],
+): string[] {
+  const closedIds = new Set(closed.map((e) => e.epicId));
+  return [
+    ...new Set(
+      taskRows
+        .filter(
+          (t) => t.epicId && !TERMINAL_TASK_STATUSES.has(t.taskStatus) && !closedIds.has(t.epicId),
+        )
+        .map((t) => t.epicId as string),
+    ),
+  ].sort();
+}
+
+/**
  * A finding the operator's pending-waiver count is about: one the waiver
  * machinery would actually act on. Both rosters are imported from the modules
  * that own them — the severities from waivers.ts, the statuses from findings.ts,
@@ -1219,7 +1247,9 @@ function projectSummary(
   const scope: Scope = { ...baseScope, project };
   const liveRows = allAgentsForScope(db, scope);
   const taskRows = allTasksForScope(db, scope);
-  const epicsInFlight = inFlightEpics(taskRows, closedEpicsForScope(db, scope));
+  const closedEpicsHere = closedEpicsForScope(db, scope);
+  const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
   const tokensBudget =
@@ -1234,6 +1264,7 @@ function projectSummary(
     liveAgentCount: liveRows.length,
     workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
     epicsInFlight,
+    epicsActivelyRunning,
     tokensSpent,
     tokensBudget,
     unmeasured,
@@ -1434,6 +1465,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpics);
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
 
@@ -1558,6 +1590,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     stalledAgentCount: liveRows.length - workingRows.length,
     runningSessions: runningSessions(db, scope, { nowIso }),
     epicsInFlight,
+    epicsActivelyRunning,
     closedEpics,
     tokensByEpic,
     alerts: { escalations, pendingWaivers },

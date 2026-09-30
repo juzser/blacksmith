@@ -44,6 +44,7 @@ function overview(over: Partial<OverviewResult>): OverviewResult {
     stalledAgentCount: 0,
     runningSessions: [],
     epicsInFlight: [],
+    epicsActivelyRunning: [],
     closedEpics: [],
     tokensByEpic: [],
     alerts: { escalations: 0, pendingWaivers: 0 },
@@ -110,6 +111,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
           liveAgentCount: 30,
           workingAgentCount: 28,
           epicsInFlight: ['shop-1'],
+          epicsActivelyRunning: ['shop-1'],
           tokensSpent: 10_600_000,
           tokensBudget: 10_300_000,
           unmeasured: 0,
@@ -120,10 +122,25 @@ describe('lib/homeView.ts runningNowCards()', () => {
           liveAgentCount: 0,
           workingAgentCount: 0,
           epicsInFlight: [],
+          epicsActivelyRunning: [],
           tokensSpent: 5,
           tokensBudget: null,
           unmeasured: 0,
           alerts: { escalations: 0, pendingWaivers: 0 },
+        },
+        {
+          // F1: an epic whose only open task is escalated stays in
+          // epicsInFlight (Kanban/Flow must still reach it) but drops out
+          // of epicsActivelyRunning — nothing is actually running.
+          project: 'stuck',
+          liveAgentCount: 0,
+          workingAgentCount: 0,
+          epicsInFlight: ['stuck-1'],
+          epicsActivelyRunning: [],
+          tokensSpent: 0,
+          tokensBudget: null,
+          unmeasured: 0,
+          alerts: { escalations: 1, pendingWaivers: 0 },
         },
       ],
     });
@@ -141,6 +158,7 @@ describe('lib/homeView.ts runningNowCards()', () => {
     const o = overview({
       workingAgentCount: 3,
       epicsInFlight: ['e1'],
+      epicsActivelyRunning: ['e1'],
       tokensByEpic: [epic('e1', 40, 100, 1)],
     });
     expect(runningNowCards(o, 'shop-api')).toEqual([
@@ -155,6 +173,15 @@ describe('lib/homeView.ts runningNowCards()', () => {
 
   it('shows no card for a selected project with nothing running', () => {
     expect(runningNowCards(overview({}), 'shop-api')).toEqual([]);
+  });
+
+  it('shows no card for a selected project whose only open epic is escalated (F1)', () => {
+    const o = overview({
+      workingAgentCount: 0,
+      epicsInFlight: ['stuck-1'],
+      epicsActivelyRunning: [],
+    });
+    expect(runningNowCards(o, 'shop-api')).toEqual([]);
   });
 });
 
