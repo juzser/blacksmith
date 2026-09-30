@@ -306,7 +306,8 @@ function describeShape(value: unknown): string {
 function readLegacyArtifactsMap(value: unknown): Array<[string, string]> | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const entries = Object.entries(value as Record<string, unknown>);
-  const allPaths = entries.length > 0 && entries.every(([, v]) => typeof v === 'string' && v.length > 0);
+  const allPaths =
+    entries.length > 0 && entries.every(([, v]) => typeof v === 'string' && v.length > 0);
   return allPaths ? (entries as Array<[string, string]>) : null;
 }
 

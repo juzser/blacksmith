@@ -1112,7 +1112,10 @@ describe('db/projector.ts — a task-result-recorded whose artifacts is the lega
 
   it.each([
     // One bad entry: the whole map is held back rather than half-projected.
-    ['a map with a non-string value', { claude_half: 'scratchpad/r23/claude-half.json', repair_brief: 7 }],
+    [
+      'a map with a non-string value',
+      { claude_half: 'scratchpad/r23/claude-half.json', repair_brief: 7 },
+    ],
     // No entries at all: nothing says it was ever a name->path map.
     ['an empty object', {}],
   ])('%s is not read as legacy and still reports a skip', async (_label, artifacts) => {
