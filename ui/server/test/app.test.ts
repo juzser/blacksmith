@@ -12,6 +12,7 @@ import {
   SESSION_ID,
   TASK_1,
   TASK_2,
+  TASK_3,
   TASK_4,
 } from '../../../factory/orchestrator/test/db/fixtures.js';
 import { closeApp, createApp } from '../src/app.js';
@@ -730,6 +731,17 @@ describe('ui/server app.ts', () => {
       const res = await handle.app.request(route);
       expect(res.status, route).toBe(200);
     }
+    closeApp(handle);
+  });
+
+  it('GET /api/inbox lists the fixture escalated task as a row', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/inbox');
+    expect(res.status).toBe(200);
+    const body = await json<{ rows: { kind: string; taskId: string | null }[] }>(res);
+    expect(body.rows).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'escalation', taskId: TASK_3 })]),
+    );
     closeApp(handle);
   });
 

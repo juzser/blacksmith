@@ -36,6 +36,7 @@ import {
   artifactById,
   errorsPage,
   flowGraph,
+  inboxRows,
   kanban,
   lessonOwnerSession,
   lessonsPage,
@@ -883,6 +884,8 @@ export function createApp(opts: AppOpts): AppHandle {
   });
 
   app.get('/api/lessons', (c) => c.json(lessonsPage(handle.db, sessionScope(c))));
+
+  app.get('/api/inbox', (c) => c.json({ rows: inboxRows(handle.db, sessionScope(c)) }));
 
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');

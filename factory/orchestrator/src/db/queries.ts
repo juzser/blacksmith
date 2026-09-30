@@ -1077,6 +1077,122 @@ function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): b
   return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
 }
 
+// ---------------------------------------------------------------------------
+// inboxRows() — ds-spec.md §4.1 NeedsYouInbox. Three kinds today: pending
+// waivers, escalations, and lesson candidates awaiting review. Stop points
+// have no projected row yet (no writer exists) and are deliberately left
+// out — see the DS2 brief's return for the follow-up note.
+// ---------------------------------------------------------------------------
+
+export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
+
+export interface InboxRow {
+  id: string;
+  kind: InboxKind;
+  /** The row's headline. Never a placeholder: when there is nothing more to
+   *  say than the title, `description` is null and the client renders the
+   *  title alone. */
+  title: string;
+  description: string | null;
+  /** Null for rows with no project affiliation (lesson candidates today) —
+   *  the client's last, catch-all "All projects" group. */
+  project: string | null;
+  taskId: string | null;
+  createdAt: string;
+}
+
+const INBOX_KIND_RANK: Record<InboxKind, number> = {
+  escalation: 0,
+  waiver: 1,
+  lesson_candidate: 2,
+};
+
+/** A task's Kanban display text — the same `objective ?? taskId` fallback
+ *  every other query on this table uses; tasks have no `title` column. */
+function taskDisplayText(t: { objective: string | null; taskId: string }): string {
+  return t.objective ?? t.taskId;
+}
+
+export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
+  const taskRows = allTasksForScope(db, scope);
+  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const rows: InboxRow[] = [];
+
+  // Escalations: task rows the projector parked at `escalated`
+  // (db/projector.ts's error-logged handling, `coordination.*` errors).
+  for (const t of taskRows) {
+    if (t.taskStatus !== 'escalated') continue;
+    const lastDispatch = inLogOrder(
+      db.select().from(dispatches).where(eq(dispatches.taskId, t.taskId)).all(),
+    ).at(-1);
+    rows.push({
+      id: `escalation:${t.taskId}`,
+      kind: 'escalation',
+      title: taskDisplayText(t),
+      description: lastDispatch ? `Escalated while dispatched as ${lastDispatch.agentRole}` : null,
+      project: t.project,
+      taskId: t.taskId,
+      createdAt: t.updatedAt,
+    });
+  }
+
+  // Pending waivers: findings `awaitsWaiverDecision()` covers, not yet
+  // decided, grouped one row per task (the operator waives a task's batch,
+  // not one finding at a time — /bs waivers's own unit).
+  const pendingFindings = allFindingsForScope(db, scope).filter(
+    (f) => awaitsWaiverDecision(f) && f.waiverId === null,
+  );
+  const pendingByTask = new Map<string, (typeof pendingFindings)[number][]>();
+  for (const f of pendingFindings) {
+    const list = pendingByTask.get(f.taskId) ?? [];
+    list.push(f);
+    pendingByTask.set(f.taskId, list);
+  }
+  for (const [taskId, findingRows] of pendingByTask) {
+    const t = tasksById.get(taskId);
+    const latest = findingRows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
+    const count = findingRows.length;
+    rows.push({
+      id: `waiver:${taskId}`,
+      kind: 'waiver',
+      title: t ? taskDisplayText(t) : taskId,
+      description: `${count} finding${count === 1 ? '' : 's'} awaiting a waiver decision`,
+      project: latest.project ?? t?.project ?? null,
+      taskId,
+      createdAt: latest.raisedAt,
+    });
+  }
+
+  // Lesson candidates: what /api/lessons already buckets as 'pending'. No
+  // project column on lessons — always the client's "All projects" group.
+  if (scope.project === undefined) {
+    const sessionCond = scopedToSessions(lessons.sessionId, scope);
+    const lessonRows = sessionCond
+      ? db.select().from(lessons).where(sessionCond).all()
+      : db.select().from(lessons).all();
+    for (const l of lessonRows) {
+      if (LESSON_BUCKET_FOR_STATUS[l.lessonStatus] !== 'pending') continue;
+      rows.push({
+        id: `lesson_candidate:${l.lessonId}`,
+        kind: 'lesson_candidate',
+        title: l.statement,
+        description: null,
+        project: null,
+        taskId: null,
+        createdAt: l.validFrom,
+      });
+    }
+  }
+
+  return rows.sort((a, b) => {
+    const rank = INBOX_KIND_RANK[a.kind] - INBOX_KIND_RANK[b.kind];
+    if (rank !== 0) return rank;
+    const created = a.createdAt.localeCompare(b.createdAt);
+    if (created !== 0) return created;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 /**
  * One project's overview slice, computed by the same logic overview() itself
  * uses (no drift). `nowIso` is the caller's single instant, not a fresh
