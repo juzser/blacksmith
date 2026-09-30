@@ -21,20 +21,15 @@ const STYLES = join(SRC, 'styles');
  * legitimately has no rule. Each one was read before being listed here; a
  * name may only join this list with the same evidence.
  *
- * - `cmd-hint` — CommandHint.vue's root. `__list`, `__item`, `__cmd`,
- *   `__desc` and `__note` are all styled; the root only stacks two blocks.
  * - `ds-sh__left` — SectionHeading.vue. Exists to make the title and the
  *   description one flex item, so `.ds-sh`'s space-between pushes the
  *   action slot to the far edge. Grouping is the whole job.
- * - `live-agent-group` — LiveAgentGroupRow.vue's root. `-row` and `-detail`
- *   are both styled, and the detail is already inside `.live-agents-col`'s
- *   flex column (ds-components.css notes this at the `-detail` rule).
  * - `bs-btn__label` — kit/Button.vue's label span. It inherits the button's
  *   own flex-row text styling and exists only so its `--hidden` modifier can
  *   toggle `visibility` while the loading spinner sits over it; the span
- *   itself carries no rule of its own, same shape as `cmd-hint` above.
+ *   itself carries no rule of its own, same shape as `ds-sh__left` above.
  */
-const WRAPPERS_WITHOUT_RULES = ['cmd-hint', 'ds-sh__left', 'live-agent-group', 'bs-btn__label'];
+const WRAPPERS_WITHOUT_RULES = ['ds-sh__left', 'bs-btn__label'];
 
 function vueFiles(dir: string): string[] {
   const out: string[] = [];

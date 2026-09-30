@@ -1,13 +1,14 @@
 import type { RouteLocationNormalizedLoaded, RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
 import type { Crumb } from './composables/useBreadcrumb.js';
+import { homeRedirect } from './lib/homeRoute.js';
 
-// Routes per design-spec.md §2 + Phase 6b's multi-project hub addendum:
-// `/` redirects to `/projects` (the new app default route); `/overview` is
-// "global mode" (aggregated across projects); `/p/:project/overview`
-// scopes the same page to one project. Every other page keeps its 6a path
-// and additionally accepts a `?project=` query param via the topbar
-// switcher (useProjectContext.ts).
+// Routes: Home (ds-spec.md §4.1, Overview + Projects merged) renders at
+// `/overview` in global mode and at `/p/:project/overview` scoped to one
+// project; `/` and the retired `/projects` redirect there through
+// homeRedirect, keeping the deep-link query and turning `?project=` into the
+// project route. Every other page keeps its path and accepts a `?project=`
+// query param via the topbar switcher (useProjectContext.ts).
 //
 // `meta.crumb` (ds-spec.md §3, DS1): the app shell derives the topbar
 // Breadcrumb from route meta so it updates the instant navigation happens,
@@ -20,24 +21,18 @@ declare module 'vue-router' {
 }
 
 const routes: RouteRecordRaw[] = [
-  { path: '/', redirect: '/projects' },
-  {
-    path: '/projects',
-    name: 'projects',
-    component: () => import('./pages/ProjectsPage.vue'),
-    meta: { crumb: () => [{ label: 'Projects' }] },
-  },
+  { path: '/', redirect: homeRedirect },
+  { path: '/projects', redirect: homeRedirect },
   {
     path: '/overview',
     name: 'overview-global',
-    component: () => import('./pages/OverviewPage.vue'),
+    component: () => import('./pages/HomePage.vue'),
     meta: { crumb: () => [{ label: 'Home' }] },
   },
   {
     path: '/p/:project/overview',
     name: 'overview-project',
-    component: () => import('./pages/OverviewPage.vue'),
-    props: true,
+    component: () => import('./pages/HomePage.vue'),
     meta: { crumb: (r) => [{ label: `${r.params.project} · Home` }] },
   },
   {

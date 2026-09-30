@@ -26,6 +26,7 @@ function overview(epicsInFlight: string[], closedEpics: ClosedEpic[]): OverviewR
     stalledAgentCount: 0,
     runningSessions: [],
     epicsInFlight,
+    epicsActivelyRunning: epicsInFlight,
     closedEpics,
     tokensByEpic: [],
     alerts: { escalations: 0, pendingWaivers: 0 },

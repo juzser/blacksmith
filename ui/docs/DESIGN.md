@@ -315,6 +315,36 @@ None of these composables changed for DS0 — the kit swap is presentational.
   yet. Likewise the picker's derived run titles and its 25-cap "Show more"
   affordance are unbuilt; `sessionOptions()` today just truncates at the cap
   silently. Both belong to the DS that builds the epic block.
+- **Home's "Recent activity" section (ds-spec.md §4.1 point 1b) is
+  deferred to DS6.** It needs the plain-language event lines DS6 builds for
+  Activity; DS2 ships Home without the section rather than with raw event
+  names. Deferred, not dropped.
+- **Home's inbox is not the full §2.2 pattern yet.** It shows three kinds
+  (waivers, escalations, lesson candidates); stop points, the unread dot and
+  read-state weight (pattern 12) have no server source yet. Row titles are
+  the server's task text, not a per-kind sentence.
+- **Home's "Just finished" is per tab, not per operator session.** It lists
+  closed epics this tab saw in flight since it loaded, plus (F3 review
+  fix) anything closed in the last 24h regardless of session state, so a
+  tab opened fresh the morning after a close still shows it. It sits under
+  Running now rather than inside each project card, because a closed epic
+  carries no project. The Work link is the only follow-up affordance;
+  `ClosedEpic` carries no PR field, so a PR link is deferred until a
+  server source exists.
+- **Home's budget outlier threshold (10x an epic's budget) is ours.**
+  §4.1 point 4 names the case but no number. Outliers are left out of the
+  ring and the total; the server's hour-over-hour delta still includes them.
+- **Running now reads a new `epicsActivelyRunning` field, not
+  `epicsInFlight`.** `epicsInFlight` keeps an epic whose only open task is
+  `escalated`/`failed` reachable on Kanban/Flow (D-43/P9-27) — correct, an
+  operator still needs to act on it, and that must not change. But nothing
+  is actually running in it, so presenting it on "Running now" reads as a
+  live agent that does not exist. `GET /api/overview` (whole-factory and
+  per-project summaries) now also reports `epicsActivelyRunning`:
+  `epicsInFlight` narrowed to epics with a task in a truly open status
+  (`db/queries.ts`'s `activeEpics()`, the complement of
+  `TERMINAL_TASK_STATUSES`). Home's "Running now" reads the narrower field;
+  the escalated-only epic still surfaces under Needs you.
 
 ## Verification
 

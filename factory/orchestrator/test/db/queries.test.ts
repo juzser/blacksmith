@@ -8,8 +8,10 @@ import { openDb, rebuild } from '../../src/db/projector.js';
 import {
   analytics,
   artifactById,
+  DEFAULT_PROJECT,
   errorsPage,
   flowGraph,
+  inboxRows,
   kanban,
   LESSON_BUCKET_FOR_STATUS,
   lessonOwnerSession,
@@ -1462,6 +1464,137 @@ describe('overview() — closed epics (D-43/P9-27)', () => {
   });
 });
 
+describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
+  let stateDir: string;
+  let dbDir: string;
+  let handle: DbHandle;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-db-'));
+    await buildFixture({ stateDir });
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    handle = openDb(dbPath);
+  });
+
+  afterEach(async () => {
+    handle.sqlite.close();
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('lists the fixture escalated task (task-3) as the only row', () => {
+    const rows = inboxRows(handle.db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
+    expect(rows[0]?.title.length).toBeGreaterThan(0);
+  });
+
+  it('projects an untagged escalated task to DEFAULT_PROJECT, same as every other query, and it appears when scoped to that project', () => {
+    const rows = inboxRows(handle.db);
+    expect(rows[0]?.project).toBe(DEFAULT_PROJECT);
+    const scoped = inboxRows(handle.db, { project: DEFAULT_PROJECT });
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
+  });
+
+  it('adds a per-task pending-waiver row and a pending lesson-candidate row, sorted escalation < waiver < lesson_candidate', async () => {
+    const ctx: EventContext = {
+      sessionId: SESSION_ID,
+      planVersion: 1,
+      causalParent: await lastEventId({ stateDir }),
+    };
+    const raised = await raiseFinding(
+      {
+        finding: {
+          finding_id: 'inbox-pw-1',
+          task_id: TASK_1,
+          finding_category: 'correctness',
+          severity: 'S3-minor',
+          finding_status: 'raised',
+          summary: 'a stray console.log in the widget renderer',
+          failure_scenario: { inputs: 'n=5', expected: '5 items', actual: '4 items' },
+          found_by: 'reviewer',
+        },
+        filePath: 'src/widget.ts',
+      },
+      ctx,
+      { stateDir },
+    );
+    if (raised.suppressed) throw new Error('inbox-pw-1 unexpectedly suppressed');
+
+    await appendEvent(
+      {
+        session_id: SESSION_ID,
+        actor: 'scribe',
+        event_type: 'lesson-candidate-raised',
+        plan_version: 1,
+        causal_parent: await lastEventId({ stateDir }),
+        payload: {
+          lesson_id: 'inbox-lesson-1',
+          lesson_type: 'rule',
+          lesson_level: 'principle',
+          lesson_status: 'candidate',
+          lesson_scope: 'claim-path',
+          claim_path: 'src/**',
+          statement: 'Always run the linter before raising a finding.',
+          valid_from: new Date().toISOString(),
+          provenance_event_ids: ['inbox-pw-1'],
+        },
+      },
+      { stateDir },
+    );
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const fresh = openDb(dbPath);
+    try {
+      const rows = inboxRows(fresh.db);
+      expect(rows.map((r) => r.kind)).toEqual(['escalation', 'waiver', 'lesson_candidate']);
+      const waiverRow = rows.find((r) => r.kind === 'waiver');
+      expect(waiverRow).toMatchObject({ taskId: TASK_1, project: DEFAULT_PROJECT });
+      const scoped = inboxRows(fresh.db, { project: DEFAULT_PROJECT });
+      expect(scoped.some((r) => r.kind === 'waiver' && r.taskId === TASK_1)).toBe(true);
+      const lessonRow = rows.find((r) => r.kind === 'lesson_candidate');
+      expect(lessonRow).toMatchObject({ taskId: null, project: null });
+      expect(lessonRow?.title).toContain('linter');
+    } finally {
+      fresh.sqlite.close();
+    }
+  });
+
+  it('reports the empty-inbox shape when nothing is pending', async () => {
+    // No escalated task, no pending waiver, no pending lesson candidate.
+    const emptyStateDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-empty-events-'));
+    const emptyDbDir = await mkdtemp(path.join(tmpdir(), 'smith-inbox-empty-db-'));
+    try {
+      await appendEvent(
+        {
+          session_id: 'sess-empty',
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        },
+        { stateDir: emptyStateDir },
+      );
+      const dbPath = path.join(emptyDbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir: emptyStateDir });
+      const empty = openDb(dbPath);
+      try {
+        expect(inboxRows(empty.db)).toEqual([]);
+      } finally {
+        empty.sqlite.close();
+      }
+    } finally {
+      await rm(emptyStateDir, { recursive: true, force: true });
+      await rm(emptyDbDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // The same field, read the other way round. `epicsInFlight` was computed by
 // naming the *open* statuses and asking `includes()`, so a status this build
@@ -1536,6 +1669,82 @@ describe('overview() — a task_status this build does not recognise', () => {
     });
 
     expect(overview(handle.db).epicsInFlight).toEqual([]);
+  });
+
+  // DS2 / ds-spec.md §4.1 "Data/API note", audit item 2 — an epic whose last
+  // open task went `escalated` (or `failed`) is a person's queue item, not a
+  // finished epic: no `epic-closed` event exists for it, so it used to fall
+  // OUT of both `epicsInFlight` and `closedEpics` the moment the last task hit
+  // one of those two statuses — TERMINAL_TASK_STATUSES (db/projector.ts's "the
+  // projector will not overwrite this") counts them terminal, but
+  // taskStatus.ts's own HELD_OPEN_BY_AN_OPERATOR says a person is still
+  // expected to come back to them. The epic disappeared from every picker
+  // Home/Kanban/Flow read `epicsInFlight`/`closedEpics` from.
+  it('keeps an epic in flight when its last open task is escalated, not closed', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'escalated',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.closedEpics).toEqual([]);
+  });
+
+  it('keeps an epic in flight when its last open task failed, not closed', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'failed',
+    });
+
+    expect(overview(handle.db).epicsInFlight).toEqual([EPIC_ID]);
+  });
+
+  // DS2 review F1: `epicsInFlight` keeps the epic reachable on Kanban/Flow —
+  // asserted above — but Home's "Running now" must not present it as running
+  // when nothing is actually running in it. `epicsActivelyRunning` is the
+  // narrower signal Home reads for that.
+  it('drops an epic out of epicsActivelyRunning when its only open task is escalated, though it stays in epicsInFlight', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'escalated',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.epicsActivelyRunning).toEqual([]);
+  });
+
+  it('drops an epic out of epicsActivelyRunning when its only open task failed, though it stays in epicsInFlight', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'failed',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.epicsActivelyRunning).toEqual([]);
+  });
+
+  it('keeps an epic in epicsActivelyRunning when it has a truly open task alongside an escalated one', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'in-progress',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'escalated',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.epicsActivelyRunning).toEqual([EPIC_ID]);
   });
 });
 

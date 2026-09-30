@@ -20,7 +20,11 @@ import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
-import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../taskStatus.js';
+import {
+  CLOSED_TO_FURTHER_WORK,
+  TERMINAL_OK_TASK_STATUSES,
+  TERMINAL_TASK_STATUSES,
+} from '../taskStatus.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
 import { WAIVABLE_SEVERITIES } from '../waivers.js';
 import type { SmithDb } from './projector.js';
@@ -458,6 +462,8 @@ export interface ProjectOverviewSummary {
   /** Of `liveAgentCount`, those dispatched within DEFAULT_STALE_HOURS of `nowIso` — see OverviewResult.workingAgentCount. */
   workingAgentCount: number;
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
+  epicsActivelyRunning: string[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` (issue #220) — tokensSpent is a floor, not exact, when this is > 0. */
@@ -492,6 +498,8 @@ export interface OverviewResult {
   runningSessions: RunningSession[];
   /** Epics with non-terminal work AND no close on the log — see closedEpics. */
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status — see activeEpics(). */
+  epicsActivelyRunning: string[];
   /** D-43/P9-27: every epic the log says was closed, newest close first. */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
@@ -1042,6 +1050,40 @@ function inFlightEpics(
     ...new Set(
       taskRows
         .filter(
+          // ds-spec.md §4.1 "Data/API note" (audit item 2, DS2): a task the
+          // projector will not overwrite (TERMINAL_TASK_STATUSES) is not the
+          // same question as "does this epic still need a person" —
+          // `escalated`/`failed` are HELD_OPEN_BY_AN_OPERATOR (taskStatus.ts),
+          // and no `epic-closed` event exists for them. Filtering on
+          // TERMINAL_TASK_STATUSES alone dropped such an epic out of BOTH
+          // `epicsInFlight` and `closedEpics` the moment its last open task hit
+          // one of those two statuses — it simply disappeared from every
+          // picker that reads this field. CLOSED_TO_FURTHER_WORK excludes
+          // exactly the statuses a person is not expected to come back to.
+          (t) => t.epicId && !CLOSED_TO_FURTHER_WORK.has(t.taskStatus) && !closedIds.has(t.epicId),
+        )
+        .map((t) => t.epicId as string),
+    ),
+  ].sort();
+}
+
+/**
+ * The subset of `inFlightEpics()` an operator would call actually running:
+ * epics with a task in a truly open status, not merely one the projector
+ * still calls non-terminal. An epic whose only open task is `escalated` or
+ * `failed` stays in `inFlightEpics()` (it is still pickable on Kanban/Flow —
+ * see that function's doc), but it has nothing running and belongs in the
+ * inbox, not on the "Running now" card (ds-spec.md §4.1, DS2 review F1).
+ */
+function activeEpics(
+  taskRows: readonly { epicId: string | null; taskStatus: string }[],
+  closed: readonly ClosedEpic[],
+): string[] {
+  const closedIds = new Set(closed.map((e) => e.epicId));
+  return [
+    ...new Set(
+      taskRows
+        .filter(
           (t) => t.epicId && !TERMINAL_TASK_STATUSES.has(t.taskStatus) && !closedIds.has(t.epicId),
         )
         .map((t) => t.epicId as string),
@@ -1063,6 +1105,134 @@ function awaitsWaiverDecision(f: { severity: string; findingStatus: string }): b
   return WAIVABLE_SEVERITIES.includes(f.severity) && WAIVABLE_STATUSES.includes(f.findingStatus);
 }
 
+// ---------------------------------------------------------------------------
+// inboxRows() — ds-spec.md §4.1 NeedsYouInbox. Three kinds today: pending
+// waivers, escalations, and lesson candidates awaiting review. Stop points
+// have no projected row yet (no writer exists) and are deliberately left
+// out — see the DS2 brief's return for the follow-up note.
+// ---------------------------------------------------------------------------
+
+export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
+
+export interface InboxRow {
+  id: string;
+  kind: InboxKind;
+  /** The row's headline. Never a placeholder: when there is nothing more to
+   *  say than the title, `description` is null and the client renders the
+   *  title alone. */
+  title: string;
+  description: string | null;
+  /** Null for rows with no project affiliation (lesson candidates today) —
+   *  the client's last, catch-all "All projects" group. */
+  project: string | null;
+  taskId: string | null;
+  createdAt: string;
+}
+
+const INBOX_KIND_RANK: Record<InboxKind, number> = {
+  escalation: 0,
+  waiver: 1,
+  lesson_candidate: 2,
+};
+
+/** A task's Kanban display text — the same `objective ?? taskId` fallback
+ *  every other query on this table uses; tasks have no `title` column. */
+function taskDisplayText(t: { objective: string | null; taskId: string }): string {
+  return t.objective ?? t.taskId;
+}
+
+export function inboxRows(db: SmithDb, scope: Scope = {}): InboxRow[] {
+  const taskRows = allTasksForScope(db, scope);
+  const tasksById = new Map(taskRows.map((t) => [t.taskId, t]));
+  const rows: InboxRow[] = [];
+
+  // Escalations: task rows the projector parked at `escalated`
+  // (db/projector.ts's error-logged handling, `coordination.*` errors).
+  // Dispatches for every escalated task are fetched in one query, not one
+  // per task, and grouped by taskId below.
+  const escalatedTaskIds = taskRows
+    .filter((t) => t.taskStatus === 'escalated')
+    .map((t) => t.taskId);
+  const lastDispatchByTask = new Map<string, typeof dispatches.$inferSelect>();
+  if (escalatedTaskIds.length > 0) {
+    const dispatchRows = inLogOrder(
+      db.select().from(dispatches).where(inArray(dispatches.taskId, escalatedTaskIds)).all(),
+    );
+    for (const d of dispatchRows) {
+      if (d.taskId) lastDispatchByTask.set(d.taskId, d);
+    }
+  }
+  for (const t of taskRows) {
+    if (t.taskStatus !== 'escalated') continue;
+    const lastDispatch = lastDispatchByTask.get(t.taskId);
+    rows.push({
+      id: `escalation:${t.taskId}`,
+      kind: 'escalation',
+      title: taskDisplayText(t),
+      description: lastDispatch ? `Escalated while dispatched as ${lastDispatch.agentRole}` : null,
+      project: projectOf(t.project),
+      taskId: t.taskId,
+      createdAt: t.updatedAt,
+    });
+  }
+
+  // Pending waivers: findings `awaitsWaiverDecision()` covers, not yet
+  // decided, grouped one row per task (the operator waives a task's batch,
+  // not one finding at a time — /bs waivers's own unit).
+  const pendingFindings = allFindingsForScope(db, scope).filter(
+    (f) => awaitsWaiverDecision(f) && f.waiverId === null,
+  );
+  const pendingByTask = new Map<string, (typeof pendingFindings)[number][]>();
+  for (const f of pendingFindings) {
+    const list = pendingByTask.get(f.taskId) ?? [];
+    list.push(f);
+    pendingByTask.set(f.taskId, list);
+  }
+  for (const [taskId, findingRows] of pendingByTask) {
+    const t = tasksById.get(taskId);
+    const latest = findingRows.reduce((a, b) => (a.raisedAt > b.raisedAt ? a : b));
+    const count = findingRows.length;
+    rows.push({
+      id: `waiver:${taskId}`,
+      kind: 'waiver',
+      title: t ? taskDisplayText(t) : taskId,
+      description: `${count} finding${count === 1 ? '' : 's'} awaiting a waiver decision`,
+      project: projectOf(latest.project ?? t?.project ?? null),
+      taskId,
+      createdAt: latest.raisedAt,
+    });
+  }
+
+  // Lesson candidates: what /api/lessons already buckets as 'pending'. No
+  // project column on lessons — always the client's "All projects" group.
+  if (scope.project === undefined) {
+    const sessionCond = scopedToSessions(lessons.sessionId, scope);
+    const lessonRows = sessionCond
+      ? db.select().from(lessons).where(sessionCond).all()
+      : db.select().from(lessons).all();
+    for (const l of lessonRows) {
+      if (LESSON_BUCKET_FOR_STATUS[l.lessonStatus] !== 'pending') continue;
+      rows.push({
+        id: `lesson_candidate:${l.lessonId}`,
+        kind: 'lesson_candidate',
+        title: l.statement,
+        description: null,
+        project: null,
+        taskId: null,
+        createdAt: l.validFrom,
+      });
+    }
+  }
+
+  return rows.sort((a, b) => {
+    const rank = INBOX_KIND_RANK[a.kind] - INBOX_KIND_RANK[b.kind];
+    if (rank !== 0) return rank;
+    const created = a.createdAt.localeCompare(b.createdAt);
+    if (created !== 0) return created;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 /**
  * One project's overview slice, computed by the same logic overview() itself
  * uses (no drift). `nowIso` is the caller's single instant, not a fresh
@@ -1079,7 +1249,9 @@ function projectSummary(
   const scope: Scope = { ...baseScope, project };
   const liveRows = allAgentsForScope(db, scope);
   const taskRows = allTasksForScope(db, scope);
-  const epicsInFlight = inFlightEpics(taskRows, closedEpicsForScope(db, scope));
+  const closedEpicsHere = closedEpicsForScope(db, scope);
+  const epicsInFlight = inFlightEpics(taskRows, closedEpicsHere);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpicsHere);
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
   const tokensSpent = [...spentByEpic.values()].reduce((s, v) => s + v, 0);
   const tokensBudget =
@@ -1094,6 +1266,7 @@ function projectSummary(
     liveAgentCount: liveRows.length,
     workingAgentCount: liveRows.filter((a) => isWorkingAt(a.dispatchedAt, nowIso)).length,
     epicsInFlight,
+    epicsActivelyRunning,
     tokensSpent,
     tokensBudget,
     unmeasured,
@@ -1294,6 +1467,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
 
   const closedEpics = closedEpicsForScope(db, scope);
   const epicsInFlight = inFlightEpics(taskRows, closedEpics);
+  const epicsActivelyRunning = activeEpics(taskRows, closedEpics);
 
   const { budgetByEpic, spentByEpic, unmeasuredByEpic } = epicTokenMaps(db, scope, taskRows);
 
@@ -1418,6 +1592,7 @@ export function overview(db: SmithDb, scope: Scope = {}, opts: OverviewOpts = {}
     stalledAgentCount: liveRows.length - workingRows.length,
     runningSessions: runningSessions(db, scope, { nowIso }),
     epicsInFlight,
+    epicsActivelyRunning,
     closedEpics,
     tokensByEpic,
     alerts: { escalations, pendingWaivers },

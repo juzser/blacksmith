@@ -131,7 +131,7 @@ export interface RecentDispatch {
   modelTier: string;
   taskId: string | null;
   reason: string | null;
-  /** Which attempt this was — OverviewPage's derived line when `reason` is null. */
+  /** Which attempt this was — Home's derived line when `reason` is null. */
   round: number;
 }
 export interface ProjectOverviewSummary {
@@ -140,6 +140,8 @@ export interface ProjectOverviewSummary {
   /** Of `liveAgentCount`, the ones inside the 4h window — see RunningSession.workingAgentCount. */
   workingAgentCount: number;
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
+  epicsActivelyRunning: string[];
   tokensSpent: number;
   tokensBudget: number | null;
   /** Results whose `token_usage` was `{ measured: false }` — tokensSpent is a floor, not exact, when this is > 0. */
@@ -171,6 +173,8 @@ export interface OverviewResult {
   runningSessions: RunningSession[];
   /** Epics with non-terminal work and no `epic-closed` event. */
   epicsInFlight: string[];
+  /** `epicsInFlight` narrowed to epics with a task in a truly open status (not merely escalated/failed). */
+  epicsActivelyRunning: string[];
   /** Epics with an `epic-closed` event, newest first (D-43/P9-27). */
   closedEpics: ClosedEpic[];
   tokensByEpic: EpicTokenSpend[];
@@ -314,6 +318,21 @@ export interface LessonsResult {
   approved: LessonRecord[];
   /** Rejected, superseded, or invalidated — closed, but still auditable (D-220). */
   closed: LessonRecord[];
+}
+
+/** ds-spec.md §4.1 NeedsYouInbox row: mirrors queries.ts's InboxRow. */
+export type InboxKind = 'waiver' | 'escalation' | 'lesson_candidate';
+export interface InboxRow {
+  id: string;
+  kind: InboxKind;
+  title: string;
+  description: string | null;
+  project: string | null;
+  taskId: string | null;
+  createdAt: string;
+}
+export interface InboxResult {
+  rows: InboxRow[];
 }
 
 /** lessons.ts's NoveltyMatch — the nearest statement in the corpus and its Jaccard score. */
@@ -554,6 +573,13 @@ export function fetchLessons(session?: SessionScope): Promise<LessonsResult> {
   applySessionScope(q, session);
   const qs = q.toString();
   return getJson(`/api/lessons${qs ? `?${qs}` : ''}`);
+}
+
+export function fetchInbox(session?: SessionScope): Promise<InboxResult> {
+  const q = new URLSearchParams();
+  applySessionScope(q, session);
+  const qs = q.toString();
+  return getJson(`/api/inbox${qs ? `?${qs}` : ''}`);
 }
 
 export function fetchErrors(session?: SessionScope, project?: string): Promise<ErrorsResult> {

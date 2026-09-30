@@ -63,6 +63,7 @@ function overview(over: Partial<OverviewResult>): OverviewResult {
     stalledAgentCount: 0,
     runningSessions: [],
     epicsInFlight: [],
+    epicsActivelyRunning: [],
     closedEpics: [],
     tokensByEpic: [],
     alerts: { escalations: 0, pendingWaivers: 0 },

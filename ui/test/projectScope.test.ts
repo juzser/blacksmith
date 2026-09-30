@@ -28,9 +28,9 @@ function readsProjectScope(pageFile: string): boolean {
 describe('D-216: the project switcher is shown exactly where the scope is read', () => {
   it('parses every named route in router.ts', () => {
     const names = routedPages().map(([name]) => name);
-    // The redirect-only '/' route carries no name, so it is absent by design.
+    // The redirect-only '/' and '/projects' routes carry no name, so they
+    // are absent by design.
     expect(names).toEqual([
-      'projects',
       'overview-global',
       'overview-project',
       'sessions',

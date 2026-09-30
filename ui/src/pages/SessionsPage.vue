@@ -131,7 +131,7 @@ onMounted(() => {
 // — flipping it there would flash the skeleton over the canvas every tick.
 // Raising it on a project switch is what stops the previous project's bands
 // sitting under the new project's breadcrumb while the new fetch is in flight.
-// Same split as OverviewPage, which polls the same endpoint. A session scope
+// Same split as Home, which polls the same endpoint. A session scope
 // change earns the same treatment for the same reason -- it swaps which runs
 // the canvas draws, not just how many.
 watch([project, sessionKey], () => {

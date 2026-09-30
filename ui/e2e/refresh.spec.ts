@@ -67,7 +67,7 @@ test.describe('Manual refresh (design-spec §8)', () => {
       if (surface.ready) {
         await expect(page.getByRole('tablist', { name: surface.ready })).toBeVisible();
       }
-      await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+      await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
       // Hold the refetch open so the in-flight state is observable rather
       // than raced (the kanban.spec.ts idiom).
@@ -105,21 +105,20 @@ test.describe('Manual refresh (design-spec §8)', () => {
 /**
  * D-243, extended: Projects and Flow neither polled nor answered the shared
  * topbar Refresh (`LiveStatus.vue`'s "Refresh now" button, wired through
- * usePoll.ts's `triggerGlobalRefresh()`). The polling pages (Overview,
- * Sessions, Kanban, Timeline) answer it via their own `usePoll(...)`; these
- * two now join them at the 15s cadence design-spec.md §8 states for
- * Kanban/Timeline. Roadmap still does not, and the manual-refresh pages
+ * usePoll.ts's `triggerGlobalRefresh()`). The polling pages (Sessions,
+ * Kanban, Timeline) answer it via their own `usePoll(...)`; Flow joined them
+ * at the 15s cadence design-spec.md §8 states for Kanban/Timeline. Projects
+ * is now part of Home (ds-spec.md §4.1), which polls too, so its tests run
+ * against Home's per-project cards. Roadmap still does not, and the manual-refresh pages
  * above never will by design.
  *
  * The "re-fetches" tests bound their wait well under the 15s poll, so it is
  * the click that must produce the response, not the next tick.
  */
-test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
-  test('Projects: topbar Refresh re-fetches the overview', async ({ page }) => {
-    await page.goto('/projects');
-    await expect(
-      page.getByRole('link', { name: /black-smith project, opens overview/ }),
-    ).toBeVisible();
+test.describe('Topbar Refresh reaches Home and Flow (D-243)', () => {
+  test('Home: topbar Refresh re-fetches the overview', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'View black-smith in Work' })).toBeVisible();
 
     const refetched = page.waitForResponse((r) => r.url().includes('/api/overview'), {
       timeout: 5000,
@@ -130,14 +129,12 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
     await refetched;
   });
 
-  test('Projects: keeps its content on screen while the topbar Refresh is in flight', async ({
+  test('Home: keeps its content on screen while the topbar Refresh is in flight', async ({
     page,
   }) => {
-    await page.goto('/projects');
-    await expect(
-      page.getByRole('link', { name: /black-smith project, opens overview/ }),
-    ).toBeVisible();
-    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await page.goto('/overview');
+    await expect(page.getByRole('link', { name: 'View black-smith in Work' })).toBeVisible();
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
     await page.route('**/api/overview*', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -151,10 +148,8 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
 
     // Read synchronously, inside the route's hold — see the manual-refresh
     // block above for why a retrying matcher would prove nothing here.
-    expect(await page.locator('.ds-skeleton').count()).toBe(0);
-    expect(
-      await page.getByRole('link', { name: /black-smith project, opens overview/ }).count(),
-    ).toBe(1);
+    expect(await page.locator('.bs-skeleton').count()).toBe(0);
+    expect(await page.getByRole('link', { name: 'View black-smith in Work' }).count()).toBe(1);
   });
 
   test('Flow: topbar Refresh re-fetches the graph', async ({ page }) => {
@@ -175,7 +170,7 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
   }) => {
     await page.goto('/flow');
     await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
     // Hold the graph fetch only. The page's refresh tick awaits the picker's
     // /api/overview BEFORE load() runs, so a hold on every /api/** route
@@ -209,7 +204,7 @@ test.describe('Topbar Refresh reaches Projects and Flow (D-243)', () => {
     await page.getByLabel('Epic', { exact: true }).selectOption('epic-1');
 
     await expect(page.locator('.ds-banner')).toBeVisible();
-    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
     await expect(page.locator('.flow-node')).toHaveCount(0);
   });
 

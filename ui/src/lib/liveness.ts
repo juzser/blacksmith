@@ -5,7 +5,7 @@
 //
 // The mechanism stays polling, not sockets — design-spec.md §8 ("No
 // WebSockets") and composables/usePoll.ts. What was missing was not fresher
-// data but any *evidence* of freshness: OverviewPage already re-fetched every
+// data but any *evidence* of freshness: Home already re-fetches every
 // 5s, and a page frozen by a dead server looked exactly like a page where
 // nothing had changed. livenessLevel() turns "age of the last successful
 // load" into that evidence.

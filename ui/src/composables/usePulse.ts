@@ -33,7 +33,7 @@ import type { PulseState } from '../lib/navBadges.js';
 import { applyNav, applyPulse, EMPTY_PULSE_STATE, navBadges } from '../lib/navBadges.js';
 import { triggerGlobalRefresh, usePoll } from './usePoll.js';
 
-/** Matches OverviewPage's own interval — the shell should not read staler. */
+/** Matches Home's own interval — the shell should not read staler. */
 export const PULSE_POLL_MS = 5000;
 
 const state = ref<PulseState>(EMPTY_PULSE_STATE);
