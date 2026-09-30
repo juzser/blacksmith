@@ -1283,6 +1283,48 @@
 }
 .bs-mtopbar__overflow {
   min-width: 0;
+  display: flex;
+  gap: var(--bs-space-1);
+}
+/* ---- MobileProjectSwitcher (§3.1, finding 9): trigger + Popover list ---- */
+.bs-mproject {
+  display: contents;
+}
+.bs-mproject__trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  max-width: 12ch;
+  padding: var(--bs-space-1) var(--bs-space-2);
+  background: none;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-sm);
+  color: var(--bs-text);
+  font-size: var(--bs-text-sm);
+}
+.bs-mproject__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-mproject__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  min-width: 12rem;
+}
+.bs-mproject__item {
+  width: 100%;
+  text-align: left;
+  padding: var(--bs-space-2);
+  background: none;
+  border: none;
+  border-radius: var(--bs-radius-sm);
+  color: var(--bs-text);
+  font-size: var(--bs-text-sm);
+}
+.bs-mproject__item[aria-current='true'] {
+  background: var(--bs-surface-selected);
 }
 /* No shell-level scroll offset needed: the mobile shell's own topbar/tabbar
    are both flex-shrink: 0 siblings of .app-scroll inside .app-shell__main. */

@@ -161,7 +161,7 @@ const projection = computed(() => projectionNotice(pulse.value));
       :collapsed="isCollapsedWidth"
       @select="selectNav"
     />
-    <Sheet :open="sheetOpen" @close="sheetOpen = false">
+    <Sheet v-if="!isPhoneWidth" :open="sheetOpen" @close="sheetOpen = false">
       <SidebarNav :items="NAV_ITEMS" :active-id="activeId" @select="selectNav" />
     </Sheet>
 
@@ -176,9 +176,7 @@ const projection = computed(() => projectionNotice(pulse.value));
         :show-project-switcher="showProjectSwitcher"
         :project="project ?? ''"
         :project-options="projectOptions"
-        @open-nav="sheetOpen = true"
         @update-project="onSwitchProject"
-        @refresh="refresh"
         @toggle-pause="onTogglePause"
         @toggle-theme="toggle"
       />
