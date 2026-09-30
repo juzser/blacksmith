@@ -765,12 +765,14 @@ https://openrouter.ai/api/v1/models`, no key needed) on 2026-09-30:
 - **`codex` → `openai/gpt-6-sol`** — an exact match for the id `codex exec -m
   gpt-6-sol` pins, so the substitute is literally the same model, not an
   approximation.
-- **`deepseek` → `deepseek/deepseek-r1`** — the closest match, not exact: no
-  id named `deepseek-reasoner` or `reasoner` exists on OpenRouter at all. R1
-  is DeepSeek's own reasoning-tier lineage and the nearest equivalent
-  OpenRouter carries. Re-check the catalog before trusting this pairing long
-  after the date above; OpenRouter's id list is not versioned against this
-  repo.
+- **`deepseek` → `deepseek/deepseek-v4-pro`** — an exact match for the id
+  `deepseek-v4-pro` pins above, so the substitute is literally the same
+  model, not an approximation. DeepSeek's own `/models` listing dropped
+  `deepseek-reasoner` (operator check, 2026-09-30; a call naming it is now
+  silently answered by `deepseek-flash` instead of erroring), and
+  `deepseek-v4-pro` is its current reasoning-tier model. Re-check the
+  catalog before trusting this pairing long after the date above;
+  OpenRouter's id list is not versioned against this repo.
 
 Substitution is eligible when all four hold: the provider is not declared
 `enabled: false` outright (an explicit opt-out is never overridden — that

@@ -36,7 +36,7 @@ describe('crosscheck.ts', () => {
       kind: 'api',
       transport: 'api',
       baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-reasoner',
+      model: 'deepseek-v4-pro',
       apiKeyEnv: 'DEEPSEEK_API_KEY',
     });
     for (const [name, config] of Object.entries(policy.providers)) {
@@ -109,7 +109,7 @@ providers:
     transport: api
     enabled: true
     base_url: https://api.deepseek.com
-    model: deepseek-reasoner
+    model: deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
 `;
 
@@ -604,7 +604,7 @@ providers:
     `providers:\n  claude: { kind: native, enabled: true }\n  codex:\n    kind: api\n    transport: cli\n    command: ${NO_SUCH_COMMAND}\n    enabled: auto\n    mode: active\n    openrouter_fallback:\n      model: openai/gpt-6-sol\n${extra}`;
 
   const withOpenrouterDeepseek = (extra = ''): string =>
-    `providers:\n  claude: { kind: native, enabled: true }\n  deepseek:\n    kind: api\n    transport: api\n    base_url: https://api.deepseek.com\n    model: deepseek-reasoner\n    api_key_env: DEEPSEEK_API_KEY\n    enabled: auto\n    mode: active\n    openrouter_fallback:\n      model: deepseek/deepseek-r1\n${extra}`;
+    `providers:\n  claude: { kind: native, enabled: true }\n  deepseek:\n    kind: api\n    transport: api\n    base_url: https://api.deepseek.com\n    model: deepseek-v4-pro\n    api_key_env: DEEPSEEK_API_KEY\n    enabled: auto\n    mode: active\n    openrouter_fallback:\n      model: deepseek/deepseek-v4-pro\n${extra}`;
 
   describe('OpenRouter substitution and extra judges', () => {
     afterEach(() => {
@@ -640,7 +640,7 @@ providers:
         transport: 'api',
         enabled: true,
         mode: 'active',
-        model: 'deepseek/deepseek-r1',
+        model: 'deepseek/deepseek-v4-pro',
         apiKeyEnv: OPENROUTER_KEY,
         via: 'openrouter',
       });

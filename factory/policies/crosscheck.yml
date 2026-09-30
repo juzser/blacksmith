@@ -114,7 +114,13 @@ providers:
     kind: api
     transport: api
     base_url: https://api.deepseek.com
-    model: deepseek-reasoner
+    # `deepseek-reasoner` retired from DeepSeek's own `/models` listing
+    # (operator check, 2026-09-30): a call naming it is now silently
+    # answered by `deepseek-flash` instead of erroring, so the pin below
+    # matters -- a stale model id here fails open, not closed.
+    # `deepseek-v4-pro` is DeepSeek's current reasoning-tier model, the
+    # direct-API successor to the retired `deepseek-reasoner`.
+    model: deepseek-v4-pro
     response_format_json_object: true
     api_key_env: DEEPSEEK_API_KEY
     model_tier: mid
@@ -146,16 +152,15 @@ providers:
     mode: active
     # OpenRouter substitution (operator decision 1a): when DEEPSEEK_API_KEY
     # is missing and OPENROUTER_API_KEY is set, this provider runs through
-    # OpenRouter instead. `deepseek/deepseek-r1` is the CLOSEST catalog
-    # match, not exact -- `curl -s https://openrouter.ai/api/v1/models`
-    # (checked 2026-09-30) has no id named "deepseek-reasoner" or
-    # "reasoner" at all; R1 is DeepSeek's own reasoning-tier lineage and the
-    # nearest equivalent OpenRouter carries to the `model: deepseek-reasoner`
-    # pinned above. No response_format_json_object override: the catalog
-    # entry lists `response_format` among its supported parameters, same as
-    # the direct-API entry above, so the default (true) applies.
+    # OpenRouter instead. `deepseek/deepseek-v4-pro` is an EXACT catalog
+    # match (`curl -s https://openrouter.ai/api/v1/models`, checked
+    # 2026-09-30) for the id pinned above: the fallback substitutes as
+    # literally the same model, not an approximation, same as the codex
+    # substitution above. No response_format_json_object override: the
+    # catalog entry lists `response_format` among its supported parameters,
+    # same as the direct-API entry above, so the default (true) applies.
     openrouter_fallback:
-      model: deepseek/deepseek-r1
+      model: deepseek/deepseek-v4-pro
 
 quorum_triggers:
   # architecture §6, agent-constraints.md "cross-check (phase 8)" — all four,

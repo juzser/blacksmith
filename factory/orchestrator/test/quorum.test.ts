@@ -425,7 +425,7 @@ describe('quorum.ts recordJudgeRun / runQuorumCase (integration)', () => {
       {
         taskId: 'epic-1/task-1',
         modelTier: 'mid',
-        model: 'deepseek-reasoner',
+        model: 'deepseek-v4-pro',
         kind: 'verify',
         run: {
           provider: 'deepseek',
