@@ -1219,6 +1219,19 @@ describe('evaluateCommand — rule 5: history-rewrite-on-protected', () => {
     expect(ruleIds(d)).toContain('history-rewrite-on-protected');
   });
 
+  // bs-rename, operator decision 2/3: an epic that already integrates on
+  // smith/ keeps working there, but every new one lands on bs/ -- so the
+  // real guardrails.yml's protected_branches.patterns has to cover both
+  // shapes, not just the legacy one the fixture above still uses.
+  it('denies commit --amend on a shared bs/<epic>/integration branch, real policy', () => {
+    const real = loadGuardrailPolicy();
+    const d = evaluateCommand(
+      ctx({ command: 'git commit --amend', branch: 'bs/epic1/integration' }),
+      real,
+    );
+    expect(ruleIds(d)).toContain('history-rewrite-on-protected');
+  });
+
   it('denies filter-branch on main', () => {
     const d = evaluateCommand(
       ctx({ command: 'git filter-branch --tree-filter true HEAD', branch: 'main' }),
