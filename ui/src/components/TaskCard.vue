@@ -50,6 +50,7 @@ const showCase = computed(() => (sev.value && chip.value ? null : props.task.tag
         v-if="chip"
         :id="task.agentRole ?? ''"
         :label="chip.label"
+        :title="chip.title"
         :live="chip.live"
         :class="{ 'kanban-card__agent--gone': chip.gone }"
       />
