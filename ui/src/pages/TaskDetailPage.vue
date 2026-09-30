@@ -295,7 +295,7 @@ function agentChipLabel(role: string, modelTier: string | null): string {
                 style="border: 1px solid var(--ds-border); border-radius: var(--ds-radius-lg); padding: var(--ds-space-2); background: var(--ds-surface-raised); cursor: pointer; text-align: left; font-size: var(--ds-text-xs)"
                 @click="lightboxSrc = artifactUrl(a)"
               >
-                <img :src="artifactUrl(a)" :alt="a.type" style="width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--ds-radius-md)" />
+                <img :src="artifactUrl(a)" :alt="a.type" style="width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--ds-radius-sm)" />
                 <div style="margin-top: var(--ds-space-1)">{{ a.type }}</div>
               </button>
             </div>
