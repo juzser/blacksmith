@@ -35,6 +35,7 @@ import {
   findings,
   lessons,
   milestones,
+  operatorFeedback,
   prompts,
   sessions,
   tasks,
@@ -1516,6 +1517,14 @@ export const FREE_TIMELINE_EVENT_TYPES = [
   // only event written after `epic-closed`, so without it the timeline of a
   // closed epic ends at the closing and never shows what the closing was for.
   'integration-pr-opened',
+  // A comment the operator leaves mid-run on one task (feedback.ts), and its
+  // later resolution -- bounced, turned into a follow-up task, or dismissed.
+  // Both are the operator's own words about a specific task, the same reason
+  // operator-note is on this list, and neither carries a gate_event/graph_event
+  // tag: what happens to the comment is a later PR's playbook wiring, not a
+  // taxonomy outcome this orchestrator declares today.
+  'operator-feedback-recorded',
+  'operator-feedback-resolved',
 ];
 
 let cachedTaxonomy: Taxonomy | undefined;
@@ -1960,6 +1969,8 @@ export interface TaskDetail {
   agents: (typeof agents.$inferSelect)[];
   findings: (typeof findings.$inferSelect)[];
   artifacts: (typeof artifacts.$inferSelect)[];
+  /** Every `operator_feedback` row for this task, resolved and unresolved alike (feedback.ts). */
+  feedback: (typeof operatorFeedback.$inferSelect)[];
   branch: string | null;
 }
 
@@ -1986,6 +1997,11 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
   });
   const findingRows = db.select().from(findings).where(eq(findings.taskId, taskId)).all();
   const artifactRows = db.select().from(artifacts).where(eq(artifacts.taskId, taskId)).all();
+  const feedbackRows = db
+    .select()
+    .from(operatorFeedback)
+    .where(eq(operatorFeedback.taskId, taskId))
+    .all();
 
   return {
     task,
@@ -1994,6 +2010,7 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
     agents: agentRows,
     findings: findingRows,
     artifacts: artifactRows,
+    feedback: feedbackRows,
     branch: task.branch,
   };
 }

@@ -547,6 +547,10 @@ describe('db/queries.ts', () => {
         'task-result-recorded',
         'gate-outcome',
         'severity-decisions', // the same-mistake decision, also tagged task-1
+        // The fixture's operator-feedback pair on task-1 (recorded, then
+        // resolved as a follow-up) -- both free-listed onto the timeline.
+        'operator-feedback-recorded',
+        'operator-feedback-resolved',
       ]);
       // Non-decreasing timestamps (interleaved chronologically).
       const timestamps = entries.map((e) => e.ts);
@@ -940,6 +944,16 @@ describe('db/queries.ts', () => {
         criterionRef: null,
       });
       expect(detail?.artifacts).toHaveLength(1);
+      expect(detail?.feedback).toHaveLength(1);
+      expect(detail?.feedback[0]).toMatchObject({
+        taskId: TASK_1,
+        kind: 'nice-to-have',
+        source: 'github',
+        externalId: 'gh-comment:42',
+        author: 'sonnh',
+        resolution: 'follow-up',
+        followUpTaskId: 'epic-1/task-5',
+      });
       expect(detail?.branch).toBe(`smith/${EPIC_ID}/task-1`);
     });
 
@@ -1043,7 +1057,7 @@ describe('db/queries.ts', () => {
       const result = pulse(handle.db);
 
       // The same event overview()'s session row reports as the fixture's last.
-      expect(result.lastEventType).toBe('finding-transitioned');
+      expect(result.lastEventType).toBe('operator-feedback-resolved');
       expect(result.lastEventAt).not.toBeNull();
       expect(result.counts.events).toBe(readEventCount(handle));
       expect(result.counts.errors).toBe(1); // the one error errorsPage() groups
@@ -1693,7 +1707,7 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     expect(fixture).toMatchObject({
       liveAgentCount: 2, // same two agents overview() already counts
       projects: ['black-smith'],
-      lastEventType: 'finding-transitioned',
+      lastEventType: 'operator-feedback-resolved',
     });
     expect(fixture?.eventCount).toBeGreaterThan(0);
     expect(fixture && fixture.lastEventAt >= fixture.startedAt).toBe(true);

@@ -10684,6 +10684,535 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  describe('feedback record / pending / resolve', () => {
+    const feedbackDir = () => path.join(scratchDir, 'feedback-events');
+
+    function seedSession(sessionId: string): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        feedbackDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    function addTask(
+      sessionId: string,
+      parent: string,
+      taskId: string,
+      taskStatus: string,
+    ): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'system',
+          event_type: 'task-added',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: { task_status: taskStatus },
+        }),
+        '--state-dir',
+        feedbackDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    function record(sessionId: string, parent: string, taskId: string, extra: string[] = []) {
+      return runCli([
+        'feedback',
+        'record',
+        '--task',
+        taskId,
+        '--body',
+        'Please fix the flaky test.',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        parent,
+        '--state-dir',
+        feedbackDir(),
+        ...extra,
+      ]);
+    }
+
+    describe('feedback record', () => {
+      it('appends operator-feedback-recorded and prints event_id/feedback_id', () => {
+        const root = seedSession('fb-rec-1');
+        const taskAdded = addTask('fb-rec-1', root, 'epic-1/task-1', 'todo');
+
+        const { stdout, status } = record('fb-rec-1', taskAdded, 'epic-1/task-1');
+
+        expect(status).toBe(0);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.event_id).toBe('fb-rec-1#2');
+        expect(parsed.feedback_id).toMatch(/^fb-/);
+        expect(parsed.deduped).toBe(false);
+      });
+
+      it('defaults kind to must-fix and source to cli, visible through feedback pending', () => {
+        const root = seedSession('fb-rec-2');
+        const rec = record('fb-rec-2', root, 'epic-1/task-1');
+        const feedbackId = JSON.parse(rec.stdout).feedback_id;
+
+        const pending = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-rec-2',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        const item = JSON.parse(pending.stdout).pending.find(
+          (p: { feedbackId: string }) => p.feedbackId === feedbackId,
+        );
+        expect(item).toMatchObject({ kind: 'must-fix', source: 'cli' });
+      });
+
+      it('reads the body from --body-file', () => {
+        const root = seedSession('fb-rec-3');
+        const file = path.join(scratchDir, 'feedback-body.txt');
+        writeFileSync(file, 'From a file.\n');
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'record',
+          '--task',
+          'epic-1/task-1',
+          '--body-file',
+          file,
+          '--session',
+          'fb-rec-3',
+          '--causal-parent',
+          root,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+
+        expect(status).toBe(0);
+        expect(JSON.parse(stdout).feedback_id).toMatch(/^fb-/);
+      });
+
+      it('rejects neither --body nor --body-file', () => {
+        const root = seedSession('fb-rec-7');
+        const { stdout, status } = runCli([
+          'feedback',
+          'record',
+          '--task',
+          'epic-1/task-1',
+          '--session',
+          'fb-rec-7',
+          '--causal-parent',
+          root,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('cli.missing-flag');
+      });
+
+      it('refuses a whitespace-only body and writes nothing', () => {
+        const root = seedSession('fb-rec-4');
+        const { stdout, status } = runCli([
+          'feedback',
+          'record',
+          '--task',
+          'epic-1/task-1',
+          '--body',
+          '   ',
+          '--session',
+          'fb-rec-4',
+          '--causal-parent',
+          root,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('feedback.empty-body');
+
+        const tail = runCli(['event', 'tail', 'fb-rec-4', '--state-dir', feedbackDir()]);
+        expect(JSON.parse(tail.stdout).length).toBe(1);
+      });
+
+      it('rejects an invalid --kind', () => {
+        const root = seedSession('fb-rec-5');
+        const { stdout, status } = record('fb-rec-5', root, 'epic-1/task-1', ['--kind', 'urgent']);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('cli.invalid-flag');
+      });
+
+      it('rejects an invalid --source', () => {
+        const root = seedSession('fb-rec-8');
+        const { stdout, status } = record('fb-rec-8', root, 'epic-1/task-1', ['--source', 'slack']);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('cli.invalid-flag');
+      });
+
+      it('is idempotent on --external-id: a repeat returns the same feedback_id and appends nothing', () => {
+        const root = seedSession('fb-rec-6');
+        const first = record('fb-rec-6', root, 'epic-1/task-1', [
+          '--source',
+          'github',
+          '--external-id',
+          'gh-comment:1',
+        ]);
+        const firstParsed = JSON.parse(first.stdout);
+
+        const second = record('fb-rec-6', firstParsed.event_id, 'epic-1/task-1', [
+          '--source',
+          'github',
+          '--external-id',
+          'gh-comment:1',
+        ]);
+
+        expect(second.status).toBe(0);
+        const secondParsed = JSON.parse(second.stdout);
+        expect(secondParsed.feedback_id).toBe(firstParsed.feedback_id);
+        expect(secondParsed.deduped).toBe(true);
+
+        const tail = runCli(['event', 'tail', 'fb-rec-6', '--state-dir', feedbackDir()]);
+        expect(
+          JSON.parse(tail.stdout).filter(
+            (r: { record: { event_type: string } }) =>
+              r.record.event_type === 'operator-feedback-recorded',
+          ),
+        ).toHaveLength(1);
+      });
+    });
+
+    describe('feedback pending', () => {
+      it('lists unresolved feedback for a session, suggesting bounce for an open task', () => {
+        const root = seedSession('fb-pen-1');
+        const taskAdded = addTask('fb-pen-1', root, 'epic-1/task-1', 'todo');
+        record('fb-pen-1', taskAdded, 'epic-1/task-1');
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-pen-1',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+
+        expect(status).toBe(0);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.count).toBe(1);
+        expect(parsed.pending[0]).toMatchObject({
+          taskId: 'epic-1/task-1',
+          suggestedAction: 'bounce',
+        });
+      });
+
+      it('suggests follow-up once the task is closed to further work', () => {
+        const root = seedSession('fb-pen-2');
+        const taskAdded = addTask('fb-pen-2', root, 'epic-1/task-2', 'completed');
+        record('fb-pen-2', taskAdded, 'epic-1/task-2');
+
+        const { stdout } = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-pen-2',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(JSON.parse(stdout).pending[0].suggestedAction).toBe('follow-up');
+      });
+
+      it('narrows by --task', () => {
+        const root = seedSession('fb-pen-3');
+        const t1 = addTask('fb-pen-3', root, 'epic-1/task-1', 'todo');
+        const rec1 = record('fb-pen-3', t1, 'epic-1/task-1');
+        const t2 = addTask('fb-pen-3', JSON.parse(rec1.stdout).event_id, 'epic-1/task-2', 'todo');
+        record('fb-pen-3', t2, 'epic-1/task-2');
+
+        const { stdout } = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-pen-3',
+          '--task',
+          'epic-1/task-1',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.count).toBe(1);
+        expect(parsed.pending[0].taskId).toBe('epic-1/task-1');
+      });
+
+      it('narrows by --epic', () => {
+        const root = seedSession('fb-pen-4');
+        const t1 = addTask('fb-pen-4', root, 'epic-1/task-1', 'todo');
+        const rec1 = record('fb-pen-4', t1, 'epic-1/task-1');
+        const t2 = addTask('fb-pen-4', JSON.parse(rec1.stdout).event_id, 'epic-2/task-1', 'todo');
+        record('fb-pen-4', t2, 'epic-2/task-1');
+
+        const { stdout } = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-pen-4',
+          '--epic',
+          'epic-2',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.count).toBe(1);
+        expect(parsed.pending[0].taskId).toBe('epic-2/task-1');
+      });
+
+      it('omits a resolved feedback item', () => {
+        const root = seedSession('fb-pen-5');
+        const t1 = addTask('fb-pen-5', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-pen-5', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+        runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'dismissed',
+          '--session',
+          'fb-pen-5',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+
+        const { stdout } = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-pen-5',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(JSON.parse(stdout).count).toBe(0);
+      });
+
+      it('rejects a session that was never started', () => {
+        const { status } = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-pen-never',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+      });
+    });
+
+    describe('feedback resolve', () => {
+      it('resolves as bounced and prints the event', () => {
+        const root = seedSession('fb-res-1');
+        const t1 = addTask('fb-res-1', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-1', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'bounced',
+          '--session',
+          'fb-res-1',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+
+        expect(status).toBe(0);
+        const parsed = JSON.parse(stdout);
+        expect(parsed.record.event_type).toBe('operator-feedback-resolved');
+        expect(parsed.record.payload.resolution).toBe('bounced');
+      });
+
+      it('rejects an unknown feedback id', () => {
+        const root = seedSession('fb-res-2');
+        const { stdout, status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          'fb-does-not-exist',
+          '--resolution',
+          'dismissed',
+          '--session',
+          'fb-res-2',
+          '--causal-parent',
+          root,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('feedback.unknown-feedback');
+      });
+
+      it('rejects resolving the same feedback twice', () => {
+        const root = seedSession('fb-res-3');
+        const t1 = addTask('fb-res-3', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-3', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const first = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'dismissed',
+          '--session',
+          'fb-res-3',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(first.status).toBe(0);
+
+        const second = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'bounced',
+          '--session',
+          'fb-res-3',
+          '--causal-parent',
+          JSON.parse(first.stdout).event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(second.status).toBe(1);
+        expect(JSON.parse(second.stdout).error.code).toBe('feedback.already-resolved');
+      });
+
+      it('rejects follow-up resolution with no --follow-up-task, and appends no event', () => {
+        const root = seedSession('fb-res-5');
+        const t1 = addTask('fb-res-5', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-5', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'follow-up',
+          '--session',
+          'fb-res-5',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('feedback.missing-follow-up-task');
+
+        const pending = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-res-5',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(
+          JSON.parse(pending.stdout).pending.some(
+            (p: { feedbackId: string }) => p.feedbackId === recParsed.feedback_id,
+          ),
+        ).toBe(true);
+      });
+
+      it('rejects a --follow-up-task on a non-follow-up resolution, and appends no event', () => {
+        const root = seedSession('fb-res-6');
+        const t1 = addTask('fb-res-6', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-6', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'bounced',
+          '--follow-up-task',
+          'epic-1/task-2',
+          '--session',
+          'fb-res-6',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('feedback.unexpected-follow-up-task');
+
+        const pending = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-res-6',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(
+          JSON.parse(pending.stdout).pending.some(
+            (p: { feedbackId: string }) => p.feedbackId === recParsed.feedback_id,
+          ),
+        ).toBe(true);
+      });
+
+      it('rejects an invalid --resolution', () => {
+        const root = seedSession('fb-res-4');
+        const t1 = addTask('fb-res-4', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-4', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const { status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'ignored',
+          '--session',
+          'fb-res-4',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+      });
+    });
+  });
+
   // The tester's screenshots reach the dashboard the moment the tester
   // finishes, not only at the next `gate run`. `gate run` bundles this same
   // schema-check/task-result-recorded/artifact-check sequence with a worktree

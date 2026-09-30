@@ -1,14 +1,16 @@
 // Synthesizes one realistic session event log covering every projection
 // table (db/schema.ts): prompts, dispatches, task lifecycle, findings incl.
-// waived + suppressed, edges, errors, lessons, artifacts. Uses the REAL
-// findings.ts/waivers.ts functions (raiseFinding/transition/grantWaiver/
-// denyWaiver) for anything they own — the same "reuse the fold" rule the
-// projector itself follows — and plain appendEvent() for event kinds no
+// waived + suppressed, edges, errors, lessons, artifacts, operator feedback.
+// Uses the REAL findings.ts/waivers.ts/feedback.ts functions
+// (raiseFinding/transition/grantWaiver/denyWaiver/recordFeedback/
+// resolveFeedback) for anything they own — the same "reuse the fold" rule
+// the projector itself follows — and plain appendEvent() for event kinds no
 // module owns yet (task-added/wave-admitted/wave-merged/task-superseded/
 // task-result-recorded/lesson-candidate-raised/lesson-status-changed).
 // prompts.ts joined the first list in D-142; operator-note is still in the
 // second, and is the remaining event here a person writes by hand.
 import { appendEdge, appendEvent, type EventOpts, readEvents } from '../../src/events.js';
+import { recordFeedback, resolveFeedback } from '../../src/feedback.js';
 import type { EventContext } from '../../src/findings.js';
 import { raiseFinding, transition } from '../../src/findings.js';
 import { recordUserPrompt } from '../../src/prompts.js';
@@ -44,6 +46,8 @@ export interface FixtureIds {
   finding4Id: string; // task-4, S2, parked at "confirmed"
   lessonId: string;
   rejectedLessonId: string; // raised, then invalidated by the operator
+  feedbackOpenId: string; // task-4 (never merged): still-unresolved, the "bounce" branch
+  feedbackResolvedId: string; // task-1 (merged): resolved as a follow-up task
 }
 
 export async function buildFixture(opts: EventOpts): Promise<FixtureIds> {
@@ -736,6 +740,52 @@ export async function buildFixture(opts: EventOpts): Promise<FixtureIds> {
   );
   parent = await lastEventId(opts);
 
+  // --- operator feedback: one still-open comment on task-4 (never merged —
+  // the "bounce back to its coder" branch), one on task-1 (merged) resolved
+  // as a follow-up task. Through the real writer (feedback.ts), same D-142
+  // reasoning as recordUserPrompt above. ---
+  const feedbackOpen = await recordFeedback(
+    {
+      taskId: TASK_4,
+      body: 'The theme toggle still resets after reload — please take another pass.',
+      kind: 'must-fix',
+      source: 'dashboard',
+      // Pinned: recordFeedback's default id is randomUUID(), and
+      // e2eFixtureDeterminism.test.ts asserts two builds of this fixture
+      // are byte-identical.
+      feedbackId: 'fb-fixture-task4-open',
+    },
+    { sessionId: SESSION_ID, planVersion, causalParent: parent },
+    opts,
+  );
+  parent = feedbackOpen.event.event_id;
+
+  const feedbackResolved = await recordFeedback(
+    {
+      taskId: TASK_1,
+      body: 'Nice work — could the widget loop also handle n=0?',
+      kind: 'nice-to-have',
+      source: 'github',
+      externalId: 'gh-comment:42',
+      author: 'sonnh',
+      feedbackId: 'fb-fixture-task1-resolved',
+    },
+    { sessionId: SESSION_ID, planVersion, causalParent: parent },
+    opts,
+  );
+  parent = feedbackResolved.event.event_id;
+
+  const feedbackResolution = await resolveFeedback(
+    {
+      feedbackId: feedbackResolved.feedbackId,
+      resolution: 'follow-up',
+      followUpTaskId: 'epic-1/task-5',
+    },
+    { sessionId: SESSION_ID, planVersion, causalParent: parent },
+    opts,
+  );
+  parent = feedbackResolution.event_id;
+
   return {
     userPromptId: prompt.event_id,
     dispatchTask1Id: dispatch1.event_id,
@@ -747,5 +797,7 @@ export async function buildFixture(opts: EventOpts): Promise<FixtureIds> {
     finding4Id: raised4.finding.finding_id,
     lessonId: 'lesson-1',
     rejectedLessonId: 'lesson-2',
+    feedbackOpenId: feedbackOpen.feedbackId,
+    feedbackResolvedId: feedbackResolved.feedbackId,
   };
 }
