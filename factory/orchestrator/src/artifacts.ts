@@ -138,6 +138,37 @@ function contains(root: string, child: string): boolean {
 }
 
 /**
+ * Resolve one declared artifact path to an absolute, real, on-disk location
+ * inside `<artifactsDir>/<taskId>/`, for a reader that is about to open the
+ * bytes rather than merely check the declaration — the dashboard's artifact
+ * route, not the gate. Reuses `checkArtifacts`'s containment and realpath
+ * logic so the two agree about what "inside the home" means; returns `null`
+ * for anything that logic would flag (`..`, an absolute path, a symlink that
+ * escapes, a missing file) rather than a reason, since the only caller turns
+ * every reason into the same 404.
+ */
+export function resolveArtifactPath(
+  taskId: string,
+  declaredPath: string,
+  artifactsDir: string = STATE_ARTIFACTS_DIR,
+): string | null {
+  try {
+    const root = path.resolve(artifactsDir);
+    const home = homeUnder(root, taskId);
+    if (path.isAbsolute(declaredPath)) return null;
+    const resolved = path.resolve(home, declaredPath);
+    if (resolved === home || !contains(home, resolved)) return null;
+    if (!existsSync(resolved)) return null;
+    const realHome = realOf(home);
+    const real = realOf(resolved);
+    if (!contains(realHome, real)) return null;
+    return real;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check every path a result declares as evidence. Relative paths resolve
  * against the task's home, so `coverage.txt` means the obvious thing and the
  * short spelling is also the correct one. A path that already begins with the

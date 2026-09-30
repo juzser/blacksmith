@@ -19,17 +19,21 @@
 // factory/orchestrator/dist/ build (`pnpm build`, run first) keeps every
 // path computation correct. See docs/standards/stack.md's directory
 // conventions — dist/ is gitignored/generated, never committed.
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, constants as fsConstants, readdirSync, statSync } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { serveStatic } from '@hono/node-server/serve-static';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { resolveArtifactPath } from '../../../factory/orchestrator/dist/artifacts.js';
 import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import type { AnalyticsResult, Scope } from '../../../factory/orchestrator/dist/db/queries.js';
 import {
   analytics,
+  artifactById,
   errorsPage,
   flowGraph,
   kanban,
@@ -53,12 +57,33 @@ import type {
 import { transitionLesson } from '../../../factory/orchestrator/dist/lessons.js';
 import type { LogCache } from '../../../factory/orchestrator/dist/logCache.js';
 import { createLogCache } from '../../../factory/orchestrator/dist/logCache.js';
-import { STATE_EVENTS_DIR } from '../../../factory/orchestrator/dist/paths.js';
+import { STATE_ARTIFACTS_DIR, STATE_EVENTS_DIR } from '../../../factory/orchestrator/dist/paths.js';
 import type { SchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import { loadSchedulerPolicy } from '../../../factory/orchestrator/dist/scheduler.js';
 import type { WaiverBatchDecision } from '../../../factory/orchestrator/dist/waivers.js';
 import { applyBatch } from '../../../factory/orchestrator/dist/waivers.js';
 import { writeGuard } from './middleware.js';
+
+/**
+ * The only image types the artifact route will stream — a screenshot is a
+ * png, jpeg, webp or gif in practice, and serving anything else (svg, html)
+ * with an image content type is an XSS vector the route has no reason to
+ * open. Keyed by lowercase extension, checked before the bytes are read.
+ */
+const ARTIFACT_CONTENT_TYPE_BY_EXT: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+};
+
+/**
+ * Largest artifact the route will read. A screenshot is well under this; a
+ * bigger file is refused rather than buffered, since the task page polls and
+ * one oversized declared path would otherwise be read into memory each time.
+ */
+const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 
 /**
  * How often the change stream re-scans `state/events/` while at least one
@@ -83,6 +108,15 @@ export interface AppOpts {
   stateDir?: string;
   roadmapPath?: string;
   specsDir?: string;
+  /** Injection seam for tests; production is `state/artifacts`. */
+  artifactsDir?: string;
+  /** Injection seam for tests; production is MAX_ARTIFACT_BYTES. */
+  maxArtifactBytes?: number;
+  /**
+   * Test-only hook run between resolving an artifact's path and opening it,
+   * so a test can stage the swap the open has to survive.
+   */
+  onArtifactResolved?: () => Promise<void>;
   /** Root of the built Vue app (ui/dist) to static-serve; omitted in tests (API-only). */
   uiDistDir?: string;
   /**
@@ -602,6 +636,8 @@ export function createApp(opts: AppOpts): AppHandle {
   // operator to click Approve discovers. Unguarded for the same reason
   // noveltyOptsFromFlags() is — a missing policy is an error, not a default.
   const lessonsPolicy = (opts.schedulerPolicy ?? loadSchedulerPolicy()).lessons;
+  const artifactsDir = opts.artifactsDir ?? STATE_ARTIFACTS_DIR;
+  const maxArtifactBytes = opts.maxArtifactBytes ?? MAX_ARTIFACT_BYTES;
   // Spread into every clock-dependent query rather than resolved to a
   // default here: an absent pin must stay absent so each query reads the
   // wall clock per call (AppOpts.nowIso), not the instant the server booted.
@@ -808,6 +844,42 @@ export function createApp(opts: AppOpts): AppHandle {
     const detail = taskDetail(handle.db, taskId);
     if (!detail) throw new SmithError('task.not-found', `No task "${taskId}".`, { taskId });
     return c.json(detail);
+  });
+
+  // Serves a task's own screenshots to the dashboard. The id comes from the
+  // projected `artifacts` row, never from the URL directly: what the request
+  // names is looked up, and what gets opened is what resolveArtifactPath()
+  // resolves that row's own taskId/path to — never a caller-supplied path.
+  app.get('/api/artifacts/:artifactId', async (c) => {
+    const artifactId = c.req.param('artifactId');
+    const row = artifactById(handle.db, artifactId);
+    if (!row) return c.body(null, 404);
+    const resolved = resolveArtifactPath(row.taskId, row.path, artifactsDir);
+    if (!resolved) return c.body(null, 404);
+    const contentType = ARTIFACT_CONTENT_TYPE_BY_EXT[path.extname(resolved).toLowerCase()];
+    if (!contentType) return c.body(null, 415);
+    await opts.onArtifactResolved?.();
+    // resolveArtifactPath() returned the real path, so no component of it is
+    // a link. Open with O_NOFOLLOW and check the descriptor, not the path: a
+    // file swapped for a symlink after the check fails the open, and what is
+    // read is exactly what fstat() described.
+    let file: FileHandle;
+    try {
+      file = await open(resolved, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    } catch {
+      return c.body(null, 404);
+    }
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile()) return c.body(null, 404);
+      if (stat.size > maxArtifactBytes) return c.body(null, 413);
+      const bytes = await file.readFile();
+      c.header('Content-Type', contentType);
+      c.header('X-Content-Type-Options', 'nosniff');
+      return c.body(bytes);
+    } finally {
+      await file.close();
+    }
   });
 
   app.get('/api/lessons', (c) => c.json(lessonsPage(handle.db, sessionScope(c))));

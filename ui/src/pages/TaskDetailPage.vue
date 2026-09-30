@@ -2,7 +2,7 @@
 // Task detail — design-spec.md §5.5. Tabs Overview/Findings/Artifacts/
 // History; waiver UI exactly per spec: Waive/Deny only on S3+confirmed+
 // unwaived, Popover confirm naming the fingerprint, Toast, race guard.
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import Banner from '../components/ds/Banner.vue';
 import Button from '../components/ds/Button.vue';
 import Card from '../components/ds/Card.vue';
@@ -19,6 +19,7 @@ import TwoColumn from '../components/ds/TwoColumn.vue';
 import IdentityChip from '../components/IdentityChip.vue';
 import TimelineRow from '../components/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
 import { useToast } from '../composables/useToast.js';
 import {
   applyWaiverBatch,
@@ -100,6 +101,9 @@ onMounted(() => {
   load();
   loadHistory();
 });
+// The page refreshes live: a task's screenshots should appear as soon as the
+// task produces them, not only on a manual Refresh click.
+usePoll(load, 15000);
 
 // Waiver mutation race guard (ux-conventions.md §3): disable + `if (saving) return`.
 const saving = ref<string | null>(null); // fingerprint currently in flight, or null
@@ -143,6 +147,17 @@ async function decide(fingerprint: string, decision: 'granted' | 'denied') {
 }
 
 const lightboxSrc = ref<string | null>(null);
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
+function isImageArtifact(a: TaskDetail['artifacts'][number]): boolean {
+  return a.type === 'screenshot' || IMAGE_EXTENSIONS.test(a.path);
+}
+function artifactUrl(a: TaskDetail['artifacts'][number]): string {
+  return `/api/artifacts/${encodeURIComponent(a.id)}`;
+}
+const imageArtifacts = computed(() => detail.value?.artifacts.filter(isImageArtifact) ?? []);
+const otherArtifacts = computed(
+  () => detail.value?.artifacts.filter((a) => !isImageArtifact(a)) ?? [],
+);
 const tabs = [
   { id: 'overview', label: 'Overview' },
   { id: 'findings', label: 'Findings' },
@@ -271,17 +286,28 @@ function agentChipLabel(role: string, modelTier: string | null): string {
         </template>
 
         <template #artifacts>
-          <div v-if="detail.artifacts.length > 0" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--ds-space-3)">
-            <button
-              v-for="a in detail.artifacts"
-              :key="a.id"
-              type="button"
-              style="border: 1px solid var(--ds-border); border-radius: var(--ds-radius-lg); padding: var(--ds-space-2); background: var(--ds-surface-raised); cursor: pointer; text-align: left; font-size: var(--ds-text-xs)"
-              @click="a.type === 'screenshot' ? (lightboxSrc = a.path) : undefined"
-            >
-              {{ a.type }}: {{ a.path }}
-            </button>
-          </div>
+          <template v-if="detail.artifacts.length > 0">
+            <div v-if="imageArtifacts.length > 0" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--ds-space-3)">
+              <button
+                v-for="a in imageArtifacts"
+                :key="a.id"
+                type="button"
+                style="border: 1px solid var(--ds-border); border-radius: var(--ds-radius-lg); padding: var(--ds-space-2); background: var(--ds-surface-raised); cursor: pointer; text-align: left; font-size: var(--ds-text-xs)"
+                @click="lightboxSrc = artifactUrl(a)"
+              >
+                <img :src="artifactUrl(a)" :alt="a.type" style="width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--ds-radius-sm)" />
+                <div style="margin-top: var(--ds-space-1)">{{ a.type }}</div>
+              </button>
+            </div>
+            <RowList v-if="otherArtifacts.length > 0" density="compact">
+              <li v-for="a in otherArtifacts" :key="a.id" class="ds-row">
+                <span class="ds-row__main">
+                  <span class="ds-row__title">{{ a.type }}</span>
+                  <span class="ds-row__meta">{{ a.path }}</span>
+                </span>
+              </li>
+            </RowList>
+          </template>
           <EmptyState v-else icon="image">No artifacts recorded.</EmptyState>
           <Dialog :open="!!lightboxSrc" title="Artifact preview" @close="lightboxSrc = null">
             <img v-if="lightboxSrc" :src="lightboxSrc" alt="Artifact preview" style="max-width: 100%" />

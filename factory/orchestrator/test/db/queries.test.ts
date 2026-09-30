@@ -7,6 +7,7 @@ import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
 import {
   analytics,
+  artifactById,
   errorsPage,
   flowGraph,
   kanban,
@@ -906,6 +907,17 @@ describe('db/queries.ts', () => {
 
     it('returns null for an unknown task', () => {
       expect(taskDetail(handle.db, 'epic-1/does-not-exist')).toBeNull();
+    });
+
+    it('artifactById looks up one projected artifact row by its id', () => {
+      const detail = taskDetail(handle.db, TASK_1);
+      const artifactId = detail?.artifacts[0]?.id;
+      expect(artifactId).toBeDefined();
+      expect(artifactById(handle.db, artifactId as string)).toMatchObject({
+        taskId: TASK_1,
+        path: 'artifacts/task-1.diff',
+      });
+      expect(artifactById(handle.db, 'no-such-id')).toBeNull();
     });
 
     it('lists tied attempts in log order, not in the order the rows come back', async () => {
