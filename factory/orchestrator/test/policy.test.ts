@@ -2312,6 +2312,18 @@ describe('role write scopes', () => {
       expect(ruleIds(run('rm state/sandboxes/abc.json'))).toContain('judge-sandbox-escape');
     });
 
+    it('refuses the lift through `bs`, the CLI name, not only the deprecated `smith` alias', () => {
+      expect(ruleIds(run('bs sandbox close'))).toContain('judge-sandbox-escape');
+      expect(ruleIds(run('pnpm run test && bs sandbox close --session s'))).toContain(
+        'judge-sandbox-escape',
+      );
+    });
+
+    it('lets a `bs` command that does not touch the sandbox through', () => {
+      expect(ruleIds(run('bs plan validate plan.json'))).not.toContain('judge-sandbox-escape');
+      expect(run('bs plan validate plan.json').allowed).toBe(true);
+    });
+
     it('keeps the base six, so a lease is never a way to become more permissible', () => {
       expect(ruleIds(run('git push origin main'))).toContain('push-to-protected');
     });
