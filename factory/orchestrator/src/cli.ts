@@ -3816,6 +3816,14 @@ async function main(): Promise<number> {
         // from a hole nobody filled -- resolved the same way `effort show`
         // resolves it, security floor included.
         effort: resolveEpicEffort(epicId, flags),
+        // --project is already required above; hand it to the crosscheck
+        // load too, so a project's .blacksmith/crosscheck.yml overlay
+        // (OpenRouter substitution/extra judges) is what the verdict's
+        // quorum actually reads, not just what preflight reports. No
+        // --policy override for this command (unlike judge preflight):
+        // the shipped/default path plus the project overlay is the only
+        // combination epic verdict has ever read.
+        crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir }) },
       },
       ctx,
       eventOptsFromFlags(flags),
@@ -3843,6 +3851,10 @@ async function main(): Promise<number> {
         // See `epic verdict` above: same tier resolution, so a close can
         // never waive a review its own verdict would have blocked on.
         effort: resolveEpicEffort(epicId, flags),
+        // Same reasoning as `epic verdict` above: the project overlay must
+        // reach the close's own crosscheck load too, not just the verdict
+        // it is closing over.
+        crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir }) },
         ...(flags['override-rationale'] !== undefined
           ? { overrideRationale: flags['override-rationale'] }
           : {}),
@@ -4577,7 +4589,7 @@ async function main(): Promise<number> {
     // Deliberately ahead of `judge run` in this file for the same reason it is
     // ahead of it in the runbook: an operator reaching for a calibration call
     // to find out why a provider keeps failing usually needed this instead.
-    const report = judgePreflight(flags.policy);
+    const report = judgePreflight(flags.policy, { projectDir: flags.project });
     printJson(report);
     return report.problems.length > 0 ? 1 : 0;
   }

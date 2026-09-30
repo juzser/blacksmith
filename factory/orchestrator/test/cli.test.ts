@@ -3929,6 +3929,65 @@ describe('cli.ts (built binary)', () => {
     ).toBe(true);
   });
 
+  it('judge preflight --project: reads the project overlay over the policy file', async () => {
+    // Operator decision 2 (OpenRouter brief): a project's
+    // .blacksmith/crosscheck.yml overrides fields of an existing provider by
+    // name, highest precedence. No --project at all is the pre-existing
+    // behaviour above; this proves the CLI actually threads the flag through
+    // rather than judgePreflight() merely supporting it in isolation.
+    const policyPath = path.join(scratchDir, 'preflight-overlay-policy.yml');
+    await writeFile(
+      policyPath,
+      [
+        'providers:',
+        '  claude:',
+        '    kind: native',
+        '    enabled: true',
+        '  ds:',
+        '    kind: api',
+        '    transport: api',
+        '    enabled: true',
+        '    mode: shadow',
+        '    model_tier: mid',
+        '    base_url: https://example.invalid',
+        '    model: test-model',
+        '    api_key_env: SMITH_TEST_KEY_THAT_IS_NEVER_SET',
+        '',
+      ].join('\n'),
+    );
+
+    // No --project: same unmet result as the bare-policy test above.
+    const withoutProject = runCli(['judge', 'preflight', '--policy', policyPath]);
+    expect(withoutProject.status).toBe(1);
+    expect(JSON.parse(withoutProject.stdout).problems).toHaveLength(1);
+
+    // --project points at a directory whose overlay disables `ds` outright —
+    // proves the CLI reads --project and hands it to judgePreflight(), not
+    // just that judgePreflight() itself supports a projectDir.
+    const projectDir = path.join(scratchDir, 'preflight-project');
+    await mkdir(path.join(projectDir, '.blacksmith'), { recursive: true });
+    await writeFile(
+      path.join(projectDir, '.blacksmith', 'crosscheck.yml'),
+      ['providers:', '  ds:', '    enabled: false', ''].join('\n'),
+    );
+
+    const withProject = runCli([
+      'judge',
+      'preflight',
+      '--policy',
+      policyPath,
+      '--project',
+      projectDir,
+    ]);
+    expect(withProject.status).toBe(0);
+    const report = JSON.parse(withProject.stdout);
+    expect(report.problems).toEqual([]);
+    expect(report.providers.find((p: { provider: string }) => p.provider === 'ds')).toMatchObject({
+      enabled: false,
+      status: 'not-applicable',
+    });
+  });
+
   it('stats providers: reports per-provider calibration stats from judge-verdict events', () => {
     const sessionId = `cli-providers-${Date.now()}`;
     const eventsDir = path.join(scratchDir, 'providers-events');

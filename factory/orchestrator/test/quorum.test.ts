@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { foldAgents, liveAgents } from '../src/agents-registry.js';
 import type { CrosscheckPolicy } from '../src/crosscheck.js';
 import { checkDelegationLog, type DelegationPolicy } from '../src/delegation.js';
@@ -587,6 +587,126 @@ describe('quorum.ts recordJudgeRun / runQuorumCase (integration)', () => {
     });
     const events = await readEvents(sessionId, { stateDir });
     expect(events.some((e) => e.record.event_type === 'judge-verdict')).toBe(false);
+  });
+
+  // Operator decision 1a: a substituted provider keeps its own name, mode and
+  // gating power -- only the transport target changed. The event log has to
+  // say so in words, not just in the model id, or a reader scanning
+  // dispatch_decision rows for "which providers actually ran deepseek" would
+  // never learn this one didn't.
+  it('records "via openrouter" in the dispatch reason and verdict payload when the run substituted (1a)', async () => {
+    const run: ExternalJudgeRun = {
+      ...externalOk('codex', 'active', 'confirm'),
+      via: 'openrouter',
+    };
+    await recordJudgeRun(
+      {
+        taskId: 'epic-1/task-1',
+        modelTier: 'mid',
+        model: 'openai/gpt-6-sol',
+        kind: 'verify',
+        run,
+        native: native(),
+      },
+      ctx(),
+      { stateDir },
+    );
+
+    const events = await readEvents(sessionId, { stateDir });
+    const dispatch = events.find((e) => e.record.event_type === 'dispatch_decision');
+    const verdict = events.find((e) => e.record.event_type === 'judge-verdict');
+    const dispatchPayload = dispatch?.record.payload as { reason: string };
+    expect(dispatchPayload.reason).toBe('cross-provider judge (active) via openrouter');
+    expect(verdict?.record.payload).toMatchObject({ via: 'openrouter', model: 'openai/gpt-6-sol' });
+  });
+
+  it('never mentions openrouter when the run did not substitute', async () => {
+    const run = externalOk('codex', 'active', 'confirm');
+    await recordJudgeRun(
+      {
+        taskId: 'epic-1/task-1',
+        modelTier: 'mid',
+        model: 'codex:default',
+        kind: 'verify',
+        run,
+        native: native(),
+      },
+      ctx(),
+      { stateDir },
+    );
+
+    const events = await readEvents(sessionId, { stateDir });
+    const dispatch = events.find((e) => e.record.event_type === 'dispatch_decision');
+    const verdict = events.find((e) => e.record.event_type === 'judge-verdict');
+    const dispatchPayload = dispatch?.record.payload as { reason: string };
+    expect(dispatchPayload.reason).toBe('cross-provider judge (active)');
+    const verdictPayload = verdict?.record.payload as { via?: unknown };
+    expect(verdictPayload.via).toBeNull();
+  });
+
+  it("runQuorumCase threads a substituted provider's via from the policy into the recorded verdict", async () => {
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              { message: { content: JSON.stringify({ verdict: 'confirm', rationale: 'ok' }) } },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const policy: CrosscheckPolicy = {
+      ...crosscheckDefaults(),
+      providers: {
+        claude: { name: 'claude', kind: 'native', enabled: true },
+        codex: {
+          name: 'codex',
+          kind: 'api',
+          transport: 'api',
+          enabled: true,
+          enabledSource: 'declared',
+          mode: 'active',
+          modelTier: 'mid',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          model: 'openai/gpt-6-sol',
+          apiKeyEnv: 'OPENROUTER_API_KEY',
+          responseFormatJsonObject: true,
+          via: 'openrouter',
+        },
+      },
+      quorumRule: { agreement: '2-of-3', minProviders: 2, acceptNonGatingActives: false },
+    };
+
+    await runQuorumCase(
+      {
+        taskId: 'epic-1/task-1',
+        triggerReason: 'blocking-finding',
+        finderProvider: 'coder-session',
+        kind: 'verify',
+        native: native({ verdict: 'confirm' }),
+        providers: ['codex'],
+        request: {
+          kind: 'verify',
+          taskId: 'epic-1/task-1',
+          inputRefs: {},
+          prompt: 'judge it',
+          schemaName: 'judge-verdict',
+          budget: { timeout_ms: 5000, max_output_bytes: 100_000 },
+        },
+        policy,
+        fetchImpl: fetchMock,
+      },
+      ctx(),
+      { stateDir },
+    );
+
+    const events = await readEvents(sessionId, { stateDir });
+    const dispatch = events.find((e) => e.record.event_type === 'dispatch_decision');
+    const verdict = events.find((e) => e.record.event_type === 'judge-verdict');
+    const dispatchPayload = dispatch?.record.payload as { reason: string };
+    expect(dispatchPayload.reason).toBe('cross-provider judge (active) via openrouter');
+    expect(verdict?.record.payload).toMatchObject({ via: 'openrouter', model: 'openai/gpt-6-sol' });
   });
 });
 

@@ -97,6 +97,19 @@ providers:
     # is make this box gate the moment one is enabled, with no second edit
     # and no second decision to remember. Rollback is `mode: shadow` here.
     mode: active
+    # OpenRouter substitution (operator decision 1a, docs/runbooks/providers.md
+    # §9): when `codex` is missing from PATH or not logged in, and
+    # OPENROUTER_API_KEY is set, this provider runs through OpenRouter
+    # instead — same name, same mode, same gating power, only the transport
+    # and model underneath change. `openai/gpt-6-sol` is an EXACT catalog
+    # match (`curl -s https://openrouter.ai/api/v1/models`, checked
+    # 2026-09-30) for the id `-m gpt-6-sol` pins above: codex substitutes as
+    # literally the same model, not an approximation. No
+    # response_format_json_object override: the catalog entry lists
+    # `response_format` among its supported parameters, so the default
+    # (true) applies.
+    openrouter_fallback:
+      model: openai/gpt-6-sol
   deepseek:
     kind: api
     transport: api
@@ -131,6 +144,18 @@ providers:
     # two dogfooded product epics (docs/runbooks/providers.md §3).
     # Rollback is `mode: shadow` here; nothing else remembers the promotion.
     mode: active
+    # OpenRouter substitution (operator decision 1a): when DEEPSEEK_API_KEY
+    # is missing and OPENROUTER_API_KEY is set, this provider runs through
+    # OpenRouter instead. `deepseek/deepseek-r1` is the CLOSEST catalog
+    # match, not exact -- `curl -s https://openrouter.ai/api/v1/models`
+    # (checked 2026-09-30) has no id named "deepseek-reasoner" or
+    # "reasoner" at all; R1 is DeepSeek's own reasoning-tier lineage and the
+    # nearest equivalent OpenRouter carries to the `model: deepseek-reasoner`
+    # pinned above. No response_format_json_object override: the catalog
+    # entry lists `response_format` among its supported parameters, same as
+    # the direct-API entry above, so the default (true) applies.
+    openrouter_fallback:
+      model: deepseek/deepseek-r1
 
 quorum_triggers:
   # architecture §6, agent-constraints.md "cross-check (phase 8)" — all four,

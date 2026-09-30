@@ -813,9 +813,9 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'judge preflight',
     positionals: '',
-    flags: '[--policy <file>]',
+    flags: '[--policy <file>] [--project <dir>]',
     summary:
-      'Can the enabled providers be called at all, and would a promotion decide anything? Exit 1 on a provider that costs a call it cannot make.',
+      'Can the enabled providers be called at all, and would a promotion decide anything? Exit 1 on a provider that costs a call it cannot make. --project merges <dir>/.blacksmith/crosscheck.yml over the policy (OpenRouter substitution/extra judges).',
   },
   {
     command: 'judge run',
