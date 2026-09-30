@@ -823,3 +823,200 @@
   text-align: center;
   color: var(--bs-text-subtle);
 }
+
+/* Progress (ds-spec.md §2.1 rows ProgressRing/ProgressBarMini/ProgressBar +
+   the "Progress tones and placement" paragraph). ProgressRing/ProgressBarMini
+   share tone/percent logic via kit/progressTone.ts; both read their fill
+   colour from an inline style, not a CSS class, since the tone is chosen at
+   runtime. ProgressBar's .pbar/.pbar__seg are new — no old-kit predecessor
+   or mockup markup exists for a stacked-segment bar (see the component's
+   own header comment) — sized to 6px to match ProgressBarMini's track,
+   the only height the spec gives for any Progress component. */
+.pring {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+}
+.pring svg {
+  width: 20px;
+  height: 20px;
+  transform: rotate(-90deg);
+}
+.pring .trk {
+  fill: none;
+  stroke: var(--bs-border);
+  stroke-width: 2.5;
+}
+.pring .fil {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.pring .pnum {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.pmini {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+}
+.pmini .ptrack {
+  display: inline-block;
+  width: 56px;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-border);
+  overflow: hidden;
+}
+.pmini .ptrack > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+}
+.pmini .pnum {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.pbar {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-border);
+  overflow: hidden;
+}
+.pbar__seg {
+  height: 100%;
+}
+
+/* Charts (BarChart/LineChart/Sparkline, ds-spec.md §2.1/§5) — ported from
+   the old kit's chart classes, renamed to the bs- prefix. The old
+   `var(--bs-radius-sm, 4px)` fallback is dropped: bs-tokens.css always
+   defines --bs-radius-sm, the old kit's didn't. `--bs-chart-1..6` replace
+   the old 8-token set — only chart-1 is ever referenced here since these
+   three components are still single-series by default; BarChart's stacked
+   path takes its per-series colour from the caller's `series[].tone`
+   instead, so the narrower set doesn't block anything. */
+.bs-chart {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-chart__takeaway {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+/* Sparkline's fixed 80x24 intrinsic size (design-spec.md §4) needs the
+   wrapper to stay inline/auto-width rather than the full-width column
+   layout the other two charts use — see Sparkline.vue's own comment. */
+.bs-chart--spark {
+  width: auto;
+  display: inline-flex;
+  gap: var(--bs-space-1);
+}
+.bs-chart__axisrow {
+  display: flex;
+  justify-content: space-between;
+}
+.bs-chart__axislabel {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+}
+.bs-chart__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+.bs-chart__gridline {
+  stroke: var(--bs-border);
+  stroke-width: 1;
+}
+.bs-chart__line {
+  fill: none;
+  stroke: var(--bs-chart-1);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bs-chart__point {
+  fill: var(--bs-surface-raised);
+  stroke: var(--bs-chart-1);
+  stroke-width: 1.5;
+}
+.bs-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+  width: 100%;
+}
+.bs-bars__plot {
+  display: flex;
+  align-items: stretch;
+  gap: var(--bs-space-2);
+  width: 100%;
+}
+.bs-bars__col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--bs-space-1);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.bs-bars__track {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 4px;
+  width: 100%;
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+  overflow: hidden;
+}
+.bs-bars__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bs-chart-1);
+  border-radius: var(--bs-radius-sm) var(--bs-radius-sm) 0 0;
+}
+/* Stacked segments (BarChart's additive `stacked` path) set their own
+   height/bottom/background inline per-series — the shared base rule above
+   would round every segment's top corners, which only reads correctly for
+   the topmost one, so the stack modifier resets that back to square. */
+.bs-bars__bar--stack {
+  border-radius: 0;
+}
+.bs-bars__x {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+.bs-bars__v {
+  font-size: var(--bs-text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--bs-text-subtlest);
+  flex-shrink: 0;
+}
+.bs-bars__scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
