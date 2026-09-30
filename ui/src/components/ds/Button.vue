@@ -4,7 +4,7 @@ import Icon from './Icon.vue';
 
 const props = withDefaults(
   defineProps<{
-    variant?: 'default' | 'outline' | 'secondary' | 'ghost' | 'destructive' | 'link' | 'inverse';
+    variant?: 'default' | 'outline' | 'secondary' | 'ghost' | 'destructive' | 'link';
     size?: 'default' | 'sm' | 'xs' | 'icon' | 'icon-sm' | 'icon-xs';
     icon?: string;
     loading?: boolean;
