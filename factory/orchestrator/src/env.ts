@@ -1,5 +1,6 @@
-const BS_PREFIX = 'BS_';
-const LEGACY_PREFIX = 'SMITH_';
+/** The current and legacy namespace prefixes, for call sites that filter a whole env object rather than read one name (e.g. `testgate.ts`'s `projectCommandEnv`). */
+export const BS_PREFIX = 'BS_';
+export const LEGACY_PREFIX = 'SMITH_';
 
 /**
  * The one place that knows `BS_<X>` is the current name and `SMITH_<X>` is
