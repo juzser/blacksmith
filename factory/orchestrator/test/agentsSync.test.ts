@@ -138,6 +138,39 @@ describe('syncAgentMaxTurns', () => {
       /maxTurns/,
     );
   });
+
+  // bs-rename, operator decision 3: BS_MAXTURNS_<ROLE> is the current name,
+  // SMITH_MAXTURNS_<ROLE> still works as a fallback, and BS_ wins when both
+  // are set.
+  it('accepts BS_MAXTURNS_<ROLE> as well as the legacy SMITH_MAXTURNS_<ROLE>', () => {
+    const report = syncAgentMaxTurns({ agentsDir, env: { BS_MAXTURNS_CODER: '55' } });
+    expect(report.changes).toEqual([
+      { role: 'coder', env: 'BS_MAXTURNS_CODER', from: 40, to: 55, changed: true },
+    ]);
+    expect(read('coder')).toBe(template('coder', 55));
+  });
+
+  it('prefers BS_MAXTURNS_<ROLE> over SMITH_MAXTURNS_<ROLE> when both are set', () => {
+    const report = syncAgentMaxTurns({
+      agentsDir,
+      env: { BS_MAXTURNS_CODER: '55', SMITH_MAXTURNS_CODER: '99' },
+    });
+    expect(report.changes).toEqual([
+      { role: 'coder', env: 'BS_MAXTURNS_CODER', from: 40, to: 55, changed: true },
+    ]);
+    expect(read('coder')).toBe(template('coder', 55));
+  });
+
+  it('refuses an unknown role named through BS_MAXTURNS_, same as the legacy prefix', () => {
+    try {
+      syncAgentMaxTurns({ agentsDir, env: { BS_MAXTURNS_CODRE: '10' } });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(AgentsSyncError);
+      expect((err as AgentsSyncError).code).toBe('agents.unknown-role');
+      expect((err as Error).message).toMatch(/BS_MAXTURNS_CODRE/);
+    }
+  });
 });
 
 describe('resetAgentMaxTurns', () => {
