@@ -133,7 +133,9 @@ export function formatTokens(tokens: number | null): string {
  * to it — the card is hidden entirely below two providers rather than drawn
  * with one bar (D-31: no claim with nothing to contrast it against).
  */
-export function hasMultipleProviders(costByProviderData: readonly { label: string }[]): boolean {
+export function hasMultipleProviders(
+  costByProviderData: readonly { label: string; value: number }[],
+): boolean {
   return costByProviderData.length >= 2;
 }
 
