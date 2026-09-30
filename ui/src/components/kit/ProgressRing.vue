@@ -20,14 +20,14 @@
 // report as a spec-vs-mockup mismatch rather than silently resolved; no
 // `size`/`lg` prop is added here.
 import { computed } from 'vue';
-import Tooltip from './Tooltip.vue';
 import {
   clampedPercent,
   computeProgressTone,
-  progressToneColor,
   type ProgressKind,
   type ProgressTone,
+  progressToneColor,
 } from './progressTone.js';
+import Tooltip from './Tooltip.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -41,7 +41,9 @@ const props = withDefaults(
   { max: 100, kind: 'ratio' },
 );
 
-const resolvedTone = computed(() => props.tone ?? computeProgressTone(props.value, props.max, props.kind));
+const resolvedTone = computed(
+  () => props.tone ?? computeProgressTone(props.value, props.max, props.kind),
+);
 const fillColor = computed(() => progressToneColor(resolvedTone.value));
 const pct = computed(() => clampedPercent(props.value, props.max));
 // Unclamped on purpose: a budget past 100% still reads its true value, e.g.

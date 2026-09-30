@@ -19,7 +19,7 @@ describe('kit/Breadcrumb.vue', () => {
     expect(BREADCRUMB).toMatch(/items:\s*Crumb\[\]/);
   });
 
-  it('emits select with the crumb\'s `to` target', () => {
+  it("emits select with the crumb's `to` target", () => {
     expect(BREADCRUMB).toMatch(/defineEmits<\{\s*select:\s*\[to:\s*string\]\s*\}>/);
   });
 

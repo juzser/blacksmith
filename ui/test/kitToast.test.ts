@@ -9,7 +9,9 @@ const TOAST = readFileSync(join(KIT, 'Toast.vue'), 'utf8');
 
 describe('kit/Toast.vue', () => {
   it('reads toasts/dismiss from useToast', () => {
-    expect(TOAST).toMatch(/import\s*\{\s*useToast\s*\}\s*from\s*'\.\.\/\.\.\/composables\/useToast\.js';/);
+    expect(TOAST).toMatch(
+      /import\s*\{\s*useToast\s*\}\s*from\s*'\.\.\/\.\.\/composables\/useToast\.js';/,
+    );
     expect(TOAST).toMatch(/useToast\(\)/);
   });
 

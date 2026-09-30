@@ -26,9 +26,7 @@ describe('kit/AlertDialog.vue', () => {
 
   it('renders a secondary Cancel and a danger confirm button, both size sm', () => {
     expect(ALERT_DIALOG).toMatch(/<Button variant="secondary" size="sm" @click="emit\('close'\)">/);
-    expect(ALERT_DIALOG).toMatch(
-      /<Button variant="danger" size="sm" @click="emit\('confirm'\)">/,
-    );
+    expect(ALERT_DIALOG).toMatch(/<Button variant="danger" size="sm" @click="emit\('confirm'\)">/);
   });
 
   it('emits close and confirm', () => {

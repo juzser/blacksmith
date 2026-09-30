@@ -35,7 +35,13 @@ const props = withDefaults(
     series?: { key: string; tone: string }[];
     stackedBars?: { label: string; values: Record<string, number> }[];
   }>(),
-  { height: 200, format: (v: number) => String(v), stacked: false, series: () => [], stackedBars: () => [] },
+  {
+    height: 200,
+    format: (v: number) => String(v),
+    stacked: false,
+    series: () => [],
+    stackedBars: () => [],
+  },
 );
 
 const capped = computed(() => props.bars.slice(0, 8));

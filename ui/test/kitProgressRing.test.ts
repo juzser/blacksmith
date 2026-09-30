@@ -48,9 +48,7 @@ describe('kit/ProgressRing.vue', () => {
   });
 
   it('imports the shared tone helper instead of duplicating threshold literals', () => {
-    expect(RING).toMatch(
-      /import \{[\s\S]*?\} from '\.\/progressTone\.js';/,
-    );
+    expect(RING).toMatch(/import \{[\s\S]*?\} from '\.\/progressTone\.js';/);
     expect(RING).toMatch(/computeProgressTone/);
     expect(RING).toMatch(/clampedPercent/);
     expect(RING).toMatch(/progressToneColor/);

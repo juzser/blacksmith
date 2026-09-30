@@ -17,7 +17,7 @@ describe('kit/ProgressBar.vue', () => {
   });
 
   it('sizes each segment against the sum of all segment values, floored at 100', () => {
-    expect(BAR).toMatch(/Math\.max\([\s\S]*?100\)/);
+    expect(BAR).toMatch(/Math\.max\([\s\S]*?100,?\s*\)/);
   });
 
   it('renders no built-in percentage number — the caller composes that separately', () => {

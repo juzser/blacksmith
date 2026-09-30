@@ -27,7 +27,9 @@ describe('kit/Skeleton.vue', () => {
   });
 
   it('reuses cssLength unchanged, not a reimplementation', () => {
-    expect(SKELETON).toMatch(/import\s*\{\s*cssLength\s*\}\s*from\s*'\.\.\/\.\.\/lib\/cssLength\.js';/);
+    expect(SKELETON).toMatch(
+      /import\s*\{\s*cssLength\s*\}\s*from\s*'\.\.\/\.\.\/lib\/cssLength\.js';/,
+    );
   });
 
   it('forces a fully round shape for circle via a bs-skeleton--circle class', () => {

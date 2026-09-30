@@ -22,7 +22,8 @@ const style = computed(() => {
   const text = `var(--bs-tone-${props.tone}-text)`;
   const subtle = `var(--bs-tone-${props.tone}-subtle)`;
   if (props.variant === 'bold') return { background: text, color: subtle };
-  if (props.variant === 'outline') return { background: 'transparent', color: text, borderColor: text };
+  if (props.variant === 'outline')
+    return { background: 'transparent', color: text, borderColor: text };
   return { background: subtle, color: text };
 });
 </script>

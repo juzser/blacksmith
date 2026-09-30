@@ -9,7 +9,7 @@
 // prose puts the overall % beside it as a separate ProgressBarMini-style
 // read, composed by the caller/page — out of scope here.
 import { computed } from 'vue';
-import { progressToneColor, type ProgressTone } from './progressTone.js';
+import { type ProgressTone, progressToneColor } from './progressTone.js';
 
 type Segment = { tone: ProgressTone | 'neutral'; value: number };
 
@@ -22,7 +22,12 @@ const props = defineProps<{
 // that doesn't add up to a full 100 leaves genuine empty space rather than
 // stretching to fill it, while a track that does (or overflows) never spills
 // past its own width.
-const denom = computed(() => Math.max(props.segments.reduce((sum, s) => sum + s.value, 0), 100));
+const denom = computed(() =>
+  Math.max(
+    props.segments.reduce((sum, s) => sum + s.value, 0),
+    100,
+  ),
+);
 
 function widthOf(segment: Segment): string {
   return `${(segment.value / denom.value) * 100}%`;

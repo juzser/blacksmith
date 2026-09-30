@@ -3,14 +3,14 @@
 // ProgressRing, plus the same two additive props (`kind`, `detail`) for the
 // same reasons — see ProgressRing.vue's own comment and progressTone.ts.
 import { computed } from 'vue';
-import Tooltip from './Tooltip.vue';
 import {
   clampedPercent,
   computeProgressTone,
-  progressToneColor,
   type ProgressKind,
   type ProgressTone,
+  progressToneColor,
 } from './progressTone.js';
+import Tooltip from './Tooltip.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -24,7 +24,9 @@ const props = withDefaults(
   { max: 100, kind: 'ratio' },
 );
 
-const resolvedTone = computed(() => props.tone ?? computeProgressTone(props.value, props.max, props.kind));
+const resolvedTone = computed(
+  () => props.tone ?? computeProgressTone(props.value, props.max, props.kind),
+);
 const fillColor = computed(() => progressToneColor(resolvedTone.value));
 const pct = computed(() => clampedPercent(props.value, props.max));
 // Unclamped on purpose — see ProgressRing.vue's rawPercent for why.

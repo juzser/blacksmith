@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
 import { ChevronDown, ChevronUp, CircleAlert, Info, TriangleAlert } from 'lucide-vue-next';
+import { computed, ref } from 'vue';
 import Button from './Button.vue';
 import Icon from './Icon.vue';
 import IconButton from './IconButton.vue';
@@ -19,11 +19,18 @@ const emit = defineEmits<{ retry: [] }>();
 
 const TONES = {
   danger: { text: '--bs-tone-danger-text', subtle: '--bs-tone-danger-subtle', icon: CircleAlert },
-  warning: { text: '--bs-tone-warning-text', subtle: '--bs-tone-warning-subtle', icon: TriangleAlert },
+  warning: {
+    text: '--bs-tone-warning-text',
+    subtle: '--bs-tone-warning-subtle',
+    icon: TriangleAlert,
+  },
   info: { text: '--bs-tone-info-text', subtle: '--bs-tone-info-subtle', icon: Info },
 } as const;
 const t = computed(() => TONES[props.tone]);
-const style = computed(() => ({ background: `var(${t.value.subtle})`, color: `var(${t.value.text})` }));
+const style = computed(() => ({
+  background: `var(${t.value.subtle})`,
+  color: `var(${t.value.text})`,
+}));
 
 // `collapsible` starts expanded; the toggle's accessible label names the
 // action it performs (not the current state), matching disclosure-widget

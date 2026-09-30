@@ -36,7 +36,9 @@ describe('kit/Table.vue', () => {
   });
 
   it('emits rowClick and exposes a scoped cell slot', () => {
-    expect(TABLE).toMatch(/defineEmits<\{\s*rowClick:\s*\[row:\s*Record<string,\s*unknown>\];?\s*\}>/);
+    expect(TABLE).toMatch(
+      /defineEmits<\{\s*rowClick:\s*\[row:\s*Record<string,\s*unknown>\];?\s*\}>/,
+    );
     expect(TABLE).toMatch(/<slot name="cell" :column="c" :row="row">/);
   });
 
