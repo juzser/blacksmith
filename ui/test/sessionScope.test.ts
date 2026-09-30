@@ -312,7 +312,7 @@ describe('topbar session picker visibility (ds-spec.md §3): Activity and Work -
       'ErrorsPage.vue',
       'AnalyticsPage.vue',
       'SessionsPage.vue',
-      'OverviewPage.vue',
+      'HomePage.vue',
     ].filter((page) => !readsSessionScope(page));
     expect(stillReading).toEqual([]);
   });

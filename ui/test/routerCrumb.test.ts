@@ -42,3 +42,17 @@ describe('router.ts meta.crumb', () => {
     expect(body).toMatch(/label: String\(r\.params\.taskId\)/);
   });
 });
+
+describe('router.ts Home (ds-spec.md §4.1)', () => {
+  it('renders HomePage on both Overview routes and no longer routes to Overview or Projects pages', () => {
+    const byName = new Map(routeBodies());
+    expect(byName.get('overview-global')).toMatch(/pages\/HomePage\.vue/);
+    expect(byName.get('overview-project')).toMatch(/pages\/HomePage\.vue/);
+    expect(SRC).not.toMatch(/OverviewPage|ProjectsPage/);
+  });
+
+  it('redirects / and /projects through homeRedirect, keeping the deep-link query', () => {
+    expect(SRC).toMatch(/\{ path: '\/', redirect: homeRedirect \}/);
+    expect(SRC).toMatch(/\{ path: '\/projects', redirect: homeRedirect \}/);
+  });
+});
