@@ -1,8 +1,9 @@
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { artifactHome, checkArtifacts } from '../src/artifacts.js';
+import { artifactHome, checkArtifacts, resolveArtifactPath } from '../src/artifacts.js';
 
 describe('artifactHome', () => {
   it('gives a task one home, under the artifacts dir and named for the task', () => {
@@ -303,5 +304,51 @@ describe('checkArtifacts', () => {
         path.join(nestedHome, 'state', 'artifacts', 'epic-1', 'task-1', 'round2.txt'),
       ]);
     });
+  });
+});
+
+describe('resolveArtifactPath', () => {
+  let artifactsDir: string;
+  let home: string;
+  const taskId = 'epic-1/task-1';
+
+  beforeEach(async () => {
+    artifactsDir = await mkdtemp(path.join(tmpdir(), 'smith-resolve-'));
+    home = artifactHome(taskId, artifactsDir);
+    await mkdir(home, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(artifactsDir, { recursive: true, force: true });
+  });
+
+  it('resolves a normal file inside the home', async () => {
+    const file = path.join(home, 'screenshot.png');
+    await writeFile(file, 'fake-png');
+    expect(resolveArtifactPath(taskId, 'screenshot.png', artifactsDir)).toBe(realpathSync(file));
+  });
+
+  it('returns null for a path that climbs out of the home', async () => {
+    const outside = path.join(artifactsDir, 'stray.png');
+    await writeFile(outside, 'fake-png');
+    expect(resolveArtifactPath(taskId, '../stray.png', artifactsDir)).toBeNull();
+  });
+
+  it('returns null for an absolute path', async () => {
+    const file = path.join(home, 'screenshot.png');
+    await writeFile(file, 'fake-png');
+    expect(resolveArtifactPath(taskId, file, artifactsDir)).toBeNull();
+  });
+
+  it('returns null for a symlink that escapes the home', async () => {
+    const outside = path.join(artifactsDir, 'elsewhere');
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, 'shot.png'), 'fake-png');
+    await symlink(path.join(outside, 'shot.png'), path.join(home, 'shot.png'));
+    expect(resolveArtifactPath(taskId, 'shot.png', artifactsDir)).toBeNull();
+  });
+
+  it('returns null for a path that does not exist', () => {
+    expect(resolveArtifactPath(taskId, 'missing.png', artifactsDir)).toBeNull();
   });
 });

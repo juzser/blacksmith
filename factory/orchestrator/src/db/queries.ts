@@ -1976,6 +1976,19 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
   };
 }
 
+/**
+ * One projected artifact row by its id (`${event_id}#${index}`), for the
+ * dashboard's artifact-serving route — it needs the declaring task and the
+ * declared path to resolve a file, and neither is safe to take from the
+ * request itself.
+ */
+export function artifactById(
+  db: SmithDb,
+  artifactId: string,
+): typeof artifacts.$inferSelect | null {
+  return db.select().from(artifacts).where(eq(artifacts.id, artifactId)).get() ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // lessons()
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { appendFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -593,6 +593,87 @@ describe('ui/server app.ts', () => {
     const notFound = await handle.app.request('/api/tasks/no-such-task');
     expect(notFound.status).toBe(404);
     closeApp(handle);
+  });
+
+  describe('GET /api/artifacts/:artifactId', () => {
+    let artifactsDir: string;
+
+    beforeEach(async () => {
+      artifactsDir = await mkdtemp(path.join(tmpdir(), 'smith-app-artifacts-'));
+    });
+
+    afterEach(async () => {
+      await rm(artifactsDir, { recursive: true, force: true });
+    });
+
+    /**
+     * Declares one extra artifact on TASK_2 and writes real bytes for it
+     * under `<artifactsDir>/<TASK_2>/<fileName>` — the same layout
+     * resolveArtifactPath() expects in production. Returns the id the
+     * dashboard's task-detail response will carry for it.
+     */
+    async function seedArtifact(fileName: string, type: string, bytes: string): Promise<string> {
+      const home = path.join(artifactsDir, TASK_2);
+      await mkdir(home, { recursive: true });
+      await writeFile(path.join(home, fileName), bytes);
+      const existing = await readEvents(SESSION_ID, { stateDir });
+      const tip = existing[existing.length - 1]?.event_id;
+      const recorded = await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'coder',
+          event_type: 'task-result-recorded',
+          task_id: TASK_2,
+          plan_version: 1,
+          causal_parent: tip ?? null,
+          payload: {
+            task_id: TASK_2,
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [{ type, path: fileName }],
+          },
+        },
+        { stateDir },
+      );
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const detailRes = await createApp({
+        dbPath,
+        stateDir,
+        roadmapPath,
+        artifactsDir,
+      }).app.request(`/api/tasks/${encodeURIComponent(TASK_2)}`);
+      const detail = await json<{ artifacts: Array<{ id: string; path: string }> }>(detailRes);
+      const row = detail.artifacts.find((a) => a.path === fileName);
+      if (!row) throw new Error(`expected ${fileName} to project as an artifact row`);
+      void recorded;
+      return row.id;
+    }
+
+    it('serves a known image artifact with the right content type and nosniff', async () => {
+      const artifactId = await seedArtifact('shot.png', 'screenshot', 'fake-png-bytes');
+      const handle = createApp({ dbPath, stateDir, roadmapPath, artifactsDir });
+      const res = await handle.app.request(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe('image/png');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(await res.text()).toBe('fake-png-bytes');
+      closeApp(handle);
+    });
+
+    it('404s for an unknown artifact id', async () => {
+      const handle = createApp({ dbPath, stateDir, roadmapPath, artifactsDir });
+      const res = await handle.app.request('/api/artifacts/no-such-id');
+      expect(res.status).toBe(404);
+      closeApp(handle);
+    });
+
+    it('415s a declared type this route will not serve, e.g. svg', async () => {
+      const artifactId = await seedArtifact('shot.svg', 'screenshot', '<svg></svg>');
+      const handle = createApp({ dbPath, stateDir, roadmapPath, artifactsDir });
+      const res = await handle.app.request(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+      expect(res.status).toBe(415);
+      closeApp(handle);
+    });
   });
 
   it('GET /api/lessons, /api/errors, /api/analytics, /api/roadmap all 200', async () => {
