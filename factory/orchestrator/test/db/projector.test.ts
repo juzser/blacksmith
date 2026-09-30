@@ -350,6 +350,66 @@ describe('db/projector.ts', () => {
     expect(taskIds).toContain(TASK_1);
   });
 
+  // Task 3 (dispatch reason fallback): writers put the reason under other
+  // keys than `reason` — the dashboard was showing "no reason given" on
+  // almost every row because of it. `dispatches.reason` now falls back
+  // through reason ?? rationale ?? note ?? why (strings only, trimmed).
+  it('projects reason from rationale, note, or why when the payload has no reason key', async () => {
+    const parent = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.event_id ?? null;
+    const dispatchWith = async (
+      taskId: string,
+      causalParent: string | null,
+      extra: Record<string, unknown>,
+    ) => {
+      const dispatched = await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'dispatch_decision',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: causalParent,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+            model: 'claude-sonnet-5',
+            ...extra,
+          },
+        },
+        { stateDir },
+      );
+      return dispatched.event_id;
+    };
+
+    let cursor = parent;
+    cursor = await dispatchWith(TASK_1, cursor, { rationale: 'a rationale' });
+    cursor = await dispatchWith(TASK_1, cursor, { note: 'a note' });
+    cursor = await dispatchWith(TASK_1, cursor, { why: 'a why' });
+    // reason wins over rationale when both are present, and a blank reason
+    // is skipped in favour of the next key, whitespace trimmed either way.
+    cursor = await dispatchWith(TASK_1, cursor, { reason: 'the reason', rationale: 'ignored' });
+    cursor = await dispatchWith(TASK_1, cursor, { reason: '   ', rationale: '  trimmed  ' });
+    // A non-string value at a key is not a reason: keep looking past it.
+    await dispatchWith(TASK_1, cursor, { reason: 42, note: 'the real note' });
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    const reasons = rows.dispatches.slice(-6).map((d) => d.reason);
+    expect(reasons).toEqual([
+      'a rationale',
+      'a note',
+      'a why',
+      'the reason',
+      'trimmed',
+      'the real note',
+    ]);
+  });
+
   it('never materialises a task row for an id nothing but a dispatch ever named', async () => {
     const { appendEvent, readEvents } = await import('../../src/events.js');
     // One dogfood epic's session ran its planning rounds by hand, before
