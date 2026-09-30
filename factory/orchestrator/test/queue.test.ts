@@ -143,7 +143,7 @@ describe('step', () => {
 
     expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
 
-    const log = git(projectDir, ['log', 'smith/epic-1/integration', '--oneline']);
+    const log = git(projectDir, ['log', 'bs/epic-1/integration', '--oneline']);
     expect(log).toContain('edit a');
   });
 
@@ -164,8 +164,8 @@ describe('step', () => {
     expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
     expect(git(projectDir, ['branch', '--show-current'])).toBe('main');
     expect(git(projectDir, ['status', '--porcelain'])).toBe('');
-    expect(git(projectDir, ['log', 'smith/epic-1/integration', '--oneline'])).toContain(
-      'Merge task-1 into smith/epic-1/integration',
+    expect(git(projectDir, ['log', 'bs/epic-1/integration', '--oneline'])).toContain(
+      'Merge task-1 into bs/epic-1/integration',
     );
     // No merge worktree was added, or left behind.
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).toBe(worktreesBefore);
@@ -193,14 +193,14 @@ describe('step', () => {
 
     expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).toBe(worktreesBefore);
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:a.txt'])).toBe('a-edited');
   });
 
   it('lands a two-parent merge commit with the queue message', async () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
-    const integrationBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    const integrationBefore = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
 
     await step(
       { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
@@ -213,15 +213,15 @@ describe('step', () => {
       '--parents',
       '-n',
       '1',
-      'smith/epic-1/integration',
+      'bs/epic-1/integration',
     ])
       .split(' ')
       .slice(1);
     expect(parents).toEqual([integrationBefore, taskHead]);
-    expect(git(projectDir, ['log', '-1', '--format=%B', 'smith/epic-1/integration'])).toBe(
-      'Merge task-1 into smith/epic-1/integration',
+    expect(git(projectDir, ['log', '-1', '--format=%B', 'bs/epic-1/integration'])).toBe(
+      'Merge task-1 into bs/epic-1/integration',
     );
-    expect(git(projectDir, ['log', '-1', '--format=%an <%ae>', 'smith/epic-1/integration'])).toBe(
+    expect(git(projectDir, ['log', '-1', '--format=%an <%ae>', 'bs/epic-1/integration'])).toBe(
       'Test <test@example.com>',
     );
   });
@@ -253,7 +253,7 @@ describe('step', () => {
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
     const staleDir = path.join(root, 'stale-integration');
-    git(projectDir, ['worktree', 'add', '-q', staleDir, 'smith/epic-1/integration']);
+    git(projectDir, ['worktree', 'add', '-q', staleDir, 'bs/epic-1/integration']);
     await rm(staleDir, { recursive: true, force: true });
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).toContain('prunable');
 
@@ -263,7 +263,7 @@ describe('step', () => {
     );
 
     expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:a.txt'])).toBe('a-edited');
     // Not ours to prune either.
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).toContain(staleDir);
   });
@@ -275,7 +275,7 @@ describe('step', () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
-    const integration = 'refs/heads/smith/epic-1/integration';
+    const integration = 'refs/heads/bs/epic-1/integration';
     const script = path.join(root, 'move-integration.sh');
     await writeFile(
       script,
@@ -311,7 +311,7 @@ describe('step', () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
 
     const result = await step(
       { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
@@ -319,7 +319,7 @@ describe('step', () => {
     );
 
     expect(result).toEqual({ outcome: 'merged', taskId: 'task-1' });
-    expect(git(projectDir, ['branch', '--show-current'])).toBe('smith/epic-1/integration');
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('bs/epic-1/integration');
     expect(git(projectDir, ['status', '--porcelain'])).toBe('');
     expect(await readFile(path.join(projectDir, 'a.txt'), 'utf8')).toBe('a-edited\n');
   });
@@ -329,7 +329,7 @@ describe('step', () => {
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
     const integrationDir = path.join(root, 'integration');
-    git(projectDir, ['worktree', 'add', '-q', integrationDir, 'smith/epic-1/integration']);
+    git(projectDir, ['worktree', 'add', '-q', integrationDir, 'bs/epic-1/integration']);
 
     const result = await step(
       { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
@@ -346,9 +346,9 @@ describe('step', () => {
     const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
     await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
     git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
     await writeFile(path.join(projectDir, 'b.txt'), 'operator is editing\n');
-    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    const headBefore = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
 
     const result = await step(
       { taskId: 'task-1', branch: task.branch, worktreeDir: task.worktreeDir },
@@ -359,7 +359,7 @@ describe('step', () => {
     if (result.outcome !== 'integration-dirty') throw new Error('unreachable');
     expect(await realpath(result.worktree)).toBe(await realpath(projectDir));
     expect(result.dirty).toEqual(['b.txt']);
-    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
+    expect(git(projectDir, ['rev-parse', 'bs/epic-1/integration'])).toBe(headBefore);
     // The operator's edit is untouched.
     expect(await readFile(path.join(projectDir, 'b.txt'), 'utf8')).toBe('operator is editing\n');
   });
@@ -379,7 +379,7 @@ describe('step', () => {
       expect(typeof result.outputTail).toBe('string');
     }
 
-    const log = git(projectDir, ['log', 'smith/epic-1/integration', '--oneline']);
+    const log = git(projectDir, ['log', 'bs/epic-1/integration', '--oneline']);
     expect(log).not.toContain('edit a');
   });
 
@@ -438,7 +438,7 @@ describe('step', () => {
     git(task.worktreeDir, ['commit', '-q', '-am', 'task edits a']);
 
     // Simulate a prior merged task that touched the same line of a.txt.
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
     await writeFile(path.join(projectDir, 'a.txt'), 'from-integration\n');
     git(projectDir, ['commit', '-q', '-am', 'integration edits a']);
 
@@ -458,7 +458,7 @@ describe('step', () => {
     const rebaseMergeExists = git(task.worktreeDir, ['rev-parse', '--is-inside-work-tree']);
     expect(rebaseMergeExists).toBe('true');
 
-    const log = git(projectDir, ['log', 'smith/epic-1/integration', '--oneline']);
+    const log = git(projectDir, ['log', 'bs/epic-1/integration', '--oneline']);
     expect(log).not.toContain('task edits a');
   });
 
@@ -583,7 +583,7 @@ describe('step', () => {
       const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
       await writeFile(path.join(task.worktreeDir, 'a.txt'), 'from-task\n');
       git(task.worktreeDir, ['commit', '-q', '-am', 'task edits a']);
-      git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+      git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
       await writeFile(path.join(projectDir, 'a.txt'), 'from-integration\n');
       git(projectDir, ['commit', '-q', '-am', 'integration edits a']);
 
@@ -600,7 +600,7 @@ describe('step', () => {
       const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
       await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
       git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
-      git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+      git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
       await writeFile(path.join(projectDir, 'b.txt'), 'operator is editing\n');
 
       await step(
@@ -655,7 +655,7 @@ describe('step', () => {
       const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
       await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
       git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
-      const integrationBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+      const integrationBefore = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
       const taskHeadBefore = git(task.worktreeDir, ['rev-parse', 'HEAD']);
 
       await expect(
@@ -670,10 +670,31 @@ describe('step', () => {
         ),
       ).rejects.toMatchObject({ code: 'events.unknown-causal-parent' });
 
-      expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(integrationBefore);
+      expect(git(projectDir, ['rev-parse', 'bs/epic-1/integration'])).toBe(integrationBefore);
       expect(git(task.worktreeDir, ['rev-parse', 'HEAD'])).toBe(taskHeadBefore);
       expect(await logged()).toEqual([]);
     });
+  });
+
+  // Operator decision 3 (bs-rename): an epic already integrating on
+  // `smith/` keeps every new task branch there instead of splitting one
+  // epic across two prefixes — this is the merge-queue's own regression
+  // test for that continuity, one layer above worktree.ts's unit coverage.
+  it('merges onto an epic’s existing smith/ integration branch, not bs/', async () => {
+    git(projectDir, ['branch', 'smith/epic-1/integration']);
+    const task = createTaskWorktree(projectDir, 'epic-1', 'task-1');
+    expect(task.branch).toBe('smith/epic-1/task-1');
+    await writeFile(path.join(task.worktreeDir, 'a.txt'), 'a-edited\n');
+    git(task.worktreeDir, ['commit', '-q', '-am', 'edit a']);
+
+    const result = await step(
+      { taskId: 'epic-1/task-1', branch: task.branch, worktreeDir: task.worktreeDir },
+      { projectDir, epic: 'epic-1', testCmd: 'true' },
+    );
+
+    expect(result).toMatchObject({ outcome: 'merged' });
+    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(() => git(projectDir, ['rev-parse', '--verify', 'bs/epic-1/integration'])).toThrow();
   });
 });
 
@@ -734,19 +755,19 @@ describe('batchStep', () => {
       'log',
       '--first-parent',
       '--format=%s',
-      'smith/epic-1/integration',
+      'bs/epic-1/integration',
     ])
       .split('\n')
       .reverse();
     expect(subjects).toEqual([
       'init',
-      'Merge epic-1/task-a into smith/epic-1/integration',
-      'Merge epic-1/task-b into smith/epic-1/integration',
-      'Merge epic-1/task-c into smith/epic-1/integration',
+      'Merge epic-1/task-a into bs/epic-1/integration',
+      'Merge epic-1/task-b into bs/epic-1/integration',
+      'Merge epic-1/task-c into bs/epic-1/integration',
     ]);
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:b.txt'])).toBe('b-edited');
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:b.txt'])).toBe('b-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:c.txt'])).toBe('c-edited');
     // No trace of the throwaway candidate worktree survives a green landing.
     expect(git(projectDir, ['worktree', 'list', '--porcelain'])).not.toMatch(
       /\.wt[\\/]project[\\/]batch-/,
@@ -824,13 +845,13 @@ describe('batchStep', () => {
 
     const a = makeTask('task-a', 'a.txt', 'a-edited\n');
     const b = makeTask('task-b', 'b.txt', 'b-edited\n');
-    const integrationBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    const integrationBefore = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
 
     await expect(
       batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true', events }),
     ).rejects.toMatchObject({ code: 'events.unknown-causal-parent' });
 
-    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(integrationBefore);
+    expect(git(projectDir, ['rev-parse', 'bs/epic-1/integration'])).toBe(integrationBefore);
     const all = await readEvents(sessionId, { stateDir });
     expect(all.filter((e) => e.record.event_type !== 'session-start')).toEqual([]);
     // No trace of a throwaway candidate worktree either.
@@ -862,10 +883,10 @@ describe('batchStep', () => {
     ]);
     expect(result.suiteRuns).toBe(1 + 2 * Math.ceil(Math.log2(3)));
 
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:a.txt'])).toBe('a-edited');
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:a.txt'])).toBe('a-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:c.txt'])).toBe('c-edited');
     // task-b never landed — integration still has the original file.
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:b.txt'])).toBe('b');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:b.txt'])).toBe('b');
   });
 
   // Once the left half of a bisection comes back fully merged, the right
@@ -904,7 +925,7 @@ describe('batchStep', () => {
       { outcome: 'merged', taskId: 'epic-1/task-8' },
     ]);
     expect(result.suiteRuns).toBe(6);
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:f5.txt'])).toBe('f5');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:f5.txt'])).toBe('f5');
   });
 
   // A left half is only "known red" when it landed completely. Part guilty,
@@ -935,8 +956,8 @@ describe('batchStep', () => {
     ]);
     // top(1) + left[a,b](1) + [a](1) + [b](1) + right[c,d] actually tested (1).
     expect(result.suiteRuns).toBe(5);
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:d.txt'])).toBe('d-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:c.txt'])).toBe('c-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:d.txt'])).toBe('d-edited');
   });
 
   // A right half's ready set can shrink after it has already been marked
@@ -970,11 +991,11 @@ describe('batchStep', () => {
         'if grep -q d-edited shared.txt 2>/dev/null; then',
         `  cd ${JSON.stringify(projectDir)}`,
         `  export GIT_INDEX_FILE=${JSON.stringify(path.join(root, 'side.index'))}`,
-        '  git read-tree refs/heads/smith/epic-1/integration',
+        '  git read-tree refs/heads/bs/epic-1/integration',
         "  blob=$(printf 'concurrent-edit\\n' | git hash-object -w --stdin)",
         '  git update-index --cacheinfo 100644,$blob,shared.txt',
-        '  c=$(git commit-tree $(git write-tree) -p refs/heads/smith/epic-1/integration -m concurrent)',
-        '  git update-ref refs/heads/smith/epic-1/integration $c',
+        '  c=$(git commit-tree $(git write-tree) -p refs/heads/bs/epic-1/integration -m concurrent)',
+        '  git update-ref refs/heads/bs/epic-1/integration $c',
         '  exit 1',
         'fi',
         'exit 0',
@@ -997,8 +1018,8 @@ describe('batchStep', () => {
     // top(1, red) + left[a,b](1, lands) + right: only c actually runs (1) —
     // d dropped at certify, before any test, not a phantom red assumed for it.
     expect(result.suiteRuns).toBe(3);
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:c.txt'])).toBe('c-edited');
-    expect(git(projectDir, ['show', 'smith/epic-1/integration:shared.txt'])).toBe(
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:c.txt'])).toBe('c-edited');
+    expect(git(projectDir, ['show', 'bs/epic-1/integration:shared.txt'])).toBe(
       'concurrent-edit',
     );
   });
@@ -1013,7 +1034,7 @@ describe('batchStep', () => {
   it('reports integration-moved for every task when the ref moves mid-suite, without throwing', async () => {
     const a = makeTask('task-a', 'a.txt', 'a-edited\n');
     const b = makeTask('task-b', 'b.txt', 'b-edited\n');
-    const integration = 'refs/heads/smith/epic-1/integration';
+    const integration = 'refs/heads/bs/epic-1/integration';
     const script = path.join(root, 'move-integration.sh');
     await writeFile(
       script,
@@ -1056,9 +1077,9 @@ describe('batchStep', () => {
   it('refuses to land a batch into a worktree whose integration checkout has uncommitted changes', async () => {
     const a = makeTask('task-a', 'a.txt', 'a-edited\n');
     const b = makeTask('task-b', 'b.txt', 'b-edited\n');
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
     await writeFile(path.join(projectDir, 'c.txt'), 'operator is editing\n');
-    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    const headBefore = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
 
     const result = await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true' });
 
@@ -1076,7 +1097,7 @@ describe('batchStep', () => {
         dirty: ['c.txt'],
       },
     ]);
-    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
+    expect(git(projectDir, ['rev-parse', 'bs/epic-1/integration'])).toBe(headBefore);
     expect(await readFile(path.join(projectDir, 'c.txt'), 'utf8')).toBe('operator is editing\n');
   });
 
@@ -1093,9 +1114,9 @@ describe('batchStep', () => {
     const b = makeTask('task-b', 'b.txt', 'b-edited\n');
     const c = makeTask('task-c', 'c.txt', 'BAD\n');
     const d = makeTask('task-d', 'd.txt', 'd-edited\n');
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
     await writeFile(path.join(projectDir, 'a.txt'), 'operator is editing\n');
-    const headBefore = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    const headBefore = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
 
     const result = await batchStep([a, b, c, d], {
       projectDir,
@@ -1113,7 +1134,7 @@ describe('batchStep', () => {
     // top (red, 1) + left [a,b] (green, then finds the checkout dirty, 1).
     // The right half [c,d] never gets a suite run of its own.
     expect(result.suiteRuns).toBe(2);
-    expect(git(projectDir, ['rev-parse', 'smith/epic-1/integration'])).toBe(headBefore);
+    expect(git(projectDir, ['rev-parse', 'bs/epic-1/integration'])).toBe(headBefore);
   });
 
   // A clean holder must land through it, exactly as `step` does, so its
@@ -1122,7 +1143,7 @@ describe('batchStep', () => {
   it('lands a batch in the project directory when it already has the integration branch out', async () => {
     const a = makeTask('task-a', 'a.txt', 'a-edited\n');
     const b = makeTask('task-b', 'b.txt', 'b-edited\n');
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
 
     const result = await batchStep([a, b], { projectDir, epic: 'epic-1', testCmd: 'true' });
 
@@ -1130,9 +1151,9 @@ describe('batchStep', () => {
       { outcome: 'merged', taskId: 'epic-1/task-a' },
       { outcome: 'merged', taskId: 'epic-1/task-b' },
     ]);
-    expect(git(projectDir, ['branch', '--show-current'])).toBe('smith/epic-1/integration');
+    expect(git(projectDir, ['branch', '--show-current'])).toBe('bs/epic-1/integration');
     expect(git(projectDir, ['status', '--porcelain'])).toBe('');
-    const tip = git(projectDir, ['rev-parse', 'smith/epic-1/integration']);
+    const tip = git(projectDir, ['rev-parse', 'bs/epic-1/integration']);
     expect(git(projectDir, ['rev-parse', 'HEAD'])).toBe(tip);
     expect(await readFile(path.join(projectDir, 'a.txt'), 'utf8')).toBe('a-edited\n');
     expect(await readFile(path.join(projectDir, 'b.txt'), 'utf8')).toBe('b-edited\n');
@@ -1203,7 +1224,7 @@ describe('adopt', () => {
 
   /** The out-of-band merge this verb exists to adopt: no queue, no worktree. */
   function handMerge(branch: string, message: string): string {
-    git(projectDir, ['checkout', '-q', 'smith/epic-1/integration']);
+    git(projectDir, ['checkout', '-q', 'bs/epic-1/integration']);
     git(projectDir, ['merge', '--no-ff', branch, '-m', message]);
     return git(projectDir, ['rev-parse', 'HEAD']);
   }
@@ -1352,7 +1373,7 @@ describe('adopt', () => {
 
     await expect(
       adopt(
-        { taskId: 'epic-1/task-9', branch: 'smith/epic-1/task-9' },
+        { taskId: 'epic-1/task-9', branch: 'bs/epic-1/task-9' },
         { projectDir, epic: 'epic-1', mergeCommit: sha, events },
       ),
     ).rejects.toMatchObject({ code: 'queue.adopt-unknown-branch' });
@@ -1496,7 +1517,7 @@ describe('step with test selection', () => {
     );
 
     expect(result.outcome).toBe('tests-failed');
-    const log = git(projectDir, ['log', 'smith/epic-1/integration', '--oneline']);
+    const log = git(projectDir, ['log', 'bs/epic-1/integration', '--oneline']);
     expect(log).not.toContain('edit beta');
   });
 });

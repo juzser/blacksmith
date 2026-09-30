@@ -11,7 +11,7 @@ import { buildSymbolGraph, collectSources } from './symbols.js';
 import { emitTaskBlocked, emitWaveMerged, type TaskEventContext } from './taskEvents.js';
 import { projectCommandEnv } from './testgate.js';
 import { renderSelectedTestCmd, selectTests, type TestSelectStatus } from './testSelect.js';
-import { integrationBranchName } from './worktree.js';
+import { epicBranchPrefix, integrationBranchName } from './worktree.js';
 
 export class QueueError extends SmithError {}
 
@@ -192,7 +192,7 @@ export type StepOutcome =
     }
   /**
    * Batch-only (`batchStep`): the candidate's suite passed, but
-   * `smith/<epic>/integration` had moved to a different commit by the time
+   * `<prefix>/<epic>/integration` had moved to a different commit by the time
    * the batch tried to land it — the same compare-and-swap race
    * `mergeWithoutWorktree` guards against for a single task (a `branch` that
    * moved during the merge throws there), now reachable with a whole group
@@ -278,7 +278,10 @@ async function certifyAndRebase(
  * non-merged outcome.
  */
 export async function step(task: QueueTask, opts: StepOptions): Promise<StepOutcome> {
-  const integrationBranch = integrationBranchName(opts.epic);
+  const integrationBranch = integrationBranchName(
+    opts.epic,
+    epicBranchPrefix(opts.projectDir, opts.epic),
+  );
   const events = opts.events;
 
   // Refused before certifyAndRebase's real `git rebase` or the merge below
@@ -765,7 +768,10 @@ export interface BatchStepResult {
  * failing every task in the group for one task's sake.
  */
 export async function batchStep(tasks: QueueTask[], opts: StepOptions): Promise<BatchStepResult> {
-  const integrationBranch = integrationBranchName(opts.epic);
+  const integrationBranch = integrationBranchName(
+    opts.epic,
+    epicBranchPrefix(opts.projectDir, opts.epic),
+  );
   const events = opts.events;
 
   // Same envelope check as step(), and for the same reason: runGroup below
@@ -848,7 +854,7 @@ function isAncestor(projectDir: string, ancestor: string, descendant: string): b
  */
 export async function adopt(task: AdoptTask, opts: AdoptOptions): Promise<AdoptOutcome> {
   const { projectDir } = opts;
-  const integrationBranch = integrationBranchName(opts.epic);
+  const integrationBranch = integrationBranchName(opts.epic, epicBranchPrefix(projectDir, opts.epic));
 
   for (const ref of [integrationBranch, task.branch]) {
     if (!resolveCommit(projectDir, ref)) {
