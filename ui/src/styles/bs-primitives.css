@@ -109,6 +109,19 @@
   height: 28px;
   border: 1px solid var(--bs-border);
 }
+/* inverse (Batch C, Toast's dismiss button) — mirrors the old kit's
+   .ds-toast__dismiss:hover rule verbatim (ds-components.css): colour rides
+   currentColor so it inherits whatever the inverted surface set (Toast sets
+   color: var(--bs-surface)), and hover is a currentColor-mix tint rather
+   than the default tone's --bs-surface-sunken (which assumes a normal,
+   non-inverted background). */
+.bs-iconbtn--inverse {
+  color: currentColor;
+}
+.bs-iconbtn--inverse:hover {
+  color: currentColor;
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
 
 /* CompactNumber (§2.1) — no bespoke type scale of its own (it inherits
    whatever surrounding context it sits in, same as the design page's plain

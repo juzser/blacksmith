@@ -16,8 +16,16 @@ const props = withDefaults(
     label: string;
     size?: 'sm' | 'md';
     disabled?: boolean;
+    /**
+     * 'inverse' is for an IconButton sitting on a deliberately inverted
+     * surface (Toast's dismiss button: background: var(--bs-text); color:
+     * var(--bs-surface)) — the default tone's colour/hover assume a normal
+     * surface and would render as a dim grey icon on a dark background.
+     * Defaults to 'default', today's only behaviour.
+     */
+    tone?: 'default' | 'inverse';
   }>(),
-  { size: 'md' },
+  { size: 'md', tone: 'default' },
 );
 
 const emit = defineEmits<{ click: [MouseEvent] }>();
@@ -33,7 +41,7 @@ function onClick(event: MouseEvent) {
     <button
       type="button"
       class="bs-iconbtn"
-      :class="`bs-iconbtn--${size}`"
+      :class="[`bs-iconbtn--${size}`, { 'bs-iconbtn--inverse': tone === 'inverse' }]"
       :aria-label="label"
       :aria-disabled="disabled ? 'true' : undefined"
       @click="onClick"

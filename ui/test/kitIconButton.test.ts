@@ -40,4 +40,23 @@ describe('kit/IconButton.vue', () => {
     expect(ICON_BUTTON).toMatch(/:aria-disabled=/);
     expect(ICON_BUTTON).not.toMatch(/\sdisabled\s*(?:=|>|\/)/);
   });
+
+  // tone (Batch C, Toast's dismiss button): Toast is a deliberately inverted
+  // surface (background: var(--bs-text); color: var(--bs-surface), see
+  // Toast.vue's own comment), and .bs-iconbtn's default colour/hover assume a
+  // normal surface — a plain IconButton would render a dim grey icon on the
+  // dark toast. tone is optional and defaults to 'default' so every existing
+  // call site (none yet, but the contract) is unaffected.
+  it('declares an optional tone prop, default|inverse, defaulting to default', () => {
+    expect(ICON_BUTTON).toMatch(/tone\?:\s*'default'\s*\|\s*'inverse';/);
+    const match = ICON_BUTTON.match(
+      /withDefaults\(\s*defineProps<\{[\s\S]*?\}>\(\),\s*\{([\s\S]*?)\}\s*,?\s*\)/,
+    );
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toMatch(/tone:\s*'default'/);
+  });
+
+  it('applies a bs-iconbtn--inverse class when tone is inverse', () => {
+    expect(ICON_BUTTON).toMatch(/bs-iconbtn--inverse/);
+  });
 });
