@@ -330,6 +330,17 @@ None of these composables changed for DS0 — the kit swap is presentational.
 - **Home's budget outlier threshold (10x an epic's budget) is ours.**
   §4.1 point 4 names the case but no number. Outliers are left out of the
   ring and the total; the server's hour-over-hour delta still includes them.
+- **Running now reads a new `epicsActivelyRunning` field, not
+  `epicsInFlight`.** `epicsInFlight` keeps an epic whose only open task is
+  `escalated`/`failed` reachable on Kanban/Flow (D-43/P9-27) — correct, an
+  operator still needs to act on it, and that must not change. But nothing
+  is actually running in it, so presenting it on "Running now" reads as a
+  live agent that does not exist. `GET /api/overview` (whole-factory and
+  per-project summaries) now also reports `epicsActivelyRunning`:
+  `epicsInFlight` narrowed to epics with a task in a truly open status
+  (`db/queries.ts`'s `activeEpics()`, the complement of
+  `TERMINAL_TASK_STATUSES`). Home's "Running now" reads the narrower field;
+  the escalated-only epic still surfaces under Needs you.
 
 ## Verification
 
