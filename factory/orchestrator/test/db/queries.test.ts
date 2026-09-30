@@ -1487,7 +1487,7 @@ describe('inboxRows() (DS2 §4.1 NeedsYouInbox)', () => {
     const rows = inboxRows(handle.db);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: 'escalation', taskId: TASK_3 });
-    expect(rows[0].title.length).toBeGreaterThan(0);
+    expect(rows[0]?.title.length).toBeGreaterThan(0);
   });
 
   it('adds a per-task pending-waiver row and a pending lesson-candidate row, sorted escalation < waiver < lesson_candidate', async () => {

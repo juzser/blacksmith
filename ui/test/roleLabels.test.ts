@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { dispatchDecisionLine, providerLabel, roleLabel, tierLabel } from '../src/lib/roleLabels.js';
+import {
+  dispatchDecisionLine,
+  providerLabel,
+  roleLabel,
+  tierLabel,
+} from '../src/lib/roleLabels.js';
 
 // factory/policies/taxonomy.yml `agent` (version 11, ~line 25-27) is the
 // closed vocabulary every dispatched role is drawn from. Hard-coded here
