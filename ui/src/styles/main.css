@@ -2,10 +2,19 @@
    inline blocks (design-spec.md section 9 - tokens copy path), then the
    ported kit component CSS. Order matters: ds-tokens.css has a base layer
    block that must land after the tailwindcss import so a repo base layer
-   would still win if one existed. */
+   would still win if one existed.
+
+   The BS kit (bs-tokens.css, bs-primitives.css) comes last: tokens before
+   the primitives that read them, and both after the old kit because DS1's
+   shell classes (.app-shell, .app-topbar, .app-scroll, .app-projection) are
+   defined in both component files — the shell now runs on the BS kit, so its
+   bs-* version has to win the equal-specificity tie. The two kits share no
+   other selector, so the old pages still read ds-components.css unchanged. */
 @import "tailwindcss";
 @import "./ds-tokens.css";
 @import "./ds-components.css";
+@import "./bs-tokens.css";
+@import "./bs-primitives.css";
 
 /* Repo-specific, additive only (not part of the vendored token file). */
 :root {
