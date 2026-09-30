@@ -329,11 +329,12 @@ describe('every session-taking fetch sends the pair through applySessionScope', 
   );
   const sessionTaking = [...fetches].filter(([, body]) => /\bsession\b/.test(body));
 
-  it('finds the eleven fetches whose endpoint spreads sessionScope(c)', () => {
+  it('finds the twelve fetches whose endpoint spreads sessionScope(c)', () => {
     expect(sessionTaking.map(([name]) => name).sort()).toEqual([
       'fetchAnalytics',
       'fetchErrors',
       'fetchFlow',
+      'fetchInbox',
       'fetchKanban',
       'fetchLessons',
       'fetchOverview',
