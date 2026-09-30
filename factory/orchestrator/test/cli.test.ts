@@ -219,6 +219,38 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  // bs-rename, operator decision 3: `smith` keeps working as a deprecated
+  // alias of `bs`, both pointing at this same built cli.js -- npm/pnpm's
+  // `bin` field makes each an unextended symlink literally named after the
+  // key, which is what these recreate directly rather than trusting a real
+  // `pnpm install` to have run.
+  describe('smith/bs alias (bs-rename)', () => {
+    it('invoked as `smith` behaves identically but adds one deprecation line on stderr', async () => {
+      const legacyPath = path.join(scratchDir, 'smith');
+      await symlink(CLI_PATH, legacyPath);
+      const viaBs = runCli(['--help']);
+      const viaSmith = runProcess('node', [legacyPath, '--help']);
+      assertExited(viaSmith, 'smith --help (legacy alias)');
+      expect(viaSmith.status).toBe(viaBs.status);
+      // stdout is parsed as JSON by playbooks in other commands, so the
+      // deprecation notice must never land there, only on stderr.
+      expect(viaSmith.stdout).toBe(viaBs.stdout);
+      const lines = viaSmith.stderr.split('\n').filter((line) => line.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('smith');
+      expect(lines[0]).toContain('bs');
+      expect(lines[0]?.toLowerCase()).toContain('deprecat');
+    });
+
+    it('invoked as `bs` prints no deprecation line', async () => {
+      const currentPath = path.join(scratchDir, 'bs');
+      await symlink(CLI_PATH, currentPath);
+      const run = runProcess('node', [currentPath, '--help']);
+      assertExited(run, 'bs --help');
+      expect(run.stderr).toBe('');
+    });
+  });
+
   it('plan quorum: rejects an unparseable --confidence instead of failing open', () => {
     // NaN < threshold is false, so a typo'd confidence would silently disable
     // plan_quorum's third trigger rather than firing it (planQuorum.ts).

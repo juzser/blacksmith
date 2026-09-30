@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +80,36 @@ describe('run-cli.ts (built binary: smith-run)', () => {
     const run = runSmithRun([]);
     expect(run.status).toBe(1);
     expect(run.stderr).toContain('missing <invocation.json');
+  });
+
+  // bs-rename, operator decision 3: `smith-run` keeps working as a
+  // deprecated alias of `bs-run`, both pointing at this same built
+  // run-cli.js -- npm/pnpm's `bin` field makes each an unextended symlink
+  // literally named after the key, which is what these recreate directly
+  // rather than trusting a real `pnpm install` to have run.
+  describe('smith-run/bs-run alias (bs-rename)', () => {
+    it('invoked as `smith-run` behaves identically but adds one deprecation line on stderr', async () => {
+      const legacyPath = path.join(cwd, 'smith-run');
+      await symlink(RUN_CLI_PATH, legacyPath);
+      const viaBsRun = runSmithRun(['--help']);
+      const viaSmithRun = runProcess('node', [legacyPath, '--help']);
+      assertExited(viaSmithRun, 'smith-run --help (legacy alias)');
+      expect(viaSmithRun.status).toBe(viaBsRun.status);
+      expect(viaSmithRun.stdout).toBe(viaBsRun.stdout);
+      const lines = viaSmithRun.stderr.split('\n').filter((line) => line.length > 0);
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('smith-run');
+      expect(lines[0]).toContain('bs-run');
+      expect(lines[0]?.toLowerCase()).toContain('deprecat');
+    });
+
+    it('invoked as `bs-run` prints no deprecation line', async () => {
+      const currentPath = path.join(cwd, 'bs-run');
+      await symlink(RUN_CLI_PATH, currentPath);
+      const run = runProcess('node', [currentPath, '--help']);
+      assertExited(run, 'bs-run --help');
+      expect(run.stderr).toBe('');
+    });
   });
 
   it('exits 0 and prints the JSON RunOutcome when the harness completes and no schema is set', async () => {

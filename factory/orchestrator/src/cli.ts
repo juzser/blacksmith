@@ -52,6 +52,7 @@ import {
   type WaveTask,
   writeRootCheck,
 } from './claims.js';
+import { warnIfLegacyName } from './cliName.js';
 import { collectCoverageEvidence } from './coverage.js';
 import { loadCrosscheckPolicy } from './crosscheck.js';
 import {
@@ -1234,6 +1235,11 @@ async function nextWaveInputFrom(
 }
 
 async function main(): Promise<number> {
+  // bs-rename, operator decision 3: a no-op unless argv[1]'s basename is the
+  // deprecated `smith`, in which case it writes one line to stderr, never
+  // stdout -- stdout is parsed as JSON by playbooks.
+  warnIfLegacyName(process.argv[1], 'smith', 'bs');
+
   // Refuse an unsupported runtime before anything opens the database. The
   // native binding crashes lazily — `new Database()`, not import — so a check
   // here still runs, and a subcommand that happens to avoid SQLite must not
@@ -2817,7 +2823,10 @@ async function main(): Promise<number> {
       // the merge — and adopt any task with it, which is the forgery the whole
       // verb exists to prevent. Deriving it from the plan-resolved id means the
       // branch and the id it is logged under cannot disagree.
-      { taskId, branch: taskBranchName(plan.epic_id, taskId, epicBranchPrefix(projectDir, plan.epic_id)) },
+      {
+        taskId,
+        branch: taskBranchName(plan.epic_id, taskId, epicBranchPrefix(projectDir, plan.epic_id)),
+      },
       {
         projectDir,
         epic: plan.epic_id,
