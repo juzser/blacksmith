@@ -36,6 +36,7 @@ import {
   longestRunningSince,
   workingCount,
 } from '../lib/liveness.js';
+import { roleLabel } from '../lib/roleLabels.js';
 import Icon from './ds/Icon.vue';
 import Lozenge from './ds/Lozenge.vue';
 import IdentityChip from './IdentityChip.vue';
@@ -77,7 +78,8 @@ const working = computed(() => workingCount(props.group.entries, props.now));
       <Icon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
       <IdentityChip
         :id="group.agentRole"
-        :label="`${group.agentRole} · ${group.modelTier}`"
+        :label="`${roleLabel(group.agentRole)} · ${group.modelTier}`"
+        :title="`${group.agentRole} · ${group.modelTier}`"
         :live="working > 0"
       />
       <Lozenge variant="outline">×{{ group.count }}</Lozenge>

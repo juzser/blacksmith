@@ -94,6 +94,7 @@ import {
   sessionActivity,
 } from '../lib/liveness.js';
 import { nothingPending, type PendingReviewCounts, pendingClauses } from '../lib/pendingReview.js';
+import { roleLabel } from '../lib/roleLabels.js';
 
 const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
@@ -646,7 +647,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
                   :title="`started ${formatDateTime(a.dispatchedAt)}`"
                   :aria-label="
                     a.taskId
-                      ? `${a.agentRole} on ${a.modelTier}, working on ${a.taskId}, running ${formatElapsed(a.dispatchedAt, now)}, opens task detail`
+                      ? `${roleLabel(a.agentRole)} on ${a.modelTier}, working on ${a.taskId}, running ${formatElapsed(a.dispatchedAt, now)}, opens task detail`
                       : undefined
                   "
                 >
@@ -654,7 +655,12 @@ const bsCommands = computed<CommandHintItem[]>(() => {
                     class="live-agent-entry__dot live-agent-entry__dot--working"
                     aria-hidden="true"
                   />
-                  <IdentityChip :id="a.agentRole" :label="`${a.agentRole} · ${a.modelTier}`" live />
+                  <IdentityChip
+                    :id="a.agentRole"
+                    :label="`${roleLabel(a.agentRole)} · ${a.modelTier}`"
+                    :title="`${a.agentRole} · ${a.modelTier}`"
+                    live
+                  />
                   <span class="live-agent-entry__task">{{ agentScopeLabel(a) }}</span>
                   <span class="live-agent-entry__elapsed">{{
                     formatElapsed(a.dispatchedAt, now)
@@ -755,14 +761,18 @@ const bsCommands = computed<CommandHintItem[]>(() => {
           <Row
             v-for="d in data.recentDispatches"
             :key="d.eventId"
-            :title="`${d.agentRole} → ${d.modelTier}/${d.provider}`"
+            :title="`${roleLabel(d.agentRole)} → ${d.modelTier}/${d.provider}`"
             :meta="`${d.reason ?? 'no reason given'} · ${formatRelative(d.ts, now)}`"
             :clickable="!!d.taskId"
             :aria-label="d.taskId ? `Open task ${d.taskId}` : undefined"
             @activate="d.taskId && router.push(`/tasks/${encodeURIComponent(d.taskId)}`)"
           >
             <template #trailing>
-              <IdentityChip :id="d.agentRole" :label="`${d.agentRole} · ${d.modelTier}`" />
+              <IdentityChip
+                :id="d.agentRole"
+                :label="`${roleLabel(d.agentRole)} · ${d.modelTier}`"
+                :title="`${d.agentRole} · ${d.modelTier}`"
+              />
             </template>
           </Row>
         </RowList>

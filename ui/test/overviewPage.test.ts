@@ -31,3 +31,25 @@ describe('OverviewPage.vue — Budget used card sources its label from lib/forma
     expect(SFC).toMatch(/<StatCard[^>]*:title="budgetUsedTitle"/s);
   });
 });
+
+// Task 2 (friendly role labels): a raw taxonomy string like "spec-reviewer"
+// is the thing the operator finds too technical, so every role render on
+// this page routes through roleLabel() — the raw `role · tier` stays
+// reachable (a title tooltip on the chips; the aria-label reads it in full).
+describe('OverviewPage.vue — role labels', () => {
+  it('imports roleLabel from lib/roleLabels', () => {
+    expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
+  });
+
+  it('labels the Now-running agent chip and keeps the raw role · tier as a tooltip', () => {
+    expect(SFC).toContain('roleLabel(a.agentRole)');
+    expect(SFC).toMatch(/:label="`\$\{roleLabel\(a\.agentRole\)\} · \$\{a\.modelTier\}`"/);
+    expect(SFC).toMatch(/:title="`\$\{a\.agentRole\} · \$\{a\.modelTier\}`"/);
+  });
+
+  it('labels the recent-dispatch row title and its trailing chip', () => {
+    expect(SFC).toContain('roleLabel(d.agentRole)');
+    expect(SFC).toMatch(/:title="`\$\{roleLabel\(d\.agentRole\)\} → \$\{d\.modelTier\}\/\$\{d\.provider\}`"/);
+    expect(SFC).toMatch(/:label="`\$\{roleLabel\(d\.agentRole\)\} · \$\{d\.modelTier\}`"/);
+  });
+});

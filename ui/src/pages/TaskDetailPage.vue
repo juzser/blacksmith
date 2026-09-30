@@ -29,6 +29,7 @@ import {
   type TimelineEntry,
 } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
+import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
 import {
   agentStatusTone,
@@ -175,7 +176,13 @@ const findingColumns = [
 // Operator directive 5 (Phase 6b round 3): same combined "role · tier"
 // IdentityChip label as Kanban's TaskCard (directive 2) — hashed on role
 // only, so the same agent role gets the same accent everywhere it appears.
+// Task 2 (friendly role labels): the visible label now reads "Builder"
+// rather than "coder"; agentChipTitle below keeps the raw pair as a tooltip.
 function agentChipLabel(role: string, modelTier: string | null): string {
+  const label = roleLabel(role);
+  return modelTier ? `${label} · ${modelTier}` : label;
+}
+function agentChipTitle(role: string, modelTier: string | null): string {
   return modelTier ? `${role} · ${modelTier}` : role;
 }
 </script>
@@ -224,13 +231,17 @@ function agentChipLabel(role: string, modelTier: string | null): string {
                 <RowList v-if="detail.attempts.length > 0">
                   <li v-for="a in detail.attempts" :key="a.eventId" class="ds-row">
                     <span class="ds-row__main">
-                      <span class="ds-row__title">{{ a.agentRole }} · {{ a.modelTier }}/{{ a.provider }}</span>
+                      <span class="ds-row__title">{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}/{{ a.provider }}</span>
                       <span class="ds-row__meta">
                         started {{ formatDateTime(a.ts) }}<template v-if="a.terminalAt"> · ended {{ formatDateTime(a.terminalAt) }}</template>
                       </span>
                     </span>
                     <span class="ds-row__trail">
-                      <IdentityChip :id="a.agentRole" :label="agentChipLabel(a.agentRole, a.modelTier)" />
+                      <IdentityChip
+                        :id="a.agentRole"
+                        :label="agentChipLabel(a.agentRole, a.modelTier)"
+                        :title="agentChipTitle(a.agentRole, a.modelTier)"
+                      />
                       <Lozenge v-if="a.agentStatus" :tone="agentStatusTone(a.agentStatus)">{{ a.agentStatus }}</Lozenge>
                     </span>
                   </li>
@@ -357,7 +368,11 @@ function agentChipLabel(role: string, modelTier: string | null): string {
             <RowList v-if="detail.agents.length > 0" density="compact">
               <li v-for="a in detail.agents" :key="a.id" class="ds-row">
                 <span class="ds-row__main">
-                  <IdentityChip :id="a.agentRole" :label="agentChipLabel(a.agentRole, a.modelTier)" />
+                  <IdentityChip
+                    :id="a.agentRole"
+                    :label="agentChipLabel(a.agentRole, a.modelTier)"
+                    :title="agentChipTitle(a.agentRole, a.modelTier)"
+                  />
                   <span class="ds-row__meta">{{ a.provider }}</span>
                 </span>
                 <span class="ds-row__trail">
