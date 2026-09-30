@@ -54,6 +54,8 @@ CODE_EXT = {".css", ".scss", ".tsx", ".jsx", ".ts", ".js", ".vue", ".svelte",
 EXCLUDE_FILES = {
     "ds-tokens.css",
     "ds-components.css",
+    "bs-tokens.css",
+    "bs-primitives.css",
     "icons.ts",
 }
 

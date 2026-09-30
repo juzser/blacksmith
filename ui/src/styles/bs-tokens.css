@@ -1,0 +1,269 @@
+/* ============================================================
+   Blacksmith dashboard — BS kit design tokens (bs-*)
+
+   Provenance: authored in-repo, 2026-09-30, supersedes the HDS-derived kit
+   (ds-tokens.css / ds-components.css) retired the same day — see git
+   history for the prior file if a comparison is ever needed. This is a
+   fresh palette picked and contrast-checked for this file, not a
+   re-numbered copy of the old zinc/blue scale: semantic names only, no
+   numeric step carried over.
+
+   Structure:
+     1. `:root`                          light theme + every theme-independent
+                                          token (type, spacing, radius, shadow,
+                                          motion, mobile/touch).
+     2. `:root.dark`                     dark theme, one block. Keyed on the
+        `.dark` class the app actually toggles (useTheme.ts sets/clears
+        `.dark` on <html>, no `data-theme` attribute exists anywhere in this
+        app) — the same mechanism ds-tokens.css uses (`.dark {}`, no OS
+        media-query fallback there either). ds-spec.md §1.2 contradicts
+        itself (heading says `.dark`, body says `data-theme`); `.dark` is
+        chosen because it is what useTheme.ts actually sets, and one block
+        keeps this file and ds-tokens.css from drifting apart the way two
+        near-duplicate blocks in one file already had.
+     3. `prefers-reduced-motion` reset (§1.8).
+
+   Every hex value here is deliberately hardcoded — this file is the one
+   place lint_hardcodes.py exempts, since it is the token source of truth.
+   ============================================================ */
+
+:root {
+  /* ---- Colour — light theme (§1.1) ---- */
+  --bs-surface: #ffffff;
+  --bs-surface-sunken: #f7f7f8;
+  --bs-surface-raised: #ffffff;
+  --bs-surface-overlay: #ffffff;
+  --bs-border: #e4e4e7;
+  --bs-border-bold: #a1a1aa;
+  --bs-surface-selected: #f4f4f5;
+  --bs-focus-ring: #53565c;
+  --bs-text: #0b0c0e;
+  --bs-text-subtle: #53565c;
+  --bs-text-subtlest: #696c72;
+  --bs-text-disabled: #a1a1aa;
+  --bs-text-on-accent: #ffffff;
+  --bs-accent: #2a5adf;
+  --bs-accent-hover: #1e46b8;
+  --bs-accent-pressed: #173a99;
+  --bs-accent-subtle: #eaf1ff;
+  --bs-link-text: var(--bs-text);
+  --bs-link-underline: var(--bs-text-subtlest);
+  --bs-tooltip-bg: #26272b;
+  --bs-tooltip-text: #f4f4f5;
+  --bs-tooltip-border: #26272b;
+
+  --bs-tone-done-text: #166534;
+  --bs-tone-done-subtle: #e9f7ee;
+  --bs-tone-review-text: #7c3aed;
+  --bs-tone-review-subtle: #f4f0fe;
+  --bs-tone-progress-text: #1d4ed8;
+  --bs-tone-progress-subtle: #eaf1ff;
+  --bs-tone-todo-text: #53565c;
+  --bs-tone-todo-subtle: #f1f1f2;
+  --bs-tone-blocked-text: #b45309;
+  --bs-tone-blocked-subtle: #fef3e0;
+  --bs-tone-danger-text: #b91c1c;
+  --bs-tone-danger-subtle: #fdecec;
+  --bs-tone-warning-text: #b45309;
+  --bs-tone-warning-subtle: #fef3e0;
+  /* info: Banner's tone prop is info|warning|danger (§2.1), but §1.1's
+     7-tone table (done/review/progress/todo/blocked/danger/warning) has no
+     "info" row — every other tone maps to a task/event status, and info
+     doesn't describe one. Reusing progress's blue rather than inventing an
+     eighth hue: progress ("status tag: in-progress / ready", §1.1) is the
+     least alarming, bluest tone already in the palette, and reusing an
+     already contrast-checked pair means this new pair needs no new
+     measurement, only a new name. Flagged as a spec gap in the DS0 report. */
+  --bs-tone-info-text: #1d4ed8;
+  --bs-tone-info-subtle: #eaf1ff;
+  /* neutral: Tag's tone prop is done|review|progress|todo|blocked|danger|
+     warning|neutral (ds-spec.md §2.1) — an 8th tone, same gap as info above
+     (no "neutral" row in §1.1's 7-tone table either). The old kit's
+     ds-tokens.css carried a --ds-neutral-text/-subtle pair (#52525b on
+     #f4f4f5, light), but that grey nearly duplicates this file's own
+     --bs-text-subtle on --bs-surface-sunken pairing rather than being a
+     distinct hue, so instead of picking a second, deliberately-similar
+     grey, neutral aliases directly to that existing pair — same colour
+     relationship, already contrast-checked, no new hex to measure. */
+  --bs-tone-neutral-text: var(--bs-text-subtle);
+  --bs-tone-neutral-subtle: var(--bs-surface-sunken);
+
+  /* Activity event kinds (§1.1, `--bs-event-*`). Prompt is the one blue
+     kind and it is a tint, never a solid fill (§1.9). */
+  --bs-event-prompt-text: #1e46b8;
+  --bs-event-prompt-subtle: #eaf1ff;
+  --bs-event-dispatch-text: #0e7490;
+  --bs-event-dispatch-subtle: #e6f6f9;
+  --bs-event-returned-text: #166534;
+  --bs-event-returned-subtle: #e9f7ee;
+  --bs-event-finding-text: #7c3aed;
+  --bs-event-finding-subtle: #f4f0fe;
+  --bs-event-gate-text: #3730a3;
+  --bs-event-gate-subtle: #eef0ff;
+  --bs-event-merge-text: #9d174d;
+  --bs-event-merge-subtle: #fdeef5;
+  --bs-event-error-text: #b91c1c;
+  --bs-event-error-subtle: #fdecec;
+  --bs-event-feedback-text: #92400e;
+  --bs-event-feedback-subtle: #fef3e0;
+  --bs-event-system-text: #53565c;
+  --bs-event-system-subtle: #f1f1f2;
+
+  /* Project/epic identity colour — 6 slots, cycles back to slot 1 with a
+     different chip shape for a 7th project (see `IdentityChip`, later PR). */
+  --bs-chart-1: #2a5adf;
+  --bs-chart-2: #16a34a;
+  --bs-chart-3: #d97706;
+  --bs-chart-4: #7c3aed;
+  --bs-chart-5: #dc2626;
+  --bs-chart-6: #0891b2;
+
+  /* ---- Type scale (§1.4) ---- */
+  --bs-font-sans: -apple-system, 'Segoe UI', Inter, sans-serif;
+  --bs-font-mono: ui-monospace, SFMono-Regular, monospace;
+  --bs-text-xs: 12px;
+  --bs-leading-xs: 16px;
+  --bs-text-sm: 13px;
+  --bs-leading-sm: 20px;
+  --bs-text-base: 14px;
+  --bs-leading-base: 20px;
+  --bs-text-md: 16px;
+  --bs-leading-md: 24px;
+  --bs-text-xl: 20px;
+  --bs-leading-xl: 28px;
+  --bs-text-2xl: 24px;
+  --bs-leading-2xl: 32px;
+  --bs-font-weight-normal: 400;
+  --bs-font-weight-medium: 500;
+  --bs-font-weight-semibold: 600;
+
+  /* ---- Spacing, 4px base (§1.5) ---- */
+  --bs-space-1: 4px;
+  --bs-space-2: 8px;
+  --bs-space-3: 12px;
+  --bs-space-4: 16px;
+  --bs-space-5: 24px;
+  --bs-space-6: 32px;
+  --bs-space-7: 48px;
+
+  /* Timeline geometry (RunHistoryTimeline, Activity day groups) — the rail
+     and the dots share one set of variables so their centres cannot drift
+     apart. Deliberately not `--bs-`-prefixed: single-purpose geometry
+     tokens for one composite, not part of the semantic palette/scale the
+     `--bs-` gates track (ds-spec.md §1.5). */
+  --tl-rail-x: 7px;
+  --tl-rail-w: 2px;
+  --tl-dot: 12px;
+  --tl-lh: 24px;
+  --tl-gap: 16px;
+
+  /* ---- Radius (§1.6) ---- */
+  --bs-radius-sm: 4px;
+  --bs-radius-md: 8px;
+  --bs-radius-lg: 12px;
+  --bs-radius-full: 999px;
+
+  /* ---- Shadow (§1.7) — same alpha values in both themes: flat elevation
+     via border, not a separate light-source shadow set. ---- */
+  --bs-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --bs-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --bs-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.16);
+
+  /* ---- Motion (§1.8) ---- */
+  --bs-duration-fast: 120ms;
+  --bs-duration-base: 200ms;
+  --bs-duration-slow: 400ms;
+  --bs-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- Mobile / touch (§3.1) — theme-independent, no dark copy needed ---- */
+  --bs-bp-mobile: 640px;
+  --bs-m-gutter: 16px;
+  --bs-m-gap: 16px;
+  --bs-m-card-pad: 12px;
+  --bs-touch: 44px;
+  --bs-tabbar-h: 56px;
+}
+
+/* ---- Colour — dark theme (§1.2) — keyed on the `.dark` class useTheme.ts
+   toggles on <html>, the app's real mechanism (see file header). ---- */
+:root.dark {
+  --bs-surface: #151619;
+  --bs-surface-sunken: #111214;
+  --bs-surface-raised: #1b1c1f;
+  --bs-surface-overlay: #212226;
+  --bs-surface-selected: #26272b;
+  --bs-border: #2c2d31;
+  --bs-border-bold: #45474c;
+  --bs-focus-ring: #b8bbc1;
+  --bs-text: #e3e4e6;
+  --bs-text-subtle: #b8bbc1;
+  --bs-text-subtlest: #9a9ea6;
+  --bs-text-disabled: #5f6268;
+  --bs-text-on-accent: #151619;
+  --bs-accent: #86a4e2;
+  --bs-accent-hover: #9db7eb;
+  --bs-accent-pressed: #b2c8f3;
+  --bs-accent-subtle: #1b2435;
+  --bs-link-text: var(--bs-text);
+  --bs-link-underline: var(--bs-text-subtlest);
+  --bs-tooltip-bg: var(--bs-surface-selected);
+  --bs-tooltip-text: var(--bs-text);
+  --bs-tooltip-border: var(--bs-border-bold);
+
+  --bs-tone-done-text: #7bc990;
+  --bs-tone-done-subtle: #17291b;
+  --bs-tone-review-text: #b6add9;
+  --bs-tone-review-subtle: #252131;
+  --bs-tone-progress-text: #99b7da;
+  --bs-tone-progress-subtle: #1a2532;
+  --bs-tone-todo-text: #b8bbc1;
+  --bs-tone-todo-subtle: #232428;
+  --bs-tone-blocked-text: #d9b56b;
+  --bs-tone-blocked-subtle: #2c230f;
+  --bs-tone-danger-text: #e18d8a;
+  --bs-tone-danger-subtle: #331d1c;
+  --bs-tone-warning-text: #d9b56b;
+  --bs-tone-warning-subtle: #2c230f;
+  --bs-tone-info-text: #99b7da;
+  --bs-tone-info-subtle: #1a2532;
+  --bs-tone-neutral-text: var(--bs-text-subtle);
+  --bs-tone-neutral-subtle: var(--bs-surface-sunken);
+
+  --bs-event-prompt-text: #92b1ef;
+  --bs-event-prompt-subtle: #1b2435;
+  --bs-event-dispatch-text: #7cc2cb;
+  --bs-event-dispatch-subtle: #0c292c;
+  --bs-event-returned-text: #7bc990;
+  --bs-event-returned-subtle: #17291b;
+  --bs-event-finding-text: #b6add9;
+  --bs-event-finding-subtle: #252131;
+  --bs-event-gate-text: #a8b2de;
+  --bs-event-gate-subtle: #1f2333;
+  --bs-event-merge-text: #d5a3bd;
+  --bs-event-merge-subtle: #301d27;
+  --bs-event-error-text: #e18d8a;
+  --bs-event-error-subtle: #331d1c;
+  --bs-event-feedback-text: #d9b56b;
+  --bs-event-feedback-subtle: #2c230f;
+  --bs-event-system-text: #b8bbc1;
+  --bs-event-system-subtle: #232428;
+
+  --bs-chart-1: #86a4e2;
+  --bs-chart-2: #7bc990;
+  --bs-chart-3: #d9b56b;
+  --bs-chart-4: #b6add9;
+  --bs-chart-5: #e18d8a;
+  --bs-chart-6: #7cc2cb;
+}
+
+/* ---- Reduced motion (§1.8) — every animated element in this kit also
+   carries a static fallback that alone conveys state; this reset removes
+   only the motion, never the information. ---- */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

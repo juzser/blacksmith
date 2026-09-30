@@ -29,8 +29,12 @@ const STYLES = join(SRC, 'styles');
  * - `live-agent-group` — LiveAgentGroupRow.vue's root. `-row` and `-detail`
  *   are both styled, and the detail is already inside `.live-agents-col`'s
  *   flex column (ds-components.css notes this at the `-detail` rule).
+ * - `bs-btn__label` — kit/Button.vue's label span. It inherits the button's
+ *   own flex-row text styling and exists only so its `--hidden` modifier can
+ *   toggle `visibility` while the loading spinner sits over it; the span
+ *   itself carries no rule of its own, same shape as `cmd-hint` above.
  */
-const WRAPPERS_WITHOUT_RULES = ['cmd-hint', 'ds-sh__left', 'live-agent-group'];
+const WRAPPERS_WITHOUT_RULES = ['cmd-hint', 'ds-sh__left', 'live-agent-group', 'bs-btn__label'];
 
 function vueFiles(dir: string): string[] {
   const out: string[] = [];
