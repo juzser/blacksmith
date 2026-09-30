@@ -162,7 +162,7 @@ describe('cli.ts (built binary)', () => {
     it('--help exits 0 and prints the command list on stdout', () => {
       const { stdout, status } = runCli(['--help']);
       expect(status).toBe(0);
-      expect(stdout).toContain('smith plan validate <plan.json>');
+      expect(stdout).toContain('bs plan validate <plan.json>');
       expect(stdout).toContain('gate run');
       expect(stdout).toContain('stats providers');
     });
@@ -179,7 +179,7 @@ describe('cli.ts (built binary)', () => {
       // callers that already read the error envelope.
       const { stdout, stderr, status } = runCli(['not', 'a-command']);
       expect(status).toBe(1);
-      expect(stderr).toContain('smith plan validate <plan.json>');
+      expect(stderr).toContain('bs plan validate <plan.json>');
       expect(JSON.parse(stdout).error.message).toContain('Unknown command: not a-command');
     });
 
@@ -205,7 +205,7 @@ describe('cli.ts (built binary)', () => {
     it('--help on a real command shows that command, not the whole list', () => {
       const { stdout, status } = runCli(['gate', 'run', '--help']);
       expect(status).toBe(0);
-      expect(stdout).toContain('smith gate run');
+      expect(stdout).toContain('bs gate run');
       expect(stdout).not.toContain('plan validate');
     });
 
@@ -215,7 +215,7 @@ describe('cli.ts (built binary)', () => {
       const err = JSON.parse(stdout).error;
       expect(err.code).toBe('cli.missing-positional');
       expect(err.message).toContain('<plan.json>');
-      expect(err.message).toContain('smith plan validate <plan.json>');
+      expect(err.message).toContain('bs plan validate <plan.json>');
     });
   });
 
@@ -548,7 +548,7 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('cli.missing-positional');
       expect(parsed.error.message).toContain('session-id');
-      expect(parsed.error.message).toContain('smith event tail');
+      expect(parsed.error.message).toContain('bs event tail');
     });
 
     it('event tail on a session that has no log is an error, not an empty array', () => {
@@ -582,7 +582,7 @@ describe('cli.ts (built binary)', () => {
       // The usage line names both, as it should; what must name only the
       // missing one is the error itself.
       expect(parsed.error.details.missing).toEqual(['epic']);
-      expect(parsed.error.message).toContain('smith worktree stale <project-dir> <epic>');
+      expect(parsed.error.message).toContain('bs worktree stale <project-dir> <epic>');
     });
 
     it('findings transition reports the missing positional before the missing flag', () => {
@@ -1775,14 +1775,14 @@ describe('cli.ts (built binary)', () => {
       // one step along — which is how D-139's four missing flags were found.
       const { stdout } = runCli(['event', 'tail', sessionId, '--lineag']);
       const parsed = JSON.parse(stdout);
-      expect(parsed.error.details.usage).toContain('smith event tail');
+      expect(parsed.error.details.usage).toContain('bs event tail');
       expect(parsed.error.details.usage).toContain('--lineage');
     });
 
     it('still prints help for a command carrying a bad flag', () => {
       const { status, stdout } = runCli(['event', 'tail', '--help', '--nonsense']);
       expect(status).toBe(0);
-      expect(stdout).toContain('smith event tail');
+      expect(stdout).toContain('bs event tail');
     });
 
     // The same defect as D-131, one step further along: there the value was
@@ -1803,7 +1803,7 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('cli.missing-flag-value');
       expect(parsed.error.message).toContain('--task');
-      expect(parsed.error.details.usage).toContain('smith event tail');
+      expect(parsed.error.details.usage).toContain('bs event tail');
       expect(parsed.error.details.usage).toContain('--task <task-id>');
     });
 
@@ -1828,7 +1828,7 @@ describe('cli.ts (built binary)', () => {
       // to survive the command line that made them ask.
       const { status, stdout } = runCli(['event', 'tail', '--help', '--task']);
       expect(status).toBe(0);
-      expect(stdout).toContain('smith event tail');
+      expect(stdout).toContain('bs event tail');
     });
 
     // D-139 itself: the documented invocation must not fail on a flag the
@@ -1940,7 +1940,7 @@ describe('cli.ts (built binary)', () => {
       expect(status).toBe(1);
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('cli.missing-positional');
-      expect(parsed.error.message).toContain('smith dispatch check');
+      expect(parsed.error.message).toContain('bs dispatch check');
     });
 
     it('errors on an unknown session rather than answering it with an empty report', () => {
@@ -14026,7 +14026,7 @@ describe('smith init (built binary)', () => {
     // `--work-root /tmp/x` silently becomes a work root of `--work-root`.
     const { stdout, status } = runCli(['--help']);
     expect(status).toBe(0);
-    expect(stdout).toContain('smith init [--work-root');
+    expect(stdout).toContain('bs init [--work-root');
   });
 });
 

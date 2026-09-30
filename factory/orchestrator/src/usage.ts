@@ -1,5 +1,5 @@
 /**
- * What `smith` can be asked to do, written down once (P9-21).
+ * What `bs` can be asked to do, written down once (P9-21).
  *
  * Before this, `smith` and `smith --help` both answered
  * `{"error":{"message":"Unknown command: "}}`, so the only way to learn a
@@ -35,7 +35,7 @@ export interface CommandDoc {
   /**
    * The flag shape, and since D-132 the parser's source of truth as well:
    * `flagsOf` reads a `<placeholder>` here as "this flag carries a value",
-   * which is what keeps `smith mcp check --verbose envkit` from eating its
+   * which is what keeps `bs mcp check --verbose envkit` from eating its
    * own positional. A value written any other way is one the parser cannot
    * see — `[--run-all false]` declared a flag that took nothing and a
    * positional nobody wanted (D-192), so a documented value belongs in
@@ -567,7 +567,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     positionals: '',
     flags: '[--policy <file>]',
     summary:
-      'Which stack answers the shipped templates honour, which they only record, and which make `smith new` refuse. Exit 1 on a refusal.',
+      'Which stack answers the shipped templates honour, which they only record, and which make `bs new` refuse. Exit 1 on a refusal.',
   },
   {
     command: 'policy check',
@@ -942,7 +942,7 @@ const NAMESPACES = new Set<string>(COMMANDS.map(namespaceOf));
 
 /** The line that would have worked. Empty parts are dropped, never printed as a double space. */
 export function usageLine(doc: CommandDoc): string {
-  return ['smith', doc.command, doc.positionals, doc.flags].filter((part) => part !== '').join(' ');
+  return ['bs', doc.command, doc.positionals, doc.flags].filter((part) => part !== '').join(' ');
 }
 
 /** The positional argument names, in order — what a missing-argument error names. */
@@ -987,7 +987,7 @@ function flagsOf(doc: CommandDoc): Array<[string, boolean]> {
 export function flagSpecFor(namespace?: string, action?: string): Map<string, boolean> | undefined {
   if (namespace === undefined) return undefined;
   const key = action === undefined ? namespace : `${namespace} ${action}`;
-  // The second arm is what keeps the action-less verbs working: `smith new
+  // The second arm is what keeps the action-less verbs working: `bs new
   // my-project` spends its action slot on a positional. Same fallback as
   // isDocumented, deliberately — a command that dispatches must also parse.
   const docs = COMMANDS.filter((doc) => doc.command === key || doc.command === namespace).filter(
@@ -1020,14 +1020,14 @@ function renderCommands(docs: readonly CommandDoc[]): string {
 
 /**
  * The whole command list, or one namespace's slice of it. An unknown namespace
- * throws rather than printing an empty list: "smith has no such namespace" and
+ * throws rather than printing an empty list: "bs has no such namespace" and
  * "that namespace has no commands" must not be the same observable answer.
  */
 export function usageText(namespace?: string): string {
   if (namespace !== undefined && !NAMESPACES.has(namespace)) {
     throw new SmithError(
       'usage.unknown-namespace',
-      `No such namespace: ${namespace}. Run "smith --help" for the list.`,
+      `No such namespace: ${namespace}. Run "bs --help" for the list.`,
       { namespace },
     );
   }
@@ -1037,13 +1037,13 @@ export function usageText(namespace?: string): string {
   const header =
     namespace === undefined
       ? [
-          'Usage: smith <namespace> <action> [args] [--flags]',
+          'Usage: bs <namespace> <action> [args] [--flags]',
           '',
-          '  smith <namespace> --help   list one namespace',
-          '  smith <command> --help     show one command',
+          '  bs <namespace> --help      list one namespace',
+          '  bs <command> --help        show one command',
           '',
         ].join('\n')
-      : `Usage: smith ${namespace} <action> [args] [--flags]\n`;
+      : `Usage: bs ${namespace} <action> [args] [--flags]\n`;
 
   let out = `${header}\n`;
   let current = '';
@@ -1070,7 +1070,7 @@ export function helpText(namespace?: string, action?: string): string | undefine
   const exact = COMMANDS.filter((doc) => doc.command === key);
   if (exact.length > 0) return renderCommands(exact);
 
-  // `smith new my-project --help`: the action slot holds a positional, so the
+  // `bs new my-project --help`: the action slot holds a positional, so the
   // namespace alone is the command.
   const bare = COMMANDS.filter((doc) => doc.command === namespace);
   if (bare.length > 0) return renderCommands(bare);
@@ -1083,7 +1083,7 @@ export function helpText(namespace?: string, action?: string): string | undefine
  * Whether cli.ts's dispatcher has a branch for this pair. Checked before
  * dispatch, so an undocumented command cannot run — which is the half of
  * "the table and the dispatcher agree" that a test cannot enforce at runtime.
- * The second arm is what keeps the action-less verbs working: `smith new
+ * The second arm is what keeps the action-less verbs working: `bs new
  * my-project` spends its action slot on a positional.
  */
 export function isDocumented(namespace?: string, action?: string): boolean {
