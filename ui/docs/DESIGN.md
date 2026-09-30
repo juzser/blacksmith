@@ -75,9 +75,9 @@ restyled on `bs-tokens.css`, gate-checked, but not yet imported by any page.
 | EmptyState | `icon`, `title`, `body`; `action` is a named slot, not a prop |
 | Banner | `tone: info\|warning\|danger`, `collapsible?` |
 | PageHeader / Breadcrumb / Separator | ported, restyled |
-| ProgressRing | 20px inline SVG ring (`r=8`, `pathLength=100`, 2.5px stroke), `.pring`; additive `kind: budget\|ratio` (default `ratio`) selects the auto-tone threshold rule, additive `detail?` shows a describe-mode Tooltip with exact values when given — see Known deviations for the spec-vs-mockup sizing disagreement |
-| ProgressBarMini | same contract and additive props as ProgressRing, `.pmini`/`.pnum`, 56×6px track |
-| ProgressBar | `segments: [{tone, value}]`, stacked; `.pbar`/`.pbar__seg` — no old-kit predecessor, class names newly invented (see Known deviations) |
+| ProgressRing | 20px inline SVG ring (`r=8`, `pathLength=100`, 2.5px stroke), `.bs-pring`; additive `kind: budget\|ratio` (default `ratio`) selects the auto-tone threshold rule, additive `detail?` shows a describe-mode Tooltip with exact values when given — see Known deviations for the spec-vs-mockup sizing disagreement |
+| ProgressBarMini | same contract and additive props as ProgressRing, `.pmini`/`.bs-pnum`, 56×6px track |
+| ProgressBar | `segments: [{tone, value}]`, stacked; `.bs-pbar`/`.bs-pbar__seg` — no old-kit predecessor, class names newly invented (see Known deviations) |
 | BarChart | gains additive `stacked`/`series`/`stackedBars` for a per-series stacked path (see Known deviations); otherwise ported |
 | LineChart / Sparkline | ported (inline SVG, `role="img"` + `aria-label` + sr-only `<table>`); both, plus BarChart, now REQUIRE a `takeaway` prop (one-line prose summary) per the redesign spec's chart contract; Sparkline gains a wrapper `<div class="bs-chart bs-chart--spark">` to hold it (see Known deviations) |
 | CompactNumber | `value`, `unit?: "tok"` — renders "1.2M tokens", "127K", "43" |
@@ -145,6 +145,28 @@ None of these composables changed for DS0 — the kit swap is presentational.
 
 ## Known deviations
 
+- **Dark theme keys on `.dark`, not `data-theme` or an OS media query.**
+  The redesign spec's §1.2 contradicts itself — its heading says "declared
+  twice... under `@media (prefers-color-scheme: dark)`... once under the
+  explicit `data-theme` attribute", but the app's real toggle
+  (`ui/src/composables/useTheme.ts`) sets/clears a `.dark` class on
+  `<html>`; no `data-theme` attribute exists anywhere in this codebase.
+  `bs-tokens.css` declares one `:root.dark { ... }` block, matching the
+  mechanism `ds-tokens.css` already uses for the old kit (`.dark {}`, no
+  OS-preference fallback there either) — so a user's explicit light/dark
+  choice is never overridden by their OS setting, and the two kits cannot
+  drift into disagreeing about which selector means "dark".
+- **Button's `disabled`/`loading` use `aria-disabled` + a click guard, never
+  the native `disabled` attribute** — same reasoning `IconButton` already
+  documents for its own `disabled?` prop: a natively disabled button drops
+  out of the tab order and, if it was the focused element when loading
+  started (the common submit-then-loading case), loses focus entirely. The
+  loading label stays in the DOM with `opacity: 0` rather than
+  `visibility: hidden` for the same reason — `visibility: hidden` removes an
+  element from the accessibility tree, which would leave a loading button
+  with no accessible name; `opacity: 0` keeps the label announced (paired
+  with `aria-busy="true"`) while staying visually invisible and keeping its
+  layout box, so the width-lock trick is unaffected.
 - **Tag's `info` tone has no dedicated hex.** `IconButton`/`Banner`'s
   `tone: info|warning|danger` needs an `info` colour, but the redesign
   spec's 7-tone table (`done/review/progress/todo/blocked/danger/warning`)
@@ -190,8 +212,15 @@ None of these composables changed for DS0 — the kit swap is presentational.
   percentage number beside it is not — a budget past 100% still reports its
   true value, e.g. "103%", per the spec's own worked example.
 - **ProgressBar (`segments`) has no old-kit predecessor.** No stacked-bar
-  markup exists in the visual reference to port from; its `.pbar`/
-  `.pbar__seg` class names are new, not a port.
+  markup exists in the visual reference to port from; its `.bs-pbar`/
+  `.bs-pbar__seg` class names are new, not a port.
+- **`.pring`/`.trk`/`.fil`/`.pnum`/`.pbar` were un-namespaced** (S3-3 review
+  finding — contradicted this file's own "bs-* only" header). Renamed to
+  `.bs-pring`/`.bs-trk`/`.bs-fil`/`.bs-pnum`/`.bs-pbar` (and its
+  `.bs-pbar__seg` element). `.pmini`/`.ptrack` are unchanged — the finding
+  named only those five. The ring's own `.bs-pnum` was also brought onto its
+  own spec row (14px/400/`--bs-text`, §2.1) rather than ProgressBarMini's
+  (12px/`--bs-text-subtle`), which it had been copying.
 - **BarChart's `stacked`/`series`/`stackedBars` are additive and
   under-specified** — the spec names the prop shape but has no stacked-bar
   mockup or prose to port from. Minimal decision: a second, mutually

@@ -24,12 +24,14 @@ describe('kit/ProgressBar.vue', () => {
     expect(BAR).not.toMatch(/pnum/);
   });
 
-  it('uses new pbar/pbar__seg class names (no mockup precedent to port from)', () => {
-    expect(BAR).toMatch(/class="pbar"/);
-    expect(BAR).toMatch(/class="pbar__seg"/);
+  it('uses new bs-pbar/bs-pbar__seg class names, namespaced (S3-3, no mockup precedent to port from)', () => {
+    expect(BAR).toMatch(/class="bs-pbar"/);
+    expect(BAR).toMatch(/class="bs-pbar__seg"/);
+    expect(BAR).not.toMatch(/class="pbar"/);
+    expect(BAR).not.toMatch(/class="pbar__seg"/);
   });
 
-  it('reads role=img and aria-label off the label prop on the pbar wrapper', () => {
-    expect(BAR).toMatch(/class="pbar" role="img" :aria-label="label"/);
+  it('reads role=img and aria-label off the label prop on the bs-pbar wrapper', () => {
+    expect(BAR).toMatch(/class="bs-pbar" role="img" :aria-label="label"/);
   });
 });

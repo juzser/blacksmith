@@ -56,11 +56,11 @@ describe('kit/ProgressRing.vue', () => {
 
   it('wraps in a describe-mode Tooltip only when detail is provided', () => {
     expect(RING).toMatch(/<Tooltip\s+v-if="detail"\s+mode="describe"\s+:text="detail">/);
-    expect(RING).toMatch(/<span\s+v-else\s+class="pring"/);
+    expect(RING).toMatch(/<span\s+v-else\s+class="bs-pring"/);
   });
 
-  it('carries role=img and aria-label on the pring wrapper itself, not the Tooltip trigger', () => {
-    const wrapperOccurrences = RING.match(/class="pring" role="img" :aria-label="label"/g);
+  it('carries role=img and aria-label on the bs-pring wrapper itself, not the Tooltip trigger', () => {
+    const wrapperOccurrences = RING.match(/class="bs-pring" role="img" :aria-label="label"/g);
     expect(wrapperOccurrences).toHaveLength(2); // once inside Tooltip's slot, once in the v-else branch
   });
 
@@ -71,10 +71,14 @@ describe('kit/ProgressRing.vue', () => {
     expect(RING).not.toMatch(/\bsize\??:\s*'/); // no size/lg prop was added
   });
 
-  it('uses the pring/trk/fil/pnum class names', () => {
-    expect(RING).toMatch(/class="pring"/);
-    expect(RING).toMatch(/class="trk"/);
-    expect(RING).toMatch(/class="fil"/);
-    expect(RING).toMatch(/class="pnum"/);
+  it('uses the bs-pring/bs-trk/bs-fil/bs-pnum class names, namespaced (S3-3)', () => {
+    expect(RING).toMatch(/class="bs-pring"/);
+    expect(RING).toMatch(/class="bs-trk"/);
+    expect(RING).toMatch(/class="bs-fil"/);
+    expect(RING).toMatch(/class="bs-pnum"/);
+    expect(RING).not.toMatch(/class="pring"/);
+    expect(RING).not.toMatch(/class="trk"/);
+    expect(RING).not.toMatch(/class="fil"/);
+    expect(RING).not.toMatch(/class="pnum"/);
   });
 });

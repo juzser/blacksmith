@@ -176,10 +176,10 @@
 .bs-btn:focus-visible {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
 }
-.bs-btn:active:not(:disabled) {
+.bs-btn:active:not([aria-disabled='true']) {
   transform: translateY(1px);
 }
-.bs-btn:disabled {
+.bs-btn[aria-disabled='true'] {
   pointer-events: none;
   opacity: 0.5;
 }
@@ -190,7 +190,7 @@
 .bs-btn--primary:hover {
   background: var(--bs-accent-hover);
 }
-.bs-btn--primary:active:not(:disabled) {
+.bs-btn--primary:active:not([aria-disabled='true']) {
   background: var(--bs-accent-pressed);
 }
 .bs-btn--secondary {
@@ -238,7 +238,14 @@
   animation: bs-spin 1s linear infinite;
 }
 .bs-btn__label--hidden {
-  visibility: hidden;
+  /* opacity, not visibility: hidden — visibility: hidden removes an element
+     from the accessibility tree, which would leave the button with no
+     accessible name while loading (S2-4). opacity: 0 stays visually
+     invisible, keeps the label's layout box (so the width-lock trick above
+     still works), and — unlike visibility/display — is not pulled out of
+     the accessibility tree, so a screen reader still announces the label
+     alongside aria-busy="true". */
+  opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .bs-btn__spinner {
@@ -828,34 +835,43 @@
    the "Progress tones and placement" paragraph). ProgressRing/ProgressBarMini
    share tone/percent logic via kit/progressTone.ts; both read their fill
    colour from an inline style, not a CSS class, since the tone is chosen at
-   runtime. ProgressBar's .pbar/.pbar__seg are new — no old-kit predecessor
-   or mockup markup exists for a stacked-segment bar (see the component's
-   own header comment) — sized to 6px to match ProgressBarMini's track,
-   the only height the spec gives for any Progress component. */
-.pring {
+   runtime. ProgressBar's .bs-pbar/.bs-pbar__seg are new — no old-kit
+   predecessor or mockup markup exists for a stacked-segment bar (see the
+   component's own header comment) — sized to 6px to match ProgressBarMini's
+   track, the only height the spec gives for any Progress component.
+   `.pring`/`.trk`/`.fil`/`.pnum` were un-namespaced (S3-3 review finding) —
+   renamed to `.bs-pring`/`.bs-trk`/`.bs-fil`/`.bs-pnum` here. `.pmini`/
+   `.ptrack` are unchanged: the review finding named only
+   pring/trk/fil/pnum/pbar. */
+.bs-pring {
   display: inline-flex;
   align-items: center;
   gap: var(--bs-space-1);
 }
-.pring svg {
+.bs-pring svg {
   width: 20px;
   height: 20px;
   transform: rotate(-90deg);
 }
-.pring .trk {
+.bs-pring .bs-trk {
   fill: none;
   stroke: var(--bs-border);
   stroke-width: 2.5;
 }
-.pring .fil {
+.bs-pring .bs-fil {
   fill: none;
   stroke-width: 2.5;
   stroke-linecap: round;
 }
-.pring .pnum {
-  font-size: var(--bs-text-xs);
+/* ds-spec.md §2.1 ProgressRing row: "the % number sits to its right at
+   14px/400 --bs-text" — the ring's own pnum, not ProgressBarMini's (that one
+   is 12px per its own spec row, kept at --bs-text-xs below). Was
+   --bs-text-xs/--bs-text-subtle, matching pmini's rather than its own spec
+   row (S3-3). */
+.bs-pring .bs-pnum {
+  font-size: var(--bs-text-base);
   font-weight: var(--bs-font-weight-normal);
-  color: var(--bs-text-subtle);
+  color: var(--bs-text);
   font-variant-numeric: tabular-nums;
 }
 .pmini {
@@ -882,7 +898,7 @@
   color: var(--bs-text-subtle);
   font-variant-numeric: tabular-nums;
 }
-.pbar {
+.bs-pbar {
   display: flex;
   width: 100%;
   height: 6px;
@@ -890,7 +906,7 @@
   background: var(--bs-border);
   overflow: hidden;
 }
-.pbar__seg {
+.bs-pbar__seg {
   height: 100%;
 }
 

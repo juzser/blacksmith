@@ -2,8 +2,8 @@
 // ds-spec.md §2.1 row `ProgressBar`: segments: [{tone, value}], stacked,
 // replaces a single-fill bar. Unlike ProgressRing/ProgressBarMini, this one
 // has no old-kit predecessor and no mockup markup to port from (ds-review.html
-// has no stacked-bar HTML) — the .pbar/.pbar__seg class names below are new,
-// not a port, flagged as such in the DS0 report.
+// has no stacked-bar HTML) — the .bs-pbar/.bs-pbar__seg class names below
+// are new, not a port, flagged as such in the DS0 report.
 //
 // Renders only the stacked track: no built-in percentage number. The spec's
 // prose puts the overall % beside it as a separate ProgressBarMini-style
@@ -40,11 +40,11 @@ function colorOf(segment: Segment): string {
 </script>
 
 <template>
-  <span class="pbar" role="img" :aria-label="label">
+  <span class="bs-pbar" role="img" :aria-label="label">
     <span
       v-for="(segment, i) in segments"
       :key="i"
-      class="pbar__seg"
+      class="bs-pbar__seg"
       :style="{ width: widthOf(segment), background: colorOf(segment) }"
     />
   </span>

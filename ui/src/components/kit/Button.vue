@@ -25,7 +25,20 @@ const props = withDefaults(
   { variant: 'primary', size: 'md', type: 'button' },
 );
 
+const emit = defineEmits<{ click: [MouseEvent] }>();
+
 const iconSize = computed(() => (props.size === 'sm' ? 14 : 16));
+const isBlocked = computed(() => props.disabled || props.loading);
+
+// aria-disabled + a click guard, not the native `disabled` attribute, same
+// reasoning IconButton already documents: a natively disabled button drops
+// out of the tab order and, if it was the focused element when loading
+// started (the common submit-then-loading case), drops focus entirely. The
+// button stays focusable; this guard is what actually blocks the click.
+function onClick(event: MouseEvent) {
+  if (isBlocked.value) return;
+  emit('click', event);
+}
 </script>
 
 <template>
@@ -33,7 +46,9 @@ const iconSize = computed(() => (props.size === 'sm' ? 14 : 16));
     :type="type"
     class="bs-btn"
     :class="[`bs-btn--${variant}`, `bs-btn--${size}`, { 'bs-btn--loading': loading }]"
-    :disabled="disabled || loading"
+    :aria-disabled="isBlocked ? 'true' : undefined"
+    :aria-busy="loading ? 'true' : undefined"
+    @click="onClick"
   >
     <Icon v-if="icon && !loading" :icon="icon" :size="iconSize" />
     <Icon v-if="loading" class="bs-btn__spinner" :icon="LoaderCircle" :size="iconSize" />

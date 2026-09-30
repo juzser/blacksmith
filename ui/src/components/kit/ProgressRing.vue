@@ -54,11 +54,11 @@ const text = computed(() => `${Math.round(rawPercent.value)}%`);
 
 <template>
   <Tooltip v-if="detail" mode="describe" :text="detail">
-    <span class="pring" role="img" :aria-label="label">
+    <span class="bs-pring" role="img" :aria-label="label">
       <svg viewBox="0 0 20 20" aria-hidden="true">
-        <circle class="trk" cx="10" cy="10" r="8" />
+        <circle class="bs-trk" cx="10" cy="10" r="8" />
         <circle
-          class="fil"
+          class="bs-fil"
           cx="10"
           cy="10"
           r="8"
@@ -67,14 +67,14 @@ const text = computed(() => `${Math.round(rawPercent.value)}%`);
           :style="{ stroke: fillColor }"
         />
       </svg>
-      <span class="pnum">{{ text }}</span>
+      <span class="bs-pnum">{{ text }}</span>
     </span>
   </Tooltip>
-  <span v-else class="pring" role="img" :aria-label="label">
+  <span v-else class="bs-pring" role="img" :aria-label="label">
     <svg viewBox="0 0 20 20" aria-hidden="true">
-      <circle class="trk" cx="10" cy="10" r="8" />
+      <circle class="bs-trk" cx="10" cy="10" r="8" />
       <circle
-        class="fil"
+        class="bs-fil"
         cx="10"
         cy="10"
         r="8"
@@ -83,6 +83,6 @@ const text = computed(() => `${Math.round(rawPercent.value)}%`);
         :style="{ stroke: fillColor }"
       />
     </svg>
-    <span class="pnum">{{ text }}</span>
+    <span class="bs-pnum">{{ text }}</span>
   </span>
 </template>

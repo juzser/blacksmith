@@ -38,11 +38,11 @@ const text = computed(() => `${Math.round(rawPercent.value)}%`);
   <Tooltip v-if="detail" mode="describe" :text="detail">
     <span class="pmini" role="img" :aria-label="label">
       <span class="ptrack"><span :style="{ width: `${pct}%`, background: fillColor }" /></span>
-      <span class="pnum">{{ text }}</span>
+      <span class="bs-pnum">{{ text }}</span>
     </span>
   </Tooltip>
   <span v-else class="pmini" role="img" :aria-label="label">
     <span class="ptrack"><span :style="{ width: `${pct}%`, background: fillColor }" /></span>
-    <span class="pnum">{{ text }}</span>
+    <span class="bs-pnum">{{ text }}</span>
   </span>
 </template>

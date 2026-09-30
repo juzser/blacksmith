@@ -40,8 +40,15 @@ describe('kit/Button.vue', () => {
     expect(match?.[1]).toMatch(/size:\s*'md'/);
   });
 
-  it('locks in aria-disabled while loading and disables the native button too, so it cannot be double-submitted', () => {
-    expect(BUTTON).toMatch(/:disabled="disabled\s*\|\|\s*loading"/);
+  it('guards clicks via aria-disabled + a click handler, never the native disabled attribute (S2-4: native disabled drops focus while loading)', () => {
+    expect(BUTTON).toMatch(/:aria-disabled="isBlocked\s*\?\s*'true'\s*:\s*undefined"/);
+    expect(BUTTON).not.toMatch(/:disabled=/);
+    expect(BUTTON.match(/<button\b[^>]*>/)?.[0]).not.toMatch(/\bdisabled\b/);
+    expect(BUTTON).toMatch(/if\s*\(isBlocked\.value\)\s*return;/);
+  });
+
+  it('sets aria-busy while loading, so a screen reader announces the pending state', () => {
+    expect(BUTTON).toMatch(/:aria-busy="loading\s*\?\s*'true'\s*:\s*undefined"/);
   });
 
   it("renders the loading spinner from a real Lucide component, not a string icon name, matching Icon's icon prop contract", () => {

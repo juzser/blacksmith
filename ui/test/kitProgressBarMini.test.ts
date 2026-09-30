@@ -35,9 +35,10 @@ describe('kit/ProgressBarMini.vue', () => {
     expect(MINI).toMatch(/<span\s+v-else\s+class="pmini"/);
   });
 
-  it('matches the directive-specified pmini/ptrack/pnum structure', () => {
+  it('matches the directive-specified pmini/ptrack structure, with the shared bs-pnum class (S3-3)', () => {
     expect(MINI).toMatch(/class="pmini" role="img" :aria-label="label"/);
     expect(MINI).toMatch(/<span class="ptrack">/);
-    expect(MINI).toMatch(/class="pnum"/);
+    expect(MINI).toMatch(/class="bs-pnum"/);
+    expect(MINI).not.toMatch(/class="pnum"/);
   });
 });
