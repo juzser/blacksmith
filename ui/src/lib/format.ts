@@ -159,12 +159,26 @@ const COMPACT_NUMBER_TIERS: Array<[number, string]> = [
 
 export function formatCompactNumber(n: number): string {
   const abs = Math.abs(n);
-  for (const [threshold, suffix] of COMPACT_NUMBER_TIERS) {
-    if (abs >= threshold) {
-      const rounded = Math.round((n / threshold) * 10) / 10;
-      const str = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-      return `${str}${suffix}`;
+  const sign = n < 0 ? -1 : 1;
+  for (const [index, [threshold, suffix]] of COMPACT_NUMBER_TIERS.entries()) {
+    if (abs < threshold) continue;
+
+    let roundedAbs = Math.round((abs / threshold) * 10) / 10;
+    let effectiveSuffix = suffix;
+    // Rounding can carry a value up to the next tier's floor (999950 rounds
+    // to "1000K"); when it does, and a next tier up exists, re-derive the
+    // rounded magnitude against that tier instead. B has no tier above it,
+    // so "1000B" stands.
+    const nextTier = COMPACT_NUMBER_TIERS[index - 1];
+    if (roundedAbs >= 1000 && nextTier) {
+      const [nextThreshold, nextSuffix] = nextTier;
+      roundedAbs = Math.round((abs / nextThreshold) * 10) / 10;
+      effectiveSuffix = nextSuffix;
     }
+
+    const value = sign * roundedAbs;
+    const str = Number.isInteger(value) ? String(value) : value.toFixed(1);
+    return `${str}${effectiveSuffix}`;
   }
   return String(n);
 }

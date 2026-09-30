@@ -60,12 +60,38 @@ describe('TaskDetailPage.vue — role labels', () => {
 // tooltip (its own `title` prop IS the heading), so the raw id stays
 // reachable via the Details rail's always-visible "Task ID" field, not a
 // hover tooltip.
+//
+// This block cannot mount TaskDetailPage with @vue/test-utils: that package
+// is not a dependency of this repo (no entry in package.json/pnpm-lock.yaml,
+// nothing under node_modules/@vue), and ui/vitest.config.ts deliberately runs
+// this suite under `environment: 'node'` — there is no DOM here to mount
+// into. Per that config's own comment, component/page behavior is Playwright
+// (ui/e2e/*.spec.ts) territory; adding a DOM environment and a new test
+// dependency to cover one page here would be a second, competing way to test
+// component behavior in a suite that is explicitly scoped to pure-logic
+// units. So this stays a source-text assertion like its siblings above, now
+// covering the fallback path added for the long-objective case.
 describe('TaskDetailPage.vue — humanized task label', () => {
   it('imports taskLabel and heads the page with it', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/format\.js'/);
     expect(SFC).toContain('taskLabel(detail.task.taskId, detail.task.objective)');
     expect(SFC).toMatch(
-      /<PageHeader :title="taskLabel\(detail\.task\.taskId, detail\.task\.objective\)"/,
+      /<PageHeader\s+:title="taskLabel\(detail\.task\.taskId, detail\.task\.objective\)"/,
+    );
+  });
+
+  it('passes a description to PageHeader only when the objective differs from the heading', () => {
+    expect(SFC).toMatch(
+      /:description="objectiveDescription\(detail\.task\.taskId, detail\.task\.objective\)"/,
+    );
+    expect(SFC).toMatch(
+      /function objectiveDescription\(taskId: string, objective: string \| null\): string \| undefined \{/,
+    );
+  });
+
+  it('falls back to undefined once the trimmed objective equals the derived label', () => {
+    expect(SFC).toMatch(
+      /return trimmed === taskLabel\(taskId, objective\) \? undefined : trimmed;/,
     );
   });
 });

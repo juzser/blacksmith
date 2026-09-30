@@ -187,6 +187,35 @@ describe('lib/format.ts formatCompactNumber()', () => {
     expect(formatCompactNumber(2_500_000_000)).toBe('2.5B');
     expect(formatCompactNumber(1_000_000_000)).toBe('1B');
   });
+
+  // A value that rounds up to 1000 within its tier used to render "1000K"
+  // instead of promoting to the next tier up ("1M") — the rounded display
+  // value, not the raw magnitude, decides which tier a number belongs to.
+  describe('boundary values that round up into the next tier', () => {
+    it('promotes a K value that rounds to 1000 up to 1M', () => {
+      expect(formatCompactNumber(999_950)).toBe('1M');
+    });
+
+    it('does not promote a K value that rounds to 999.9', () => {
+      expect(formatCompactNumber(999_949)).toBe('999.9K');
+    });
+
+    it('promotes an M value that rounds to 1000 up to 1B', () => {
+      expect(formatCompactNumber(999_994_999)).toBe('1B');
+    });
+
+    it('promotes a negative K value that rounds to -1000 up to -1M', () => {
+      expect(formatCompactNumber(-999_950)).toBe('-1M');
+    });
+
+    it('renders exactly 999 with no suffix', () => {
+      expect(formatCompactNumber(999)).toBe('999');
+    });
+
+    it('renders exactly 1000 as 1K', () => {
+      expect(formatCompactNumber(1000)).toBe('1K');
+    });
+  });
 });
 
 // OverviewPage's "Recent dispatch decisions" and Timeline both show a bare

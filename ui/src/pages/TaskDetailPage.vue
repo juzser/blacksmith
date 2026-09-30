@@ -185,6 +185,18 @@ function agentChipLabel(role: string, modelTier: string | null): string {
 function agentChipTitle(role: string, modelTier: string | null): string {
   return modelTier ? `${role} · ${modelTier}` : role;
 }
+
+// Task (long objective): taskLabel() drops the objective in favor of a
+// slug once it is longer than SHORT_TASK_LABEL_MAX, and nothing else on
+// this page showed it. This surfaces the full text as PageHeader's
+// description whenever it differs from the heading — i.e. whenever
+// taskLabel() had to fall back to the derived slug — so it stays reachable
+// without duplicating a short objective that is already the heading.
+function objectiveDescription(taskId: string, objective: string | null): string | undefined {
+  const trimmed = objective?.trim();
+  if (!trimmed) return undefined;
+  return trimmed === taskLabel(taskId, objective) ? undefined : trimmed;
+}
 </script>
 
 <template>
@@ -193,7 +205,10 @@ function agentChipTitle(role: string, modelTier: string | null): string {
     <Skeleton v-if="loading" height="240" />
 
     <template v-else-if="detail">
-      <PageHeader :title="taskLabel(detail.task.taskId, detail.task.objective)">
+      <PageHeader
+        :title="taskLabel(detail.task.taskId, detail.task.objective)"
+        :description="objectiveDescription(detail.task.taskId, detail.task.objective)"
+      >
         <template #status>
           <Lozenge :tone="taskStatusTone(detail.task.taskStatus)">{{ detail.task.taskStatus }}</Lozenge>
         </template>
