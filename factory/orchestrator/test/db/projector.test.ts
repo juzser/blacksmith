@@ -930,6 +930,12 @@ describe('D-200: a finding transitioned from a continuation session', () => {
 // the *whole session* rolled back and the dashboard drew nothing for an epic
 // that was three waves deep. The fix shape is D-141's: land everything that
 // can land, hold back only the rows that cannot, and name what was held.
+//
+// That all-string shape is now read as the legacy name->path map (see the
+// describe below this one), so this fixture uses a value that is *not* a
+// string. An object shaped like this — or any other non-array payload —
+// still cannot become rows, and still has to be held back and named rather
+// than crash the session.
 // ---------------------------------------------------------------------------
 describe('db/projector.ts — a task-result-recorded whose artifacts is not a list', () => {
   let stateDir: string;
@@ -960,7 +966,9 @@ describe('db/projector.ts — a task-result-recorded whose artifacts is not a li
         structured_output: {},
         artifacts: {
           claude_half: 'state/results/task-2.claude.json',
-          external_half: 'state/results/task-2.external.json',
+          // Not a string: this keeps the object out of the legacy
+          // name->path reading and into the loud skip below.
+          external_half: 42,
         },
         token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
         agent: 'spec-reviewer',
@@ -1029,6 +1037,132 @@ describe('db/projector.ts — a task-result-recorded whose artifacts is not a li
     const dbPath = path.join(dbDir, 'smith.db');
     const applied = await apply(dbPath, 'sess-clean', { stateDir });
     expect(applied.skippedArtifacts).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A task-result-recorded whose `artifacts` is the legacy name->path map: a
+// hand-written log from before `validateResultArtifactsShape` (events.ts)
+// started refusing non-array artifacts at append time. `{"claude_half":
+// "scratchpad/r23/claude-half.json", "repair_brief": "scratchpad/r24/repairs.md"}`
+// is exactly that shape. The log is append-only history, so that line can
+// never become an array -- the projector reads it as what it is instead of
+// holding it back forever behind a banner an operator can never clear.
+// ---------------------------------------------------------------------------
+describe('db/projector.ts — a task-result-recorded whose artifacts is the legacy name->path map', () => {
+  let stateDir: string;
+  let dbDir: string;
+  let legacyEventId: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-legacy-artifacts-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-legacy-artifacts-db-'));
+    await buildFixture({ stateDir });
+    const priorEvents = await readEvents(SESSION_ID, { stateDir });
+    const index = priorEvents.length;
+    legacyEventId = `${SESSION_ID}#${index}`;
+    const record = {
+      session_id: SESSION_ID,
+      actor: 'orchestrator',
+      event_type: 'task-result-recorded',
+      task_id: TASK_2,
+      plan_version: 1,
+      causal_parent: priorEvents.at(-1)?.event_id ?? null,
+      ts: '2026-08-15T00:00:00.000Z',
+      payload: {
+        task_id: TASK_2,
+        run_status: 'done',
+        structured_output: {},
+        artifacts: {
+          claude_half: 'scratchpad/r23/claude-half.json',
+          repair_brief: 'scratchpad/r24/repairs.md',
+        },
+        token_usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 },
+        agent: 'spec-reviewer',
+        provider: 'claude',
+        model_tier: 'mid',
+      },
+    };
+    await appendFile(path.join(stateDir, `${SESSION_ID}.jsonl`), `${JSON.stringify(record)}\n`);
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('projects one file-typed row per entry, in Object.entries order, reporting no skip', async () => {
+    const dbPath = path.join(dbDir, 'smith.db');
+    const result = await rebuild(dbPath, 'all', { stateDir });
+    expect(result.skippedArtifacts).toEqual([]);
+
+    const handle = openDb(dbPath);
+    const rows = allRows(handle.db);
+    handle.sqlite.close();
+
+    const legacyRows = rows.artifacts.filter((a) => a.eventId === legacyEventId);
+    expect(legacyRows.map((a) => [a.id, a.type, a.path, a.description])).toEqual([
+      [`${legacyEventId}#0`, 'file', 'scratchpad/r23/claude-half.json', 'claude_half'],
+      [`${legacyEventId}#1`, 'file', 'scratchpad/r24/repairs.md', 'repair_brief'],
+    ]);
+    // Never 'screenshot': the task page's gallery filter would otherwise
+    // pull a hand-written path into the screenshot lightbox.
+    expect(legacyRows.every((a) => a.type === 'file')).toBe(true);
+  });
+
+  it.each([
+    // One bad entry: the whole map is held back rather than half-projected.
+    [
+      'a map with a non-string value',
+      { claude_half: 'scratchpad/r23/claude-half.json', repair_brief: 7 },
+    ],
+    // No entries at all: nothing says it was ever a name->path map.
+    ['an empty object', {}],
+  ])('%s is not read as legacy and still reports a skip', async (_label, artifacts) => {
+    // A second, independent log.
+    const secondStateDir = await mkdtemp(
+      path.join(tmpdir(), 'smith-projector-legacy-artifacts-mixed-events-'),
+    );
+    const secondDbDir = await mkdtemp(
+      path.join(tmpdir(), 'smith-projector-legacy-artifacts-mixed-db-'),
+    );
+    try {
+      await buildFixture({ stateDir: secondStateDir });
+      const priorEvents = await readEvents(SESSION_ID, { stateDir: secondStateDir });
+      const badEventId = `${SESSION_ID}#${priorEvents.length}`;
+      const record = {
+        session_id: SESSION_ID,
+        actor: 'orchestrator',
+        event_type: 'task-result-recorded',
+        task_id: TASK_2,
+        plan_version: 1,
+        causal_parent: priorEvents.at(-1)?.event_id ?? null,
+        ts: '2026-08-15T00:00:00.000Z',
+        payload: {
+          task_id: TASK_2,
+          run_status: 'done',
+          structured_output: {},
+          artifacts,
+        },
+      };
+      await appendFile(
+        path.join(secondStateDir, `${SESSION_ID}.jsonl`),
+        `${JSON.stringify(record)}\n`,
+      );
+      const dbPath = path.join(secondDbDir, 'smith.db');
+      const result = await rebuild(dbPath, 'all', { stateDir: secondStateDir });
+      expect(result.skippedArtifacts).toEqual([
+        expect.objectContaining({
+          event_id: badEventId,
+          session_id: SESSION_ID,
+          task_id: TASK_2,
+          reason: expect.stringContaining('not an array'),
+        }),
+      ]);
+    } finally {
+      await rm(secondStateDir, { recursive: true, force: true });
+      await rm(secondDbDir, { recursive: true, force: true });
+    }
   });
 });
 

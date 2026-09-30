@@ -11135,6 +11135,279 @@ describe('cli.ts (built binary)', () => {
     });
   });
 
+  // The tester's screenshots reach the dashboard the moment the tester
+  // finishes, not only at the next `gate run`. `gate run` bundles this same
+  // schema-check/task-result-recorded/artifact-check sequence with a worktree
+  // certification a tester never has, so wave.md's tester dispatch needed a
+  // caller with no worktree and no tests to run — this verb is that caller,
+  // over `recordTaskResult` (gate.ts).
+  describe('results record', () => {
+    const eventsDir = () => path.join(scratchDir, 'results-record-events');
+    const artifactsDir = () => path.join(scratchDir, 'results-record-artifacts');
+
+    function seedSession(sessionId: string): string {
+      const { stdout, status } = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(status).toBe(0);
+      return JSON.parse(stdout).event_id;
+    }
+
+    function resultFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+      return {
+        task_id: 'epic-1/task-2',
+        run_status: 'done',
+        structured_output: {},
+        artifacts: [],
+        token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+        agent: 'tester',
+        provider: 'claude',
+        model_tier: 'mid',
+        ...overrides,
+      };
+    }
+
+    function writeResult(name: string, overrides: Record<string, unknown> = {}): string {
+      const file = path.join(scratchDir, name);
+      writeFileSync(file, JSON.stringify(resultFixture(overrides)));
+      return file;
+    }
+
+    function record(sessionId: string, parent: string, resultFile: string, extra: string[] = []) {
+      return runCli([
+        'results',
+        'record',
+        '--task',
+        'epic-1/task-2',
+        '--result',
+        resultFile,
+        '--session',
+        sessionId,
+        '--causal-parent',
+        parent,
+        '--state-dir',
+        eventsDir(),
+        ...extra,
+      ]);
+    }
+
+    it('records a valid result and prints the event id it was written under', () => {
+      const root = seedSession('res-1');
+      const file = writeResult('res-1-result.json');
+
+      const { stdout, status } = record('res-1', root, file);
+
+      expect(status).toBe(0);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toMatchObject({
+        outcome: 'recorded',
+        taskId: 'epic-1/task-2',
+        deduped: false,
+      });
+      expect(parsed.eventId).toMatch(/^res-1#\d+$/);
+
+      const tail = runCli(['event', 'tail', 'res-1', '--state-dir', eventsDir()]);
+      const events = JSON.parse(tail.stdout);
+      expect(
+        events.some(
+          (e: { record: { event_type: string } }) => e.record.event_type === 'task-result-recorded',
+        ),
+      ).toBe(true);
+    });
+
+    it('blocks on a schema-invalid result and exits 1', () => {
+      const root = seedSession('res-2');
+      const file = writeResult('res-2-result.json', { run_status: 'not-a-real-status' });
+
+      const { stdout, status } = record('res-2', root, file);
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toMatchObject({ outcome: 'blocked', reason: 'schema-invalid' });
+      expect(parsed.schemaErrors.length).toBeGreaterThan(0);
+    });
+
+    it('blocks on an artifact outside the task home', () => {
+      const root = seedSession('res-3');
+      const file = writeResult('res-3-result.json', {
+        artifacts: [{ type: 'screenshot', path: '/tmp/probe-outside-home.png' }],
+      });
+
+      const { stdout, status } = record('res-3', root, file, ['--artifacts-dir', artifactsDir()]);
+
+      expect(status).toBe(1);
+      const parsed = JSON.parse(stdout);
+      expect(parsed).toMatchObject({ outcome: 'blocked', reason: 'artifacts-missing' });
+      expect(parsed.artifactIssues).toHaveLength(1);
+    });
+
+    it('projects a screenshot declared inside the task home, via --artifacts-dir', () => {
+      const root = seedSession('res-4');
+      const home = path.join(artifactsDir(), 'epic-1', 'task-2');
+      mkdirSync(home, { recursive: true });
+      writeFileSync(path.join(home, 'screen.png'), 'not-really-a-png');
+      const file = writeResult('res-4-result.json', {
+        artifacts: [{ type: 'screenshot', path: 'screen.png' }],
+      });
+
+      const { stdout, status } = record('res-4', root, file, ['--artifacts-dir', artifactsDir()]);
+
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout).outcome).toBe('recorded');
+    });
+
+    it('is idempotent: a byte-identical re-run hands back the first event id, deduped', () => {
+      const root = seedSession('res-5');
+      const file = writeResult('res-5-result.json');
+
+      const first = record('res-5', root, file);
+      const second = record('res-5', root, file);
+
+      expect(first.status).toBe(0);
+      expect(second.status).toBe(0);
+      const firstParsed = JSON.parse(first.stdout);
+      const secondParsed = JSON.parse(second.stdout);
+      expect(firstParsed.deduped).toBe(false);
+      expect(secondParsed.deduped).toBe(true);
+      expect(secondParsed.eventId).toBe(firstParsed.eventId);
+
+      const tail = runCli(['event', 'tail', 'res-5', '--state-dir', eventsDir()]);
+      const events = JSON.parse(tail.stdout);
+      expect(
+        events.filter(
+          (e: { record: { event_type: string } }) => e.record.event_type === 'task-result-recorded',
+        ),
+      ).toHaveLength(1);
+    });
+
+    it('requires --task and --result', () => {
+      const root = seedSession('res-6');
+      const file = writeResult('res-6-result.json');
+
+      const missingTask = runCli([
+        'results',
+        'record',
+        '--result',
+        file,
+        '--session',
+        'res-6',
+        '--causal-parent',
+        root,
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(missingTask.status).toBe(1);
+      expect(JSON.parse(missingTask.stdout).error.code).toBe('cli.missing-flag');
+
+      const missingResult = runCli([
+        'results',
+        'record',
+        '--task',
+        'epic-1/task-2',
+        '--session',
+        'res-6',
+        '--causal-parent',
+        root,
+        '--state-dir',
+        eventsDir(),
+      ]);
+      expect(missingResult.status).toBe(1);
+      expect(JSON.parse(missingResult.stdout).error.code).toBe('cli.missing-flag');
+    });
+
+    it('never emits gate-outcome — a Result projection is not a gate run', () => {
+      const root = seedSession('res-7');
+      const file = writeResult('res-7-result.json');
+
+      expect(record('res-7', root, file).status).toBe(0);
+
+      const tail = runCli(['event', 'tail', 'res-7', '--state-dir', eventsDir()]);
+      const types = JSON.parse(tail.stdout).map(
+        (e: { record: { event_type: string } }) => e.record.event_type,
+      );
+      expect(types).toContain('task-result-recorded');
+      expect(types).not.toContain('gate-outcome');
+    });
+
+    // D-18/P9-17, as `gate run` has it: with `--agent` the file is the worker's
+    // half and the dispatcher stamps token_usage, so a tester cannot feed the
+    // budget reads a count it wrote itself.
+    describe('with --agent (dispatcher stamping)', () => {
+      const TESTER_HALF = { run_status: 'done', structured_output: {}, artifacts: [] };
+      const STAMP = ['--agent', 'tester', '--provider', 'claude', '--model-tier', 'mid'];
+
+      function writeHalf(name: string, half: Record<string, unknown>): string {
+        const file = path.join(scratchDir, name);
+        writeFileSync(file, JSON.stringify(half));
+        return file;
+      }
+
+      function recordedPayload(sessionId: string): Record<string, unknown> | undefined {
+        const tail = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir()]);
+        return JSON.parse(tail.stdout).find(
+          (e: { record: { event_type: string } }) => e.record.event_type === 'task-result-recorded',
+        )?.record.payload;
+      }
+
+      it('stamps {measured: false} when no token flags are given', () => {
+        const root = seedSession('res-8');
+        const file = writeHalf('res-8-half.json', TESTER_HALF);
+
+        const { status } = record('res-8', root, file, STAMP);
+
+        expect(status).toBe(0);
+        expect(recordedPayload('res-8')).toMatchObject({
+          task_id: 'epic-1/task-2',
+          agent: 'tester',
+          token_usage: { measured: false },
+        });
+      });
+
+      it('stamps the measured count when both token flags are given', () => {
+        const root = seedSession('res-9');
+        const file = writeHalf('res-9-half.json', TESTER_HALF);
+
+        const { status } = record('res-9', root, file, [
+          ...STAMP,
+          '--input-tokens',
+          '1200',
+          '--output-tokens',
+          '300',
+        ]);
+
+        expect(status).toBe(0);
+        expect(recordedPayload('res-9')).toMatchObject({
+          token_usage: { input_tokens: 1200, output_tokens: 300, total_tokens: 1500 },
+        });
+      });
+
+      it('refuses a tester-written token_usage instead of recording it', () => {
+        const root = seedSession('res-10');
+        const file = writeHalf('res-10-half.json', {
+          ...TESTER_HALF,
+          token_usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+        });
+
+        const { stdout, status } = record('res-10', root, file, STAMP);
+
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('results.agent-wrote-owned-field');
+        expect(recordedPayload('res-10')).toBeUndefined();
+      });
+    });
+  });
+
   describe('event lineage / tail --lineage (P9-7)', () => {
     const eventsDir = () => path.join(scratchDir, 'lineage-events');
 

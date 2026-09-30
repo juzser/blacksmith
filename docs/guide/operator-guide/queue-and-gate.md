@@ -723,3 +723,40 @@ machine-readable artifact is the D-40 condition itself. The fix is one line in
 `vitest.config.ts`, and blocking is what makes it get fixed. A gate with **no**
 coverage check is untouched by any of this: no evidence field, no event, no
 block.
+
+## 5d. `smith results record` — projecting a Result with no gate to run it through
+
+Not every worker gets a worktree to certify or tests to run.
+`.claude/skills/bs/wave.md`'s tester (step 5) returns a `Result` with
+`artifacts` — its screenshots — but it never reaches `gate run`, so those
+artifacts never reached the projector (the `${event_id}#${index}` rows the UI
+reads).
+
+`smith results record` is the schema-check → task-result-recorded →
+artifact-check third of `gate run`, exposed on its own:
+
+```bash
+smith results record --task epic-1/task-1 --result result.json \
+  --agent tester --provider claude --model-tier mid \
+  --session <session-id> --plan-version 1 --causal-parent <event-id>
+```
+
+`--agent`/`--provider`/`--model-tier` (and the optional, both-or-neither
+`--input-tokens`/`--output-tokens`) work exactly as on `gate run`: the file is
+the worker's half, the dispatcher stamps the envelope, and a worker-written
+`token_usage` is refused with `results.agent-wrote-owned-field` rather than fed
+to the budget reads. Without `--agent` the file is taken as a complete
+document.
+
+Same `result.schema.json` validation and the same artifact-home check
+(`--artifacts-dir` moves it, as above) as §5's `--result`, and the same shape
+of outcome — `{"outcome":"recorded","taskId":"...","eventId":"...","deduped":false}`
+or `{"outcome":"blocked","taskId":"...","reason":"schema-invalid"|"artifacts-missing","...":"..."}`,
+exit 1 on `blocked`.
+
+It never emits `gate-outcome` — the epic's ungated-task check (D-138) reads
+that event as proof a full gate ran, and a lean Result projection is not one.
+Recording the same result twice is a no-op rather than a second row:
+`task-result-recorded` is deduped by content hash within the session's
+lineage (§5b), so a byte-identical re-run returns the same `eventId` with
+`deduped: true`.
