@@ -373,81 +373,6 @@
   height: 3px;
 }
 
-/* Operator directive 3 (Phase 6b round 3): StatCards become clickable links
-   to their relevant page. A plain <a> (router-link) rather than a
-   role="link" div (kanban-card/flow-node's pattern) — StatCard has no
-   internal interactive content to conflict with, so the native anchor is
-   simpler and gets the vendored `a:focus-visible` ring (ds-tokens.css) for
-   free, no new focus CSS needed here. */
-.ds-stat-link {
-  display: block;
-  color: inherit;
-  text-decoration: none;
-  border-radius: var(--ds-radius-card);
-}
-
-/* Overview "Live agents" compact grid (Phase 6b round 4 operator
-   directive): a container query, not a viewport media query — this grid
-   lives inside TwoColumn's variable-width main column, not the full
-   viewport, so `container-type: inline-size` on its own wrapper is what
-   makes the breakpoint below meaningful here.
-
-   The operator's brief said "~640px" as an approximate guideline; measured
-   (Playwright boundingBox) this card's own container at the app's own
-   1280px desktop test viewport is 616px wide (TwoColumn's main column
-   minus the card's own padding) — honoring 640px literally would mean the
-   2-column layout NEVER actually appears at a normal desktop width,
-   defeating the point of "many agents will run concurrently" needing a
-   denser grid. Set to 480px instead: 2 columns from ~600px main-column
-   widths up (covers the real desktop case), 1 column below that (narrow
-   windows, and the mobile viewport where TwoColumn stacks to a near-full-
-   width single column anyway). ds-allow-hardcode: a breakpoint value, not
-   a spacing/sizing design token — same class of exception as
-   useViewport.ts's own hardcoded breakpoints. */
-.live-agents-container {
-  container-type: inline-size;
-}
-.live-agents-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: var(--ds-space-2) var(--ds-space-4);
-}
-@container (max-width: 480px) {
-  .live-agents-grid {
-    /* Stacks the two .live-agents-col children (round 6 fix below) —
-       every group still renders, just left-column groups fully before
-       right-column ones instead of interleaved; acceptable at this width,
-       nothing is hidden. */
-    grid-template-columns: 1fr;
-  }
-}
-/* Operator directive (Phase 6b round 6): each column is its own flex list
-   (index-parity split, OverviewPage.vue) so an expanded group's detail
-   lines stack directly under their own row WITHIN this column only — see
-   that file's header comment for why NOT a single grid with full-span
-   detail items (round 5's actual bug: consecutive expanded groups forced
-   full-width rows, visually collapsing the grid to one column). */
-.live-agents-col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-2);
-  min-width: 0;
-}
-.live-agent-entry {
-  display: flex;
-  align-items: center;
-  gap: var(--ds-space-2);
-  min-width: 0;
-  padding: var(--ds-space-1-5) var(--ds-space-2);
-  border-radius: var(--ds-radius-control);
-  color: inherit;
-  text-decoration: none;
-  font-size: var(--ds-text-xs);
-}
-a.live-agent-entry:hover,
-a.live-agent-entry:focus-visible {
-  background: var(--ds-surface-sunken);
-}
 /* Round 9: the pulse became conditional. Until this round every dot here
    animated, including an agent the factory itself would report as stale —
    which made the motion decorative. The three modifiers come from
@@ -476,44 +401,6 @@ a.live-agent-entry:focus-visible {
   .live-agent-entry__dot--working {
     animation: none;
   }
-}
-.live-agent-entry__task {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--ds-font-mono);
-  color: var(--ds-text-subtlest);
-}
-/* Round 7: how long this agent has been running. Tabular figures and a
-   right-aligned column so a ticking "9s" -> "10s" cannot shove the task id
-   beside it sideways once a second. */
-.live-agent-entry__elapsed {
-  flex-shrink: 0;
-  margin-left: auto;
-  font-family: var(--ds-font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--ds-text-subtlest);
-}
-.live-agents-summary {
-  margin: 0 0 var(--ds-space-2);
-  font-size: var(--ds-text-xs);
-  color: var(--ds-text-subtle);
-}
-/* Operator directive (dogfood round 2): "the now-running block should show the
-   sessions that are running right now, with an animated indicator". Round
-   9's .now-running-list was one flat grid of agent rows; the unit is now the
-   session, so this is a vertical list of blocks — each a session header plus,
-   only while that session is active, its own agent rows indented under it.
-   A grid of equal cells would have flattened that hierarchy back out. */
-.running-session-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 .running-session + .running-session {
   padding-top: var(--ds-space-2);
@@ -591,66 +478,6 @@ a.live-agent-entry:focus-visible {
   font-size: var(--ds-text-xs);
   color: var(--ds-text-subtlest);
 }
-.now-running-more {
-  margin: var(--ds-space-2) 0 0;
-  font-size: var(--ds-text-xs);
-  color: var(--ds-text-subtlest);
-}
-
-/* Operator directive (Phase 6b round 10): the `/bs` command hints
-   (CommandHint.vue). The command sits on --ds-surface-sunken so it reads as
-   a thing you type, not a link you click — nothing on this page runs it. */
-.cmd-hint__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.cmd-hint__item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-0-5);
-  min-width: 0;
-}
-.cmd-hint__cmd {
-  align-self: flex-start;
-  max-width: 100%;
-  padding: var(--ds-space-0-5) var(--ds-space-1-5);
-  border-radius: var(--ds-radius-control);
-  background: var(--ds-surface-sunken);
-  font-family: var(--ds-font-mono);
-  font-size: var(--ds-text-xs);
-  color: var(--ds-text);
-  /* Long forms ("/bs new <project> --ui") must wrap inside the narrow rail
-     rather than widening the card or spilling out of it. */
-  overflow-wrap: anywhere;
-}
-.cmd-hint__desc {
-  font-size: var(--ds-text-xs);
-  color: var(--ds-text-subtle);
-}
-.cmd-hint__note {
-  margin: var(--ds-space-3) 0 0;
-  font-size: var(--ds-text-xs);
-  color: var(--ds-text-subtlest);
-}
-/* Operator directive (Phase 6b round 5): grouped role·tier rows replace
-   round 4's flat capped list ("+N more" removed — grouping supersedes the
-   cap, every agent is always reachable via its group's disclosure). */
-.live-agent-group-row {
-  width: 100%;
-  border: none;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-  justify-content: flex-start;
-}
-.live-agent-group-row:hover,
-.live-agent-group-row:focus-visible {
-  background: var(--ds-surface-sunken);
-}
 /* Round 7 freshness indicator (LiveStatus.vue). The dot pulses only while
    the data is actually live — an animation that keeps running on a stale
    page is a lie about the page's state, so `lagging`/`stale` hold a static
@@ -688,16 +515,6 @@ a.live-agent-entry:focus-visible {
   .live-status--live .live-status__dot {
     animation: none;
   }
-}
-
-/* No grid-column span (round 6) — this now lives inside its own
-   .live-agents-col flex column (LiveAgentGroupRow.vue), so it's already
-   confined under its own row without needing to span anything. */
-.live-agent-group-detail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ds-space-1);
-  padding-left: var(--ds-space-6);
 }
 
 /* RowList */
@@ -2250,8 +2067,8 @@ a.live-agent-entry:focus-visible {
   border-radius: var(--ds-radius-card);
   background: var(--ds-surface-sunken);
 }
-/* Same weight as Overview's .now-running-more: a truncation note is a footnote
-   about the view, never a finding about the factory. */
+/* Same weight as a truncation footnote elsewhere in the app: a count of
+   what's hidden is never a finding about the factory. */
 .sessions-canvas__more {
   margin: var(--ds-space-2) 0 0;
   font-size: var(--ds-text-xs);
