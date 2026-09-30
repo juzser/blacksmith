@@ -1469,3 +1469,74 @@ summary.bs-inbox__group-head {
     display: none;
   }
 }
+
+/* HomePage (ds-spec.md §4.1): stacked sections, project cards in a wrap
+   grid, one-line rows for Just finished and the decision list. */
+.bs-home {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-6);
+}
+.bs-home__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+.bs-home__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--bs-space-3);
+}
+.bs-home__card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-home__stat {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text);
+  margin: 0;
+}
+.bs-home__quiet {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  margin: 0;
+}
+.bs-home__tokens {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text);
+}
+.bs-home__finished {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-home__subhead {
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  margin: 0;
+}
+.bs-home__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-home__line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-home__decision {
+  flex: 1;
+  min-width: 0;
+  color: var(--bs-text);
+}

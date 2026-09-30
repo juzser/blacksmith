@@ -14,6 +14,7 @@ import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { useViewport } from '../composables/useViewport.js';
 import type { InboxRow } from '../lib/api.js';
+import { canClaimEmpty } from '../lib/emptyClaim.js';
 import {
   filterInbox,
   groupInbox,
@@ -65,7 +66,7 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
     </div>
 
     <EmptyState
-      v-else-if="rows !== null && groupCount === 0"
+      v-else-if="canClaimEmpty(rows !== null, groupCount)"
       :icon="Inbox"
       title="Nothing needs you right now."
       body="Waivers, escalations and lesson candidates that wait on your decision show up here, grouped by project."
