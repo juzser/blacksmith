@@ -2,6 +2,7 @@
 // grouping by EVENT KIND only, never status — actual outcome renders as a
 // Lozenge (taxonomy.ts) alongside it, never via tint alone.
 import type { TimelineEntry } from './api.js';
+import { taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
 
@@ -686,5 +687,5 @@ export function titleFor(entry: TimelineEntry): string {
 }
 
 export function metaFor(entry: TimelineEntry): string {
-  return entry.taskId ? `${entry.taskId} · ${entry.eventType}` : entry.eventType;
+  return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
 }

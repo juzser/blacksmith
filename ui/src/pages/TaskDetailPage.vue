@@ -28,7 +28,7 @@ import {
   type TaskDetail,
   type TimelineEntry,
 } from '../lib/api.js';
-import { formatDateTime } from '../lib/format.js';
+import { formatDateTime, taskLabel } from '../lib/format.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
 import {
@@ -193,7 +193,7 @@ function agentChipTitle(role: string, modelTier: string | null): string {
     <Skeleton v-if="loading" height="240" />
 
     <template v-else-if="detail">
-      <PageHeader :title="detail.task.objective || detail.task.taskId">
+      <PageHeader :title="taskLabel(detail.task.taskId, detail.task.objective)">
         <template #status>
           <Lozenge :tone="taskStatusTone(detail.task.taskStatus)">{{ detail.task.taskStatus }}</Lozenge>
         </template>

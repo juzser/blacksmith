@@ -49,3 +49,19 @@ describe('TaskDetailPage.vue — role labels', () => {
     expect(SFC).toContain('{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}/{{ a.provider }}');
   });
 });
+
+// Task 4 (humanized task label helper): a task with no objective used to
+// head the page with its raw id ("epic-9/task-29-readme-merge-trim").
+// taskLabel() humanizes it instead; PageHeader has no spare prop for a
+// tooltip (its own `title` prop IS the heading), so the raw id stays
+// reachable via the Details rail's always-visible "Task ID" field, not a
+// hover tooltip.
+describe('TaskDetailPage.vue — humanized task label', () => {
+  it('imports taskLabel and heads the page with it', () => {
+    expect(SFC).toMatch(/from '\.\.\/lib\/format\.js'/);
+    expect(SFC).toContain('taskLabel(detail.task.taskId, detail.task.objective)');
+    expect(SFC).toMatch(
+      /<PageHeader :title="taskLabel\(detail\.task\.taskId, detail\.task\.objective\)"/,
+    );
+  });
+});

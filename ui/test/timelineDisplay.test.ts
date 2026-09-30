@@ -11,6 +11,7 @@ import {
   iconFor,
   KIND_OPTIONS,
   matchesKind,
+  metaFor,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
@@ -1059,5 +1060,25 @@ describe('lib/timelineDisplay.ts', () => {
       expect(inner.every((i) => i.kind === 'entry')).toBe(true);
       expect(ids(inner)).toEqual(['d1', 'd2', 'd3']);
     });
+  });
+});
+
+// Task 4 (humanized task label helper): metaFor() is the row's second line
+// ("<date> · <meta>", rendered as plain text by TimelineRow.vue — not a
+// tooltip), and it showed the bare taskId. taskLabel() humanizes the id's
+// slug; TimelineRow.vue keeps the raw id reachable in a title tooltip.
+describe('lib/timelineDisplay.ts metaFor()', () => {
+  it('humanizes a taskId rather than showing the raw slug', () => {
+    const e = entry({
+      eventType: 'gate-outcome',
+      taskId: 'epic-9/task-29-readme-merge-trim',
+      payload: {},
+    });
+    expect(metaFor(e)).toBe('Readme merge trim · gate-outcome');
+  });
+
+  it('falls back to the bare event type when there is no task', () => {
+    const e = entry({ eventType: 'session-start', taskId: null, payload: {} });
+    expect(metaFor(e)).toBe('session-start');
   });
 });

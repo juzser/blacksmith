@@ -23,3 +23,14 @@ describe('TimelineRow.vue — role labels', () => {
     expect(SFC).toMatch(/<IdentityChip[^>]*:title="dispatchAgent\.title"/);
   });
 });
+
+// Task 4 (humanized task label helper): metaFor() now humanizes the taskId
+// it shows (lib/timelineDisplay.ts); the raw id stays reachable as a title
+// tooltip on the row's meta line rather than disappearing.
+describe('TimelineRow.vue — task label tooltip', () => {
+  it('keeps the raw taskId as a title tooltip on the meta line', () => {
+    expect(SFC).toMatch(
+      /<span class="timeline-row__meta"[^>]*:title="entry\.taskId[^"]*"[^>]*>\{\{ formatDateTime\(entry\.ts\) \}\} · \{\{ meta \}\}<\/span>/,
+    );
+  });
+});

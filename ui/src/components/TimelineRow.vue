@@ -110,7 +110,7 @@ const clickable = computed(
           :title="dispatchAgent.title"
         />
       </div>
-      <span class="timeline-row__meta">{{ formatDateTime(entry.ts) }} · {{ meta }}</span>
+      <span class="timeline-row__meta" :title="entry.taskId ?? undefined">{{ formatDateTime(entry.ts) }} · {{ meta }}</span>
     </div>
   </div>
 </template>
