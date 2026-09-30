@@ -20,7 +20,11 @@ import { waveLayers } from '../graph.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
-import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from '../taskStatus.js';
+import {
+  CLOSED_TO_FURTHER_WORK,
+  TERMINAL_OK_TASK_STATUSES,
+  TERMINAL_TASK_STATUSES,
+} from '../taskStatus.js';
 import { loadTaxonomy, type Taxonomy } from '../taxonomy.js';
 import { WAIVABLE_SEVERITIES } from '../waivers.js';
 import type { SmithDb } from './projector.js';
@@ -1042,7 +1046,17 @@ function inFlightEpics(
     ...new Set(
       taskRows
         .filter(
-          (t) => t.epicId && !TERMINAL_TASK_STATUSES.has(t.taskStatus) && !closedIds.has(t.epicId),
+          // ds-spec.md §4.1 "Data/API note" (audit item 2, DS2): a task the
+          // projector will not overwrite (TERMINAL_TASK_STATUSES) is not the
+          // same question as "does this epic still need a person" —
+          // `escalated`/`failed` are HELD_OPEN_BY_AN_OPERATOR (taskStatus.ts),
+          // and no `epic-closed` event exists for them. Filtering on
+          // TERMINAL_TASK_STATUSES alone dropped such an epic out of BOTH
+          // `epicsInFlight` and `closedEpics` the moment its last open task hit
+          // one of those two statuses — it simply disappeared from every
+          // picker that reads this field. CLOSED_TO_FURTHER_WORK excludes
+          // exactly the statuses a person is not expected to come back to.
+          (t) => t.epicId && !CLOSED_TO_FURTHER_WORK.has(t.taskStatus) && !closedIds.has(t.epicId),
         )
         .map((t) => t.epicId as string),
     ),

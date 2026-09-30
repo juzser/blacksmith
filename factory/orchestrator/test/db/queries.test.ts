@@ -1537,6 +1537,39 @@ describe('overview() — a task_status this build does not recognise', () => {
 
     expect(overview(handle.db).epicsInFlight).toEqual([]);
   });
+
+  // DS2 / ds-spec.md §4.1 "Data/API note", audit item 2 — an epic whose last
+  // open task went `escalated` (or `failed`) is a person's queue item, not a
+  // finished epic: no `epic-closed` event exists for it, so it used to fall
+  // OUT of both `epicsInFlight` and `closedEpics` the moment the last task hit
+  // one of those two statuses — TERMINAL_TASK_STATUSES (db/projector.ts's "the
+  // projector will not overwrite this") counts them terminal, but
+  // taskStatus.ts's own HELD_OPEN_BY_AN_OPERATOR says a person is still
+  // expected to come back to them. The epic disappeared from every picker
+  // Home/Kanban/Flow read `epicsInFlight`/`closedEpics` from.
+  it('keeps an epic in flight when its last open task is escalated, not closed', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'escalated',
+    });
+
+    const result = overview(handle.db);
+    expect(result.epicsInFlight).toEqual([EPIC_ID]);
+    expect(result.closedEpics).toEqual([]);
+  });
+
+  it('keeps an epic in flight when its last open task failed, not closed', async () => {
+    handle = await projectWithStatuses({
+      [TASK_1]: 'completed',
+      [TASK_2]: 'completed',
+      [TASK_3]: 'completed',
+      [TASK_4]: 'failed',
+    });
+
+    expect(overview(handle.db).epicsInFlight).toEqual([EPIC_ID]);
+  });
 });
 
 // P9-37: the timeline's event-type allowlist is a hand-written copy of the
