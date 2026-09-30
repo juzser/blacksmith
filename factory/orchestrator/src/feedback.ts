@@ -240,6 +240,20 @@ export async function resolveFeedback(
       { feedback_id: input.feedbackId, resolution: existing.resolution },
     );
   }
+  if (input.resolution === 'follow-up' && !input.followUpTaskId?.trim()) {
+    throw new FeedbackError(
+      'feedback.missing-follow-up-task',
+      `Resolving '${input.feedbackId}' as 'follow-up' needs --follow-up-task: without it the record can never get its task id, and re-resolving is refused once it is set.`,
+      { feedback_id: input.feedbackId },
+    );
+  }
+  if (input.resolution !== 'follow-up' && input.followUpTaskId !== undefined) {
+    throw new FeedbackError(
+      'feedback.unexpected-follow-up-task',
+      `--follow-up-task only applies to resolution 'follow-up', not '${input.resolution}'.`,
+      { feedback_id: input.feedbackId, resolution: input.resolution },
+    );
+  }
 
   return appendEvent(
     {

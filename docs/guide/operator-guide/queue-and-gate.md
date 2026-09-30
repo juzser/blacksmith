@@ -370,10 +370,14 @@ read: it lists the session lineage's unresolved feedback, each entry naming a
 work (`completed`, `superseded`, `waived`), `bounce` otherwise.
 
 `smith feedback resolve --feedback <id> --resolution
-bounced|follow-up|dismissed --session <id> --causal-parent <event-id>`
-appends `operator-feedback-resolved` and prints the stored record. It refuses
-a feedback id nothing recorded, or one already resolved, with
-`feedback.unknown-feedback` and `feedback.already-resolved` respectively.
+bounced|follow-up|dismissed --session <id> --causal-parent <event-id>
+[--follow-up-task <id>]` appends `operator-feedback-resolved` and prints the
+stored record. It refuses a feedback id nothing recorded, or one already
+resolved, with `feedback.unknown-feedback` and `feedback.already-resolved`
+respectively. `--resolution follow-up` requires `--follow-up-task`
+(`feedback.missing-follow-up-task` otherwise, since re-resolving is refused
+and the record could never get its task id later); `--follow-up-task` on any
+other resolution is refused with `feedback.unexpected-follow-up-task`.
 
 Verified outcome shapes (this is exactly what the CLI printed against a
 real fixture — see the guide's source history for the fixture files):

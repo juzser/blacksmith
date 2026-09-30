@@ -11110,6 +11110,84 @@ describe('cli.ts (built binary)', () => {
         expect(JSON.parse(second.stdout).error.code).toBe('feedback.already-resolved');
       });
 
+      it('rejects follow-up resolution with no --follow-up-task, and appends no event', () => {
+        const root = seedSession('fb-res-5');
+        const t1 = addTask('fb-res-5', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-5', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'follow-up',
+          '--session',
+          'fb-res-5',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('feedback.missing-follow-up-task');
+
+        const pending = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-res-5',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(
+          JSON.parse(pending.stdout).pending.some(
+            (p: { feedbackId: string }) => p.feedbackId === recParsed.feedback_id,
+          ),
+        ).toBe(true);
+      });
+
+      it('rejects a --follow-up-task on a non-follow-up resolution, and appends no event', () => {
+        const root = seedSession('fb-res-6');
+        const t1 = addTask('fb-res-6', root, 'epic-1/task-1', 'todo');
+        const rec = record('fb-res-6', t1, 'epic-1/task-1');
+        const recParsed = JSON.parse(rec.stdout);
+
+        const { stdout, status } = runCli([
+          'feedback',
+          'resolve',
+          '--feedback',
+          recParsed.feedback_id,
+          '--resolution',
+          'bounced',
+          '--follow-up-task',
+          'epic-1/task-2',
+          '--session',
+          'fb-res-6',
+          '--causal-parent',
+          recParsed.event_id,
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('feedback.unexpected-follow-up-task');
+
+        const pending = runCli([
+          'feedback',
+          'pending',
+          '--session',
+          'fb-res-6',
+          '--state-dir',
+          feedbackDir(),
+        ]);
+        expect(
+          JSON.parse(pending.stdout).pending.some(
+            (p: { feedbackId: string }) => p.feedbackId === recParsed.feedback_id,
+          ),
+        ).toBe(true);
+      });
+
       it('rejects an invalid --resolution', () => {
         const root = seedSession('fb-res-4');
         const t1 = addTask('fb-res-4', root, 'epic-1/task-1', 'todo');

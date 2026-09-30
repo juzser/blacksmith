@@ -195,6 +195,39 @@ describe('recordFeedback / resolveFeedback', () => {
     });
   });
 
+  it('rejects resolving as follow-up with no follow-up task id', async () => {
+    const recorded = await recordFeedback({ taskId, body: 'Fix this.' }, ctx, { stateDir });
+    await expect(
+      resolveFeedback(
+        { feedbackId: recorded.feedbackId, resolution: 'follow-up' },
+        { ...ctx, causalParent: recorded.event.event_id },
+        { stateDir },
+      ),
+    ).rejects.toMatchObject({ code: 'feedback.missing-follow-up-task' });
+  });
+
+  it('rejects resolving as follow-up with a blank follow-up task id', async () => {
+    const recorded = await recordFeedback({ taskId, body: 'Fix this.' }, ctx, { stateDir });
+    await expect(
+      resolveFeedback(
+        { feedbackId: recorded.feedbackId, resolution: 'follow-up', followUpTaskId: '   ' },
+        { ...ctx, causalParent: recorded.event.event_id },
+        { stateDir },
+      ),
+    ).rejects.toMatchObject({ code: 'feedback.missing-follow-up-task' });
+  });
+
+  it('rejects a follow-up task id on a non-follow-up resolution', async () => {
+    const recorded = await recordFeedback({ taskId, body: 'Fix this.' }, ctx, { stateDir });
+    await expect(
+      resolveFeedback(
+        { feedbackId: recorded.feedbackId, resolution: 'bounced', followUpTaskId: 'epic-1/task-2' },
+        { ...ctx, causalParent: recorded.event.event_id },
+        { stateDir },
+      ),
+    ).rejects.toMatchObject({ code: 'feedback.unexpected-follow-up-task' });
+  });
+
   it('rejects resolving an unknown feedback id', async () => {
     await expect(
       resolveFeedback({ feedbackId: 'fb-does-not-exist', resolution: 'dismissed' }, ctx, {
