@@ -700,13 +700,13 @@ describe('mcpBlockers — what the epic-close gate refuses on', () => {
         problem,
       })[0] ?? '';
 
-    it('sends an operator with no manifest to `smith mcp init`', () => {
+    it('sends an operator with no manifest to `bs mcp init`', () => {
       const blocker = unread('missing');
       expect(blocker).toContain('bs mcp init');
       expect(blocker).toContain('demo-mcp-surface');
     });
 
-    it('does not send an operator with an unreadable manifest to `smith mcp init`', () => {
+    it('does not send an operator with an unreadable manifest to `bs mcp init`', () => {
       // init refuses over an existing manifest (mcp.surface-exists), so telling
       // them to run it is a loop: the gate says init, init says edit in place.
       const missing = unread('missing');
