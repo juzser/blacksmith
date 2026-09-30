@@ -1506,6 +1506,11 @@ describe('ui/server app.ts — a finding the projection cannot store', () => {
 // as an object: the session rolled back, stderr said so, no page did. The
 // pulse is the one read every page makes, so that is where the projection
 // admits what it could not land.
+//
+// The object here has a non-string value on purpose: an all-string name->path
+// object is now read as the legacy artifacts shape (projector.test.ts) and no
+// longer held back, so this fixture keeps a value that still cannot become a
+// row, which is what this test is about.
 // ---------------------------------------------------------------------------
 describe('ui/server app.ts — what the projection could not land reaches the pulse', () => {
   let stateDir: string;
@@ -1535,7 +1540,7 @@ describe('ui/server app.ts — what the projection could not land reaches the pu
         task_id: TASK_2,
         run_status: 'done',
         structured_output: {},
-        artifacts: { claude_half: 'a.json', external_half: 'b.json' },
+        artifacts: { claude_half: 'a.json', external_half: 7 },
       },
     };
     await appendFile(
