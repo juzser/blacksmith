@@ -1,22 +1,13 @@
-import type { NavItem } from './components/ds/types.js';
+import { Activity, Coins, House, Kanban, Lightbulb } from '@lucide/vue';
+import type { NavItem } from './components/kit/types.js';
 
-// design-spec.md §2's SidebarNav item array, 2 groups + Phase 6b's Projects
-// hub / Flow additions. All pages ship this phase — nothing disabled.
-export const NAV_ITEMS: (NavItem & { route?: string })[] = [
-  { category: 'Monitor' },
-  { id: 'projects', label: 'Projects', icon: 'layers', route: '/projects' },
-  { id: 'overview', label: 'Overview', icon: 'layout-dashboard', route: '/overview' },
-  // Sessions sits under Monitor and directly after Overview because it reads
-  // the SAME /api/overview payload — it is the "Now running" card as a canvas.
-  // Filed under Work would imply it shows planned work; it only ever shows
-  // what is running at this second.
-  { id: 'sessions', label: 'Sessions', icon: 'play', route: '/sessions' },
-  { id: 'timeline', label: 'Timeline', icon: 'history', route: '/timeline' },
-  { id: 'errors', label: 'Errors', icon: 'triangle-alert', route: '/errors' },
-  { id: 'analytics', label: 'Analytics', icon: 'bar-chart-3', route: '/analytics' },
-  { category: 'Work' },
-  { id: 'kanban', label: 'Kanban', icon: 'kanban', route: '/kanban' },
-  { id: 'roadmap', label: 'Roadmap', icon: 'map', route: '/roadmap' },
-  { id: 'flow', label: 'Flow', icon: 'git-merge', route: '/flow' },
-  { id: 'lessons', label: 'Lessons', icon: 'graduation-cap', route: '/lessons' },
+// The app shell's SidebarNav / MobileTabBar item list (ds-spec.md §3, §5
+// "DS1"). DS1 keeps every old route working — these 5 entries point at
+// EXISTING pages; old pages are unchanged, only the shell around them is new.
+export const NAV_ITEMS: NavItem[] = [
+  { id: 'home', label: 'Home', icon: House, route: '/overview' },
+  { id: 'work', label: 'Work', icon: Kanban, route: '/kanban' },
+  { id: 'activity', label: 'Activity', icon: Activity, route: '/timeline' },
+  { id: 'cost-quality', label: 'Cost & quality', icon: Coins, route: '/analytics' },
+  { id: 'lessons', label: 'Lessons', icon: Lightbulb, route: '/lessons' },
 ];

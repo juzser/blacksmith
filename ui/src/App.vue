@@ -1,25 +1,26 @@
 <script setup lang="ts">
+import { Menu } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import Banner from './components/ds/Banner.vue';
-import Breadcrumb from './components/ds/Breadcrumb.vue';
-import Icon from './components/ds/Icon.vue';
-import Select from './components/ds/Select.vue';
-import Sheet from './components/ds/Sheet.vue';
-import SidebarNav from './components/ds/SidebarNav.vue';
-import Toast from './components/ds/Toast.vue';
-import Tooltip from './components/ds/Tooltip.vue';
-import LiveStatus from './components/LiveStatus.vue';
-import { useBreadcrumb } from './composables/useBreadcrumb.js';
+import Banner from './components/kit/Banner.vue';
+import Breadcrumb from './components/kit/Breadcrumb.vue';
+import IconButton from './components/kit/IconButton.vue';
+import LiveIndicator from './components/kit/LiveIndicator.vue';
+import MobileTabBar from './components/kit/MobileTabBar.vue';
+import MobileTopBar from './components/kit/MobileTopBar.vue';
+import ProjectSwitcher from './components/kit/ProjectSwitcher.vue';
+import Select from './components/kit/Select.vue';
+import Sheet from './components/kit/Sheet.vue';
+import SidebarNav from './components/kit/SidebarNav.vue';
+import Toast from './components/kit/Toast.vue';
 import { useNow } from './composables/useNow.js';
+import { getIsLive, setLive } from './composables/usePoll.js';
 import { useProjectContext } from './composables/useProjectContext.js';
-import { PULSE_POLL_MS, usePulse } from './composables/usePulse.js';
+import { usePulse } from './composables/usePulse.js';
 import { useSessionContext } from './composables/useSessionContext.js';
 import { useTheme } from './composables/useTheme.js';
 import { useViewport } from './composables/useViewport.js';
 import { fetchProjects, fetchSessions } from './lib/api.js';
-import { lastEventLabel } from './lib/liveness.js';
-import { badgeLabel } from './lib/navBadges.js';
 import { projectionNotice } from './lib/projectionIssues.js';
 import { SCOPABLE_ROUTES } from './lib/projectScope.js';
 import {
@@ -33,19 +34,24 @@ import { NAV_ITEMS } from './nav.js';
 const router = useRouter();
 const route = useRoute();
 const { theme, toggle } = useTheme();
-const { crumbs } = useBreadcrumb();
-const { isCollapsedWidth, isMobileWidth } = useViewport();
+const { isCollapsedWidth, isMobileWidth, isPhoneWidth } = useViewport();
 const { project, setProject } = useProjectContext();
 const { sessionScope, width, setSession, setWidth } = useSessionContext();
 
 const sheetOpen = ref(false);
 const activeId = computed(() => {
-  // /p/:project/overview and /overview both highlight the "overview" item;
-  // every other page matches its route exactly (query params ignored).
-  if (route.name === 'overview-global' || route.name === 'overview-project') return 'overview';
+  // /p/:project/overview and /overview both highlight "home"; every other
+  // page matches its route exactly (query params ignored).
+  if (route.name === 'overview-global' || route.name === 'overview-project') return 'home';
   const found = NAV_ITEMS.find((it) => it.route === route.path);
   return found?.id;
 });
+
+// The topbar Breadcrumb (ds-spec.md §3, DS1): derived from route meta so it
+// updates the instant navigation happens, before the new page's own data has
+// arrived — never from a page's fetched payload.
+const crumbs = computed(() => route.meta.crumb?.(route) ?? []);
+const pageTitle = computed(() => crumbs.value.at(-1)?.label ?? '');
 
 // Project switcher (topbar). SCOPABLE_ROUTES lives in lib/projectScope.ts so
 // a test can hold it to the rule (shown exactly where useProjectContext is
@@ -127,27 +133,16 @@ function selectCrumb(to: string) {
   router.push(to);
 }
 
-// Liveness, hoisted out of OverviewPage (lib/navBadges.ts has the argument for
-// why this is a badge-and-pill job and not a toast one). Every page polls, and
-// on the other nine a frozen server was indistinguishable from a quiet
-// factory. One shell-level poll now answers both halves for all of them: the
-// pill says whether the screen is current, and the sidebar says what arrived
-// while the operator was elsewhere.
+// Liveness + the single Refresh/Pause/theme/Settings cluster (ds-spec.md
+// §2.2 `LiveIndicator`), replacing the old two-clock topbar (a pulse <span>
+// plus a separate LiveStatus.vue) — /api/pulse already carries both signals,
+// so this is a shell-level render change, not a server/API one.
 const now = useNow(1000);
-const { pulse, lastUpdatedAt, badges, seePage, refresh } = usePulse(project);
-const navItems = computed(() =>
-  NAV_ITEMS.map((it) => {
-    const count = it.id === undefined ? 0 : (badges.value[it.id] ?? 0);
-    return count > 0 ? { ...it, badge: count, badgeLabel: badgeLabel(it.id ?? '', count) } : it;
-  }),
-);
-// `immediate` so the page the operator lands on starts out seen — otherwise
-// the first poll would badge the very page they are reading.
-watch(activeId, (id) => seePage(id), { immediate: true });
-const factoryPulse = computed(() => lastEventLabel(pulse.value?.lastEventAt ?? null, now.value));
-const factoryPulseTitle = computed(() =>
-  pulse.value?.lastEventType ? `Last event: ${pulse.value.lastEventType}` : undefined,
-);
+const { pulse, refresh } = usePulse(project);
+const live = getIsLive();
+function onTogglePause() {
+  setLive(!live.value);
+}
 // What the projection could not land. Shell-level, like the pulse, because
 // the gap is under every page at once: a session the server could not fold
 // is absent from Sessions, Kanban, Flow and every count, and each of those
@@ -157,49 +152,49 @@ const projection = computed(() => projectionNotice(pulse.value));
 
 <template>
   <a href="#main" class="skip-link">Skip to content</a>
-  <div class="app-shell">
+  <div class="app-shell" :data-phone="isPhoneWidth">
     <SidebarNav
-      v-if="!isMobileWidth"
-      :items="navItems"
+      v-if="!isPhoneWidth && !isMobileWidth"
+      :items="NAV_ITEMS"
       :active-id="activeId"
       :collapsed="isCollapsedWidth"
       @select="selectNav"
     />
-    <Sheet v-else :open="sheetOpen" @close="sheetOpen = false">
-      <SidebarNav :items="navItems" :active-id="activeId" @select="selectNav" />
+    <Sheet :open="sheetOpen" @close="sheetOpen = false">
+      <SidebarNav :items="NAV_ITEMS" :active-id="activeId" @select="selectNav" />
     </Sheet>
 
     <div class="app-shell__main">
-      <header class="app-topbar">
-        <button
+      <MobileTopBar
+        v-if="isPhoneWidth"
+        :title="pageTitle"
+        :live="live"
+        :theme="theme"
+        :last-event-at="pulse?.lastEventAt ?? null"
+        :now="now"
+        :show-project-switcher="showProjectSwitcher"
+        :project="project ?? ''"
+        :project-options="projectOptions"
+        @open-nav="sheetOpen = true"
+        @update-project="onSwitchProject"
+        @refresh="refresh"
+        @toggle-pause="onTogglePause"
+        @toggle-theme="toggle"
+      />
+      <header v-else class="app-topbar">
+        <IconButton
           v-if="isMobileWidth"
-          type="button"
-          class="ds-btn ds-btn--ghost ds-btn--icon-sm"
-          aria-label="Open navigation"
+          :icon="Menu"
+          label="Open navigation"
+          size="sm"
           @click="sheetOpen = true"
-        >
-          <Icon name="panel-left" :size="16" />
-        </button>
+        />
         <Breadcrumb :items="crumbs" @select="selectCrumb" />
-        <div style="margin-left: auto; display: flex; align-items: center; gap: var(--ds-space-2)">
-          <!-- Two clocks, not one. LiveStatus answers "is my screen current";
-               the pulse answers "is the factory moving". A healthy server
-               polled every five seconds reports Live indefinitely over a
-               factory that has emitted nothing since Tuesday. -->
-          <span v-if="!isMobileWidth" class="app-topbar__pulse" :title="factoryPulseTitle">{{
-            factoryPulse
-          }}</span>
-          <LiveStatus
-            :last-updated-at="lastUpdatedAt"
-            :now="now"
-            :interval-ms="PULSE_POLL_MS"
-            @refresh="refresh"
-          />
-          <Select
+        <div class="app-topbar__controls">
+          <ProjectSwitcher
             v-if="showProjectSwitcher"
             :model-value="project ?? ''"
             :options="projectOptions"
-            aria-label="Project"
             @update:model-value="onSwitchProject"
           />
           <Select
@@ -217,22 +212,28 @@ const projection = computed(() => projectionNotice(pulse.value));
             aria-label="Session scope width"
             @update:model-value="setWidth"
           />
-          <Tooltip :label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'">
-            <button
-              type="button"
-              class="ds-btn ds-btn--ghost ds-btn--icon-sm"
-              aria-label="Toggle theme"
-              @click="toggle"
-            >
-              <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
-            </button>
-          </Tooltip>
+          <LiveIndicator
+            :live="live"
+            :theme="theme"
+            :last-event-at="pulse?.lastEventAt ?? null"
+            :now="now"
+            @refresh="refresh"
+            @toggle-pause="onTogglePause"
+            @toggle-theme="toggle"
+          />
         </div>
       </header>
       <!-- Under the topbar and above the page, not inside it: the page below
            is the thing this is warning about. Warning, not danger — the
            server is up and answering; it is the numbers that are short. -->
-      <Banner v-if="projection" tone="warning" class="app-projection">
+      <Banner
+        v-if="projection"
+        tone="warning"
+        class="app-projection"
+        show-retry
+        retry-label="Retry"
+        @retry="refresh"
+      >
         {{ projection.lead }}
         <ul class="app-projection__lines">
           <li v-for="line in projection.lines" :key="line">{{ line }}</li>
@@ -243,6 +244,7 @@ const projection = computed(() => projectionNotice(pulse.value));
           <router-view />
         </main>
       </div>
+      <MobileTabBar v-if="isPhoneWidth" :items="NAV_ITEMS" :active-id="activeId" @select="selectNav" />
     </div>
     <Toast />
   </div>

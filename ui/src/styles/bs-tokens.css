@@ -175,6 +175,11 @@
   --bs-duration-slow: 400ms;
   --bs-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 
+  /* ---- App shell geometry (§3) — theme-independent. ---- */
+  --bs-topbar-height: 3rem;
+  --bs-sidebar-width: 15rem;
+  --bs-sidebar-width-collapsed: 4rem;
+
   /* ---- Mobile / touch (§3.1) — theme-independent, no dark copy needed ---- */
   --bs-bp-mobile: 640px;
   --bs-m-gutter: 16px;

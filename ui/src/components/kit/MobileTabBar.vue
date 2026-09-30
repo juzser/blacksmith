@@ -1,0 +1,28 @@
+<script setup lang="ts">
+// The ≤640px phone shell's bottom tab bar (ds-spec.md §3.1) — same 5 items
+// as SidebarNav, icon above label, bottom-fixed. No accent colour on the
+// active tab (§1.9's accent budget): active state is aria-current plus the
+// neutral --bs-surface-selected/--bs-text pairing CSS applies, same rule
+// SidebarNav's active item follows.
+import Icon from './Icon.vue';
+import type { NavItem } from './types.js';
+
+defineProps<{ items: NavItem[]; activeId?: string }>();
+const emit = defineEmits<{ select: [id: string] }>();
+</script>
+
+<template>
+  <nav class="bs-tabbar" aria-label="Primary">
+    <button
+      v-for="it in items"
+      :key="it.id"
+      type="button"
+      class="bs-tabbar__item"
+      :aria-current="it.id === activeId ? 'page' : undefined"
+      @click="emit('select', it.id)"
+    >
+      <Icon :icon="it.icon" :size="20" />
+      <span class="bs-tabbar__label">{{ it.label }}</span>
+    </button>
+  </nav>
+</template>
