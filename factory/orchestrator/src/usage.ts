@@ -568,7 +568,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'results record',
     positionals: '',
-    flags: `--task <task-id> --result <result.json> [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--task <task-id> --result <result.json> [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
     summary:
       "Project a worker's Result on its own, with no worktree to certify and no tests to run: schema-check, task-result-recorded, artifact-check. Wave.md's tester has no gate to run one through; this is how its screenshots reach the dashboard the moment it finishes. Exit 1 when blocked.",
   },

@@ -3524,7 +3524,21 @@ async function main(): Promise<number> {
   if (namespace === 'results' && action === 'record') {
     const { recordTaskResult } = await import('./gate.js');
     const taskId = requireFlag(flags, 'task');
-    const result = readJsonFile<unknown>(requireFlag(flags, 'result'));
+    // The same two intake shapes as `gate run`'s `--result`, for the same
+    // reason (D-18/P9-17): with `--agent` the file is the worker's half and
+    // the dispatcher stamps token_usage, so a tester's own count never reaches
+    // the budget reads.
+    const resultFile = readJsonFile<unknown>(requireFlag(flags, 'result'));
+    const result = flags.agent
+      ? stampResultEnvelope(resultFile, {
+          taskId,
+          agent: flags.agent,
+          provider: requireFlag(flags, 'provider'),
+          modelTier: requireFlag(flags, 'model-tier'),
+          inputTokens: boundedIntFlag(flags, 'input-tokens', { min: 0 }),
+          outputTokens: boundedIntFlag(flags, 'output-tokens', { min: 0 }),
+        })
+      : resultFile;
     const ctx = eventContextFromFlags(flags);
     const outcome = await recordTaskResult(
       {

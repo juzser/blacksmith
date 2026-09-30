@@ -706,8 +706,16 @@ artifact-check third of `gate run`, exposed on its own:
 
 ```bash
 smith results record --task epic-1/task-1 --result result.json \
+  --agent tester --provider claude --model-tier mid \
   --session <session-id> --plan-version 1 --causal-parent <event-id>
 ```
+
+`--agent`/`--provider`/`--model-tier` (and the optional, both-or-neither
+`--input-tokens`/`--output-tokens`) work exactly as on `gate run`: the file is
+the worker's half, the dispatcher stamps the envelope, and a worker-written
+`token_usage` is refused with `results.agent-wrote-owned-field` rather than fed
+to the budget reads. Without `--agent` the file is taken as a complete
+document.
 
 Same `result.schema.json` validation and the same artifact-home check
 (`--artifacts-dir` moves it, as above) as §5's `--result`, and the same shape

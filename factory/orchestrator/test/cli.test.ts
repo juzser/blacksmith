@@ -10874,6 +10874,87 @@ describe('cli.ts (built binary)', () => {
       expect(missingResult.status).toBe(1);
       expect(JSON.parse(missingResult.stdout).error.code).toBe('cli.missing-flag');
     });
+
+    it('never emits gate-outcome — a Result projection is not a gate run', () => {
+      const root = seedSession('res-7');
+      const file = writeResult('res-7-result.json');
+
+      expect(record('res-7', root, file).status).toBe(0);
+
+      const tail = runCli(['event', 'tail', 'res-7', '--state-dir', eventsDir()]);
+      const types = JSON.parse(tail.stdout).map(
+        (e: { record: { event_type: string } }) => e.record.event_type,
+      );
+      expect(types).toContain('task-result-recorded');
+      expect(types).not.toContain('gate-outcome');
+    });
+
+    // D-18/P9-17, as `gate run` has it: with `--agent` the file is the worker's
+    // half and the dispatcher stamps token_usage, so a tester cannot feed the
+    // budget reads a count it wrote itself.
+    describe('with --agent (dispatcher stamping)', () => {
+      const TESTER_HALF = { run_status: 'done', structured_output: {}, artifacts: [] };
+      const STAMP = ['--agent', 'tester', '--provider', 'claude', '--model-tier', 'mid'];
+
+      function writeHalf(name: string, half: Record<string, unknown>): string {
+        const file = path.join(scratchDir, name);
+        writeFileSync(file, JSON.stringify(half));
+        return file;
+      }
+
+      function recordedPayload(sessionId: string): Record<string, unknown> | undefined {
+        const tail = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir()]);
+        return JSON.parse(tail.stdout).find(
+          (e: { record: { event_type: string } }) => e.record.event_type === 'task-result-recorded',
+        )?.record.payload;
+      }
+
+      it('stamps {measured: false} when no token flags are given', () => {
+        const root = seedSession('res-8');
+        const file = writeHalf('res-8-half.json', TESTER_HALF);
+
+        const { status } = record('res-8', root, file, STAMP);
+
+        expect(status).toBe(0);
+        expect(recordedPayload('res-8')).toMatchObject({
+          task_id: 'epic-1/task-2',
+          agent: 'tester',
+          token_usage: { measured: false },
+        });
+      });
+
+      it('stamps the measured count when both token flags are given', () => {
+        const root = seedSession('res-9');
+        const file = writeHalf('res-9-half.json', TESTER_HALF);
+
+        const { status } = record('res-9', root, file, [
+          ...STAMP,
+          '--input-tokens',
+          '1200',
+          '--output-tokens',
+          '300',
+        ]);
+
+        expect(status).toBe(0);
+        expect(recordedPayload('res-9')).toMatchObject({
+          token_usage: { input_tokens: 1200, output_tokens: 300, total_tokens: 1500 },
+        });
+      });
+
+      it('refuses a tester-written token_usage instead of recording it', () => {
+        const root = seedSession('res-10');
+        const file = writeHalf('res-10-half.json', {
+          ...TESTER_HALF,
+          token_usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+        });
+
+        const { stdout, status } = record('res-10', root, file, STAMP);
+
+        expect(status).toBe(1);
+        expect(JSON.parse(stdout).error.code).toBe('results.agent-wrote-owned-field');
+        expect(recordedPayload('res-10')).toBeUndefined();
+      });
+    });
   });
 
   describe('event lineage / tail --lineage (P9-7)', () => {
