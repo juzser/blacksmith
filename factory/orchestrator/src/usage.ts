@@ -391,6 +391,27 @@ export const COMMANDS: readonly CommandDoc[] = [
       "Put the operator's own words on the timeline verbatim, and print the event id a dispatch hangs off.",
   },
   {
+    command: 'feedback record',
+    positionals: '',
+    flags: `--task <task-id> [--body <text>|--body-file <file>] [--kind <must-fix|nice-to-have>] [--source <dashboard|github|cli>] [--external-id <id>] [--author <name>] ${EVENTS_DIR}`,
+    summary:
+      "Record the operator's mid-run comment on a task. Print { event_id, feedback_id, deduped }; a repeated --external-id dedupes rather than appending.",
+  },
+  {
+    command: 'feedback pending',
+    positionals: '',
+    flags: '--session <id> [--task <task-id>] [--epic <id>] [--state-dir <dir>]',
+    summary:
+      "List this session lineage's unresolved feedback, each with a suggestedAction: follow-up once its task is closed to further work, bounce otherwise.",
+  },
+  {
+    command: 'feedback resolve',
+    positionals: '',
+    flags: `--feedback <id> --resolution <bounced|follow-up|dismissed> [--note <text>] [--follow-up-task <task-id>] ${EVENTS_DIR}`,
+    summary:
+      'Resolve one recorded feedback item. Rejects an unknown or already-resolved feedback id.',
+  },
+  {
     command: 'claims check',
     form: '--roots',
     positionals: '<root-dir>',

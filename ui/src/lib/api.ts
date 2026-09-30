@@ -277,6 +277,21 @@ export interface TaskDetail {
     criterionRef: string | null;
   }>;
   artifacts: Array<{ id: string; type: string; path: string; description: string | null }>;
+  feedback: Array<{
+    id: string;
+    taskId: string;
+    sessionId: string;
+    body: string;
+    kind: string;
+    source: string;
+    externalId: string | null;
+    author: string | null;
+    recordedAt: string;
+    recordedEventId: string;
+    resolvedAt: string | null;
+    resolution: string | null;
+    followUpTaskId: string | null;
+  }>;
   branch: string | null;
 }
 

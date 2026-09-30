@@ -405,3 +405,36 @@ export const artifacts = sqliteTable(
   },
   (t) => [index('artifacts_session_idx').on(t.sessionId), index('artifacts_task_idx').on(t.taskId)],
 );
+
+/**
+ * Operator feedback left mid-run on a task, from the dashboard or from
+ * GitHub (feedback.ts). A GLOBAL fold, the same shape as `lessons` and
+ * `findings` above and for the same reason (D-199/D-200): a comment can be
+ * recorded in one session and resolved in a later, continuing one, so the
+ * table's primary key is the feedback id, not (session, feedback) — one
+ * global key, one global fold, rewritten whole by
+ * db/projector.ts's projectOperatorFeedback().
+ */
+export const operatorFeedback = sqliteTable(
+  'operator_feedback',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id').notNull(),
+    sessionId: text('session_id').notNull(),
+    body: text('body').notNull(),
+    kind: text('kind').notNull(),
+    source: text('source').notNull(),
+    externalId: text('external_id'),
+    author: text('author'),
+    recordedAt: text('recorded_at').notNull(),
+    recordedEventId: text('recorded_event_id').notNull(),
+    resolvedAt: text('resolved_at'),
+    resolution: text('resolution'),
+    followUpTaskId: text('follow_up_task_id'),
+  },
+  (t) => [
+    index('operator_feedback_task_idx').on(t.taskId),
+    index('operator_feedback_session_idx').on(t.sessionId),
+    index('operator_feedback_external_idx').on(t.externalId),
+  ],
+);

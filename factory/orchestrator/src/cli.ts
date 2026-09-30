@@ -87,6 +87,14 @@ import {
   startSession,
   tailEvents,
 } from './events.js';
+import {
+  type FeedbackKind,
+  type FeedbackResolution,
+  type FeedbackSource,
+  listPendingFeedback,
+  recordFeedback,
+  resolveFeedback,
+} from './feedback.js';
 import { findingsForDispatch } from './findingContext.js';
 import type { EventContext, FindingEvidence, MintContext, RaiseFindingInput } from './findings.js';
 import {
@@ -201,6 +209,8 @@ import {
   unadmissibleTasks,
   type WaveAdmissionBudget,
 } from './taskEvents.js';
+import { epicOfTaskId } from './taskId.js';
+import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
 import { loadTaxonomy } from './taxonomy.js';
 import { checkTesterIsolation } from './testerAudit.js';
 import type { CheckCommand } from './testgate.js';
@@ -2474,6 +2484,115 @@ async function main(): Promise<number> {
     // `--causal-parent` to the dispatch this prompt caused, which is the edge
     // that makes the interleaved timeline (architecture §7) real rather than
     // inferred from timestamps.
+    printJson({ event_id: stored.event_id, record: stored.record });
+    return 0;
+  }
+
+  // The operator's mid-run comment on a task, from the dashboard or from
+  // GitHub, and its two readers/writers below (feedback.ts). This PR is the
+  // store and the CLI only; the dashboard form and the playbook that acts on
+  // `smith feedback pending`'s suggestion are later work.
+  if (namespace === 'feedback' && action === 'record') {
+    const taskId = requireFlag(flags, 'task');
+    const bodyFile = flags['body-file'];
+    const body = bodyFile !== undefined ? readFileSync(bodyFile, 'utf8') : flags.body;
+    if (body === undefined) {
+      throw new SmithError(
+        'cli.missing-flag',
+        'Missing --body or --body-file: operator feedback needs a body.',
+        { flag: 'body' },
+      );
+    }
+    if (flags.kind !== undefined && flags.kind !== 'must-fix' && flags.kind !== 'nice-to-have') {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--kind must be "must-fix" or "nice-to-have", got "${flags.kind}".`,
+        { flag: 'kind', value: flags.kind },
+      );
+    }
+    if (
+      flags.source !== undefined &&
+      flags.source !== 'dashboard' &&
+      flags.source !== 'github' &&
+      flags.source !== 'cli'
+    ) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--source must be "dashboard", "github" or "cli", got "${flags.source}".`,
+        { flag: 'source', value: flags.source },
+      );
+    }
+    const result = await recordFeedback(
+      {
+        taskId,
+        body,
+        kind: flags.kind as FeedbackKind | undefined,
+        source: flags.source as FeedbackSource | undefined,
+        externalId: flags['external-id'],
+        author: flags.author,
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson({
+      event_id: result.event.event_id,
+      feedback_id: result.feedbackId,
+      deduped: result.deduped,
+    });
+    return 0;
+  }
+
+  if (namespace === 'feedback' && action === 'pending') {
+    const sessionId = requireFlag(flags, 'session');
+    const eventOpts = eventOptsFromFlags(flags);
+    requireSession(sessionId, eventOpts);
+    const taskId = flags.task;
+    const epic = flags.epic;
+    const pending = await listPendingFeedback(sessionId, { taskId }, eventOpts);
+    const scoped =
+      epic === undefined ? pending : pending.filter((row) => epicOfTaskId(row.taskId) === epic);
+    // Kept out of the boot graph like every other db/projector.js call site
+    // (P9-2, test/cliBoot.test.ts): the module pulls in drizzle-orm, and
+    // `smith --help` should not pay for a database it never opens.
+    const { foldTasks } = await import('./db/projector.js');
+    const statuses = new Map(
+      foldTasks(await readLineageEvents(sessionId, eventOpts)).map((t) => [t.taskId, t.taskStatus]),
+    );
+    const withAction = scoped.map((row) => ({
+      ...row,
+      // A task not yet closed to further work gets its comment bounced back
+      // to the coder still on it; one that already merged (or was superseded
+      // or waived) gets a follow-up task instead (taskStatus.ts's
+      // CLOSED_TO_FURTHER_WORK, the same question claims.ts's
+      // decideFindingAttribution answers for a finding).
+      suggestedAction: CLOSED_TO_FURTHER_WORK.has(statuses.get(row.taskId) ?? '')
+        ? 'follow-up'
+        : 'bounce',
+    }));
+    printJson({ sessionId, pending: withAction, count: withAction.length });
+    return 0;
+  }
+
+  if (namespace === 'feedback' && action === 'resolve') {
+    const feedbackId = requireFlag(flags, 'feedback');
+    const resolution = requireFlag(flags, 'resolution');
+    if (resolution !== 'bounced' && resolution !== 'follow-up' && resolution !== 'dismissed') {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--resolution must be "bounced", "follow-up" or "dismissed", got "${resolution}".`,
+        { flag: 'resolution', value: resolution },
+      );
+    }
+    const stored = await resolveFeedback(
+      {
+        feedbackId,
+        resolution: resolution as FeedbackResolution,
+        note: flags.note,
+        followUpTaskId: flags['follow-up-task'],
+      },
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
     printJson({ event_id: stored.event_id, record: stored.record });
     return 0;
   }

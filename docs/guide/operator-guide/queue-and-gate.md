@@ -344,6 +344,37 @@ and without the edge a reader can only guess which request a piece of work
 answers. Whitespace-only text is refused rather than written, since a blank
 row is indistinguishable from a real prompt once it is in the log.
 
+**Leaving a comment on a running task.** `smith feedback record --task <id>
+--body <text>|--body-file <file> --session <id> --causal-parent <event-id>`
+appends an `operator-feedback-recorded` event and prints the event id
+alongside a generated `feedback_id`:
+
+```
+$ smith feedback record --task epic-1/task-1 \
+  --body 'Please fix the flaky test.' --kind must-fix --source cli \
+  --session sess-1 --causal-parent 'sess-1#1'
+{"event_id":"sess-1#2","feedback_id":"fb-...","deduped":false}
+```
+
+`--kind` defaults to `must-fix`; the other value is `nice-to-have`. `--source`
+is `dashboard`, `github` or `cli`. Pass `--external-id <id>` when importing a
+comment from outside the CLI (GitHub comments use `gh-comment:<id>`) —
+recording the same `--external-id` twice returns the same `feedback_id` and
+appends nothing, with `deduped: true` on the repeat. A whitespace-only
+`--body`/`--body-file` is refused the same way `prompt record` refuses one,
+with `feedback.empty-body`.
+
+`smith feedback pending --session <id> [--task <id>] [--epic <id>]` is a
+read: it lists the session lineage's unresolved feedback, each entry naming a
+`suggestedAction` — `follow-up` once the task's status is closed to further
+work (`completed`, `superseded`, `waived`), `bounce` otherwise.
+
+`smith feedback resolve --feedback <id> --resolution
+bounced|follow-up|dismissed --session <id> --causal-parent <event-id>`
+appends `operator-feedback-resolved` and prints the stored record. It refuses
+a feedback id nothing recorded, or one already resolved, with
+`feedback.unknown-feedback` and `feedback.already-resolved` respectively.
+
 Verified outcome shapes (this is exactly what the CLI printed against a
 real fixture — see the guide's source history for the fixture files):
 
