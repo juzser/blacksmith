@@ -290,6 +290,26 @@ function describeShape(value: unknown): string {
   return typeof value === 'object' ? 'an object' : `a ${typeof value}`;
 }
 
+/**
+ * A hand-written `task-result-recorded` from before `validateResultArtifactsShape`
+ * (events.ts) started refusing non-array artifacts at append time keyed them
+ * by name instead of listing them, e.g. `{"claude_half":
+ * "scratchpad/r23/claude-half.json"}`. The event log is append-only history,
+ * so that line can never be rewritten into the array shape the guard now
+ * requires — read it as the legacy shape it plainly is, rather than holding
+ * it back forever behind a banner an operator can never clear.
+ *
+ * Only a plain object whose every value is a non-empty string counts: one
+ * bad value (or the value itself, or any other non-array shape) still goes
+ * through the loud skip below (D-141 — a loud undercount beats a crash).
+ */
+function readLegacyArtifactsMap(value: unknown): Array<[string, string]> | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  const allPaths = entries.every(([, v]) => typeof v === 'string' && v.length > 0);
+  return allPaths ? (entries as Array<[string, string]>) : null;
+}
+
 interface WaiverPayload {
   fingerprint?: string;
   operator_note?: string;
@@ -1370,6 +1390,28 @@ export function projectSession(
         // nothing. Hold back the one list that cannot be read, name it, and
         // keep going (D-141: a loud undercount beats a crash).
         if (p.artifacts !== undefined && !Array.isArray(p.artifacts)) {
+          const legacyMap = readLegacyArtifactsMap(p.artifacts);
+          if (legacyMap) {
+            legacyMap.forEach(([description, artifactPath], index) => {
+              txDb
+                .insert(schema.artifacts)
+                .values({
+                  id: `${event_id}#${index}`,
+                  sessionId: record.session_id,
+                  taskId,
+                  eventId: event_id,
+                  ts: record.ts,
+                  // Never 'screenshot': this is history from before artifacts
+                  // carried a type at all, so it must not fall into the task
+                  // page's screenshot gallery.
+                  type: 'file',
+                  path: artifactPath,
+                  description,
+                })
+                .run();
+            });
+            continue;
+          }
           skippedArtifacts.push({
             event_id,
             session_id: record.session_id,
