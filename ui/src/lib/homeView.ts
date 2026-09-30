@@ -123,15 +123,29 @@ export function runningNowCards(o: OverviewResult, project?: string): RunningCar
     }));
 }
 
+/** How long a closed epic stays under "Just finished" on a fresh load (F3). */
+const JUST_FINISHED_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /**
  * "Just finished" (§4.1 point 2): closed epics this tab saw in flight
- * earlier. Records the current in-flight set into `seen` as it goes, so the
- * caller keeps one set for the life of the page session.
+ * earlier, plus (F3) anything closed in the last 24h regardless of session
+ * state — a tab opened fresh the morning after a close starts with an empty
+ * `seen` and would otherwise never show it. Records the current in-flight
+ * set into `seen` as it goes, so the caller keeps one set for the life of
+ * the page session.
  */
-export function trackJustFinished(seen: Set<string>, o: OverviewResult): ClosedEpic[] {
+export function trackJustFinished(
+  seen: Set<string>,
+  o: OverviewResult,
+  now: number = Date.now(),
+): ClosedEpic[] {
   for (const id of o.epicsInFlight) seen.add(id);
   const inFlight = new Set(o.epicsInFlight);
-  return o.closedEpics.filter((e) => seen.has(e.epicId) && !inFlight.has(e.epicId));
+  return o.closedEpics.filter(
+    (e) =>
+      !inFlight.has(e.epicId) &&
+      (seen.has(e.epicId) || now - new Date(e.closedAt).getTime() < JUST_FINISHED_WINDOW_MS),
+  );
 }
 
 /** A decision line; when no reason was recorded, the task and round stand in. */

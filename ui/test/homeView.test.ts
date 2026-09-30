@@ -186,20 +186,49 @@ describe('lib/homeView.ts runningNowCards()', () => {
 });
 
 describe('lib/homeView.ts trackJustFinished()', () => {
+  // Fixed far outside closed()'s 24h window, so these session-tracking cases
+  // are not accidentally satisfied by the F3 24h-window fallback below.
+  const FAR_LATER = new Date('2026-10-10T10:00:00Z').getTime();
+
   it('reports a closed epic only once it was seen in flight in this session', () => {
     const seen = new Set<string>();
     expect(
-      trackJustFinished(seen, overview({ epicsInFlight: ['a'], closedEpics: [closed('old')] })),
+      trackJustFinished(
+        seen,
+        overview({ epicsInFlight: ['a'], closedEpics: [closed('old')] }),
+        FAR_LATER,
+      ),
     ).toEqual([]);
     const next = overview({ epicsInFlight: [], closedEpics: [closed('a'), closed('old')] });
-    expect(trackJustFinished(seen, next).map((e) => e.epicId)).toEqual(['a']);
+    expect(trackJustFinished(seen, next, FAR_LATER).map((e) => e.epicId)).toEqual(['a']);
   });
 
   it('does not report an epic that is still in flight', () => {
     const seen = new Set(['a']);
     expect(
-      trackJustFinished(seen, overview({ epicsInFlight: ['a'], closedEpics: [closed('a')] })),
+      trackJustFinished(
+        seen,
+        overview({ epicsInFlight: ['a'], closedEpics: [closed('a')] }),
+        FAR_LATER,
+      ),
     ).toEqual([]);
+  });
+
+  it('reports an epic closed within the last 24h even on a fresh load (F3, no session state yet)', () => {
+    // closed('a') carries closedAt 2026-09-30T10:00:00Z; "now" 6h later is
+    // still within the 24h window, so a tab opened fresh (empty `seen`)
+    // must still surface it — the morning-after case F3 exists for.
+    const seen = new Set<string>();
+    const now = new Date('2026-09-30T16:00:00Z').getTime();
+    const o = overview({ epicsInFlight: [], closedEpics: [closed('a')] });
+    expect(trackJustFinished(seen, o, now).map((e) => e.epicId)).toEqual(['a']);
+  });
+
+  it('does not report an epic closed more than 24h ago on a fresh load', () => {
+    const seen = new Set<string>();
+    const now = new Date('2026-10-02T11:00:00Z').getTime();
+    const o = overview({ epicsInFlight: [], closedEpics: [closed('a')] });
+    expect(trackJustFinished(seen, o, now)).toEqual([]);
   });
 });
 

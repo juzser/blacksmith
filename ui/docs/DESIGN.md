@@ -324,9 +324,13 @@ None of these composables changed for DS0 — the kit swap is presentational.
   read-state weight (pattern 12) have no server source yet. Row titles are
   the server's task text, not a per-kind sentence.
 - **Home's "Just finished" is per tab, not per operator session.** It lists
-  closed epics this tab saw in flight since it loaded; a reload starts it
-  empty. It sits under Running now rather than inside each project card,
-  because a closed epic carries no project.
+  closed epics this tab saw in flight since it loaded, plus (F3 review
+  fix) anything closed in the last 24h regardless of session state, so a
+  tab opened fresh the morning after a close still shows it. It sits under
+  Running now rather than inside each project card, because a closed epic
+  carries no project. The Work link is the only follow-up affordance;
+  `ClosedEpic` carries no PR field, so a PR link is deferred until a
+  server source exists.
 - **Home's budget outlier threshold (10x an epic's budget) is ours.**
   §4.1 point 4 names the case but no number. Outliers are left out of the
   ring and the total; the server's hour-over-hour delta still includes them.
