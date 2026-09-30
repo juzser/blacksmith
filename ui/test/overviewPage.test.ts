@@ -53,3 +53,29 @@ describe('OverviewPage.vue — role labels', () => {
     expect(SFC).toMatch(/:label="`\$\{roleLabel\(d\.agentRole\)\} · \$\{d\.modelTier\}`"/);
   });
 });
+
+// Task 3 (dispatch reason fallback): projector.ts's own reason ?? rationale
+// ?? note ?? why chain still leaves rows with genuinely no reason at all —
+// those named "no reason given" almost every time. Once there truly is
+// nothing, the row says what happened instead: "<role label> on <task
+// label> · round N".
+describe('OverviewPage.vue — dispatch reason fallback', () => {
+  it('imports taskLabel from lib/format', () => {
+    expect(SFC).toMatch(/taskLabel/);
+  });
+
+  it('never falls back to the literal "no reason given"', () => {
+    expect(SFC).not.toContain('no reason given');
+  });
+
+  it('routes the dispatch meta line through a dispatchReasonText helper', () => {
+    expect(SFC).toContain('dispatchReasonText(d)');
+  });
+
+  it('derives the helper from role label, task label and round', () => {
+    expect(SFC).toMatch(/function dispatchReasonText\(/);
+    expect(SFC).toContain('roleLabel(d.agentRole)');
+    expect(SFC).toContain('taskLabel(d.taskId');
+    expect(SFC).toContain('d.round');
+  });
+});

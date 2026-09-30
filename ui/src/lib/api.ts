@@ -131,6 +131,8 @@ export interface RecentDispatch {
   modelTier: string;
   taskId: string | null;
   reason: string | null;
+  /** Which attempt this was — OverviewPage's derived line when `reason` is null. */
+  round: number;
 }
 export interface ProjectOverviewSummary {
   project: string;

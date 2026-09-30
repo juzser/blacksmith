@@ -73,6 +73,7 @@ import {
   fetchOverview,
   type LiveAgentEntry,
   type OverviewResult,
+  type RecentDispatch,
   type RunningSession,
 } from '../lib/api.js';
 import {
@@ -81,6 +82,7 @@ import {
   formatMeasuredTokens,
   formatRelative,
   pluralize,
+  taskLabel,
 } from '../lib/format.js';
 import {
   byRuntimeDesc,
@@ -225,6 +227,20 @@ const budgetUsedTitle = computed(() => {
   const unmeasured = epics.reduce((s, e) => s + e.unmeasured, 0);
   return unmeasured > 0 ? `${spent} tok spent · ${unmeasured} not measured` : `${spent} tok spent`;
 });
+
+// Task 3 (dispatch reason fallback): projector.ts's own reason ?? rationale
+// ?? note ?? why chain (factory/orchestrator/src/db/projector.ts) still
+// leaves a genuine null on rows nobody wrote any of those keys for. Rather
+// than admit there is nothing to say, name what actually happened — role,
+// task and attempt number are always known even when the free-text reason
+// is not.
+function dispatchReasonText(d: RecentDispatch): string {
+  if (d.reason) return d.reason;
+  const who = roleLabel(d.agentRole);
+  return d.taskId
+    ? `${who} on ${taskLabel(d.taskId)} · round ${d.round}`
+    : `${who} · round ${d.round}`;
+}
 
 // Operator directive (running-only): the dashboard shows what is working
 // and says what it is not showing. A `live` registry row is not proof of
@@ -762,7 +778,7 @@ const bsCommands = computed<CommandHintItem[]>(() => {
             v-for="d in data.recentDispatches"
             :key="d.eventId"
             :title="`${roleLabel(d.agentRole)} → ${d.modelTier}/${d.provider}`"
-            :meta="`${d.reason ?? 'no reason given'} · ${formatRelative(d.ts, now)}`"
+            :meta="`${dispatchReasonText(d)} · ${formatRelative(d.ts, now)}`"
             :clickable="!!d.taskId"
             :aria-label="d.taskId ? `Open task ${d.taskId}` : undefined"
             @activate="d.taskId && router.push(`/tasks/${encodeURIComponent(d.taskId)}`)"
