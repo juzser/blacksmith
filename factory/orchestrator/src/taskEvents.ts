@@ -8,7 +8,7 @@ import {
 import type { EventContext } from './findings.js';
 import { type PlanFile, resolveTaskId, type TaskSpecRecord } from './plan.js';
 import { CLOSED_TO_FURTHER_WORK } from './taskStatus.js';
-import { taskBranchName } from './worktree.js';
+import { BRANCH_PREFIX, epicBranchPrefix, taskBranchName } from './worktree.js';
 
 /**
  * Producers for the five task-status events (architecture §7) that
@@ -93,7 +93,11 @@ function planScoped(ctx: TaskEventContext, plan: PlanFile): TaskEventContext {
   return project === undefined ? ctx : { ...ctx, project };
 }
 
-function addedPayload(plan: PlanFile, task: TaskSpecRecord): Record<string, unknown> {
+function addedPayload(
+  plan: PlanFile,
+  task: TaskSpecRecord,
+  branchPrefix: string,
+): Record<string, unknown> {
   const budget = task.budget as { tokens?: number } | undefined;
   // A task spec is a `Record<string, unknown>`, so its `epic_id` is only a
   // string by convention. `taskBranchName` needs a real one, and a task
@@ -111,9 +115,13 @@ function addedPayload(plan: PlanFile, task: TaskSpecRecord): Record<string, unkn
     // D-23/P9-12. Declared here rather than derived by the reader: the board
     // wants a branch link the moment a task is added, which is well before a
     // worktree exists, and worktree.ts's convention is the one that decides
-    // what `smith worktree create` will actually cut. Reading it off the same
-    // function that creates it means the two cannot say different things.
-    branch: taskBranchName(epicId, task.task_id),
+    // what `smith worktree create` will actually cut. `branchPrefix` is
+    // `epicBranchPrefix`'s answer for this epic when `emitTasksAdded` was
+    // handed a project dir (a legacy `smith/<epic>/integration` keeps this
+    // epic's new branches there too), or the plain `bs` default otherwise —
+    // the same choice `worktree create` makes, so the two cannot say
+    // different things.
+    branch: taskBranchName(epicId, task.task_id, branchPrefix),
   };
 }
 
@@ -358,17 +366,36 @@ export async function planIngestGaps(
  *
  * Returns only the events it actually appended, so a caller can report "5
  * added, 0 already present" truthfully rather than guessing from the plan.
+ *
+ * `projectDir` is optional: the CLI's `--project` flag. Given, the branch
+ * prefix each `task-added` declares is resolved once per epic via
+ * `epicBranchPrefix` — a legacy `smith/<epic>/integration` epic keeps landing
+ * `smith/...` here, matching what `worktree create` will actually cut.
+ * Absent, every task gets the plain `bs` default — correct for a brand-new
+ * epic, which has no worktree convention to ask git about yet.
  */
 export async function emitTasksAdded(
   plan: PlanFile,
   ctx: TaskEventContext,
   opts: EventOpts = {},
+  projectDir?: string,
 ): Promise<StoredEvent[]> {
   const scoped = planScoped(ctx, plan);
   const written: StoredEvent[] = [];
+  const branchPrefixes = new Map<string, string>();
   for (const { task, eventType } of await pendingIngest(plan, ctx, opts)) {
-    const payload =
-      eventType === 'task-added' ? addedPayload(plan, task) : { epic_id: plan.epic_id };
+    let payload: Record<string, unknown>;
+    if (eventType === 'task-added') {
+      const epicId = typeof task.epic_id === 'string' ? task.epic_id : plan.epic_id;
+      let prefix = branchPrefixes.get(epicId);
+      if (prefix === undefined) {
+        prefix = projectDir ? epicBranchPrefix(projectDir, epicId) : BRANCH_PREFIX;
+        branchPrefixes.set(epicId, prefix);
+      }
+      payload = addedPayload(plan, task, prefix);
+    } else {
+      payload = { epic_id: plan.epic_id };
+    }
     written.push(await appendEvent(envelope(scoped, eventType, payload, task.task_id), opts));
   }
   return written;

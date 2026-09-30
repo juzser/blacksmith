@@ -26,7 +26,7 @@ import { resolveRepoAtDir } from '../src/gh.js';
 import { GOAL_CHECK_EVENT } from '../src/goalCheck.js';
 import { factoryProjects } from '../src/projects.js';
 import { SPEC_REVIEW_EVENT } from '../src/spec.js';
-import { assertExited, runOrThrow, runProcess, startProcess } from './helpers/process.js';
+import { assertExited, git, runOrThrow, runProcess, startProcess } from './helpers/process.js';
 
 // cli.ts is thin argv->module wiring (excluded from the coverage floor, like
 // UI glue per stack.md); it is verified end-to-end here as a built binary,
@@ -4214,6 +4214,50 @@ describe('cli.ts (built binary)', () => {
       expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'task-added')).toHaveLength(
         2,
       );
+    });
+
+    // bs-rename part 1: `--project` resolves the branch prefix per epic, the
+    // same way `worktree create` does, instead of always declaring `bs/...`
+    // for an epic that already integrates on `smith/<epic>/integration`.
+    it('plan ingest --project: declares smith/... for an epic already on a legacy integration branch', async () => {
+      const { sessionId, eventsDir, planPath } = await session();
+      const projectRoot = await mkdtemp(path.join(tmpdir(), 'smith-cli-project-'));
+      const originDir = path.join(projectRoot, 'origin.git');
+      const projectDir = path.join(projectRoot, 'project');
+      try {
+        git(projectRoot, ['init', '-q', '--bare', '-b', 'main', originDir]);
+        git(projectRoot, ['clone', '-q', originDir, projectDir]);
+        git(projectDir, ['config', 'user.email', 'test@example.com']);
+        git(projectDir, ['config', 'user.name', 'Test']);
+        await writeFile(path.join(projectDir, 'README.md'), '# project\n');
+        git(projectDir, ['add', '.']);
+        git(projectDir, ['commit', '-q', '-m', 'init']);
+        git(projectDir, ['push', '-q', 'origin', 'main']);
+        git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+        const ingest = runCli([
+          'plan',
+          'ingest',
+          planPath,
+          '--project',
+          projectDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(ingest.status).toBe(0);
+
+        const added = tail(sessionId, eventsDir).filter((r) => r.event_type === 'task-added');
+        expect(added.map((r) => r.payload.branch)).toEqual([
+          'smith/epic-1/task-1',
+          'smith/epic-1/task-2',
+        ]);
+      } finally {
+        await rm(projectRoot, { recursive: true, force: true });
+      }
     });
 
     // D-254. The plan declares a DAG; before this the ingest wrote its nodes

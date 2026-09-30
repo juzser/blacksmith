@@ -81,7 +81,9 @@ describe('foldTasks — task id normalisation', () => {
       taskId: 'envkit/task-0',
       epicId: 'envkit',
       taskStatus: 'completed',
-      branch: 'bs/envkit/task-0',
+      // No `branch` field on the task-added payload: the fallback reads as
+      // legacy smith/, not the current bs/ default (bs-rename part 1).
+      branch: 'smith/envkit/task-0',
     });
   });
 
@@ -243,7 +245,11 @@ describe('foldTasks — branch (D-23 / P9-12)', () => {
     expect(rows[0]?.branch).toBe('smith/epic-1/rename-me');
   });
 
-  it('derives the conventional branch when the payload declares none', () => {
+  // bs-rename part 1. A `task-added` with no `branch` field predates the
+  // field itself, so it was written by a build that only ever knew `smith/`
+  // — the fallback must say that, not the current `bs` default, or the
+  // dashboard links a branch `worktree create` never cut.
+  it('derives the legacy smith/ branch when the payload declares none', () => {
     const rows = foldTasks([
       event({
         event_id: 'e1',
@@ -252,7 +258,7 @@ describe('foldTasks — branch (D-23 / P9-12)', () => {
         payload: { epic_id: 'epic-1' },
       }),
     ]);
-    expect(rows[0]?.branch).toBe('bs/epic-1/task-1');
+    expect(rows[0]?.branch).toBe('smith/epic-1/task-1');
   });
 });
 

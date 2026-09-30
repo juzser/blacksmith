@@ -1558,7 +1558,12 @@ async function main(): Promise<number> {
     const plan = readJsonFile<PlanFile>(planFile);
     const ctx = eventContextFromFlags(flags);
     const opts = eventOptsFromFlags(flags);
-    const written = await emitTasksAdded(plan, ctx, opts);
+    // --project: an epic already integrating on `smith/<epic>/integration`
+    // (legacy continuity, worktree.ts's epicBranchPrefix) must have this
+    // v(n+1) ingest declare the same prefix `worktree create` will actually
+    // cut, not the plain `bs` default. Absent for a brand-new epic, which has
+    // no such branch to ask git about yet.
+    const written = await emitTasksAdded(plan, ctx, opts, flags.project);
     // D-254: the arrows, after the nodes. The plan declares a DAG and the
     // scheduler has always read it off the file, but nothing wrote it to the
     // log -- so the db's `edges` table was empty and every operator-facing

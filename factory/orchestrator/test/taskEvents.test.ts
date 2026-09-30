@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -18,6 +18,7 @@ import {
   type TaskEventContext,
   unadmissibleTasks,
 } from '../src/taskEvents.js';
+import { git } from './helpers/process.js';
 
 function task(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -292,6 +293,57 @@ describe('taskEvents', () => {
       ]);
       expect(await typesFor('task-superseded')).toHaveLength(1);
       expect(written).toHaveLength(2);
+    });
+  });
+
+  // bs-rename part 1. `plan ingest`'s `--project` flag resolves the branch
+  // prefix per epic, the same way `worktree create` does, instead of always
+  // declaring the plain `bs` default.
+  describe('emitTasksAdded — projectDir resolves the branch prefix', () => {
+    let projectRoot: string;
+    let projectDir: string;
+
+    beforeEach(async () => {
+      projectRoot = await mkdtemp(path.join(tmpdir(), 'smith-taskevents-project-'));
+      const originDir = path.join(projectRoot, 'origin.git');
+      projectDir = path.join(projectRoot, 'project');
+      git(projectRoot, ['init', '-q', '--bare', '-b', 'main', originDir]);
+      git(projectRoot, ['clone', '-q', originDir, projectDir]);
+      git(projectDir, ['config', 'user.email', 'test@example.com']);
+      git(projectDir, ['config', 'user.name', 'Test']);
+      await writeFile(path.join(projectDir, 'README.md'), '# project\n');
+      git(projectDir, ['add', '.']);
+      git(projectDir, ['commit', '-q', '-m', 'init']);
+      git(projectDir, ['push', '-q', 'origin', 'main']);
+    });
+
+    afterEach(async () => {
+      await rm(projectRoot, { recursive: true, force: true });
+    });
+
+    it('declares smith/... for an epic already integrating on smith/<epic>/integration', async () => {
+      git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+      await emitTasksAdded(planWith(task()), ctx, { stateDir }, projectDir);
+
+      const added = await typesFor('task-added');
+      expect(added[0]?.payload?.branch).toBe('smith/epic-1/task-1');
+    });
+
+    it('still declares bs/... for a brand-new epic with a projectDir but no legacy branch', async () => {
+      await emitTasksAdded(planWith(task()), ctx, { stateDir }, projectDir);
+
+      const added = await typesFor('task-added');
+      expect(added[0]?.payload?.branch).toBe('bs/epic-1/task-1');
+    });
+
+    it('without a projectDir, keeps declaring bs/... even when a legacy branch exists', async () => {
+      git(projectDir, ['branch', 'smith/epic-1/integration', 'main']);
+
+      await emitTasksAdded(planWith(task()), ctx, { stateDir });
+
+      const added = await typesFor('task-added');
+      expect(added[0]?.payload?.branch).toBe('bs/epic-1/task-1');
     });
   });
 
