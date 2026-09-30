@@ -75,7 +75,7 @@
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "better-sqlite3": "13.0.3",
-    "drizzle-orm": "0.45.2",
+    "drizzle-orm": "0.45.3",
     "picomatch": "4.0.7",
     "yaml": "2.9.1"
   },
