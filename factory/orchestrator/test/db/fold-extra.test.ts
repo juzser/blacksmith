@@ -81,7 +81,7 @@ describe('foldTasks — task id normalisation', () => {
       taskId: 'envkit/task-0',
       epicId: 'envkit',
       taskStatus: 'completed',
-      branch: 'smith/envkit/task-0',
+      branch: 'bs/envkit/task-0',
     });
   });
 
@@ -252,7 +252,7 @@ describe('foldTasks — branch (D-23 / P9-12)', () => {
         payload: { epic_id: 'epic-1' },
       }),
     ]);
-    expect(rows[0]?.branch).toBe('smith/epic-1/task-1');
+    expect(rows[0]?.branch).toBe('bs/epic-1/task-1');
   });
 });
 

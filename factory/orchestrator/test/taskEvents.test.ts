@@ -112,7 +112,7 @@ describe('taskEvents', () => {
         // D-23/P9-12: the branch is declared at add time, not inferred later.
         // The board needs to link to it before any worktree exists, and a
         // second derivation of the convention is a second thing to keep right.
-        branch: 'smith/epic-1/task-1',
+        branch: 'bs/epic-1/task-1',
       });
     });
 
@@ -124,8 +124,8 @@ describe('taskEvents', () => {
 
       const added = await typesFor('task-added');
       expect(added.map((r) => r.payload?.branch)).toEqual([
-        'smith/epic-1/task-1', // epic prefix stripped, never doubled
-        'smith/epic-2/loose-task', // an id that carries no epic is used whole
+        'bs/epic-1/task-1', // epic prefix stripped, never doubled
+        'bs/epic-2/loose-task', // an id that carries no epic is used whole
       ]);
     });
 

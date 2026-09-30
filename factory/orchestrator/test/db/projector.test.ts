@@ -108,7 +108,7 @@ describe('db/projector.ts', () => {
       epicId: EPIC_ID,
       caseTag: 'feature',
       taskStatus: 'completed',
-      branch: `smith/${EPIC_ID}/task-1`,
+      branch: `bs/${EPIC_ID}/task-1`,
       budgetTokens: 2000,
     });
     expect(taskById[TASK_2]).toMatchObject({ taskStatus: 'reviewing', caseTag: 'refactor' });
