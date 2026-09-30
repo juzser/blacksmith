@@ -127,9 +127,9 @@ export interface EpicWidthSummary {
  * must not be able to read as a healthy one.
  */
 export const UNMEASURED_HINT =
-  'No close read here carried a width. Either these epics were closed before `smith epic close` ' +
-  'recorded one, or the closes were written by hand — close a current epic with `smith epic ' +
-  'close`, or read a live log back with `smith wave audit --session <id>`.';
+  'No close read here carried a width. Either these epics were closed before `bs epic close` ' +
+  'recorded one, or the closes were written by hand — close a current epic with `bs epic ' +
+  'close`, or read a live log back with `bs wave audit --session <id>`.';
 
 /** The payload shape `epicSummaryPayload` projects; every key optional here. */
 interface RecordedWidth {

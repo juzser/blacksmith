@@ -219,7 +219,7 @@ export function checkDelegationGrants(
     for (const pair of options.isolationPairs) {
       if (pair.worker === grant.role && grant.mayDispatch.includes(pair.auditor)) {
         problems.push(
-          `\`${grant.role}\` may dispatch \`${pair.auditor}\`, its own auditor under crosscheck.yml \`role_isolation\`. The worker would choose and prompt its grader, and \`smith tester check\` would report the isolation it was reading evidence for.`,
+          `\`${grant.role}\` may dispatch \`${pair.auditor}\`, its own auditor under crosscheck.yml \`role_isolation\`. The worker would choose and prompt its grader, and \`bs tester check\` would report the isolation it was reading evidence for.`,
         );
       }
     }

@@ -611,7 +611,7 @@ describe('cli.ts (built binary)', () => {
         expect(status).toBe(1);
         const parsed = JSON.parse(stdout);
         expect(parsed.error.code).toBe('cli.amendment-edge-unreachable');
-        expect(parsed.error.message).toContain('smith plan amend');
+        expect(parsed.error.message).toContain('bs plan amend');
         expect(parsed.error.details.status).toBe('amend-pending');
       });
 
@@ -620,7 +620,7 @@ describe('cli.ts (built binary)', () => {
         expect(status).toBe(1);
         const parsed = JSON.parse(stdout);
         expect(parsed.error.code).toBe('cli.amendment-edge-unreachable');
-        expect(parsed.error.message).toContain('smith epic close');
+        expect(parsed.error.message).toContain('bs epic close');
       });
 
       it('refuses before it reads the log, and writes nothing', () => {
@@ -1611,7 +1611,7 @@ describe('cli.ts (built binary)', () => {
       expect(second.status).toBe(0);
       expect(JSON.parse(second.stdout).event_id).toBe(`${sessionId}#1`);
       expect(second.stderr).toContain('session-start');
-      expect(second.stderr).toContain('smith session start');
+      expect(second.stderr).toContain('bs session start');
     });
   });
 

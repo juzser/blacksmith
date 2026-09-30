@@ -332,7 +332,7 @@ async function withLogLock<T>(filePath: string, task: () => Promise<T>): Promise
         throw new EventError(
           'events.log-busy',
           `Another process has held the log for ${filePath} longer than ${LOCK_TIMEOUT_MS}ms. ` +
-            'Nothing was written. If no `smith` process is running, delete the stale lock file.',
+            'Nothing was written. If no `bs` process is running, delete the stale lock file.',
           { lock_path: lockPath },
         );
       }

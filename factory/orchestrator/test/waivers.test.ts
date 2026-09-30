@@ -526,7 +526,7 @@ describe('waivers.ts', () => {
         expect(error).toBeInstanceOf(WaiverError);
         expect((error as WaiverError).message).toContain('src/a.ts');
         expect((error as WaiverError).message).toContain('epic-1/task-2');
-        expect((error as WaiverError).message).toContain('smith findings reverify --finding f-1');
+        expect((error as WaiverError).message).toContain('bs findings reverify --finding f-1');
       });
 
       it('lets the grant through once the finding has been re-verified', async () => {

@@ -616,7 +616,7 @@ export async function amendPlan(
   if (!draftValidation.valid) {
     throw new SpecError(
       'plan.amendment-invalid-draft',
-      `Refusing to amend plan "${epicId}" v${plan.version}: v${draft.version} would fail its own validation (the same check \`smith plan validate\` runs), so nothing was written. ${draftValidation.errors
+      `Refusing to amend plan "${epicId}" v${plan.version}: v${draft.version} would fail its own validation (the same check \`bs plan validate\` runs), so nothing was written. ${draftValidation.errors
         .map((e) => `${e.path}: ${e.message}`)
         .join(' ')}`,
       { epicId, version: plan.version, nextVersion: draft.version, errors: draftValidation.errors },

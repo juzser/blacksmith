@@ -78,7 +78,7 @@ const WORK_DIRS: readonly string[] = [
  * the roadmap and the stack answers are declarations the operator made, and a
  * team sharing the repository should share them.
  */
-const WORK_ROOT_GITIGNORE = `# Written by \`smith init\`. Blacksmith's state is a cache of its event log
+const WORK_ROOT_GITIGNORE = `# Written by \`bs init\`. Blacksmith's state is a cache of its event log
 # and belongs to this machine; the answers under factory/ are declarations
 # this project made, so they are tracked.
 state/

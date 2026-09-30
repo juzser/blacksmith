@@ -358,7 +358,7 @@ export async function applyBatch(
             `"${evidence.mergedTaskId}" has merged over since the finding was raised (matched by ` +
             `${evidence.basis}: ${evidence.matched}). Its evidence describes code that no longer ` +
             'exists, so this waiver would answer a question about a deleted file. Re-read it first: ' +
-            `smith findings reverify --finding ${finding.finding_id}`,
+            `bs findings reverify --finding ${finding.finding_id}`,
           {
             fingerprint: decision.fingerprint,
             findingId: finding.finding_id,

@@ -767,7 +767,7 @@ export function planWorkerTurn(
   if (request.promptFile === undefined || request.promptFile === '') {
     throw new HarnessError(
       'harness.missing-prompt',
-      'A worker turn needs a prompt file. This port renders invocations, not prompts — write the prompt first (`smith prompt record`), then plan the turn that carries it.',
+      'A worker turn needs a prompt file. This port renders invocations, not prompts — write the prompt first (`bs prompt record`), then plan the turn that carries it.',
       { role },
     );
   }

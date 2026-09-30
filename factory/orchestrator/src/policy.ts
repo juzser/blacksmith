@@ -2271,10 +2271,10 @@ function checkRoleWriteScope(
 /**
  * Judge rule 3: a judge does not touch its own lease.
  *
- * Without this the sandbox would be one `smith sandbox close` away from
- * being off, and `rm state/sandboxes/<hash>.json` is a removal under
- * `state/`, which the `unbounded-rm` rule above explicitly permits. The
- * refusal is unconditional on the lease directory rather than scoped to
+ * Without this the sandbox would be one `bs sandbox close` (or its
+ * deprecated `smith` alias) away from being off, and
+ * `rm state/sandboxes/<hash>.json` is a removal under `state/`, which the
+ * `unbounded-rm` rule above explicitly permits. The refusal is unconditional on the lease directory rather than scoped to
  * *this* lease: reading another judge's lease is no more a judge's business
  * than deleting its own.
  */
@@ -2287,6 +2287,7 @@ function checkJudgeSandboxEscape(
     if (/state[\\/]sandboxes/i.test(segment)) return true;
     if (!/\bsandbox\b/i.test(segment)) return false;
     return (
+      hasCommandWord(segment, 'bs') ||
       hasCommandWord(segment, 'smith') ||
       hasCommandWord(segment, 'node') ||
       /\bcli\.js\b/i.test(segment)

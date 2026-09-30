@@ -3741,7 +3741,7 @@ describe('epic.ts — the spec-vs-goal gate (B3)', () => {
   it('holds an epic that has no spec-vs-goal check on record', () => {
     const summary = gate({ check: null, goal: goalStatus() });
     expect(summary.mechanicallyReady).toBe(false);
-    expect(summary.blockers.some((b) => b.includes('smith epic goal-check'))).toBe(true);
+    expect(summary.blockers.some((b) => b.includes('bs epic goal-check'))).toBe(true);
   });
 
   // The MCP gate has MCP_SURFACE_NOT_REQUIRED; this one has no counterpart on
@@ -3806,7 +3806,7 @@ describe('epic.ts — the spec-vs-goal gate (B3)', () => {
       },
     });
     expect(summary.mechanicallyReady).toBe(false);
-    expect(summary.blockers.some((b) => b.includes('smith plan amend'))).toBe(true);
+    expect(summary.blockers.some((b) => b.includes('bs plan amend'))).toBe(true);
   });
 
   // `out-of-scope` is the one verdict that makes a clause go away, so it is

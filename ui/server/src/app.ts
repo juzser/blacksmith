@@ -399,7 +399,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
         for (const issue of landed) {
           if (!issue.eventId || namedArtifacts.has(issue.eventId)) continue;
           namedArtifacts.add(issue.eventId);
-          process.stderr.write(`smith ui: ${issue.message}\n`);
+          process.stderr.write(`bs ui: ${issue.message}\n`);
         }
         // D-141 turned "a finding that cannot fill a notNull column" from a
         // crash into a returned report, on the rule that a loud undercount
@@ -418,7 +418,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
           // The event id too, because it is what an operator greps the log
           // for; the reason because it says the data is short, not the server.
           process.stderr.write(
-            `smith ui: finding '${named}' (${skipped.event_id}) is missing from the projection: ${skipped.reason}\n`,
+            `bs ui: finding '${named}' (${skipped.event_id}) is missing from the projection: ${skipped.reason}\n`,
           );
         }
       } catch (err) {
@@ -432,7 +432,7 @@ function createRefresher(dbPath: string, eventsDir: string, dbOpts: DbOpts): Ref
         issues.set(sessionId, [{ sessionId, kind: 'session-not-projected', message }]);
         if (warned.get(sessionId) !== fingerprint) {
           warned.set(sessionId, fingerprint);
-          process.stderr.write(`smith ui: ${message}\n`);
+          process.stderr.write(`bs ui: ${message}\n`);
         }
       }
     }

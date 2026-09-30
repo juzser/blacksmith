@@ -415,8 +415,8 @@ describe('what one tick notices', () => {
     // find out what they are being asked.
     expect(specChanges[0]?.detail).toContain('epic-1/task-2:criterion-1');
     expect(specChanges[0]?.detail).toContain('every value is single-line');
-    expect(specChanges[0]?.detail).toContain('smith plan approve');
-    expect(specChanges[0]?.detail).toContain('smith plan reject');
+    expect(specChanges[0]?.detail).toContain('bs plan approve');
+    expect(specChanges[0]?.detail).toContain('bs plan reject');
   });
 
   it('files a non-blocking proposal as work to schedule, not as a fault', () => {
@@ -667,7 +667,7 @@ describe('what the factory-wide pass notices', () => {
     expect(width).toHaveLength(1);
     expect(width[0]?.severity).toBe('info');
     expect(width[0]?.sessionId).toBeNull();
-    expect(width[0]?.detail).toContain('smith epic close');
+    expect(width[0]?.detail).toContain('bs epic close');
   });
 
   it('does not call a factory unmeasured while one close still carries a width', () => {
@@ -2336,7 +2336,7 @@ describe('an error nobody has reported', () => {
     expect(findings[0]?.subject).toContain(fingerprint);
     expect(findings[0]?.detail).toContain(fingerprint);
     expect(findings[0]?.detail).toContain('2 occurrence(s)');
-    expect(findings[0]?.detail).toContain('smith issues report --session sess-1');
+    expect(findings[0]?.detail).toContain('bs issues report --session sess-1');
   });
 
   // No resolver in OPTS, no project stamp on the event: proposal.project is

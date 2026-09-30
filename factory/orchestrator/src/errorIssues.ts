@@ -513,7 +513,7 @@ function fingerprintLine(fingerprint: string): string {
 
 /** The local, read-only command an operator runs to see the detail this body/comment deliberately omit. */
 function smithEventCommand(sessionId: string): string {
-  return `smith event tail ${sessionId} --lineage`;
+  return `bs event tail ${sessionId} --lineage`;
 }
 
 export interface IssueBodyFields {

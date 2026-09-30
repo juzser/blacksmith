@@ -248,8 +248,8 @@ export async function runInvocation(
     throw new RunnerError(
       'runner.in-process',
       `Invocation for role "${invocation.role}" is in-process (harness "${invocation.harness}") — ` +
-        'smith-run starts programs, not Agent-tool subagents. In-process harnesses run inside the ' +
-        'orchestrator session itself and have no separate binary for smith-run to spawn.',
+        'bs-run starts programs, not Agent-tool subagents. In-process harnesses run inside the ' +
+        'orchestrator session itself and have no separate binary for bs-run to spawn.',
       { harness: invocation.harness, role: invocation.role },
     );
   }

@@ -207,7 +207,7 @@ An `in-process` invocation is refused outright — it names an `Agent`-tool
 subagent turn, and there is no separate binary for `bs-run` to spawn:
 
 ```
-smith-run: Invocation for role "coder" is in-process (harness "claude-code") — smith-run starts programs, not Agent-tool subagents. In-process harnesses run inside the orchestrator session itself and have no separate binary for smith-run to spawn.
+bs-run: Invocation for role "coder" is in-process (harness "claude-code") — bs-run starts programs, not Agent-tool subagents. In-process harnesses run inside the orchestrator session itself and have no separate binary for bs-run to spawn.
 ```
 
 **`bs-run` opens no event log, no `state/`, no DB.** It is the library

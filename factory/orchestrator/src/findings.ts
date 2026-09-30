@@ -1282,7 +1282,7 @@ export async function transition(
     if (extra.waiverRevokedBy === undefined) {
       throw new FindingError(
         'findings.waiver-revocation-unproven',
-        `Finding "${findingId}" is waived, and a waiver is undone by revoking it, not by typing a status at it. Record the operator's reversal first — "smith waiver apply" with a "denied" decision on this fingerprint reopens the finding as part of writing the denial.`,
+        `Finding "${findingId}" is waived, and a waiver is undone by revoking it, not by typing a status at it. Record the operator's reversal first — "bs waiver apply" with a "denied" decision on this fingerprint reopens the finding as part of writing the denial.`,
         { findingId, to: newStatus },
       );
     }
@@ -1314,7 +1314,7 @@ export async function transition(
   if (newStatus === AMEND_PENDING_STATUS && (extra.amendsTaskIds?.length ?? 0) === 0) {
     throw new FindingError(
       'findings.amendment-without-obligation',
-      `Finding "${findingId}" cannot enter "${AMEND_PENDING_STATUS}" naming no task ids. An amendment that obligates nothing discharges the finding the moment it is written, which is D-127 — say which added or superseded task this finding is now waiting on. "smith plan amend" derives that list from the plan diff and is the only verb that does (D-136).`,
+      `Finding "${findingId}" cannot enter "${AMEND_PENDING_STATUS}" naming no task ids. An amendment that obligates nothing discharges the finding the moment it is written, which is D-127 — say which added or superseded task this finding is now waiting on. "bs plan amend" derives that list from the plan diff and is the only verb that does (D-136).`,
       { findingId },
     );
   }
@@ -1326,7 +1326,7 @@ export async function transition(
         'findings.amendment-not-discharged',
         outstanding === null
           ? `Finding "${findingId}" is at "${AMEND_PENDING_STATUS}" but names no task ids at a plan version, so no evidence can discharge it. Expire it at the epic boundary instead.`
-          : `Finding "${findingId}" cannot close at "${AMENDED_STATUS}": ${outstanding.join(', ')} has not been shown to have landed at plan version ${current.amends_plan_version} or later. An amendment is discharged by its tasks landing, not by being told they did — this is D-127. "smith epic close" computes and supplies that evidence.`,
+          : `Finding "${findingId}" cannot close at "${AMENDED_STATUS}": ${outstanding.join(', ')} has not been shown to have landed at plan version ${current.amends_plan_version} or later. An amendment is discharged by its tasks landing, not by being told they did — this is D-127. "bs epic close" computes and supplies that evidence.`,
         {
           findingId,
           outstanding: outstanding ?? [],
@@ -1548,7 +1548,7 @@ export async function repairObligation(
       'findings.repair-not-corrupt',
       `Finding "${input.findingId}"'s obligation names ${original.length} task id(s), all ` +
         'well-formed — there is nothing to repair. This verb repairs malformed amends_task_ids ' +
-        'data; it never renegotiates a well-formed obligation. Use "smith plan amend" to change ' +
+        'data; it never renegotiates a well-formed obligation. Use "bs plan amend" to change ' +
         'what a finding is waiting on.',
       { findingId: input.findingId },
     );
