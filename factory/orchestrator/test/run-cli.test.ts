@@ -79,7 +79,8 @@ describe('run-cli.ts (built binary: smith-run)', () => {
   it('exits 1 with a usage message when no invocation argument is given', () => {
     const run = runSmithRun([]);
     expect(run.status).toBe(1);
-    expect(run.stderr).toContain('missing <invocation.json');
+    expect(run.stderr).toContain('bs-run: missing <invocation.json');
+    expect(run.stderr).not.toContain('smith-run:');
   });
 
   // bs-rename, operator decision 3: `smith-run` keeps working as a

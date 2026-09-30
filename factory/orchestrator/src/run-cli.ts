@@ -77,7 +77,7 @@ async function main(): Promise<number> {
 
   const source = parsed.positional[0];
   if (source === undefined) {
-    process.stderr.write('smith-run: missing <invocation.json | -> argument.\n\n');
+    process.stderr.write('bs-run: missing <invocation.json | -> argument.\n\n');
     process.stderr.write(HELP);
     return 1;
   }
@@ -87,7 +87,7 @@ async function main(): Promise<number> {
     invocation = readInvocation(source);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`smith-run: could not read/parse invocation: ${message}\n`);
+    process.stderr.write(`bs-run: could not read/parse invocation: ${message}\n`);
     return 1;
   }
 
@@ -95,7 +95,7 @@ async function main(): Promise<number> {
   if (timeoutOverride !== undefined && invocation.kind === 'cli') {
     const timeout_ms = Number.parseInt(timeoutOverride, 10);
     if (Number.isNaN(timeout_ms)) {
-      process.stderr.write(`smith-run: --timeout-ms must be a number, got "${timeoutOverride}".\n`);
+      process.stderr.write(`bs-run: --timeout-ms must be a number, got "${timeoutOverride}".\n`);
       return 1;
     }
     invocation = { ...invocation, budget: { ...invocation.budget, timeout_ms } };
@@ -108,7 +108,7 @@ async function main(): Promise<number> {
       opts.promptText = readFileSync(promptFile, 'utf8');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`smith-run: could not read --prompt-file: ${message}\n`);
+      process.stderr.write(`bs-run: could not read --prompt-file: ${message}\n`);
       return 1;
     }
   }
@@ -118,7 +118,7 @@ async function main(): Promise<number> {
     outcome = await runInvocation(invocation, opts);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`smith-run: ${message}\n`);
+    process.stderr.write(`bs-run: ${message}\n`);
     return 1;
   }
 
@@ -139,7 +139,7 @@ main().then(
   },
   (err: unknown) => {
     const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    process.stderr.write(`smith-run: unexpected error: ${message}\n`);
+    process.stderr.write(`bs-run: unexpected error: ${message}\n`);
     process.exitCode = 1;
   },
 );
