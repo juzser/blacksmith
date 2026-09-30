@@ -127,7 +127,7 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'plan quorum',
     positionals: '',
     flags:
-      '--plan-version <n> --session <id> --causal-parent <event-id> [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
+      '--plan-version <n> --session <id> --causal-parent <event-id> [--epic <id>] [--plan <draft.json>] [--confidence <0-1>] [--project <dir>] [--out <file>] [--actor <name>] [--specs-dir <dir>] [--state-dir <dir>]',
     summary:
       'Critique-only review of a drafted plan: --plan <draft.json> before it is filed, or --epic for the filed version. Exit 1 means the operator must look first.',
   },
@@ -583,7 +583,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'gate run',
     positionals: '<task-id>',
-    flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
     summary: 'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked.',
   },
   {
@@ -827,21 +827,22 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'crossfind request',
     positionals: '',
     flags:
-      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>]',
+      '--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] [--project <dir>] [--worktree <dir>]',
     summary:
       'Print the finder request without sending it — exactly what would leave the machine. Refuses when send_diff is false.',
   },
   {
     command: 'crossfind reconcile',
     positionals: '',
-    flags: '--task <id> --native <findings.json> --independent <runs.json> [--policy <file>]',
+    flags:
+      '--task <id> --native <findings.json> --independent <runs.json> [--policy <file>] [--project <dir>] [--worktree <dir>]',
     summary:
       'Reconcile two saved finding lists offline. No provider, no log. Exit 1 when the result would change a gate.',
   },
   {
     command: 'crossfind run',
     positionals: '',
-    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] ${EVENTS_DIR}`,
+    flags: `--task <id> --diff <file> --diff-ref <ref> [--criterion <text>...] [--status <status>] [--timeout-ms <n>] [--max-output-bytes <n>] [--max-output-tokens <n>] [--policy <file>] [--project <dir>] [--worktree <dir>] ${EVENTS_DIR}`,
     summary:
       'Run the independent finder over a diff and reconcile it against the native findings. Exit 1 when the result would change a gate.',
   },

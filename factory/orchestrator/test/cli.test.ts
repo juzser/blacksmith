@@ -384,6 +384,123 @@ describe('cli.ts (built binary)', () => {
       expect(status).toBe(1);
       expect(JSON.parse(stdout).error.code).toBe('cli.missing-flag');
     });
+
+    it("--project: reads the project overlay's provider, same as `epic verdict`/`judge preflight` (D-42)", async () => {
+      // `plan quorum` has no --policy override at all (unlike judge preflight):
+      // it always reads the shipped factory/policies/crosscheck.yml, so this
+      // test can't swap in a throwaway policy file the way the crossfind test
+      // above does -- the overlay has to override an existing provider's
+      // fields instead of inventing a new one. A brand-new provider name
+      // parses fine at parseCrosscheckPolicy() (the merge is a union of
+      // policy/env/overlay provider NAMES), but every attempted provider --
+      // success or failure -- flows through runQuorumCase's recordJudgeRun,
+      // which emits a `dispatch_decision` event whose `provider` field is
+      // validated against factory/policies/taxonomy.yml's closed enum
+      // `[claude, codex, deepseek]`. An unrecognised name fails that
+      // validation and the CLI exits 1, so the overlay below reuses
+      // `deepseek` (already `transport: api` in the shipped policy) and
+      // overrides its endpoint/model/key fields, the same trick the
+      // judge-preflight --project test above plays with `ds`.
+      //
+      // --confidence below plan_quorum.confidence_threshold (0.8 in the
+      // shipped policy) fires trigger 3, so providers.length is actually
+      // evaluated instead of short-circuiting at triggers.length === 0.
+      //
+      // test/setup.ts sets SMITH_CROSSCHECK_OFFLINE for the whole suite, but
+      // the offline switch forces EVERY non-native provider off regardless of
+      // configSource (crosscheck.ts's merge loop) -- including an
+      // overlay-added one -- so it has to come off here, same as the
+      // crossfind --project test above. With it off, this box's shipped
+      // policy would otherwise reach real providers: codex is `enabled: auto`
+      // and genuinely on PATH on a dev box with `codex login` run, and
+      // deepseek is `enabled: auto` gated on a real DEEPSEEK_API_KEY. Both
+      // are neutralized below by their own preconditions (PATH stripped of
+      // codex's directory, DEEPSEEK_API_KEY blanked) rather than by policy
+      // edits, and OPENROUTER_API_KEY is blanked too so neither silently
+      // substitutes via OpenRouter instead (crosscheck.ts's
+      // shouldSubstituteViaOpenrouter) -- so this stays exactly as offline as
+      // the blanket switch, but only for the shipped policy's own providers,
+      // not for the one the overlay adds.
+      const pathWithoutCodex = (process.env.PATH ?? '')
+        .split(path.delimiter)
+        .filter((dir) => dir.length > 0 && !existsSync(path.join(dir, 'codex')))
+        .join(path.delimiter);
+      const neutralizeRealProviders = {
+        SMITH_CROSSCHECK_OFFLINE: '',
+        PATH: pathWithoutCodex,
+        DEEPSEEK_API_KEY: '',
+        OPENROUTER_API_KEY: '',
+        OPENROUTER_MODELS: '',
+      };
+
+      const baseline = await quorumFixture('project-baseline');
+      const withoutProject = runCli(
+        ['plan', 'quorum', '--plan', baseline.draft, '--confidence', '0.5', ...baseline.envelope],
+        neutralizeRealProviders,
+      );
+      expect(withoutProject.status).toBe(0);
+      const withoutProjectOutcome = JSON.parse(withoutProject.stdout);
+      expect(withoutProjectOutcome.triggers.length).toBeGreaterThan(0);
+      expect(withoutProjectOutcome.endorsedBy).toBe('default-no-provider');
+      // Every shipped provider is neutralized above, so nothing runs and no
+      // quorum is ever computed -- the baseline this test's --project half
+      // has to differ from.
+      expect(withoutProjectOutcome.quorum).toBeUndefined();
+
+      const projectDir = path.join(scratchDir, 'plan-quorum-project-overlay');
+      await mkdir(path.join(projectDir, '.blacksmith'), { recursive: true });
+      await writeFile(
+        path.join(projectDir, '.blacksmith', 'crosscheck.yml'),
+        [
+          'providers:',
+          '  deepseek:',
+          '    enabled: true',
+          '    mode: shadow',
+          '    base_url: https://example.invalid',
+          '    model: test-model',
+          '    api_key_env: SMITH_TEST_KEY_THAT_IS_NEVER_SET',
+          '',
+        ].join('\n'),
+      );
+
+      const overlay = await quorumFixture('project-overlay');
+      const withProject = runCli(
+        [
+          'plan',
+          'quorum',
+          '--plan',
+          overlay.draft,
+          '--confidence',
+          '0.5',
+          '--project',
+          projectDir,
+          ...overlay.envelope,
+        ],
+        neutralizeRealProviders,
+      );
+      expect(withProject.status).toBe(0);
+      const withProjectOutcome = JSON.parse(withProject.stdout);
+      // Still no ACTIVE judge (the overlay drives deepseek into shadow mode
+      // and its call fails before it ever reaches the network -- see below),
+      // so the gating decision is unchanged. What proves the CLI actually
+      // threaded --project through to runPlanQuorum() is that a quorum ran at
+      // all: without --project, deepseek stays disabled (its shipped
+      // `enabled: auto` can't satisfy DEEPSEEK_API_KEY, blanked above) and no
+      // quorum is computed at all (see withoutProjectOutcome above); with it,
+      // the overlay's `enabled: true` overrides that regardless of
+      // precondition (crosscheck.ts's parseProvider only gates 'auto').
+      expect(withProjectOutcome.endorsedBy).toBe('default-no-provider');
+      expect(withProjectOutcome.quorum).toBeDefined();
+      const overlayParticipant = withProjectOutcome.quorum.participants.find(
+        (p: { provider: string }) => p.provider === 'deepseek',
+      );
+      expect(overlayParticipant).toBeDefined();
+      // resolveApiKey() throws before any fetch when the env var is unset
+      // (providers/api-transport.ts), so this proves the overlay provider was
+      // actually attempted, offline and deterministically.
+      expect(overlayParticipant).toMatchObject({ mode: 'shadow', ok: false, verdict: null });
+      expect(overlayParticipant.rationale).toContain('SMITH_TEST_KEY_THAT_IS_NEVER_SET');
+    });
   });
 
   // P9-28: `cli.ts` validated flags with requireFlag and positionals not at
@@ -8681,6 +8798,266 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // D-42: a project's .blacksmith/crosscheck.yml overlay has to reach the
+    // gate the same way it reaches `plan quorum`/`judge preflight` -- the gate
+    // is where a blocking finding actually triggers a quorum case
+    // (crossCheckFinding, gate.ts), so a provider the overlay turns on has to
+    // show up in the `quorum-decision` event the gate emits for it.
+    describe('gate run --project / --worktree derivation (D-42)', () => {
+      function blockingEvidence(filePath: string, summary: string) {
+        return [
+          {
+            file_path: filePath,
+            finding_category: 'correctness',
+            severity: 'S2-major',
+            summary,
+            failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
+          },
+        ];
+      }
+
+      async function evidenceFile(name: string, body: unknown): Promise<string> {
+        const filePath = path.join(scratchDir, `${name}.json`);
+        await writeFile(filePath, JSON.stringify(body));
+        return filePath;
+      }
+
+      /** The worktree and the two files a gate run needs before it will look at any evidence (same shape as the multi-judge fixture above). */
+      async function gateFixture(name: string): Promise<[string, string, string]> {
+        const worktreeDir = await committedWorktree(`d42-${name}`);
+        const checksPath = path.join(scratchDir, `${name}-checks.json`);
+        const resultPath = path.join(scratchDir, `${name}-result.json`);
+        await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        return [worktreeDir, checksPath, resultPath];
+      }
+
+      // Same neutralization as the plan-quorum --project test above: turn the
+      // suite-wide SMITH_CROSSCHECK_OFFLINE switch off (it disables every
+      // non-native provider regardless of configSource, including one the
+      // overlay adds), then neutralize this dev box's real codex/deepseek/
+      // OpenRouter credentials individually so nothing here makes a live call.
+      function neutralizeRealProviders(): Record<string, string> {
+        const pathWithoutCodex = (process.env.PATH ?? '')
+          .split(path.delimiter)
+          .filter((dir) => dir.length > 0 && !existsSync(path.join(dir, 'codex')))
+          .join(path.delimiter);
+        return {
+          SMITH_CROSSCHECK_OFFLINE: '',
+          PATH: pathWithoutCodex,
+          DEEPSEEK_API_KEY: '',
+          OPENROUTER_API_KEY: '',
+          OPENROUTER_MODELS: '',
+        };
+      }
+
+      function overlayYaml(): string {
+        return [
+          'providers:',
+          '  deepseek:',
+          '    enabled: true',
+          '    mode: shadow',
+          '    base_url: https://example.invalid',
+          '    model: test-model',
+          '    api_key_env: SMITH_TEST_KEY_THAT_IS_NEVER_SET',
+          '',
+        ].join('\n');
+      }
+
+      it("--project: reads the project overlay's provider over the shipped policy", async () => {
+        const env = neutralizeRealProviders();
+
+        // Without --project: the shipped policy's codex/deepseek both fail
+        // their precondition above (PATH stripped, DEEPSEEK_API_KEY blank), so
+        // resolveCrosscheck() sees zero enabled providers and never calls
+        // runQuorumCase -- no quorum-decision event at all for the finding
+        // that blocks this gate run.
+        const baseline = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(baseline.sessionId);
+        const baselineFinding = await evidenceFile(
+          `${baseline.sessionId}-finding`,
+          blockingEvidence('src/foo/one.ts', 'off-by-one in loop bound'),
+        );
+        const withoutProject = runCli(
+          [
+            'gate',
+            'run',
+            'epic-1/task-1',
+            '--worktree',
+            worktreeDir,
+            '--checks',
+            checksPath,
+            '--result',
+            resultPath,
+            '--evidence',
+            baselineFinding,
+            '--found-by',
+            'reviewer',
+            '--plan',
+            baseline.planPath,
+            '--session',
+            baseline.sessionId,
+            '--causal-parent',
+            `${baseline.sessionId}#0`,
+            '--state-dir',
+            baseline.eventsDir,
+          ],
+          env,
+        );
+        expect(withoutProject.status).toBe(1);
+        expect(
+          tail(baseline.sessionId, baseline.eventsDir).filter(
+            (r) => r.event_type === 'quorum-decision',
+          ),
+        ).toEqual([]);
+
+        // With --project: the overlay forces deepseek on regardless of its
+        // (unmet, by construction) precondition -- parseProvider only gates
+        // `enabled: auto`, not an explicit boolean -- so this proves the CLI
+        // actually threads --project into runGate()'s crosscheck.policy load,
+        // not just that loadCrosscheckPolicy() itself supports a projectDir.
+        const projectDir = path.join(scratchDir, `${baseline.sessionId}-project-overlay`);
+        await mkdir(path.join(projectDir, '.blacksmith'), { recursive: true });
+        await writeFile(path.join(projectDir, '.blacksmith', 'crosscheck.yml'), overlayYaml());
+
+        const overlay = await session();
+        const [overlayWorktreeDir, overlayChecksPath, overlayResultPath] = await gateFixture(
+          overlay.sessionId,
+        );
+        const overlayFinding = await evidenceFile(
+          `${overlay.sessionId}-finding`,
+          blockingEvidence('src/foo/one.ts', 'off-by-one in loop bound'),
+        );
+        const withProject = runCli(
+          [
+            'gate',
+            'run',
+            'epic-1/task-1',
+            '--worktree',
+            overlayWorktreeDir,
+            '--checks',
+            overlayChecksPath,
+            '--result',
+            overlayResultPath,
+            '--evidence',
+            overlayFinding,
+            '--found-by',
+            'reviewer',
+            '--project',
+            projectDir,
+            '--plan',
+            overlay.planPath,
+            '--session',
+            overlay.sessionId,
+            '--causal-parent',
+            `${overlay.sessionId}#0`,
+            '--state-dir',
+            overlay.eventsDir,
+          ],
+          env,
+        );
+        // Still blocked -- resolveApiKey() throws before any fetch (the api
+        // transport, same as the plan-quorum test), so deepseek's run comes
+        // back ok:false and never overturns the finding. What proves --project
+        // worked is the quorum-decision event naming a provider that never ran
+        // in the baseline above.
+        expect(withProject.status).toBe(1);
+        const decisions = tail(overlay.sessionId, overlay.eventsDir)
+          .filter((r) => r.event_type === 'quorum-decision')
+          .map((r) => r.payload);
+        expect(decisions).toHaveLength(1);
+        const participants = decisions[0]?.participants as Array<{
+          provider: string;
+          mode: string;
+          ok: boolean;
+          verdict: string | null;
+        }>;
+        const overlayParticipant = participants.find((p) => p.provider === 'deepseek');
+        expect(overlayParticipant).toMatchObject({ mode: 'shadow', ok: false, verdict: null });
+      });
+
+      it('derives --project from --worktree when --project is omitted', async () => {
+        const env = neutralizeRealProviders();
+
+        // committedWorktree() hands back a plain, self-contained git repo (its
+        // own `git init`), not a `.wt/<project>/<task>` sibling layout -- but
+        // that is exactly what makes it a fair worktree-derivation fixture:
+        // `git rev-parse --git-common-dir` inside it resolves to its own
+        // `.git`, so projectDirFromFlags() derives the worktree's own root as
+        // the project dir. Dropping the overlay there proves derivation reads
+        // `--worktree` when `--project` is absent, not that a copy of the
+        // explicit-flag test happens to also pass. It has to be committed, not
+        // just written: certifyCommit() (commit.ts) reads `git status
+        // --untracked-files=all` and blocks the gate on ANY dirty path before
+        // a single check runs (D-30/P9-8), so an untracked overlay file would
+        // fail the run for "not-committed" before crossCheckFinding ever sees
+        // the evidence below.
+        const derived = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(derived.sessionId);
+        await mkdir(path.join(worktreeDir, '.blacksmith'), { recursive: true });
+        await writeFile(path.join(worktreeDir, '.blacksmith', 'crosscheck.yml'), overlayYaml());
+        const git = (args: string[]) => runOrThrow('git', args, { cwd: worktreeDir });
+        git(['add', '.blacksmith/crosscheck.yml']);
+        git(['commit', '-q', '-m', 'add project overlay']);
+        const finding = await evidenceFile(
+          `${derived.sessionId}-finding`,
+          blockingEvidence('src/foo/one.ts', 'off-by-one in loop bound'),
+        );
+
+        const result = runCli(
+          [
+            'gate',
+            'run',
+            'epic-1/task-1',
+            '--worktree',
+            worktreeDir,
+            '--checks',
+            checksPath,
+            '--result',
+            resultPath,
+            '--evidence',
+            finding,
+            '--found-by',
+            'reviewer',
+            '--plan',
+            derived.planPath,
+            '--session',
+            derived.sessionId,
+            '--causal-parent',
+            `${derived.sessionId}#0`,
+            '--state-dir',
+            derived.eventsDir,
+          ],
+          env,
+        );
+        expect(result.status).toBe(1);
+        const decisions = tail(derived.sessionId, derived.eventsDir)
+          .filter((r) => r.event_type === 'quorum-decision')
+          .map((r) => r.payload);
+        expect(decisions).toHaveLength(1);
+        const participants = decisions[0]?.participants as Array<{
+          provider: string;
+          mode: string;
+          ok: boolean;
+          verdict: string | null;
+        }>;
+        const overlayParticipant = participants.find((p) => p.provider === 'deepseek');
+        expect(overlayParticipant).toMatchObject({ mode: 'shadow', ok: false, verdict: null });
+      });
+    });
+
     // Same reason as the ownership block above: without `--grader` wired
     // through here, the grader gate exists only in the library, and the grader
     // file goes on being written and never read (D-34/P9-14).
@@ -12971,6 +13348,111 @@ describe('cli.ts (built binary)', () => {
       const parsed = JSON.parse(stdout);
       expect(parsed.error.code).toBe('crossfind.no-providers');
       expect(parsed.error.details.skipped).toEqual(['codex']);
+    });
+
+    it("run --project: reads the project overlay's provider over the policy file", async () => {
+      // Same proof shape as `judge preflight --project` above, but for the
+      // one crossfind subcommand an overlay can ever move: `request` and
+      // `reconcile` only ever read `policy.independentFinder`, which
+      // loadProjectProviderOverlay is structurally forbidden to touch (it
+      // may only merge `providers`) -- only `run` hands runIndependentFinder
+      // the full policy, `providers` included.
+      const sessionId = `cli-crossfind-project-${Date.now()}`;
+      const eventsDir = path.join(scratchDir, 'crossfind-project-events');
+      const start = runCli([
+        'event',
+        'append',
+        JSON.stringify({
+          session_id: sessionId,
+          actor: 'user',
+          event_type: 'session-start',
+          plan_version: 1,
+          causal_parent: null,
+          payload: {},
+        }),
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(start.status).toBe(0);
+      const parent = JSON.parse(start.stdout).event_id as string;
+
+      // The base policy's codex is disabled outright, same failure signature
+      // as the offline-switch test above (`crossfind.no-providers`, `skipped:
+      // ['codex']`) -- but this time nothing about the switch is involved.
+      const answerPath = await writeJson('cf-project-answer.json', [evidence()]);
+      const args = JSON.stringify([JUDGE_CLI, 'echo-prompt', answerPath]);
+      const policy = path.join(scratchDir, 'cf-project.yml');
+      await writeFile(
+        policy,
+        [
+          'providers:',
+          '  claude: { kind: native, enabled: true }',
+          '  codex:',
+          '    kind: api',
+          '    transport: cli',
+          '    command: node',
+          `    args: ${args}`,
+          '    model_tier: mid',
+          '    enabled: false',
+          '    mode: active',
+          'independent_finder:',
+          '  enabled: true',
+          '  mode: active',
+          '  providers: [codex]',
+          '  send_diff: true',
+          '  severity_resolution: highest-wins',
+          '',
+        ].join('\n'),
+      );
+      const diffPath = path.join(scratchDir, 'cf-project.diff');
+      await writeFile(diffPath, DIFF);
+
+      const baseArgs = [
+        'crossfind',
+        'run',
+        '--task',
+        'epic-1/task-1',
+        '--diff',
+        diffPath,
+        '--diff-ref',
+        'smith/epic-1/integration...task-1',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        parent,
+        '--state-dir',
+        eventsDir,
+        '--policy',
+        policy,
+      ];
+
+      // No --project: codex stays disabled, same as the base policy says.
+      const withoutProject = runCli(baseArgs, { SMITH_CROSSCHECK_OFFLINE: '' });
+      expect(withoutProject.status).toBe(1);
+      const withoutProjectParsed = JSON.parse(withoutProject.stdout);
+      expect(withoutProjectParsed.error.code).toBe('crossfind.no-providers');
+      expect(withoutProjectParsed.error.details.skipped).toEqual(['codex']);
+
+      // --project points at an overlay that re-enables codex. Proves the CLI
+      // reads --project and hands it to loadCrosscheckPolicy(), not just
+      // that loadCrosscheckPolicy() itself supports a projectDir.
+      const projectDir = path.join(scratchDir, 'cf-project-overlay');
+      await mkdir(path.join(projectDir, '.blacksmith'), { recursive: true });
+      await writeFile(
+        path.join(projectDir, '.blacksmith', 'crosscheck.yml'),
+        ['providers:', '  codex:', '    enabled: true', ''].join('\n'),
+      );
+
+      const withProject = runCli([...baseArgs, '--project', projectDir], {
+        SMITH_CROSSCHECK_OFFLINE: '',
+      });
+      expect(withProject.status).toBe(1); // gates: true, same as the plain run test above
+      const withProjectParsed = JSON.parse(withProject.stdout);
+      expect(withProjectParsed.native_considered).toBe(0);
+      expect(withProjectParsed.runs).toHaveLength(1);
+      expect(withProjectParsed.runs[0].provider).toBe('codex');
+      expect(withProjectParsed.raise).toHaveLength(1);
+      expect(withProjectParsed.raise[0].finding.found_by_provider).toBe('codex');
     });
 
     it('run names a session that does not exist instead of reconciling against nothing', async () => {
