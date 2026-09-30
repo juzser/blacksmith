@@ -768,7 +768,7 @@ https://openrouter.ai/api/v1/models`, no key needed) on 2026-09-30:
 - **`deepseek` → `deepseek/deepseek-v4-pro`** — an exact match for the id
   `deepseek-v4-pro` pins above, so the substitute is literally the same
   model, not an approximation. DeepSeek's own `/models` listing dropped
-  `deepseek-reasoner` (operator check, 2026-09-30; a call naming it is now
+  `deepseek-reasoner` (live check of `/models`, 2026-09-30; a call naming it is now
   silently answered by `deepseek-flash` instead of erroring), and
   `deepseek-v4-pro` is its current reasoning-tier model. Re-check the
   catalog before trusting this pairing long after the date above;
@@ -841,9 +841,10 @@ Three sources feed a provider's final config, highest precedence first
 The merge is field by field, per provider name, project overriding env
 overriding policy — a project overlay that sets only `mode: active` on a
 provider the shipped policy already fully describes changes just that one
-field, not the rest of the entry. Which layer decided a given provider's
-config is itself reported (`configSource: 'project' | 'env' | 'policy'`), so
-a preflight or event-log read never has to guess which file to go edit.
+field, not the rest of the entry. The highest layer that set any field of a
+provider is reported (`configSource: 'project' | 'env' | 'policy'`), so a
+preflight or event-log read knows the first file to open; fields that layer
+left unset still come from the layers below it.
 
 Which commands actually thread a `projectDir` through to
 `loadCrosscheckPolicy()` — and so read the project overlay at all — is not
