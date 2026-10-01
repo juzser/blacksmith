@@ -109,4 +109,22 @@ test.describe('Task detail', () => {
       });
     }
   }
+
+  // Evidence gap: no phase-6b screenshot showed the History tab, so the
+  // RunHistoryTimeline move (item 3 above) had no visual record. Uses the
+  // completed task — two run rows, same fixture as the "shows a row per
+  // run" test above — so the capture proves the timeline renders real rows,
+  // not just its empty state.
+  for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
+    for (const theme of ['light', 'dark'] as const) {
+      test(`screenshot ${vpName}/${theme} History tab`, async ({ page }) => {
+        await setTheme(page, theme);
+        await page.setViewportSize(viewport);
+        await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+        await page.getByRole('tab', { name: 'History' }).click();
+        await settleForShot(page, page.locator('.bs-run-history__row').first());
+        await shoot(page, `task-detail-history-${vpName}-${theme}`);
+      });
+    }
+  }
 });
