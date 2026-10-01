@@ -1837,6 +1837,73 @@ describe('evaluateCommand — an unreadable command word carrying a guarded shap
   });
 });
 
+// The scan above only reached a segment's first word. A wrapper (`sudo`,
+// `env`, `timeout 5`, `xargs`, a bare `VAR=val` prefix), a group (`( … )`), a
+// keyword (`{ … }`, `if … then … fi`), or a nested shell (`sh -c '…'`,
+// `bash -c "…"`, `eval '…'`) all put the unreadable word somewhere other
+// than first position, without moving it out of the segment — every one of
+// these carries the same guarded shape and must be refused the same way.
+describe('evaluateCommand — an unreadable command word behind a wrapper, group or nested shell', () => {
+  it.each([
+    ['sudo $X -rf /x'],
+    ['env $X -rf /x'],
+    ['timeout 5 $X -rf /x'],
+    ['xargs $X -rf'],
+    ['VAR=1 $X -rf /x'],
+    ['nohup ${X} -rf /x'],
+    ['( $X -rf /x )'],
+    ['{ $X -rf /x; }'],
+    ['if true; then $X -rf /x; fi'],
+    [`sh -c '$X -rf /x'`],
+    ['bash -c "$X -rf /x"'],
+    [`eval '$X -rf /x'`],
+  ])(
+    'denies %s — an unexpanded word behind a wrapper, group, keyword or nested shell, with a recursive force cluster',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it.each([['sudo $G push -f origin main'], [`sh -c '$G push -f origin main'`]])(
+    'denies %s — an unexpanded word behind a wrapper or nested shell, with a push word and a force flag',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  it.each([
+    ['cp -rf "$SRC" dst'],
+    ['ls -rf $DIR'],
+    ['rm -rf "workspaces/$NAME"'],
+    ['echo $HOME'],
+    ['chmod -Rf 755 $DIR'],
+  ])(
+    'allows %s — a plain first word that cannot hand its arguments to another program',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it.each([['echo $HOME'], ['pnpm run test -- --reporter=$R']])(
+    'allows %s — an ordinary expansion with nothing removal- or push-shaped in it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows cd "$WT" && git status — an expanded argument, not an expanded command word', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'cd "$WT" && git status', branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block

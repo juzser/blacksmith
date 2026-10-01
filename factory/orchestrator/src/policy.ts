@@ -1312,20 +1312,35 @@ const SHELL_C_WRAPPER_RE = /\b(sh|bash|zsh|env)\b[^;&|]*-c\b/;
 const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
 
 /**
+ * The dequoted payload of a segment wrapped in `eval`, or a `-c` string
+ * handed to `sh`/`bash`/`zsh`/`env` — or `null` when `segment` is not one of
+ * those wrappers at all, so a caller never mistakes "nothing to unwrap" for
+ * an empty payload. Quotes and backslashes are stripped from the *whole*
+ * segment, wrapper prefix included (`bash -c 'git rese""t --hard $(x)'`
+ * names `git` and a spliced `reset` only once they're gone), which is also
+ * why the result still reads correctly as one text to scan rather than an
+ * isolated inner string. Shared so rule 2's and rule 6's own unexpanded-word
+ * checks below read a nested shell's payload the same way
+ * `isShellWrappedForceCandidate` and `checkUnboundedRm`'s wrapped-`rm` pass
+ * already do, instead of a fourth copy of the same two lines.
+ */
+function dequoteShellWrappedSegment(segment: string): string | null {
+  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
+  return stripSpliceQuotes(segment).replace(/\\/g, '');
+}
+
+/**
  * `eval`, or a `-c` string handed to `sh`/`bash`/`zsh`/`env`, passes a whole
  * second command line to another shell to parse — a second chance for any
  * trick above to hide inside a string this rule would otherwise read as
  * inert text, without this scanner ever parsing the nested line itself.
  * Simplest fail-closed read: a segment naming one of those wrappers
  * alongside `git` and force-push-shaped subcommand text is refused outright,
- * rather than trusted to be read correctly. The wrapped text is dequoted
- * first — `bash -c 'git rese""t --hard $(x)'` names `git` and a spliced
- * `reset` only once quotes and backslashes are gone, the same read the
- * plain-word gate gives every other word here.
+ * rather than trusted to be read correctly.
  */
 function isShellWrappedForceCandidate(segment: string): boolean {
-  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return false;
-  const dequoted = stripSpliceQuotes(segment).replace(/\\/g, '');
+  const dequoted = dequoteShellWrappedSegment(segment);
+  if (dequoted === null) return false;
   return /\bgit\b/i.test(dequoted) && FORCE_GATE_WORD_RE.test(dequoted);
 }
 
@@ -1448,11 +1463,11 @@ const UNKNOWN_COMMAND_WORD_REASON =
   'the command word here is an unexpanded parameter or substitution, so the guard cannot tell what it runs — write it out plainly';
 
 /**
- * Rule 2's gap once the command word itself is unreadable: neither the
+ * Rule 2's gap once some word of the segment is unreadable: neither the
  * exact `git` match above nor its `hidden` fallback (which still needs the
  * dequoted text to end in "git") can place a word that only resolves to
  * `git` once a shell expands `$G`, `$(...)` or a backtick span — this file
- * never evaluates one of those. So when the segment's first word is
+ * never evaluates one of those. So when any word of the segment is
  * unreadable this way (`isUnexpandedCommandWord`), the rest of it is read
  * for the shape rule 2 already guards against on a recognised push: a
  * `push` word together with a force flag (`FORCE_PUSH_RE`, the same test
@@ -1460,14 +1475,33 @@ const UNKNOWN_COMMAND_WORD_REASON =
  * (`pushOperands`, the same read rule 1 uses for a push's destination).
  * Resolving the expansion itself is out of scope — an open-ended evaluator
  * is the wrong tool — so this is shape only, same as rule 6's analogue.
+ *
+ * Every word is scanned, not just the one in command position: a wrapper
+ * (`sudo`, `env`, `timeout 5`, `xargs`, a bare `VAR=val` prefix, …), a group
+ * (`( … )`), or a keyword (`{ … }`, `if … then … fi`) can all sit in front
+ * of the unreadable word without moving it out of the segment, and an
+ * open-ended wrapper list would miss whichever one is not on it. No
+ * allowlist narrows this scan the way rule 6's does: a `push` word plus a
+ * force flag or `+refspec` is never the shape of an everyday command, so
+ * there is no ordinary first word to carve an exception for.
+ *
+ * Also checked against the segment's dequoted payload when it is a nested
+ * shell (`sh -c '…'`, `bash -c "…"`, `eval '…'`): `splitDequotedWords` keeps
+ * a quoted span's internal text as one word, which can hide a `-f` token or
+ * even the `push` word itself inside it until the quotes are gone.
  */
-function hasUnknownForcePushCommandWord(segment: string): boolean {
+function isUnknownForcePushShape(segment: string): boolean {
   const words = splitDequotedWords(segment);
-  const first = words[0];
-  if (first === undefined || !isUnexpandedCommandWord(first)) return false;
+  if (!words.some((word) => isUnexpandedCommandWord(word))) return false;
   if (!new RegExp(bareWord('push'), 'i').test(segment)) return false;
   if (FORCE_PUSH_RE.test(segment)) return true;
   return pushOperands(segment).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
+}
+
+function hasUnknownForcePushCommandWord(segment: string): boolean {
+  if (isUnknownForcePushShape(segment)) return true;
+  const wrapped = dequoteShellWrappedSegment(segment);
+  return wrapped !== null && isUnknownForcePushShape(wrapped);
 }
 
 /**
@@ -2106,38 +2140,94 @@ function rmOutOfBoundsInText(
  * Rather than parse the wrapped command a second time, hand the same
  * dequoted text back through `rmOutOfBoundsInText`: stripping every quote
  * character turns `sh -c "rm -rf /x"` into `sh -c rm -rf /x`, where `rm`
- * reads as an ordinary word like any other.
+ * reads as an ordinary word like any other. A thin alias over
+ * `dequoteShellWrappedSegment`, kept under this name since
+ * `checkUnboundedRm`'s wrapped-`rm` pass below already reads by it.
  */
 function shellWrappedRmPayload(segment: string): string | null {
-  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
-  return stripSpliceQuotes(segment).replace(/\\/g, '');
+  return dequoteShellWrappedSegment(segment);
 }
 
 /**
- * Rule 6's gap once the command word itself is unreadable: neither
- * `hasDisguisedRmWord` (which still needs the word's basename to resolve to
+ * Plain first words that cannot hand their later arguments to another
+ * program — the allowlist that keeps the every-word scan below from
+ * refusing ordinary commands whose own flags happen to spell `-rf`/`-Rf`:
+ * `cp -rf "$SRC" dst`, `ls -rf $DIR`, `chmod -Rf 755 $DIR`. None of these
+ * runs a second program from an argument the way a wrapper (`sudo`, `env`,
+ * `xargs`, `timeout 5`, a bare `VAR=val` prefix, …) or a nested shell can, so
+ * an unreadable word later in the same line carries no risk here. `rm`
+ * itself is deliberately left out of this set: a plain `rm` or `/bin/rm`
+ * first word is exempted the same way, but keeps the allowed-roots analysis
+ * above instead of skipping straight to "allowed" — see
+ * `isUnknownRemovalSegment`.
+ */
+const REMOVAL_SAFE_FIRST_WORDS = new Set([
+  'cp',
+  'mv',
+  'ls',
+  'chmod',
+  'chown',
+  'chgrp',
+  'ln',
+  'mkdir',
+  'touch',
+  'cat',
+  'echo',
+  'printf',
+  'grep',
+]);
+
+/**
+ * Rule 6's gap once some word of the segment is unreadable: neither
+ * `hasDisguisedRmWord` (which still needs a word's basename to resolve to
  * the literal `rm`) nor the rest of `rmOutOfBoundsInText` (which needs to
  * find an `rm` word at all) can place a word that only resolves to `rm` once
  * a shell expands `$X`, `$(...)` or a backtick span — this file never
- * evaluates one of those. So when a top-level command's first word is
- * unreadable this way (`isUnexpandedCommandWord`), the rest of it is read
- * for the one shape this rule already guards against: a recursive-force
- * flag cluster (`hasRecursiveForce`, the same flag parsing the plain-`rm`
- * path above uses). Resolving the expansion itself is out of scope — an
- * open-ended evaluator is the wrong tool — so this is shape only.
+ * evaluates one of those. So when any word of the segment is unreadable this
+ * way (`isUnexpandedCommandWord`), the rest of it is read for the one shape
+ * this rule already guards against: a recursive-force flag cluster
+ * (`hasRecursiveForce`, the same flag parsing the plain-`rm` path above
+ * uses). Resolving the expansion itself is out of scope — an open-ended
+ * evaluator is the wrong tool — so this is shape only.
  *
+ * Every word is scanned, not just the one in command position: a wrapper, a
+ * group (`( … )`), or a keyword (`{ … }`, `if … then … fi`) can all sit in
+ * front of the unreadable word without moving it out of the segment. That
+ * widens what trips the check, so a first word that is plain and cannot run
+ * another program (`REMOVAL_SAFE_FIRST_WORDS`), or dequotes to the literal
+ * `rm`/`/bin/rm`, is exempted — anything else in first position, including
+ * an unrecognised command, falls through to the refusal. Fail-closed over
+ * precise, same direction as every other read in this file.
+ */
+function isUnknownRemovalSegment(segment: string): boolean {
+  const words = splitDequotedWords(segment);
+  const first = words[0];
+  if (first !== undefined && isPlainWord(first.raw)) {
+    const basename = first.text.split(/[\\/]/).pop() ?? first.text;
+    if (basename === 'rm' || REMOVAL_SAFE_FIRST_WORDS.has(basename)) return false;
+  }
+  if (!words.some((word) => isUnexpandedCommandWord(word))) return false;
+  return hasRecursiveForce(words.map((word) => word.text));
+}
+
+/**
  * Reads `topLevelCommands`, not `splitChainSegments`: the naive
  * single-character split above cuts `$(echo rm) -rf /x` apart at the very
  * `(`/`)`/backtick that make the word unreadable, landing the flag cluster
  * in a different "segment" than the word it belongs to and missing the
  * combination entirely.
+ *
+ * Each top-level segment is also checked as a nested shell's dequoted
+ * payload (`sh -c '…'`, `bash -c "…"`, `eval '…'`): `splitDequotedWords`
+ * keeps a quoted span's internal text as one word, which hides a `-rf`
+ * token as a standalone token until the quotes are gone — see
+ * `dequoteShellWrappedSegment`.
  */
 function hasUnknownRemovalCommandWord(command: string): boolean {
   return topLevelCommands(command).some((segment) => {
-    const words = splitDequotedWords(segment);
-    const first = words[0];
-    if (first === undefined || !isUnexpandedCommandWord(first)) return false;
-    return hasRecursiveForce(words.slice(1).map((word) => word.text));
+    if (isUnknownRemovalSegment(segment)) return true;
+    const wrapped = dequoteShellWrappedSegment(segment);
+    return wrapped !== null && isUnknownRemovalSegment(wrapped);
   });
 }
 
