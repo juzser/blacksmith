@@ -1,7 +1,7 @@
 // Work view (Kanban/Roadmap) switch logic (ds4-plan.md S1). Pure helpers so
 // WorkPage.vue, SegmentedControl and router.ts's legacy redirects stay thin
 // and testable without mounting a component or a router.
-import type { LocationQueryRaw, RouteLocationNormalized } from 'vue-router';
+import type { LocationQueryRaw } from 'vue-router';
 
 export type WorkView = 'kanban' | 'roadmap';
 
@@ -38,5 +38,5 @@ export function workViewFromRouteName(name: unknown): WorkView {
  * same target, full query string kept (unlike switchQuery, which only
  * carries three keys when the SegmentedControl changes view). */
 export function legacyWorkRedirect(targetPath: string) {
-  return (to: RouteLocationNormalized) => ({ path: targetPath, query: to.query });
+  return (to: { query: LocationQueryRaw }) => ({ path: targetPath, query: to.query });
 }
