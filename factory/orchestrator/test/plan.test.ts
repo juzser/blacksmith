@@ -7,6 +7,7 @@ import {
   diffPlans,
   draftNextVersion,
   impliedSpecsDir,
+  isUiAffecting,
   latestPlanVersion,
   livePlanTasks,
   loadPlan,
@@ -75,6 +76,27 @@ describe('plan.ts', () => {
 
   it('throws a typed error when the plan file does not exist', () => {
     expect(() => loadPlan('epic-1', 99, { specsDir })).toThrow(PlanError);
+  });
+
+  it('loads an old plan with no ui_affecting field; isUiAffecting reads false', async () => {
+    const plan: PlanFile = {
+      epic_id: 'epic-1',
+      version: 1,
+      status: 'active',
+      tasks: [task()],
+      edges: [],
+    };
+    await writePlanFixture(plan);
+    const loaded = loadPlan('epic-1', 1, { specsDir });
+    expect(isUiAffecting(loaded.tasks[0] as TaskSpecRecord)).toBe(false);
+  });
+
+  describe('isUiAffecting', () => {
+    it('is true only when the flag is exactly true', () => {
+      expect(isUiAffecting(task({ ui_affecting: true }))).toBe(true);
+      expect(isUiAffecting(task({ ui_affecting: false }))).toBe(false);
+      expect(isUiAffecting(task())).toBe(false);
+    });
   });
 
   describe('validatePlan', () => {
@@ -221,6 +243,51 @@ describe('plan.ts', () => {
 
       it('accepts a plan without the field, which is every plan written before it', () => {
         expect(validatePlan(planWith({}))).toEqual({ valid: true });
+      });
+    });
+
+    describe('ui_affecting / plan.ui-flag-missing', () => {
+      function planWith(overrides: Record<string, unknown>): PlanFile {
+        return {
+          epic_id: 'epic-1',
+          version: 1,
+          status: 'active',
+          tasks: [task(overrides)],
+          edges: [],
+        };
+      }
+
+      it('errors when a task claims a UI-extension path with no ui_affecting key', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.tsx'] }));
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toContainEqual({
+            path: '/tasks/epic-1/task-1/ui_affecting',
+            message: expect.stringMatching(
+              /plan\.ui-flag-missing.*src\/App\.tsx|src\/App\.tsx.*plan\.ui-flag-missing/,
+            ),
+          });
+        }
+      });
+
+      it('passes when the flag is explicitly false', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.tsx'], ui_affecting: false }));
+        expect(result.valid).toBe(true);
+      });
+
+      it('passes when the flag is explicitly true', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.tsx'], ui_affecting: true }));
+        expect(result.valid).toBe(true);
+      });
+
+      it('catches an uppercase extension', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.TSX'] }));
+        expect(result.valid).toBe(false);
+      });
+
+      it('does not flag a .ts-only claim', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.ts'] }));
+        expect(result.valid).toBe(true);
       });
     });
 

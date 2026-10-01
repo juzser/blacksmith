@@ -415,6 +415,41 @@ function describeAllowed(err: TaxonomyError): string {
  */
 const GLOB_CHARS = /[*?[{]/;
 
+/** Extensions that make a claimed path a UI-visible surface (U2 D3). */
+const UI_EXTENSION_RE = /\.(tsx|jsx|vue|svelte|css|scss|sass|less|html)$/i;
+
+/**
+ * Whether a task spec is flagged as changing what a user sees. An absent
+ * `ui_affecting` means false at the gate (U2 D3) — work already running must
+ * not be blocked by a flag it predates.
+ */
+export function isUiAffecting(spec: TaskSpecRecord): boolean {
+  return spec.ui_affecting === true;
+}
+
+/**
+ * `plan.ui-flag-missing`: a task that claims a UI-extension path must say,
+ * one way or the other, whether it is UI-affecting. An absent flag reads as
+ * false everywhere else in the factory (U2 D3), but silently reading false
+ * here would let a visibly UI-shaped task skip the uiux judge turn by
+ * omission rather than by a reviewed `ui_affecting: false`. Only the
+ * absence of the key is an error; an explicit `false` passes.
+ */
+function uiFlagMissing(t: TaskSpecRecord): ValidationIssue[] {
+  if (t.ui_affecting !== undefined) return [];
+  const claims = Array.isArray(t.claims)
+    ? t.claims.filter((c): c is string => typeof c === 'string')
+    : [];
+  const firstMatch = claims.find((c) => UI_EXTENSION_RE.test(c));
+  if (firstMatch === undefined) return [];
+  return [
+    {
+      path: '/ui_affecting',
+      message: `Task "${t.task_id}" claims UI-extension path "${firstMatch}" but has no ui_affecting flag (plan.ui-flag-missing). Set ui_affecting: true or false explicitly.`,
+    },
+  ];
+}
+
 /**
  * A `keeps_exports` promise is a file the task swears to keep the exports of,
  * and the post-run verifier reads it back against the task's diff. Three
@@ -502,6 +537,9 @@ export function validatePlan(plan: PlanFile, opts: PlanOpts = {}): PlanValidatio
       }
     }
     for (const issue of unkeptPromises(t, result.valid ? [] : result.errors)) {
+      errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
+    }
+    for (const issue of uiFlagMissing(t)) {
       errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
     }
     if (t.plan_version !== plan.version) {

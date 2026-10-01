@@ -7,6 +7,7 @@ import {
   type EffortPolicy,
   loadEffortPolicy,
   parseEffortPolicy,
+  requiresUiux,
   resolveEffort,
 } from '../src/effort.js';
 import { REPO_ROOT } from '../src/paths.js';
@@ -334,6 +335,33 @@ describe('the playbooks actually ask for the tier', () => {
     const guide = readFileSync(path.join(REPO_ROOT, 'docs/guide/operator-guide/setup.md'), 'utf8');
     expect(guide).toContain('bs effort show');
     expect(guide).toContain('factory/policies/effort.yml');
+  });
+});
+
+describe('pre_code_uiux: never', () => {
+  it('fails to parse with a clear error (wave.md: it cannot be turned off)', () => {
+    const yaml = fullPolicyYaml().replace(
+      /pre_code_uiux: when-ui-criterion/g,
+      'pre_code_uiux: never',
+    );
+    expect(() => parseEffortPolicy(yaml)).toThrowError(/pre_code_uiux/);
+  });
+});
+
+describe('requiresUiux', () => {
+  const profile = loadEffortPolicy().tiers.medium; // preCodeUiux: when-ui-criterion
+
+  it('is true when the task is flagged ui_affecting', () => {
+    expect(requiresUiux(task({ ui_affecting: true }), profile)).toBe(true);
+  });
+
+  it('is true when the tier profile is preCodeUiux: always, even with the flag absent', () => {
+    const alwaysProfile = { ...profile, preCodeUiux: 'always' as const };
+    expect(requiresUiux(task(), alwaysProfile)).toBe(true);
+  });
+
+  it('is false when the flag is absent and the tier is when-ui-criterion', () => {
+    expect(requiresUiux(task(), profile)).toBe(false);
   });
 });
 

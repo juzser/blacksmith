@@ -141,6 +141,10 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Repo-relative file paths, each inside one of this task's own claims, whose existing exports this task keeps: no export removed, no export's declaration changed; adding exports is allowed. A symbol crossing whose producer promised the exporting file does not serialize the wave (impact.ts waveImpact); the promise is verified post-run by `smith claims impact <worktree> <spec.json>` against the diff."
+    },
+    "ui_affecting": {
+      "type": "boolean",
+      "description": "Optional. True when this task changes what a user sees (components, styles, templates, on-screen copy); false when it claims UI-extension paths without a visible change. Absent means false at the gate, but validatePlan errors when a task claims a UI-extension path (.tsx/.jsx/.vue/.svelte/.css/.scss/.sass/.less/.html) and this key is absent — set it explicitly (U2)."
     }
   },
   "additionalProperties": false
