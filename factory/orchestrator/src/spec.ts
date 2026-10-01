@@ -612,7 +612,7 @@ export async function amendPlan(
   // schema-invalid version written to disk is unrecoverable; refusing it here,
   // before the write, is what closes that loop rather than leaving `smith
   // plan validate` to reject the file this tool just produced.
-  const draftValidation = validatePlan(draft, opts);
+  const draftValidation = validatePlan(draft, { ...opts, previous: plan });
   if (!draftValidation.valid) {
     throw new SpecError(
       'plan.amendment-invalid-draft',

@@ -291,6 +291,58 @@ describe('plan.ts', () => {
       });
     });
 
+    describe('grandfathering carried-forward tasks (U2 S1 R2)', () => {
+      function v1(): PlanFile {
+        return {
+          epic_id: 'epic-1',
+          version: 1,
+          status: 'active',
+          tasks: [task({ claims: ['ui/src/App.vue'] })],
+          edges: [],
+        };
+      }
+
+      it('does not flag a legacy task draftNextVersion carries forward unchanged', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {});
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(true);
+      });
+
+      it('still flags an added task with no flag, naming only that task', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {
+          added: [task({ task_id: 'epic-1/task-2', claims: ['ui/src/New.tsx'] })],
+        });
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]?.path).toBe('/tasks/epic-1/task-2/ui_affecting');
+        }
+      });
+
+      it('still flags a supersede replacement with no flag, even under the same task_id', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {
+          supersede: {
+            'epic-1/task-1': task({ claims: ['ui/src/App.vue', 'ui/src/Extra.vue'] }),
+          },
+        });
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]?.path).toBe('/tasks/epic-1/task-1/ui_affecting');
+        }
+      });
+
+      it('still flags every task in a v1 plan (no previous version to grandfather against)', () => {
+        const result = validatePlan(v1());
+        expect(result.valid).toBe(false);
+      });
+    });
+
     it('reports schema-invalid tasks without throwing', () => {
       const plan: PlanFile = {
         epic_id: 'epic-1',

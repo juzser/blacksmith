@@ -74,6 +74,13 @@ export interface PlanOpts {
   specsDir?: string;
   taxonomy?: Taxonomy;
   schemas?: CompiledSchemaSet;
+  /**
+   * The plan version being amended, when the caller has it. `validatePlan`
+   * uses it only to grandfather `plan.ui-flag-missing` on a task carried
+   * forward unchanged from before the rule existed (U2 S1 R2) — it never
+   * relaxes any other check.
+   */
+  previous?: PlanFile;
 }
 
 export type PlanValidationResult = { valid: true } | { valid: false; errors: ValidationIssue[] };
@@ -451,6 +458,31 @@ function uiFlagMissing(t: TaskSpecRecord): ValidationIssue[] {
 }
 
 /**
+ * Whether `t` is exempt from `plan.ui-flag-missing` because the previous
+ * plan version already carried this exact task_id with no `ui_affecting` key
+ * and the same claims. The operator's binding decision (S2 fix round 2): work
+ * already in flight must not be blocked by a flag that predates it, so a task
+ * `draftNextVersion` carries forward unchanged is grandfathered rather than
+ * stamped `ui_affecting: false` — that would claim a decision nobody made.
+ *
+ * `added` tasks and v1 tasks have no previous record to match, so they are
+ * never exempt. A supersede replacement that keeps the old task_id (D-121)
+ * writes new content under that id, so its claims differ from the previous
+ * record's and it does not match either — it still needs the flag. The dead
+ * `superseded` record `draftNextVersion` leaves behind keeps the old claims
+ * verbatim, so it matches and is exempt too, which is correct: it is inert
+ * history that nothing will ever dispatch again.
+ */
+function isGrandfatheredUiFlag(t: TaskSpecRecord, previous: PlanFile | undefined): boolean {
+  if (previous === undefined) return false;
+  const prevTask = previous.tasks.find((p) => p.task_id === t.task_id);
+  if (prevTask === undefined || prevTask.ui_affecting !== undefined) return false;
+  const prevClaims = Array.isArray(prevTask.claims) ? prevTask.claims : [];
+  const claims = Array.isArray(t.claims) ? t.claims : [];
+  return prevClaims.length === claims.length && prevClaims.every((c, i) => c === claims[i]);
+}
+
+/**
  * A `keeps_exports` promise is a file the task swears to keep the exports of,
  * and the post-run verifier reads it back against the task's diff. Three
  * things make a promise unverifiable at plan time, and each is caught here:
@@ -539,8 +571,10 @@ export function validatePlan(plan: PlanFile, opts: PlanOpts = {}): PlanValidatio
     for (const issue of unkeptPromises(t, result.valid ? [] : result.errors)) {
       errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
     }
-    for (const issue of uiFlagMissing(t)) {
-      errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
+    if (!isGrandfatheredUiFlag(t, opts.previous)) {
+      for (const issue of uiFlagMissing(t)) {
+        errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
+      }
     }
     if (t.plan_version !== plan.version) {
       errors.push({
