@@ -2065,15 +2065,11 @@ function epicIdOfIntegrationRef(taskRef: string): string | null {
   return taskRef.endsWith('/integration') ? taskRef.slice(0, -'/integration'.length) : null;
 }
 
-function nearestUserPrompt(
-  db: SmithDb,
-  sessionId: string,
-  eventId: string,
-): RequestQuote | null {
+function nearestUserPrompt(db: SmithDb, sessionId: string, eventId: string): RequestQuote | null {
   const chain = causalChain(db, sessionId, eventId);
   for (let i = chain.length - 1; i >= 0; i--) {
     const entry = chain[i];
-    if (!entry || entry.eventType !== 'user_prompt') continue;
+    if (entry?.eventType !== 'user_prompt') continue;
     const row = db.select().from(prompts).where(eq(prompts.eventId, entry.eventId)).get();
     if (row) return { prompt: row.prompt, ts: row.ts, eventId: row.eventId, source: 'task' };
   }
@@ -2258,7 +2254,13 @@ export function kanban(
   }
 
   // DS3 item 2 — epic friendly label; closed epics (epics table holds only those) get " (finished)".
-  const closedEpicIds = new Set(db.select({ epicId: epics.epicId }).from(epics).all().map((e) => e.epicId));
+  const closedEpicIds = new Set(
+    db
+      .select({ epicId: epics.epicId })
+      .from(epics)
+      .all()
+      .map((e) => e.epicId),
+  );
 
   const columns = new Map<string, KanbanTask[]>();
   for (const t of taskRows) {

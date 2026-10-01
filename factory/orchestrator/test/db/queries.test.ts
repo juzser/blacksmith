@@ -1239,7 +1239,11 @@ describe('db/queries.ts', () => {
         const runs = taskRuns(runsHandle.db, task);
         expect(runs.map((r) => r.kind)).toEqual(['dispatch', 'judge-report', 'result']);
         const judgeRun = runs.find((r) => r.kind === 'judge-report');
-        expect(judgeRun).toMatchObject({ agentRole: 'spec-reviewer', round: 1, outcome: '2-findings' });
+        expect(judgeRun).toMatchObject({
+          agentRole: 'spec-reviewer',
+          round: 1,
+          outcome: '2-findings',
+        });
       } finally {
         runsHandle.sqlite.close();
       }
