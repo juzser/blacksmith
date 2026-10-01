@@ -1752,6 +1752,422 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
   });
 });
 
+// Both rule 2 and rule 6 recognise their command by its literal word — `git`,
+// `rm` — read from the command position. When that word is itself an
+// unexpanded shell expansion (`$X`, `${X}`, `$(...)`, a backtick span), its
+// true value cannot be read from the text at all: it might be `rm`, it might
+// be `ls`. So a segment whose command word is unreadable this way, and which
+// also carries the shape the rule guards against (rule 6: a recursive+force
+// flag cluster; rule 2: a `push` word plus a force flag or a `+refspec`), is
+// refused rather than let through as "not literally rm/git".
+describe('evaluateCommand — an unreadable command word carrying a guarded shape', () => {
+  it.each([
+    ['X=rm; $X -rf /x'],
+    ['X=rm && "$X" -rf /x'],
+    ['${X} -rf /x'],
+    ['$(echo rm) -rf /x'],
+    ['`echo rm` -rf /x'],
+    ['$(printf rm) -rf src'],
+    ['/bin/$X -rf /x'],
+  ])(
+    'denies %s — the command word is an unexpanded parameter or substitution, with a recursive force cluster after it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  // Already covered before this change: the word's basename still dequotes to
+  // the exact literal `rm`, which the existing disguised-word read already
+  // refuses — pinned here next to the rest of the path-glued probes rather
+  // than claimed as new ground.
+  it(`denies \${P}/rm -rf /x — a path-glued word whose basename is still the literal rm`, () => {
+    const d = evaluateCommand(ctx({ command: '${P}/rm -rf /x', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([['G=git; $G push -f origin main'], ['$(echo git) push --force origin main']])(
+    'denies %s — the command word is an unexpanded parameter or substitution, with a push word and a force flag',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  it.each([['echo $HOME'], ['pnpm run test -- --reporter=$R']])(
+    'allows %s — an ordinary expansion with nothing removal- or push-shaped in it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows cd "$WORKTREE" && git status — an expanded argument, not an expanded command word', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'cd "$WORKTREE" && git status', branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // Not a new case: a recognised `git push` already requires every word
+  // after the subcommand to be plain (rule 2's existing plain-word gate,
+  // unrelated to this change), so an unexpanded destination here is already
+  // refused today and stays refused — this pins that pre-existing behaviour
+  // rather than the allow the brief expected; see the final report.
+  it('denies git push origin "$BRANCH" — pre-existing plain-word gate on a recognised push, unrelated to this change', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin "$BRANCH"', branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(false);
+  });
+
+  it('allows rm -rf "workspaces/$NAME" — a plain rm word, path under an allowed root', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -rf "workspaces/$NAME"', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows ls -rf $DIR — no removal and no push, regardless of the flag shape', () => {
+    const d = evaluateCommand(ctx({ command: 'ls -rf $DIR', repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
+// The scan above only reached a segment's first word. A wrapper (`sudo`,
+// `env`, `timeout 5`, `xargs`, a bare `VAR=val` prefix), a group (`( … )`), a
+// keyword (`{ … }`, `if … then … fi`), or a nested shell (`sh -c '…'`,
+// `bash -c "…"`, `eval '…'`) all put the unreadable word somewhere other
+// than first position, without moving it out of the segment — every one of
+// these carries the same guarded shape and must be refused the same way.
+describe('evaluateCommand — an unreadable command word behind a wrapper, group or nested shell', () => {
+  it.each([
+    ['sudo $X -rf /x'],
+    ['env $X -rf /x'],
+    ['timeout 5 $X -rf /x'],
+    ['xargs $X -rf'],
+    ['VAR=1 $X -rf /x'],
+    ['nohup ${X} -rf /x'],
+    ['( $X -rf /x )'],
+    ['{ $X -rf /x; }'],
+    ['if true; then $X -rf /x; fi'],
+    [`sh -c '$X -rf /x'`],
+    ['bash -c "$X -rf /x"'],
+    [`eval '$X -rf /x'`],
+  ])(
+    'denies %s — an unexpanded word behind a wrapper, group, keyword or nested shell, with a recursive force cluster',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it.each([['sudo $G push -f origin main'], [`sh -c '$G push -f origin main'`]])(
+    'denies %s — an unexpanded word behind a wrapper or nested shell, with a push word and a force flag',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  it.each([
+    ['cp -rf "$SRC" dst'],
+    ['ls -rf $DIR'],
+    ['rm -rf "workspaces/$NAME"'],
+    ['echo $HOME'],
+    ['chmod -Rf 755 $DIR'],
+  ])(
+    'allows %s — a plain first word that cannot hand its arguments to another program',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it.each([['echo $HOME'], ['pnpm run test -- --reporter=$R']])(
+    'allows %s — an ordinary expansion with nothing removal- or push-shaped in it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows cd "$WT" && git status — an expanded argument, not an expanded command word', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'cd "$WT" && git status', branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+});
+
+// The two describes above only read a segment's own words. A command or
+// process substitution runs as a command in its own right while the shell
+// builds an argument for whatever sits outside it — `echo $(X=rm; $X -rf /x)`
+// never puts anything dangerous in an argument to `echo`; the shell runs
+// `$X -rf /x` on its own account to decide what `echo` should print. The
+// allowlist that lets a plain `echo`/`cat`/`grep`/… first word skip the rest
+// of rule 6's scan was exempting that too, since it returned before ever
+// looking past the first word. A substitution inside single quotes is not a
+// substitution at all — single quotes suppress every expansion — so that
+// stays exempt; one inside double quotes still runs and is read the same as
+// an unquoted one.
+describe('evaluateCommand — a removal hidden in a command, process or backtick substitution', () => {
+  it.each([
+    ['echo $(X=rm; $X -rf /x)'],
+    ['cat <($X -rf /x)'],
+    ['grep x $( $X -rf /x )'],
+    ['echo `$X -rf /x`'],
+    ['printf %s >($X -rf /x)'],
+    ['ls "$(X=rm; $X -rf /x)"'],
+  ])(
+    'denies %s — an allowlisted first word, but a removal the shell runs while building its argument',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  // Rule 2 has no first-word allowlist to begin with (see
+  // `isUnknownForcePushShape`), and its final checks already scan the whole
+  // segment's raw text rather than stopping after a recognised first word —
+  // so a push word and a force flag sitting inside an unresolved substitution
+  // are already read the same as anywhere else in the segment. Pinned here as
+  // the matching case for rule 6's fix above, not a new behaviour.
+  it('denies echo $(X=git; $X push -f origin main) — rule 2 already reads the whole segment, substitution or not', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'echo $(X=git; $X push -f origin main)', branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([['echo $(date)'], ['cp -rf "$(pwd)/a" b'], [`echo '$(X=rm; $X -rf /x)'`]])(
+    'allows %s — an ordinary substitution, or one single-quoted into a literal with nothing to run',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  // Not a new case, and not this change's doing: `splitDequotedWords` reads
+  // `$(git` as one whitespace-delimited word ending in the literal "git",
+  // which `checkForcePushSubcommandWord`'s pre-existing disguised-word
+  // fallback already refused before this round touched anything — a rule-2
+  // heuristic unrelated to rule 6's substitution-body read above. This pins
+  // what the command actually does rather than the allow the brief expected;
+  // see the final report.
+  it('denies ls $(git rev-parse --show-toplevel) — pre-existing rule-2 heuristic, unrelated to this change', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'ls $(git rev-parse --show-toplevel)', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['force-push']);
+  });
+});
+
+// `extractSubstitutionBodies` read only `'` at the top level, so an
+// apostrophe inside an *already open* double-quoted argument was misread as
+// opening a new single-quoted span — one that never closes, since the next
+// `'` in the text is the contraction's own. The scan gave up (`null`), and
+// the fallback at the time split the segment into dequoted words, which
+// swallowed the whole double-quoted argument as a single word and lost the
+// `-rf` hiding inside it. The fix tracks double-quote state so `$(…)` and a
+// backtick are still found inside a double-quoted argument, and an
+// apostrophe there is just a character — plus a cap on substitution nesting
+// depth, so a pathological `$(…)` chain fails closed on raw text instead of
+// recursing until the stack does.
+describe('evaluateCommand — an apostrophe inside a double-quoted substitution argument', () => {
+  it.each([
+    [`echo "it's $(X=rm; $X -rf /x)"`],
+    [`echo "don't" "$(X=rm; $X -rf /x)"`],
+    [`echo "it's \`X=rm; $X -rf /x\`"`],
+  ])(
+    'denies %s — the apostrophe does not close the double-quoted span the substitution sits in',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it.each([
+    [`echo "it's $(date)"`],
+    [`echo "it's fine"`],
+    [`git commit -m "don't break"`],
+    [`echo '$(X=rm; $X -rf /x)'`],
+  ])('allows %s — an apostrophe with nothing removal-shaped behind it', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows echo $((1+2)) — arithmetic expansion, not a command substitution', () => {
+    const d = evaluateCommand(ctx({ command: 'echo $((1+2))', repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows a POSIX case arm whose pattern is a bare (rm) — not an rm invocation', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'case "$x" in (rm) echo match ;; esac', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('never throws on 5000 levels of $(…) nesting, and stays fast', () => {
+    const nested = `${'$('.repeat(5000)}echo hi${')'.repeat(5000)}`;
+    const start = Date.now();
+    let d: PolicyDecision | undefined;
+    expect(() => {
+      d = evaluateCommand(ctx({ command: nested, repoRoot: '/repo' }), policy);
+    }).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(d).toBeDefined();
+  });
+});
+
+// Past MAX_SUBSTITUTION_DEPTH, a substitution body is never actually read —
+// extraction is skipped outright before it could recurse the call stack any
+// further. The first pass of that cap still asked what it could not read:
+// `hasRecursiveForceInText` on text that was never extracted, split or
+// dequoted. A flag cluster split across tokens (`-r -f`, `-r --force`) only
+// ever matched that fallback when both letters landed in the same hyphen
+// run, so a payload nested past the cap, or one sitting behind a quote this
+// scanner could not close, read as flag-free even carrying both. Past the
+// cap there is no body left to vouch for either way, so this file now
+// refuses outright instead of reading one; short of the cap, the raw-text
+// fallback itself now reads a recursive flag and a force flag as two
+// independent token-shaped tests, so a split or long-form pair still denies.
+describe('evaluateCommand — a substitution nested past the read limit, or one a quote leaves unreadable', () => {
+  const nestEcho = (levels: number, inner: string) =>
+    `${'$(echo '.repeat(levels)}${inner}${')'.repeat(levels)}`;
+
+  it('denies 20 levels of $(echo $(echo …)) wrapping X=rm; $X -r -f /x — past the cap, refused without reading the flags', () => {
+    const command = nestEcho(20, 'X=rm; $X -r -f /x');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('denies 20 levels of $(echo $(echo …)) wrapping plain echo hi — past the cap, refused on depth alone', () => {
+    const command = nestEcho(20, 'echo hi');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it("denies echo 'unclosed span -r --force — an unterminated quote falls back to raw text, which now reads split flags", () => {
+    const command = "echo 'unclosed span -r --force";
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([[`git commit -m "it's -rf free"`], ['pnpm run test'], ['echo "$(date)"']])(
+    'allows %s — nothing removal-shaped, in or out of a substitution',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows 15 levels of $(echo $(echo …)) wrapping plain echo hi — short of the cap, read normally', () => {
+    const command = nestEcho(15, 'echo hi');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
+// The raw-text fallback reads `-r`/`-f` as literal letters, but the shell
+// does not: outside single quotes, a backslash in front of any character —
+// `\r`, `\-`, even a bare `\` before a trailing newline — is read as that
+// character, or as nothing at all for the newline case. A flag spelled with
+// an escaped letter (`-\r`) or an escaped hyphen (`\-r`) carried the same
+// recursive-force meaning past this fallback unread. Because this fallback
+// only ever runs once the quoting itself could not be resolved with
+// confidence, there is no reliable read on whether a given backslash sat
+// inside single quotes — so every one of them is now read as an escape
+// before the two flag scans run, the same fail-closed direction the rest of
+// this file already takes.
+describe('evaluateCommand — a backslash escape inside the raw-text fallback scan', () => {
+  const unclosed = (flags: string) => `echo 'unclosed span X=rm; $X ${flags} /x`;
+
+  it.each([
+    ['-\\r -\\f', unclosed('-\\r -\\f')],
+    ['-\\r\\f', unclosed('-\\r\\f')],
+    ['-r\\f', unclosed('-r\\f')],
+    ['--\\recursive --\\force', unclosed('--\\recursive --\\force')],
+    ['\\-r \\-f', unclosed('\\-r \\-f')],
+  ])('denies %s — an escaped flag letter still reads as recursive-force', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('denies a backslash-newline splitting a flag — the continuation is dropped, not read as a letter', () => {
+    const command = "echo 'unclosed span X=rm; $X -r -\\\nf /x";
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([
+    [`git commit -m "it's -rf free"`],
+    ['pnpm run test'],
+    ['echo "$(date)"'],
+    [`printf 'a\\nb'`],
+  ])('allows %s — nothing removal-shaped, escaped or not', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows 15 levels of $(echo $(echo …)) wrapping plain echo hi — short of the cap, read normally', () => {
+    const nestEcho = (levels: number, inner: string) =>
+      `${'$(echo '.repeat(levels)}${inner}${')'.repeat(levels)}`;
+    const command = nestEcho(15, 'echo hi');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
+// A line continuation — a backslash immediately followed by a newline — is
+// deleted outright by the shell, not inserted as whitespace: `-r\<LF>f` is
+// one word, `-rf`. `splitDequotedWords` used to carry the newline through to
+// a word's dequoted text instead of dropping it, so a flag cluster split by
+// a continuation no longer matched the anchored short-flag regex and read as
+// two harmless-looking pieces instead of one recursive-force cluster.
+describe('evaluateCommand — a line continuation inside an rm invocation', () => {
+  it.each([
+    ['rm -r\\<LF>f /x', 'rm -r\\\nf /x'],
+    ['rm -\\<LF>rf /x', 'rm -\\\nrf /x'],
+    ['rm -r -\\<LF>f /x', 'rm -r -\\\nf /x'],
+    ['"rm" -r\\<LF>f /x', '"rm" -r\\\nf /x'],
+    ['X=rm; $X -r\\<LF>f /x', 'X=rm; $X -r\\\nf /x'],
+    ['rm "-r\\<LF>f" /x', 'rm "-r\\\nf" /x'],
+  ])(
+    'denies %s — the continuation joins the flags back into one recursive-force cluster',
+    (_label, command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it('allows a multi-line pnpm invocation — the continuation joins words, nothing removal-shaped', () => {
+    const command = 'pnpm run test \\\n  --reporter=dot';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows rm -f\\<LF> file.txt — force without recursive, continuation or not', () => {
+    const command = 'rm -f\\\n file.txt';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows a commit message with a continuation inside its quotes — still prose, not a command', () => {
+    const command = 'git commit -m "line one\\\nline two"';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block

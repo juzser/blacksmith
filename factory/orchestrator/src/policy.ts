@@ -1203,6 +1203,22 @@ function isPlainWord(word: string): boolean {
 const PLAIN_WORD_REASON =
   'write this git command with plain words — no quotes inside words, escapes, variables, braces or globs — so the guard can read exactly what git will receive';
 
+/**
+ * True when `word` is unreadable specifically because of an unexpanded
+ * shell expansion — a `$name` parameter, a `${...}` form, a `$(...)`
+ * command substitution, or a backtick span — rather than any other reason
+ * `isPlainWord` refuses a word (a bare glob, a stray `<`/`>`, an embedded
+ * newline). Rule 2 and rule 6 both recognise their command by its literal
+ * word (`git`, `rm`); this is their shared read of "that word's true value
+ * is unknowable here," narrowed to the expansion forms those two rules fail
+ * closed on rather than every non-plain word, so a path argument elsewhere
+ * in the same command — already its own, separately-read concern — is never
+ * what trips this.
+ */
+function isUnexpandedCommandWord(word: DequotedWord): boolean {
+  return !isPlainWord(word.raw) && /[$`]/.test(word.raw);
+}
+
 /** Subcommands the plain-word gate covers unconditionally. */
 const FORCE_GATE_SUBCOMMANDS = ['push', 'rebase', 'reset', 'filter-branch', 'update-ref'];
 
@@ -1296,20 +1312,41 @@ const SHELL_C_WRAPPER_RE = /\b(sh|bash|zsh|env)\b[^;&|]*-c\b/;
 const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
 
 /**
+ * The dequoted payload of a segment wrapped in `eval`, or a `-c` string
+ * handed to `sh`/`bash`/`zsh`/`env` — or `null` when `segment` is not one of
+ * those wrappers at all, so a caller never mistakes "nothing to unwrap" for
+ * an empty payload. Quotes and backslashes are stripped from the *whole*
+ * segment, wrapper prefix included (`bash -c 'git rese""t --hard $(x)'`
+ * names `git` and a spliced `reset` only once they're gone), which is also
+ * why the result still reads correctly as one text to scan rather than an
+ * isolated inner string. Shared so rule 2's and rule 6's own unexpanded-word
+ * checks below read a nested shell's payload the same way
+ * `isShellWrappedForceCandidate` and `checkUnboundedRm`'s wrapped-`rm` pass
+ * already do, instead of a fourth copy of the same two lines.
+ */
+function dequoteShellWrappedSegment(segment: string): string | null {
+  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
+  // A line continuation is dropped outright, not just its backslash — rule
+  // 6's callers (`hasUnknownRemovalCommandWord`, `shellWrappedRmPayload`)
+  // reach this on a segment `joinLineContinuations` never ran over, so a
+  // bare `.replace(/\\/g, '')` would leave the newline behind and still
+  // split a flag cluster it glues back together (`-r\<LF>f` → `-r`, `<LF>`,
+  // `f` instead of `-rf`).
+  return stripSpliceQuotes(segment).replace(/\\\n/g, '').replace(/\\/g, '');
+}
+
+/**
  * `eval`, or a `-c` string handed to `sh`/`bash`/`zsh`/`env`, passes a whole
  * second command line to another shell to parse — a second chance for any
  * trick above to hide inside a string this rule would otherwise read as
  * inert text, without this scanner ever parsing the nested line itself.
  * Simplest fail-closed read: a segment naming one of those wrappers
  * alongside `git` and force-push-shaped subcommand text is refused outright,
- * rather than trusted to be read correctly. The wrapped text is dequoted
- * first — `bash -c 'git rese""t --hard $(x)'` names `git` and a spliced
- * `reset` only once quotes and backslashes are gone, the same read the
- * plain-word gate gives every other word here.
+ * rather than trusted to be read correctly.
  */
 function isShellWrappedForceCandidate(segment: string): boolean {
-  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return false;
-  const dequoted = stripSpliceQuotes(segment).replace(/\\/g, '');
+  const dequoted = dequoteShellWrappedSegment(segment);
+  if (dequoted === null) return false;
   return /\bgit\b/i.test(dequoted) && FORCE_GATE_WORD_RE.test(dequoted);
 }
 
@@ -1363,8 +1400,14 @@ function splitDequotedWords(segment: string): DequotedWord[] {
       i += 1;
       while (i < segment.length && segment.charAt(i) !== '"') {
         if (segment.charAt(i) === '\\' && i + 1 < segment.length) {
-          raw += segment.charAt(i) + segment.charAt(i + 1);
-          text += segment.charAt(i + 1);
+          const escaped = segment.charAt(i + 1);
+          raw += segment.charAt(i) + escaped;
+          // A backslash-newline is a line continuation, deleted outright —
+          // not a character the word's text carries, the same join
+          // `joinLineContinuations` already does ahead of the callers that
+          // run it first. This branch also reads segments nothing joins
+          // first (rule 6's unjoined paths), so it has to hold on its own.
+          if (escaped !== '\n') text += escaped;
           i += 2;
         } else {
           raw += segment.charAt(i);
@@ -1379,9 +1422,19 @@ function splitDequotedWords(segment: string): DequotedWord[] {
       continue;
     }
     if (c === '\\' && i + 1 < segment.length) {
+      const escaped = segment.charAt(i + 1);
+      raw += c + escaped;
+      // A line continuation alone starts nothing: `inWord` stays whatever
+      // it already was, so a bare `\`-newline sitting between two real
+      // words never pushes an empty word between them. Mid-word (`-r\<LF>f`)
+      // `inWord` is already true from the characters before it, so this is
+      // a no-op there — the flag cluster still comes out joined as `-rf`.
+      if (escaped === '\n') {
+        i += 2;
+        continue;
+      }
       inWord = true;
-      raw += c + segment.charAt(i + 1);
-      text += segment.charAt(i + 1);
+      text += escaped;
       i += 2;
       continue;
     }
@@ -1427,6 +1480,51 @@ function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): nu
 
 const SUBCOMMAND_NOT_PLAIN_REASON =
   'the git subcommand is not written as a plain word, so the guard cannot tell what it runs — write it out plainly';
+
+const UNKNOWN_COMMAND_WORD_REASON =
+  'the command word here is an unexpanded parameter or substitution, so the guard cannot tell what it runs — write it out plainly';
+
+/**
+ * Rule 2's gap once some word of the segment is unreadable: neither the
+ * exact `git` match above nor its `hidden` fallback (which still needs the
+ * dequoted text to end in "git") can place a word that only resolves to
+ * `git` once a shell expands `$G`, `$(...)` or a backtick span — this file
+ * never evaluates one of those. So when any word of the segment is
+ * unreadable this way (`isUnexpandedCommandWord`), the rest of it is read
+ * for the shape rule 2 already guards against on a recognised push: a
+ * `push` word together with a force flag (`FORCE_PUSH_RE`, the same test
+ * the raw-text fallback below uses) or a `+refspec` operand
+ * (`pushOperands`, the same read rule 1 uses for a push's destination).
+ * Resolving the expansion itself is out of scope — an open-ended evaluator
+ * is the wrong tool — so this is shape only, same as rule 6's analogue.
+ *
+ * Every word is scanned, not just the one in command position: a wrapper
+ * (`sudo`, `env`, `timeout 5`, `xargs`, a bare `VAR=val` prefix, …), a group
+ * (`( … )`), or a keyword (`{ … }`, `if … then … fi`) can all sit in front
+ * of the unreadable word without moving it out of the segment, and an
+ * open-ended wrapper list would miss whichever one is not on it. No
+ * allowlist narrows this scan the way rule 6's does: a `push` word plus a
+ * force flag or `+refspec` is never the shape of an everyday command, so
+ * there is no ordinary first word to carve an exception for.
+ *
+ * Also checked against the segment's dequoted payload when it is a nested
+ * shell (`sh -c '…'`, `bash -c "…"`, `eval '…'`): `splitDequotedWords` keeps
+ * a quoted span's internal text as one word, which can hide a `-f` token or
+ * even the `push` word itself inside it until the quotes are gone.
+ */
+function isUnknownForcePushShape(segment: string): boolean {
+  const words = splitDequotedWords(segment);
+  if (!words.some((word) => isUnexpandedCommandWord(word))) return false;
+  if (!new RegExp(bareWord('push'), 'i').test(segment)) return false;
+  if (FORCE_PUSH_RE.test(segment)) return true;
+  return pushOperands(segment).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
+}
+
+function hasUnknownForcePushCommandWord(segment: string): boolean {
+  if (isUnknownForcePushShape(segment)) return true;
+  const wrapped = dequoteShellWrappedSegment(segment);
+  return wrapped !== null && isUnknownForcePushShape(wrapped);
+}
 
 /**
  * Round 6's fix for a subcommand word the shell will glue back together
@@ -1477,6 +1575,9 @@ function checkForcePushSubcommandWord(
         word.text.replace(/\r?\n/g, '').toLowerCase().endsWith('git'),
     );
     if (hidden) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
+    if (hasUnknownForcePushCommandWord(stripRedirections(segment))) {
+      return violation(rule, UNKNOWN_COMMAND_WORD_REASON);
+    }
     return null;
   }
   // The `git` word itself, found above by its *dequoted* text, still needs
@@ -1811,6 +1912,63 @@ function hasRecursiveForce(tokens: readonly string[]): boolean {
 }
 
 /**
+ * The same recursive-force cluster `hasRecursiveForce` reads out of a
+ * tokenised word list, asked instead of two independent, linear scans over
+ * raw, unparsed text — one per flag, not one combined pattern — because
+ * there is no word list left to read: the text has not been dequoted or
+ * split, so a cluster split across tokens (`-r -f`, `-r --force`) has to be
+ * found without that split ever happening. This is what a substitution body
+ * falls back to once it cannot be delimited with confidence — an
+ * unterminated quote, an unbalanced paren, or a nesting depth past
+ * `MAX_SUBSTITUTION_DEPTH`.
+ *
+ * Each scan looks for its flag at the start of a token — the start of the
+ * text, or just past whitespace, a quote, `(`, a backtick, `;`, `|` or `&` —
+ * then either the flag's long spelling (`--recursive`, `--force`) or a
+ * single hyphen followed by nothing but letters containing the flag's
+ * letter (`-r`, `-R`, `-rf`, `-Rvf`). The long spelling is checked on its
+ * own branch, gated on a second, literal hyphen, rather than folded into
+ * the bundled-letter scan: `hasRecursiveForce` never reads `--force` as
+ * carrying a recursive flag, because its own bundled-flag test
+ * (`RM_SHORT_FLAG_RE`) is anchored to exactly one leading hyphen and
+ * `--force` has two, so it only ever matches `--force`'s own exact-token
+ * branch. A combined scan that let the recursive pattern walk into a second
+ * hyphen would read `--force`'s own tail letters — `f`, `o`, `r`, `c`, `e` —
+ * and find the `r` in "force", flagging a force-only invocation as
+ * recursive too. Splitting the hyphen count the same way `hasRecursiveForce`
+ * does keeps that false read out. Over-matching in every other direction (a
+ * bundled flag that is not really `rm`'s, a comment mentioning both words)
+ * is the same direction every fail-closed read in this file already takes.
+ */
+const TOKEN_START = String.raw`(?:^|[\s'"(\`;|&])`;
+const RAW_RECURSIVE_FLAG_RE = new RegExp(`${TOKEN_START}-(?:-recursive\\b|[A-Za-z]*[rR][A-Za-z]*)`);
+const RAW_FORCE_FLAG_RE = new RegExp(`${TOKEN_START}-(?:-force\\b|[A-Za-z]*f[A-Za-z]*)`);
+
+/**
+ * Outside single quotes, the shell turns a backslash followed by any
+ * character into that character, and drops a backslash-newline outright —
+ * its line continuation. `-\r` reads as `-r`, so the two flag regexes above
+ * need to see the escape resolved, not the backslash that is still sitting
+ * in front of the letter. This text is exactly the text whose quoting
+ * could not be resolved with confidence (an unterminated quote, or a
+ * nesting depth this scanner gave up delimiting), so there is no reliable
+ * way to tell whether a given backslash sits inside single quotes, where
+ * the shell would have left it untouched. Reading every backslash as an
+ * escape is the same fail-closed direction the rest of this fallback
+ * already takes: over-denying a backslash that was really inside single
+ * quotes costs nothing here, and under-denying one that was not is the gap
+ * this closes.
+ */
+function unescapeForFlagScan(text: string): string {
+  return text.replace(/\\([\s\S])/g, (_match, ch: string) => (ch === '\n' ? '' : ch));
+}
+
+function hasRecursiveForceInText(text: string): boolean {
+  const unescaped = unescapeForFlagScan(text);
+  return RAW_RECURSIVE_FLAG_RE.test(unescaped) && RAW_FORCE_FLAG_RE.test(unescaped);
+}
+
+/**
  * The characters that separate one command in a chain from the next. `;&|`
  * are the three guard.sh knew, and for a long time this file knew no others
  * — which left the rules that read a segment's *operands* (rule 1's
@@ -1853,9 +2011,17 @@ const SEPARATOR_CHARS = `${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}`;
  * Every separated segment of a command, so a chain can be inspected one
  * invocation at a time — and so a rule reading a segment's operands is looking
  * at that command's operands and nothing else.
+ *
+ * Joins line continuations first. The split below is a naive character class
+ * that includes a bare newline, with no idea a backslash in front of one
+ * means "this is not where the command ends" — left unjoined, `rm -r\<LF>f
+ * /x` would split into `rm -r\` and `f /x` before either reached a word
+ * splitter, and no fix inside one could ever reunite a flag cluster already
+ * cut in half. `joinLineContinuations` is the same join `checkForcePush`
+ * already runs first; every caller here gets it for the same reason.
  */
 function splitChainSegments(command: string): string[] {
-  return command.split(new RegExp(`[${SEPARATOR_CHARS}]`));
+  return joinLineContinuations(command).split(new RegExp(`[${SEPARATOR_CHARS}]`));
 }
 
 /**
@@ -2061,16 +2227,346 @@ function rmOutOfBoundsInText(
  * Rather than parse the wrapped command a second time, hand the same
  * dequoted text back through `rmOutOfBoundsInText`: stripping every quote
  * character turns `sh -c "rm -rf /x"` into `sh -c rm -rf /x`, where `rm`
- * reads as an ordinary word like any other.
+ * reads as an ordinary word like any other. A thin alias over
+ * `dequoteShellWrappedSegment`, kept under this name since
+ * `checkUnboundedRm`'s wrapped-`rm` pass below already reads by it.
  */
 function shellWrappedRmPayload(segment: string): string | null {
-  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
-  return stripSpliceQuotes(segment).replace(/\\/g, '');
+  return dequoteShellWrappedSegment(segment);
 }
 
 /**
- * Rule 6: a recursive-force `rm` outside `allowed_roots`, however the two
- * flags are spelled (see `hasRecursiveForce`).
+ * The index just past the quote that closes the one starting at `start`
+ * (`text[start]` is `'` or `"`) — or `null` when the text ends first. Shared
+ * by `findBalancedParenClose` and `findBacktickClose` so the two
+ * substitution-delimiter scanners below read a quoted span inside a body the
+ * same way, rather than a second copy of the same loop apiece.
+ */
+function skipQuotedSpan(text: string, start: number): number | null {
+  if (text[start] === "'") {
+    const end = text.indexOf("'", start + 1);
+    return end === -1 ? null : end + 1;
+  }
+  let i = start + 1;
+  while (i < text.length && text[i] !== '"') {
+    i += text[i] === '\\' && i + 1 < text.length ? 2 : 1;
+  }
+  return i < text.length ? i + 1 : null;
+}
+
+/**
+ * The index of the `)` that balances the `(` just before `start` — or `null`
+ * when the text ends first, the same "cannot delimit this with confidence"
+ * signal `topLevelCommands` falls back on for an unbalanced paren. A quoted
+ * span inside the body is skipped whole (`skipQuotedSpan`), so a literal
+ * `)` inside an argument, like the one in `$(echo ")")`, is never mistaken
+ * for the substitution's own close.
+ */
+function findBalancedParenClose(text: string, start: number): number | null {
+  let depth = 1;
+  let i = start;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '\\' && i + 1 < text.length) {
+      i += 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      const next = skipQuotedSpan(text, i);
+      if (next === null) return null;
+      i = next;
+      continue;
+    }
+    if (c === '(') {
+      depth += 1;
+      i += 1;
+      continue;
+    }
+    if (c === ')') {
+      depth -= 1;
+      if (depth === 0) return i;
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return null;
+}
+
+/**
+ * The index of the unescaped backtick that closes a backtick substitution
+ * starting at `start` — reading through a quoted span the same way
+ * `findBalancedParenClose` does, so a backtick inside a quoted argument
+ * never ends the span early. `null` when no close is found before the text
+ * ends.
+ */
+function findBacktickClose(text: string, start: number): number | null {
+  let i = start;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '\\' && i + 1 < text.length) {
+      i += 2;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      const next = skipQuotedSpan(text, i);
+      if (next === null) return null;
+      i = next;
+      continue;
+    }
+    if (c === '`') return i;
+    i += 1;
+  }
+  return null;
+}
+
+/**
+ * Every command substitution (`$(...)`), backtick substitution, and process
+ * substitution (`<(...)`/`>(...)`) body in `segment` — the shell still runs
+ * each of these while it builds an allowlisted command's argv, which
+ * `isUnknownRemovalSegment`'s first-word allowlist does not account for on
+ * its own: `cp` cannot run a second program from one of its own
+ * *arguments*, but `echo $(X=rm; $X -rf /x)` never puts anything dangerous
+ * in an argument — the shell runs `$X -rf /x` as a command in its own right
+ * to decide what `echo` should print. A body inside single quotes is not a
+ * substitution at all, since single quotes suppress every expansion, so
+ * that span is skipped rather than read; one inside double quotes still
+ * runs and is read the same as an unquoted one.
+ *
+ * Reads as a small quote-state machine — unquoted, single-quoted or
+ * double-quoted — rather than `skipQuotedSpan`'s "skip the whole span" read
+ * the two delimiter finders above use: a single-quoted span truly has
+ * nothing left to find inside it, but a double-quoted one still runs a
+ * `$(...)` or backtick substitution this scan must keep recognising, so it
+ * cannot be skipped whole. The one thing double quotes change inside their
+ * own span is that `'` is just a character, not a span of its own — an
+ * apostrophe in `"it's $(...)"` used to be read as opening a fresh
+ * single-quoted span, which this text never closes, so the whole scan gave
+ * up and returned `null` for a segment that was perfectly readable. Process
+ * substitution (`<(`/`>(`) is the other thing double quotes change: they
+ * suppress it, so it is only recognised unquoted, matching
+ * `shellExpandsPayload`'s read of the same two forms for rule 4's message
+ * payload. A backslash escapes the next character in either the unquoted or
+ * the double-quoted state, the same as a real shell. `$((` arithmetic is
+ * left exactly as it reads today: this scan does not special-case it, so it
+ * is still found as a `$(` whose body happens to start with its own `(`.
+ *
+ * `null` means some substitution in `segment` could not be delimited with
+ * confidence — an unterminated quote or an unbalanced paren — so the caller
+ * reads that as "cannot prove this is safe", not "found nothing".
+ */
+function extractSubstitutionBodies(segment: string): string[] | null {
+  const bodies: string[] = [];
+  let i = 0;
+  let inDouble = false;
+  while (i < segment.length) {
+    const c = segment[i];
+    if (c === '\\' && i + 1 < segment.length) {
+      i += 2;
+      continue;
+    }
+    if (!inDouble && c === "'") {
+      const next = skipQuotedSpan(segment, i);
+      if (next === null) return null;
+      i = next;
+      continue;
+    }
+    if (c === '"') {
+      inDouble = !inDouble;
+      i += 1;
+      continue;
+    }
+    if (c === '$' && segment[i + 1] === '(') {
+      const close = findBalancedParenClose(segment, i + 2);
+      if (close === null) return null;
+      bodies.push(segment.slice(i + 2, close));
+      i = close + 1;
+      continue;
+    }
+    if (c === '`') {
+      const close = findBacktickClose(segment, i + 1);
+      if (close === null) return null;
+      bodies.push(segment.slice(i + 1, close));
+      i = close + 1;
+      continue;
+    }
+    if (!inDouble && (c === '<' || c === '>') && segment[i + 1] === '(') {
+      const close = findBalancedParenClose(segment, i + 2);
+      if (close === null) return null;
+      bodies.push(segment.slice(i + 2, close));
+      i = close + 1;
+      continue;
+    }
+    i += 1;
+  }
+  return bodies;
+}
+
+/**
+ * Whether `segment` carries a removal the shell would run while building
+ * another command's argv, even one behind a plain, allowlisted first word —
+ * the gap a re-review found in `isUnknownRemovalSegment`'s allowlist: `echo`
+ * cannot run a second program from an *argument*, but
+ * `echo $(X=rm; $X -rf /x)` has the shell run `$X -rf /x` as a command in
+ * its own right before `echo` ever sees a value to print. Each substitution
+ * body found by `extractSubstitutionBodies` is checked as a full command
+ * line of its own, by recursing into `isUnboundedRemovalCommand` — the same
+ * literal-`rm`, unknown-word and nested-shell reads it runs on the outer
+ * command — so a substitution nested inside a body is caught by that same
+ * recursive call rather than a second extraction pass here.
+ *
+ * A body this scanner cannot delimit with confidence (an unbalanced paren, a
+ * quote that never closes) is not read as "found nothing": the segment is
+ * refused outright when it carries a recursive-force flag cluster anywhere
+ * in its raw text, the same shape `isUnknownRemovalSegment` already refuses
+ * an unreadable word for — read as a substring of the untouched text
+ * (`hasRecursiveForceInText`), not a dequoted word list, because the same
+ * quoting that defeated delimiting also defeats a clean word split: an
+ * apostrophe stranded inside an unresolved double-quoted span is exactly
+ * what left this body undelimitable in the first place, so the one word
+ * list `splitDequotedWords` would produce here cannot be trusted either.
+ *
+ * `depth` counts how many substitution bodies deep this call already is —
+ * zero at the outermost command, one past the first `$(...)`/backtick/
+ * process substitution, and so on as each body recurses into
+ * `isUnboundedRemovalCommand` below. Nesting is attacker-controlled and
+ * unbounded (`$($($(...)))`), and following it one JS stack frame per level
+ * throws past a few hundred levels — so once `depth` reaches
+ * `MAX_SUBSTITUTION_DEPTH`, extraction stops outright rather than reading
+ * whatever raw text is left: nesting sixteen levels deep is never a
+ * legitimate agent command, and a check this far past the point it can
+ * actually read the body has nothing to vouch for it with. Refusing here
+ * does not depend on `hasRecursiveForceInText` finding anything — it denies
+ * on depth alone, the same way an undelimitable body used to read as "found
+ * nothing" if it happened to carry no flags. That keeps both the call stack
+ * and the work done bounded, however deep the nesting actually goes.
+ */
+const MAX_SUBSTITUTION_DEPTH = 16;
+
+function hasUnsafeSubstitution(
+  segment: string,
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+  depth = 0,
+): boolean {
+  if (depth >= MAX_SUBSTITUTION_DEPTH) return true;
+  const bodies = extractSubstitutionBodies(segment);
+  if (bodies === null) return hasRecursiveForceInText(segment);
+  return bodies.some((body) => isUnboundedRemovalCommand(body, repoRoot, policy, depth + 1));
+}
+
+/**
+ * Plain first words that cannot hand their later arguments to another
+ * program — the allowlist that keeps the every-word scan below from
+ * refusing ordinary commands whose own flags happen to spell `-rf`/`-Rf`:
+ * `cp -rf "$SRC" dst`, `ls -rf $DIR`, `chmod -Rf 755 $DIR`. None of these
+ * runs a second program from an argument the way a wrapper (`sudo`, `env`,
+ * `xargs`, `timeout 5`, a bare `VAR=val` prefix, …) or a nested shell can, so
+ * an unreadable word later in the same line carries no risk here. `rm`
+ * itself is deliberately left out of this set: a plain `rm` or `/bin/rm`
+ * first word is exempted the same way, but keeps the allowed-roots analysis
+ * above instead of skipping straight to "allowed" — see
+ * `isUnknownRemovalSegment`.
+ */
+const REMOVAL_SAFE_FIRST_WORDS = new Set([
+  'cp',
+  'mv',
+  'ls',
+  'chmod',
+  'chown',
+  'chgrp',
+  'ln',
+  'mkdir',
+  'touch',
+  'cat',
+  'echo',
+  'printf',
+  'grep',
+]);
+
+/**
+ * Rule 6's gap once some word of the segment is unreadable: neither
+ * `hasDisguisedRmWord` (which still needs a word's basename to resolve to
+ * the literal `rm`) nor the rest of `rmOutOfBoundsInText` (which needs to
+ * find an `rm` word at all) can place a word that only resolves to `rm` once
+ * a shell expands `$X`, `$(...)` or a backtick span — this file never
+ * evaluates one of those. So when any word of the segment is unreadable this
+ * way (`isUnexpandedCommandWord`), the rest of it is read for the one shape
+ * this rule already guards against: a recursive-force flag cluster
+ * (`hasRecursiveForce`, the same flag parsing the plain-`rm` path above
+ * uses). Resolving the expansion itself is out of scope — an open-ended
+ * evaluator is the wrong tool — so this is shape only.
+ *
+ * Every word is scanned, not just the one in command position: a wrapper, a
+ * group (`( … )`), or a keyword (`{ … }`, `if … then … fi`) can all sit in
+ * front of the unreadable word without moving it out of the segment. That
+ * widens what trips the check, so a first word that is plain and cannot run
+ * another program (`REMOVAL_SAFE_FIRST_WORDS`), or dequotes to the literal
+ * `rm`/`/bin/rm`, is exempted — anything else in first position, including
+ * an unrecognised command, falls through to the refusal. Fail-closed over
+ * precise, same direction as every other read in this file.
+ *
+ * Checked before any of that: `hasUnsafeSubstitution`. The allowlist above
+ * only says a plain first word cannot run another program from its own
+ * *arguments* — it says nothing about a command or process substitution
+ * sitting in one of those arguments, which the shell still runs as a
+ * command in its own right while it builds the argv. `echo $(X=rm; $X -rf
+ * /x)` is exactly `echo`'s shape and nothing else, so the allowlist alone
+ * would wave it through; the substitution check below is what actually
+ * reads what the shell runs before `echo` sees a value to print.
+ */
+function isUnknownRemovalSegment(
+  segment: string,
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+  depth = 0,
+): boolean {
+  if (hasUnsafeSubstitution(segment, repoRoot, policy, depth)) return true;
+  const words = splitDequotedWords(segment);
+  const first = words[0];
+  if (first !== undefined && isPlainWord(first.raw)) {
+    const basename = first.text.split(/[\\/]/).pop() ?? first.text;
+    if (basename === 'rm' || REMOVAL_SAFE_FIRST_WORDS.has(basename)) return false;
+  }
+  if (!words.some((word) => isUnexpandedCommandWord(word))) return false;
+  return hasRecursiveForce(words.map((word) => word.text));
+}
+
+/**
+ * Reads `topLevelCommands`, not `splitChainSegments`: the naive
+ * single-character split above cuts `$(echo rm) -rf /x` apart at the very
+ * `(`/`)`/backtick that make the word unreadable, landing the flag cluster
+ * in a different "segment" than the word it belongs to and missing the
+ * combination entirely.
+ *
+ * Each top-level segment is also checked as a nested shell's dequoted
+ * payload (`sh -c '…'`, `bash -c "…"`, `eval '…'`): `splitDequotedWords`
+ * keeps a quoted span's internal text as one word, which hides a `-rf`
+ * token as a standalone token until the quotes are gone — see
+ * `dequoteShellWrappedSegment`.
+ */
+function hasUnknownRemovalCommandWord(
+  command: string,
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+  depth = 0,
+): boolean {
+  return topLevelCommands(command).some((segment) => {
+    if (isUnknownRemovalSegment(segment, repoRoot, policy, depth)) return true;
+    const wrapped = dequoteShellWrappedSegment(segment);
+    return wrapped !== null && isUnknownRemovalSegment(wrapped, repoRoot, policy, depth);
+  });
+}
+
+/**
+ * Rule 6's boolean core, pulled out of `checkUnboundedRm` so
+ * `hasUnsafeSubstitution` can run the exact same check on a substitution
+ * body: the literal-`rm` path (every chain segment read for a disguised or
+ * plain `rm` outside `allowed_roots`) plus the unknown-word path
+ * (`hasUnknownRemovalCommandWord`, which already folds in the nested-shell
+ * path). `command` here is "a command line of its own" in the brief's
+ * words — it may be the whole tool call, or it may be the text found inside
+ * someone else's `$(...)`.
  *
  * Checks every chain segment independently, not just the first `rm` in the
  * whole command. guard.sh's own `grep -Eo 'rm[[:space:]]+[^;&|]*'` — and this
@@ -2081,11 +2577,12 @@ function shellWrappedRmPayload(segment: string): string | null {
  * straight port: closing a chained-command bypass that guard.sh always had,
  * not carrying it forward with new spelling.
  */
-function checkUnboundedRm(
+function isUnboundedRemovalCommand(
   command: string,
   repoRoot: string | null,
   policy: GuardrailPolicy,
-): PolicyViolation | null {
+  depth = 0,
+): boolean {
   const outOfBounds = splitChainSegments(command).some((segment) => {
     const decoded = decodeAnsiCQuoting(segment);
     // An unterminated `$'` span cannot be decoded with confidence — fail
@@ -2096,7 +2593,20 @@ function checkUnboundedRm(
     const wrapped = shellWrappedRmPayload(decoded.text);
     return wrapped !== null && rmOutOfBoundsInText(wrapped, repoRoot, policy);
   });
-  if (!outOfBounds) return null;
+  return outOfBounds || hasUnknownRemovalCommandWord(command, repoRoot, policy, depth);
+}
+
+/**
+ * Rule 6: a recursive-force `rm` outside `allowed_roots`, however the two
+ * flags are spelled (see `hasRecursiveForce`) — see
+ * `isUnboundedRemovalCommand` for the check itself.
+ */
+function checkUnboundedRm(
+  command: string,
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+): PolicyViolation | null {
+  if (!isUnboundedRemovalCommand(command, repoRoot, policy)) return null;
   return violation(requireRule(policy, 'unbounded-rm'));
 }
 
