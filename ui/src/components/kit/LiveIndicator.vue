@@ -42,9 +42,11 @@ function onRefresh() {
   <div class="bs-live" role="status" aria-live="polite">
     <span class="bs-live__dot" :data-live="live" aria-hidden="true"></span>
     <span class="bs-live__text"
-      >{{ statusLabel }}<template v-if="lastEventAt">
-        , last activity <RelativeTime :iso="lastEventAt" :now="now" /></template
-    ></span>
+      >{{ lastEventAt ? `${statusLabel} — last activity ` : statusLabel }}<RelativeTime
+        v-if="lastEventAt"
+        :iso="lastEventAt"
+        :now="now"
+    /></span>
     <IconButton
       :icon="live ? Pause : Play"
       :label="live ? 'Pause updates' : 'Resume updates'"
