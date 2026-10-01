@@ -816,6 +816,18 @@ describe('findings.ts', () => {
       expect(findings[0]?.finding_status).toBe('confirmed');
     });
 
+    // #286: a caller chaining transitions as --causal-parent needs the id of
+    // the event THIS call appended, not "log line count - 1" -- which names a
+    // sibling's event under parallel writers.
+    it('returns the event_id of the finding-transitioned event it just appended', async () => {
+      const result = await transition('f-1', 'confirmed', rootCtx(), { stateDir });
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const transitioned = events.filter((e) => e.record.event_type === 'finding-transitioned');
+      const last = transitioned[transitioned.length - 1];
+      expect(last).toBeDefined();
+      expect(result.event_id).toBe(last?.event_id);
+    });
+
     // D-49/P9-10: epic membership is a field, not string surgery.
     it('matches on epic_id when the task_id alone cannot say which epic', async () => {
       await raiseFinding(

@@ -722,7 +722,16 @@ describe('cli.ts (built binary)', () => {
           eventsDir,
         ]);
         expect(status, stdout).toBe(0);
-        expect(JSON.parse(stdout).finding_status).toBe('confirmed');
+        const printed = JSON.parse(stdout);
+        expect(printed.finding_status).toBe('confirmed');
+        // #286: the printed record carries the event_id of the
+        // finding-transitioned event it just appended, so a chained
+        // transition can pass it straight to `--causal-parent`.
+        const tail = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
+        const transitioned = JSON.parse(tail.stdout).find(
+          (e: { record: { event_type: string } }) => e.record.event_type === 'finding-transitioned',
+        );
+        expect(printed.event_id).toBe(transitioned.event_id);
       });
     });
 

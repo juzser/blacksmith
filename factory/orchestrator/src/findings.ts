@@ -1194,7 +1194,7 @@ export async function transition(
   ctx: EventContext,
   opts: EventOpts = {},
   extra: TransitionExtra = {},
-): Promise<Finding> {
+): Promise<Finding & { event_id: string }> {
   // Lineage (D-119): a finding raised in the first session of a cross-session
   // epic is otherwise not FOUND from the second, and this function's own
   // "unknown finding" error would be the answer to a finding that plainly
@@ -1355,7 +1355,7 @@ export async function transition(
   if (extra.amendsSatisfiedBy !== undefined)
     payload.amends_satisfied_by = extra.amendsSatisfiedBy.map((row) => ({ ...row }));
 
-  await appendEvent(
+  const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',
@@ -1368,7 +1368,7 @@ export async function transition(
     opts,
   );
 
-  const result: Finding = {
+  const result: Finding & { event_id: string } = {
     ...current,
     finding_status: newStatus,
     ...(extra.waiverId !== undefined ? { waiver_id: extra.waiverId } : {}),
@@ -1376,6 +1376,12 @@ export async function transition(
     ...(extra.amendsPlanVersion !== undefined
       ? { amends_plan_version: extra.amendsPlanVersion }
       : {}),
+    // #286: the id of the `finding-transitioned` event this call just
+    // appended, the same shape #238 gave `judge report` -- so a caller
+    // chaining transitions as `--causal-parent` has it without falling back
+    // to "log line count - 1", which names a sibling's event under parallel
+    // writers.
+    event_id: stored.event_id,
   };
   // A reopened finding carrying the id of the waiver that no longer holds it
   // is the same split state D-180 is about, one field smaller.
