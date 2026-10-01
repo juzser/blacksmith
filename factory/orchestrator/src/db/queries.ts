@@ -2149,12 +2149,7 @@ export function requestQuoteForTask(
     db.select().from(eventsRaw).where(eq(eventsRaw.taskId, taskId)).all(),
   )[0];
   if (firstEvent) {
-    const taskQuote = nearestUserPrompt(
-      db,
-      firstEvent.sessionId,
-      firstEvent.eventId,
-      memo?.events,
-    );
+    const taskQuote = nearestUserPrompt(db, firstEvent.sessionId, firstEvent.eventId, memo?.events);
     if (taskQuote) return taskQuote;
   }
   // Two tasks named with the same epic share one `epicSourcePrompt` answer
