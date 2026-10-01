@@ -5,7 +5,9 @@ import { describe, expect, it } from 'vitest';
 import {
   agentChip,
   capColumn,
+  epicKeyForTask,
   foldIntoColumns,
+  groupByKanban,
   KANBAN_COLUMNS,
   KANBAN_PAGE_SIZE,
   subStatusSummary,
@@ -241,6 +243,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: true,
       gone: false,
+      state: 'working',
     });
     // Stalled is still somebody: the registry has no terminal event, only
     // the clock says it should have — the chip stays but stops breathing.
@@ -249,6 +252,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: false,
       gone: false,
+      state: 'waiting',
     });
   });
 
@@ -260,6 +264,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: false,
       gone: true,
+      state: 'idle',
     });
   });
 
@@ -282,6 +287,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
         title: 'coder · mid',
         live: false,
         gone: true,
+        state: 'idle',
       });
     }
   });
@@ -295,7 +301,106 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: true,
       gone: false,
+      state: 'working',
     });
+  });
+});
+
+// DS3 pattern 3 — the new kit's AgentChip state vocabulary, additive beside
+// the pre-kit live/gone booleans above.
+describe('lib/kanban.ts — agentChip() state (DS3 pattern 3)', () => {
+  const task = (over: Partial<Parameters<typeof agentChip>[0]>) => ({
+    taskStatus: 'in-progress',
+    agentRole: 'coder',
+    agentModelTier: 'mid',
+    agentActivity: null,
+    ...over,
+  });
+
+  it('is working while the agent is live and the status is not a Reviewing one', () => {
+    expect(agentChip(task({ agentActivity: 'working' }))?.state).toBe('working');
+  });
+
+  it('is reviewing when the live agent sits on a status the board folds into Reviewing', () => {
+    expect(agentChip(task({ taskStatus: 'reviewing', agentActivity: 'working' }))?.state).toBe(
+      'reviewing',
+    );
+    expect(agentChip(task({ taskStatus: 'merging', agentActivity: 'working' }))?.state).toBe(
+      'reviewing',
+    );
+  });
+
+  it('is waiting when the clock, not a terminal event, says the agent should have returned', () => {
+    expect(agentChip(task({ agentActivity: 'stalled' }))?.state).toBe('waiting');
+  });
+
+  it('is idle once the task is over or nobody is on it', () => {
+    expect(agentChip(task({ agentActivity: null }))?.state).toBe('idle');
+    expect(agentChip(task({ taskStatus: 'completed', agentActivity: 'working' }))?.state).toBe(
+      'idle',
+    );
+  });
+});
+
+// DS3 pattern 7 — group-by switch's pure helpers.
+describe('lib/kanban.ts — epicKeyForTask() (DS3 pattern 7)', () => {
+  it('reads the prefix before the first slash', () => {
+    expect(epicKeyForTask('harness-codex-dispatch/task-a-skill-install')).toBe(
+      'harness-codex-dispatch',
+    );
+  });
+
+  it('is null for a task id with no slash', () => {
+    expect(epicKeyForTask('no-epic-task')).toBeNull();
+  });
+});
+
+describe('lib/kanban.ts — groupByKanban() (DS3 pattern 7)', () => {
+  const task = (over: Partial<Parameters<typeof groupByKanban>[0][number]>) => ({
+    taskId: 'epic-a/task-1',
+    taskStatus: 'in-progress',
+    project: 'shop-api',
+    agentRole: 'coder',
+    epicLabel: 'shop-api: Epic a',
+    ...over,
+  });
+
+  it('status grouping delegates to foldIntoColumns, in its fixed column order', () => {
+    const columns = groupByKanban([task({})], 'status');
+    expect(columns.map((c) => c.key)).toEqual([...KANBAN_COLUMNS]);
+  });
+
+  it('groups by project, with a task lacking one in a trailing "None" bucket', () => {
+    const columns = groupByKanban(
+      [task({ project: 'shop-api' }), task({ taskId: 'epic-b/task-2', project: null })],
+      'project',
+    );
+    expect(columns.map((c) => c.key)).toEqual(['shop-api', '\u0000none']);
+    expect(columns[1]?.label).toBe('None');
+  });
+
+  it('groups by epic, reading the key off the task id and the label off epicLabel', () => {
+    const columns = groupByKanban(
+      [task({ taskId: 'epic-a/task-1', epicLabel: 'shop-api: Epic a' })],
+      'epic',
+    );
+    expect(columns).toEqual([
+      { key: 'epic-a', label: 'shop-api: Epic a', tasks: [task({})] },
+    ]);
+  });
+
+  it('groups by role, with the friendly label, and a task never dispatched in "None"', () => {
+    const columns = groupByKanban(
+      [task({ agentRole: 'coder' }), task({ taskId: 'epic-a/task-2', agentRole: null })],
+      'role',
+    );
+    expect(columns[0]?.label).toBe('Builder');
+    expect(columns[1]?.key).toBe('\u0000none');
+  });
+
+  it('drops failed/superseded tasks by default, same as the status board', () => {
+    const columns = groupByKanban([task({ taskStatus: 'failed' })], 'project');
+    expect(columns).toEqual([]);
   });
 });
 

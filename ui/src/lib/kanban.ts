@@ -168,6 +168,15 @@ export interface AgentChipLike {
   agentActivity: 'working' | 'stalled' | null;
 }
 
+/**
+ * DS3 pattern 3 — the chip's own four-value vocabulary (spec §2.2's
+ * `AgentChip` entry: "working / reviewing / waiting / idle"), distinct from
+ * the two booleans above (`live`/`gone`) that the pre-kit `TaskCard`/
+ * `IdentityChip` still read: those stay as they are so that still-in-scope
+ * old-kit surface does not regress, and `state` is additive.
+ */
+export type AgentState = 'working' | 'reviewing' | 'waiting' | 'idle';
+
 export interface AgentChip {
   /** Friendly `role · tier` (Task 2: roleLabel()), or the label alone when the dispatch named no tier. */
   label: string;
@@ -177,6 +186,22 @@ export interface AgentChip {
   live: boolean;
   /** Nobody is on the task any more: the chip names who did the work, muted. */
   gone: boolean;
+  /** DS3 pattern 3 — the new kit's `AgentChip` state. */
+  state: AgentState;
+}
+
+/**
+ * DS3 pattern 3 — `working`/`reviewing` split by whether the task's own
+ * status already folds into the Kanban "Reviewing" column (`columnForStatus`,
+ * same source the board itself uses, so the two never disagree); `waiting`
+ * is `agentActivity: 'stalled'` (the kanban() query's own name for "the
+ * clock says this agent should have returned"); `idle` is everything else
+ * (settled task, or no live row at all).
+ */
+function agentState(task: AgentChipLike, settled: boolean): AgentState {
+  if (settled || task.agentActivity === null) return 'idle';
+  if (task.agentActivity === 'stalled') return 'waiting';
+  return columnForStatus(task.taskStatus) === 'Reviewing' ? 'reviewing' : 'working';
 }
 
 /**
@@ -206,5 +231,81 @@ export function agentChip(task: AgentChipLike): AgentChip | null {
     title: `${task.agentRole}${task.agentModelTier ? ` · ${task.agentModelTier}` : ''}`,
     live: task.agentActivity === 'working' && !settled,
     gone: task.agentActivity === null || settled,
+    state: agentState(task, settled),
   };
+}
+
+/**
+ * DS3 pattern 7 — group-by switch. `status` keeps `foldIntoColumns`'s own
+ * fixed order and Completed-stays-last behavior; the other three fold into
+ * ad-hoc buckets, alphabetical by label with the "None" bucket (a task
+ * lacking the grouped property) always last, since there is no fixed order
+ * to borrow for them the way there is for status.
+ */
+export type KanbanGroupBy = 'status' | 'project' | 'epic' | 'role';
+
+export interface GroupableTask extends KanbanTaskLike {
+  project: string | null;
+  agentRole: string | null;
+  epicLabel: string | null;
+}
+
+export interface KanbanGroupColumn<T> {
+  /** Stable identity for persistence (hidden-columns list) and Vue `:key`. */
+  key: string;
+  /** What the column header shows. */
+  label: string;
+  tasks: T[];
+}
+
+const NONE_KEY = '\u0000none';
+const NONE_LABEL = 'None';
+
+/**
+ * DS3 pattern 7 — a task's epic, read off its own id rather than a field the
+ * Kanban payload does not carry: `taskId` is `<epic>/<slug>` (the same shape
+ * `epicIdOfIntegrationRef` in queries.ts reads for the `<epic>/integration`
+ * ref), so the prefix before the first `/` is the epic key. Returns null for
+ * a task id with no `/` (no epic).
+ */
+export function epicKeyForTask(taskId: string): string | null {
+  const idx = taskId.indexOf('/');
+  return idx > 0 ? taskId.slice(0, idx) : null;
+}
+
+export function groupByKanban<T extends GroupableTask>(
+  tasks: readonly T[],
+  groupBy: KanbanGroupBy,
+  showAll = false,
+): Array<KanbanGroupColumn<T>> {
+  if (groupBy === 'status') {
+    return foldIntoColumns(tasks, showAll).map((c) => ({ key: c.name, label: c.name, tasks: c.tasks }));
+  }
+  const buckets = new Map<string, { label: string; tasks: T[] }>();
+  for (const task of tasks) {
+    if (!showAll && HIDDEN_BY_DEFAULT.has(task.taskStatus)) continue;
+    let key: string;
+    let label: string;
+    if (groupBy === 'project') {
+      key = task.project ?? NONE_KEY;
+      label = task.project ?? NONE_LABEL;
+    } else if (groupBy === 'epic') {
+      const epicKey = epicKeyForTask(task.taskId);
+      key = epicKey ?? NONE_KEY;
+      label = epicKey ? (task.epicLabel ?? epicKey) : NONE_LABEL;
+    } else {
+      key = task.agentRole ?? NONE_KEY;
+      label = task.agentRole ? roleLabel(task.agentRole) : NONE_LABEL;
+    }
+    const bucket = buckets.get(key);
+    if (bucket) bucket.tasks.push(task);
+    else buckets.set(key, { label, tasks: [task] });
+  }
+  return [...buckets.entries()]
+    .sort(([a], [b]) => {
+      if (a === NONE_KEY) return 1;
+      if (b === NONE_KEY) return -1;
+      return a.localeCompare(b);
+    })
+    .map(([key, { label, tasks: bucketTasks }]) => ({ key, label, tasks: bucketTasks }));
 }
