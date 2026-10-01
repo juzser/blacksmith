@@ -1823,6 +1823,14 @@ summary.bs-inbox__group-head {
   gap: var(--bs-space-5);
   align-items: start;
 }
+/* Same mobile nit as the Kanban board (§3.1): below 640px the fixed 320px
+   rail no longer fits beside the main column without forcing the page to
+   scroll sideways, so it drops under the tabs instead. */
+@media (max-width: 640px) {
+  .bs-task-detail__layout {
+    grid-template-columns: 1fr;
+  }
+}
 .bs-task-detail__overview {
   display: flex;
   flex-direction: column;

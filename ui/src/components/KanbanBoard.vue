@@ -116,9 +116,20 @@ function openPeek(taskId: string, trigger: HTMLElement | null) {
 function onCardSelect(taskId: string) {
   openPeek(taskId, document.activeElement as HTMLElement | null);
 }
-function closePeek() {
+async function closePeek() {
+  const card = lastFocusedCard;
   peekTaskId.value = null;
-  lastFocusedCard?.focus();
+  // TaskPeekPanel's Dialog is always mounted already-open (`:open="true"`,
+  // gated by this `v-if` instead), so `useModalFocus`'s own close branch
+  // never runs for it — its `useInertBackground().release()` only fires
+  // from `onBeforeUnmount` once Vue actually unmounts the Dialog, which
+  // happens on the next render flush, not synchronously here. Focusing the
+  // card before that flush lands on a still-`inert` `#app` and silently
+  // fails (inert subtrees refuse focus), leaving focus on <body> once the
+  // unmount runs moments later (found via e2e). Awaiting a tick lets that
+  // flush — and the inert release — happen first.
+  await nextTick();
+  card?.focus();
 }
 
 function onCardKeydown(event: KeyboardEvent, taskId: string) {
@@ -177,11 +188,12 @@ defineExpose({ focusFirstCard });
         </div>
         <p v-if="col.total === 0" class="bs-kanban-col__empty">No tasks in {{ col.label }}.</p>
         <ul role="list" class="bs-kanban-col__list">
-          <li v-for="task in col.visible" :key="task.taskId" @keydown="onCardKeydown($event, task.taskId)">
+          <li v-for="task in col.visible" :key="task.taskId">
             <KanbanTaskCard
               :task="task"
               :group-by="options.groupBy"
               @select="onCardSelect"
+              @keydown="onCardKeydown($event, task.taskId)"
             />
           </li>
         </ul>

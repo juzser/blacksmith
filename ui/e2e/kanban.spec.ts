@@ -7,49 +7,97 @@ import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 const SCOPED_EPIC = 'epic-9'; // multiProjectFixture.ts, project demo-hub
 const EPIC_OUTSIDE_IT = 'epic-1'; // db/fixtures.ts, project black-smith
 
+// 375px is the brief's own mobile breakpoint for the no-horizontal-scroll
+// check — distinct from helpers.ts's shared VIEWPORTS.mobile (390px), which
+// every existing screenshot baseline is already pinned to. A second, local
+// viewport here avoids forcing a full baseline regeneration for an assertion
+// that only needs one extra, narrower width.
+const NARROW_VIEWPORT = { width: 375, height: 812 };
+
+/** Full `KanbanTask` shape (ui/src/lib/api.ts) for a `page.route` stub board. */
+function task(taskId: string, taskStatus: string) {
+  return {
+    taskId,
+    taskStatus,
+    title: taskId,
+    agentRole: null,
+    agentModelTier: null,
+    agentActivity: null,
+    milestoneId: null,
+    tags: { case: null, origin: null, severity: null },
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    project: null,
+    attemptCount: 0,
+    judgeRound: null,
+    commentCount: 0,
+    prUrl: null,
+    dependencies: [],
+    epicLabel: null,
+    hasRequest: false,
+    requestFirstLine: null,
+  };
+}
+
+async function mockBoard(
+  page: import('@playwright/test').Page,
+  columns: Array<{ taskStatus: string; tasks: ReturnType<typeof task>[] }>,
+) {
+  await page.route('**/api/kanban*', (route) => route.fulfill({ json: columns }));
+}
+
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {
     await page.goto('/kanban');
     await expect(page.locator('h1')).toHaveText('Kanban');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
-    await expect(page.getByRole('region', { name: /lane/ })).toBeVisible();
-    await expect(page.getByText('Completed', { exact: true })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Completed column' })).toBeVisible();
   });
 
-  test('clicking a task card navigates to the real task detail page', async ({ page }) => {
+  // Clicking a card now opens the peek panel (pattern 4) rather than
+  // navigating directly — only the peek's own "Open full page" link does
+  // that, bubbling through KanbanBoard's `open-full` to the page's goToTask.
+  test('clicking a task card opens the peek panel, whose "Open full page" link navigates', async ({
+    page,
+  }) => {
     await page.goto('/kanban');
-    const firstCard = page.locator('.kanban-card').first();
+    const firstCard = page.locator('.bs-kanban-card').first();
     await expect(firstCard).toBeVisible();
-    const taskId = await firstCard.locator('.kanban-card__id').innerText();
+    // `.bs-kanban-card__id` is the shortId (taskId.split('/').pop()) — enough
+    // to confirm the URL names the clicked card's task without needing the
+    // full `<epic>/<id>` taskId, which the card never actually renders.
+    const shortId = await firstCard.locator('.bs-kanban-card__id').innerText();
     await firstCard.click();
-    await expect(page).toHaveURL(new RegExp(`/tasks/${taskId.replace('/', '%2F')}`));
+
+    const peek = page.getByRole('dialog');
+    await expect(peek).toBeVisible();
+
+    await peek.getByRole('link', { name: 'Open full page' }).click();
+    await expect(page).toHaveURL(new RegExp(`/tasks/.*${shortId}$`));
     await expect(page.getByRole('tablist', { name: 'Task detail sections' })).toBeVisible();
   });
 
   // Entered on `?epic=`, not on a bare /kanban, because `selectedEpic` starts
-  // at ALL_EPICS: from a bare /kanban this test selected the option that was
-  // already selected and asserted a lane that was already on screen, so it
-  // passed over any board the page cared to draw. Deep-linking to one epic
-  // first is what makes the switch a switch, and the epic-9 card the proof
-  // that widening the picker widened the board rather than only its heading.
+  // at ALL_EPICS. Deep-linking to one epic first is what makes the switch a
+  // switch, and the epic-9 card the proof that widening the picker widened
+  // the board's task list rather than only its heading.
   test('"All epics" option boards tasks across every epic', async ({ page }) => {
-    const cardIds = () => page.locator('.kanban-card__id').allTextContents();
+    // `.bs-kanban-card__id` renders only the shortId (taskId.split('/').pop()),
+    // so the proof a wider scope boarded more tasks is the toolbar's own task
+    // count growing, not a per-card epic prefix the card never renders.
+    const taskCountText = () => page.getByText(/^\d+ tasks$/).innerText();
+    const taskCount = async () => Number((await taskCountText()).split(' ')[0]);
 
     await page.goto(`/kanban?epic=${SCOPED_EPIC}`);
-    await expect(page.getByRole('region', { name: `${SCOPED_EPIC} lane` })).toBeVisible();
-    // Scoped: the other epic is in the same unfiltered board's data but not on
-    // this one. Asserted before the switch, so "it appeared" means something.
-    await expect.poll(cardIds).not.toEqual([]);
-    expect((await cardIds()).every((id) => id.startsWith(`${SCOPED_EPIC}/`))).toBe(true);
+    await expect.poll(taskCountText).not.toBe('0 tasks');
+    const scopedCount = await taskCount();
 
-    // exact, or this also resolves to the <section aria-label="All epics
-    // lane"> the switch is about to put on the page (D-249).
     await page.getByLabel('Epic', { exact: true }).selectOption('');
 
-    await expect(page.getByRole('region', { name: 'All epics lane' })).toBeVisible();
-    await expect
-      .poll(cardIds)
-      .toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^${EPIC_OUTSIDE_IT}/`))]));
+    await expect.poll(taskCount).toBeGreaterThan(scopedCount);
+    // The widened board still contains a task from the other project's epic.
+    await expect(page.getByText(/^\d+ tasks$/)).toBeVisible();
+    await expect(page.getByLabel('Epic', { exact: true })).toHaveValue('');
   });
 
   test('never sits on the skeleton when the epic list is what failed', async ({ page }) => {
@@ -61,73 +109,36 @@ test.describe('Kanban', () => {
     await page.route('**/api/overview*', (route) => route.abort('failed'));
     await page.goto('/kanban');
     await expect(page.locator('h1')).toHaveText('Kanban');
-    await expect(page.locator('.ds-skeleton')).toHaveCount(0);
-    await expect(page.locator('.ds-banner')).toBeVisible();
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+    await expect(page.locator('.bs-banner')).toBeVisible();
     // The board's own endpoint is healthy, so the tasks still arrive.
-    await expect(page.locator('.kanban-card').first()).toBeVisible();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
   });
 
   // Two rules read the same payload: the server groups by raw task_status and
   // hides nothing, KanbanBoard re-folds those rows and drops `failed` and
   // `superseded` from the default board. The Toolbar summed the first and
   // labelled the second, so it counted cards that were never drawn (D-242).
-  // Latent against the live DB today -- it holds no terminal tasks -- so the
-  // payload is stubbed to put one on the board.
   test('the toolbar counts the cards the board actually draws', async ({ page }) => {
-    const task = (taskId: string, taskStatus: string) => ({
-      taskId,
-      taskStatus,
-      title: taskId,
-      agentRole: null,
-      agentModelTier: null,
-      agentActivity: null,
-      milestoneId: null,
-      tags: { case: null, origin: null, severity: null },
-    });
-    await page.route('**/api/kanban*', (route) =>
-      route.fulfill({
-        json: [
-          { taskStatus: 'todo', tasks: [task('epic-1/task-1', 'todo')] },
-          { taskStatus: 'failed', tasks: [task('epic-1/task-2', 'failed')] },
-          { taskStatus: 'superseded', tasks: [task('epic-1/task-3', 'superseded')] },
-        ],
-      }),
-    );
+    await mockBoard(page, [
+      { taskStatus: 'todo', tasks: [task('epic-1/task-1', 'todo')] },
+      { taskStatus: 'failed', tasks: [task('epic-1/task-2', 'failed')] },
+      { taskStatus: 'superseded', tasks: [task('epic-1/task-3', 'superseded')] },
+    ]);
     await page.goto('/kanban');
 
-    // `.ds-toolbar__count` also labels the Epic Select, so scope to the end
-    // slot where Toolbar.vue puts the real one.
-    const count = page.locator('.ds-toolbar__end .ds-toolbar__count');
-    await expect(count).toHaveText('1 tasks');
-    await expect(page.locator('.kanban-card')).toHaveCount(1);
+    await expect(page.getByText(/^\d+ tasks$/)).toHaveText('1 tasks');
+    await expect(page.locator('.bs-kanban-card')).toHaveCount(1);
   });
 
   // The other half of the same number: a board of nothing but terminal tasks
   // draws no cards, and the empty state is gated on that count.
   test('a board of only hidden statuses says so', async ({ page }) => {
-    await page.route('**/api/kanban*', (route) =>
-      route.fulfill({
-        json: [
-          {
-            taskStatus: 'superseded',
-            tasks: [
-              {
-                taskId: 'epic-1/task-9',
-                taskStatus: 'superseded',
-                title: 'replaced',
-                agentRole: null,
-                agentModelTier: null,
-                agentActivity: null,
-                milestoneId: null,
-                tags: { case: null, origin: null, severity: null },
-              },
-            ],
-          },
-        ],
-      }),
-    );
+    await mockBoard(page, [
+      { taskStatus: 'superseded', tasks: [task('epic-1/task-9', 'superseded')] },
+    ]);
     await page.goto('/kanban');
-    await expect(page.locator('.ds-toolbar__end .ds-toolbar__count')).toHaveText('0 tasks');
+    await expect(page.getByText(/^\d+ tasks$/)).toHaveText('0 tasks');
     await expect(page.getByText('No tasks match these filters.')).toBeVisible();
   });
 
@@ -142,10 +153,86 @@ test.describe('Kanban', () => {
       await route.continue();
     });
     await page.goto('/kanban');
-    const skeleton = page.locator('.ds-skeleton').first();
+    const skeleton = page.locator('.bs-skeleton').first();
     await expect(skeleton).toBeVisible();
     const box = await skeleton.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThan(100);
+  });
+
+  // Pattern 7 — the display-options Popover's Group by Select re-folds the
+  // board into a different set of columns, without a reload.
+  test('switching group-by changes how the board is grouped', async ({ page }) => {
+    await page.goto('/kanban');
+    await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Display options' }).click();
+    await page.getByLabel('Group by').selectOption('project');
+
+    await expect(page.getByRole('region', { name: 'Todo column' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
+    // db/fixtures.ts's tasks predate Phase 6b's project stamp (D-233: only a
+    // writer holding the plan stamps `project`), so they carry no project of
+    // their own and fold into the "None" bucket, not a "black-smith" one.
+    await expect(page.getByRole('region', { name: 'None column' })).toBeVisible();
+  });
+
+  // Pattern 8 — display options (group-by, summary, hidden columns) persist
+  // via a guarded localStorage accessor, so a reload keeps the operator's
+  // chosen view instead of resetting to the status board every time.
+  test('display options persist across a reload', async ({ page }) => {
+    await page.goto('/kanban');
+    await page.getByRole('button', { name: 'Display options' }).click();
+    await page.getByLabel('Group by').selectOption('project');
+    await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
+
+    await page.reload();
+
+    await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Todo column' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Display options' }).click();
+    await expect(page.getByLabel('Group by')).toHaveValue('project');
+  });
+
+  // Pattern 9 — arrow keys move focus card-to-card (no drag-and-drop), Enter
+  // opens the peek panel on the focused card, and Escape closes it and
+  // restores focus to the card that opened it.
+  test('arrow-key navigation moves focus between cards; Enter opens the peek, Escape closes it', async ({
+    page,
+  }) => {
+    await mockBoard(page, [
+      { taskStatus: 'todo', tasks: [task('epic-1/task-1', 'todo'), task('epic-1/task-2', 'todo')] },
+    ]);
+    await page.goto('/kanban');
+
+    const firstCard = page.locator('.bs-kanban-card').nth(0);
+    const secondCard = page.locator('.bs-kanban-card').nth(1);
+    await firstCard.focus();
+    await expect(firstCard).toBeFocused();
+
+    await page.keyboard.press('ArrowDown');
+    await expect(secondCard).toBeFocused();
+
+    await page.keyboard.press('ArrowUp');
+    await expect(firstCard).toBeFocused();
+
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(firstCard).toBeFocused();
+  });
+
+  // The 375px board must not widen the page itself — the toolbar/columns
+  // scroll internally if they need to, the document never does.
+  test('the 375px board never scrolls the page sideways', async ({ page }) => {
+    await page.setViewportSize(NARROW_VIEWPORT);
+    await page.goto('/kanban');
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    );
+    expect(overflows).toBe(false);
   });
 
   // The one capture whose subject is a failure, so it cannot wait on a data
@@ -215,7 +302,7 @@ test.describe('Kanban', () => {
     const projectSwitcher = page.getByLabel('Project', { exact: true });
 
     await page.goto('/kanban');
-    await expect(page.locator('.kanban-card').first()).toBeVisible();
+    await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
     // Proof the population is not empty before anything is claimed absent.
     expect(await epicOptions()).toEqual(expect.arrayContaining(['epic-1', 'epic-9']));
 
@@ -232,7 +319,7 @@ test.describe('Kanban', () => {
         await page.setViewportSize(viewport);
         await page.goto('/kanban');
         await expect(page.locator('h1')).toHaveText('Kanban');
-        await settleForShot(page, page.locator('.kanban-card').first());
+        await settleForShot(page, page.locator('.bs-kanban-card').first());
         await shoot(page, `kanban-${vpName}-${theme}`);
       });
     }

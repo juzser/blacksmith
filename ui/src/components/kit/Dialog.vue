@@ -53,6 +53,7 @@ useModalFocus(
         ref="dialogEl"
         class="bs-dialog"
         :class="{ 'bs-dialog--sm': size === 'sm' }"
+        tabindex="-1"
         :role="role"
         aria-modal="true"
         :aria-label="title"
