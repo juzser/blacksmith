@@ -1594,6 +1594,15 @@ summary.bs-inbox__group-head {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.bs-kanban-card__summary {
+  margin: 0;
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-sm);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .bs-kanban-card__chips {
   flex-wrap: wrap;
 }

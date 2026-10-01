@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   agentChip,
   agentNudgeDue,
+  attemptLabel,
   capColumn,
   cardChips,
   columnTone,
@@ -13,6 +14,7 @@ import {
   foldIntoColumns,
   groupByKanban,
   isDoneStatus,
+  isInteractiveDescendant,
   KANBAN_COLUMNS,
   KANBAN_PAGE_SIZE,
   subStatusSummary,
@@ -556,6 +558,68 @@ describe('lib/kanban.ts — isDoneStatus() (DS3 pattern 7, column collapse)', ()
   it('reads any other status as not done', () => {
     expect(isDoneStatus('in-progress')).toBe(false);
     expect(isDoneStatus('failed')).toBe(false);
+  });
+});
+
+// S2 fix (review round 2) — `onCardKeydown` used to act on every bubbled
+// keydown regardless of where it started, so Enter on the card's own "Open
+// PR" link (or any other focusable descendant) opened the peek panel instead
+// of letting the link's native activation run. The guard is keyed off
+// `target !== currentTarget` plus an interactive tag/role check, not a single
+// hardcoded selector for that one link, so it also covers the row-1 "Copy
+// task id" IconButton and anything else focusable the card ever grows.
+describe('lib/kanban.ts — isInteractiveDescendant() (S2 fix)', () => {
+  const root = { tagName: 'DIV' };
+
+  it('is false for the card root itself, even though the root also carries a role', () => {
+    const cardRoot = { tagName: 'DIV', getAttribute: (name: string) => (name === 'role' ? 'link' : null) };
+    expect(isInteractiveDescendant(cardRoot, cardRoot)).toBe(false);
+  });
+
+  it('is true for a descendant <a>', () => {
+    const anchor = { tagName: 'A' };
+    expect(isInteractiveDescendant(anchor, root)).toBe(true);
+  });
+
+  it('is true for a descendant <button> or <input>', () => {
+    expect(isInteractiveDescendant({ tagName: 'BUTTON' }, root)).toBe(true);
+    expect(isInteractiveDescendant({ tagName: 'INPUT' }, root)).toBe(true);
+  });
+
+  it('is true for a descendant carrying any role attribute', () => {
+    const roled = { tagName: 'SPAN', getAttribute: (name: string) => (name === 'role' ? 'img' : null) };
+    expect(isInteractiveDescendant(roled, root)).toBe(true);
+  });
+
+  it('is false for a plain descendant span with no role', () => {
+    const span = { tagName: 'SPAN', getAttribute: () => null };
+    expect(isInteractiveDescendant(span, root)).toBe(false);
+  });
+
+  it('is false for a null target', () => {
+    expect(isInteractiveDescendant(null, root)).toBe(false);
+  });
+});
+
+// S3 fix (review round 2) — row 5 used to render
+// `Attempt {{ task.judgeRound ?? task.attemptCount }}`, silently swapping
+// which number it showed depending on which field happened to be set. A
+// judge round and a dispatch-attempt count are different counters
+// (api.ts's own comments: attemptCount is "count of this task's
+// dispatch_decision events", judgeRound is "highest judge round among this
+// task's judge-role dispatches") and conflating them under one label misled
+// whichever one lost. The card now only ever shows the attempt count, per
+// ds-spec.md §4.2's own worked example ("Attempt 2" on a task with no judge
+// round at all).
+describe('lib/kanban.ts — attemptLabel() (S3 fix)', () => {
+  it('is null on a task’s first attempt', () => {
+    expect(attemptLabel({ attemptCount: 1 })).toBeNull();
+    expect(attemptLabel({ attemptCount: 0 })).toBeNull();
+  });
+
+  it('names the attempt count once there has been more than one', () => {
+    expect(attemptLabel({ attemptCount: 2 })).toBe('Attempt 2');
+    expect(attemptLabel({ attemptCount: 5 })).toBe('Attempt 5');
   });
 });
 

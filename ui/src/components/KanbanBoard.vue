@@ -24,6 +24,7 @@ import {
   type GroupableTask,
   groupByKanban,
   isDoneStatus,
+  isInteractiveDescendant,
   type KanbanGroupBy,
 } from '../lib/kanban.js';
 import {
@@ -174,6 +175,10 @@ async function closePeek() {
 }
 
 function onCardKeydown(event: KeyboardEvent, taskId: string) {
+  // S2 review fix: a keydown that started on a focusable descendant (e.g.
+  // the footer's "Open PR" link) must keep its own native behaviour instead
+  // of being swallowed by the card's own Enter/Space/arrow handling.
+  if (isInteractiveDescendant(event.target as HTMLElement | null, event.currentTarget)) return;
   const current = event.target as HTMLElement;
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault();
@@ -257,6 +262,7 @@ defineExpose({ focusFirstCard });
             <KanbanTaskCard
               :task="task"
               :group-by="options.groupBy"
+              :summary-enabled="options.summary"
               @select="onCardSelect"
               @keydown="onCardKeydown($event, task.taskId)"
             />
