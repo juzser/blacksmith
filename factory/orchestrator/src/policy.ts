@@ -1441,6 +1441,14 @@ const SUBCOMMAND_NOT_PLAIN_REASON =
  * happens to name a covered subcommand, since a word this unreadable could
  * be any of them. A subcommand read plainly and found covered still needs
  * every word after it plain, the same gate `hasUnsafeWord` already applies.
+ *
+ * The scan covers every word of the segment rather than stopping at the
+ * first one that is not a recognised wrapper: a wrapper list is open-ended
+ * (`sudo`, `env`, `time`, `timeout`, `nice`, `nohup`, `xargs`, `stdbuf`,
+ * `ionice`, `command`, `exec`, a bare `VAR=val` prefix, and whatever the
+ * next one is), so stopping early would miss a disguised `git` sitting
+ * right after a wrapper this function does not recognise. `echo g\it` being
+ * refused along with it is accepted — fail-closed over precise.
  */
 function checkForcePushSubcommandWord(
   segment: string,
@@ -1470,6 +1478,21 @@ function checkForcePushSubcommandWord(
     );
     if (hidden) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
     return null;
+  }
+  // The `git` word itself, found above by its *dequoted* text, still needs
+  // its raw spelling checked: a backslash inside it (`g\it`, `gi\t`) dequotes
+  // to exactly `git` and so is found here, but it also breaks the literal
+  // `\bgit\b` substring every raw-text check in this file scans for —
+  // `GIT_PUSH_ANYWHERE_RE` chief among them, and, outside this file,
+  // `isGitSubcommand`, which rules 1 (push-to-protected), 3
+  // (merge-into-protected) and 5 (history-rewrite-on-protected) all read a
+  // segment through. None of those ever sees a `git` word written this way,
+  // so this refusal is their only defence against one — a future narrowing
+  // of it must keep covering every subcommand those rules care about, not
+  // just force-flagged pushes.
+  const gitWord = words[gitIndex];
+  if (gitWord !== undefined && !isPlainWord(gitWord.raw)) {
+    return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
   }
   const subcommandIndex = gitSubcommandWord(words, gitIndex);
   if (subcommandIndex === -1) return null;
@@ -1755,8 +1778,6 @@ function checkHistoryRewriteOnProtected(
   return violation(rule, renderBranch(rule.reason, branch));
 }
 
-/** Rule 6 detection, half one: is `rm` invoked as a command in this segment? Looser than "first token", so `sudo rm …` still matches; stricter than a bare substring, so the `rm` inside `charm`/`confirm` is not this rule's business. */
-const RM_INVOKE_RE = /(^|[;&|]|\s)rm\s+/;
 /** A bundled short-flag token (`-rf`, `-Rvf`) as opposed to a long flag (`--force`) or a path. */
 const RM_SHORT_FLAG_RE = /^-[a-zA-Z]+$/;
 
@@ -1885,8 +1906,59 @@ function catchUpSegments(command: string): string[] {
     .filter((s) => re.test(s));
 }
 
+/** Rule 6 detection, half one: is `rm` invoked as a command in this segment? Looser than "first token", so `sudo rm …` still matches; stricter than a bare substring, so the `rm` inside `charm`/`confirm` is not this rule's business. Used as a fallback alongside the whole-segment word scan below — see `checkUnboundedRm`. */
+const RM_INVOKE_RE = /(^|[;&|]|\s)rm\s+/;
+
 /** The `rm <args>` run up to the next separator, ported from guard.sh's `grep -Eo 'rm[[:space:]]+[^;&|]*'` and widened with it. Applied per chain segment (see `checkUnboundedRm`), so "up to the next separator" and "to the end of the string" mean the same thing by the time this runs — the negated class is belt and braces, kept in step with the split so the two can never disagree about where a command ends. */
 const RM_ARGS_RE = new RegExp(`rm\\s+([^${SEPARATOR_CHARS}]*)`);
+
+/**
+ * True when any word of `segment` has basename `rm` and resolves to it only
+ * once a backslash is undone (`r\m`, `/bin/r\m`, `./r\m`) — fails closed,
+ * refused outright wherever it sits rather than parsed for its flags and
+ * paths, since neither can be trusted from a word that was never written
+ * plainly. Every word of the segment is scanned, not just the one in command
+ * position: an open-ended list of wrappers (`sudo`, `env`, `time`, `xargs`,
+ * `nohup`, `stdbuf`, `ionice`, `command`, `exec`, a bare `VAR=val` prefix…)
+ * can sit in front of `rm`, so narrowing the scan to command position would
+ * miss a disguised `rm` behind any wrapper not on that list. `echo r\m`
+ * being refused along with it is accepted.
+ */
+function hasDisguisedRmWord(words: readonly DequotedWord[]): boolean {
+  return words.some((word) => {
+    const basename = word.text.split(/[\\/]/).pop() ?? word.text;
+    return basename === 'rm' && !isPlainWord(word.raw);
+  });
+}
+
+/**
+ * The index of the first plain (non-disguised) word in `words` whose
+ * basename is `rm` — `rm`, `/bin/rm`, `./rm` — or `-1` if there is none.
+ * Reading this word's position, rather than just whether one exists, is
+ * what lets `extractRmArgsFromWords` take the words that follow it instead
+ * of re-deriving them from raw text.
+ */
+function plainRmWordIndex(words: readonly DequotedWord[]): number {
+  return words.findIndex((word) => {
+    if (!isPlainWord(word.raw)) return false;
+    const basename = word.text.split(/[\\/]/).pop() ?? word.text;
+    return basename === 'rm';
+  });
+}
+
+/**
+ * `rm`'s arguments, already dequoted, straight from the same word split that
+ * found it. `RM_ARGS_RE` reads flags from the *raw* text
+ * after a literal `rm `, so a quoted invocation like `"rm" -rf /x` was never
+ * matched: the closing quote sits where the regex wants whitespace, the
+ * match fails, and `-rf /x` is never seen at all. The word list has already
+ * dequoted `"rm"` down to the plain word `rm` and split `-rf`/`/x` out as
+ * their own words regardless of how `rm` itself was spelled, so slicing from
+ * the word after it is both simpler and correct where the regex was not.
+ */
+function extractRmArgsFromWords(words: readonly DequotedWord[], rmIndex: number): string[] {
+  return words.slice(rmIndex + 1).map((word) => word.text);
+}
 
 function extractRmArgs(segment: string): string[] {
   const match = RM_ARGS_RE.exec(segment);
@@ -1895,6 +1967,18 @@ function extractRmArgs(segment: string): string[] {
     .trim()
     .split(/\s+/)
     .filter((t) => t !== '');
+}
+
+function isOutOfBoundsRemoval(
+  args: readonly string[],
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+): boolean {
+  if (!hasRecursiveForce(args)) return false;
+  return args.some((tok) => {
+    if (tok.startsWith('-')) return false;
+    return !isAllowedRemovalPath(normalizeRemovalPath(tok, repoRoot), policy);
+  });
 }
 
 /**
@@ -1938,12 +2022,59 @@ function isAllowedRemovalPath(normalizedPath: string, policy: GuardrailPolicy): 
 }
 
 /**
+ * Whether `text` names `rm` outside `allowed_roots`, by itself — no chain
+ * splitting, no wrapper unwrapping, just the three reads of one piece of
+ * text: a disguised `rm` word anywhere is refused outright; a plain `rm`
+ * word's flags come from the same word split that found it
+ * (`extractRmArgsFromWords`), trusted directly; and the raw `RM_INVOKE_RE`
+ * fallback — belt and braces for a spelling the word-level read might miss —
+ * is read with less trust, since it is text `plainRmWordIndex` could not
+ * place a word at. `RM_ARGS_RE` wants whitespace right after a literal `rm`,
+ * so a quoted invocation like `"rm" -rf /x` leaves it with no match and
+ * nothing to say was forced — handled for the plain-word case by reading
+ * args from the words themselves, and for the raw-fallback case by failing
+ * closed when it can find `rm` but not its flags, rather than reading
+ * "found nothing" as "not forced".
+ */
+function rmOutOfBoundsInText(
+  text: string,
+  repoRoot: string | null,
+  policy: GuardrailPolicy,
+): boolean {
+  const words = splitDequotedWords(text);
+  if (hasDisguisedRmWord(words)) return true;
+  const rmIndex = plainRmWordIndex(words);
+  if (rmIndex !== -1) {
+    return isOutOfBoundsRemoval(extractRmArgsFromWords(words, rmIndex), repoRoot, policy);
+  }
+  if (!RM_INVOKE_RE.test(text)) return false;
+  const args = extractRmArgs(text);
+  if (args.length === 0) return true;
+  return isOutOfBoundsRemoval(args, repoRoot, policy);
+}
+
+/**
+ * Rule 6's analogue of `checkForcePush`'s `isShellWrappedForceCandidate`: a
+ * `-c` string handed to `sh`/`bash`/`zsh`/`env`, or `eval`, hides its payload
+ * from a word-level read the same way it hides a force-push from rule 2 — a
+ * pre-existing gap (`sh -c "rm -rf /x"` was allowed on every prior version).
+ * Rather than parse the wrapped command a second time, hand the same
+ * dequoted text back through `rmOutOfBoundsInText`: stripping every quote
+ * character turns `sh -c "rm -rf /x"` into `sh -c rm -rf /x`, where `rm`
+ * reads as an ordinary word like any other.
+ */
+function shellWrappedRmPayload(segment: string): string | null {
+  if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
+  return stripSpliceQuotes(segment).replace(/\\/g, '');
+}
+
+/**
  * Rule 6: a recursive-force `rm` outside `allowed_roots`, however the two
  * flags are spelled (see `hasRecursiveForce`).
  *
  * Checks every chain segment independently, not just the first `rm` in the
  * whole command. guard.sh's own `grep -Eo 'rm[[:space:]]+[^;&|]*'` — and this
- * function, until this fix — stopped at the first match in the *whole*
+ * function, until an earlier fix — stopped at the first match in the *whole*
  * command string, so `rm -rf workspaces/a; rm -rf src/important` read
  * `workspaces/a` (allowed), decided the command was fine, and never looked
  * at `src/important` at all. That is a deliberate behaviour change from a
@@ -1956,13 +2087,14 @@ function checkUnboundedRm(
   policy: GuardrailPolicy,
 ): PolicyViolation | null {
   const outOfBounds = splitChainSegments(command).some((segment) => {
-    if (!RM_INVOKE_RE.test(segment)) return false;
-    const args = extractRmArgs(segment);
-    if (!hasRecursiveForce(args)) return false;
-    return args.some((tok) => {
-      if (tok.startsWith('-')) return false;
-      return !isAllowedRemovalPath(normalizeRemovalPath(tok, repoRoot), policy);
-    });
+    const decoded = decodeAnsiCQuoting(segment);
+    // An unterminated `$'` span cannot be decoded with confidence — fail
+    // closed rather than guess at what it hides, the same direction
+    // `checkForcePush` takes for the same construct.
+    if (decoded.unterminated) return /\brm\b/i.test(segment);
+    if (rmOutOfBoundsInText(decoded.text, repoRoot, policy)) return true;
+    const wrapped = shellWrappedRmPayload(decoded.text);
+    return wrapped !== null && rmOutOfBoundsInText(wrapped, repoRoot, policy);
   });
   if (!outOfBounds) return null;
   return violation(requireRule(policy, 'unbounded-rm'));
