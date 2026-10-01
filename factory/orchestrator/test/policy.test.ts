@@ -909,6 +909,71 @@ describe('evaluateCommand — rule 2: force-push', () => {
     const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
     expect(d.allowed).toBe(true);
   });
+
+  // Issue #273: the defence-in-depth branch above stripped *every*
+  // whitespace character — not just the literal newline the line-
+  // continuation trick leaves behind — before checking whether a non-plain
+  // word's dequoted text ends in "git". A word is only non-plain (and so
+  // reaches this check at all) when its quoting is not a single clean pair
+  // around the whole word — `--title="..."`, flag glued to the quote with
+  // `=`, is the common shape. Once its ordinary spaces are squeezed out too,
+  // a harmless title or message ending in "...ing it" reads as ending in
+  // "git", and a command with no `git` word anywhere in it was refused.
+  it.each([
+    ['gh pr create --title="fix: read the map instead of skipping it" --body-file body.md'],
+    ["echo --msg='please keep doing it'"],
+  ])(
+    'allows %s — an = -glued quoted argument ending in "g it" is not a hidden git word',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  // A word quoted as a single clean pair around its whole span (`--title
+  // "..."`, a separate shell word) is already a plain word regardless of
+  // what it contains, so it never reaches the hidden-word check in the
+  // first place — pinned here so a future change to `isPlainWord` cannot
+  // quietly reopen issue #273 through this shape instead.
+  it('allows a cleanly double-quoted argument ending in "g it", spaces and all', () => {
+    const d = evaluateCommand(
+      ctx({
+        command:
+          'gh pr create --title "fix: read the map instead of skipping it" --body-file body.md',
+        branch: 'feature',
+      }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // The hidden-word branch exists for a raw, un-escaped newline sitting
+  // directly inside a quoted span — bash lets a double- or single-quoted
+  // string carry a literal newline with no backslash at all, so
+  // `joinLineContinuations` (which only deletes a backslash-newline pair)
+  // never sees it. `g"<LF>"it` dequotes to "g\nit", which still spells
+  // `git` once the newline — not an ordinary space — is stripped; this must
+  // stay denied after the fix narrows what gets stripped to newlines.
+  it.each([[`g"\n"it push --force origin main`], [`g'\n'it push -f origin feat`]])(
+    'denies %s — a raw newline inside quotes still hides the git word',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  // Quote-splicing resolves to the exact word `git` with no embedded
+  // whitespace at all (`g""it` dequotes to "git" directly), so it is caught
+  // by the exact-match branch above the hidden one, unaffected by narrowing
+  // what the hidden branch strips — pinned alongside the newline case so
+  // both ways of reaching `git` without spelling it stay covered together.
+  it('denies g""it push --force origin main — quote-splicing still resolves to the exact word "git"', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'g""it push --force origin main', branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
 });
 
 describe('evaluateCommand — rule 3: merge-into-protected', () => {
