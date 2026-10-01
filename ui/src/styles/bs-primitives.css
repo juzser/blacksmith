@@ -169,6 +169,12 @@
   cursor: pointer;
   user-select: none;
   outline: none;
+  /* A RouterLink can wear .bs-btn (NeedsYouInbox.vue's "Decide" action),
+     which renders as a real <a> — without this, the browser's default
+     anchor underline shows through in every state. .bs-btn--link is the
+     one modifier that wants an underline back; it re-adds its own on
+     :hover below, so this reset does not touch that case. */
+  text-decoration: none;
   transition:
     background var(--bs-duration-fast) var(--bs-ease-standard),
     color var(--bs-duration-fast) var(--bs-ease-standard);

@@ -13,6 +13,10 @@ import { describe, expect, it } from 'vitest';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'kit');
 const BUTTON = readFileSync(join(KIT, 'Button.vue'), 'utf8');
+const PRIMITIVES_CSS = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+  'utf8',
+);
 
 describe('kit/Button.vue', () => {
   it('declares the five variants from §2.1, nothing else', () => {
@@ -66,5 +70,20 @@ describe('kit/Button.vue', () => {
     for (const size of sizes) {
       expect([14, 16, 20]).toContain(size);
     }
+  });
+});
+
+// Visual-pass follow-up: the mobile home screenshot showed the "Decide"
+// button underlined like a plain link. Button.vue's root element is
+// `role`-agnostic — NeedsYouInbox.vue puts `.bs-btn.bs-btn--primary` on a
+// RouterLink, which renders as a real `<a>` — so a `.bs-btn` that sets no
+// text-decoration falls through to the browser's default anchor underline.
+// `.bs-btn--link` (a sibling modifier, untouched here) intentionally adds
+// the underline back on hover; that is a different, deliberate case.
+describe('.bs-btn primitive (bs-primitives.css) — anchor-safe', () => {
+  it('drops the default underline so any anchor wearing .bs-btn renders as a button, not a link', () => {
+    const rule = PRIMITIVES_CSS.match(/\.bs-btn\s*\{([^}]*)\}/)?.[1];
+    expect(rule).toBeTruthy();
+    expect(rule).toMatch(/text-decoration:\s*none;/);
   });
 });

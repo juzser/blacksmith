@@ -239,7 +239,9 @@ None of these composables changed for DS0 — the kit swap is presentational.
   `.bs-btn--block` (100% width) sit in `bs-primitives.css` beside the
   `sm`/`md` steps and combine with an existing colour variant
   (`.bs-btn--primary`) rather than adding a third size to the component's
-  prop type.
+  prop type. Because an anchor can wear `.bs-btn` this way, the base rule
+  also resets `text-decoration: none` so a `RouterLink` styled as a button
+  never renders with the browser's default link underline.
 - **Tag's `info` tone has no dedicated hex.** `IconButton`/`Banner`'s
   `tone: info|warning|danger` needs an `info` colour, but the redesign
   spec's 7-tone table (`done/review/progress/todo/blocked/danger/warning`)
