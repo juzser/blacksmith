@@ -178,7 +178,9 @@ Work → Kanban and the task-detail route are rebuilt on the BS kit (ds-spec.md
   routing.
 - **RunHistoryTimeline** — the task-detail page's run history list; tones its
   rows from `taxonomy.ts`'s `runOutcomeKitTone()`, the same outcome-tone
-  mapping the rest of the kit uses, rather than a bespoke per-row rule.
+  mapping the rest of the kit uses, rather than a bespoke per-row rule. Opens
+  the History tab (above the per-event `TimelineRow` list), not the overview
+  tab — see Known deviations.
 - **RequestQuote** — the task-detail page's quoted request-text block.
 
 ## Repo-specific patterns
@@ -442,6 +444,22 @@ None of these composables changed for DS0 — the kit swap is presentational.
   prior assertion, confirmed against the pre-DS3 baseline (which correctly
   stacked at the same width). Fixed with the same `@media (max-width:
   640px)` collapse-to-one-column pattern the Kanban board already uses.
+- **Task-detail's overview tab replaced the "Spec contract" dl card and the
+  branch Tag with a facts row, a "Files this task may change" list, and a
+  collapsed "Technical details" disclosure; `RunHistoryTimeline` moved to
+  the History tab.** Visual-pass items 2-4 (uiux-ds0-3-visual.md): the
+  branch Tag read as a second subtitle beside the status, the dl card put
+  raw metadata (Origin/Case/Epic/Plan version/Claims) above the fold, and
+  RunHistoryTimeline sat on the tab labelled "What was asked" rather than
+  the one named "History". The dl card's two headline fields (case tag,
+  plan version) now render as a single "Type: … · Plan revision N" line
+  (`factsRowText`, each clause independently optional — no "-" placeholder
+  for an absent one); `claims` moved to its own named list; branch, origin
+  and epic moved into a native `<details>`/`<summary>` disclosure, the same
+  pattern `NeedsYouInbox.vue` already uses for its mobile group folding,
+  rather than a bespoke disclosure component. `.bs-task-detail__grid`/
+  `.bs-task-detail__card`/`.bs-task-detail__card--wide` (the two-card grid
+  layout these replaced) were deleted as dead CSS, not left unused.
 
 ## Verification
 

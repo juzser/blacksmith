@@ -1870,17 +1870,40 @@ summary.bs-inbox__group-head {
   flex-direction: column;
   gap: var(--bs-space-4);
 }
-.bs-task-detail__grid {
+/* Visual-pass item 4: the compact "Type: … · Plan revision N" line that
+   replaced the Spec contract dl card's two headline fields. */
+.bs-task-detail__facts {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-task-detail__claim-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
-  gap: var(--bs-space-4);
   flex-wrap: wrap;
+  gap: var(--bs-space-1) var(--bs-space-2);
 }
-.bs-task-detail__card {
-  flex: 1;
-  min-width: 260px;
+.bs-task-detail__claim-empty {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtlest);
 }
-.bs-task-detail__card--wide {
-  flex: 2;
+/* Visual-pass items 2-3: branch/origin/epic, raw data an operator only
+   needs occasionally, collapsed the same way NeedsYouInbox folds its
+   mobile groups — a native <details>/<summary>, no bespoke disclosure
+   component. --bs-touch sizes the summary row as a tap target. */
+.bs-task-detail__tech-details summary {
+  cursor: pointer;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  min-height: var(--bs-touch);
+  display: flex;
+  align-items: center;
+}
+.bs-task-detail__tech-details > dl {
+  margin-top: var(--bs-space-2);
 }
 .bs-task-detail__dl {
   display: grid;

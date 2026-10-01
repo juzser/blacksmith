@@ -86,3 +86,51 @@ describe('TaskDetailPage.vue — humanized task label', () => {
     );
   });
 });
+
+// Visual-pass items 2-4 (§4.7): the branch tag beside the status, and the
+// "Spec contract" dl card, read as false subtitle / raw-data cruft the
+// operator does not need up front; RunHistoryTimeline sat on the wrong tab.
+describe('TaskDetailPage.vue — DS visual pass restructure (items 2-4)', () => {
+  const TEMPLATE = SFC.slice(SFC.indexOf('<template>'));
+
+  it('no longer shows the branch as a visible Tag beside the status', () => {
+    expect(TEMPLATE).not.toMatch(/<Tag v-if="detail\.branch"/);
+  });
+
+  it('collapses branch, origin and epic behind a "Technical details" disclosure', () => {
+    expect(TEMPLATE).toMatch(/<details class="bs-task-detail__tech-details">/);
+    expect(TEMPLATE).toMatch(/<summary>Technical details<\/summary>/);
+    expect(TEMPLATE).toMatch(/detail\.branch/);
+    expect(TEMPLATE).toMatch(/detail\.task\.origin/);
+    expect(TEMPLATE).toMatch(/detail\.task\.epicId/);
+  });
+
+  it('replaces the "Spec contract" dl card with a compact facts row', () => {
+    expect(TEMPLATE).not.toMatch(/Card title="Spec contract"/);
+    expect(TEMPLATE).toMatch(/class="bs-task-detail__facts"/);
+  });
+
+  it('builds the facts row as "Type: … · Plan revision N" from caseTag and planVersion', () => {
+    expect(SFC).toMatch(/const factsRowText = computed/);
+    expect(SFC).toMatch(/Type: \$\{detail\.value\.task\.caseTag\}/);
+    expect(SFC).toMatch(/Plan revision \$\{detail\.value\.task\.planVersion\}/);
+  });
+
+  it('lists claims under "Files this task may change", not a bare "Claims" dt', () => {
+    expect(TEMPLATE).toMatch(/Card title="Files this task may change"/);
+    expect(TEMPLATE).not.toMatch(/<dt>Claims<\/dt>/);
+  });
+
+  it('moves RunHistoryTimeline out of the overview tab', () => {
+    const overview = TEMPLATE.slice(TEMPLATE.indexOf('#overview'), TEMPLATE.indexOf('#findings'));
+    expect(overview).not.toMatch(/RunHistoryTimeline/);
+    expect(overview).not.toMatch(/Card title="Run history"/);
+  });
+
+  it('puts RunHistoryTimeline at the top of History, above the TimelineRow list', () => {
+    const history = TEMPLATE.slice(TEMPLATE.indexOf('#history'));
+    const order = ['<RunHistoryTimeline', '<TimelineRow'].map((marker) => history.indexOf(marker));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+});
