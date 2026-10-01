@@ -99,7 +99,13 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
           {{ g.label }} · {{ g.rows.length }}
         </component>
         <ul class="bs-inbox__list">
-          <li v-for="(r, ri) in g.rows" :key="r.id" class="bs-inbox__row" :data-kind="r.kind">
+          <li
+            v-for="(r, ri) in g.rows"
+            :key="r.id"
+            class="bs-inbox__row"
+            :class="{ 'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0 }"
+            :data-kind="r.kind"
+          >
             <Tag :tone="INBOX_KIND[r.kind].tone" size="sm">{{ INBOX_KIND[r.kind].tag }}</Tag>
             <div class="bs-inbox__text">
               <p class="bs-inbox__title">{{ r.title }}</p>
@@ -108,9 +114,20 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
               </Tooltip>
             </div>
             <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
+            <!-- §3.1: the single most urgent row (first group, first row) on
+                 phone gets one full-width 44px "Decide" action instead of the
+                 inline per-kind label; every other row keeps the small link. -->
             <RouterLink
-              class="bs-btn bs-btn--sm"
-              :class="isPhoneWidth && gi === 0 && ri === 0 ? 'bs-btn--primary' : 'bs-btn--secondary'"
+              v-if="isPhoneWidth && gi === 0 && ri === 0"
+              class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
+              :aria-label="`Decide: ${r.title}`"
+              :to="inboxActionTarget(r)"
+            >
+              Decide
+            </RouterLink>
+            <RouterLink
+              v-else
+              class="bs-btn bs-btn--sm bs-btn--secondary"
               :aria-label="`${INBOX_KIND[r.kind].action}: ${r.title}`"
               :to="inboxActionTarget(r)"
             >

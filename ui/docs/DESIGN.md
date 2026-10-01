@@ -63,7 +63,7 @@ additive and inert until a page-wiring PR imports it.
 
 | Primitive | Notes |
 |---|---|
-| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon` |
+| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon`; raw `.bs-btn--touch`/`.bs-btn--block` CSS modifiers (44px height, full width) exist for call sites that build a `.bs-btn` directly rather than through this component — see Known deviations |
 | Icon | rebuilt on `@lucide/vue` (the old kit's hand-kept `icons.ts` SVG registry is retired); `size: 14\|16\|20`, stroke 1.75 at 14/16, 1.5 at 20 |
 | IconButton | `label` required (no default — a missing one is a type error); additive `tone: default\|inverse` for controls on an inverted surface (Toast's dismiss button); `lint_icon_only.py` gate-enforces the label requirement on every call site, see "Gates wired" |
 | Tooltip | rebuilt on `@floating-ui/dom`; `mode: describe\|label`; hover after 300ms, focus immediately, Escape dismisses |
@@ -227,6 +227,17 @@ None of these composables changed for DS0 — the kit swap is presentational.
   with no accessible name; `opacity: 0` keeps the label announced (paired
   with `aria-busy="true"`) while staying visually invisible and keeping its
   layout box, so the width-lock trick is unaffected.
+- **Button's `.bs-btn--touch`/`.bs-btn--block` are additive CSS modifiers,
+  not a `size`/`block` prop on the component.** §3.1's only on-phone
+  primary action (Home's inbox "Decide") needs a 44px tap target and the
+  full row width; `Button.vue`'s `size` prop only has `sm|md` (28px/32px),
+  and `NeedsYouInbox.vue` already builds its row actions as raw `.bs-btn`
+  classes on a `RouterLink` rather than through `Button.vue` (it needs an
+  anchor, not a `<button>`). `.bs-btn--touch` (44px height) and
+  `.bs-btn--block` (100% width) sit in `bs-primitives.css` beside the
+  `sm`/`md` steps and combine with an existing colour variant
+  (`.bs-btn--primary`) rather than adding a third size to the component's
+  prop type.
 - **Tag's `info` tone has no dedicated hex.** `IconButton`/`Banner`'s
   `tone: info|warning|danger` needs an `info` colour, but the redesign
   spec's 7-tone table (`done/review/progress/todo/blocked/danger/warning`)
