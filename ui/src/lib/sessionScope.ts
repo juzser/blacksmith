@@ -82,7 +82,7 @@ export const SESSION_OPTION_CAP = 25;
  * it. Roadmap is the opposite case -- newly shown, not yet a scope consumer;
  * its epic-block session scoping is out of DS1 (deferred, see DESIGN.md).
  */
-export const SESSION_SCOPABLE_ROUTES: ReadonlySet<string> = new Set(['timeline', 'roadmap']);
+export const SESSION_SCOPABLE_ROUTES: ReadonlySet<string> = new Set(['timeline', 'work-roadmap']);
 
 /** What sessionOptions() needs off a RunningSession. Structural, so the
  *  overview payload satisfies it without being imported. */

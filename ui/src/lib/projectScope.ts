@@ -22,7 +22,7 @@ export const SCOPABLE_ROUTES: ReadonlySet<string> = new Set([
   // `project` for a re-fetch. They were the two the switcher forgot.
   'errors',
   'analytics',
-  'kanban',
-  'roadmap',
+  'work-kanban',
+  'work-roadmap',
   'flow',
 ]);

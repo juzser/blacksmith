@@ -21,4 +21,8 @@ export interface NavItem {
   shortLabel?: string;
   icon: Component;
   route: string;
+  /** Highlights this item for any route whose path starts with this prefix,
+   * in addition to an exact match on `route` (Work: /work/kanban,
+   * /work/roadmap and the legacy /kanban, /roadmap redirects). */
+  matchPrefix?: string;
 }

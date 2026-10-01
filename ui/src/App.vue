@@ -40,10 +40,15 @@ const { sessionScope, width, setSession, setWidth } = useSessionContext();
 
 const sheetOpen = ref(false);
 const activeId = computed(() => {
-  // /p/:project/overview and /overview both highlight "home"; every other
-  // page matches its route exactly (query params ignored).
+  // /p/:project/overview and /overview both highlight "home"; task-detail
+  // highlights "work" (it is reached from Work, not listed in NAV_ITEMS of
+  // its own); every other page matches by its matchPrefix (Work's two child
+  // routes) or its route exactly (query params ignored either way).
   if (route.name === 'overview-global' || route.name === 'overview-project') return 'home';
-  const found = NAV_ITEMS.find((it) => it.route === route.path);
+  if (route.name === 'task-detail') return 'work';
+  const found = NAV_ITEMS.find(
+    (it) => it.route === route.path || (it.matchPrefix && route.path.startsWith(it.matchPrefix)),
+  );
   return found?.id;
 });
 

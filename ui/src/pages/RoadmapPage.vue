@@ -46,7 +46,6 @@ import Banner from '../components/ds/Banner.vue';
 import Button from '../components/ds/Button.vue';
 import EmptyState from '../components/ds/EmptyState.vue';
 import Lozenge from '../components/ds/Lozenge.vue';
-import PageHeader from '../components/ds/PageHeader.vue';
 import Skeleton from '../components/ds/Skeleton.vue';
 import Toolbar from '../components/ds/Toolbar.vue';
 import IdentityChip from '../components/IdentityChip.vue';
@@ -124,7 +123,7 @@ const flowEdges = computed(() =>
 );
 
 function goToKanban(m: MilestoneProgress) {
-  router.push({ path: '/kanban', query: { milestone: m.milestoneId } });
+  router.push({ path: '/work/kanban', query: { milestone: m.milestoneId } });
 }
 
 function goToTask(taskId: string) {
@@ -133,9 +132,7 @@ function goToTask(taskId: string) {
 </script>
 
 <template>
-  <div class="app-page app-page--full-bleed">
-    <PageHeader title="Roadmap" />
-
+  <div>
     <Toolbar :count="`${shown.length} milestones`">
       <input v-model="search" type="search" class="raw-input" aria-label="Search milestone name" placeholder="Search name…" style="height: var(--ds-control-height); border: 1px solid var(--ds-border); border-radius: var(--ds-radius-control); padding: 0 var(--ds-space-2); background: var(--ds-surface); color: var(--ds-text)" />
       <!-- The filter says out loud what it is holding back. A page that

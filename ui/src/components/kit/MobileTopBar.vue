@@ -11,7 +11,8 @@
 // path. Page-view options and "Open desktop view" are deferred, see
 // ui/docs/DESIGN.md Known deviations.
 import { Ellipsis, Moon, Pause, Play, Settings, Sun } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { formatLiveStatus } from '../../lib/format.js';
 import IconButton from './IconButton.vue';
 import MobileProjectSwitcher from './MobileProjectSwitcher.vue';
@@ -37,6 +38,13 @@ const overflowOpen = ref(false);
 function closeOverflow() {
   overflowOpen.value = false;
 }
+
+// Any navigation closes the overflow — in particular Work's "View" radio
+// group teleported in via #bs-mtopbar-overflow-extra, whose own change
+// handler routes rather than emitting a dedicated close event (ds4-plan.md
+// S1, uiux spec §3 focus return).
+const route = useRoute();
+watch(() => route.fullPath, closeOverflow);
 
 // Same text LiveIndicator.vue composes inline (statusLabel + a conditional
 // RelativeTime), as a plain string here because this is an aria-label, not a

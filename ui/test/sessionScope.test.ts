@@ -297,7 +297,7 @@ describe('topbar session picker visibility (ds-spec.md §3): Activity and Work -
   // keep doing so unconditionally, so a deep link into them keeps filtering
   // even with no control on screen to set it.
   it('shows the picker on exactly the Activity and Roadmap routes', () => {
-    expect([...SESSION_SCOPABLE_ROUTES].sort()).toEqual(['roadmap', 'timeline']);
+    expect([...SESSION_SCOPABLE_ROUTES].sort()).toEqual(['timeline', 'work-roadmap']);
   });
 
   it('names only routes router.ts defines', () => {

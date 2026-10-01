@@ -57,7 +57,7 @@ describe('HomePage.vue', () => {
   });
 
   it('links each project card to Work filtered by that project, not /flow', () => {
-    expect(SRC).toMatch(/path: '\/kanban', query: \{ project: p \}/);
+    expect(SRC).toMatch(/path: '\/work\/kanban', query: \{ project: p \}/);
     expect(TEMPLATE).not.toContain('/flow');
   });
 

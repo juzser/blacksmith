@@ -794,6 +794,49 @@
   padding-top: var(--bs-space-4);
 }
 
+/* SegmentedControl (ds4-plan.md S1, Work's Kanban/Roadmap switch): two
+   RouterLinks, no accent fill on the selected item (§1.9 accent budget) —
+   --bs-surface-selected + aria-current="page" is the cue instead, same as
+   the rest of this kit's non-accent active states. One size (md): 36px row
+   height, but items meet --bs-touch (44px) even while the control itself is
+   hidden ≤640px, so a future non-hidden caller stays safe. */
+.bs-segctl {
+  display: flex;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+  height: 36px;
+}
+.bs-segctl__item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--bs-touch);
+  padding: 0 var(--bs-space-3);
+  color: var(--bs-text-subtle);
+  text-decoration: none;
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+}
+.bs-segctl__item:hover {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+}
+.bs-segctl__item[aria-current='page'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+}
+.bs-segctl__item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+@media (max-width: 640px) {
+  .bs-segctl {
+    display: none;
+  }
+}
+
 /* Table (§2.1/§2.3) — .bs-tablewrap is the bordered/rounded outer frame
    (ds/Table.vue's `bordered` prop toggles it); `compact` tightens cell
    padding via whole-step --bs-space-* tokens (no half-step tokens exist in
@@ -1678,6 +1721,12 @@ summary.bs-inbox__group-head {
   display: flex;
   align-items: center;
   gap: var(--bs-space-2);
+}
+.bs-kanban-page__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  margin-left: auto;
 }
 .bs-kanban-page__count {
   font-size: var(--bs-text-xs);
