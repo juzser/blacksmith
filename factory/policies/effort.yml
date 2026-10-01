@@ -7,7 +7,7 @@
 # written for: a decision made fresh every time is a decision made differently
 # every time. So the tiers are declared here and asked for, never recalled.
 #
-# HOST: `smith effort show --plan <plan.json>` reads this file plus the plan's
+# HOST: `bs effort show --plan <plan.json>` reads this file plus the plan's
 # own `effort` field and returns the profile for that epic
 # (factory/orchestrator/src/effort.ts). `.claude/skills/bs/plan.md` and
 # `run.md` run that verb at the top of `/bs plan` and `/bs run` and obey the
@@ -69,7 +69,7 @@ tiers:
     pre_code_uiux: when-ui-criterion
     # /bs plan steps 3-4 — planner <-> spec-reviewer until nothing S1/S2 is left.
     spec_review_rounds: until-clean
-    # /bs plan step 4 — `smith plan quorum` before operator sign-off.
+    # /bs plan step 4 — `bs plan quorum` before operator sign-off.
     plan_quorum: always
     # /bs run step 6 — the grader's bounded rubric loop (agent-constraints.md
     # caps it at 2; a tier may lower that number, never raise it).
@@ -128,22 +128,22 @@ tiers:
 
 # ── What no tier may touch ──────────────────────────────────────────
 #
-# Returned verbatim by `smith effort show` next to every profile. These are
+# Returned verbatim by `bs effort show` next to every profile. These are
 # mechanical oracles and guardrails, not judgments: their cost is a command
 # exiting, not an agent thinking, so scaling them saves nothing and buys
 # nothing but a weaker claim about the result.
 invariants:
   - the gate pipeline — schema check, grader verdict, tests, coverage
-    evidence, findings intake, severity decision (`smith gate run`)
+    evidence, findings intake, severity decision (`bs gate run`)
   - the root-level integration check on the assembled branch
-    (`smith integration check`)
-  - claim disjointness and worktree isolation (`smith wave check`,
-    `smith worktree create/fingerprint/verify`)
+    (`bs integration check`)
+  - claim disjointness and worktree isolation (`bs wave check`,
+    `bs worktree create/fingerprint/verify`)
   - the security-reviewer's conditional dispatch
-    (`smith security triggers`) — sensitive-paths.yml decides it, not a tier
+    (`bs security triggers`) — sensitive-paths.yml decides it, not a tier
   - the operator's plan sign-off, which no tier may skip or infer
-  - the epic-final verdict and its mechanical holds (`smith epic verdict`,
-    `smith epic close`)
+  - the epic-final verdict and its mechanical holds (`bs epic verdict`,
+    `bs epic close`)
   - the event log — every dispatch is still a `dispatch_decision` with a
     causal parent, at every tier
   - the escalation ladder after a blocked round (budgets.yml

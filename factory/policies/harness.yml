@@ -3,14 +3,14 @@
 # architecture §19 "Worker harness port". A *provider* is the model vendor a
 # judge's verdict comes from (crosscheck.yml); a *harness* is the program
 # that holds a worker turn — gives the agent its tools, its working directory,
-# its turn limit. HOST: `smith harness list` / `smith harness plan`
+# its turn limit. HOST: `bs harness list` / `bs harness plan`
 # (factory/orchestrator/src/harness.ts), which read this file when `--policy`
-# names no other. `smith` renders an invocation from it and never starts one
-# (§18 rule 3); `smith-run` (src/run-cli.ts) is the separate binary that does.
+# names no other. `bs` renders an invocation from it and never starts one
+# (§18 rule 3); `bs-run` (src/run-cli.ts) is the separate binary that does.
 #
 # Shape, per harness:
 #   kind          `in-process` — the Claude Code Agent tool, no program started
-#                 (`command`/`args` unused); `cli` — a program `smith-run` spawns
+#                 (`command`/`args` unused); `cli` — a program `bs-run` spawns
 #                 with the rendered prompt on stdin.
 #   roles         taxonomy roles this harness serves; empty = every role that
 #                 ships a `.claude/agents/<role>.md`.
@@ -25,7 +25,7 @@
 #                 when this is empty). Rule 6's fingerprint runs regardless.
 #   schema_args   appended only when the turn names a schema (`--schema`), so a
 #                 turn that validates nothing renders without one.
-#   output        how smith-run reads the program's output: `text` (default),
+#   output        how bs-run reads the program's output: `text` (default),
 #                 `codex-json` (the `codex exec --json` JSONL stream),
 #                 `claude-json` (the `claude -p --output-format json` object).
 #   models        tier → model id for `{model}`; tiers are taxonomy.yml

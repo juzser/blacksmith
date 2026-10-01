@@ -386,8 +386,8 @@ select on. Each names its own bullet, validated against \`taxonomy.yml\`:
 At dispatch, an \`agent-role\` entry reaches only the role its \`agent_role\`
 names, and a \`case-type\` entry only a task whose \`case\` its \`case_type\`
 names. An entry in one of those scopes with **no** selector reaches NOBODY —
-it is inert, not universal, and \`smith lessons for-dispatch\` reports it as
-such. \`smith lessons raise\` refuses to mint one; the entries that predate
+it is inert, not universal, and \`bs lessons for-dispatch\` reports it as
+such. \`bs lessons raise\` refuses to mint one; the entries that predate
 the selector (D-129) are the only ones that can still be in that state.
 
 Two kinds of entry are therefore injected at dispatch and still never

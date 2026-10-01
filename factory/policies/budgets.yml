@@ -12,18 +12,18 @@
 #   * `epic.cap_tokens` — three readers now, and only the newest of them
 #     blocks. planQuorum's budget trigger sums *declared* task budgets against
 #     it before any dispatch and only ever surfaces the finding for a human to
-#     act on; `smith budget alarm` compares it against spend counted from the
-#     event log, after wave merge, and also stops nothing itself. `smith wave
+#     act on; `bs budget alarm` compares it against spend counted from the
+#     event log, after wave merge, and also stops nothing itself. `bs wave
 #     check` (src/waveBudget.ts) is the reader that blocks: at wave admission —
 #     before any task in the wave has been dispatched — it sums the wave's
 #     declared task budgets against headroom under the cap (measured spend plus
 #     a declared price for every dispatch nothing has measured yet, the same
-#     projection `smith budget alarm` computes) and refuses to admit a wave
+#     projection `bs budget alarm` computes) and refuses to admit a wave
 #     that would cross it. It is not a stricter version of the other two
 #     readers' advice; it is the only one of the three standing upstream of the
 #     spend it is judging, so it is the only one that can refuse the spend
 #     instead of merely describing it afterward.
-#   * `epic.alarm_ratio` — `smith budget alarm` (src/budgetAlarm.ts), which
+#   * `epic.alarm_ratio` — `bs budget alarm` (src/budgetAlarm.ts), which
 #     reports each epic's measured and projected spend against
 #     `alarm_ratio * cap_tokens` and exits 1 on a crossing. Measured spend is a
 #     floor, not a total: a judge returns findings rather than a Result, so its
@@ -34,16 +34,16 @@
 #     load-bearing and not merely documentary.
 #   * a task's `tokens` — compared at the gate against the result's
 #     `token_usage.total_tokens`. The per-role caps under `task:` are what
-#     `smith budget alarm` and `smith wave check` charge a dispatch nothing has
+#     `bs budget alarm` and `bs wave check` charge a dispatch nothing has
 #     measured yet, and what the dispatch harness hands a CLI turn as its
 #     `cap_tokens`.
 #   * a task's `diff_lines` — compared at the gate against a real
 #     `git diff --numstat` (src/diffstat.ts), lockfiles and generated output
 #     excluded.
 #   * `escalation_ladder.rungs[].failed_rounds` — counted from `gate-outcome`
-#     events by `smith escalation check` (src/escalation.ts), which asserts the
+#     events by `bs escalation check` (src/escalation.ts), which asserts the
 #     rung's `enforce` obligation against what the log shows happened next.
-#   * `epic.max_in_flight_tasks` — `smith wave check`, which refuses to admit a
+#   * `epic.max_in_flight_tasks` — `bs wave check`, which refuses to admit a
 #     wave that would put more of the epic's tasks in flight at once (admitted,
 #     not yet merged) than this. Null by default; see the field's own comment
 #     below for why it is not the mechanism that bounds cost.
@@ -55,7 +55,7 @@
 # measuring (D-29: a coder spent its tail shaving lines to land exactly on
 # `diff_lines`, stopping mid-procedure to do it).
 #
-# The epic cap no longer works that way: `smith wave check` blocks on one.
+# The epic cap no longer works that way: `bs wave check` blocks on one.
 # The difference is not that an epic overrun matters more than a task overrun
 # — it is *when* each is checked. The task gate polices work already
 # underway, so refusing there distorts the work it is judging. Wave admission
@@ -92,19 +92,20 @@
 #   * `epic.alarm_ratio` is a ratio and is the same at every tier.
 #
 # Per-box env overrides (`.env`, or an exported value, which beats it). Each
-# number that a box may want to move has an env name — SMITH_EPIC_CAP_TOKENS,
-# SMITH_TASK_<ROLE>_CAP_TOKENS, … listed in .env.example — and each name has a
+# number that a box may want to move has an env name — BS_EPIC_CAP_TOKENS,
+# BS_TASK_<ROLE>_CAP_TOKENS, … listed in .env.example (the deprecated
+# SMITH_* spellings still work as a fallback) — and each name has a
 # `_SMALL`, `_MEDIUM` and `_HUGE` variant. For an epic of a given tier the
 # precedence is, highest first:
 #
-#   1. the variant for that tier, e.g. SMITH_EPIC_CAP_TOKENS_HUGE;
-#   2. the bare name, e.g. SMITH_EPIC_CAP_TOKENS, which applies to every tier
+#   1. the variant for that tier, e.g. BS_EPIC_CAP_TOKENS_HUGE;
+#   2. the bare name, e.g. BS_EPIC_CAP_TOKENS, which applies to every tier
 #      that has no variant of its own set;
 #   3. the number in this file for that tier.
 #
 # An env value beats the tier: a bare name pins one number for every tier. A
 # malformed value in any variant — even one for a tier not in play — is
-# refused with `budgets.invalid-env`. `smith wave check` and `smith budget
+# refused with `budgets.invalid-env`. `bs wave check` and `bs budget
 # alarm` name the variables that moved a number, never their values.
 #
 # No concurrency cap on cost grounds, by design (removed 2026-08-05). Workers
@@ -112,7 +113,7 @@
 # by the claim graph, not by a worker count — and fan-out buys wall-clock
 # without buying extra tokens (architecture §15.3). Hundreds of concurrent
 # subagents is a supported shape. That reasoning holds only as long as the
-# token cap it leans on actually binds, which — before `smith wave check` —
+# token cap it leans on actually binds, which — before `bs wave check` —
 # `epic.cap_tokens` did not. `epic.max_in_flight_tasks` below is not that
 # removed cap come back: it defaults to null, and cost stays bounded by
 # `cap_tokens`, not by a worker count. It exists for an operator who wants a
@@ -152,14 +153,14 @@ epic:
                               # so a number raised for one epic is raised for
                               # every epic black-smith will ever run. What
                               # exists is a per-BOX override, a different
-                              # thing: SMITH_EPIC_CAP_TOKENS in the env (or
+                              # thing: BS_EPIC_CAP_TOKENS in the env (or
                               # `.env`) replaces this number for every epic
                               # run on that box while it is set — the
-                              # SMITH_EPIC_* / SMITH_TASK_* names in
+                              # BS_EPIC_* / BS_TASK_* names in
                               # .env.example cover each number in this file
                               # that a box may want to move; (2) a
                               # large share of that 1.5M was rework — stopped
-                              # dispatches and re-dispatches that `smith
+                              # dispatches and re-dispatches that `bs
                               # escalation check` recorded as ladder
                               # violations — so this cap now accommodates
                               # waste as well as work. A cap sized from a
@@ -170,14 +171,14 @@ epic:
                               # work to fit, or ask the operator. Epics that
                               # cannot fit are split at spec time, never
                               # silently extended (extension is always an
-                              # operator question). Checked by `smith budget
+                              # operator question). Checked by `bs budget
                               # alarm <session>`, which the /bs run loop runs at
                               # each wave merge — before P9-33 this number's
                               # only reader was a human remembering to look.
   max_in_flight_tasks: null  # Off by default. "Fan-out buys wall-clock
                               # without buying extra tokens" above is the
                               # standing decision, and it only holds while the
-                              # token cap actually binds — which `smith wave
+                              # token cap actually binds — which `bs wave
                               # check` now makes true. So this is NOT the
                               # mechanism that bounds cost; `cap_tokens` is,
                               # and it is checked regardless of how this field
@@ -185,7 +186,7 @@ epic:
                               # wants a wall-clock or rate-limit bound for a
                               # reason of their own — a provider's
                               # concurrent-request limit, a laptop's CPU count
-                              # — and setting it makes `smith wave check`
+                              # — and setting it makes `bs wave check`
                               # refuse to admit a wave that would put more of
                               # the epic's tasks in flight (admitted, not yet
                               # merged) than this number at once.
@@ -210,7 +211,7 @@ task:
   # researcher was 60k, and planner, tester, security-reviewer and auditor had
   # no cap at all, which left every epic that used one unverifiable.
   coder:
-    cap_tokens: 220000       # Second reader, added 2026-08-26: `smith wave
+    cap_tokens: 220000       # Second reader, added 2026-08-26: `bs wave
                              # check` prices a task that exists only in the
                              # event log at this number. A follow-up minted by
                              # `findings raise` has claims but no declared
@@ -227,7 +228,7 @@ task:
                              # `budget.tokens` is a different silence and is
                              # still refused — the schema requires that field,
                              # so its absence is a plan that never passed
-                             # `smith plan validate`.
+                             # `bs plan validate`.
     cap_diff_lines: 700      # excludes lockfiles/generated files. Measured
                              # p50 316 / p90 727 lines (was 400); small 350,
                              # huge 1400.
@@ -254,7 +255,7 @@ task:
   # and grader wherever it does not name that role itself.
   #
   # Not priced here, and dispatched anyway: merger, uiux, scribe, wave-runner.
-  # `smith budget alarm` cannot put a number on those dispatches, so an epic
+  # `bs budget alarm` cannot put a number on those dispatches, so an epic
   # that used one is reported unverifiable rather than under — the omission is
   # visible instead of free. Left unpriced on purpose until there is real spend
   # data to size them from; inventing a cap would make the projection look
@@ -308,7 +309,7 @@ escalation_ladder:
   # architecture §12, agent-constraints.md "budgets (factory-wide)"
   #
   # `failed_rounds` and `enforce` are the machine-readable half, added P9-32.
-  # src/escalation.ts reads them and `smith escalation check` asserts them
+  # src/escalation.ts reads them and `bs escalation check` asserts them
   # against the log; `trigger`/`action` stay as the human contract and must say
   # the same thing. A failed round is one `gate-outcome` with outcome
   # `blocked` for the task.
@@ -349,7 +350,7 @@ effort_scaling:
   # and it lives in `factory/policies/effort.yml`: a per-epic tier
   # (small/medium/huge) that scales the deliberation steps — pre-code briefs,
   # spec-review rounds, the plan quorum, grader rounds, verifier severities,
-  # the closing spec review — and nothing else. Ask `smith effort show`; the
+  # the closing spec review — and nothing else. Ask `bs effort show`; the
   # two files do not overlap, and neither may touch a mechanical gate.
   - rule: small fixes get a single coder, not a fan-out.
   - rule: >

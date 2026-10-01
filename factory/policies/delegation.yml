@@ -9,15 +9,15 @@
 # event log for what it dispatches" (docs/standards/agent-constraints.md).
 # Until D13 step 3 that was enforced by granting `Agent` to nobody, which also
 # capped an epic at one operator session. A grantee that opens its own session
-# with `smith session start <id> --continues <dispatch-event-id>` is a real
+# with `bs session start <id> --continues <dispatch-event-id>` is a real
 # dispatching node with a real log, so the cap can lift without the rule
 # bending.
 #
-# What a grant may not do — asserted by `smith delegation check` and by
+# What a grant may not do — asserted by `bs delegation check` and by
 # delegation.test.ts against the shipped files, so a widened grant fails CI:
 #
 #   - dispatch itself (a role that dispatches itself writes dispatches about
-#     itself, and `smith tester check` reads a second dispatch as proof of a
+#     itself, and `bs tester check` reads a second dispatch as proof of a
 #     second turn),
 #   - dispatch its own auditor from crosscheck.yml `role_isolation.pairs`
 #     (a coder that picks and prompts its own tester grades itself), or

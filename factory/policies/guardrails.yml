@@ -1,7 +1,7 @@
 # Blacksmith — guardrail enforcement policy
 #
 # docs/standards/guardrails.md is the contract; this file is the data half of
-# what enforces it. HOST: `smith policy check`/`smith policy hook`
+# what enforces it. HOST: `bs policy check`/`bs policy hook`
 # (factory/orchestrator/src/policy.ts), and — via `dist/policyHook.js` —
 # `.claude/hooks/guard.sh`, the PreToolUse gate on every guarded tool call
 # an agent session makes.
@@ -125,7 +125,7 @@ rules:
 # ---------------------------------------------------------------------------
 #
 # Everything above applies to every agent session. This block applies to one
-# additional condition: a `smith sandbox open` lease is active over the
+# additional condition: a `bs sandbox open` lease is active over the
 # directory the command will run in (factory/orchestrator/src/sandbox.ts).
 # The orchestrator opens a lease before handing a worktree to one of the six
 # read-only judge roles and closes it after.
@@ -143,7 +143,7 @@ rules:
 #
 # What it is not: a container, a seccomp profile, or a read-only mount. A
 # command that writes through an interpreter (`python3 -c "open(...,'w')"`)
-# is invisible to a matcher, and always will be. `smith worktree verify`
+# is invisible to a matcher, and always will be. `bs worktree verify`
 # stays in the pipeline behind this for exactly that reason. Both halves are
 # stated in docs/standards/guardrails.md; neither is sold as the other.
 #
@@ -159,7 +159,7 @@ judge_sandbox:
   # `Edit`/`Write` (.claude/agents/*.md). `researcher` is deliberately absent
   # — fetching is its job, and it is never leased. A lease is matched to a
   # rule set by role, and a role named in neither list falls back to *this*
-  # one, so the list is the vocabulary `smith sandbox open --role` validates
+  # one, so the list is the vocabulary `bs sandbox open --role` validates
   # against rather than a gate of its own.
   roles: [reviewer, verifier, spec-reviewer, security-reviewer, grader, uiux]
 

@@ -95,7 +95,7 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       always logged, including when the
                   #                       project declares nothing to install
                   # judges-outstanding  — a judge this task dispatched through
-                  #                       `smith judge dispatch` never reported
+                  #                       `bs judge dispatch` never reported
                   #                       back, so the gate refuses to score an
                   #                       unknown: a missing `--evidence` reads
                   #                       identically whether the judge found
@@ -219,10 +219,10 @@ error:
                  # (planner, scribe) wrote outside its declared write root
                  # (P9-3); shipped as a code before it was a class
                  # judge-mutation — a read-only judge moved the worktree it
-                 # was judging (P9-5, `smith worktree verify`)
+                 # was judging (P9-5, `bs worktree verify`)
                  # uncited-claim — a researcher finding with no citation, or a
                  # citation that is neither a repo path with a line number nor
-                 # a URL actually fetched (P9-6, `smith research check`)
+                 # a URL actually fetched (P9-6, `bs research check`)
                  # unsourced-recommendation — a brief's recommendation names no
                  # finding, or names one the brief does not carry, so what came
                  # from fetched text is invisible (P9-6)
