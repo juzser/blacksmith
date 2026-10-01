@@ -223,6 +223,54 @@ test.describe('Kanban', () => {
     await expect(firstCard).toBeFocused();
   });
 
+  // S2 review fix — Enter on the card's own "Open PR" link used to be
+  // swallowed by the card's keydown handler and open the peek panel instead
+  // of letting the link's native activation run. Focusing the link directly
+  // and pressing Enter must leave the peek panel closed.
+  test('Enter on the "Open PR" link does not open the peek panel', async ({ page }) => {
+    await mockBoard(page, [
+      {
+        taskStatus: 'todo',
+        tasks: [{ ...task('epic-1/task-1', 'todo'), prUrl: 'https://example.com/pr/1' }],
+      },
+    ]);
+    await page.goto('/kanban');
+
+    const link = page.getByRole('link', { name: 'Open PR' });
+    await link.focus();
+    await expect(link).toBeFocused();
+
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  // S3 review fix — the "Show summary" toggle used to do nothing because no
+  // summary field was ever rendered. It now shows the linked request's first
+  // line, hidden again once the toggle is switched off.
+  test('the summary toggle shows and hides the request first line on a card', async ({ page }) => {
+    await mockBoard(page, [
+      {
+        taskStatus: 'todo',
+        tasks: [
+          {
+            ...task('epic-1/task-1', 'todo'),
+            hasRequest: true,
+            requestFirstLine: 'Fix the login button alignment',
+          },
+        ],
+      },
+    ]);
+    await page.goto('/kanban');
+
+    await expect(page.getByText('Fix the login button alignment')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Display options' }).click();
+    await page.getByLabel('Show summary').uncheck();
+
+    await expect(page.getByText('Fix the login button alignment')).toHaveCount(0);
+  });
+
   // The 375px board must not widen the page itself — the toolbar/columns
   // scroll internally if they need to, the document never does.
   test('the 375px board never scrolls the page sideways', async ({ page }) => {
