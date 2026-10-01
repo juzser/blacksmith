@@ -268,6 +268,56 @@ function readJsonFile<T>(filePath: string): T {
  */
 const MAX_CHECK_TIMEOUT_MS = 2_147_483_647;
 
+/**
+ * `--findings <file>`'s intake, both places it's read (`findings raise`,
+ * `gate run`). The file is a pre-minted `RaiseFindingInput[]` (`{finding,
+ * filePath}`) — a replay, a fixture, a cross-check re-run — not the
+ * `FindingEvidence[]` (`{file_path, finding_category, ...}`, snake_case) a
+ * judge artifact actually holds, the shape `--evidence` expects. Reading it
+ * unvalidated used to crash deep inside routing: `normalizeRepoPath` reads
+ * `filePath` straight off the item, so a judge artifact's `undefined`
+ * `filePath` threw a raw TypeError (#285) instead of naming what was wrong.
+ */
+function readFindingsInputFile(filePath: string): RaiseFindingInput[] {
+  const items = readJsonFile<unknown>(filePath);
+  if (!Array.isArray(items)) {
+    throw new SmithError(
+      'cli.invalid-flag',
+      `--findings ${filePath} must be a JSON array of {finding, filePath} items, got ${typeof items}.`,
+      { flag: 'findings', file: filePath },
+    );
+  }
+  items.forEach((item, index) => {
+    const record = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const looksLikeEvidence =
+      typeof record.file_path === 'string' &&
+      typeof record.finding_category === 'string' &&
+      record.finding === undefined;
+    if (looksLikeEvidence) {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--findings ${filePath} item ${index} looks like a judge artifact (FindingEvidence: file_path/finding_category), not a raised finding ({finding, filePath}). Use --evidence <file> --found-by <role> instead.`,
+        { flag: 'findings', file: filePath, index },
+      );
+    }
+    if (typeof record.filePath !== 'string') {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--findings ${filePath} item ${index} is missing a string "filePath".`,
+        { flag: 'findings', file: filePath, index, field: 'filePath' },
+      );
+    }
+    if (record.finding === null || typeof record.finding !== 'object') {
+      throw new SmithError(
+        'cli.invalid-flag',
+        `--findings ${filePath} item ${index} is missing a "finding" object.`,
+        { flag: 'findings', file: filePath, index, field: 'finding' },
+      );
+    }
+  });
+  return items as RaiseFindingInput[];
+}
+
 function readChecksFile(filePath: string): CheckCommand[] {
   const checks = readJsonFile<CheckCommand[]>(filePath);
   for (const check of checks) {
@@ -3584,7 +3634,7 @@ async function main(): Promise<number> {
     // judge at this gate (D-32/P9-13). `--findings` stays for already-minted
     // records (replays, fixtures, cross-check re-runs).
     const findingsInput = [
-      ...(flags.findings ? readJsonFile<RaiseFindingInput[]>(flags.findings) : []),
+      ...(flags.findings ? readFindingsInputFile(flags.findings) : []),
       ...mintFromEvidence(args, taskId),
     ];
     const lessons = flags.lessons ? parseLessons(readFileSync(flags.lessons, 'utf8')) : [];
@@ -4143,7 +4193,7 @@ async function main(): Promise<number> {
     const mintTaskId = specDispatch && plan ? `${plan.epic_id}/${RESERVED_TASK_ID}` : defaultTaskId;
 
     const findingsInput = [
-      ...(flags.findings ? readJsonFile<RaiseFindingInput[]>(flags.findings) : []),
+      ...(flags.findings ? readFindingsInputFile(flags.findings) : []),
       // The mint id, not the default one: a spec finding belongs to the epic
       // (D-33), and the dispatch's scope rides along with it so every finding
       // in the batch is spec-scoped by construction.
