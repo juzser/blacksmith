@@ -1,6 +1,7 @@
 // Kanban §5.3 status-column folding: reconciles taxonomy.yml's 12-value
 // task_status against §10's 5-column board. `failed`/`superseded` are
 // terminal/replaced, hidden from the default board (design-spec.md §5.3).
+import { agentWaitingThresholdMs } from './constants.js';
 import { roleLabel } from './roleLabels.js';
 import { isTaskOver } from './taxonomy.js';
 
@@ -233,6 +234,19 @@ export function agentChip(task: AgentChipLike): AgentChip | null {
     gone: task.agentActivity === null || settled,
     state: agentState(task, settled),
   };
+}
+
+/**
+ * DS3 pattern 3 — whether a "waiting" chip should add the nudge suffix
+ * ("— a nudge may help"), gated by `agentWaitingThresholdMs` (constants.ts):
+ * the server's `stalled` flag names the state, this constant names how long
+ * is long enough to suggest doing something about it.
+ */
+export function agentNudgeDue(updatedAt: string, nowIso?: string): boolean {
+  const then = new Date(updatedAt).getTime();
+  if (Number.isNaN(then)) return false;
+  const now = nowIso ? new Date(nowIso).getTime() : Date.now();
+  return now - then >= agentWaitingThresholdMs;
 }
 
 /**

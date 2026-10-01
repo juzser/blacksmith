@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   agentChip,
+  agentNudgeDue,
   capColumn,
   epicKeyForTask,
   foldIntoColumns,
@@ -339,6 +340,25 @@ describe('lib/kanban.ts — agentChip() state (DS3 pattern 3)', () => {
     expect(agentChip(task({ taskStatus: 'completed', agentActivity: 'working' }))?.state).toBe(
       'idle',
     );
+  });
+});
+
+describe('lib/kanban.ts — agentNudgeDue() (DS3 pattern 3)', () => {
+  it('is false before agentWaitingThresholdMs has elapsed', () => {
+    // Threshold is 4h; 1h in is not yet long enough to suggest a nudge.
+    expect(
+      agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T01:00:00.000Z'),
+    ).toBe(false);
+  });
+
+  it('is true once agentWaitingThresholdMs has elapsed', () => {
+    expect(
+      agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T04:00:00.000Z'),
+    ).toBe(true);
+  });
+
+  it('is false for an unparseable timestamp rather than throwing', () => {
+    expect(agentNudgeDue('not-a-date', '2026-01-01T04:00:00.000Z')).toBe(false);
   });
 });
 
