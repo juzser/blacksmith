@@ -297,6 +297,14 @@ export function columnTone(groupBy: KanbanGroupBy, key: string): KitTone {
   return groupBy === 'status' ? taskStatusKitTone(key) : 'neutral';
 }
 
+// ds-spec.md §3.1 Work/Kanban row — the phone tab row "default[s] to the
+// first non-empty column". Pure so the fallback logic is unit-tested here
+// rather than only via a source-text scrape of KanbanBoard.vue's template.
+export function defaultMobileColumnKey(columns: readonly { key: string; total: number }[]): string | null {
+  if (columns.length === 0) return null;
+  return columns.find((c) => c.total > 0)?.key ?? columns[0]?.key ?? null;
+}
+
 export function groupByKanban<T extends GroupableTask>(
   tasks: readonly T[],
   groupBy: KanbanGroupBy,

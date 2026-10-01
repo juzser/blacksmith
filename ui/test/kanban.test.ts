@@ -9,6 +9,7 @@ import {
   capColumn,
   cardChips,
   columnTone,
+  defaultMobileColumnKey,
   dependencyChainText,
   epicKeyForTask,
   foldIntoColumns,
@@ -626,6 +627,29 @@ describe('lib/kanban.ts — attemptLabel() (S3 fix)', () => {
   it('names the attempt count once there has been more than one', () => {
     expect(attemptLabel({ attemptCount: 2 })).toBe('Attempt 2');
     expect(attemptLabel({ attemptCount: 5 })).toBe('Attempt 5');
+  });
+});
+
+describe('lib/kanban.ts — defaultMobileColumnKey() (ds-spec.md §3.1 Work/Kanban row)', () => {
+  it('picks the first column that has at least one task', () => {
+    const columns = [
+      { key: 'todo', total: 0 },
+      { key: 'in-progress', total: 3 },
+      { key: 'done', total: 2 },
+    ];
+    expect(defaultMobileColumnKey(columns)).toBe('in-progress');
+  });
+
+  it('falls back to the first column key when every column is empty', () => {
+    const columns = [
+      { key: 'todo', total: 0 },
+      { key: 'done', total: 0 },
+    ];
+    expect(defaultMobileColumnKey(columns)).toBe('todo');
+  });
+
+  it('returns null for an empty board', () => {
+    expect(defaultMobileColumnKey([])).toBeNull();
   });
 });
 

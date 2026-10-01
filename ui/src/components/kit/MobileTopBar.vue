@@ -84,6 +84,11 @@ const dotLabel = computed(() => formatLiveStatus(props.live, props.lastEventAt, 
           "
         />
         <IconButton :icon="Settings" label="Settings" size="sm" disabled />
+        <!-- ds-spec.md §3.1 Work/Kanban row: page-specific overflow controls
+             (e.g. Kanban's display options) teleport in here, same Teleport
+             mechanism kit/Dialog.vue/Sheet.vue/Toast.vue already use. Kept
+             prop-free: MobileTopBar stays generic shell chrome. -->
+        <div id="bs-mtopbar-overflow-extra" class="bs-mtopbar__overflow-extra"></div>
       </div>
     </Popover>
   </header>

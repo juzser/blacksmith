@@ -41,6 +41,7 @@ import TimelineRow from '../components/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useToast } from '../composables/useToast.js';
+import { useViewport } from '../composables/useViewport.js';
 import {
   applyWaiverBatch,
   fetchTaskDetail,
@@ -65,6 +66,7 @@ import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 const props = defineProps<{ taskId: string }>();
 const { setBreadcrumb } = useBreadcrumb();
 const { show: showToast } = useToast();
+const { isPhoneWidth } = useViewport();
 
 const detail = ref<TaskDetail | null>(null);
 const error = ref<string | null>(null);
@@ -261,7 +263,7 @@ const factsRowText = computed(() => {
           <AgentChip v-if="agentChipTask" :task="agentChipTask" />
         </template>
         <template #actions>
-          <Button variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
+          <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
         </template>
       </PageHeader>
 
