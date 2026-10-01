@@ -1922,8 +1922,28 @@ const TOKEN_START = String.raw`(?:^|[\s'"(\`;|&])`;
 const RAW_RECURSIVE_FLAG_RE = new RegExp(`${TOKEN_START}-(?:-recursive\\b|[A-Za-z]*[rR][A-Za-z]*)`);
 const RAW_FORCE_FLAG_RE = new RegExp(`${TOKEN_START}-(?:-force\\b|[A-Za-z]*f[A-Za-z]*)`);
 
+/**
+ * Outside single quotes, the shell turns a backslash followed by any
+ * character into that character, and drops a backslash-newline outright —
+ * its line continuation. `-\r` reads as `-r`, so the two flag regexes above
+ * need to see the escape resolved, not the backslash that is still sitting
+ * in front of the letter. This text is exactly the text whose quoting
+ * could not be resolved with confidence (an unterminated quote, or a
+ * nesting depth this scanner gave up delimiting), so there is no reliable
+ * way to tell whether a given backslash sits inside single quotes, where
+ * the shell would have left it untouched. Reading every backslash as an
+ * escape is the same fail-closed direction the rest of this fallback
+ * already takes: over-denying a backslash that was really inside single
+ * quotes costs nothing here, and under-denying one that was not is the gap
+ * this closes.
+ */
+function unescapeForFlagScan(text: string): string {
+  return text.replace(/\\([\s\S])/g, (_match, ch: string) => (ch === '\n' ? '' : ch));
+}
+
 function hasRecursiveForceInText(text: string): boolean {
-  return RAW_RECURSIVE_FLAG_RE.test(text) && RAW_FORCE_FLAG_RE.test(text);
+  const unescaped = unescapeForFlagScan(text);
+  return RAW_RECURSIVE_FLAG_RE.test(unescaped) && RAW_FORCE_FLAG_RE.test(unescaped);
 }
 
 /**

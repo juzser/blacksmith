@@ -2077,6 +2077,54 @@ describe('evaluateCommand — a substitution nested past the read limit, or one 
   });
 });
 
+// The raw-text fallback reads `-r`/`-f` as literal letters, but the shell
+// does not: outside single quotes, a backslash in front of any character —
+// `\r`, `\-`, even a bare `\` before a trailing newline — is read as that
+// character, or as nothing at all for the newline case. A flag spelled with
+// an escaped letter (`-\r`) or an escaped hyphen (`\-r`) carried the same
+// recursive-force meaning past this fallback unread. Because this fallback
+// only ever runs once the quoting itself could not be resolved with
+// confidence, there is no reliable read on whether a given backslash sat
+// inside single quotes — so every one of them is now read as an escape
+// before the two flag scans run, the same fail-closed direction the rest of
+// this file already takes.
+describe('evaluateCommand — a backslash escape inside the raw-text fallback scan', () => {
+  const unclosed = (flags: string) => `echo 'unclosed span X=rm; $X ${flags} /x`;
+
+  it.each([
+    ['-\\r -\\f', unclosed('-\\r -\\f')],
+    ['-\\r\\f', unclosed('-\\r\\f')],
+    ['-r\\f', unclosed('-r\\f')],
+    ['--\\recursive --\\force', unclosed('--\\recursive --\\force')],
+    ['\\-r \\-f', unclosed('\\-r \\-f')],
+  ])('denies %s — an escaped flag letter still reads as recursive-force', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('denies a backslash-newline splitting a flag — the continuation is dropped, not read as a letter', () => {
+    const command = "echo 'unclosed span X=rm; $X -r -\\\nf /x";
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([[`git commit -m "it's -rf free"`], ['pnpm run test'], ['echo "$(date)"'], [`printf 'a\\nb'`]])(
+    'allows %s — nothing removal-shaped, escaped or not',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows 15 levels of $(echo $(echo …)) wrapping plain echo hi — short of the cap, read normally', () => {
+    const nestEcho = (levels: number, inner: string) =>
+      `${'$(echo '.repeat(levels)}${inner}${')'.repeat(levels)}`;
+    const command = nestEcho(15, 'echo hi');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block
