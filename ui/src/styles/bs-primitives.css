@@ -1625,6 +1625,28 @@ summary.bs-inbox__group-head {
   padding-top: var(--bs-space-2);
 }
 
+.bs-kanban-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+  flex-wrap: wrap;
+}
+.bs-kanban-page__toolbar-field {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.bs-kanban-page__count {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-variant-numeric: tabular-nums;
+}
+.bs-kanban-page__skeletons {
+  display: flex;
+  gap: var(--bs-space-4);
+}
+
 .bs-kanban-board {
   display: flex;
   flex-direction: column;
