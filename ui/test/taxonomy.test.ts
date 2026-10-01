@@ -16,6 +16,7 @@ import {
   MILESTONE_STATUS_TONE,
   milestoneStatusTone,
   planStatusTone,
+  runOutcomeKitTone,
   runStatusTone,
   severityKitTone,
   severityTone,
@@ -234,5 +235,30 @@ describe('lib/taxonomy.ts — severityKitTone/findingStatusKitTone/agentStatusKi
     expect(agentStatusKitTone('error')).toBe('danger');
     expect(agentStatusKitTone('superseded')).toBe('neutral');
     expect(agentStatusKitTone('abandoned')).toBe('neutral');
+  });
+});
+
+describe('lib/taxonomy.ts — runOutcomeKitTone() (RunHistoryTimeline part 2 fix)', () => {
+  it('follows the outcome, not the kind, for a failed result', () => {
+    expect(runOutcomeKitTone('result', 'dead')).toBe('danger');
+  });
+
+  it('keeps the done tone for a successful result', () => {
+    expect(runOutcomeKitTone('result', 'done')).toBe('done');
+  });
+
+  it('an error row is always danger, whatever its outcome text names', () => {
+    expect(runOutcomeKitTone('error', 'spec.schema-invalid')).toBe('danger');
+    expect(runOutcomeKitTone('error', null)).toBe('danger');
+  });
+
+  it('dispatch and judge-report keep their own default tone when outcome names no failure', () => {
+    expect(runOutcomeKitTone('dispatch', null)).toBe('progress');
+    expect(runOutcomeKitTone('judge-report', 'no-findings')).toBe('review');
+    expect(runOutcomeKitTone('judge-report', '2-findings')).toBe('review');
+  });
+
+  it('falls back to neutral for an unknown kind', () => {
+    expect(runOutcomeKitTone('invented', null)).toBe('neutral');
   });
 });

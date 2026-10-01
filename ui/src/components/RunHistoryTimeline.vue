@@ -8,6 +8,7 @@ import { CircleAlert, FileCheck, PlayCircle, Send } from '@lucide/vue';
 import type { TaskRun } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
 import { roleLabel } from '../lib/roleLabels.js';
+import { runOutcomeKitTone } from '../lib/taxonomy.js';
 import Icon from './kit/Icon.vue';
 import Tag from './kit/Tag.vue';
 
@@ -18,13 +19,6 @@ const ICON_FOR_KIND = {
   'judge-report': FileCheck,
   result: PlayCircle,
   error: CircleAlert,
-} as const;
-
-const TONE_FOR_KIND = {
-  dispatch: 'progress',
-  'judge-report': 'review',
-  result: 'done',
-  error: 'danger',
 } as const;
 
 function label(run: TaskRun): string {
@@ -51,7 +45,7 @@ function tokens(run: TaskRun): string | null {
       <div class="bs-run-history__main">
         <div class="bs-run-history__head">
           <span class="bs-run-history__label">{{ label(run) }}</span>
-          <Tag v-if="run.outcome" :tone="TONE_FOR_KIND[run.kind]" variant="subtle" size="sm">{{ run.outcome }}</Tag>
+          <Tag v-if="run.outcome" :tone="runOutcomeKitTone(run.kind, run.outcome)" variant="subtle" size="sm">{{ run.outcome }}</Tag>
         </div>
         <span class="bs-run-history__meta">
           {{ formatDateTime(run.ts) }}<template v-if="tokens(run)"> · {{ tokens(run) }}</template>

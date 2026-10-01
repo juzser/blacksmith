@@ -249,6 +249,32 @@ export function agentStatusKitTone(status: string): KitTone {
   return TONE_TO_KIT_TONE[agentStatusTone(status)];
 }
 
+const RUN_KIND_DEFAULT_KIT_TONE: Record<string, KitTone> = {
+  dispatch: 'progress',
+  'judge-report': 'review',
+  result: 'done',
+  error: 'danger',
+};
+
+/**
+ * DS3 part 2 fix — `RunHistoryTimeline`'s outcome `Tag` tone previously came
+ * from `run.kind` alone, so a `result` row whose own outcome was `dead` (or
+ * any other failure) still rendered with the `result` kind's `done` default.
+ * The tone follows the outcome text first — `dead`/anything naming a failure
+ * or an error reads `danger` regardless of which event kind carried it — and
+ * only falls back to the kind's own default tone when the outcome names no
+ * failure (a judge report's `no-findings`/`N-findings`, a dispatch's `null`).
+ */
+export function runOutcomeKitTone(kind: string, outcome: string | null): KitTone {
+  if (outcome !== null) {
+    const normalized = outcome.toLowerCase();
+    if (normalized === 'dead' || normalized.includes('fail') || normalized.includes('error')) {
+      return 'danger';
+    }
+  }
+  return RUN_KIND_DEFAULT_KIT_TONE[kind] ?? 'neutral';
+}
+
 /** §3.4 severity → tone + variant (S1 is the one "bold" — a danger wall). */
 export function severityTone(severity: string): ToneMapping {
   switch (severity) {
