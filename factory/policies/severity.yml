@@ -36,9 +36,9 @@ levels:
           system: a spec'd layout broken, or content clipped/overflowing, at
           a required viewport; an interactive target below the project's
           declared touch-target minimum (fall back to the WCAG 2.2 target
-          size minimum only when the project declares none); text or
-          non-text contrast below WCAG AA; a required state (empty, error,
-          loading) missing
+          size minimum only when the project declares none); a required
+          state (empty, error, loading) missing (contrast: see a11y WCAG AA
+          above)
     on_trigger: >
       bounce to coder on the same branch; after 2 failed rounds, escalate
       model tier (mid -> frontier, budgets.yml); after 3, escalate to
