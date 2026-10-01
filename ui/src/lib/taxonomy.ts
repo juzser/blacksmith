@@ -186,6 +186,29 @@ export function lessonStatusTone(status: string): Tone {
   return LESSON_STATUS_TONE[status] ?? 'neutral';
 }
 
+/** DS3 — ds-spec.md §1.1's task_status -> kit `Tag` tone (not the old `Tone`/Lozenge vocabulary). */
+export type KitTone = 'done' | 'review' | 'progress' | 'todo' | 'blocked' | 'danger' | 'warning' | 'neutral';
+
+const TASK_STATUS_KIT_TONE: Record<string, KitTone> = {
+  completed: 'done',
+  waived: 'done',
+  reviewing: 'review',
+  grading: 'review',
+  merging: 'review',
+  'in-progress': 'progress',
+  ready: 'progress',
+  todo: 'todo',
+  blocked: 'blocked',
+  escalated: 'blocked',
+  failed: 'danger',
+  superseded: 'neutral',
+};
+
+/** DS3 pattern 6 — task_status -> the kit `Tag`'s tone, per ds-spec.md §1.1. */
+export function taskStatusKitTone(status: string): KitTone {
+  return TASK_STATUS_KIT_TONE[status] ?? 'neutral';
+}
+
 /** §3.4 severity → tone + variant (S1 is the one "bold" — a danger wall). */
 export function severityTone(severity: string): ToneMapping {
   switch (severity) {

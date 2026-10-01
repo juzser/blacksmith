@@ -18,6 +18,7 @@ import {
   severityTone,
   TASK_STATUS_OUTCOME,
   taskOutcome,
+  taskStatusKitTone,
   taskStatusTone,
 } from '../src/lib/taxonomy.js';
 
@@ -165,5 +166,38 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(errorGroupIcon('judgment')).toBe('scale');
     expect(errorGroupIcon('coordination')).toBe('users');
     expect(errorGroupIcon('memory')).toBe('database');
+  });
+});
+
+describe('lib/taxonomy.ts — taskStatusKitTone() (DS3 §1.1 kit Tag tone)', () => {
+  it('maps the done pair', () => {
+    expect(taskStatusKitTone('completed')).toBe('done');
+    expect(taskStatusKitTone('waived')).toBe('done');
+  });
+
+  it('maps the review trio', () => {
+    expect(taskStatusKitTone('reviewing')).toBe('review');
+    expect(taskStatusKitTone('grading')).toBe('review');
+    expect(taskStatusKitTone('merging')).toBe('review');
+  });
+
+  it('maps the progress pair', () => {
+    expect(taskStatusKitTone('in-progress')).toBe('progress');
+    expect(taskStatusKitTone('ready')).toBe('progress');
+  });
+
+  it('maps todo and the blocked pair', () => {
+    expect(taskStatusKitTone('todo')).toBe('todo');
+    expect(taskStatusKitTone('blocked')).toBe('blocked');
+    expect(taskStatusKitTone('escalated')).toBe('blocked');
+  });
+
+  it('maps failed to danger and superseded to neutral', () => {
+    expect(taskStatusKitTone('failed')).toBe('danger');
+    expect(taskStatusKitTone('superseded')).toBe('neutral');
+  });
+
+  it('falls back to neutral for an unclassified status', () => {
+    expect(taskStatusKitTone('invented-tomorrow')).toBe('neutral');
   });
 });

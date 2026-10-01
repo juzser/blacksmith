@@ -6,6 +6,7 @@ import {
   agentChip,
   agentNudgeDue,
   capColumn,
+  cardChips,
   epicKeyForTask,
   foldIntoColumns,
   groupByKanban,
@@ -359,6 +360,44 @@ describe('lib/kanban.ts — agentNudgeDue() (DS3 pattern 3)', () => {
 
   it('is false for an unparseable timestamp rather than throwing', () => {
     expect(agentNudgeDue('not-a-date', '2026-01-01T04:00:00.000Z')).toBe(false);
+  });
+});
+
+describe('lib/kanban.ts — cardChips() (DS3 pattern 6, row 4)', () => {
+  const task = (over: Partial<Parameters<typeof cardChips>[0]> = {}) => ({
+    taskStatus: 'blocked',
+    project: 'shop-api',
+    tags: { case: 'feature', severity: 'S2-major' },
+    ...over,
+  });
+
+  it('suppresses the status chip only when grouped by status', () => {
+    expect(cardChips(task(), 'project').chips.map((c) => c.text)).toContain('Blocked');
+    expect(cardChips(task(), 'status').chips.map((c) => c.text)).not.toContain('Blocked');
+  });
+
+  it('suppresses the project chip only when grouped by project', () => {
+    const noTags = task({ taskStatus: 'status-irrelevant', tags: { case: null, severity: null } });
+    expect(cardChips(noTags, 'status').chips.map((c) => c.text)).toContain('shop-api');
+    expect(cardChips(noTags, 'project').chips.map((c) => c.text)).not.toContain('shop-api');
+  });
+
+  it('drops the S4-nit default severity but keeps a non-default one', () => {
+    expect(cardChips(task({ tags: { case: null, severity: 'S4-nit' } }), 'status').chips).not.toContainEqual(
+      expect.objectContaining({ text: 'S4-nit' }),
+    );
+    expect(cardChips(task(), 'status').chips).toContainEqual({ text: 'S2-major', tone: 'danger' });
+  });
+
+  it('caps at 2 chips and reports the rest as overflow', () => {
+    // status + case + severity + project = 4 candidates when grouped by role.
+    const result = cardChips(task(), 'role');
+    expect(result.chips).toHaveLength(2);
+    expect(result.overflow).toBe(2);
+  });
+
+  it('case chips carry no tone — descriptive, not evaluative', () => {
+    expect(cardChips(task(), 'status').chips).toContainEqual({ text: 'Feature', tone: null });
   });
 });
 

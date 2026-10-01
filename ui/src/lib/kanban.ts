@@ -3,7 +3,7 @@
 // terminal/replaced, hidden from the default board (design-spec.md §5.3).
 import { agentWaitingThresholdMs } from './constants.js';
 import { roleLabel } from './roleLabels.js';
-import { isTaskOver } from './taxonomy.js';
+import { isTaskOver, type KitTone, taskStatusKitTone } from './taxonomy.js';
 
 export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'Completed'] as const;
 export type KanbanColumnName = (typeof KANBAN_COLUMNS)[number];
@@ -117,7 +117,7 @@ export function capColumn<T>(
   };
 }
 
-function titleCase(status: string): string {
+export function titleCase(status: string): string {
   return status
     .split('-')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -322,4 +322,48 @@ export function groupByKanban<T extends GroupableTask>(
       return a.localeCompare(b);
     })
     .map(([key, { label, tasks: bucketTasks }]) => ({ key, label, tasks: bucketTasks }));
+}
+
+export interface KanbanCardChip {
+  text: string;
+  /** `null` is a descriptive (non-evaluative) pill: no status colour, per design-spec.md §3's rule. */
+  tone: KitTone | null;
+}
+
+export interface CardChipTask {
+  taskStatus: string;
+  project: string | null;
+  tags: { case: string | null; severity: string | null };
+}
+
+const SEVERITY_KIT_TONE: Record<string, KitTone> = {
+  'S1-stop-the-line': 'danger',
+  'S2-major': 'danger',
+  'S3-minor': 'warning',
+};
+
+/**
+ * DS3 pattern 6, row 4 — "chips shown only when they add information beyond
+ * what the column/grouping already states" (ds-spec.md §4.2). Status is
+ * suppressed when the board is already grouped by status (the column name
+ * says it); project is suppressed when grouped by project; `S4-nit` is the
+ * severity default and is never shown. Capped at 2, with the rest folded
+ * into `overflow` for a trailing "+N".
+ */
+export function cardChips(
+  task: CardChipTask,
+  groupBy: KanbanGroupBy,
+): { chips: KanbanCardChip[]; overflow: number } {
+  const candidates: KanbanCardChip[] = [];
+  if (groupBy !== 'status') {
+    candidates.push({ text: titleCase(task.taskStatus), tone: taskStatusKitTone(task.taskStatus) });
+  }
+  if (task.tags.case) candidates.push({ text: titleCase(task.tags.case), tone: null });
+  if (task.tags.severity && task.tags.severity !== 'S4-nit') {
+    candidates.push({ text: task.tags.severity, tone: SEVERITY_KIT_TONE[task.tags.severity] ?? 'warning' });
+  }
+  if (groupBy !== 'project' && task.project) {
+    candidates.push({ text: task.project, tone: null });
+  }
+  return { chips: candidates.slice(0, 2), overflow: Math.max(0, candidates.length - 2) };
 }
