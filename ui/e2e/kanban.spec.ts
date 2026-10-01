@@ -166,7 +166,7 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Display options' }).click();
-    await page.getByLabel('Group by').selectOption('project');
+    await page.getByLabel('Group by', { exact: true }).selectOption('project');
 
     await expect(page.getByRole('region', { name: 'Todo column' })).toHaveCount(0);
     await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
@@ -182,7 +182,7 @@ test.describe('Kanban', () => {
   test('display options persist across a reload', async ({ page }) => {
     await page.goto('/kanban');
     await page.getByRole('button', { name: 'Display options' }).click();
-    await page.getByLabel('Group by').selectOption('project');
+    await page.getByLabel('Group by', { exact: true }).selectOption('project');
     await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
 
     await page.reload();
@@ -190,7 +190,7 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Todo column' })).toHaveCount(0);
     await page.getByRole('button', { name: 'Display options' }).click();
-    await expect(page.getByLabel('Group by')).toHaveValue('project');
+    await expect(page.getByLabel('Group by', { exact: true })).toHaveValue('project');
   });
 
   // Pattern 9 — arrow keys move focus card-to-card (no drag-and-drop), Enter
