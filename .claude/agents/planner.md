@@ -97,7 +97,10 @@ a planner edit outside that root is a claim violation like any other.
 
 **1. Write the plan** to `factory/specs/active/<epic-id>/plan.json`: task
 specs conforming to `factory/specs/schema/task-spec.schema.json`, one object
-per task. When rendering a verdict instead, write
+per task. Populate the optional `title` (short human-facing label) and
+`summary` (one-line description) fields when you have a natural one to give;
+leave them out rather than restating `objective`. When rendering a verdict
+instead, write
 `factory/specs/active/<epic-id>/verdict-v<n>.json`:
 `{plan_version, criteria: [{criterion, status: "pass" | "fail", evidence}],
 overall, gaps, next_plan_version}`.

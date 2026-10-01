@@ -1693,3 +1693,93 @@ describe('db/projector.ts — a task continued in a second session keeps one row
     }
   });
 });
+
+describe('db/projector.ts — title/summary (DS3)', () => {
+  let stateDir: string;
+  let dbDir: string;
+  const SESSION = 'sess-title-summary';
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-title-events-'));
+    dbDir = await mkdtemp(path.join(tmpdir(), 'smith-projector-title-db-'));
+  });
+
+  afterEach(async () => {
+    await rm(stateDir, { recursive: true, force: true });
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('folds the optional title/summary task-spec fields onto the task row, and leaves them null when absent', async () => {
+    const opts = { stateDir };
+    const root = await appendEvent(
+      {
+        session_id: SESSION,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      opts,
+    );
+    await appendEvent(
+      {
+        session_id: SESSION,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-t/task-1',
+        plan_version: 1,
+        causal_parent: root.event_id,
+        payload: {
+          epic_id: 'epic-t',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          plan_version: 1,
+          objective: 'Do the thing.',
+          claims: ['src/foo.ts'],
+          budget_tokens: 1000,
+          title: 'Do the thing well',
+          summary: 'A one-liner.',
+        },
+      },
+      opts,
+    );
+    await appendEvent(
+      {
+        session_id: SESSION,
+        actor: 'planner',
+        event_type: 'task-added',
+        task_id: 'epic-t/task-2',
+        plan_version: 1,
+        causal_parent: root.event_id,
+        payload: {
+          epic_id: 'epic-t',
+          case: 'feature',
+          origin: 'user',
+          task_status: 'todo',
+          plan_version: 1,
+          objective: 'Do another thing.',
+          claims: ['src/bar.ts'],
+          budget_tokens: 1000,
+        },
+      },
+      opts,
+    );
+
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', opts);
+    const handle = openDb(dbPath);
+    try {
+      const rows = handle.db.select().from(schema.tasks).all();
+      const byId = new Map(rows.map((r) => [r.taskId, r]));
+      expect(byId.get('epic-t/task-1')).toMatchObject({
+        title: 'Do the thing well',
+        summary: 'A one-liner.',
+      });
+      expect(byId.get('epic-t/task-2')).toMatchObject({ title: null, summary: null });
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+});

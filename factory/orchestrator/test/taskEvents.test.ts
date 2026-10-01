@@ -117,6 +117,24 @@ describe('taskEvents', () => {
       });
     });
 
+    // DS3 — title/summary are optional task-spec fields; present them when
+    // the spec carries them, and never fabricate a value when it does not.
+    it('carries title/summary through when the spec sets them, and omits them when it does not', async () => {
+      const plan = planWith(
+        task({ task_id: 'epic-1/task-1', title: 'Add the widget', summary: 'Renders the widget.' }),
+        task({ task_id: 'epic-1/task-2' }),
+      );
+      await emitTasksAdded(plan, ctx, { stateDir });
+
+      const added = await typesFor('task-added');
+      expect(added[0]?.payload).toMatchObject({
+        title: 'Add the widget',
+        summary: 'Renders the widget.',
+      });
+      expect(added[1]?.payload?.title).toBeUndefined();
+      expect(added[1]?.payload?.summary).toBeUndefined();
+    });
+
     it('declares the branch worktree.ts will actually create, epic prefix and all', async () => {
       const plan = planWith(task({ task_id: 'epic-1/task-1' }), {
         ...task({ task_id: 'loose-task', epic_id: 'epic-2' }),

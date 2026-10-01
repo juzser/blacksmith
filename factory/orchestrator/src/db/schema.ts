@@ -152,6 +152,8 @@ export const tasks = sqliteTable(
     taskStatus: text('task_status').notNull(),
     planVersion: integer('plan_version'),
     objective: text('objective'),
+    title: text('title'), // DS3 — optional human-facing title (task-spec field)
+    summary: text('summary'), // DS3 — optional human-facing summary (task-spec field)
     claims: text('claims'), // JSON array
     budgetTokens: integer('budget_tokens'),
     branch: text('branch'),
