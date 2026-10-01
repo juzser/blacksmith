@@ -1745,7 +1745,11 @@ async function main(): Promise<number> {
   // sites. Approval supplies them from what the worker already recorded.
   if (namespace === 'plan' && action === 'approve') {
     const [proposalId] = requirePositionals(positional, usageFor('plan approve')) as [string];
-    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const planPath = requireFlag(flags, 'plan');
+    const plan = readJsonFile<PlanFile>(planPath);
+    // #287: approval runs `plan amend` underneath, so it is the same write
+    // `amendSpecsDirOpts` was written for (#219), not the read
+    // `planOptsFromFlags` silently defaults for everyone else.
     const result = await approveSpecChange(
       {
         proposalId,
@@ -1754,7 +1758,7 @@ async function main(): Promise<number> {
         ...(flags.rationale ? { rationale: flags.rationale } : {}),
       },
       eventContextFromFlags(flags),
-      { ...eventOptsFromFlags(flags), ...planOptsFromFlags(flags) },
+      { ...eventOptsFromFlags(flags), ...amendSpecsDirOpts(planPath, plan, flags) },
     );
     printJson({
       proposalId,
