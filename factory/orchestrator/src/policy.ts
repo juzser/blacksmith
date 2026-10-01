@@ -1890,6 +1890,28 @@ function hasRecursiveForce(tokens: readonly string[]): boolean {
 }
 
 /**
+ * The same recursive-force cluster `hasRecursiveForce` reads out of a
+ * tokenised word list, asked instead as a plain substring of raw,
+ * unparsed text: `-` followed by letters spelling both a recursive flag
+ * (`r`/`R`) and `f` somewhere in the run, or `--recursive` and `--force`
+ * appearing anywhere in the text, in either order. This is what a
+ * substitution body falls back to once it cannot be delimited with
+ * confidence — an unterminated quote, an unbalanced paren, or a nesting
+ * depth past `MAX_SUBSTITUTION_DEPTH` — and there is no word list left to
+ * read: the text has not been dequoted or split, because the quoting that
+ * would make that split meaningful is exactly what could not be read. Over-
+ * matching here (a bundled flag that is not really `rm`'s, a comment
+ * mentioning both words) is the same direction every fail-closed read in
+ * this file already takes.
+ */
+const RAW_RECURSIVE_FORCE_RE = /-[A-Za-z]*(?:[rR][A-Za-z]*f|f[A-Za-z]*[rR])[A-Za-z]*/;
+
+function hasRecursiveForceInText(text: string): boolean {
+  if (RAW_RECURSIVE_FORCE_RE.test(text)) return true;
+  return /--recursive\b/.test(text) && /--force\b/.test(text);
+}
+
+/**
  * The characters that separate one command in a chain from the next. `;&|`
  * are the three guard.sh knew, and for a long time this file knew no others
  * — which left the rules that read a segment's *operands* (rule 1's
@@ -2246,6 +2268,24 @@ function findBacktickClose(text: string, start: number): number | null {
  * that span is skipped rather than read; one inside double quotes still
  * runs and is read the same as an unquoted one.
  *
+ * Reads as a small quote-state machine — unquoted, single-quoted or
+ * double-quoted — rather than `skipQuotedSpan`'s "skip the whole span" read
+ * the two delimiter finders above use: a single-quoted span truly has
+ * nothing left to find inside it, but a double-quoted one still runs a
+ * `$(...)` or backtick substitution this scan must keep recognising, so it
+ * cannot be skipped whole. The one thing double quotes change inside their
+ * own span is that `'` is just a character, not a span of its own — an
+ * apostrophe in `"it's $(...)"` used to be read as opening a fresh
+ * single-quoted span, which this text never closes, so the whole scan gave
+ * up and returned `null` for a segment that was perfectly readable. Process
+ * substitution (`<(`/`>(`) is the other thing double quotes change: they
+ * suppress it, so it is only recognised unquoted, matching
+ * `shellExpandsPayload`'s read of the same two forms for rule 4's message
+ * payload. A backslash escapes the next character in either the unquoted or
+ * the double-quoted state, the same as a real shell. `$((` arithmetic is
+ * left exactly as it reads today: this scan does not special-case it, so it
+ * is still found as a `$(` whose body happens to start with its own `(`.
+ *
  * `null` means some substitution in `segment` could not be delimited with
  * confidence — an unterminated quote or an unbalanced paren — so the caller
  * reads that as "cannot prove this is safe", not "found nothing".
@@ -2253,16 +2293,22 @@ function findBacktickClose(text: string, start: number): number | null {
 function extractSubstitutionBodies(segment: string): string[] | null {
   const bodies: string[] = [];
   let i = 0;
+  let inDouble = false;
   while (i < segment.length) {
     const c = segment[i];
     if (c === '\\' && i + 1 < segment.length) {
       i += 2;
       continue;
     }
-    if (c === "'") {
+    if (!inDouble && c === "'") {
       const next = skipQuotedSpan(segment, i);
       if (next === null) return null;
       i = next;
+      continue;
+    }
+    if (c === '"') {
+      inDouble = !inDouble;
+      i += 1;
       continue;
     }
     if (c === '$' && segment[i + 1] === '(') {
@@ -2279,7 +2325,7 @@ function extractSubstitutionBodies(segment: string): string[] | null {
       i = close + 1;
       continue;
     }
-    if ((c === '<' || c === '>') && segment[i + 1] === '(') {
+    if (!inDouble && (c === '<' || c === '>') && segment[i + 1] === '(') {
       const close = findBalancedParenClose(segment, i + 2);
       if (close === null) return null;
       bodies.push(segment.slice(i + 2, close));
@@ -2307,20 +2353,37 @@ function extractSubstitutionBodies(segment: string): string[] | null {
  * A body this scanner cannot delimit with confidence (an unbalanced paren, a
  * quote that never closes) is not read as "found nothing": the segment is
  * refused outright when it carries a recursive-force flag cluster anywhere
- * in its own words, the same shape `isUnknownRemovalSegment` already refuses
- * an unreadable word for.
+ * in its raw text, the same shape `isUnknownRemovalSegment` already refuses
+ * an unreadable word for — read as a substring of the untouched text
+ * (`hasRecursiveForceInText`), not a dequoted word list, because the same
+ * quoting that defeated delimiting also defeats a clean word split: an
+ * apostrophe stranded inside an unresolved double-quoted span is exactly
+ * what left this body undelimitable in the first place, so the one word
+ * list `splitDequotedWords` would produce here cannot be trusted either.
+ *
+ * `depth` counts how many substitution bodies deep this call already is —
+ * zero at the outermost command, one past the first `$(...)`/backtick/
+ * process substitution, and so on as each body recurses into
+ * `isUnboundedRemovalCommand` below. Nesting is attacker-controlled and
+ * unbounded (`$($($(...)))`), and following it one JS stack frame per level
+ * throws past a few hundred levels — so once `depth` reaches
+ * `MAX_SUBSTITUTION_DEPTH`, this body is treated exactly like one that
+ * could not be delimited at all, without even attempting the extraction
+ * that would recurse further. That keeps both the call stack and the work
+ * done bounded, however deep the nesting actually goes.
  */
+const MAX_SUBSTITUTION_DEPTH = 16;
+
 function hasUnsafeSubstitution(
   segment: string,
   repoRoot: string | null,
   policy: GuardrailPolicy,
+  depth = 0,
 ): boolean {
+  if (depth >= MAX_SUBSTITUTION_DEPTH) return hasRecursiveForceInText(segment);
   const bodies = extractSubstitutionBodies(segment);
-  if (bodies === null) {
-    const words = splitDequotedWords(segment);
-    return hasRecursiveForce(words.map((word) => word.text));
-  }
-  return bodies.some((body) => isUnboundedRemovalCommand(body, repoRoot, policy));
+  if (bodies === null) return hasRecursiveForceInText(segment);
+  return bodies.some((body) => isUnboundedRemovalCommand(body, repoRoot, policy, depth + 1));
 }
 
 /**
@@ -2387,8 +2450,9 @@ function isUnknownRemovalSegment(
   segment: string,
   repoRoot: string | null,
   policy: GuardrailPolicy,
+  depth = 0,
 ): boolean {
-  if (hasUnsafeSubstitution(segment, repoRoot, policy)) return true;
+  if (hasUnsafeSubstitution(segment, repoRoot, policy, depth)) return true;
   const words = splitDequotedWords(segment);
   const first = words[0];
   if (first !== undefined && isPlainWord(first.raw)) {
@@ -2416,11 +2480,12 @@ function hasUnknownRemovalCommandWord(
   command: string,
   repoRoot: string | null,
   policy: GuardrailPolicy,
+  depth = 0,
 ): boolean {
   return topLevelCommands(command).some((segment) => {
-    if (isUnknownRemovalSegment(segment, repoRoot, policy)) return true;
+    if (isUnknownRemovalSegment(segment, repoRoot, policy, depth)) return true;
     const wrapped = dequoteShellWrappedSegment(segment);
-    return wrapped !== null && isUnknownRemovalSegment(wrapped, repoRoot, policy);
+    return wrapped !== null && isUnknownRemovalSegment(wrapped, repoRoot, policy, depth);
   });
 }
 
@@ -2447,6 +2512,7 @@ function isUnboundedRemovalCommand(
   command: string,
   repoRoot: string | null,
   policy: GuardrailPolicy,
+  depth = 0,
 ): boolean {
   const outOfBounds = splitChainSegments(command).some((segment) => {
     const decoded = decodeAnsiCQuoting(segment);
@@ -2458,7 +2524,7 @@ function isUnboundedRemovalCommand(
     const wrapped = shellWrappedRmPayload(decoded.text);
     return wrapped !== null && rmOutOfBoundsInText(wrapped, repoRoot, policy);
   });
-  return outOfBounds || hasUnknownRemovalCommandWord(command, repoRoot, policy);
+  return outOfBounds || hasUnknownRemovalCommandWord(command, repoRoot, policy, depth);
 }
 
 /**

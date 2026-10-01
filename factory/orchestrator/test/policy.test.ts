@@ -1969,6 +1969,65 @@ describe('evaluateCommand — a removal hidden in a command, process or backtick
   });
 });
 
+// `extractSubstitutionBodies` read only `'` at the top level, so an
+// apostrophe inside an *already open* double-quoted argument was misread as
+// opening a new single-quoted span — one that never closes, since the next
+// `'` in the text is the contraction's own. The scan gave up (`null`), and
+// the fallback at the time split the segment into dequoted words, which
+// swallowed the whole double-quoted argument as a single word and lost the
+// `-rf` hiding inside it. The fix tracks double-quote state so `$(…)` and a
+// backtick are still found inside a double-quoted argument, and an
+// apostrophe there is just a character — plus a cap on substitution nesting
+// depth, so a pathological `$(…)` chain fails closed on raw text instead of
+// recursing until the stack does.
+describe('evaluateCommand — an apostrophe inside a double-quoted substitution argument', () => {
+  it.each([
+    [`echo "it's $(X=rm; $X -rf /x)"`],
+    [`echo "don't" "$(X=rm; $X -rf /x)"`],
+    [`echo "it's \`X=rm; $X -rf /x\`"`],
+  ])(
+    'denies %s — the apostrophe does not close the double-quoted span the substitution sits in',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it.each([
+    [`echo "it's $(date)"`],
+    [`echo "it's fine"`],
+    [`git commit -m "don't break"`],
+    [`echo '$(X=rm; $X -rf /x)'`],
+  ])('allows %s — an apostrophe with nothing removal-shaped behind it', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows echo $((1+2)) — arithmetic expansion, not a command substitution', () => {
+    const d = evaluateCommand(ctx({ command: 'echo $((1+2))', repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows a POSIX case arm whose pattern is a bare (rm) — not an rm invocation', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'case "$x" in (rm) echo match ;; esac', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('never throws on 5000 levels of $(…) nesting, and stays fast', () => {
+    const nested = `${'$('.repeat(5000)}echo hi${')'.repeat(5000)}`;
+    const start = Date.now();
+    let d: PolicyDecision | undefined;
+    expect(() => {
+      d = evaluateCommand(ctx({ command: nested, repoRoot: '/repo' }), policy);
+    }).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(d).toBeDefined();
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block
