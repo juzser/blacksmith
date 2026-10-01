@@ -2127,6 +2127,44 @@ describe('evaluateCommand — a backslash escape inside the raw-text fallback sc
   });
 });
 
+// A line continuation — a backslash immediately followed by a newline — is
+// deleted outright by the shell, not inserted as whitespace: `-r\<LF>f` is
+// one word, `-rf`. `splitDequotedWords` used to carry the newline through to
+// a word's dequoted text instead of dropping it, so a flag cluster split by
+// a continuation no longer matched the anchored short-flag regex and read as
+// two harmless-looking pieces instead of one recursive-force cluster.
+describe('evaluateCommand — a line continuation inside an rm invocation', () => {
+  it.each([
+    ['rm -r\\<LF>f /x', 'rm -r\\\nf /x'],
+    ['rm -\\<LF>rf /x', 'rm -\\\nrf /x'],
+    ['rm -r -\\<LF>f /x', 'rm -r -\\\nf /x'],
+    ['"rm" -r\\<LF>f /x', '"rm" -r\\\nf /x'],
+    ['X=rm; $X -r\\<LF>f /x', 'X=rm; $X -r\\\nf /x'],
+    ['rm "-r\\<LF>f" /x', 'rm "-r\\\nf" /x'],
+  ])('denies %s — the continuation joins the flags back into one recursive-force cluster', (_label, command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('allows a multi-line pnpm invocation — the continuation joins words, nothing removal-shaped', () => {
+    const command = 'pnpm run test \\\n  --reporter=dot';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows rm -f\\<LF> file.txt — force without recursive, continuation or not', () => {
+    const command = 'rm -f\\\n file.txt';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows a commit message with a continuation inside its quotes — still prose, not a command', () => {
+    const command = 'git commit -m "line one\\\nline two"';
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block

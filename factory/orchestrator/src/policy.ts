@@ -1326,7 +1326,13 @@ const FORCE_GATE_WORD_RE = /\b(push|rebase|reset|filter-branch|update-ref)\b/i;
  */
 function dequoteShellWrappedSegment(segment: string): string | null {
   if (!EVAL_RE.test(segment) && !SHELL_C_WRAPPER_RE.test(segment)) return null;
-  return stripSpliceQuotes(segment).replace(/\\/g, '');
+  // A line continuation is dropped outright, not just its backslash — rule
+  // 6's callers (`hasUnknownRemovalCommandWord`, `shellWrappedRmPayload`)
+  // reach this on a segment `joinLineContinuations` never ran over, so a
+  // bare `.replace(/\\/g, '')` would leave the newline behind and still
+  // split a flag cluster it glues back together (`-r\<LF>f` → `-r`, `<LF>`,
+  // `f` instead of `-rf`).
+  return stripSpliceQuotes(segment).replace(/\\\n/g, '').replace(/\\/g, '');
 }
 
 /**
@@ -1394,8 +1400,14 @@ function splitDequotedWords(segment: string): DequotedWord[] {
       i += 1;
       while (i < segment.length && segment.charAt(i) !== '"') {
         if (segment.charAt(i) === '\\' && i + 1 < segment.length) {
-          raw += segment.charAt(i) + segment.charAt(i + 1);
-          text += segment.charAt(i + 1);
+          const escaped = segment.charAt(i + 1);
+          raw += segment.charAt(i) + escaped;
+          // A backslash-newline is a line continuation, deleted outright —
+          // not a character the word's text carries, the same join
+          // `joinLineContinuations` already does ahead of the callers that
+          // run it first. This branch also reads segments nothing joins
+          // first (rule 6's unjoined paths), so it has to hold on its own.
+          if (escaped !== '\n') text += escaped;
           i += 2;
         } else {
           raw += segment.charAt(i);
@@ -1410,9 +1422,19 @@ function splitDequotedWords(segment: string): DequotedWord[] {
       continue;
     }
     if (c === '\\' && i + 1 < segment.length) {
+      const escaped = segment.charAt(i + 1);
+      raw += c + escaped;
+      // A line continuation alone starts nothing: `inWord` stays whatever
+      // it already was, so a bare `\`-newline sitting between two real
+      // words never pushes an empty word between them. Mid-word (`-r\<LF>f`)
+      // `inWord` is already true from the characters before it, so this is
+      // a no-op there — the flag cluster still comes out joined as `-rf`.
+      if (escaped === '\n') {
+        i += 2;
+        continue;
+      }
       inWord = true;
-      raw += c + segment.charAt(i + 1);
-      text += segment.charAt(i + 1);
+      text += escaped;
       i += 2;
       continue;
     }
@@ -1989,9 +2011,17 @@ const SEPARATOR_CHARS = `${COMMAND_SEPARATOR_CHARS}${REDIRECTION_CHARS}`;
  * Every separated segment of a command, so a chain can be inspected one
  * invocation at a time — and so a rule reading a segment's operands is looking
  * at that command's operands and nothing else.
+ *
+ * Joins line continuations first. The split below is a naive character class
+ * that includes a bare newline, with no idea a backslash in front of one
+ * means "this is not where the command ends" — left unjoined, `rm -r\<LF>f
+ * /x` would split into `rm -r\` and `f /x` before either reached a word
+ * splitter, and no fix inside one could ever reunite a flag cluster already
+ * cut in half. `joinLineContinuations` is the same join `checkForcePush`
+ * already runs first; every caller here gets it for the same reason.
  */
 function splitChainSegments(command: string): string[] {
-  return command.split(new RegExp(`[${SEPARATOR_CHARS}]`));
+  return joinLineContinuations(command).split(new RegExp(`[${SEPARATOR_CHARS}]`));
 }
 
 /**
