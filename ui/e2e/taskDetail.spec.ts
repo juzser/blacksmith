@@ -17,14 +17,16 @@ test.describe('Task detail', () => {
     );
   });
 
-  // Pattern 2 — the "What was asked" tab's Run history card, fed by
-  // GET /api/tasks/:taskId/runs (queries.ts's `taskRuns()`). This task has a
-  // dispatch row and a completed result row: two distinct run kinds, so the
-  // timeline is proven to render more than a single placeholder entry.
+  // Pattern 2 — the History tab's run history timeline (visual-pass item 3
+  // moved it there from "What was asked"), fed by GET /api/tasks/:taskId/runs
+  // (queries.ts's `taskRuns()`). This task has a dispatch row and a completed
+  // result row: two distinct run kinds, so the timeline is proven to render
+  // more than a single placeholder entry.
   test('Run history timeline shows a row per run, in the done tone for a completed result', async ({
     page,
   }) => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
     const rows = page.locator('.bs-run-history__row');
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
