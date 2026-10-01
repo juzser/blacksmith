@@ -6,7 +6,6 @@ import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 // scope, so both are on the same board — which is what makes "every epic"
 // something a card can be counted for rather than only a heading to read.
 const SCOPED_EPIC = 'epic-9'; // multiProjectFixture.ts, project demo-hub
-const EPIC_OUTSIDE_IT = 'epic-1'; // db/fixtures.ts, project black-smith
 
 // 375px is the brief's own mobile breakpoint for the no-horizontal-scroll
 // check — distinct from helpers.ts's shared VIEWPORTS.mobile (390px), which

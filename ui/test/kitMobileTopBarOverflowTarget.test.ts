@@ -9,7 +9,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const SRC = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'kit', 'MobileTopBar.vue'),
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'src',
+    'components',
+    'kit',
+    'MobileTopBar.vue',
+  ),
   'utf8',
 );
 
