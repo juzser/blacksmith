@@ -32,7 +32,7 @@ export type JudgeRole = (typeof JUDGE_ROLES)[number];
  * `JUDGE_ROLES` plus `uiux`: every role a `smith judge dispatch` / `smith
  * judge report` pair can open and close a turn for. wave.md's steps 5-7
  * bracket the uiux visual pass with those same two verbs, same as grader,
- * reviewer, verifier and security-reviewer (wave.md:227-237) — so
+ * reviewer, verifier and security-reviewer (wave.md:242-253) — so
  * `foldJudgeTurns` and `recordJudgeDispatch` (judges.ts) need uiux in scope
  * too, or a real uiux dispatch throws `judges.non-judge-role` and its turn
  * never folds.

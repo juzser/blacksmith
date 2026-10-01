@@ -31,6 +31,14 @@ levels:
       - a11y WCAG AA failure
       - new flaky test introduced by the task
       - behavioral-drift touching a core flow
+      - >
+          serious visual defect against the uiux spec or the project's design
+          system: a spec'd layout broken, or content clipped/overflowing, at
+          a required viewport; an interactive target below the project's
+          declared touch-target minimum (fall back to the WCAG 2.2 target
+          size minimum only when the project declares none); a required
+          state (empty, error, loading) missing (contrast: see a11y WCAG AA
+          above)
     on_trigger: >
       bounce to coder on the same branch; after 2 failed rounds, escalate
       model tier (mid -> frontier, budgets.yml); after 3, escalate to
@@ -40,7 +48,11 @@ levels:
     blocks_merge: false
     semantics: waivable — batched to operator at epic end
     classes:
-      - visual regression vs the uiux spec
+      - >
+          minor visual deviation from the uiux spec: spacing, color or type a
+          few px or a shade off a design-system token — not a broken layout,
+          clipped content, a missing required state, or a touch-target/
+          contrast failure below WCAG AA (those are S2-major, above)
       - performance regression > 20%
       - over-engineering (default severity — see rule below)
       - behavioral-drift not touching a core flow

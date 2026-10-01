@@ -63,7 +63,7 @@ export const JUDGE_DISPATCH_EVENT_TYPE = 'dispatch_decision';
  *
  * Deliberately the wider set, not the plain `JUDGE_ROLES` six: uiux's visual
  * pass is bracketed by `smith judge dispatch`/`smith judge report` in
- * practice (wave.md:227-237) exactly like the six, so a real uiux dispatch
+ * practice (wave.md:242-253) exactly like the six, so a real uiux dispatch
  * must open a turn here too, even though `dispatchLint.ts`'s narrower
  * artifact-line check and `judgeStopHook.ts`'s Stop guard stay scoped to the
  * six (see judgeRoles.ts for why).

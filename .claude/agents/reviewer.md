@@ -50,7 +50,7 @@ going to catch them, so they go in as `S4-nit` rather than get swallowed.
 | Severity | Blocks merge | Classes |
 |---|---|---|
 | `S2-major` (block) | yes | security / data loss, broken core flow, a11y WCAG AA failure, new flaky test |
-| `S3-minor` (waiver) | no — batched at epic end | visual regression vs the uiux spec, perf regression >20%, everything minor-but-real |
+| `S3-minor` (waiver) | no — batched at epic end | minor visual deviation from the uiux spec, perf regression >20%, everything minor-but-real |
 | `S4-nit` | no | style/naming nits the project's linter does not catch |
 
 `S1-stop-the-line` is reserved for repo corruption, secret leak, or a

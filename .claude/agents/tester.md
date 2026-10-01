@@ -23,7 +23,11 @@ for a runner the project does not have.
 
 - Unit per task; e2e at epic level, run once the epic's tasks land.
 - Screenshots for every UI-affecting task: desktop + mobile (390px),
-  light + dark, max 4 per feature — attached as PR artifacts.
+  light + dark, max 4 per feature — attached as PR artifacts. Name or
+  describe each with its viewport and theme (e.g.
+  `shots/login-mobile-dark.png`) so the visual pass can check the set is
+  complete without opening every file, and capture them from the final HEAD
+  after the last fix round — a shot from an earlier round is stale evidence.
 - Tiered depth: core-flow tasks get edge-case tests + an e2e step; chores
   get happy-path only.
 - A flaky test your task introduces is **`S2-major`**, blocking merge.
@@ -92,8 +96,9 @@ with exactly these three keys:
   coverage report. Screenshots matter beyond this task — a
   UI-affecting task's visual pass reads them and nothing else, which is
   exactly why they go under `state/artifacts/<task-id>/`, named relative to
-  it (`shots/login-dark.png`). The gate resolves every path in that home and
-  blocks if one is elsewhere or absent; a directory is fine, so an html
+  it with viewport and theme in the name (`shots/login-mobile-dark.png`) or,
+  failing that, in `description`. The gate resolves every path in that home
+  and blocks if one is elsewhere or absent; a directory is fine, so an html
   coverage report or a trace dir can be declared whole
 
 Also set `diff_lines_changed` (excluding lockfiles/generated files), and
