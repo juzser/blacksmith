@@ -2141,10 +2141,13 @@ describe('evaluateCommand — a line continuation inside an rm invocation', () =
     ['"rm" -r\\<LF>f /x', '"rm" -r\\\nf /x'],
     ['X=rm; $X -r\\<LF>f /x', 'X=rm; $X -r\\\nf /x'],
     ['rm "-r\\<LF>f" /x', 'rm "-r\\\nf" /x'],
-  ])('denies %s — the continuation joins the flags back into one recursive-force cluster', (_label, command) => {
-    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
-    expect(ruleIds(d)).toContain('unbounded-rm');
-  });
+  ])(
+    'denies %s — the continuation joins the flags back into one recursive-force cluster',
+    (_label, command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
 
   it('allows a multi-line pnpm invocation — the continuation joins words, nothing removal-shaped', () => {
     const command = 'pnpm run test \\\n  --reporter=dot';
