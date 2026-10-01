@@ -1203,6 +1203,22 @@ function isPlainWord(word: string): boolean {
 const PLAIN_WORD_REASON =
   'write this git command with plain words — no quotes inside words, escapes, variables, braces or globs — so the guard can read exactly what git will receive';
 
+/**
+ * True when `word` is unreadable specifically because of an unexpanded
+ * shell expansion — a `$name` parameter, a `${...}` form, a `$(...)`
+ * command substitution, or a backtick span — rather than any other reason
+ * `isPlainWord` refuses a word (a bare glob, a stray `<`/`>`, an embedded
+ * newline). Rule 2 and rule 6 both recognise their command by its literal
+ * word (`git`, `rm`); this is their shared read of "that word's true value
+ * is unknowable here," narrowed to the expansion forms those two rules fail
+ * closed on rather than every non-plain word, so a path argument elsewhere
+ * in the same command — already its own, separately-read concern — is never
+ * what trips this.
+ */
+function isUnexpandedCommandWord(word: DequotedWord): boolean {
+  return !isPlainWord(word.raw) && /[$`]/.test(word.raw);
+}
+
 /** Subcommands the plain-word gate covers unconditionally. */
 const FORCE_GATE_SUBCOMMANDS = ['push', 'rebase', 'reset', 'filter-branch', 'update-ref'];
 
@@ -1428,6 +1444,32 @@ function gitSubcommandWord(words: readonly DequotedWord[], gitIndex: number): nu
 const SUBCOMMAND_NOT_PLAIN_REASON =
   'the git subcommand is not written as a plain word, so the guard cannot tell what it runs — write it out plainly';
 
+const UNKNOWN_COMMAND_WORD_REASON =
+  'the command word here is an unexpanded parameter or substitution, so the guard cannot tell what it runs — write it out plainly';
+
+/**
+ * Rule 2's gap once the command word itself is unreadable: neither the
+ * exact `git` match above nor its `hidden` fallback (which still needs the
+ * dequoted text to end in "git") can place a word that only resolves to
+ * `git` once a shell expands `$G`, `$(...)` or a backtick span — this file
+ * never evaluates one of those. So when the segment's first word is
+ * unreadable this way (`isUnexpandedCommandWord`), the rest of it is read
+ * for the shape rule 2 already guards against on a recognised push: a
+ * `push` word together with a force flag (`FORCE_PUSH_RE`, the same test
+ * the raw-text fallback below uses) or a `+refspec` operand
+ * (`pushOperands`, the same read rule 1 uses for a push's destination).
+ * Resolving the expansion itself is out of scope — an open-ended evaluator
+ * is the wrong tool — so this is shape only, same as rule 6's analogue.
+ */
+function hasUnknownForcePushCommandWord(segment: string): boolean {
+  const words = splitDequotedWords(segment);
+  const first = words[0];
+  if (first === undefined || !isUnexpandedCommandWord(first)) return false;
+  if (!new RegExp(bareWord('push'), 'i').test(segment)) return false;
+  if (FORCE_PUSH_RE.test(segment)) return true;
+  return pushOperands(segment).some((ref) => ref.replace(/\\/g, '').startsWith('+'));
+}
+
 /**
  * Round 6's fix for a subcommand word the shell will glue back together
  * before git ever sees it — quote-splicing (`rese""t`), a stray backslash
@@ -1477,6 +1519,9 @@ function checkForcePushSubcommandWord(
         word.text.replace(/\r?\n/g, '').toLowerCase().endsWith('git'),
     );
     if (hidden) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
+    if (hasUnknownForcePushCommandWord(stripRedirections(segment))) {
+      return violation(rule, UNKNOWN_COMMAND_WORD_REASON);
+    }
     return null;
   }
   // The `git` word itself, found above by its *dequoted* text, still needs
@@ -2069,6 +2114,34 @@ function shellWrappedRmPayload(segment: string): string | null {
 }
 
 /**
+ * Rule 6's gap once the command word itself is unreadable: neither
+ * `hasDisguisedRmWord` (which still needs the word's basename to resolve to
+ * the literal `rm`) nor the rest of `rmOutOfBoundsInText` (which needs to
+ * find an `rm` word at all) can place a word that only resolves to `rm` once
+ * a shell expands `$X`, `$(...)` or a backtick span — this file never
+ * evaluates one of those. So when a top-level command's first word is
+ * unreadable this way (`isUnexpandedCommandWord`), the rest of it is read
+ * for the one shape this rule already guards against: a recursive-force
+ * flag cluster (`hasRecursiveForce`, the same flag parsing the plain-`rm`
+ * path above uses). Resolving the expansion itself is out of scope — an
+ * open-ended evaluator is the wrong tool — so this is shape only.
+ *
+ * Reads `topLevelCommands`, not `splitChainSegments`: the naive
+ * single-character split above cuts `$(echo rm) -rf /x` apart at the very
+ * `(`/`)`/backtick that make the word unreadable, landing the flag cluster
+ * in a different "segment" than the word it belongs to and missing the
+ * combination entirely.
+ */
+function hasUnknownRemovalCommandWord(command: string): boolean {
+  return topLevelCommands(command).some((segment) => {
+    const words = splitDequotedWords(segment);
+    const first = words[0];
+    if (first === undefined || !isUnexpandedCommandWord(first)) return false;
+    return hasRecursiveForce(words.slice(1).map((word) => word.text));
+  });
+}
+
+/**
  * Rule 6: a recursive-force `rm` outside `allowed_roots`, however the two
  * flags are spelled (see `hasRecursiveForce`).
  *
@@ -2096,7 +2169,7 @@ function checkUnboundedRm(
     const wrapped = shellWrappedRmPayload(decoded.text);
     return wrapped !== null && rmOutOfBoundsInText(wrapped, repoRoot, policy);
   });
-  if (!outOfBounds) return null;
+  if (!outOfBounds && !hasUnknownRemovalCommandWord(command)) return null;
   return violation(requireRule(policy, 'unbounded-rm'));
 }
 

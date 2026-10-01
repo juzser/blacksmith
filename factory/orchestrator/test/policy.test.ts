@@ -1752,6 +1752,91 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
   });
 });
 
+// Both rule 2 and rule 6 recognise their command by its literal word — `git`,
+// `rm` — read from the command position. When that word is itself an
+// unexpanded shell expansion (`$X`, `${X}`, `$(...)`, a backtick span), its
+// true value cannot be read from the text at all: it might be `rm`, it might
+// be `ls`. So a segment whose command word is unreadable this way, and which
+// also carries the shape the rule guards against (rule 6: a recursive+force
+// flag cluster; rule 2: a `push` word plus a force flag or a `+refspec`), is
+// refused rather than let through as "not literally rm/git".
+describe('evaluateCommand — an unreadable command word carrying a guarded shape', () => {
+  it.each([
+    ['X=rm; $X -rf /x'],
+    ['X=rm && "$X" -rf /x'],
+    ['${X} -rf /x'],
+    ['$(echo rm) -rf /x'],
+    ['`echo rm` -rf /x'],
+    ['$(printf rm) -rf src'],
+    ['/bin/$X -rf /x'],
+  ])(
+    'denies %s — the command word is an unexpanded parameter or substitution, with a recursive force cluster after it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  // Already covered before this change: the word's basename still dequotes to
+  // the exact literal `rm`, which the existing disguised-word read already
+  // refuses — pinned here next to the rest of the path-glued probes rather
+  // than claimed as new ground.
+  it(`denies \${P}/rm -rf /x — a path-glued word whose basename is still the literal rm`, () => {
+    const d = evaluateCommand(ctx({ command: '${P}/rm -rf /x', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([['G=git; $G push -f origin main'], ['$(echo git) push --force origin main']])(
+    'denies %s — the command word is an unexpanded parameter or substitution, with a push word and a force flag',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
+  it.each([['echo $HOME'], ['pnpm run test -- --reporter=$R']])(
+    'allows %s — an ordinary expansion with nothing removal- or push-shaped in it',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo', branch: 'feature' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows cd "$WORKTREE" && git status — an expanded argument, not an expanded command word', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'cd "$WORKTREE" && git status', branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // Not a new case: a recognised `git push` already requires every word
+  // after the subcommand to be plain (rule 2's existing plain-word gate,
+  // unrelated to this change), so an unexpanded destination here is already
+  // refused today and stays refused — this pins that pre-existing behaviour
+  // rather than the allow the brief expected; see the final report.
+  it('denies git push origin "$BRANCH" — pre-existing plain-word gate on a recognised push, unrelated to this change', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git push origin "$BRANCH"', branch: 'feature' }),
+      policy,
+    );
+    expect(d.allowed).toBe(false);
+  });
+
+  it('allows rm -rf "workspaces/$NAME" — a plain rm word, path under an allowed root', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'rm -rf "workspaces/$NAME"', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  it('allows ls -rf $DIR — no removal and no push, regardless of the flag shape', () => {
+    const d = evaluateCommand(ctx({ command: 'ls -rf $DIR', repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block
