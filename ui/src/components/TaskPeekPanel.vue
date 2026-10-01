@@ -5,13 +5,14 @@
 // non-modal, focus-trappable middle ground out of the box, and a modal
 // panel degrades safely everywhere a non-modal one would not (deliberate
 // scope-narrowing, flagged in the task report).
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { fetchTaskDetail, type TaskDetail } from '../lib/api.js';
 import { taskLabel } from '../lib/format.js';
-import { roleLabel } from '../lib/roleLabels.js';
 import { taskStatusKitTone } from '../lib/taxonomy.js';
+import AgentChip from './AgentChip.vue';
 import Dialog from './kit/Dialog.vue';
 import Tag from './kit/Tag.vue';
+import RequestQuote from './RequestQuote.vue';
 
 const props = defineProps<{ taskId: string }>();
 const emit = defineEmits<{ close: []; openFull: [taskId: string] }>();
@@ -32,8 +33,21 @@ async function load() {
 onMounted(load);
 watch(() => props.taskId, load);
 
-const latestAgent = () =>
-  detail.value?.agents && detail.value.agents.length > 0 ? detail.value.agents[0] : null;
+// The latest dispatch, same "who was last sent" source kanban()'s own
+// AgentChip reads (not the `agents` fold, which only says who is still on
+// it — `detail.agentActivity` already carries that half).
+const agentChipTask = computed(() => {
+  if (!detail.value) return null;
+  const latest = detail.value.attempts[detail.value.attempts.length - 1];
+  if (!latest) return null;
+  return {
+    taskStatus: detail.value.task.taskStatus,
+    agentRole: latest.agentRole,
+    agentModelTier: latest.modelTier,
+    agentActivity: detail.value.agentActivity,
+    updatedAt: detail.value.task.updatedAt,
+  };
+});
 </script>
 
 <template>
@@ -44,15 +58,10 @@ const latestAgent = () =>
         <Tag :tone="taskStatusKitTone(detail.task.taskStatus)" variant="subtle" size="sm">
           {{ detail.task.taskStatus }}
         </Tag>
-        <span v-if="latestAgent()" class="bs-task-peek__agent">{{ roleLabel(latestAgent()!.agentRole) }}</span>
+        <AgentChip v-if="agentChipTask" :task="agentChipTask" />
       </div>
-      <section class="bs-task-peek__request">
-        <h4>Request</h4>
-        <blockquote v-if="detail.requestQuote" class="bs-task-peek__quote">
-          {{ detail.requestQuote.prompt }}
-        </blockquote>
-        <p v-else class="bs-task-peek__empty">No request recorded for this task.</p>
-      </section>
+      <p v-if="detail.task.summary" class="bs-task-peek__summary">{{ detail.task.summary }}</p>
+      <RequestQuote :quote="detail.requestQuote" />
       <a href="#" class="bs-task-peek__full" @click.prevent="emit('openFull', taskId)">Open full page</a>
     </template>
     <p v-else>Loading…</p>

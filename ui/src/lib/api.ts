@@ -284,8 +284,12 @@ export interface TaskDetail {
     taskStatus: string;
     planVersion: number | null;
     objective: string | null;
+    /** DS3 part 2 item 1 — optional task-spec fields (slice A), carried through unchanged. */
+    title: string | null;
+    summary: string | null;
     branch: string | null;
     project: string | null;
+    updatedAt: string;
   };
   claims: string[];
   attempts: Array<{
@@ -335,6 +339,19 @@ export interface TaskDetail {
   branch: string | null;
   /** DS3 §4.7 — the operator prompt behind this task, or its epic's source prompt as a fallback. */
   requestQuote: RequestQuote | null;
+  /** DS3 part 2 item 1 — same "is anybody still on this task" field as `KanbanTask.agentActivity`. */
+  agentActivity: 'working' | 'stalled' | null;
+}
+
+/** DS3 §4.7 — one entry per dispatch attempt, judge round, result, or error, for `RunHistoryTimeline`. */
+export interface TaskRun {
+  eventId: string;
+  ts: string;
+  kind: 'dispatch' | 'judge-report' | 'result' | 'error';
+  agentRole: string | null;
+  round: number | null;
+  tokensTotal: number | null;
+  outcome: string | null;
 }
 
 export interface LessonRecord {
@@ -602,6 +619,13 @@ export function fetchKanban(
 
 export function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
   return getJson(`/api/tasks/${encodeURIComponent(taskId)}`);
+}
+
+export async function fetchTaskRuns(taskId: string): Promise<TaskRun[]> {
+  const { runs } = await getJson<{ runs: TaskRun[] }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/runs`,
+  );
+  return runs;
 }
 
 export function fetchLessons(session?: SessionScope): Promise<LessonsResult> {
