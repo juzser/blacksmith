@@ -1904,6 +1904,71 @@ describe('evaluateCommand — an unreadable command word behind a wrapper, group
   });
 });
 
+// The two describes above only read a segment's own words. A command or
+// process substitution runs as a command in its own right while the shell
+// builds an argument for whatever sits outside it — `echo $(X=rm; $X -rf /x)`
+// never puts anything dangerous in an argument to `echo`; the shell runs
+// `$X -rf /x` on its own account to decide what `echo` should print. The
+// allowlist that lets a plain `echo`/`cat`/`grep`/… first word skip the rest
+// of rule 6's scan was exempting that too, since it returned before ever
+// looking past the first word. A substitution inside single quotes is not a
+// substitution at all — single quotes suppress every expansion — so that
+// stays exempt; one inside double quotes still runs and is read the same as
+// an unquoted one.
+describe('evaluateCommand — a removal hidden in a command, process or backtick substitution', () => {
+  it.each([
+    ['echo $(X=rm; $X -rf /x)'],
+    ['cat <($X -rf /x)'],
+    ['grep x $( $X -rf /x )'],
+    ['echo `$X -rf /x`'],
+    ['printf %s >($X -rf /x)'],
+    ['ls "$(X=rm; $X -rf /x)"'],
+  ])(
+    'denies %s — an allowlisted first word, but a removal the shell runs while building its argument',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  // Rule 2 has no first-word allowlist to begin with (see
+  // `isUnknownForcePushShape`), and its final checks already scan the whole
+  // segment's raw text rather than stopping after a recognised first word —
+  // so a push word and a force flag sitting inside an unresolved substitution
+  // are already read the same as anywhere else in the segment. Pinned here as
+  // the matching case for rule 6's fix above, not a new behaviour.
+  it('denies echo $(X=git; $X push -f origin main) — rule 2 already reads the whole segment, substitution or not', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'echo $(X=git; $X push -f origin main)', branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it.each([['echo $(date)'], ['cp -rf "$(pwd)/a" b'], [`echo '$(X=rm; $X -rf /x)'`]])(
+    'allows %s — an ordinary substitution, or one single-quoted into a literal with nothing to run',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  // Not a new case, and not this change's doing: `splitDequotedWords` reads
+  // `$(git` as one whitespace-delimited word ending in the literal "git",
+  // which `checkForcePushSubcommandWord`'s pre-existing disguised-word
+  // fallback already refused before this round touched anything — a rule-2
+  // heuristic unrelated to rule 6's substitution-body read above. This pins
+  // what the command actually does rather than the allow the brief expected;
+  // see the final report.
+  it('denies ls $(git rev-parse --show-toplevel) — pre-existing rule-2 heuristic, unrelated to this change', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'ls $(git rev-parse --show-toplevel)', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toEqual(['force-push']);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block
