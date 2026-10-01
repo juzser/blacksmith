@@ -1,22 +1,32 @@
 <script setup lang="ts">
-// Task detail — design-spec.md §5.5. Tabs Overview/Findings/Artifacts/
-// History; waiver UI exactly per spec: Waive/Deny only on S3+confirmed+
-// unwaived, Popover confirm naming the fingerprint, Toast, race guard.
+// Task detail — DS3 §4.7, rebuilt on the kit. Tabs "What was asked" (the
+// RequestQuote + spec contract + run history)/Findings/Outputs/History.
+// Waiver UI exactly per spec: Waive/Deny only on S3+confirmed+unwaived,
+// Popover confirm naming the fingerprint, Toast, race guard — unchanged
+// from the ds/ build, just re-skinned onto kit/Popover + kit/Button.
+//
+// Deviations from §4.7 (no backing data, rendered absent per the brief):
+// - The pattern-11 totals bar (tokens spent / agent-time / elapsed) is
+//   skipped — `TaskRun` carries no derivable "elapsed" or cumulative
+//   agent-time, and inventing one from event gaps is not this task's call.
+// - No per-agent summary table: `agents-registry` rows (role/provider/tier/
+//   status) stay a plain rail list, same shape as before, not a new Table.
+import { Bot, History as HistoryIcon, Image as ImageIcon, RefreshCw } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
-import Banner from '../components/ds/Banner.vue';
-import Button from '../components/ds/Button.vue';
-import Card from '../components/ds/Card.vue';
-import Dialog from '../components/ds/Dialog.vue';
-import EmptyState from '../components/ds/EmptyState.vue';
-import Lozenge from '../components/ds/Lozenge.vue';
-import PageHeader from '../components/ds/PageHeader.vue';
-import Popover from '../components/ds/Popover.vue';
-import RowList from '../components/ds/RowList.vue';
-import Skeleton from '../components/ds/Skeleton.vue';
-import Table from '../components/ds/Table.vue';
-import Tabs from '../components/ds/Tabs.vue';
-import TwoColumn from '../components/ds/TwoColumn.vue';
-import IdentityChip from '../components/IdentityChip.vue';
+import AgentChip from '../components/AgentChip.vue';
+import Banner from '../components/kit/Banner.vue';
+import Button from '../components/kit/Button.vue';
+import Card from '../components/kit/Card.vue';
+import Dialog from '../components/kit/Dialog.vue';
+import EmptyState from '../components/kit/EmptyState.vue';
+import PageHeader from '../components/kit/PageHeader.vue';
+import Popover from '../components/kit/Popover.vue';
+import Skeleton from '../components/kit/Skeleton.vue';
+import Table from '../components/kit/Table.vue';
+import Tabs from '../components/kit/Tabs.vue';
+import Tag from '../components/kit/Tag.vue';
+import RequestQuote from '../components/RequestQuote.vue';
+import RunHistoryTimeline from '../components/RunHistoryTimeline.vue';
 import TimelineRow from '../components/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
@@ -24,18 +34,20 @@ import { useToast } from '../composables/useToast.js';
 import {
   applyWaiverBatch,
   fetchTaskDetail,
+  fetchTaskRuns,
   fetchTimeline,
   type TaskDetail,
+  type TaskRun,
   type TimelineEntry,
 } from '../lib/api.js';
-import { formatDateTime, taskLabel } from '../lib/format.js';
+import { taskLabel } from '../lib/format.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
 import {
-  agentStatusTone,
-  findingStatusTone,
-  severityTone,
-  taskStatusTone,
+  agentStatusKitTone,
+  findingStatusKitTone,
+  severityKitTone,
+  taskStatusKitTone,
 } from '../lib/taxonomy.js';
 import { isWaivable } from '../lib/waivable.js';
 import { waiverDenialNote } from '../lib/waiverDenialNote.js';
@@ -48,6 +60,7 @@ const detail = ref<TaskDetail | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
 const activeTab = ref('overview');
+const runs = ref<TaskRun[]>([]);
 const history = ref<TimelineEntry[]>([]);
 const historyLoading = ref(true);
 // The History tab fetches separately from the task itself, so it needs its own
@@ -66,7 +79,9 @@ async function load() {
   // skeleton, because there the page really is empty (D-243).
   loading.value = detail.value === null;
   try {
-    detail.value = await fetchTaskDetail(props.taskId);
+    const [d, r] = await Promise.all([fetchTaskDetail(props.taskId), fetchTaskRuns(props.taskId)]);
+    detail.value = d;
+    runs.value = r;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -85,7 +100,7 @@ async function loadHistory() {
     historyLoading.value = false;
   }
 }
-/** §8's manual refresh: the task and its history both go stale (D-243). */
+/** §8's manual refresh: the task, its runs, and its history all go stale (D-243). */
 function refresh() {
   void load();
   void loadHistory();
@@ -160,9 +175,9 @@ const otherArtifacts = computed(
   () => detail.value?.artifacts.filter((a) => !isImageArtifact(a)) ?? [],
 );
 const tabs = [
-  { id: 'overview', label: 'Overview' },
+  { id: 'overview', label: 'What was asked' },
   { id: 'findings', label: 'Findings' },
-  { id: 'artifacts', label: 'Artifacts' },
+  { id: 'artifacts', label: 'Outputs' },
   { id: 'history', label: 'History' },
 ];
 
@@ -173,18 +188,22 @@ const findingColumns = [
   { key: 'summary', label: 'Summary' },
 ];
 
-// Operator directive 5 (Phase 6b round 3): same combined "role · tier"
-// IdentityChip label as Kanban's TaskCard (directive 2) — hashed on role
-// only, so the same agent role gets the same accent everywhere it appears.
-// Task 2 (friendly role labels): the visible label now reads "Builder"
-// rather than "coder"; agentChipTitle below keeps the raw pair as a tooltip.
-function agentChipLabel(role: string, modelTier: string | null): string {
-  const label = roleLabel(role);
-  return modelTier ? `${label} · ${modelTier}` : label;
-}
-function agentChipTitle(role: string, modelTier: string | null): string {
-  return modelTier ? `${role} · ${modelTier}` : role;
-}
+// DS3 pattern 3 — the task's own current agent chip, same "last dispatch
+// attempt" source as TaskPeekPanel.vue (item 2): `attempts` names who was
+// last sent, `agentActivity` (item 1) separately says whether anyone is
+// still on it.
+const agentChipTask = computed(() => {
+  if (!detail.value) return null;
+  const latest = detail.value.attempts[detail.value.attempts.length - 1];
+  if (!latest) return null;
+  return {
+    taskStatus: detail.value.task.taskStatus,
+    agentRole: latest.agentRole,
+    agentModelTier: latest.modelTier,
+    agentActivity: detail.value.agentActivity,
+    updatedAt: detail.value.task.updatedAt,
+  };
+});
 
 // Task (long objective): taskLabel() drops the objective in favor of a
 // slug once it is longer than SHORT_TASK_LABEL_MAX, and nothing else on
@@ -202,7 +221,7 @@ function objectiveDescription(taskId: string, objective: string | null): string 
 <template>
   <div class="app-page">
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
-    <Skeleton v-if="loading" height="240" />
+    <Skeleton v-if="loading" :height="240" />
 
     <template v-else-if="detail">
       <PageHeader
@@ -210,195 +229,165 @@ function objectiveDescription(taskId: string, objective: string | null): string 
         :description="objectiveDescription(detail.task.taskId, detail.task.objective)"
       >
         <template #status>
-          <Lozenge :tone="taskStatusTone(detail.task.taskStatus)">{{ detail.task.taskStatus }}</Lozenge>
+          <Tag :tone="taskStatusKitTone(detail.task.taskStatus)" variant="subtle" size="sm">
+            {{ detail.task.taskStatus }}
+          </Tag>
+          <AgentChip v-if="agentChipTask" :task="agentChipTask" />
         </template>
         <template #actions>
-          <Lozenge v-if="detail.branch" variant="outline">{{ detail.branch }}</Lozenge>
-          <Button variant="ghost" size="sm" icon="refresh-cw" @click="refresh">Refresh</Button>
+          <Tag v-if="detail.branch" variant="outline" size="sm">{{ detail.branch }}</Tag>
+          <Button variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
         </template>
       </PageHeader>
 
-      <TwoColumn>
-        <Tabs v-model="activeTab" :tabs="tabs" aria-label="Task detail sections">
-          <template #overview>
-            <!-- ds-allow-hardcode:start — 320px is a flex-wrap breakpoint
-                 for these two Cards (not a spacing/sizing design token):
-                 below that width each Card drops to its own row. -->
-            <div style="display: flex; gap: var(--ds-space-6); flex-wrap: wrap">
-              <Card title="Spec contract" style="flex: 2; min-width: 320px">
-                <dl style="display: grid; grid-template-columns: auto 1fr; gap: var(--ds-space-2) var(--ds-space-4); margin: 0">
-                  <dt style="color: var(--ds-text-subtlest)">Case</dt>
-                  <dd><IdentityChip v-if="detail.task.caseTag" :id="detail.task.caseTag" /></dd>
-                  <dt style="color: var(--ds-text-subtlest)">Origin</dt>
-                  <dd><Lozenge v-if="detail.task.origin" variant="outline">{{ detail.task.origin }}</Lozenge></dd>
-                  <dt style="color: var(--ds-text-subtlest)">Epic</dt>
-                  <dd>{{ detail.task.epicId ?? '-' }}</dd>
-                  <dt style="color: var(--ds-text-subtlest)">Plan version</dt>
-                  <dd>{{ detail.task.planVersion ?? '-' }}</dd>
-                  <dt style="color: var(--ds-text-subtlest)">Claims</dt>
-                  <dd>
-                    <span v-for="c in detail.claims" :key="c" style="font-family: var(--ds-font-mono); font-size: var(--ds-text-xs); margin-right: var(--ds-space-2)">{{ c }}</span>
-                    <span v-if="detail.claims.length === 0">-</span>
-                  </dd>
-                </dl>
-              </Card>
-              <Card title="Attempts" style="flex: 3; min-width: 320px">
-                <RowList v-if="detail.attempts.length > 0">
-                  <li v-for="a in detail.attempts" :key="a.eventId" class="ds-row">
-                    <span class="ds-row__main">
-                      <span class="ds-row__title">{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}/{{ a.provider }}</span>
-                      <span class="ds-row__meta">
-                        started {{ formatDateTime(a.ts) }}<template v-if="a.terminalAt"> · ended {{ formatDateTime(a.terminalAt) }}</template>
-                      </span>
-                    </span>
-                    <span class="ds-row__trail">
-                      <IdentityChip
-                        :id="a.agentRole"
-                        :label="agentChipLabel(a.agentRole, a.modelTier)"
-                        :title="agentChipTitle(a.agentRole, a.modelTier)"
-                      />
-                      <Lozenge v-if="a.agentStatus" :tone="agentStatusTone(a.agentStatus)">{{ a.agentStatus }}</Lozenge>
-                    </span>
-                  </li>
-                </RowList>
-                <EmptyState v-else icon="bot" inline>No dispatch attempts yet.</EmptyState>
-              </Card>
-            </div>
-            <!-- ds-allow-hardcode:end -->
-          </template>
-
-          <template #findings>
-          <Table
-            :columns="findingColumns"
-            :rows="detail.findings"
-            row-key="findingId"
-            empty="No findings recorded for this task."
-          >
-            <template #cell="{ column, row }">
-              <Lozenge v-if="column.key === 'severity'" :tone="severityTone(String(row.severity)).tone" :variant="severityTone(String(row.severity)).variant">{{ row.severity }}</Lozenge>
-              <Lozenge v-else-if="column.key === 'findingStatus'" :tone="findingStatusTone(String(row.findingStatus))">{{ row.findingStatus }}</Lozenge>
-              <template v-else-if="column.key === 'summary'">
-                <div>{{ row.summary }}</div>
-                <!-- A spec finding names the criterion it is about; a diff finding renders nothing here. -->
-                <div v-if="specRefLabel(row as never)" style="margin-top: var(--ds-space-1); font-family: var(--ds-font-mono); font-size: var(--ds-text-xs); color: var(--ds-text-subtle)">{{ specRefLabel(row as never) }}</div>
-                <div v-if="canWaive(row as never)" style="margin-top: var(--ds-space-2); display: flex; gap: var(--ds-space-2)">
-                  <Popover label="Waive finding" :open="openPopover === (row as never as { fingerprint: string }).fingerprint" @close="openPopover = null">
-                    <template #trigger>
-                      <Button
-                        variant="outline"
-                        size="xs"
-                        :disabled="saving === (row as never as { fingerprint: string }).fingerprint"
-                        @click="openPopover = (row as never as { fingerprint: string }).fingerprint"
-                      >
-                        Waive
-                      </Button>
-                    </template>
-                    <p style="font-size: var(--ds-text-sm)">Waive finding <code>{{ (row as never as { fingerprint: string }).fingerprint }}</code>? This can't be asked again.</p>
-                    <Button variant="outline" size="sm" @click="decide((row as never as { fingerprint: string }).fingerprint, 'granted')">Confirm</Button>
-                  </Popover>
-                  <Button
-                    variant="secondary"
-                    size="xs"
-                    :disabled="saving === (row as never as { fingerprint: string }).fingerprint"
-                    @click="decide((row as never as { fingerprint: string }).fingerprint, 'denied')"
-                  >
-                    Deny
-                  </Button>
+      <div class="bs-task-detail__layout">
+        <div>
+          <Tabs v-model="activeTab" :tabs="tabs" aria-label="Task detail sections">
+            <template #overview>
+              <div class="bs-task-detail__overview">
+                <RequestQuote :quote="detail.requestQuote" />
+                <div class="bs-task-detail__grid">
+                  <Card title="Spec contract" class="bs-task-detail__card">
+                    <dl class="bs-task-detail__dl">
+                      <dt>Origin</dt>
+                      <dd><Tag v-if="detail.task.origin" variant="outline" size="sm">{{ detail.task.origin }}</Tag><template v-else>-</template></dd>
+                      <dt>Case</dt>
+                      <dd><Tag v-if="detail.task.caseTag" variant="outline" size="sm">{{ detail.task.caseTag }}</Tag><template v-else>-</template></dd>
+                      <dt>Epic</dt>
+                      <dd>{{ detail.task.epicId ?? '-' }}</dd>
+                      <dt>Plan version</dt>
+                      <dd>{{ detail.task.planVersion ?? '-' }}</dd>
+                      <dt>Claims</dt>
+                      <dd>
+                        <span v-for="c in detail.claims" :key="c" class="bs-task-detail__claim">{{ c }}</span>
+                        <span v-if="detail.claims.length === 0">-</span>
+                      </dd>
+                    </dl>
+                  </Card>
+                  <Card title="Run history" class="bs-task-detail__card bs-task-detail__card--wide">
+                    <RunHistoryTimeline :runs="runs" />
+                  </Card>
                 </div>
-              </template>
-              <template v-else>{{ row[column.key] }}</template>
+              </div>
             </template>
-          </Table>
-        </template>
 
-        <template #artifacts>
-          <template v-if="detail.artifacts.length > 0">
-            <div v-if="imageArtifacts.length > 0" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--ds-space-3)">
-              <button
-                v-for="a in imageArtifacts"
-                :key="a.id"
-                type="button"
-                style="border: 1px solid var(--ds-border); border-radius: var(--ds-radius-lg); padding: var(--ds-space-2); background: var(--ds-surface-raised); cursor: pointer; text-align: left; font-size: var(--ds-text-xs)"
-                @click="lightboxSrc = artifactUrl(a)"
-              >
-                <img :src="artifactUrl(a)" :alt="a.type" style="width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--ds-radius-sm)" />
-                <div style="margin-top: var(--ds-space-1)">{{ a.type }}</div>
-              </button>
-            </div>
-            <RowList v-if="otherArtifacts.length > 0" density="compact">
-              <li v-for="a in otherArtifacts" :key="a.id" class="ds-row">
-                <span class="ds-row__main">
-                  <span class="ds-row__title">{{ a.type }}</span>
-                  <span class="ds-row__meta">{{ a.path }}</span>
-                </span>
-              </li>
-            </RowList>
-          </template>
-          <EmptyState v-else icon="image">No artifacts recorded.</EmptyState>
-          <Dialog :open="!!lightboxSrc" title="Artifact preview" @close="lightboxSrc = null">
-            <img v-if="lightboxSrc" :src="lightboxSrc" alt="Artifact preview" style="max-width: 100%" />
-          </Dialog>
-        </template>
+            <template #findings>
+              <Table :columns="findingColumns" :rows="detail.findings" row-key="findingId" empty="No findings recorded for this task.">
+                <template #cell="{ column, row }">
+                  <Tag v-if="column.key === 'severity'" :tone="severityKitTone(String(row.severity)).tone" :variant="severityKitTone(String(row.severity)).variant" size="sm">{{ row.severity }}</Tag>
+                  <Tag v-else-if="column.key === 'findingStatus'" :tone="findingStatusKitTone(String(row.findingStatus))" size="sm">{{ row.findingStatus }}</Tag>
+                  <template v-else-if="column.key === 'summary'">
+                    <div>{{ row.summary }}</div>
+                    <!-- A spec finding names the criterion it is about; a diff finding renders nothing here. -->
+                    <div v-if="specRefLabel(row as never)" class="bs-task-detail__spec-ref">{{ specRefLabel(row as never) }}</div>
+                    <div v-if="canWaive(row as never)" class="bs-task-detail__waive-actions">
+                      <Popover label="Waive finding" :open="openPopover === (row as never as { fingerprint: string }).fingerprint" @close="openPopover = null">
+                        <template #trigger>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            :disabled="saving === (row as never as { fingerprint: string }).fingerprint"
+                            @click="openPopover = (row as never as { fingerprint: string }).fingerprint"
+                          >
+                            Waive
+                          </Button>
+                        </template>
+                        <p class="bs-task-detail__popover-text">Waive finding <code>{{ (row as never as { fingerprint: string }).fingerprint }}</code>? This can't be asked again.</p>
+                        <Button variant="secondary" size="sm" @click="decide((row as never as { fingerprint: string }).fingerprint, 'granted')">Confirm</Button>
+                      </Popover>
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        :disabled="saving === (row as never as { fingerprint: string }).fingerprint"
+                        @click="decide((row as never as { fingerprint: string }).fingerprint, 'denied')"
+                      >
+                        Deny
+                      </Button>
+                    </div>
+                  </template>
+                  <template v-else>{{ row[column.key] }}</template>
+                </template>
+              </Table>
+            </template>
 
-        <template #history>
-          <Skeleton v-if="historyLoading" height="160" />
-          <!-- Ahead of the empty state on purpose. A failed fetch has no
-               events to show either, and the two are only distinguishable
-               here -- past this point they render identically. -->
-          <Banner v-else-if="historyError" tone="danger" show-retry @retry="loadHistory">
-            {{ historyError }}
-          </Banner>
-          <div v-else-if="history.length > 0">
-            <TimelineRow
-              v-for="e in history"
-              :key="e.eventId"
-              :entry="e"
-              :has-children="false"
-              :expanded="false"
-              :selectable="false"
-            />
-          </div>
-          <EmptyState v-else icon="history" inline>No events recorded for this task.</EmptyState>
-        </template>
-        </Tabs>
+            <template #artifacts>
+              <template v-if="detail.artifacts.length > 0">
+                <div v-if="imageArtifacts.length > 0" class="bs-task-detail__artifact-grid">
+                  <button
+                    v-for="a in imageArtifacts"
+                    :key="a.id"
+                    type="button"
+                    class="bs-task-detail__artifact"
+                    @click="lightboxSrc = artifactUrl(a)"
+                  >
+                    <img :src="artifactUrl(a)" :alt="a.type" class="bs-task-detail__artifact-img" />
+                    <div>{{ a.type }}</div>
+                  </button>
+                </div>
+                <ul v-if="otherArtifacts.length > 0" class="bs-task-detail__artifact-list">
+                  <li v-for="a in otherArtifacts" :key="a.id">
+                    <span class="bs-task-detail__artifact-type">{{ a.type }}</span>
+                    <span class="bs-task-detail__artifact-path">{{ a.path }}</span>
+                  </li>
+                </ul>
+              </template>
+              <EmptyState v-else :icon="ImageIcon" title="No outputs recorded." body="Artifacts and screenshots the task produces will appear here." />
+              <Dialog :open="!!lightboxSrc" title="Artifact preview" @close="lightboxSrc = null">
+                <img v-if="lightboxSrc" :src="lightboxSrc" alt="Artifact preview" class="bs-task-detail__lightbox-img" />
+              </Dialog>
+            </template>
 
-        <template #rail>
+            <template #history>
+              <Skeleton v-if="historyLoading" :height="160" />
+              <!-- Ahead of the empty state on purpose. A failed fetch has no
+                   events to show either, and the two are only distinguishable
+                   here -- past this point they render identically. -->
+              <Banner v-else-if="historyError" tone="danger" show-retry @retry="loadHistory">
+                {{ historyError }}
+              </Banner>
+              <div v-else-if="history.length > 0">
+                <TimelineRow
+                  v-for="e in history"
+                  :key="e.eventId"
+                  :entry="e"
+                  :has-children="false"
+                  :expanded="false"
+                  :selectable="false"
+                />
+              </div>
+              <EmptyState v-else :icon="HistoryIcon" title="No events recorded." body="Events this task produces will appear here." />
+            </template>
+          </Tabs>
+        </div>
+
+        <div class="bs-task-detail__rail">
           <Card title="Details">
-            <dl style="display: grid; grid-template-columns: auto 1fr; gap: var(--ds-space-2) var(--ds-space-3); margin: 0; font-size: var(--ds-text-sm)">
-              <dt style="color: var(--ds-text-subtlest)">Task ID</dt>
-              <dd style="font-family: var(--ds-font-mono); font-size: var(--ds-text-xs)">{{ detail.task.taskId }}</dd>
-              <dt style="color: var(--ds-text-subtlest)">Epic</dt>
+            <dl class="bs-task-detail__dl">
+              <dt>Task ID</dt>
+              <dd class="bs-task-detail__mono">{{ detail.task.taskId }}</dd>
+              <dt>Epic</dt>
               <dd>{{ detail.task.epicId ?? '-' }}</dd>
-              <dt style="color: var(--ds-text-subtlest)">Plan version</dt>
+              <dt>Plan version</dt>
               <dd>{{ detail.task.planVersion ?? '-' }}</dd>
-              <dt style="color: var(--ds-text-subtlest)">Status</dt>
-              <dd><Lozenge :tone="taskStatusTone(detail.task.taskStatus)">{{ detail.task.taskStatus }}</Lozenge></dd>
-              <dt style="color: var(--ds-text-subtlest)">Origin</dt>
-              <dd><Lozenge v-if="detail.task.origin" variant="outline">{{ detail.task.origin }}</Lozenge></dd>
-              <dt style="color: var(--ds-text-subtlest)">Case</dt>
-              <dd><IdentityChip v-if="detail.task.caseTag" :id="detail.task.caseTag" /></dd>
+              <dt>Status</dt>
+              <dd><Tag :tone="taskStatusKitTone(detail.task.taskStatus)" size="sm">{{ detail.task.taskStatus }}</Tag></dd>
+              <dt>Origin</dt>
+              <dd><Tag v-if="detail.task.origin" variant="outline" size="sm">{{ detail.task.origin }}</Tag><template v-else>-</template></dd>
+              <dt>Case</dt>
+              <dd><Tag v-if="detail.task.caseTag" variant="outline" size="sm">{{ detail.task.caseTag }}</Tag><template v-else>-</template></dd>
             </dl>
           </Card>
           <Card title="Agents">
-            <RowList v-if="detail.agents.length > 0" density="compact">
-              <li v-for="a in detail.agents" :key="a.id" class="ds-row">
-                <span class="ds-row__main">
-                  <IdentityChip
-                    :id="a.agentRole"
-                    :label="agentChipLabel(a.agentRole, a.modelTier)"
-                    :title="agentChipTitle(a.agentRole, a.modelTier)"
-                  />
-                  <span class="ds-row__meta">{{ a.provider }}</span>
-                </span>
-                <span class="ds-row__trail">
-                  <Lozenge :tone="agentStatusTone(a.status)">{{ a.status }}</Lozenge>
-                </span>
+            <ul v-if="detail.agents.length > 0" class="bs-task-detail__agent-list">
+              <li v-for="a in detail.agents" :key="a.id" class="bs-task-detail__agent-row">
+                <span>{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}/{{ a.provider }}</span>
+                <Tag :tone="agentStatusKitTone(a.status)" size="sm">{{ a.status }}</Tag>
               </li>
-            </RowList>
-            <EmptyState v-else icon="bot" inline>No agents dispatched yet.</EmptyState>
+            </ul>
+            <EmptyState v-else :icon="Bot" title="No agents yet." body="Agents dispatched to this task will appear here." />
           </Card>
-        </template>
-      </TwoColumn>
+        </div>
+      </div>
     </template>
   </div>
 </template>

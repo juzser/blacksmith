@@ -6,8 +6,10 @@ import { AGENT_STATUSES } from '../../factory/orchestrator/src/agents-registry.j
 import { MILESTONE_STATUSES } from '../../factory/orchestrator/src/roadmap.js';
 import {
   AGENT_STATUS_TONE,
+  agentStatusKitTone,
   agentStatusTone,
   errorGroupIcon,
+  findingStatusKitTone,
   findingStatusTone,
   isTaskOver,
   lessonStatusTone,
@@ -15,6 +17,7 @@ import {
   milestoneStatusTone,
   planStatusTone,
   runStatusTone,
+  severityKitTone,
   severityTone,
   TASK_STATUS_OUTCOME,
   taskOutcome,
@@ -199,5 +202,37 @@ describe('lib/taxonomy.ts — taskStatusKitTone() (DS3 §1.1 kit Tag tone)', () 
 
   it('falls back to neutral for an unclassified status', () => {
     expect(taskStatusKitTone('invented-tomorrow')).toBe('neutral');
+  });
+});
+
+describe('lib/taxonomy.ts — severityKitTone/findingStatusKitTone/agentStatusKitTone (DS3 item 4)', () => {
+  it('maps severity to kit tone + variant, S1 alone is bold', () => {
+    expect(severityKitTone('S1-stop-the-line')).toEqual({ tone: 'danger', variant: 'bold' });
+    expect(severityKitTone('S2-major')).toEqual({ tone: 'danger', variant: 'subtle' });
+    expect(severityKitTone('S3-minor')).toEqual({ tone: 'warning', variant: 'subtle' });
+    expect(severityKitTone('S4-nit')).toEqual({ tone: 'neutral', variant: 'subtle' });
+  });
+
+  it('falls back to neutral/subtle for an unclassified severity', () => {
+    expect(severityKitTone('invented-tomorrow')).toEqual({ tone: 'neutral', variant: 'subtle' });
+  });
+
+  it('maps finding_status onto the kit tone set', () => {
+    expect(findingStatusKitTone('raised')).toBe('progress');
+    expect(findingStatusKitTone('confirmed')).toBe('warning');
+    expect(findingStatusKitTone('amend-pending')).toBe('warning');
+    expect(findingStatusKitTone('amended')).toBe('done');
+    expect(findingStatusKitTone('fix-verified')).toBe('done');
+    expect(findingStatusKitTone('waived')).toBe('done');
+    expect(findingStatusKitTone('refuted')).toBe('neutral');
+    expect(findingStatusKitTone('expired')).toBe('neutral');
+  });
+
+  it('maps agents.status onto the kit tone set — NOT run_status', () => {
+    expect(agentStatusKitTone('live')).toBe('progress');
+    expect(agentStatusKitTone('done')).toBe('done');
+    expect(agentStatusKitTone('error')).toBe('danger');
+    expect(agentStatusKitTone('superseded')).toBe('neutral');
+    expect(agentStatusKitTone('abandoned')).toBe('neutral');
   });
 });

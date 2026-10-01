@@ -1815,3 +1815,182 @@ summary.bs-inbox__group-head {
   margin: 0;
   color: var(--bs-text-subtle);
 }
+
+/* Task detail page (DS3 §4.7) */
+.bs-task-detail__layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: var(--bs-space-5);
+  align-items: start;
+}
+.bs-task-detail__overview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+}
+.bs-task-detail__grid {
+  display: flex;
+  gap: var(--bs-space-4);
+  flex-wrap: wrap;
+}
+.bs-task-detail__card {
+  flex: 1;
+  min-width: 260px;
+}
+.bs-task-detail__card--wide {
+  flex: 2;
+}
+.bs-task-detail__dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--bs-space-2) var(--bs-space-4);
+  margin: 0;
+  font-size: var(--bs-text-sm);
+}
+.bs-task-detail__dl dt {
+  color: var(--bs-text-subtlest);
+}
+.bs-task-detail__claim {
+  font-family: var(--bs-font-mono);
+  font-size: var(--bs-text-xs);
+  margin-right: var(--bs-space-2);
+}
+.bs-task-detail__mono {
+  font-family: var(--bs-font-mono);
+  font-size: var(--bs-text-xs);
+}
+.bs-task-detail__spec-ref {
+  margin-top: var(--bs-space-1);
+  font-family: var(--bs-font-mono);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-task-detail__waive-actions {
+  margin-top: var(--bs-space-2);
+  display: flex;
+  gap: var(--bs-space-2);
+}
+.bs-task-detail__popover-text {
+  font-size: var(--bs-text-sm);
+}
+.bs-task-detail__artifact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--bs-space-3);
+}
+.bs-task-detail__artifact {
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  padding: var(--bs-space-2);
+  background: var(--bs-surface-raised);
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--bs-text-xs);
+}
+.bs-task-detail__artifact-img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--bs-radius-sm);
+}
+.bs-task-detail__lightbox-img {
+  max-width: 100%;
+}
+.bs-task-detail__artifact-list {
+  list-style: none;
+  margin: var(--bs-space-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+}
+.bs-task-detail__artifact-type {
+  font-weight: 600;
+  margin-right: var(--bs-space-2);
+}
+.bs-task-detail__artifact-path {
+  color: var(--bs-text-subtle);
+  font-family: var(--bs-font-mono);
+  font-size: var(--bs-text-xs);
+}
+.bs-task-detail__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+}
+.bs-task-detail__agent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-task-detail__agent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+}
+
+/* RunHistoryTimeline (DS3 §4.7 pattern 2) */
+.bs-run-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+.bs-run-history__row {
+  display: flex;
+  gap: var(--bs-space-2);
+  align-items: flex-start;
+}
+.bs-run-history__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--bs-radius-full);
+  flex-shrink: 0;
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text-subtle);
+}
+.bs-run-history__icon--dispatch {
+  color: var(--bs-tone-progress-text);
+}
+.bs-run-history__icon--judge-report {
+  color: var(--bs-tone-review-text);
+}
+.bs-run-history__icon--result {
+  color: var(--bs-tone-done-text);
+}
+.bs-run-history__icon--error {
+  color: var(--bs-tone-danger-text);
+}
+.bs-run-history__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-run-history__head {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.bs-run-history__label {
+  font-size: var(--bs-text-sm);
+  font-weight: 600;
+}
+.bs-run-history__meta {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-run-history__empty {
+  margin: 0;
+  color: var(--bs-text-subtle);
+}
