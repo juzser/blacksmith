@@ -150,6 +150,37 @@ categories, neither of which the redesign spec's shell prop table carries.
 The old `ds/` shell files (`ds/SidebarNav.vue`, the old `App.vue` topbar
 markup) stay in the tree; DS9 deletes them.
 
+## Kanban + Task detail (DS3)
+
+Work → Kanban and the task-detail route are rebuilt on the BS kit (ds-spec.md
+§2.4/§4.2, §4.7). New composites, all under `ui/src/components/`:
+
+- **AgentChip** — an agent's identity + status dot, reused by `KanbanTaskCard`
+  and the task-detail rail's Agents card; `agentWaitingThresholdMs` (4h, a
+  chosen default — ds-spec.md names the "waiting" state but no threshold)
+  decides stale-vs-active tone.
+- **KanbanTaskCard** — one board card: title, status Tag, AgentChip(s),
+  focusable (`tabindex`) so the board's arrow-key navigation can walk cards
+  without a 2D grid model (DOM order only).
+- **KanbanBoard** — the board itself: switchable group-by, a hidden-columns
+  control, per-column virtualization past `KANBAN_VIRTUALIZE_THRESHOLD` (30,
+  a chosen default — reuses the existing `capColumn()`/"view more" paging
+  rather than a second rendering strategy), and arrow-key/Enter/Space/Escape
+  card navigation plus peek-panel open/close. No drag-and-drop (§2.4b pattern
+  9) — a deliberate omission, the board is read-only.
+- **KanbanDisplayOptions** — the board's group-by/summary/hidden-columns
+  popover; state round-trips through `lib/kanbanDisplayOptions.ts` into
+  `localStorage` (guarded, degrades to defaults with no storage) so display
+  choices persist across reload.
+- **TaskPeekPanel** — the arrow-key/Enter-opened quick view of a task, built
+  on `kit/Dialog`; emits a named `openFull` event to hand off to the full
+  task-detail route rather than navigating itself, since the board owns
+  routing.
+- **RunHistoryTimeline** — the task-detail page's run history list; tones its
+  rows from `taxonomy.ts`'s `runOutcomeKitTone()`, the same outcome-tone
+  mapping the rest of the kit uses, rather than a bespoke per-row rule.
+- **RequestQuote** — the task-detail page's quoted request-text block.
+
 ## Repo-specific patterns
 
 - **Breadcrumb composable:** `ui/src/composables/useBreadcrumb.ts` — each
@@ -345,6 +376,61 @@ None of these composables changed for DS0 — the kit swap is presentational.
   (`db/queries.ts`'s `activeEpics()`, the complement of
   `TERMINAL_TASK_STATUSES`). Home's "Running now" reads the narrower field;
   the escalated-only epic still surfaces under Needs you.
+- **TaskPeekPanel is a modal `Dialog`, not the ds-spec's ≥1024px non-modal
+  anchored panel.** ds-spec.md §4.2's peek is specified as an anchored,
+  non-modal side panel on wide viewports (focus and the rest of the page
+  stay live) and a modal sheet only below that. DS3 ships it as `kit/Dialog`
+  (modal, focus-trapped) at every width — the anchored non-modal variant
+  needs layout machinery (an anchored portal that coexists with page focus)
+  this slice did not build. Deferred, not dropped; the keyboard contract
+  (arrow-key open via Enter, Escape close, focus return) matches the spec
+  either way.
+- **Kanban virtualization reuses `capColumn()` paging, not a scroll-driven
+  virtualizer.** Past `KANBAN_VIRTUALIZE_THRESHOLD` a column still renders a
+  capped slice plus "view more", the same mechanism every column already
+  uses below the threshold, rather than a second windowing strategy keyed to
+  scroll position.
+- **No pattern-11 totals bar.** ds-spec.md's pattern 11 (a board-level counts
+  summary) has no server-aggregated data source yet; the board's existing
+  per-column counts stand in. Deferred, not dropped.
+- **`TaskPeekPanel` emits a named `openFull`, not a generic `select`/`open`.**
+  Chosen so `KanbanBoard`'s own `select` emit (used for full-page navigation)
+  and the peek panel's "open full task" affordance stay distinguishable at
+  the call site.
+- **`RunHistoryTimeline` renders its own row markup, not `TimelineRow`.**
+  Checked against the source during review: it has no import of or
+  reference to `TimelineRow` (which itself lives at
+  `components/TimelineRow.vue`, not under `components/ds/`) — it implements
+  its own `<ol>`/`<li>` list, icon mapping, and label function directly.
+  DS3's scope was the Kanban/task-detail composites named above, not porting
+  every `ds/` composite forward; `runOutcomeKitTone()` bridges its tone
+  mapping onto `bs-tokens.css` in the meantime.
+- **`agentWaitingThresholdMs` (4h) and `KANBAN_VIRTUALIZE_THRESHOLD` (30) are
+  this slice's own chosen defaults.** Neither ds-spec.md nor design-spec.md
+  names a number for either; both live in `lib/constants.ts` as named
+  constants rather than inline magic numbers, so a later DS can revise them
+  in one place.
+- **A capture-phase Escape race between `Tooltip.vue` and
+  `useModalFocus.ts` (D-238's composable) was found and fixed in this
+  slice.** Both registered a `keydown` listener for Escape on `document`;
+  `Tooltip.vue` registers in the capture phase, so its `stopPropagation()`
+  always won against `useModalFocus.ts`'s bubble-phase listener whenever
+  focus was on a Tooltip-wrapped control (every current Dialog/Sheet close
+  button) — eating the first Escape press on an arrow-key-opened peek panel,
+  and on a Sheet reached by Tab (Chromium's `:focus-visible` matches a real
+  Tab keypress unconditionally). Fixed by moving `useModalFocus.ts`'s
+  listener to the capture phase too: same-node, same-phase listeners run in
+  registration order, and it always registers before Tooltip's. Found and
+  verified via Playwright e2e (`kanban.spec.ts`, `sheet.spec.ts`) — this
+  codebase has no component/composable unit-test harness (no
+  `@vue/test-utils`/DOM environment; `ui/vitest.config.ts` is deliberately
+  DOM-free), so DOM/focus behaviour is e2e-only by existing convention.
+- **Task-detail's two-column rail (`.bs-task-detail__layout`) had no mobile
+  breakpoint,** overflowing sideways below 640px — a genuine new DS3 bug,
+  found by reading a regenerated e2e screenshot baseline rather than by any
+  prior assertion, confirmed against the pre-DS3 baseline (which correctly
+  stacked at the same width). Fixed with the same `@media (max-width:
+  640px)` collapse-to-one-column pattern the Kanban board already uses.
 
 ## Verification
 

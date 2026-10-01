@@ -588,11 +588,35 @@ describe('ui/server app.ts', () => {
     const handle = app();
     const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}`);
     expect(found.status).toBe(200);
-    const detail = await json<{ task: { taskId: string } }>(found);
+    const detail = await json<{
+      task: { taskId: string; title: string | null; summary: string | null; updatedAt: string };
+      agentActivity: string | null;
+    }>(found);
     expect(detail.task.taskId).toBe(TASK_1);
+    // DS3 part 2 item 1 — title/summary (slice A's optional task-spec
+    // fields) and agentActivity (the Task-detail AgentChip's state) ride
+    // alongside the rest of TaskDetail.
+    expect(detail.task.title).toBe('Widget renderer');
+    expect(detail.task.summary).toBe('Render widgets fast and reliably.');
+    expect(typeof detail.task.updatedAt).toBe('string');
+    expect(detail.agentActivity).toBeNull();
 
     const notFound = await handle.app.request('/api/tasks/no-such-task');
     expect(notFound.status).toBe(404);
+    closeApp(handle);
+  });
+
+  it("GET /api/tasks/:taskId/runs 200s with the task's dispatch rows, and [] for an unknown task", async () => {
+    const handle = app();
+    const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}/runs`);
+    expect(found.status).toBe(200);
+    const { runs } = await json<{ runs: Array<{ kind: string; agentRole: string | null }> }>(found);
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((r) => typeof r.kind === 'string')).toBe(true);
+
+    const unknown = await handle.app.request('/api/tasks/no-such-task/runs');
+    expect(unknown.status).toBe(200);
+    expect((await json<{ runs: unknown[] }>(unknown)).runs).toEqual([]);
     closeApp(handle);
   });
 

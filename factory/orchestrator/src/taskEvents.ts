@@ -110,6 +110,8 @@ function addedPayload(
     task_status: task.task_status,
     plan_version: task.plan_version,
     objective: task.objective,
+    title: typeof task.title === 'string' ? task.title : undefined,
+    summary: typeof task.summary === 'string' ? task.summary : undefined,
     claims: task.claims,
     budget_tokens: budget?.tokens,
     // D-23/P9-12. Declared here rather than derived by the reader: the board

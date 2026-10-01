@@ -2,16 +2,33 @@ import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 const DEMO_HUB_WAIVABLE_TASK = 'epic-9/task-3'; // multiProjectFixture.ts's confirmed S3 finding
+// epic-9/task-1: dispatched then completed (task-result-recorded, run_status
+// done) — the smallest fixture task with more than one run-history row.
+const DEMO_HUB_COMPLETED_TASK = 'epic-9/task-1';
 
 test.describe('Task detail', () => {
   test('renders tabs and a11y basics', async ({ page }) => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
     await expect(page.getByRole('tablist', { name: 'Task detail sections' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
+    await expect(page.getByRole('tab', { name: 'What was asked' })).toHaveAttribute(
       'aria-selected',
       'true',
     );
+  });
+
+  // Pattern 2 — the "What was asked" tab's Run history card, fed by
+  // GET /api/tasks/:taskId/runs (queries.ts's `taskRuns()`). This task has a
+  // dispatch row and a completed result row: two distinct run kinds, so the
+  // timeline is proven to render more than a single placeholder entry.
+  test('Run history timeline shows a row per run, in the done tone for a completed result', async ({
+    page,
+  }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    const rows = page.locator('.bs-run-history__row');
+    await expect(rows.first()).toBeVisible();
+    await expect(rows).toHaveCount(2);
+    await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
   });
 
   test('Findings tab shows the Waive Popover confirm naming the fingerprint', async ({ page }) => {
@@ -50,15 +67,19 @@ test.describe('Task detail', () => {
   // over a danger Banner about that task, under a crumb that still read plain
   // "Kanban". Every other page in the app sets its crumb before its fetch --
   // SessionsPage's own comment says why (D-230).
+  //
+  // Navigated here directly rather than via a Kanban card click: a card click
+  // now opens the peek panel first (pattern 4), which would itself run into
+  // the same aborted /api/tasks/* route and never reach a page navigation at
+  // all. Going straight to the URL keeps this test's actual subject — the
+  // page-level crumb surviving a failed fetch — independent of the peek
+  // panel's own, separately-tested error handling.
   test('names the task in the breadcrumb even when the task fetch fails', async ({ page }) => {
     await page.route('**/api/tasks/*', (route) => route.abort('failed'));
-    await page.goto('/kanban');
-    await page.locator('.kanban-card').first().click();
-    await page.waitForURL('**/tasks/**');
-    const taskId = decodeURIComponent(new URL(page.url()).pathname.replace(/^\/tasks\//, ''));
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
 
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-    await expect(page.locator('.bs-crumbs__current')).toHaveText(taskId);
+    await expect(page.locator('.bs-crumbs__current')).toHaveText(DEMO_HUB_WAIVABLE_TASK);
   });
 
   // Every event in this tab was fetched with `{ task: <this task> }`, and

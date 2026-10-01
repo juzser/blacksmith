@@ -358,6 +358,8 @@ export interface TaskFoldRow {
   taskStatus: string;
   planVersion: number | null;
   objective: string | null;
+  title: string | null;
+  summary: string | null;
   claims: string[] | null;
   budgetTokens: number | null;
   branch: string | null;
@@ -392,6 +394,8 @@ interface TaskAddedPayload {
   task_status?: string;
   plan_version?: number;
   objective?: string;
+  title?: string;
+  summary?: string;
   claims?: string[];
   budget_tokens?: number;
   /** D-23/P9-12: declared by the producer; `branchFor` only fills the gap. */
@@ -720,6 +724,8 @@ export function foldTasks(
         taskStatus: 'todo',
         planVersion: null,
         objective: null,
+        title: null,
+        summary: null,
         claims: null,
         budgetTokens: null,
         branch: null,
@@ -804,6 +810,8 @@ export function foldTasks(
           row.taskStatus = p.task_status ?? row.taskStatus;
         row.planVersion = p.plan_version ?? row.planVersion;
         row.objective = p.objective ?? row.objective;
+        row.title = p.title ?? row.title;
+        row.summary = p.summary ?? row.summary;
         row.claims = readClaims(p.claims) ?? row.claims;
         row.budgetTokens = p.budget_tokens ?? row.budgetTokens;
         row.branch = p.branch ?? branchFor(row.epicId, row.taskId);
@@ -1581,6 +1589,8 @@ export function projectTasks(
           taskStatus: task.taskStatus,
           planVersion: task.planVersion,
           objective: task.objective,
+          title: task.title,
+          summary: task.summary,
           claims: task.claims ? JSON.stringify(task.claims) : null,
           budgetTokens: task.budgetTokens,
           branch: task.branch,

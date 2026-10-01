@@ -29,27 +29,18 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
   });
 });
 
-// Task 2 (friendly role labels): agentChipLabel() now renders roleLabel()'s
-// friendly string ("Builder") rather than the raw taxonomy role ("coder");
-// agentChipTitle() keeps the raw `role · tier` reachable as a tooltip on
-// every IdentityChip built from it, and the Attempts row's own plain-text
-// title gets the same friendly label directly.
+// Task 2 (friendly role labels), re-skinned onto the kit in DS3 item 4: the
+// Agents rail row renders roleLabel()'s friendly string ("Builder") directly
+// as always-visible text rather than behind an IdentityChip + hover tooltip
+// (the kit has no IdentityChip equivalent, and a tooltip is only needed to
+// recover text a compact chip hides — this row shows the full "role · tier"
+// text already, so there is nothing left for a title attribute to add).
 describe('TaskDetailPage.vue — role labels', () => {
-  it('imports roleLabel and routes agentChipLabel through it', () => {
+  it('imports roleLabel', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
-    expect(SFC).toMatch(
-      /function agentChipLabel\(role: string, modelTier: string \| null\): string \{\s*const label = roleLabel\(role\);/,
-    );
   });
 
-  it('keeps the raw role · tier as a title tooltip via agentChipTitle', () => {
-    expect(SFC).toContain(
-      'function agentChipTitle(role: string, modelTier: string | null): string {',
-    );
-    expect(SFC).toMatch(/:title="agentChipTitle\(a\.agentRole, a\.modelTier\)"/);
-  });
-
-  it('labels the Attempts row title, not just its trailing chip', () => {
+  it('labels the Agents rail row with the friendly role label, not the raw taxonomy role', () => {
     expect(SFC).toContain('{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}/{{ a.provider }}');
   });
 });

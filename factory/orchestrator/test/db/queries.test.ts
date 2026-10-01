@@ -2,12 +2,13 @@ import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
 import {
   analytics,
   artifactById,
+  createQuoteMemo,
   DEFAULT_PROJECT,
   errorsPage,
   flowGraph,
@@ -18,7 +19,9 @@ import {
   lessonsPage,
   overview,
   pulse,
+  requestQuoteForTask,
   taskDetail,
+  taskRuns,
   timeline,
 } from '../../src/db/queries.js';
 import { eventsRaw, findings, tasks } from '../../src/db/schema.js';
@@ -727,6 +730,16 @@ describe('db/queries.ts', () => {
           agentActivity: null,
           milestoneId: null,
           tags: { case: 'feature', origin: 'user', severity: null },
+          updatedAt: expect.any(String),
+          project: null,
+          attemptCount: 1,
+          judgeRound: null,
+          commentCount: 1,
+          prUrl: null,
+          dependencies: [],
+          epicLabel: 'black-smith: Epic 1',
+          hasRequest: true,
+          requestFirstLine: 'Build the widget and fix the flaky import.',
         },
       ]);
       // task-2's only finding is waived (not "open"), so no severity chip.
@@ -740,6 +753,23 @@ describe('db/queries.ts', () => {
           agentActivity: 'working',
           milestoneId: null,
           tags: { case: 'refactor', origin: 'user', severity: null },
+          updatedAt: expect.any(String),
+          project: null,
+          attemptCount: 1,
+          judgeRound: null,
+          commentCount: 0,
+          prUrl: null,
+          dependencies: [
+            {
+              taskId: TASK_1,
+              title: 'Add the widget renderer.',
+              status: 'completed',
+              edgeType: 'artifact',
+            },
+          ],
+          epicLabel: 'black-smith: Epic 1',
+          hasRequest: true,
+          requestFirstLine: 'Build the widget and fix the flaky import.',
         },
       ]);
       expect(byStatus.escalated).toEqual([
@@ -752,6 +782,16 @@ describe('db/queries.ts', () => {
           agentActivity: null,
           milestoneId: null,
           tags: { case: 'bugfix', origin: 'user', severity: null },
+          updatedAt: expect.any(String),
+          project: null,
+          attemptCount: 1,
+          judgeRound: null,
+          commentCount: 0,
+          prUrl: null,
+          dependencies: [],
+          epicLabel: 'black-smith: Epic 1',
+          hasRequest: true,
+          requestFirstLine: 'Build the widget and fix the flaky import.',
         },
       ]);
       // task-4's finding-4 sits at "confirmed" — open, not waived/fixed — so
@@ -768,8 +808,31 @@ describe('db/queries.ts', () => {
           agentActivity: 'working',
           milestoneId: null,
           tags: { case: 'feature', origin: 'user', severity: 'S2-major' },
+          updatedAt: expect.any(String),
+          project: null,
+          attemptCount: 1,
+          judgeRound: null,
+          commentCount: 1,
+          prUrl: null,
+          dependencies: [],
+          epicLabel: 'black-smith: Epic 1',
+          hasRequest: true,
+          requestFirstLine: 'Build the widget and fix the flaky import.',
         },
       ]);
+    });
+
+    // epicLabelFor must read a tagged project through projectOf() (DEFAULT_PROJECT),
+    // not re-hardcode 'black-smith' as its own fallback literal.
+    it('labels a tagged task with its own project, not the hard-coded default', () => {
+      handle.db
+        .update(tasks)
+        .set({ project: 'other-project' })
+        .where(eq(tasks.taskId, TASK_1))
+        .run();
+      const columns = kanban(handle.db, EPIC_ID);
+      const byStatus = Object.fromEntries(columns.map((c) => [c.taskStatus, c.tasks]));
+      expect(byStatus.completed?.[0]?.epicLabel).toBe('other-project: Epic 1');
     });
 
     // Cross-provider UI check of 2026-09-14, fix (n): the card's chip read
@@ -900,6 +963,48 @@ describe('db/queries.ts', () => {
         chip.sqlite.close();
       }
     });
+
+    // DS3 Slice A item 3 — deterministic ordering: newest updatedAt first,
+    // task id as the tiebreak when two rows share a ts exactly.
+    it('orders a column by updatedAt desc, then taskId asc on a tie', async () => {
+      const session = 'sess-order';
+      const taskA = `${EPIC_ID}/task-order-a`;
+      const taskB = `${EPIC_ID}/task-order-b`;
+      const taskC = `${EPIC_ID}/task-order-c`;
+      let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+      body += tiedLine(
+        'task-added',
+        '2030-01-01T00:00:00.000Z',
+        { task_id: taskA, task_status: 'in-progress' },
+        session,
+      );
+      body += tiedLine(
+        'task-added',
+        '2030-01-02T00:00:00.000Z',
+        { task_id: taskB, task_status: 'in-progress' },
+        session,
+      );
+      // taskC shares taskB's exact ts: the tiebreak alone must separate them.
+      body += tiedLine(
+        'task-added',
+        '2030-01-02T00:00:00.000Z',
+        { task_id: taskC, task_status: 'in-progress' },
+        session,
+      );
+      await appendFile(path.join(stateDir, `${session}.jsonl`), body, 'utf8');
+
+      const dbPath = path.join(dbDir, 'order.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const ordered = openDb(dbPath);
+      try {
+        const column = kanban(ordered.db, EPIC_ID)
+          .find((c) => c.taskStatus === 'in-progress')
+          ?.tasks.filter((t) => [taskA, taskB, taskC].includes(t.taskId));
+        expect(column?.map((t) => t.taskId)).toEqual([taskB, taskC, taskA]);
+      } finally {
+        ordered.sqlite.close();
+      }
+    });
   });
 
   describe('flowGraph() (Phase 6b Flow page)', () => {
@@ -959,6 +1064,30 @@ describe('db/queries.ts', () => {
       // Fixture task-added payload carries no `branch` field: legacy
       // fallback, not the current `bs` default (bs-rename part 1).
       expect(detail?.branch).toBe(`smith/${EPIC_ID}/task-1`);
+      // DS3 §4.7 — the operator prompt that led to this task.
+      expect(detail?.requestQuote).toMatchObject({
+        prompt: 'Build the widget and fix the flaky import.',
+        source: 'task',
+      });
+      // DS3 part 2 item 1 — task-spec's optional title/summary, carried
+      // through unchanged on the `task` row (tasks.title/tasks.summary).
+      expect(detail?.task.title).toBe('Widget renderer');
+      expect(detail?.task.summary).toBe('Render widgets fast and reliably.');
+      // task-1's coder returned a result, so nobody is on it.
+      expect(detail?.agentActivity).toBeNull();
+    });
+
+    // DS3 part 2 item 1 — TaskPeekPanel/Task-detail's AgentChip needs the
+    // same "is anybody still on this task" answer the Kanban card gets,
+    // read off the `agents` fold rather than the last dispatch (same
+    // cross-provider fix as kanban()'s agentActivity, mirrored here).
+    it('says whether an agent is still on the task, like kanban()', () => {
+      // task-2 has a live agents row with no terminal event.
+      expect(taskDetail(handle.db, TASK_2)?.agentActivity).toBe('working');
+      // The same live row seen from a clock years on is stalled, not gone.
+      expect(
+        taskDetail(handle.db, TASK_2, { nowIso: '2031-01-01T00:00:00.000Z' })?.agentActivity,
+      ).toBe('stalled');
     });
 
     it('returns null for an unknown task', () => {
@@ -1003,6 +1132,190 @@ describe('db/queries.ts', () => {
         );
       } finally {
         attemptsHandle.sqlite.close();
+      }
+    });
+  });
+
+  describe('requestQuoteForTask() (DS3 §4.7)', () => {
+    it('terminates on a causal_parent cycle instead of looping forever, and finds no quote', async () => {
+      // Two events that point at each other: the task-added row at #2 names
+      // #1 as its parent, and #1 names #2 right back. Neither is a
+      // user_prompt and there is none anywhere else in the session, so the
+      // honest answer is null -- the test passing at all is the proof the
+      // `seen` guard stopped the walk rather than spinning.
+      const session = 'sess-cycle';
+      const task = 'epic-cycle/task-1';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          `${JSON.stringify({
+            session_id: session,
+            actor: 'user',
+            event_type: 'operator-note',
+            plan_version: 1,
+            causal_parent: `${session}#2`,
+            payload: { note_kind: 'scope-check', note: 'cycle half A' },
+            ts: '2029-06-01T00:00:00.000Z',
+          })}\n` +
+          `${JSON.stringify({
+            session_id: session,
+            actor: 'user',
+            event_type: 'task-added',
+            plan_version: 1,
+            causal_parent: `${session}#1`,
+            payload: { task_id: task },
+            ts: '2029-06-01T00:00:01.000Z',
+          })}\n`,
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'cycle.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const cycleHandle = openDb(dbPath);
+      try {
+        expect(requestQuoteForTask(cycleHandle.db, task, session)).toBeNull();
+      } finally {
+        cycleHandle.sqlite.close();
+      }
+    });
+
+    it('falls back to the epic source prompt when the task-added row names a missing parent', async () => {
+      // #2's causal_parent names an event id that was never written. The walk
+      // has to stop there without crashing, and `requestQuoteForTask` then
+      // falls back to the session's own earliest user_prompt (#1) rather
+      // than reporting no quote at all.
+      const session = 'sess-missing-parent';
+      const task = 'epic-missing/task-1';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'user_prompt',
+            '2029-06-01T00:00:00.000Z',
+            { prompt: 'Epic started from this prompt.' },
+            session,
+          ) +
+          `${JSON.stringify({
+            session_id: session,
+            actor: 'user',
+            event_type: 'task-added',
+            plan_version: 1,
+            causal_parent: `${session}#99`,
+            payload: { task_id: task },
+            ts: '2029-06-01T00:00:02.000Z',
+          })}\n`,
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'missing-parent.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const missingHandle = openDb(dbPath);
+      try {
+        expect(requestQuoteForTask(missingHandle.db, task, session)).toMatchObject({
+          prompt: 'Epic started from this prompt.',
+          source: 'epic',
+        });
+      } finally {
+        missingHandle.sqlite.close();
+      }
+    });
+
+    // S3 fix: kanban() used to re-walk every task's causal chain (and, on a
+    // miss, the epic-source-prompt fallback) from scratch, so N tasks in one
+    // epic paid for the shared ancestor events N times over. TASK_2/3/4 share
+    // most of their causal chain (each task-added row's parent is the
+    // previous task's own row) and all three sit under EPIC_ID, so a shared
+    // `QuoteMemo` should cut the combined query count well under what three
+    // independent, memo-less calls spend on the same chain.
+    it('shares the causal walk and epic fallback across tasks via one QuoteMemo', () => {
+      const countSelects = (run: () => void): number => {
+        const spy = vi.spyOn(handle.db, 'select');
+        run();
+        const n = spy.mock.calls.length;
+        spy.mockRestore();
+        return n;
+      };
+
+      const withoutMemo = countSelects(() => {
+        requestQuoteForTask(handle.db, TASK_2, SESSION_ID);
+        requestQuoteForTask(handle.db, TASK_3, SESSION_ID);
+        requestQuoteForTask(handle.db, TASK_4, SESSION_ID);
+      });
+
+      const memo = createQuoteMemo();
+      const withMemo = countSelects(() => {
+        requestQuoteForTask(handle.db, TASK_2, SESSION_ID, memo);
+        requestQuoteForTask(handle.db, TASK_3, SESSION_ID, memo);
+        requestQuoteForTask(handle.db, TASK_4, SESSION_ID, memo);
+      });
+
+      expect(withMemo).toBeLessThan(withoutMemo);
+
+      // The answers themselves must not change (behaviour preserved).
+      const quote2 = requestQuoteForTask(handle.db, TASK_2, SESSION_ID);
+      const quote4 = requestQuoteForTask(handle.db, TASK_4, SESSION_ID, memo);
+      expect(quote4).toEqual(quote2);
+    });
+  });
+
+  describe('taskRuns() (DS3 §4.7)', () => {
+    it('scopes dispatch/judge-report/result/error rows to one task, in log order', async () => {
+      const session = 'sess-runs';
+      const task = 'epic-runs/task-1';
+      const other = 'epic-runs/task-2';
+      const ts = '2029-06-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', ts, { task_id: task }, session) +
+          tiedLine('task-added', ts, { task_id: other }, session) +
+          tiedLine(
+            'dispatch_decision',
+            ts,
+            { task_id: task, agent_role: 'coder', provider: 'claude', model_tier: 'mid' },
+            session,
+          ) +
+          tiedLine(
+            'judge-reported',
+            ts,
+            {
+              task_id: task,
+              agent_role: 'spec-reviewer',
+              round: 1,
+              finding_count: 2,
+              artifact_path: 'state/artifacts/epic-runs/task-1/judge.json',
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            { task_id: task, run_status: 'done', token_usage: { measured: false } },
+            session,
+          ) +
+          tiedLine(
+            'error-logged',
+            ts,
+            { task_id: other, error: 'execution.flaky-test', agent_role: 'coder' },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'runs.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const runsHandle = openDb(dbPath);
+      try {
+        const runs = taskRuns(runsHandle.db, task);
+        expect(runs.map((r) => r.kind)).toEqual(['dispatch', 'judge-report', 'result']);
+        const judgeRun = runs.find((r) => r.kind === 'judge-report');
+        expect(judgeRun).toMatchObject({
+          agentRole: 'spec-reviewer',
+          round: 1,
+          outcome: '2-findings',
+        });
+      } finally {
+        runsHandle.sqlite.close();
       }
     });
   });

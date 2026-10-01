@@ -30,6 +30,7 @@ useModalFocus(
       v-if="open"
       ref="sheetEl"
       class="app-sheet"
+      tabindex="-1"
       role="dialog"
       aria-modal="true"
       aria-label="Navigation"

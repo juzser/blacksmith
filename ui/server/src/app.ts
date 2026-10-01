@@ -45,6 +45,7 @@ import {
   pulse,
   roadmapPage,
   taskDetail,
+  taskRuns,
   timeline,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
@@ -845,6 +846,14 @@ export function createApp(opts: AppOpts): AppHandle {
     const detail = taskDetail(handle.db, taskId);
     if (!detail) throw new SmithError('task.not-found', `No task "${taskId}".`, { taskId });
     return c.json(detail);
+  });
+
+  // DS3 §4.7 — RunHistoryTimeline's data source: a scoped read on the
+  // existing event-log projection (dispatch/judge-report/result/error rows
+  // for this task). No new event type, no writer.
+  app.get('/api/tasks/:taskId/runs', (c) => {
+    const taskId = c.req.param('taskId');
+    return c.json({ runs: taskRuns(handle.db, taskId) });
   });
 
   // Serves a task's own screenshots to the dashboard. The id comes from the

@@ -6,18 +6,23 @@ import { AGENT_STATUSES } from '../../factory/orchestrator/src/agents-registry.j
 import { MILESTONE_STATUSES } from '../../factory/orchestrator/src/roadmap.js';
 import {
   AGENT_STATUS_TONE,
+  agentStatusKitTone,
   agentStatusTone,
   errorGroupIcon,
+  findingStatusKitTone,
   findingStatusTone,
   isTaskOver,
   lessonStatusTone,
   MILESTONE_STATUS_TONE,
   milestoneStatusTone,
   planStatusTone,
+  runOutcomeKitTone,
   runStatusTone,
+  severityKitTone,
   severityTone,
   TASK_STATUS_OUTCOME,
   taskOutcome,
+  taskStatusKitTone,
   taskStatusTone,
 } from '../src/lib/taxonomy.js';
 
@@ -165,5 +170,95 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
     expect(errorGroupIcon('judgment')).toBe('scale');
     expect(errorGroupIcon('coordination')).toBe('users');
     expect(errorGroupIcon('memory')).toBe('database');
+  });
+});
+
+describe('lib/taxonomy.ts — taskStatusKitTone() (DS3 §1.1 kit Tag tone)', () => {
+  it('maps the done pair', () => {
+    expect(taskStatusKitTone('completed')).toBe('done');
+    expect(taskStatusKitTone('waived')).toBe('done');
+  });
+
+  it('maps the review trio', () => {
+    expect(taskStatusKitTone('reviewing')).toBe('review');
+    expect(taskStatusKitTone('grading')).toBe('review');
+    expect(taskStatusKitTone('merging')).toBe('review');
+  });
+
+  it('maps the progress pair', () => {
+    expect(taskStatusKitTone('in-progress')).toBe('progress');
+    expect(taskStatusKitTone('ready')).toBe('progress');
+  });
+
+  it('maps todo and the blocked pair', () => {
+    expect(taskStatusKitTone('todo')).toBe('todo');
+    expect(taskStatusKitTone('blocked')).toBe('blocked');
+    expect(taskStatusKitTone('escalated')).toBe('blocked');
+  });
+
+  it('maps failed to danger and superseded to neutral', () => {
+    expect(taskStatusKitTone('failed')).toBe('danger');
+    expect(taskStatusKitTone('superseded')).toBe('neutral');
+  });
+
+  it('falls back to neutral for an unclassified status', () => {
+    expect(taskStatusKitTone('invented-tomorrow')).toBe('neutral');
+  });
+});
+
+describe('lib/taxonomy.ts — severityKitTone/findingStatusKitTone/agentStatusKitTone (DS3 item 4)', () => {
+  it('maps severity to kit tone + variant, S1 alone is bold', () => {
+    expect(severityKitTone('S1-stop-the-line')).toEqual({ tone: 'danger', variant: 'bold' });
+    expect(severityKitTone('S2-major')).toEqual({ tone: 'danger', variant: 'subtle' });
+    expect(severityKitTone('S3-minor')).toEqual({ tone: 'warning', variant: 'subtle' });
+    expect(severityKitTone('S4-nit')).toEqual({ tone: 'neutral', variant: 'subtle' });
+  });
+
+  it('falls back to neutral/subtle for an unclassified severity', () => {
+    expect(severityKitTone('invented-tomorrow')).toEqual({ tone: 'neutral', variant: 'subtle' });
+  });
+
+  it('maps finding_status onto the kit tone set', () => {
+    expect(findingStatusKitTone('raised')).toBe('progress');
+    expect(findingStatusKitTone('confirmed')).toBe('warning');
+    expect(findingStatusKitTone('amend-pending')).toBe('warning');
+    expect(findingStatusKitTone('amended')).toBe('done');
+    expect(findingStatusKitTone('fix-verified')).toBe('done');
+    expect(findingStatusKitTone('waived')).toBe('done');
+    expect(findingStatusKitTone('refuted')).toBe('neutral');
+    expect(findingStatusKitTone('expired')).toBe('neutral');
+  });
+
+  it('maps agents.status onto the kit tone set — NOT run_status', () => {
+    expect(agentStatusKitTone('live')).toBe('progress');
+    expect(agentStatusKitTone('done')).toBe('done');
+    expect(agentStatusKitTone('error')).toBe('danger');
+    expect(agentStatusKitTone('superseded')).toBe('neutral');
+    expect(agentStatusKitTone('abandoned')).toBe('neutral');
+  });
+});
+
+describe('lib/taxonomy.ts — runOutcomeKitTone() (RunHistoryTimeline part 2 fix)', () => {
+  it('follows the outcome, not the kind, for a failed result', () => {
+    expect(runOutcomeKitTone('result', 'dead')).toBe('danger');
+  });
+
+  it('keeps the done tone for a successful result', () => {
+    expect(runOutcomeKitTone('result', 'done')).toBe('done');
+  });
+
+  it('an error row is always danger, whatever its outcome text names', () => {
+    expect(runOutcomeKitTone('error', 'spec.schema-invalid')).toBe('danger');
+    expect(runOutcomeKitTone('error', null)).toBe('danger');
+  });
+
+  it('dispatch and judge-report keep their own default tone when outcome names no failure', () => {
+    expect(runOutcomeKitTone('dispatch', null)).toBe('progress');
+    expect(runOutcomeKitTone('judge-report', 'no-findings')).toBe('review');
+    expect(runOutcomeKitTone('judge-report', '2-findings')).toBe('review');
+  });
+
+  it('falls back to neutral for an unknown kind', () => {
+    expect(runOutcomeKitTone('invented', null)).toBe('neutral');
   });
 });

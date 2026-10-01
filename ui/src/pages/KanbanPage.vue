@@ -9,16 +9,16 @@
 // query-shape gap), but composing that into full multi-lane board layout
 // is a separately-scoped UI change; this page still renders one lane
 // (either the selected epic, or "All epics" when chosen from the picker).
+import { Kanban, RefreshCw } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import Banner from '../components/ds/Banner.vue';
-import Button from '../components/ds/Button.vue';
-import EmptyState from '../components/ds/EmptyState.vue';
-import PageHeader from '../components/ds/PageHeader.vue';
-import Select from '../components/ds/Select.vue';
-import Skeleton from '../components/ds/Skeleton.vue';
-import Toolbar from '../components/ds/Toolbar.vue';
 import KanbanBoard from '../components/KanbanBoard.vue';
+import Banner from '../components/kit/Banner.vue';
+import Button from '../components/kit/Button.vue';
+import EmptyState from '../components/kit/EmptyState.vue';
+import PageHeader from '../components/kit/PageHeader.vue';
+import Select from '../components/kit/Select.vue';
+import Skeleton from '../components/kit/Skeleton.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
@@ -125,6 +125,11 @@ const displayedColumns = computed(() => {
 // stayed silent over a board with nothing on it (D-242).
 const taskCount = computed(() => visibleTaskCount(displayedColumns.value));
 
+// KanbanBoard (DS3 kit rewrite) takes a flat task list and does its own
+// grouping/column folding — this page still fetches per-status columns from
+// the server, so the board's input is simply every task across them.
+const boardTasks = computed(() => displayedColumns.value.flatMap((c) => c.tasks));
+
 function goToTask(taskId: string) {
   router.push(`/tasks/${encodeURIComponent(taskId)}`);
 }
@@ -137,16 +142,17 @@ function goToTask(taskId: string) {
         <Button v-if="milestoneFilter" variant="ghost" size="sm" @click="milestoneFilter = null">
           Clear milestone filter
         </Button>
-        <Button variant="ghost" size="sm" icon="refresh-cw" @click="refresh">Refresh</Button>
+        <Button variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
       </template>
     </PageHeader>
 
-    <Toolbar :count="`${taskCount} tasks`">
-      <label style="display: flex; align-items: center; gap: var(--ds-space-1-5)">
-        <span class="ds-toolbar__count">Epic</span>
+    <div class="bs-kanban-page__toolbar">
+      <label class="bs-kanban-page__toolbar-field">
+        <span class="bs-kanban-page__count">Epic</span>
         <Select v-model="selectedEpic" :options="epicOptions(epics)" aria-label="Epic" />
       </label>
-    </Toolbar>
+      <span class="bs-kanban-page__count">{{ taskCount }} tasks</span>
+    </div>
 
     <Banner v-if="!error && epicsFailed" tone="warning" show-retry @retry="loadEpics">
       {{ EPIC_LIST_UNAVAILABLE }}
@@ -154,17 +160,22 @@ function goToTask(taskId: string) {
     <Banner v-if="error" tone="danger" show-retry @retry="loadBoard">{{ error }}</Banner>
 
     <template v-else-if="loading">
-      <!-- ds-allow-hardcode:start — Skeleton width matches .kanban-col's own
-           232px flex-basis (ds-components.css), a board-layout constant,
+      <!-- ds-allow-hardcode:start — Skeleton width matches .bs-kanban-col's own
+           280px flex-basis (bs-primitives.css), a board-layout constant,
            not a spacing/sizing design token. -->
-      <div style="display: flex; gap: var(--ds-space-4)">
-        <Skeleton v-for="i in 5" :key="i" height="240" width="232px" />
+      <div class="bs-kanban-page__skeletons">
+        <Skeleton v-for="i in 5" :key="i" :height="240" width="280px" />
       </div>
       <!-- ds-allow-hardcode:end -->
     </template>
 
-    <EmptyState v-else-if="canClaimEmpty(columns !== null, taskCount)" icon="kanban">No tasks match these filters.</EmptyState>
+    <EmptyState
+      v-else-if="canClaimEmpty(columns !== null, taskCount)"
+      :icon="Kanban"
+      title="No tasks match these filters."
+      body="Try a different epic, or clear the milestone filter."
+    />
 
-    <KanbanBoard v-else-if="columns !== null" :columns="displayedColumns" :lane-label="selectedEpic || 'All epics'" @select="goToTask" />
+    <KanbanBoard v-else-if="columns !== null" :tasks="boardTasks" @select="goToTask" />
   </div>
 </template>

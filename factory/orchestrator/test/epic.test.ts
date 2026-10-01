@@ -134,6 +134,8 @@ function taskRow(overrides: Partial<EpicTaskRow> = {}): EpicTaskRow {
     taskStatus: 'completed',
     planVersion: 1,
     objective: null,
+    title: null,
+    summary: null,
     claims: null,
     budgetTokens: null,
     branch: null,

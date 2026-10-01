@@ -186,6 +186,95 @@ export function lessonStatusTone(status: string): Tone {
   return LESSON_STATUS_TONE[status] ?? 'neutral';
 }
 
+/** DS3 — ds-spec.md §1.1's task_status -> kit `Tag` tone (not the old `Tone`/Lozenge vocabulary). */
+export type KitTone =
+  | 'done'
+  | 'review'
+  | 'progress'
+  | 'todo'
+  | 'blocked'
+  | 'danger'
+  | 'warning'
+  | 'neutral';
+
+const TASK_STATUS_KIT_TONE: Record<string, KitTone> = {
+  completed: 'done',
+  waived: 'done',
+  reviewing: 'review',
+  grading: 'review',
+  merging: 'review',
+  'in-progress': 'progress',
+  ready: 'progress',
+  todo: 'todo',
+  blocked: 'blocked',
+  escalated: 'blocked',
+  failed: 'danger',
+  superseded: 'neutral',
+};
+
+/** DS3 pattern 6 — task_status -> the kit `Tag`'s tone, per ds-spec.md §1.1. */
+export function taskStatusKitTone(status: string): KitTone {
+  return TASK_STATUS_KIT_TONE[status] ?? 'neutral';
+}
+
+/**
+ * DS3 item 4 (Task detail rebuild) — the old `Tone` vocabulary
+ * (info/success/warning/danger/discovery/neutral) read by `severityTone()`,
+ * `findingStatusTone()` and `agentStatusTone()` onto the kit `Tag`'s `KitTone`
+ * set, so those three existing maps don't need a second, parallel copy of
+ * their own value lists just to target a different component.
+ */
+const TONE_TO_KIT_TONE: Record<Tone, KitTone> = {
+  info: 'progress',
+  success: 'done',
+  warning: 'warning',
+  danger: 'danger',
+  discovery: 'review',
+  neutral: 'neutral',
+};
+
+/** §3.4 severity -> kit `Tag` tone + variant. */
+export function severityKitTone(severity: string): { tone: KitTone; variant: 'subtle' | 'bold' } {
+  const { tone, variant } = severityTone(severity);
+  return { tone: TONE_TO_KIT_TONE[tone], variant };
+}
+
+/** finding_status -> kit `Tag` tone. */
+export function findingStatusKitTone(status: string): KitTone {
+  return TONE_TO_KIT_TONE[findingStatusTone(status)];
+}
+
+/** agents.status -> kit `Tag` tone (NOT run_status — see `agentStatusTone`'s comment). */
+export function agentStatusKitTone(status: string): KitTone {
+  return TONE_TO_KIT_TONE[agentStatusTone(status)];
+}
+
+const RUN_KIND_DEFAULT_KIT_TONE: Record<string, KitTone> = {
+  dispatch: 'progress',
+  'judge-report': 'review',
+  result: 'done',
+  error: 'danger',
+};
+
+/**
+ * DS3 part 2 fix — `RunHistoryTimeline`'s outcome `Tag` tone previously came
+ * from `run.kind` alone, so a `result` row whose own outcome was `dead` (or
+ * any other failure) still rendered with the `result` kind's `done` default.
+ * The tone follows the outcome text first — `dead`/anything naming a failure
+ * or an error reads `danger` regardless of which event kind carried it — and
+ * only falls back to the kind's own default tone when the outcome names no
+ * failure (a judge report's `no-findings`/`N-findings`, a dispatch's `null`).
+ */
+export function runOutcomeKitTone(kind: string, outcome: string | null): KitTone {
+  if (outcome !== null) {
+    const normalized = outcome.toLowerCase();
+    if (normalized === 'dead' || normalized.includes('fail') || normalized.includes('error')) {
+      return 'danger';
+    }
+  }
+  return RUN_KIND_DEFAULT_KIT_TONE[kind] ?? 'neutral';
+}
+
 /** §3.4 severity → tone + variant (S1 is the one "bold" — a danger wall). */
 export function severityTone(severity: string): ToneMapping {
   switch (severity) {

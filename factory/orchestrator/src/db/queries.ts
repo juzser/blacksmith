@@ -9,14 +9,19 @@ import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
   type AgentRecord,
+  DISPATCH_EVENT_TYPE,
+  ERROR_EVENT_TYPE,
   foldAgents,
   liveAgents as foldLiveAgents,
   isWorkingAt,
+  JUDGE_REPORT_EVENT_TYPE,
   REGISTRY_EVENT_TYPES,
+  TASK_RESULT_EVENT_TYPE,
 } from '../agents-registry.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
 import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
+import { JUDGE_ROLES } from '../judgeRoles.js';
 import { judgeFailureKind } from '../providers/types.js';
 import { severityRank } from '../severity.js';
 import { epicOfTaskId, taskIdsMatch } from '../taskId.js';
@@ -1856,20 +1861,44 @@ function applyDecisionsLens(entries: TimelineEntry[]): TimelineEntry[] {
  * lookup, so asking for a chain that does not start in the named session
  * remains an empty answer rather than a silent redirect.
  */
-function causalChain(db: SmithDb, sessionId: string, eventId: string): TimelineEntry[] {
+type EventsRawRow = typeof eventsRaw.$inferSelect;
+
+/**
+ * Row cache shared across calls within one `kanban()` invocation (S3 fix):
+ * event ids are globally unique (see the docstring above), so a row fetched
+ * for one task's walk answers for every other walk that crosses the same
+ * event, and the session gate below still applies to it.
+ */
+function fetchEventRow(
+  db: SmithDb,
+  eventId: string,
+  cache?: Map<string, EventsRawRow | null>,
+): EventsRawRow | null {
+  if (cache?.has(eventId)) return cache.get(eventId) ?? null;
+  const row = db.select().from(eventsRaw).where(eq(eventsRaw.eventId, eventId)).get() ?? null;
+  cache?.set(eventId, row);
+  return row;
+}
+
+function causalChain(
+  db: SmithDb,
+  sessionId: string,
+  eventId: string,
+  eventCache?: Map<string, EventsRawRow | null>,
+): TimelineEntry[] {
   const chain: TimelineEntry[] = [];
   let currentId: string | null = eventId;
   const seen = new Set<string>();
   let first = true;
   while (currentId && !seen.has(currentId)) {
     seen.add(currentId);
-    const idMatch = eq(eventsRaw.eventId, currentId);
-    const row = db
-      .select()
-      .from(eventsRaw)
-      .where(first ? and(idMatch, eq(eventsRaw.sessionId, sessionId)) : idMatch)
-      .get();
+    const row = fetchEventRow(db, currentId, eventCache);
     if (!row) break;
+    // Ids are globally unique, so a row fetched for a different session's
+    // walk can still answer this one's first hop — but that hop is only
+    // valid when it actually named a row inside the requested session,
+    // same as the original `and(idMatch, eq(sessionId))` constraint.
+    if (first && row.sessionId !== sessionId) break;
     first = false;
     chain.unshift(toEntry(row));
     currentId = row.causalParent as string | null;
@@ -1971,6 +2000,41 @@ export interface KanbanTask {
   /** Phase 6b — the roadmap.md milestone whose `epics:` list includes this task's epic, or null. */
   milestoneId: string | null;
   tags: KanbanTag;
+  /** DS3 — tasks.updated_at, also the tiebreaker for deterministic column ordering. */
+  updatedAt: string;
+  /** DS3 — tasks.project, for the cross-project board (Phase 6b's project key). */
+  project: string | null;
+  /** DS3 — count of this task's dispatch_decision events. */
+  attemptCount: number;
+  /** DS3 — highest `agents.round` among this task's judge-role dispatches, or null if none. */
+  judgeRound: number | null;
+  /** DS3 — count of this task's operator_feedback rows. */
+  commentCount: number;
+  /** DS3 — the epic's integration PR url (integration-pr-opened), or null. */
+  prUrl: string | null;
+  /** DS3 — this task's own edges, resolved against the current scope's task rows where possible. */
+  dependencies: KanbanDependency[];
+  /** DS3 — "<project>: <humanized epic id>[ (finished)]" (audit Kanban-4), or null with no epic. */
+  epicLabel: string | null;
+  /** DS3 — whether the causal-parent walk found a linked request (§4.7). */
+  hasRequest: boolean;
+  /** DS3 — first line of the linked request's prompt, or null when `hasRequest` is false. */
+  requestFirstLine: string | null;
+}
+
+export interface KanbanDependency {
+  taskId: string;
+  title: string | null;
+  status: string | null;
+  edgeType: string;
+}
+
+/** DS3 §4.7 — the operator prompt behind a task, or its epic's source prompt as a fallback. */
+export interface RequestQuote {
+  prompt: string;
+  ts: string;
+  eventId: string;
+  source: 'task' | 'epic';
 }
 
 export interface KanbanColumn {
@@ -2000,6 +2064,107 @@ function worstSeverity(severities: string[]): string | null {
  * task_status, tagged with case/origin/worst-open-finding severity plus
  * (Phase 6b) title/agent-role/milestone.
  */
+function firstLineOf(text: string): string {
+  return (text.split('\n')[0] ?? '').trim();
+}
+
+function humanizeEpicId(epicId: string): string {
+  const spaced = epicId.replace(/-/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** DS3 — "<project>: <humanized epic id>[ (finished)]" (audit Kanban-4). */
+function epicLabelFor(
+  epicId: string | null,
+  project: string | null,
+  closedEpicIds: ReadonlySet<string>,
+): string | null {
+  if (!epicId) return null;
+  const label = `${projectOf(project)}: ${humanizeEpicId(epicId)}`;
+  return closedEpicIds.has(epicId) ? `${label} (finished)` : label;
+}
+
+/** The epic a `<epic>/integration` task-ref belongs to, or null for any other ref. */
+function epicIdOfIntegrationRef(taskRef: string): string | null {
+  return taskRef.endsWith('/integration') ? taskRef.slice(0, -'/integration'.length) : null;
+}
+
+function nearestUserPrompt(
+  db: SmithDb,
+  sessionId: string,
+  eventId: string,
+  eventCache?: Map<string, EventsRawRow | null>,
+): RequestQuote | null {
+  const chain = causalChain(db, sessionId, eventId, eventCache);
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const entry = chain[i];
+    if (entry?.eventType !== 'user_prompt') continue;
+    const row = db.select().from(prompts).where(eq(prompts.eventId, entry.eventId)).get();
+    if (row) return { prompt: row.prompt, ts: row.ts, eventId: row.eventId, source: 'task' };
+  }
+  return null;
+}
+
+/**
+ * Shared memo for one `kanban()` call (S3 fix): `events` is `causalChain`'s
+ * row cache, keyed by event id; `epicPrompt` caches `epicSourcePrompt`'s
+ * answer per epic, since the tasks sharing an epic also share its one
+ * source prompt.
+ */
+export interface QuoteMemo {
+  events: Map<string, EventsRawRow | null>;
+  epicPrompt: Map<string, RequestQuote | null>;
+}
+
+export function createQuoteMemo(): QuoteMemo {
+  return { events: new Map(), epicPrompt: new Map() };
+}
+
+/** "Epic started from" fallback (§4.7): the earliest `user_prompt` in the epic's session lineage. */
+function epicSourcePrompt(db: SmithDb, anySessionIdInEpic: string): RequestQuote | null {
+  const lineage = projectedLineage(db, anySessionIdInEpic);
+  if (lineage.length === 0) return null;
+  const rows = inLogOrder(
+    db.select().from(prompts).where(inArray(prompts.sessionId, lineage)).all(),
+  );
+  const earliest = rows[0];
+  return earliest
+    ? { prompt: earliest.prompt, ts: earliest.ts, eventId: earliest.eventId, source: 'epic' }
+    : null;
+}
+
+/**
+ * DS3 §4.7 — the operator prompt that led to `taskId`: a bounded, cycle-safe
+ * walk up `causal_parent` from the task's own events to the nearest
+ * `user_prompt` (reuses `causalChain`'s `seen` guard), falling back to the
+ * epic's own source prompt when the task's own walk finds none.
+ */
+export function requestQuoteForTask(
+  db: SmithDb,
+  taskId: string,
+  taskSessionId: string,
+  memo?: QuoteMemo,
+): RequestQuote | null {
+  const firstEvent = inLogOrder(
+    db.select().from(eventsRaw).where(eq(eventsRaw.taskId, taskId)).all(),
+  )[0];
+  if (firstEvent) {
+    const taskQuote = nearestUserPrompt(db, firstEvent.sessionId, firstEvent.eventId, memo?.events);
+    if (taskQuote) return taskQuote;
+  }
+  // Two tasks named with the same epic share one `epicSourcePrompt` answer
+  // (same lineage walk, same earliest prompt), so the fallback is cached per
+  // epic rather than per task or per session.
+  const epicId = epicOfTaskId(taskId);
+  if (epicId !== null) {
+    const cached = memo?.epicPrompt.get(epicId);
+    if (cached !== undefined) return cached;
+  }
+  const quote = epicSourcePrompt(db, taskSessionId);
+  if (epicId !== null) memo?.epicPrompt.set(epicId, quote);
+  return quote;
+}
+
 export function kanban(
   db: SmithDb,
   epicId?: string,
@@ -2086,9 +2251,80 @@ export function kanban(
     for (const e of JSON.parse(m.epicIds) as string[]) milestoneByEpic.set(e, m.milestoneId);
   }
 
+  // DS3 item 2 — attempt count, per task_id, from the same dispatch rows above.
+  const attemptCountByTask = new Map<string, number>();
+  for (const d of dispatchRows) {
+    if (!d.taskId) continue;
+    attemptCountByTask.set(d.taskId, (attemptCountByTask.get(d.taskId) ?? 0) + 1);
+  }
+
+  // DS3 item 2 — highest judge-role dispatch round per task_id, from the agents fold.
+  const judgeRoleSet: ReadonlySet<string> = new Set(JUDGE_ROLES);
+  const agentSessionCond = scopedToSessions(agents.sessionId, scope);
+  const agentRows = agentSessionCond
+    ? db.select().from(agents).where(agentSessionCond).all()
+    : db.select().from(agents).all();
+  const judgeRoundByTask = new Map<string, number>();
+  for (const a of agentRows) {
+    if (!a.taskId || !judgeRoleSet.has(a.agentRole)) continue;
+    const current = judgeRoundByTask.get(a.taskId) ?? 0;
+    if (a.round > current) judgeRoundByTask.set(a.taskId, a.round);
+  }
+
+  // DS3 item 2 — comment count per task_id, from operator_feedback.
+  const feedbackSessionCond = scopedToSessions(operatorFeedback.sessionId, scope);
+  const feedbackRows = feedbackSessionCond
+    ? db.select().from(operatorFeedback).where(feedbackSessionCond).all()
+    : db.select().from(operatorFeedback).all();
+  const commentCountByTask = new Map<string, number>();
+  for (const f of feedbackRows) {
+    commentCountByTask.set(f.taskId, (commentCountByTask.get(f.taskId) ?? 0) + 1);
+  }
+
+  // DS3 item 2 — epic-level integration PR url, keyed by epic_id (there is no
+  // per-task PR concept today, only the epic's own integration-pr-opened).
+  const integrationRows = inLogOrder(
+    db.select().from(eventsRaw).where(eq(eventsRaw.eventType, 'integration-pr-opened')).all(),
+  );
+  const prUrlByEpic = new Map<string, string>();
+  for (const r of integrationRows) {
+    const epicRef = r.taskId ? epicIdOfIntegrationRef(r.taskId) : null;
+    if (!epicRef) continue;
+    const payload = JSON.parse(r.payload) as { pr_url?: string };
+    if (typeof payload.pr_url === 'string') prUrlByEpic.set(epicRef, payload.pr_url);
+  }
+
+  // DS3 item 2 — this task's dependency edges, resolved against the task rows
+  // already in scope; a dependsOn id outside scope resolves to a null title/status.
+  const taskRowByTaskId = new Map(taskRows.map((t) => [t.taskId, t]));
+  const edgeSessionCond = scopedToSessions(edges.sessionId, scope);
+  const edgeRows = edgeSessionCond
+    ? db.select().from(edges).where(edgeSessionCond).all()
+    : db.select().from(edges).all();
+  const edgesByTask = new Map<string, (typeof edges.$inferSelect)[]>();
+  for (const e of edgeRows) {
+    const list = edgesByTask.get(e.taskId) ?? [];
+    list.push(e);
+    edgesByTask.set(e.taskId, list);
+  }
+
+  // DS3 item 2 — epic friendly label; closed epics (epics table holds only those) get " (finished)".
+  const closedEpicIds = new Set(
+    db
+      .select({ epicId: epics.epicId })
+      .from(epics)
+      .all()
+      .map((e) => e.epicId),
+  );
+
+  // DS3 S3 fix — one shared memo for every task's request-quote walk in this
+  // call: bounds the N+1 causal walk/epic-fallback cost that scaled with the
+  // task count (see QuoteMemo's doc comment).
+  const quoteMemo = createQuoteMemo();
   const columns = new Map<string, KanbanTask[]>();
   for (const t of taskRows) {
     const column = columns.get(t.taskStatus) ?? [];
+    const quote = requestQuoteForTask(db, t.taskId, t.sessionId, quoteMemo);
     column.push({
       taskId: t.taskId,
       taskStatus: t.taskStatus,
@@ -2102,13 +2338,39 @@ export function kanban(
         origin: t.origin,
         severity: worstSeverity(openSeverityByTask.get(t.taskId) ?? []),
       },
+      updatedAt: t.updatedAt,
+      project: t.project,
+      attemptCount: attemptCountByTask.get(t.taskId) ?? 0,
+      judgeRound: judgeRoundByTask.get(t.taskId) ?? null,
+      commentCount: commentCountByTask.get(t.taskId) ?? 0,
+      prUrl: t.epicId ? (prUrlByEpic.get(t.epicId) ?? null) : null,
+      dependencies: (edgesByTask.get(t.taskId) ?? []).map((e) => {
+        const dep = taskRowByTaskId.get(e.dependsOn);
+        return {
+          taskId: e.dependsOn,
+          title: dep?.objective ?? null,
+          status: dep?.taskStatus ?? null,
+          edgeType: e.edgeType,
+        };
+      }),
+      epicLabel: epicLabelFor(t.epicId, t.project, closedEpicIds),
+      hasRequest: quote !== null,
+      requestFirstLine: quote ? firstLineOf(quote.prompt) : null,
     });
     columns.set(t.taskStatus, column);
   }
 
+  // DS3 item 3 — deterministic order within a column: most recently updated
+  // first, task_id as the tiebreaker so two same-instant rows never flap.
   return [...columns.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([taskStatus, tasksInColumn]) => ({ taskStatus, tasks: tasksInColumn }));
+    .map(([taskStatus, tasksInColumn]) => ({
+      taskStatus,
+      tasks: [...tasksInColumn].sort((a, b) => {
+        if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
+        return a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0;
+      }),
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -2147,9 +2409,14 @@ export interface TaskDetail {
   /** Every `operator_feedback` row for this task, resolved and unresolved alike (feedback.ts). */
   feedback: (typeof operatorFeedback.$inferSelect)[];
   branch: string | null;
+  /** DS3 §4.7 — "Requested by you", the operator prompt behind this task, or its epic fallback. */
+  requestQuote: RequestQuote | null;
+  /** DS3 part 2 item 1 — same "is anybody still on this task" answer as kanban()'s field of the same name, for the Task-detail/TaskPeekPanel `AgentChip`. */
+  agentActivity: KanbanAgentActivity | null;
 }
 
-export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
+export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): TaskDetail | null {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
   const task = db.select().from(tasks).where(eq(tasks.taskId, taskId)).get();
   if (!task) return null;
 
@@ -2157,6 +2424,18 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
     db.select().from(dispatches).where(eq(dispatches.taskId, taskId)).all(),
   );
   const agentRows = db.select().from(agents).where(eq(agents.taskId, taskId)).all();
+  // Mirrors kanban()'s activityByTask: a live agents row dispatched inside
+  // the stale window is "working"; a live row past it is "stalled"; a
+  // working row wins over a stalled one on the same task.
+  let agentActivity: KanbanAgentActivity | null = null;
+  for (const a of agentRows) {
+    if (a.status !== 'live') continue;
+    if (isWorkingAt(a.dispatchedAt, nowIso)) {
+      agentActivity = 'working';
+      break;
+    }
+    if (agentActivity === null) agentActivity = 'stalled';
+  }
   const agentByEventId = new Map(agentRows.map((a) => [a.id, a]));
   const attempts: TaskAttempt[] = dispatchRows.map((d) => {
     const agent = agentByEventId.get(d.eventId);
@@ -2187,7 +2466,92 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
     artifacts: artifactRows,
     feedback: feedbackRows,
     branch: task.branch,
+    requestQuote: requestQuoteForTask(db, task.taskId, task.sessionId),
+    agentActivity,
   };
+}
+
+// ---------------------------------------------------------------------------
+// taskRuns()
+// ---------------------------------------------------------------------------
+
+const RUN_EVENT_TYPES = [
+  DISPATCH_EVENT_TYPE,
+  JUDGE_REPORT_EVENT_TYPE,
+  TASK_RESULT_EVENT_TYPE,
+  ERROR_EVENT_TYPE,
+] as const;
+
+const RUN_KIND_BY_EVENT_TYPE: Record<string, TaskRun['kind']> = {
+  [DISPATCH_EVENT_TYPE]: 'dispatch',
+  [JUDGE_REPORT_EVENT_TYPE]: 'judge-report',
+  [TASK_RESULT_EVENT_TYPE]: 'result',
+  [ERROR_EVENT_TYPE]: 'error',
+};
+
+function tokensTotalFromPayload(payload: Record<string, unknown>): number | null {
+  const usage = payload.token_usage as { total_tokens?: number } | undefined;
+  return typeof usage?.total_tokens === 'number' ? usage.total_tokens : null;
+}
+
+function outcomeFromPayload(eventType: string, payload: Record<string, unknown>): string | null {
+  if (eventType === TASK_RESULT_EVENT_TYPE && typeof payload.run_status === 'string')
+    return payload.run_status;
+  if (eventType === ERROR_EVENT_TYPE && typeof payload.error === 'string') return payload.error;
+  if (eventType === JUDGE_REPORT_EVENT_TYPE) {
+    // judge-reported carries no accept/dismiss verdict of its own (that is a
+    // separate judge-verdict event, outside Slice A's event-type list) — the
+    // closest the report payload has to an outcome is whether it attested
+    // "no findings" rather than naming a finding count.
+    if (payload.attested_by !== undefined && payload.attested_by !== null) return 'no-findings';
+    if (typeof payload.finding_count === 'number') return `${payload.finding_count}-findings`;
+  }
+  return null;
+}
+
+/**
+ * DS3 §4.7 — one entry per dispatch attempt, judge round, result, or error for
+ * `taskId`, for `RunHistoryTimeline` (pattern 2). A scoped read on the
+ * existing event-log projection: no new event type, no new writer.
+ */
+export interface TaskRun {
+  eventId: string;
+  ts: string;
+  kind: 'dispatch' | 'judge-report' | 'result' | 'error';
+  agentRole: string | null;
+  /** Dispatch round, or null when the event carries none (results/errors). */
+  round: number | null;
+  /** From the event's own `token_usage.total_tokens`, never backfilled; null when not measured. */
+  tokensTotal: number | null;
+  /** `run_status` for a result, the error class for an error, the verdict for a judge report; null otherwise. */
+  outcome: string | null;
+}
+
+export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
+  const rows = inLogOrder(
+    db
+      .select()
+      .from(eventsRaw)
+      .where(and(eq(eventsRaw.taskId, taskId), inArray(eventsRaw.eventType, [...RUN_EVENT_TYPES])))
+      .all(),
+  );
+  return rows.flatMap((r) => {
+    const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
+    if (!kind) return [];
+    const payload = JSON.parse(r.payload) as Record<string, unknown>;
+    const round = typeof payload.round === 'number' ? payload.round : null;
+    return [
+      {
+        eventId: r.eventId,
+        ts: r.ts,
+        kind,
+        agentRole: typeof payload.agent_role === 'string' ? payload.agent_role : null,
+        round: round ?? (r.eventType === DISPATCH_EVENT_TYPE ? 1 : null),
+        tokensTotal: tokensTotalFromPayload(payload),
+        outcome: outcomeFromPayload(r.eventType, payload),
+      },
+    ];
+  });
 }
 
 /**

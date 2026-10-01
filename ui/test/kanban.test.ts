@@ -4,8 +4,17 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   agentChip,
+  agentNudgeDue,
+  attemptLabel,
   capColumn,
+  cardChips,
+  columnTone,
+  dependencyChainText,
+  epicKeyForTask,
   foldIntoColumns,
+  groupByKanban,
+  isDoneStatus,
+  isInteractiveDescendant,
   KANBAN_COLUMNS,
   KANBAN_PAGE_SIZE,
   subStatusSummary,
@@ -241,6 +250,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: true,
       gone: false,
+      state: 'working',
     });
     // Stalled is still somebody: the registry has no terminal event, only
     // the clock says it should have — the chip stays but stops breathing.
@@ -249,6 +259,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: false,
       gone: false,
+      state: 'waiting',
     });
   });
 
@@ -260,6 +271,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: false,
       gone: true,
+      state: 'idle',
     });
   });
 
@@ -282,6 +294,7 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
         title: 'coder · mid',
         live: false,
         gone: true,
+        state: 'idle',
       });
     }
   });
@@ -295,7 +308,157 @@ describe('lib/kanban.ts — the agent chip says who is on the task', () => {
       title: 'coder · mid',
       live: true,
       gone: false,
+      state: 'working',
     });
+  });
+});
+
+// DS3 pattern 3 — the new kit's AgentChip state vocabulary, additive beside
+// the pre-kit live/gone booleans above.
+describe('lib/kanban.ts — agentChip() state (DS3 pattern 3)', () => {
+  const task = (over: Partial<Parameters<typeof agentChip>[0]>) => ({
+    taskStatus: 'in-progress',
+    agentRole: 'coder',
+    agentModelTier: 'mid',
+    agentActivity: null,
+    ...over,
+  });
+
+  it('is working while the agent is live and the status is not a Reviewing one', () => {
+    expect(agentChip(task({ agentActivity: 'working' }))?.state).toBe('working');
+  });
+
+  it('is reviewing when the live agent sits on a status the board folds into Reviewing', () => {
+    expect(agentChip(task({ taskStatus: 'reviewing', agentActivity: 'working' }))?.state).toBe(
+      'reviewing',
+    );
+    expect(agentChip(task({ taskStatus: 'merging', agentActivity: 'working' }))?.state).toBe(
+      'reviewing',
+    );
+  });
+
+  it('is waiting when the clock, not a terminal event, says the agent should have returned', () => {
+    expect(agentChip(task({ agentActivity: 'stalled' }))?.state).toBe('waiting');
+  });
+
+  it('is idle once the task is over or nobody is on it', () => {
+    expect(agentChip(task({ agentActivity: null }))?.state).toBe('idle');
+    expect(agentChip(task({ taskStatus: 'completed', agentActivity: 'working' }))?.state).toBe(
+      'idle',
+    );
+  });
+});
+
+describe('lib/kanban.ts — agentNudgeDue() (DS3 pattern 3)', () => {
+  it('is false before agentWaitingThresholdMs has elapsed', () => {
+    // Threshold is 4h; 1h in is not yet long enough to suggest a nudge.
+    expect(agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T01:00:00.000Z')).toBe(false);
+  });
+
+  it('is true once agentWaitingThresholdMs has elapsed', () => {
+    expect(agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T04:00:00.000Z')).toBe(true);
+  });
+
+  it('is false for an unparseable timestamp rather than throwing', () => {
+    expect(agentNudgeDue('not-a-date', '2026-01-01T04:00:00.000Z')).toBe(false);
+  });
+});
+
+describe('lib/kanban.ts — cardChips() (DS3 pattern 6, row 4)', () => {
+  const task = (over: Partial<Parameters<typeof cardChips>[0]> = {}) => ({
+    taskStatus: 'blocked',
+    project: 'shop-api',
+    tags: { case: 'feature', severity: 'S2-major' },
+    ...over,
+  });
+
+  it('suppresses the status chip only when grouped by status', () => {
+    expect(cardChips(task(), 'project').chips.map((c) => c.text)).toContain('Blocked');
+    expect(cardChips(task(), 'status').chips.map((c) => c.text)).not.toContain('Blocked');
+  });
+
+  it('suppresses the project chip only when grouped by project', () => {
+    const noTags = task({ taskStatus: 'status-irrelevant', tags: { case: null, severity: null } });
+    expect(cardChips(noTags, 'status').chips.map((c) => c.text)).toContain('shop-api');
+    expect(cardChips(noTags, 'project').chips.map((c) => c.text)).not.toContain('shop-api');
+  });
+
+  it('drops the S4-nit default severity but keeps a non-default one', () => {
+    expect(
+      cardChips(task({ tags: { case: null, severity: 'S4-nit' } }), 'status').chips,
+    ).not.toContainEqual(expect.objectContaining({ text: 'S4-nit' }));
+    expect(cardChips(task(), 'status').chips).toContainEqual({ text: 'S2-major', tone: 'danger' });
+  });
+
+  it('caps at 2 chips and reports the rest as overflow', () => {
+    // status + case + severity + project = 4 candidates when grouped by role.
+    const result = cardChips(task(), 'role');
+    expect(result.chips).toHaveLength(2);
+    expect(result.overflow).toBe(2);
+  });
+
+  it('case chips carry no tone — descriptive, not evaluative', () => {
+    expect(cardChips(task(), 'status').chips).toContainEqual({ text: 'Feature', tone: null });
+  });
+});
+
+// DS3 pattern 7 — group-by switch's pure helpers.
+describe('lib/kanban.ts — epicKeyForTask() (DS3 pattern 7)', () => {
+  it('reads the prefix before the first slash', () => {
+    expect(epicKeyForTask('harness-codex-dispatch/task-a-skill-install')).toBe(
+      'harness-codex-dispatch',
+    );
+  });
+
+  it('is null for a task id with no slash', () => {
+    expect(epicKeyForTask('no-epic-task')).toBeNull();
+  });
+});
+
+describe('lib/kanban.ts — groupByKanban() (DS3 pattern 7)', () => {
+  const task = (over: Partial<Parameters<typeof groupByKanban>[0][number]>) => ({
+    taskId: 'epic-a/task-1',
+    taskStatus: 'in-progress',
+    project: 'shop-api',
+    agentRole: 'coder',
+    epicLabel: 'shop-api: Epic a',
+    ...over,
+  });
+
+  it('status grouping delegates to foldIntoColumns, in its fixed column order', () => {
+    const columns = groupByKanban([task({})], 'status');
+    expect(columns.map((c) => c.key)).toEqual([...KANBAN_COLUMNS]);
+  });
+
+  it('groups by project, with a task lacking one in a trailing "None" bucket', () => {
+    const columns = groupByKanban(
+      [task({ project: 'shop-api' }), task({ taskId: 'epic-b/task-2', project: null })],
+      'project',
+    );
+    expect(columns.map((c) => c.key)).toEqual(['shop-api', '\u0000none']);
+    expect(columns[1]?.label).toBe('None');
+  });
+
+  it('groups by epic, reading the key off the task id and the label off epicLabel', () => {
+    const columns = groupByKanban(
+      [task({ taskId: 'epic-a/task-1', epicLabel: 'shop-api: Epic a' })],
+      'epic',
+    );
+    expect(columns).toEqual([{ key: 'epic-a', label: 'shop-api: Epic a', tasks: [task({})] }]);
+  });
+
+  it('groups by role, with the friendly label, and a task never dispatched in "None"', () => {
+    const columns = groupByKanban(
+      [task({ agentRole: 'coder' }), task({ taskId: 'epic-a/task-2', agentRole: null })],
+      'role',
+    );
+    expect(columns[0]?.label).toBe('Builder');
+    expect(columns[1]?.key).toBe('\u0000none');
+  });
+
+  it('drops failed/superseded tasks by default, same as the status board', () => {
+    const columns = groupByKanban([task({ taskStatus: 'failed' })], 'project');
+    expect(columns).toEqual([]);
   });
 });
 
@@ -355,5 +518,126 @@ describe('lib/kanban.ts — every status the taxonomy declares reaches a column'
     expect(
       foldIntoColumns([{ taskId: 't1', taskStatus: 'queued' }], true).flatMap((c) => c.tasks),
     ).toEqual([]);
+  });
+});
+
+describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () => {
+  it('reads "nothing" with no dependencies', () => {
+    expect(dependencyChainText([])).toBe('Waits for: nothing');
+  });
+
+  it('names the first dependency with its status', () => {
+    expect(
+      dependencyChainText([{ taskId: 't1', title: 'Add login form', status: 'in-progress' }]),
+    ).toBe('Waits for: Add login form (in-progress)');
+  });
+
+  it('falls back to the taskId when the dependency has no title', () => {
+    expect(dependencyChainText([{ taskId: 't1', title: null, status: null }])).toBe(
+      'Waits for: t1',
+    );
+  });
+
+  it('tails off with a "+N more" count past the first dependency', () => {
+    expect(
+      dependencyChainText([
+        { taskId: 't1', title: 'Add login form', status: 'done' },
+        { taskId: 't2', title: 'Add logout', status: 'todo' },
+        { taskId: 't3', title: 'Add session', status: 'todo' },
+      ]),
+    ).toBe('Waits for: Add login form (done) +2 more');
+  });
+});
+
+describe('lib/kanban.ts — isDoneStatus() (DS3 pattern 7, column collapse)', () => {
+  it('reads completed/waived as done', () => {
+    expect(isDoneStatus('completed')).toBe(true);
+    expect(isDoneStatus('waived')).toBe(true);
+  });
+
+  it('reads any other status as not done', () => {
+    expect(isDoneStatus('in-progress')).toBe(false);
+    expect(isDoneStatus('failed')).toBe(false);
+  });
+});
+
+// S2 fix (review round 2) — `onCardKeydown` used to act on every bubbled
+// keydown regardless of where it started, so Enter on the card's own "Open
+// PR" link (or any other focusable descendant) opened the peek panel instead
+// of letting the link's native activation run. The guard is keyed off
+// `target !== currentTarget` plus an interactive tag/role check, not a single
+// hardcoded selector for that one link, so it also covers the row-1 "Copy
+// task id" IconButton and anything else focusable the card ever grows.
+describe('lib/kanban.ts — isInteractiveDescendant() (S2 fix)', () => {
+  const root = { tagName: 'DIV' };
+
+  it('is false for the card root itself, even though the root also carries a role', () => {
+    const cardRoot = {
+      tagName: 'DIV',
+      getAttribute: (name: string) => (name === 'role' ? 'link' : null),
+    };
+    expect(isInteractiveDescendant(cardRoot, cardRoot)).toBe(false);
+  });
+
+  it('is true for a descendant <a>', () => {
+    const anchor = { tagName: 'A' };
+    expect(isInteractiveDescendant(anchor, root)).toBe(true);
+  });
+
+  it('is true for a descendant <button> or <input>', () => {
+    expect(isInteractiveDescendant({ tagName: 'BUTTON' }, root)).toBe(true);
+    expect(isInteractiveDescendant({ tagName: 'INPUT' }, root)).toBe(true);
+  });
+
+  it('is true for a descendant carrying any role attribute', () => {
+    const roled = {
+      tagName: 'SPAN',
+      getAttribute: (name: string) => (name === 'role' ? 'img' : null),
+    };
+    expect(isInteractiveDescendant(roled, root)).toBe(true);
+  });
+
+  it('is false for a plain descendant span with no role', () => {
+    const span = { tagName: 'SPAN', getAttribute: () => null };
+    expect(isInteractiveDescendant(span, root)).toBe(false);
+  });
+
+  it('is false for a null target', () => {
+    expect(isInteractiveDescendant(null, root)).toBe(false);
+  });
+});
+
+// S3 fix (review round 2) — row 5 used to render
+// `Attempt {{ task.judgeRound ?? task.attemptCount }}`, silently swapping
+// which number it showed depending on which field happened to be set. A
+// judge round and a dispatch-attempt count are different counters
+// (api.ts's own comments: attemptCount is "count of this task's
+// dispatch_decision events", judgeRound is "highest judge round among this
+// task's judge-role dispatches") and conflating them under one label misled
+// whichever one lost. The card now only ever shows the attempt count, per
+// ds-spec.md §4.2's own worked example ("Attempt 2" on a task with no judge
+// round at all).
+describe('lib/kanban.ts — attemptLabel() (S3 fix)', () => {
+  it('is null on a task’s first attempt', () => {
+    expect(attemptLabel({ attemptCount: 1 })).toBeNull();
+    expect(attemptLabel({ attemptCount: 0 })).toBeNull();
+  });
+
+  it('names the attempt count once there has been more than one', () => {
+    expect(attemptLabel({ attemptCount: 2 })).toBe('Attempt 2');
+    expect(attemptLabel({ attemptCount: 5 })).toBe('Attempt 5');
+  });
+});
+
+describe('lib/kanban.ts — columnTone() (ds-spec.md §2.2 column header icon)', () => {
+  it('reads the status grouping key as a real task_status tone', () => {
+    expect(columnTone('status', 'completed')).toBe('done');
+    expect(columnTone('status', 'blocked')).toBe('blocked');
+  });
+
+  it('falls back to neutral for groupings with no status of their own', () => {
+    expect(columnTone('project', 'some-project')).toBe('neutral');
+    expect(columnTone('epic', 'some-epic')).toBe('neutral');
+    expect(columnTone('role', 'coder')).toBe('neutral');
   });
 });

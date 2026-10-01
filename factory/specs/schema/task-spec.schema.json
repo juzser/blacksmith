@@ -129,6 +129,14 @@
       "type": "string",
       "description": "Optional plain-string project identifier (Phase 6b, architecture §8) — NOT a closed taxonomy.yml vocabulary value (projects open/close far more often than any §8 dimension). Absent tasks default to 'black-smith' in the projection layer."
     },
+    "title": {
+      "type": "string",
+      "description": "Optional human-facing short title for the task row (DS3); falls back to a humanized task_id slug when absent."
+    },
+    "summary": {
+      "type": "string",
+      "description": "Optional human-facing one-line summary for the task row (DS3)."
+    },
     "keeps_exports": {
       "type": "array",
       "items": { "type": "string" },
