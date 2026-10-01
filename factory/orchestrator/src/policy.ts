@@ -1451,16 +1451,22 @@ function checkForcePushSubcommandWord(
   if (gitIndex === -1) {
     // Defence in depth for `joinLineContinuations` missing a spelling of its
     // own: a word whose dequoted text is not exactly `git` can still resolve
-    // to it once the whitespace a shell trick left behind (a stray literal
-    // newline, here, rather than a real word break) is stripped out. Such a
-    // word is never plain — `isPlainWord` already refuses a bare backslash or
-    // an embedded newline — so this only fires for a raw form this rule
-    // could not read anyway; refuse it rather than silently pass through.
+    // to it once the stray literal newline a shell trick left behind (not a
+    // real word break — bash lets a quoted span carry a raw newline with no
+    // backslash, which `joinLineContinuations` never touches) is stripped
+    // out. Such a word is never plain — `isPlainWord` already refuses a bare
+    // backslash or an embedded newline — so this only fires for a raw form
+    // this rule could not read anyway; refuse it rather than silently pass
+    // through. Only the newline itself is stripped, not every whitespace
+    // character: an ordinary quoted argument can legitimately contain plain
+    // spaces (a PR title, a commit message), and squeezing those out too
+    // reads an innocent word ending in "...ing it" as ending in "git" —
+    // issue #273.
     const hidden = words.some(
       (word) =>
         word.text.toLowerCase() !== 'git' &&
         !isPlainWord(word.raw) &&
-        word.text.replace(/\s+/g, '').toLowerCase().endsWith('git'),
+        word.text.replace(/\r?\n/g, '').toLowerCase().endsWith('git'),
     );
     if (hidden) return violation(rule, SUBCOMMAND_NOT_PLAIN_REASON);
     return null;
