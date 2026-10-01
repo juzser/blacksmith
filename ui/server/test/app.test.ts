@@ -596,6 +596,22 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  it('GET /api/tasks/:taskId/runs 200s with the task\'s dispatch rows, and [] for an unknown task', async () => {
+    const handle = app();
+    const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}/runs`);
+    expect(found.status).toBe(200);
+    const { runs } = await json<{ runs: Array<{ kind: string; agentRole: string | null }> }>(
+      found,
+    );
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((r) => typeof r.kind === 'string')).toBe(true);
+
+    const unknown = await handle.app.request('/api/tasks/no-such-task/runs');
+    expect(unknown.status).toBe(200);
+    expect((await json<{ runs: unknown[] }>(unknown)).runs).toEqual([]);
+    closeApp(handle);
+  });
+
   describe('GET /api/artifacts/:artifactId', () => {
     let artifactsDir: string;
 
