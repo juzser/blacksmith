@@ -220,6 +220,12 @@ export interface KanbanTag {
   origin: string | null;
   severity: string | null;
 }
+export interface KanbanDependency {
+  taskId: string;
+  title: string | null;
+  status: string | null;
+  edgeType: string;
+}
 export interface KanbanTask {
   taskId: string;
   taskStatus: string;
@@ -234,10 +240,38 @@ export interface KanbanTask {
   agentActivity: 'working' | 'stalled' | null;
   milestoneId: string | null;
   tags: KanbanTag;
+  /** DS3 — tasks.updated_at. */
+  updatedAt: string;
+  /** DS3 — tasks.project. */
+  project: string | null;
+  /** DS3 — count of this task's dispatch_decision events. */
+  attemptCount: number;
+  /** DS3 — highest judge round among this task's judge-role dispatches, or null. */
+  judgeRound: number | null;
+  /** DS3 — count of this task's operator_feedback rows. */
+  commentCount: number;
+  /** DS3 — the epic's integration PR url, or null. */
+  prUrl: string | null;
+  /** DS3 — this task's own edges. */
+  dependencies: KanbanDependency[];
+  /** DS3 — "<project>: <humanized epic id>[ (finished)]", or null with no epic. */
+  epicLabel: string | null;
+  /** DS3 — whether the causal-parent walk found a linked request. */
+  hasRequest: boolean;
+  /** DS3 — first line of the linked request's prompt, or null when `hasRequest` is false. */
+  requestFirstLine: string | null;
 }
 export interface KanbanColumn {
   taskStatus: string;
   tasks: KanbanTask[];
+}
+
+/** DS3 §4.7 — the operator prompt behind a task, or its epic's source prompt as a fallback. */
+export interface RequestQuote {
+  prompt: string;
+  ts: string;
+  eventId: string;
+  source: 'task' | 'epic';
 }
 
 export interface TaskDetail {
@@ -299,6 +333,8 @@ export interface TaskDetail {
     followUpTaskId: string | null;
   }>;
   branch: string | null;
+  /** DS3 §4.7 — the operator prompt behind this task, or its epic's source prompt as a fallback. */
+  requestQuote: RequestQuote | null;
 }
 
 export interface LessonRecord {
