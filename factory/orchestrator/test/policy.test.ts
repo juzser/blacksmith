@@ -2108,13 +2108,15 @@ describe('evaluateCommand — a backslash escape inside the raw-text fallback sc
     expect(ruleIds(d)).toContain('unbounded-rm');
   });
 
-  it.each([[`git commit -m "it's -rf free"`], ['pnpm run test'], ['echo "$(date)"'], [`printf 'a\\nb'`]])(
-    'allows %s — nothing removal-shaped, escaped or not',
-    (command) => {
-      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
-      expect(d.allowed).toBe(true);
-    },
-  );
+  it.each([
+    [`git commit -m "it's -rf free"`],
+    ['pnpm run test'],
+    ['echo "$(date)"'],
+    [`printf 'a\\nb'`],
+  ])('allows %s — nothing removal-shaped, escaped or not', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
 
   it('allows 15 levels of $(echo $(echo …)) wrapping plain echo hi — short of the cap, read normally', () => {
     const nestEcho = (levels: number, inner: string) =>
