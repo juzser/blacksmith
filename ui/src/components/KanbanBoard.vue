@@ -154,9 +154,14 @@ watch(
   },
   { immediate: true },
 );
-const visibleColumns = computed(() =>
-  isPhoneWidth.value ? columns.value.filter((c) => c.key === mobileActiveKey.value) : columns.value,
-);
+// v-show rather than filtering the list: swapping which section is mounted
+// tore down/rebuilt every card in the outgoing column on every tab click,
+// which crashed on an emit reaching an already-unmounted KanbanTaskCard
+// instance. Toggling display: none leaves every column mounted, so a click
+// only flips the attribute — no teardown, no crash.
+function isColumnVisible(key: string): boolean {
+  return !isPhoneWidth.value || key === mobileActiveKey.value;
+}
 function selectMobileTab(key: string) {
   mobileActiveKey.value = key;
 }
@@ -308,7 +313,13 @@ defineExpose({ focusFirstCard });
       </button>
     </div>
     <div class="bs-kanban-board__columns">
-      <section v-for="col in visibleColumns" :key="col.key" class="bs-kanban-col" :aria-label="`${col.label} column`">
+      <section
+        v-for="col in columns"
+        v-show="isColumnVisible(col.key)"
+        :key="col.key"
+        class="bs-kanban-col"
+        :aria-label="`${col.label} column`"
+      >
         <div v-if="!isPhoneWidth" class="bs-kanban-col__head">
           <component
             :is="TONE_ICON[columnTone(options.groupBy, col.key)]"

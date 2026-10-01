@@ -31,7 +31,15 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
 <template>
   <span class="bs-popover">
     <slot name="trigger" />
-    <div v-if="open" class="bs-popover__panel" role="dialog" aria-modal="false" :aria-label="label">
+    <!-- v-show, not v-if: a page can Teleport content into this slot (e.g.
+         KanbanBoard.vue's mobile display-options control into
+         MobileTopBar's overflow menu) before the user ever opens the
+         popover. v-if would unmount that Teleport's target along with the
+         panel, leaving Teleport's content stuck with no home — v-show keeps
+         the target (and therefore the teleported component) alive, just
+         hidden, so the very first open finds a real, already-initialized
+         instance instead of a broken one. -->
+    <div v-show="open" class="bs-popover__panel" role="dialog" aria-modal="false" :aria-label="label">
       <slot />
     </div>
   </span>

@@ -30,8 +30,9 @@ describe('KanbanBoard.vue — mobile column switcher (§3.1 Work/Kanban row)', (
   });
 
   it('shows only the active column on phone, every column on desktop', () => {
-    expect(SRC).toMatch(/visibleColumns/);
-    expect(SRC).toMatch(/isPhoneWidth\.value \? [\s\S]{0,120}mobileActiveKey/);
+    expect(SRC).toMatch(/isColumnVisible/);
+    expect(SRC).toMatch(/!isPhoneWidth\.value \|\| key === mobileActiveKey\.value/);
+    expect(SRC).toMatch(/v-show="isColumnVisible\(col\.key\)"/);
   });
 
   it('hides the column head (status icon, title, count tag, the hide-column menu) on phone', () => {
