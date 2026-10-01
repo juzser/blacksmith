@@ -2356,11 +2356,7 @@ export interface TaskDetail {
   agentActivity: KanbanAgentActivity | null;
 }
 
-export function taskDetail(
-  db: SmithDb,
-  taskId: string,
-  opts: ClockOpts = {},
-): TaskDetail | null {
+export function taskDetail(db: SmithDb, taskId: string, opts: ClockOpts = {}): TaskDetail | null {
   const nowIso = opts.nowIso ?? new Date().toISOString();
   const task = db.select().from(tasks).where(eq(tasks.taskId, taskId)).get();
   if (!task) return null;
