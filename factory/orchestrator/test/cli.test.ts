@@ -6477,6 +6477,64 @@ describe('cli.ts (built binary)', () => {
           [],
         );
       });
+
+      // #285: `--findings` takes an already-minted `RaiseFindingInput[]`
+      // ({finding, filePath}), not a judge artifact (`FindingEvidence[]`,
+      // snake_case `file_path`). Handing it the latter used to crash with an
+      // uncaught TypeError deep inside `normalizeRepoPath`, which reads
+      // `filePath` straight off the item.
+      it('refuses a judge-artifact-shaped --findings file with a named shape error, not a crash', async () => {
+        const { sessionId, eventsDir } = await session();
+        const judgeArtifact = await evidenceFile('raise-findings-wrong-shape');
+
+        const result = runCli([
+          'findings',
+          'raise',
+          '--findings',
+          judgeArtifact,
+          '--task',
+          'epic-1/task-1',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        const error = JSON.parse(result.stdout).error;
+        expect(error.code).toBe('cli.invalid-flag');
+        expect(error.message).toContain('item 0');
+        expect(error.message).toContain('--evidence');
+        expect(tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised')).toEqual(
+          [],
+        );
+      });
+
+      it('refuses a --findings item missing filePath, naming the index and field', async () => {
+        const { sessionId, eventsDir } = await session();
+        const badFile = path.join(scratchDir, `${sessionId}-raise-findings-missing.json`);
+        await writeFile(badFile, JSON.stringify([{ finding: { summary: 'x' } }]));
+
+        const result = runCli([
+          'findings',
+          'raise',
+          '--findings',
+          badFile,
+          '--task',
+          'epic-1/task-1',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        const error = JSON.parse(result.stdout).error;
+        expect(error.code).toBe('cli.invalid-flag');
+        expect(error.message).toContain('filePath');
+      });
     });
 
     // P9-15: an open finding in a file you are about to edit is worth knowing
@@ -8406,6 +8464,76 @@ describe('cli.ts (built binary)', () => {
         const result = await gateInvocation([{ name: 'test', cmd: 'true', timeout_ms: 1000 }]);
         expect(result.status).toBe(0);
         expect(JSON.parse(result.stdout).outcome).not.toBe('blocked');
+      });
+    });
+
+    // #285: `gate run --findings` reads the same pre-minted RaiseFindingInput[]
+    // shape `findings raise --findings` does, through the same unvalidated
+    // readJsonFile call — so a judge artifact handed to it crashed the same
+    // way, inside `normalizeRepoPath`, instead of naming the shape problem.
+    describe('gate run --findings shape validation (#285)', () => {
+      async function gateInvocation(findingsBody: unknown): Promise<{
+        status: number;
+        stdout: string;
+      }> {
+        const { sessionId, eventsDir, planPath } = await session();
+        const worktreeDir = await committedWorktree(`findings-shape-${sessionId}`);
+        const checksPath = path.join(scratchDir, `${sessionId}-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-result.json`);
+        const findingsPath = path.join(scratchDir, `${sessionId}-findings.json`);
+        await writeFile(checksPath, JSON.stringify([]));
+        await writeFile(findingsPath, JSON.stringify(findingsBody));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        return runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--findings',
+          findingsPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+      }
+
+      it('refuses a judge-artifact-shaped --findings file with a named shape error, not a crash', async () => {
+        const result = await gateInvocation([
+          {
+            file_path: 'src/bar/thing.ts',
+            finding_category: 'correctness',
+            severity: 'S2-major',
+            summary: 'off-by-one in loop bound',
+            failure_scenario: { inputs: 'n=5', expected: '5 iterations', actual: '4 iterations' },
+          },
+        ]);
+        expect(result.status).toBe(1);
+        const error = JSON.parse(result.stdout).error;
+        expect(error.code).toBe('cli.invalid-flag');
+        expect(error.message).toContain('item 0');
+        expect(error.message).toContain('--evidence');
       });
     });
 
