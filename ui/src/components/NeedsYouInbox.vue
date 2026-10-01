@@ -115,8 +115,9 @@ const groupCount = computed(() => groupInbox(props.rows ?? [], props.project).le
             </div>
             <span class="bs-inbox__meta"><RelativeTime :iso="r.createdAt" /></span>
             <!-- §3.1: the single most urgent row (first group, first row) on
-                 phone gets one full-width 44px "Decide" action instead of the
-                 inline per-kind label; every other row keeps the small link. -->
+                 phone gets one full-width --bs-touch-sized "Decide" action
+                 instead of the inline per-kind label; every other row keeps
+                 the small link. -->
             <RouterLink
               v-if="isPhoneWidth && gi === 0 && ri === 0"
               class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"
