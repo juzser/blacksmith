@@ -93,6 +93,8 @@ export async function buildFixture(opts: EventOpts): Promise<FixtureIds> {
         task_status: 'todo',
         plan_version: planVersion,
         objective: 'Add the widget renderer.',
+        title: 'Widget renderer',
+        summary: 'Render widgets fast and reliably.',
         claims: ['src/widget.ts'],
         budget_tokens: 2000,
       },

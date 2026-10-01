@@ -1064,6 +1064,25 @@ describe('db/queries.ts', () => {
         prompt: 'Build the widget and fix the flaky import.',
         source: 'task',
       });
+      // DS3 part 2 item 1 — task-spec's optional title/summary, carried
+      // through unchanged on the `task` row (tasks.title/tasks.summary).
+      expect(detail?.task.title).toBe('Widget renderer');
+      expect(detail?.task.summary).toBe('Render widgets fast and reliably.');
+      // task-1's coder returned a result, so nobody is on it.
+      expect(detail?.agentActivity).toBeNull();
+    });
+
+    // DS3 part 2 item 1 — TaskPeekPanel/Task-detail's AgentChip needs the
+    // same "is anybody still on this task" answer the Kanban card gets,
+    // read off the `agents` fold rather than the last dispatch (same
+    // cross-provider fix as kanban()'s agentActivity, mirrored here).
+    it('says whether an agent is still on the task, like kanban()', () => {
+      // task-2 has a live agents row with no terminal event.
+      expect(taskDetail(handle.db, TASK_2)?.agentActivity).toBe('working');
+      // The same live row seen from a clock years on is stalled, not gone.
+      expect(
+        taskDetail(handle.db, TASK_2, { nowIso: '2031-01-01T00:00:00.000Z' })?.agentActivity,
+      ).toBe('stalled');
     });
 
     it('returns null for an unknown task', () => {

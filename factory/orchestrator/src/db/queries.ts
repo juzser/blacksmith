@@ -2352,9 +2352,16 @@ export interface TaskDetail {
   branch: string | null;
   /** DS3 §4.7 — "Requested by you", the operator prompt behind this task, or its epic fallback. */
   requestQuote: RequestQuote | null;
+  /** DS3 part 2 item 1 — same "is anybody still on this task" answer as kanban()'s field of the same name, for the Task-detail/TaskPeekPanel `AgentChip`. */
+  agentActivity: KanbanAgentActivity | null;
 }
 
-export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
+export function taskDetail(
+  db: SmithDb,
+  taskId: string,
+  opts: ClockOpts = {},
+): TaskDetail | null {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
   const task = db.select().from(tasks).where(eq(tasks.taskId, taskId)).get();
   if (!task) return null;
 
@@ -2362,6 +2369,18 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
     db.select().from(dispatches).where(eq(dispatches.taskId, taskId)).all(),
   );
   const agentRows = db.select().from(agents).where(eq(agents.taskId, taskId)).all();
+  // Mirrors kanban()'s activityByTask: a live agents row dispatched inside
+  // the stale window is "working"; a live row past it is "stalled"; a
+  // working row wins over a stalled one on the same task.
+  let agentActivity: KanbanAgentActivity | null = null;
+  for (const a of agentRows) {
+    if (a.status !== 'live') continue;
+    if (isWorkingAt(a.dispatchedAt, nowIso)) {
+      agentActivity = 'working';
+      break;
+    }
+    if (agentActivity === null) agentActivity = 'stalled';
+  }
   const agentByEventId = new Map(agentRows.map((a) => [a.id, a]));
   const attempts: TaskAttempt[] = dispatchRows.map((d) => {
     const agent = agentByEventId.get(d.eventId);
@@ -2393,6 +2412,7 @@ export function taskDetail(db: SmithDb, taskId: string): TaskDetail | null {
     feedback: feedbackRows,
     branch: task.branch,
     requestQuote: requestQuoteForTask(db, task.taskId, task.sessionId),
+    agentActivity,
   };
 }
 
