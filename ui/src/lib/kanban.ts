@@ -367,3 +367,25 @@ export function cardChips(
   }
   return { chips: candidates.slice(0, 2), overflow: Math.max(0, candidates.length - 2) };
 }
+
+/** The bits of a KanbanDependency that dependencyChainText() actually reads. */
+export interface DependencyLike {
+  taskId: string;
+  title: string | null;
+  status: string | null;
+}
+
+/**
+ * TaskCard's footer dependency line (DS3 pattern 6, §4.2's "dependency
+ * chain in words"). Only the first dependency is named, with a "+N more"
+ * tail for the rest — the footer is a one-line summary, not a full list.
+ */
+export function dependencyChainText(dependencies: DependencyLike[]): string {
+  const first = dependencies[0];
+  if (!first) return 'Waits for: nothing';
+  const label = first.title ?? first.taskId;
+  const status = first.status ? ` (${first.status})` : '';
+  const rest = dependencies.length - 1;
+  const extra = rest > 0 ? ` +${rest} more` : '';
+  return `Waits for: ${label}${status}${extra}`;
+}

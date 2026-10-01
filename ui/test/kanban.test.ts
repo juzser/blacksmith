@@ -7,6 +7,7 @@ import {
   agentNudgeDue,
   capColumn,
   cardChips,
+  dependencyChainText,
   epicKeyForTask,
   foldIntoColumns,
   groupByKanban,
@@ -519,5 +520,31 @@ describe('lib/kanban.ts — every status the taxonomy declares reaches a column'
     expect(
       foldIntoColumns([{ taskId: 't1', taskStatus: 'queued' }], true).flatMap((c) => c.tasks),
     ).toEqual([]);
+  });
+});
+
+describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () => {
+  it('reads "nothing" with no dependencies', () => {
+    expect(dependencyChainText([])).toBe('Waits for: nothing');
+  });
+
+  it('names the first dependency with its status', () => {
+    expect(dependencyChainText([{ taskId: 't1', title: 'Add login form', status: 'in-progress' }])).toBe(
+      'Waits for: Add login form (in-progress)',
+    );
+  });
+
+  it('falls back to the taskId when the dependency has no title', () => {
+    expect(dependencyChainText([{ taskId: 't1', title: null, status: null }])).toBe('Waits for: t1');
+  });
+
+  it('tails off with a "+N more" count past the first dependency', () => {
+    expect(
+      dependencyChainText([
+        { taskId: 't1', title: 'Add login form', status: 'done' },
+        { taskId: 't2', title: 'Add logout', status: 'todo' },
+        { taskId: 't3', title: 'Add session', status: 'todo' },
+      ]),
+    ).toBe('Waits for: Add login form (done) +2 more');
   });
 });
