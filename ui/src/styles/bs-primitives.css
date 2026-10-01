@@ -1304,6 +1304,12 @@
   display: flex;
   gap: var(--bs-space-1);
 }
+/* Teleport target for page-specific overflow controls (ds-spec.md §3.1 Work/
+   Kanban row) — `display: contents` so a teleported trigger sits inline with
+   the rest of the overflow row instead of inside its own box. */
+.bs-mtopbar__overflow-extra {
+  display: contents;
+}
 /* ---- MobileProjectSwitcher (§3.1, finding 9): trigger + Popover list ---- */
 .bs-mproject {
   display: contents;
@@ -1761,6 +1767,36 @@ summary.bs-inbox__group-head {
   .bs-kanban-col {
     flex: 1 1 auto;
   }
+}
+
+/* §3.1 Work/Kanban row — the phone tab row that switches the single visible
+   column. Horizontally scrollable, each tab meets --bs-touch in both
+   dimensions (the "every tappable element" touch rule, §3.1). */
+.bs-kanban-tabs {
+  display: flex;
+  gap: var(--bs-space-2);
+  overflow-x: auto;
+  margin-bottom: var(--bs-space-3);
+}
+.bs-kanban-tabs__tab {
+  flex: 0 0 auto;
+  min-height: var(--bs-touch);
+  min-width: var(--bs-touch);
+  padding: 0 var(--bs-space-3);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+  color: var(--bs-text-subtle);
+  font: inherit;
+  cursor: pointer;
+}
+.bs-kanban-tabs__tab[aria-selected='true'] {
+  color: var(--bs-text);
+  border-color: var(--bs-accent);
+}
+.bs-kanban-tabs__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
 }
 
 .bs-kanban-display-options {

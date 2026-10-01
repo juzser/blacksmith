@@ -6,7 +6,6 @@ import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 // scope, so both are on the same board — which is what makes "every epic"
 // something a card can be counted for rather than only a heading to read.
 const SCOPED_EPIC = 'epic-9'; // multiProjectFixture.ts, project demo-hub
-const EPIC_OUTSIDE_IT = 'epic-1'; // db/fixtures.ts, project black-smith
 
 // 375px is the brief's own mobile breakpoint for the no-horizontal-scroll
 // check — distinct from helpers.ts's shared VIEWPORTS.mobile (390px), which
@@ -372,5 +371,60 @@ test.describe('Kanban', () => {
         await shoot(page, `kanban-${vpName}-${theme}`);
       });
     }
+  }
+
+  // S2 (ds-spec.md §3.1 Work/Kanban row): the phone tab row shows one column
+  // at a time, and clicking a second tab switches which one is on screen.
+  test('mobile: switching tabs switches the visible column', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/kanban');
+    const tablist = page.getByRole('tablist', { name: 'Kanban columns' });
+    await expect(tablist).toBeVisible();
+    // Every column stays mounted (v-show, not v-if) so a tab click only
+    // flips which one is visible — never tears down and rebuilds its cards.
+    const visibleCol = page.locator('.bs-kanban-col:visible');
+    await expect(visibleCol).toHaveCount(1);
+
+    // Default lands on the first non-empty column (defaultMobileColumnKey) —
+    // not necessarily the first tab, so find whichever one starts selected.
+    const activeTab = tablist.locator('[aria-selected="true"]');
+    await expect(activeTab).toHaveCount(1);
+    const firstColLabel = await visibleCol.getAttribute('aria-label');
+
+    // Resolve a concrete id before clicking — the "not selected" locator is
+    // dynamic and would re-match a different tab once the click lands. An
+    // attribute selector, not a `#id` selector: tab ids embed a column
+    // label that can contain a space (e.g. "In progress"), which `#id`
+    // parses as a descendant combinator.
+    const otherTabId = await tablist
+      .locator('[role="tab"]:not([aria-selected="true"])')
+      .first()
+      .getAttribute('id');
+    const otherTab = page.locator(`[id="${otherTabId}"]`);
+    await otherTab.click();
+    await expect(otherTab).toHaveAttribute('aria-selected', 'true');
+    await expect(tablist.locator('[aria-selected="true"]')).toHaveCount(1);
+    await expect(visibleCol).toHaveCount(1);
+    const secondColLabel = await visibleCol.getAttribute('aria-label');
+    expect(secondColLabel).not.toBe(firstColLabel);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot mobile/tab2/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await page.goto('/kanban');
+      const tablist = page.getByRole('tablist', { name: 'Kanban columns' });
+      await expect(tablist).toBeVisible();
+      // Pick a tab that is not already the default-selected one, so the
+      // shot genuinely shows a second column, not a same-column no-op.
+      const otherTabId = await tablist
+        .locator('[role="tab"]:not([aria-selected="true"])')
+        .first()
+        .getAttribute('id');
+      await page.locator(`[id="${otherTabId}"]`).click();
+      await settleForShot(page, page.locator('.bs-kanban-col:visible'));
+      await shoot(page, `kanban-mobile-tab2-${theme}`);
+    });
   }
 });

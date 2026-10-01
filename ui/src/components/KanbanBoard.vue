@@ -15,12 +15,14 @@ import {
   Loader,
   TriangleAlert,
 } from '@lucide/vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
+import { useViewport } from '../composables/useViewport.js';
 import type { KanbanTask } from '../lib/api.js';
 import { KANBAN_VIRTUALIZE_THRESHOLD } from '../lib/constants.js';
 import {
   capColumn,
   columnTone,
+  defaultMobileColumnKey,
   type GroupableTask,
   groupByKanban,
   isDoneStatus,
@@ -58,6 +60,8 @@ const props = withDefaults(defineProps<{ tasks: KanbanTask[]; showAll?: boolean 
   showAll: false,
 });
 const emit = defineEmits<{ select: [taskId: string] }>();
+
+const { isPhoneWidth } = useViewport();
 
 // `localStorage` is only ever reached through this one guarded accessor so a
 // SSR/private-browsing/no-storage environment degrades to the hardcoded
@@ -138,6 +142,46 @@ const columns = computed(() =>
   }),
 );
 
+// ds-spec.md §3.1 Work/Kanban row — phone width shows one column at a time,
+// picked by a tab row, defaulting to the first non-empty column. Desktop
+// keeps every column, unchanged.
+const mobileActiveKey = ref<string | null>(null);
+watch(
+  columns,
+  (cols) => {
+    if (cols.some((c) => c.key === mobileActiveKey.value)) return;
+    mobileActiveKey.value = defaultMobileColumnKey(cols);
+  },
+  { immediate: true },
+);
+// v-show rather than filtering the list: swapping which section is mounted
+// tore down/rebuilt every card in the outgoing column on every tab click,
+// which crashed on an emit reaching an already-unmounted KanbanTaskCard
+// instance. Toggling display: none leaves every column mounted, so a click
+// only flips the attribute — no teardown, no crash.
+function isColumnVisible(key: string): boolean {
+  return !isPhoneWidth.value || key === mobileActiveKey.value;
+}
+function selectMobileTab(key: string) {
+  mobileActiveKey.value = key;
+}
+function onMobileTabKeydown(event: KeyboardEvent) {
+  const keys = columns.value.map((c) => c.key);
+  const idx = keys.indexOf(mobileActiveKey.value ?? '');
+  if (idx === -1) return;
+  let next = idx;
+  if (event.key === 'ArrowRight') next = (idx + 1) % keys.length;
+  else if (event.key === 'ArrowLeft') next = (idx - 1 + keys.length) % keys.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = keys.length - 1;
+  else return;
+  event.preventDefault();
+  const nextKey = keys[next];
+  if (nextKey === undefined) return;
+  mobileActiveKey.value = nextKey;
+  document.getElementById(`bs-kanban-tab-${nextKey}`)?.focus();
+}
+
 // Pattern 9 — arrow-key card navigation + Space/Enter/Escape, no
 // drag-and-drop. Cards are plain focusable elements (KanbanTaskCard sets its
 // own tabindex); this only moves focus between them and opens/closes the
@@ -156,6 +200,12 @@ function openPeek(taskId: string, trigger: HTMLElement | null) {
   peekTaskId.value = taskId;
 }
 function onCardSelect(taskId: string) {
+  // ds-spec.md §3.1 Work/Kanban row: tapping a card on phone opens the task
+  // page directly — no card menu, copy id or quick-look peek panel there.
+  if (isPhoneWidth.value) {
+    emit('select', taskId);
+    return;
+  }
   openPeek(taskId, document.activeElement as HTMLElement | null);
 }
 async function closePeek() {
@@ -212,7 +262,7 @@ defineExpose({ focusFirstCard });
 
 <template>
   <div ref="boardEl" class="bs-kanban-board" @keydown="onBoardKeydown">
-    <div class="bs-kanban-board__toolbar">
+    <div v-if="!isPhoneWidth" class="bs-kanban-board__toolbar">
       <KanbanDisplayOptions
         :open="optionsOpen"
         :summary="options.summary"
@@ -225,9 +275,56 @@ defineExpose({ focusFirstCard });
         @restore="restoreColumn"
       />
     </div>
+    <!-- ds-spec.md §3.1 Work/Kanban row: the display-options trigger moves
+         into the MobileTopBar overflow menu on phone, via the same Teleport
+         mechanism the kit's own overlay components already use. -->
+    <Teleport v-if="isPhoneWidth" to="#bs-mtopbar-overflow-extra">
+      <KanbanDisplayOptions
+        :open="optionsOpen"
+        :summary="options.summary"
+        :group-by="options.groupBy"
+        :hidden="options.hidden"
+        @open="optionsOpen = true"
+        @close="optionsOpen = false"
+        @update:summary="setSummary"
+        @update:group-by="setGroupBy"
+        @restore="restoreColumn"
+      />
+    </Teleport>
+    <div
+      v-if="isPhoneWidth"
+      role="tablist"
+      class="bs-kanban-tabs"
+      aria-label="Kanban columns"
+      @keydown="onMobileTabKeydown"
+    >
+      <button
+        v-for="col in columns"
+        :id="`bs-kanban-tab-${col.key}`"
+        :key="col.key"
+        type="button"
+        role="tab"
+        class="bs-kanban-tabs__tab"
+        :aria-selected="mobileActiveKey === col.key"
+        :aria-controls="`bs-kanban-panel-${col.key}`"
+        :tabindex="mobileActiveKey === col.key ? 0 : -1"
+        @click="selectMobileTab(col.key)"
+      >
+        {{ col.label }} ({{ col.total }})
+      </button>
+    </div>
     <div class="bs-kanban-board__columns">
-      <section v-for="col in columns" :key="col.key" class="bs-kanban-col" :aria-label="`${col.label} column`">
-        <div class="bs-kanban-col__head">
+      <section
+        v-for="col in columns"
+        v-show="isColumnVisible(col.key)"
+        :id="`bs-kanban-panel-${col.key}`"
+        :key="col.key"
+        class="bs-kanban-col"
+        :aria-label="`${col.label} column`"
+        :role="isPhoneWidth && mobileActiveKey === col.key ? 'tabpanel' : undefined"
+        :aria-labelledby="isPhoneWidth && mobileActiveKey === col.key ? `bs-kanban-tab-${col.key}` : undefined"
+      >
+        <div v-if="!isPhoneWidth" class="bs-kanban-col__head">
           <component
             :is="TONE_ICON[columnTone(options.groupBy, col.key)]"
             :size="16"
@@ -263,6 +360,7 @@ defineExpose({ focusFirstCard });
               :task="task"
               :group-by="options.groupBy"
               :summary-enabled="options.summary"
+              :compact="isPhoneWidth"
               @select="onCardSelect"
               @keydown="onCardKeydown($event, task.taskId)"
             />

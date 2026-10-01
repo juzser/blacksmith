@@ -30,7 +30,13 @@ import RelativeTime from './kit/RelativeTime.vue';
 import Tag from './kit/Tag.vue';
 import Tooltip from './kit/Tooltip.vue';
 
-const props = defineProps<{ task: KanbanTask; groupBy: KanbanGroupBy; summaryEnabled?: boolean }>();
+const props = defineProps<{
+  task: KanbanTask;
+  groupBy: KanbanGroupBy;
+  summaryEnabled?: boolean;
+  /** ds-spec.md §3.1 Work/Kanban row — phone cards show only title, one tag, one meta line. */
+  compact?: boolean;
+}>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
 const shortId = computed(() => props.task.taskId.split('/').pop() ?? props.task.taskId);
@@ -69,7 +75,7 @@ function onKeydown(event: KeyboardEvent) {
     @click="onSelect"
     @keydown="onKeydown"
   >
-    <div class="bs-kanban-card__row bs-kanban-card__row--1">
+    <div v-if="!compact" class="bs-kanban-card__row bs-kanban-card__row--1">
       <span class="bs-kanban-card__id">{{ shortId }}</span>
       <AgentChip :task="{ ...task, updatedAt: task.updatedAt }" />
       <Tooltip v-if="task.hasRequest" mode="describe" :text="task.requestFirstLine ?? 'Linked request'">
@@ -79,17 +85,23 @@ function onKeydown(event: KeyboardEvent) {
 
     <p class="bs-kanban-card__title">{{ title }}</p>
 
-    <p v-if="showSummary" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
+    <p v-if="showSummary && !compact" class="bs-kanban-card__summary">{{ task.requestFirstLine }}</p>
 
     <div v-if="chips.chips.length > 0" class="bs-kanban-card__row bs-kanban-card__chips">
-      <Tag v-for="chip in chips.chips" :key="chip.text" :tone="chip.tone ?? 'neutral'" variant="outline" size="sm">
+      <Tag
+        v-for="chip in chips.chips.slice(0, compact ? 1 : 2)"
+        :key="chip.text"
+        :tone="chip.tone ?? 'neutral'"
+        variant="outline"
+        size="sm"
+      >
         {{ chip.text }}
       </Tag>
-      <span v-if="chips.overflow > 0" class="bs-kanban-card__overflow">+{{ chips.overflow }}</span>
+      <span v-if="!compact && chips.overflow > 0" class="bs-kanban-card__overflow">+{{ chips.overflow }}</span>
     </div>
 
     <div class="bs-kanban-card__row bs-kanban-card__row--5">
-      <span v-if="showRoleLabel" class="bs-kanban-card__role">{{ roleLabel(task.agentRole as string) }}</span>
+      <span v-if="showRoleLabel && !compact" class="bs-kanban-card__role">{{ roleLabel(task.agentRole as string) }}</span>
       <span class="bs-kanban-card__meta">
         <template v-if="attemptLabelText">
           {{ attemptLabelText }}
@@ -101,7 +113,10 @@ function onKeydown(event: KeyboardEvent) {
       </span>
     </div>
 
-    <div v-if="task.dependencies.length > 0 || task.commentCount > 0 || task.prUrl" class="bs-kanban-card__footer">
+    <div
+      v-if="!compact && (task.dependencies.length > 0 || task.commentCount > 0 || task.prUrl)"
+      class="bs-kanban-card__footer"
+    >
       <span>{{ footerDependency }}</span>
       <span v-if="task.commentCount > 0">{{ task.commentCount }} comment{{ task.commentCount === 1 ? '' : 's' }}</span>
       <a v-if="task.prUrl" :href="task.prUrl" target="_blank" rel="noopener" @click.stop>Open PR</a>
