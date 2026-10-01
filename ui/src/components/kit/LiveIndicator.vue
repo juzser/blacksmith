@@ -41,8 +41,12 @@ function onRefresh() {
 <template>
   <div class="bs-live" role="status" aria-live="polite">
     <span class="bs-live__dot" :data-live="live" aria-hidden="true"></span>
+    <!-- ds-spec.md §2.2's own example punctuates this with an em dash
+         ("Live — last activity 5 min ago"), but check_no_emoji.py bans
+         em/en-dash in rendered UI copy repo-wide as an AI-pattern tell; a
+         comma reads just as well and keeps the gate green. -->
     <span class="bs-live__text"
-      >{{ lastEventAt ? `${statusLabel} — last activity ` : statusLabel }}<RelativeTime
+      >{{ lastEventAt ? `${statusLabel}, last activity ` : statusLabel }}<RelativeTime
         v-if="lastEventAt"
         :iso="lastEventAt"
         :now="now"
