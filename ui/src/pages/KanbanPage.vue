@@ -125,6 +125,11 @@ const displayedColumns = computed(() => {
 // stayed silent over a board with nothing on it (D-242).
 const taskCount = computed(() => visibleTaskCount(displayedColumns.value));
 
+// KanbanBoard (DS3 kit rewrite) takes a flat task list and does its own
+// grouping/column folding — this page still fetches per-status columns from
+// the server, so the board's input is simply every task across them.
+const boardTasks = computed(() => displayedColumns.value.flatMap((c) => c.tasks));
+
 function goToTask(taskId: string) {
   router.push(`/tasks/${encodeURIComponent(taskId)}`);
 }
@@ -165,6 +170,6 @@ function goToTask(taskId: string) {
 
     <EmptyState v-else-if="canClaimEmpty(columns !== null, taskCount)" icon="kanban">No tasks match these filters.</EmptyState>
 
-    <KanbanBoard v-else-if="columns !== null" :columns="displayedColumns" :lane-label="selectedEpic || 'All epics'" @select="goToTask" />
+    <KanbanBoard v-else-if="columns !== null" :tasks="boardTasks" @select="goToTask" />
   </div>
 </template>

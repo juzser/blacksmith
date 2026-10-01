@@ -187,7 +187,15 @@ export function lessonStatusTone(status: string): Tone {
 }
 
 /** DS3 — ds-spec.md §1.1's task_status -> kit `Tag` tone (not the old `Tone`/Lozenge vocabulary). */
-export type KitTone = 'done' | 'review' | 'progress' | 'todo' | 'blocked' | 'danger' | 'warning' | 'neutral';
+export type KitTone =
+  | 'done'
+  | 'review'
+  | 'progress'
+  | 'todo'
+  | 'blocked'
+  | 'danger'
+  | 'warning'
+  | 'neutral';
 
 const TASK_STATUS_KIT_TONE: Record<string, KitTone> = {
   completed: 'done',

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_KANBAN_DISPLAY_OPTIONS,
+  type KanbanDisplayOptionsStorage,
   loadKanbanDisplayOptions,
   saveKanbanDisplayOptions,
-  type KanbanDisplayOptionsStorage,
 } from '../src/lib/kanbanDisplayOptions.js';
 
 // DS3 pattern 8 — localStorage is never touched directly: every call site
@@ -67,6 +67,8 @@ describe('lib/kanbanDisplayOptions.ts — saveKanbanDisplayOptions()', () => {
   });
 
   it('does not throw when storage access throws', () => {
-    expect(() => saveKanbanDisplayOptions(throwingStorage(), DEFAULT_KANBAN_DISPLAY_OPTIONS)).not.toThrow();
+    expect(() =>
+      saveKanbanDisplayOptions(throwingStorage(), DEFAULT_KANBAN_DISPLAY_OPTIONS),
+    ).not.toThrow();
   });
 });

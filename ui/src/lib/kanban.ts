@@ -293,7 +293,11 @@ export function groupByKanban<T extends GroupableTask>(
   showAll = false,
 ): Array<KanbanGroupColumn<T>> {
   if (groupBy === 'status') {
-    return foldIntoColumns(tasks, showAll).map((c) => ({ key: c.name, label: c.name, tasks: c.tasks }));
+    return foldIntoColumns(tasks, showAll).map((c) => ({
+      key: c.name,
+      label: c.name,
+      tasks: c.tasks,
+    }));
   }
   const buckets = new Map<string, { label: string; tasks: T[] }>();
   for (const task of tasks) {
@@ -360,7 +364,10 @@ export function cardChips(
   }
   if (task.tags.case) candidates.push({ text: titleCase(task.tags.case), tone: null });
   if (task.tags.severity && task.tags.severity !== 'S4-nit') {
-    candidates.push({ text: task.tags.severity, tone: SEVERITY_KIT_TONE[task.tags.severity] ?? 'warning' });
+    candidates.push({
+      text: task.tags.severity,
+      tone: SEVERITY_KIT_TONE[task.tags.severity] ?? 'warning',
+    });
   }
   if (groupBy !== 'project' && task.project) {
     candidates.push({ text: task.project, tone: null });
@@ -388,4 +395,15 @@ export function dependencyChainText(dependencies: DependencyLike[]): string {
   const rest = dependencies.length - 1;
   const extra = rest > 0 ? ` +${rest} more` : '';
   return `Waits for: ${label}${status}${extra}`;
+}
+
+/**
+ * Whether a task_status reads as "done" (the kit Tag's `done` tone:
+ * completed/waived). KanbanBoard uses this to collapse finished tasks
+ * behind a "show" toggle inside every column, regardless of which grouping
+ * is active — §4.2's "Completed stays collapsed by default" generalised
+ * past the status grouping's literal "Completed" column name.
+ */
+export function isDoneStatus(status: string): boolean {
+  return taskStatusKitTone(status) === 'done';
 }

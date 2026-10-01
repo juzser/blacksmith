@@ -46,7 +46,9 @@ function isWellFormed(value: unknown): value is KanbanDisplayOptions {
  * silently. A corrupted or unavailable store is never worth surfacing to the
  * operator; it just means the board opens with its defaults.
  */
-export function loadKanbanDisplayOptions(storage: KanbanDisplayOptionsStorage): KanbanDisplayOptions {
+export function loadKanbanDisplayOptions(
+  storage: KanbanDisplayOptionsStorage,
+): KanbanDisplayOptions {
   try {
     const raw = storage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_KANBAN_DISPLAY_OPTIONS;

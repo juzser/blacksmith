@@ -11,6 +11,7 @@ import {
   epicKeyForTask,
   foldIntoColumns,
   groupByKanban,
+  isDoneStatus,
   KANBAN_COLUMNS,
   KANBAN_PAGE_SIZE,
   subStatusSummary,
@@ -348,15 +349,11 @@ describe('lib/kanban.ts — agentChip() state (DS3 pattern 3)', () => {
 describe('lib/kanban.ts — agentNudgeDue() (DS3 pattern 3)', () => {
   it('is false before agentWaitingThresholdMs has elapsed', () => {
     // Threshold is 4h; 1h in is not yet long enough to suggest a nudge.
-    expect(
-      agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T01:00:00.000Z'),
-    ).toBe(false);
+    expect(agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T01:00:00.000Z')).toBe(false);
   });
 
   it('is true once agentWaitingThresholdMs has elapsed', () => {
-    expect(
-      agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T04:00:00.000Z'),
-    ).toBe(true);
+    expect(agentNudgeDue('2026-01-01T00:00:00.000Z', '2026-01-01T04:00:00.000Z')).toBe(true);
   });
 
   it('is false for an unparseable timestamp rather than throwing', () => {
@@ -384,9 +381,9 @@ describe('lib/kanban.ts — cardChips() (DS3 pattern 6, row 4)', () => {
   });
 
   it('drops the S4-nit default severity but keeps a non-default one', () => {
-    expect(cardChips(task({ tags: { case: null, severity: 'S4-nit' } }), 'status').chips).not.toContainEqual(
-      expect.objectContaining({ text: 'S4-nit' }),
-    );
+    expect(
+      cardChips(task({ tags: { case: null, severity: 'S4-nit' } }), 'status').chips,
+    ).not.toContainEqual(expect.objectContaining({ text: 'S4-nit' }));
     expect(cardChips(task(), 'status').chips).toContainEqual({ text: 'S2-major', tone: 'danger' });
   });
 
@@ -444,9 +441,7 @@ describe('lib/kanban.ts — groupByKanban() (DS3 pattern 7)', () => {
       [task({ taskId: 'epic-a/task-1', epicLabel: 'shop-api: Epic a' })],
       'epic',
     );
-    expect(columns).toEqual([
-      { key: 'epic-a', label: 'shop-api: Epic a', tasks: [task({})] },
-    ]);
+    expect(columns).toEqual([{ key: 'epic-a', label: 'shop-api: Epic a', tasks: [task({})] }]);
   });
 
   it('groups by role, with the friendly label, and a task never dispatched in "None"', () => {
@@ -529,13 +524,15 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
   });
 
   it('names the first dependency with its status', () => {
-    expect(dependencyChainText([{ taskId: 't1', title: 'Add login form', status: 'in-progress' }])).toBe(
-      'Waits for: Add login form (in-progress)',
-    );
+    expect(
+      dependencyChainText([{ taskId: 't1', title: 'Add login form', status: 'in-progress' }]),
+    ).toBe('Waits for: Add login form (in-progress)');
   });
 
   it('falls back to the taskId when the dependency has no title', () => {
-    expect(dependencyChainText([{ taskId: 't1', title: null, status: null }])).toBe('Waits for: t1');
+    expect(dependencyChainText([{ taskId: 't1', title: null, status: null }])).toBe(
+      'Waits for: t1',
+    );
   });
 
   it('tails off with a "+N more" count past the first dependency', () => {
@@ -546,5 +543,17 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
         { taskId: 't3', title: 'Add session', status: 'todo' },
       ]),
     ).toBe('Waits for: Add login form (done) +2 more');
+  });
+});
+
+describe('lib/kanban.ts — isDoneStatus() (DS3 pattern 7, column collapse)', () => {
+  it('reads completed/waived as done', () => {
+    expect(isDoneStatus('completed')).toBe(true);
+    expect(isDoneStatus('waived')).toBe(true);
+  });
+
+  it('reads any other status as not done', () => {
+    expect(isDoneStatus('in-progress')).toBe(false);
+    expect(isDoneStatus('failed')).toBe(false);
   });
 });

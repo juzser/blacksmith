@@ -11,9 +11,10 @@
 // whether the elapsed time since `updatedAt` is long enough to suggest
 // doing something about it, per pattern 3's worked example (ds-spec.md
 // §4.2: "Coder · waiting — a nudge may help").
-import { computed } from 'vue';
+
 import { Bot } from '@lucide/vue';
-import { agentChip, agentNudgeDue, type AgentChipLike, type AgentState } from '../lib/kanban.js';
+import { computed } from 'vue';
+import { type AgentChipLike, type AgentState, agentChip, agentNudgeDue } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import Icon from './kit/Icon.vue';
 import Tag from './kit/Tag.vue';
@@ -35,7 +36,7 @@ const text = computed(() => {
   if (!chip.value || !props.task.agentRole) return null;
   const role = roleLabel(props.task.agentRole);
   if (chip.value.state === 'waiting' && agentNudgeDue(props.task.updatedAt)) {
-    return `${role} · waiting — a nudge may help`;
+    return `${role} · waiting - a nudge may help`;
   }
   return `${role} · ${chip.value.state}`;
 });
@@ -47,11 +48,3 @@ const text = computed(() => {
     {{ text }}
   </Tag>
 </template>
-
-<style scoped>
-.bs-agent-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--bs-space-1);
-}
-</style>

@@ -1,113 +1,211 @@
 <script setup lang="ts">
-// Gap component (design-spec.md §6.2.2): built from Card-style column wells
-// (bg-surface-sunken) inside a labelled lane, horizontal scroll, no drag
-// (read-only, click-to-navigate). Milestone lanes are §5.3's PROVISIONAL
-// piece (no kanban-by-milestone query exists — see this file's sibling
-// TaskCard.vue comment) — 6a renders one lane for the selected epic.
-//
-// Operator directive (Phase 10): "cap each column at ten tasks, with a view
-// more after that -- avoid having to scroll a very long way." The cap and the
-// remainder are
-// lib/kanban.ts's capColumn() so they are unit-tested under the node
-// environment; this file only paints the control and holds which columns the
-// reader has expanded.
-import { computed, ref, watch } from 'vue';
-import type { KanbanColumn } from '../lib/api.js';
-import { capColumn, foldIntoColumns, subStatusSummary } from '../lib/kanban.js';
-import Button from './ds/Button.vue';
-import TaskCard from './TaskCard.vue';
+// DS3 patterns 7 + 9 (ds-spec.md §2.4/§4.2) — the Kanban board: switchable
+// group-by, hidden-columns control, per-column virtualization past
+// KANBAN_VIRTUALIZE_THRESHOLD, and arrow-key/Space/Enter/Escape card
+// navigation. No drag-and-drop — a deliberate omission (§2.4b pattern 9),
+// not an oversight: the board is read-only, click/keyboard-to-navigate.
+import { computed, nextTick, ref } from 'vue';
+import type { KanbanTask } from '../lib/api.js';
+import { KANBAN_VIRTUALIZE_THRESHOLD } from '../lib/constants.js';
+import {
+  capColumn,
+  type GroupableTask,
+  groupByKanban,
+  isDoneStatus,
+  type KanbanGroupBy,
+} from '../lib/kanban.js';
+import {
+  DEFAULT_KANBAN_DISPLAY_OPTIONS,
+  type KanbanDisplayOptionsStorage,
+  loadKanbanDisplayOptions,
+  saveKanbanDisplayOptions,
+} from '../lib/kanbanDisplayOptions.js';
+import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
+import KanbanTaskCard from './KanbanTaskCard.vue';
+import TaskPeekPanel from './TaskPeekPanel.vue';
 
-const props = withDefaults(
-  defineProps<{ columns: KanbanColumn[]; showAll?: boolean; laneLabel?: string }>(),
-  {
-    showAll: false,
-    laneLabel: 'Tasks',
-  },
-);
+const props = withDefaults(defineProps<{ tasks: KanbanTask[]; showAll?: boolean }>(), {
+  showAll: false,
+});
 const emit = defineEmits<{ select: [taskId: string] }>();
 
-const flatTasks = computed(() => props.columns.flatMap((c) => c.tasks));
-const folded = computed(() => foldIntoColumns(flatTasks.value, props.showAll));
+// `localStorage` is only ever reached through this one guarded accessor so a
+// SSR/private-browsing/no-storage environment degrades to the hardcoded
+// default rather than throwing — the storage module itself is already
+// try/catch-guarded (pattern 8); the browser-only global lives here, behind
+// an availability check, so unit tests never need a DOM for this file.
+const browserStorage: KanbanDisplayOptionsStorage | null =
+  typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
 
-/**
- * Extra pages revealed, per column name. Reset whenever the payload changes:
- * "show 30 of 212 Completed" is an answer about one epic or one project, and
- * carrying it across a switch would silently apply it to a different board.
- */
-const revealed = ref<Record<string, number>>({});
-watch(
-  () => props.columns,
-  () => {
-    revealed.value = {};
-  },
+const options = ref(
+  browserStorage ? loadKanbanDisplayOptions(browserStorage) : DEFAULT_KANBAN_DISPLAY_OPTIONS,
+);
+function persist() {
+  if (browserStorage) saveKanbanDisplayOptions(browserStorage, options.value);
+}
+
+const optionsOpen = ref(false);
+function setGroupBy(groupBy: KanbanGroupBy) {
+  options.value = { ...options.value, groupBy };
+  persist();
+}
+function setSummary(summary: boolean) {
+  options.value = { ...options.value, summary };
+  persist();
+}
+function hideColumn(key: string) {
+  if (options.value.hidden.includes(key)) return;
+  options.value = { ...options.value, hidden: [...options.value.hidden, key] };
+  persist();
+}
+function restoreColumn(key: string) {
+  options.value = { ...options.value, hidden: options.value.hidden.filter((h) => h !== key) };
+  persist();
+}
+
+const grouped = computed(() =>
+  groupByKanban(props.tasks as GroupableTask[], options.value.groupBy, props.showAll).filter(
+    (col) => !options.value.hidden.includes(col.key),
+  ),
 );
 
-const capped = computed(() =>
-  folded.value.map((col) => {
-    const slice = capColumn(col.tasks, revealed.value[col.name] ?? 0);
-    // `tasks` stays whole. Everything the column SAYS about itself -- the
-    // count, the sub-status breakdown -- describes the column; only `visible`
-    // describes the draw. A breakdown taken from the slice would sum to ten
-    // beside a header reading two hundred (D-242).
-    return { ...col, total: col.tasks.length, ...slice };
+/** Finished tasks collapse behind a "show" toggle in every column (§4.2), whatever the grouping. */
+const expandedDone = ref<Record<string, boolean>>({});
+function toggleDone(key: string) {
+  expandedDone.value = { ...expandedDone.value, [key]: !expandedDone.value[key] };
+}
+
+const revealed = ref<Record<string, number>>({});
+function revealMore(key: string) {
+  revealed.value = { ...revealed.value, [key]: (revealed.value[key] ?? 0) + 1 };
+}
+
+const columns = computed(() =>
+  grouped.value.map((col) => {
+    const active = col.tasks.filter((t) => !isDoneStatus(t.taskStatus));
+    const done = col.tasks.filter((t) => isDoneStatus(t.taskStatus));
+    const showDone = expandedDone.value[col.key] ?? false;
+    const visible = showDone ? [...active, ...done] : active;
+    // A simple windowed slice rather than a scroll-driven virtualizer: past
+    // KANBAN_VIRTUALIZE_THRESHOLD the column reuses the same capColumn()/
+    // "view more" control the rest of the board already has, so a very
+    // large column stays DOM-light without a second rendering strategy.
+    const windowed = visible.length > KANBAN_VIRTUALIZE_THRESHOLD;
+    const page = capColumn(visible, revealed.value[col.key] ?? 0);
+    return { ...col, done, showDone, windowed, ...page, total: visible.length };
   }),
 );
 
-function revealMore(name: string) {
-  revealed.value = { ...revealed.value, [name]: (revealed.value[name] ?? 0) + 1 };
+// Pattern 9 — arrow-key card navigation + Space/Enter/Escape, no
+// drag-and-drop. Cards are plain focusable elements (KanbanTaskCard sets its
+// own tabindex); this only moves focus between them and opens/closes the
+// peek panel. Escape restores focus to the card that opened the panel.
+const boardEl = ref<HTMLElement | null>(null);
+const peekTaskId = ref<string | null>(null);
+let lastFocusedCard: HTMLElement | null = null;
+
+function cardEls(): HTMLElement[] {
+  if (!boardEl.value) return [];
+  return Array.from(boardEl.value.querySelectorAll<HTMLElement>('.bs-kanban-card'));
 }
 
-function collapse(name: string) {
-  const { [name]: _dropped, ...rest } = revealed.value;
-  revealed.value = rest;
+function openPeek(taskId: string, trigger: HTMLElement | null) {
+  lastFocusedCard = trigger;
+  peekTaskId.value = taskId;
 }
+function onCardSelect(taskId: string) {
+  openPeek(taskId, document.activeElement as HTMLElement | null);
+}
+function closePeek() {
+  peekTaskId.value = null;
+  lastFocusedCard?.focus();
+}
+
+function onCardKeydown(event: KeyboardEvent, taskId: string) {
+  const current = event.target as HTMLElement;
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    openPeek(taskId, current);
+    return;
+  }
+  if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+  event.preventDefault();
+  const cards = cardEls();
+  const index = cards.indexOf(current);
+  if (index === -1 || cards.length === 0) return;
+  // Up/Down and Left/Right both step through the same flat, DOM-order list
+  // of cards: with cards laid out column-by-column this already reads as
+  // "down the column" for Up/Down and "across columns" for Left/Right
+  // without a 2D grid model.
+  const step = event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1;
+  const next = cards[(index + step + cards.length) % cards.length];
+  next?.focus();
+}
+
+function onBoardKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && peekTaskId.value) closePeek();
+}
+
+async function focusFirstCard() {
+  await nextTick();
+  cardEls()[0]?.focus();
+}
+defineExpose({ focusFirstCard });
 </script>
 
 <template>
-  <div class="kanban-board">
-    <section class="kanban-lane" :aria-label="`${laneLabel} lane`">
-      <h3 class="ds-sh__t">{{ laneLabel }}</h3>
-      <div class="kanban-lane__columns">
-        <div v-for="col in capped" :key="col.name" class="kanban-col">
-          <div class="kanban-col__head">
-            <!-- The header still counts the whole column. The cap changes how
-                 much is drawn, never how much there is. -->
-            <h4 class="ds-card__title">{{ col.name }}</h4>
-            <span class="kanban-col__count">{{ col.total }}</span>
-          </div>
-          <div v-if="subStatusSummary(col.tasks)" class="kanban-col__substatus">
-            {{ subStatusSummary(col.tasks) }}
-          </div>
-          <ul role="list" class="kanban-col__list">
-            <li v-for="task in col.visible" :key="task.taskId" role="listitem">
-              <TaskCard :task="task" @select="(id) => emit('select', id)" />
-            </li>
-          </ul>
-          <!-- aria-label carries the column name because the visible label
-               cannot: five "View more" buttons on one board are five
-               identical entries in a screen reader's element list. -->
-          <Button
-            v-if="col.hidden > 0"
-            class="kanban-col__more"
-            variant="ghost"
-            size="sm"
-            :aria-label="`View ${col.nextStep} more of the ${col.hidden} remaining ${col.name} tasks`"
-            @click="revealMore(col.name)"
-          >
-            View {{ col.nextStep }} more ({{ col.hidden }} left)
-          </Button>
-          <Button
-            v-else-if="(revealed[col.name] ?? 0) > 0"
-            class="kanban-col__more"
-            variant="ghost"
-            size="sm"
-            :aria-label="`Collapse the ${col.name} column back to its first page`"
-            @click="collapse(col.name)"
-          >
-            Show less
-          </Button>
+  <div ref="boardEl" class="bs-kanban-board" @keydown="onBoardKeydown">
+    <div class="bs-kanban-board__toolbar">
+      <KanbanDisplayOptions
+        :open="optionsOpen"
+        :summary="options.summary"
+        :group-by="options.groupBy"
+        :hidden="options.hidden"
+        @open="optionsOpen = true"
+        @close="optionsOpen = false"
+        @update:summary="setSummary"
+        @update:group-by="setGroupBy"
+        @restore="restoreColumn"
+      />
+    </div>
+    <div class="bs-kanban-board__columns">
+      <section v-for="col in columns" :key="col.key" class="bs-kanban-col" :aria-label="`${col.label} column`">
+        <div class="bs-kanban-col__head">
+          <h3 class="bs-kanban-col__title">{{ col.label }}</h3>
+          <span class="bs-kanban-col__count">{{ col.total }}</span>
+          <button type="button" class="bs-kanban-col__hide" @click="hideColumn(col.key)">Hide column</button>
         </div>
-      </div>
-    </section>
+        <p v-if="col.total === 0" class="bs-kanban-col__empty">No tasks in {{ col.label }}.</p>
+        <ul role="list" class="bs-kanban-col__list">
+          <li v-for="task in col.visible" :key="task.taskId" @keydown="onCardKeydown($event, task.taskId)">
+            <KanbanTaskCard
+              :task="task"
+              :group-by="options.groupBy"
+              @select="onCardSelect"
+            />
+          </li>
+        </ul>
+        <button v-if="col.hidden > 0" type="button" class="bs-kanban-col__more" @click="revealMore(col.key)">
+          View {{ col.nextStep }} more ({{ col.hidden }} left)
+        </button>
+        <button
+          v-if="col.done.length > 0 && !col.showDone"
+          type="button"
+          class="bs-kanban-col__more"
+          @click="toggleDone(col.key)"
+        >
+          Show {{ col.done.length }} completed
+        </button>
+        <button
+          v-else-if="col.done.length > 0 && col.showDone"
+          type="button"
+          class="bs-kanban-col__more"
+          @click="toggleDone(col.key)"
+        >
+          Hide completed
+        </button>
+      </section>
+    </div>
+    <TaskPeekPanel v-if="peekTaskId" :task-id="peekTaskId" @close="closePeek" @open-full="(id) => emit('select', id)" />
   </div>
 </template>

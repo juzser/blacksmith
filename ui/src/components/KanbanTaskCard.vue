@@ -8,12 +8,13 @@
 // `KanbanTask` (queries.ts, Slice A) carries no `summary` field at all, so
 // there is nothing to render — flagged as a data-gap deviation in the task
 // report rather than invented here.
-import { computed } from 'vue';
+
 import { Clock, Quote } from '@lucide/vue';
+import { computed } from 'vue';
 import type { KanbanTask } from '../lib/api.js';
+import { taskLabel } from '../lib/format.js';
 import { cardChips, dependencyChainText, type KanbanGroupBy } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
-import { taskLabel } from '../lib/format.js';
 import AgentChip from './AgentChip.vue';
 import Icon from './kit/Icon.vue';
 import RelativeTime from './kit/RelativeTime.vue';
@@ -81,71 +82,3 @@ function onSelect() {
     </div>
   </div>
 </template>
-
-<style scoped>
-.bs-kanban-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-2);
-  padding: var(--bs-space-3);
-  border: 1px solid var(--bs-border);
-  border-radius: var(--bs-radius-md, 8px);
-  background: var(--bs-surface);
-  cursor: pointer;
-}
-
-.bs-kanban-card:focus-visible {
-  outline: 2px solid var(--bs-focus-ring, currentColor);
-  outline-offset: 2px;
-}
-
-.bs-kanban-card__row {
-  display: flex;
-  align-items: center;
-  gap: var(--bs-space-2);
-}
-
-.bs-kanban-card__id {
-  color: var(--bs-text-muted);
-  font-size: 0.75rem;
-}
-
-.bs-kanban-card__title {
-  margin: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.bs-kanban-card__chips {
-  flex-wrap: wrap;
-}
-
-.bs-kanban-card__overflow {
-  color: var(--bs-text-muted);
-  font-size: 0.75rem;
-}
-
-.bs-kanban-card__row--5 {
-  justify-content: space-between;
-  color: var(--bs-text-muted);
-  font-size: 0.75rem;
-}
-
-.bs-kanban-card__meta {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--bs-space-1);
-}
-
-.bs-kanban-card__footer {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-1);
-  color: var(--bs-text-muted);
-  font-size: 0.75rem;
-  border-top: 1px solid var(--bs-border);
-  padding-top: var(--bs-space-2);
-}
-</style>
