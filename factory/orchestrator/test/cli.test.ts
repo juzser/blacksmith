@@ -7695,6 +7695,53 @@ describe('cli.ts (built binary)', () => {
         expect(JSON.parse(again.stdout).error.code).toBe('spec-change.already-decided');
       });
 
+      it('defaults --specs-dir to the directory --plan already lives in, not the work root (#287)', async () => {
+        const s = await session();
+        // A plan filed in the `<specsDir>/<epicId>/plan-vN.json` shape, the
+        // same move `plan amend`'s own #219 test makes, so the pre-fix
+        // fallback to the work root's specs/active is provably distinct from
+        // where this plan actually lives.
+        const ownSpecsDir = path.join(scratchDir, `${s.sessionId}-approve-own-specs`);
+        const planPath = path.join(ownSpecsDir, 'epic-1', 'plan-v1.json');
+        await mkdir(path.dirname(planPath), { recursive: true });
+        await writeFile(planPath, JSON.stringify(PLAN));
+        const own = { ...s, planPath };
+
+        const proposed = await propose('cli-approve-default-dir', own, ownSpecsDir);
+        expect(proposed.status).toBe(0);
+        const { proposalId } = JSON.parse(proposed.stdout);
+
+        // A work root of its own, so the pre-fix default (the work root's
+        // specs/active) is provably distinct from `ownSpecsDir`.
+        const smithHome = path.join(scratchDir, `${s.sessionId}-approve-smith-home`);
+
+        const result = runCli(
+          [
+            'plan',
+            'approve',
+            proposalId,
+            '--plan',
+            planPath,
+            '--decided-by',
+            'operator',
+            '--session',
+            s.sessionId,
+            '--causal-parent',
+            `${s.sessionId}#0`,
+            '--state-dir',
+            s.eventsDir,
+          ],
+          { SMITH_HOME: smithHome },
+        );
+
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({ epic: 'epic-1', version: 2 });
+        expect(existsSync(path.join(ownSpecsDir, 'epic-1', 'plan-v2.json'))).toBe(true);
+        expect(
+          existsSync(path.join(smithHome, 'factory', 'specs', 'active', 'epic-1', 'plan-v2.json')),
+        ).toBe(false);
+      });
+
       it('refuses a proposal a newer version has already overtaken, and says which one', async () => {
         const s = await session();
         const specsDir = path.join(scratchDir, `${s.sessionId}-stale-specs`);
