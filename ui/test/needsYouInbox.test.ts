@@ -62,4 +62,25 @@ describe('NeedsYouInbox.vue', () => {
       /<RouterLink[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{r\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"/,
     );
   });
+
+  // Visual-pass item 1 (§3.1): on phone, the single most urgent row (first
+  // group, first row) gets a full-width 44px "Decide" button instead of the
+  // inline per-kind label; every other row keeps the small inline link.
+  it('gives only the most urgent row on phone a full-width 44px "Decide" button, not the per-kind label', () => {
+    expect(SRC).toMatch(
+      /<RouterLink\s+v-if="isPhoneWidth && gi === 0 && ri === 0"[\s\S]*?class="bs-btn bs-btn--primary bs-btn--touch bs-btn--block bs-inbox__decide"[\s\S]*?:aria-label="`Decide: \$\{r\.title\}`"[\s\S]*?:to="inboxActionTarget\(r\)"[\s\S]*?>\s*Decide\s*<\/RouterLink>/,
+    );
+  });
+
+  it('keeps the small secondary link for every row that is not the single most urgent one', () => {
+    expect(SRC).toMatch(
+      /<RouterLink\s+v-else[\s\S]*?class="bs-btn bs-btn--sm bs-btn--secondary"[\s\S]*?:aria-label="`\$\{INBOX_KIND\[r\.kind\]\.action\}: \$\{r\.title\}`"/,
+    );
+  });
+
+  it('marks the decide row so it can wrap the button onto its own full-width line', () => {
+    expect(SRC).toMatch(
+      /:class="\{ 'bs-inbox__row--decide': isPhoneWidth && gi === 0 && ri === 0 \}"/,
+    );
+  });
 });

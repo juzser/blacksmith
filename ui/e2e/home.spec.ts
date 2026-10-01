@@ -259,8 +259,16 @@ test.describe('Home: Needs you inbox', () => {
     await expect(inbox.getByRole('group', { name: 'Filter what needs you' })).toHaveCount(0);
     await expect(inbox.locator('details.bs-inbox__group').first()).toHaveAttribute('open', '');
     await expect(inbox.locator('details.bs-inbox__group').nth(1)).not.toHaveAttribute('open', '');
+
+    // §3.1: the single most urgent row (the escalation, first group/row)
+    // gets one full-width 44px "Decide" action; every other row keeps its
+    // small per-kind link ("Open"/"Review"), not a primary button.
     await expect(inbox.locator('.bs-btn--primary')).toHaveCount(1);
-    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveClass(/bs-btn--primary/);
+    const decide = inbox.getByRole('link', { name: 'Decide: Checkout flow' });
+    await expect(decide).toHaveClass(/bs-btn--primary/);
+    await expect(decide).toHaveClass(/bs-btn--touch/);
+    await expect(decide).toHaveClass(/bs-btn--block/);
+    await expect(inbox.getByRole('link', { name: 'Open' })).toHaveCount(0);
 
     // A folded group opens from its summary.
     await inbox.locator('summary', { hasText: 'demo-hub · 1' }).click();

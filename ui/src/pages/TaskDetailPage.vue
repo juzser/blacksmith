@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Task detail — DS3 §4.7, rebuilt on the kit. Tabs "What was asked" (the
-// RequestQuote + spec contract + run history)/Findings/Outputs/History.
+// RequestQuote + a compact facts row + the files this task may change,
+// with branch/origin/epic behind a "Technical details" disclosure)/
+// Findings/Outputs/History (run history timeline, then the event list).
 // Waiver UI exactly per spec: Waive/Deny only on S3+confirmed+unwaived,
 // Popover confirm naming the fingerprint, Toast, race guard — unchanged
 // from the ds/ build, just re-skinned onto kit/Popover + kit/Button.
@@ -11,6 +13,14 @@
 //   agent-time, and inventing one from event gaps is not this task's call.
 // - No per-agent summary table: `agents-registry` rows (role/provider/tier/
 //   status) stay a plain rail list, same shape as before, not a new Table.
+//
+// Visual-pass items 2-4 (uiux-ds0-3-visual.md): the branch Tag sat beside
+// the status like a second subtitle, the "Spec contract" dl card put raw
+// metadata above the fold, and RunHistoryTimeline sat on the overview tab
+// rather than the History tab it names. Branch/Origin/Epic now live behind
+// a collapsed "Technical details" disclosure in the overview tab; the facts
+// row and the files list take the dl card's place; RunHistoryTimeline opens
+// the History tab, above the per-event TimelineRow list.
 import { Bot, History as HistoryIcon, Image as ImageIcon, RefreshCw } from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
 import AgentChip from '../components/AgentChip.vue';
@@ -216,6 +226,22 @@ function objectiveDescription(taskId: string, objective: string | null): string 
   if (!trimmed) return undefined;
   return trimmed === taskLabel(taskId, objective) ? undefined : trimmed;
 }
+
+// Visual-pass item 4 (§4.7): the old "Spec contract" dl card read as raw
+// data cruft above the fold. caseTag and planVersion are the two data
+// points worth a glance before opening Technical details; either is
+// independently optional (fixtures and real tasks both have tasks with no
+// case tag yet), so each clause is dropped rather than shown as a "-"
+// placeholder in an otherwise compact line.
+const factsRowText = computed(() => {
+  if (!detail.value) return '';
+  const parts: string[] = [];
+  if (detail.value.task.caseTag) parts.push(`Type: ${detail.value.task.caseTag}`);
+  if (detail.value.task.planVersion != null) {
+    parts.push(`Plan revision ${detail.value.task.planVersion}`);
+  }
+  return parts.join(' · ');
+});
 </script>
 
 <template>
@@ -235,7 +261,6 @@ function objectiveDescription(taskId: string, objective: string | null): string 
           <AgentChip v-if="agentChipTask" :task="agentChipTask" />
         </template>
         <template #actions>
-          <Tag v-if="detail.branch" variant="outline" size="sm">{{ detail.branch }}</Tag>
           <Button variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
         </template>
       </PageHeader>
@@ -245,29 +270,25 @@ function objectiveDescription(taskId: string, objective: string | null): string 
           <Tabs v-model="activeTab" :tabs="tabs" aria-label="Task detail sections">
             <template #overview>
               <div class="bs-task-detail__overview">
+                <p v-if="factsRowText" class="bs-task-detail__facts">{{ factsRowText }}</p>
                 <RequestQuote :quote="detail.requestQuote" />
-                <div class="bs-task-detail__grid">
-                  <Card title="Spec contract" class="bs-task-detail__card">
-                    <dl class="bs-task-detail__dl">
-                      <dt>Origin</dt>
-                      <dd><Tag v-if="detail.task.origin" variant="outline" size="sm">{{ detail.task.origin }}</Tag><template v-else>-</template></dd>
-                      <dt>Case</dt>
-                      <dd><Tag v-if="detail.task.caseTag" variant="outline" size="sm">{{ detail.task.caseTag }}</Tag><template v-else>-</template></dd>
-                      <dt>Epic</dt>
-                      <dd>{{ detail.task.epicId ?? '-' }}</dd>
-                      <dt>Plan version</dt>
-                      <dd>{{ detail.task.planVersion ?? '-' }}</dd>
-                      <dt>Claims</dt>
-                      <dd>
-                        <span v-for="c in detail.claims" :key="c" class="bs-task-detail__claim">{{ c }}</span>
-                        <span v-if="detail.claims.length === 0">-</span>
-                      </dd>
-                    </dl>
-                  </Card>
-                  <Card title="Run history" class="bs-task-detail__card bs-task-detail__card--wide">
-                    <RunHistoryTimeline :runs="runs" />
-                  </Card>
-                </div>
+                <Card title="Files this task may change">
+                  <ul v-if="detail.claims.length > 0" class="bs-task-detail__claim-list">
+                    <li v-for="c in detail.claims" :key="c" class="bs-task-detail__claim">{{ c }}</li>
+                  </ul>
+                  <p v-else class="bs-task-detail__claim-empty">No files declared.</p>
+                </Card>
+                <details class="bs-task-detail__tech-details">
+                  <summary>Technical details</summary>
+                  <dl class="bs-task-detail__dl">
+                    <dt>Branch</dt>
+                    <dd class="bs-task-detail__mono">{{ detail.branch ?? '-' }}</dd>
+                    <dt>Origin</dt>
+                    <dd><Tag v-if="detail.task.origin" variant="outline" size="sm">{{ detail.task.origin }}</Tag><template v-else>-</template></dd>
+                    <dt>Epic</dt>
+                    <dd>{{ detail.task.epicId ?? '-' }}</dd>
+                  </dl>
+                </details>
               </div>
             </template>
 
@@ -338,6 +359,7 @@ function objectiveDescription(taskId: string, objective: string | null): string 
             </template>
 
             <template #history>
+              <RunHistoryTimeline :runs="runs" />
               <Skeleton v-if="historyLoading" :height="160" />
               <!-- Ahead of the empty state on purpose. A failed fetch has no
                    events to show either, and the two are only distinguishable

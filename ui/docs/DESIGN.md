@@ -63,7 +63,7 @@ additive and inert until a page-wiring PR imports it.
 
 | Primitive | Notes |
 |---|---|
-| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon` |
+| Button | `variant: primary\|secondary\|ghost\|danger\|link`, `size: sm\|md`, optional leading `icon`; raw `.bs-btn--touch`/`.bs-btn--block` CSS modifiers (44px height, full width) exist for call sites that build a `.bs-btn` directly rather than through this component — see Known deviations |
 | Icon | rebuilt on `@lucide/vue` (the old kit's hand-kept `icons.ts` SVG registry is retired); `size: 14\|16\|20`, stroke 1.75 at 14/16, 1.5 at 20 |
 | IconButton | `label` required (no default — a missing one is a type error); additive `tone: default\|inverse` for controls on an inverted surface (Toast's dismiss button); `lint_icon_only.py` gate-enforces the label requirement on every call site, see "Gates wired" |
 | Tooltip | rebuilt on `@floating-ui/dom`; `mode: describe\|label`; hover after 300ms, focus immediately, Escape dismisses |
@@ -178,7 +178,9 @@ Work → Kanban and the task-detail route are rebuilt on the BS kit (ds-spec.md
   routing.
 - **RunHistoryTimeline** — the task-detail page's run history list; tones its
   rows from `taxonomy.ts`'s `runOutcomeKitTone()`, the same outcome-tone
-  mapping the rest of the kit uses, rather than a bespoke per-row rule.
+  mapping the rest of the kit uses, rather than a bespoke per-row rule. Opens
+  the History tab (above the per-event `TimelineRow` list), not the overview
+  tab — see Known deviations.
 - **RequestQuote** — the task-detail page's quoted request-text block.
 
 ## Repo-specific patterns
@@ -227,6 +229,19 @@ None of these composables changed for DS0 — the kit swap is presentational.
   with no accessible name; `opacity: 0` keeps the label announced (paired
   with `aria-busy="true"`) while staying visually invisible and keeping its
   layout box, so the width-lock trick is unaffected.
+- **Button's `.bs-btn--touch`/`.bs-btn--block` are additive CSS modifiers,
+  not a `size`/`block` prop on the component.** §3.1's only on-phone
+  primary action (Home's inbox "Decide") needs a 44px tap target and the
+  full row width; `Button.vue`'s `size` prop only has `sm|md` (28px/32px),
+  and `NeedsYouInbox.vue` already builds its row actions as raw `.bs-btn`
+  classes on a `RouterLink` rather than through `Button.vue` (it needs an
+  anchor, not a `<button>`). `.bs-btn--touch` (44px height) and
+  `.bs-btn--block` (100% width) sit in `bs-primitives.css` beside the
+  `sm`/`md` steps and combine with an existing colour variant
+  (`.bs-btn--primary`) rather than adding a third size to the component's
+  prop type. Because an anchor can wear `.bs-btn` this way, the base rule
+  also resets `text-decoration: none` so a `RouterLink` styled as a button
+  never renders with the browser's default link underline.
 - **Tag's `info` tone has no dedicated hex.** `IconButton`/`Banner`'s
   `tone: info|warning|danger` needs an `info` colour, but the redesign
   spec's 7-tone table (`done/review/progress/todo/blocked/danger/warning`)
@@ -431,6 +446,22 @@ None of these composables changed for DS0 — the kit swap is presentational.
   prior assertion, confirmed against the pre-DS3 baseline (which correctly
   stacked at the same width). Fixed with the same `@media (max-width:
   640px)` collapse-to-one-column pattern the Kanban board already uses.
+- **Task-detail's overview tab replaced the "Spec contract" dl card and the
+  branch Tag with a facts row, a "Files this task may change" list, and a
+  collapsed "Technical details" disclosure; `RunHistoryTimeline` moved to
+  the History tab.** Visual-pass items 2-4 (uiux-ds0-3-visual.md): the
+  branch Tag read as a second subtitle beside the status, the dl card put
+  raw metadata (Origin/Case/Epic/Plan version/Claims) above the fold, and
+  RunHistoryTimeline sat on the tab labelled "What was asked" rather than
+  the one named "History". The dl card's two headline fields (case tag,
+  plan version) now render as a single "Type: … · Plan revision N" line
+  (`factsRowText`, each clause independently optional — no "-" placeholder
+  for an absent one); `claims` moved to its own named list; branch, origin
+  and epic moved into a native `<details>`/`<summary>` disclosure, the same
+  pattern `NeedsYouInbox.vue` already uses for its mobile group folding,
+  rather than a bespoke disclosure component. `.bs-task-detail__grid`/
+  `.bs-task-detail__card`/`.bs-task-detail__card--wide` (the two-card grid
+  layout these replaced) were deleted as dead CSS, not left unused.
 
 ## Verification
 

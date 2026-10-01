@@ -169,6 +169,12 @@
   cursor: pointer;
   user-select: none;
   outline: none;
+  /* A RouterLink can wear .bs-btn (NeedsYouInbox.vue's "Decide" action),
+     which renders as a real <a> — without this, the browser's default
+     anchor underline shows through in every state. .bs-btn--link is the
+     one modifier that wants an underline back; it re-adds its own on
+     :hover below, so this reset does not touch that case. */
+  text-decoration: none;
   transition:
     background var(--bs-duration-fast) var(--bs-ease-standard),
     color var(--bs-duration-fast) var(--bs-ease-standard);
@@ -232,6 +238,18 @@
   height: 28px;
   padding: 0 var(--bs-space-2);
   font-size: var(--bs-text-xs);
+}
+/* §3.1: the one on-phone primary action (Home's inbox "Decide") needs a
+   44px tap target and the full row width; additive modifiers, combined with
+   an existing color variant (e.g. bs-btn--primary) rather than a new size
+   step in the sm/md scale above. */
+.bs-btn--touch {
+  height: var(--bs-touch);
+  padding: 0 var(--bs-space-4);
+  font-size: var(--bs-text-sm);
+}
+.bs-btn--block {
+  width: 100%;
 }
 .bs-btn__spinner {
   position: absolute;
@@ -1436,6 +1454,15 @@ summary.bs-inbox__group-head {
 .bs-inbox__row + .bs-inbox__row {
   border-top: 1px solid var(--bs-border);
 }
+/* The decide row wraps so its full-width button (.bs-inbox__decide) drops to
+   its own line below the tag/text/meta, instead of squeezing into the
+   existing single line. */
+.bs-inbox__row--decide {
+  flex-wrap: wrap;
+}
+.bs-inbox__decide {
+  flex: 1 1 100%;
+}
 .bs-inbox__text {
   display: flex;
   flex-direction: column;
@@ -1849,17 +1876,43 @@ summary.bs-inbox__group-head {
   flex-direction: column;
   gap: var(--bs-space-4);
 }
-.bs-task-detail__grid {
+/* Visual-pass item 4: the compact "Type: … · Plan revision N" line that
+   replaced the Spec contract dl card's two headline fields. */
+.bs-task-detail__facts {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-task-detail__claim-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
   display: flex;
-  gap: var(--bs-space-4);
   flex-wrap: wrap;
+  gap: var(--bs-space-1) var(--bs-space-2);
 }
-.bs-task-detail__card {
-  flex: 1;
-  min-width: 260px;
+.bs-task-detail__claim-empty {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtlest);
 }
-.bs-task-detail__card--wide {
-  flex: 2;
+/* Visual-pass items 2-3: branch/origin/epic, raw data an operator only
+   needs occasionally, collapsed the same way NeedsYouInbox folds its
+   mobile groups — a native <details>/<summary>, no bespoke disclosure
+   component. list-item, not flex: flex drops the browser's native
+   disclosure marker (it only renders for the default list-item display),
+   leaving a closed row with no visible sign it opens -- the same pitfall
+   summary.bs-inbox__group-head's own comment already names. line-height
+   gives the --bs-touch tap target instead of min-height + flex centering. */
+.bs-task-detail__tech-details summary {
+  cursor: pointer;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  display: list-item;
+  line-height: var(--bs-touch);
+}
+.bs-task-detail__tech-details > dl {
+  margin-top: var(--bs-space-2);
 }
 .bs-task-detail__dl {
   display: grid;

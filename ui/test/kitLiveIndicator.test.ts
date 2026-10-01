@@ -34,6 +34,20 @@ describe('kit/LiveIndicator.vue', () => {
   });
 
   it('renders lastEventAt via the shared RelativeTime component', () => {
-    expect(LIVE).toMatch(/<RelativeTime :iso="lastEventAt" :now="now"/);
+    expect(LIVE).toMatch(/<RelativeTime[\s\S]*?:iso="lastEventAt"[\s\S]*?:now="now"/);
+  });
+
+  // Visual-pass item 6: a stray template-whitespace text node rendered
+  // "Live , last activity …" (space before the comma). §2.2's own example
+  // uses an em dash ("Live — last activity 5 min ago"), but
+  // check_no_emoji.py bans em/en-dash in rendered UI copy repo-wide as an
+  // AI-pattern tell, so this keeps the comma and fixes only the stray
+  // leading space — built as a JS template literal inside the
+  // interpolation rather than raw text nodes, so there is no
+  // whitespace-condensing behaviour left for a stray newline/indent to
+  // leak through.
+  it('separates status and last-activity with a comma, no stray space (visual-pass item 6)', () => {
+    expect(LIVE).toMatch(/\$\{statusLabel\}, last activity /);
+    expect(LIVE).not.toMatch(/ ,\s*last activity/);
   });
 });
