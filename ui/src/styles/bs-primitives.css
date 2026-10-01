@@ -1893,14 +1893,17 @@ summary.bs-inbox__group-head {
 /* Visual-pass items 2-3: branch/origin/epic, raw data an operator only
    needs occasionally, collapsed the same way NeedsYouInbox folds its
    mobile groups — a native <details>/<summary>, no bespoke disclosure
-   component. --bs-touch sizes the summary row as a tap target. */
+   component. list-item, not flex: flex drops the browser's native
+   disclosure marker (it only renders for the default list-item display),
+   leaving a closed row with no visible sign it opens -- the same pitfall
+   summary.bs-inbox__group-head's own comment already names. line-height
+   gives the --bs-touch tap target instead of min-height + flex centering. */
 .bs-task-detail__tech-details summary {
   cursor: pointer;
   font-size: var(--bs-text-sm);
   color: var(--bs-text-subtle);
-  min-height: var(--bs-touch);
-  display: flex;
-  align-items: center;
+  display: list-item;
+  line-height: var(--bs-touch);
 }
 .bs-task-detail__tech-details > dl {
   margin-top: var(--bs-space-2);

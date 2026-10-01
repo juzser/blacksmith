@@ -7,6 +7,10 @@ const SFC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'TaskDetailPage.vue'),
   'utf8',
 );
+const PRIMITIVES_CSS = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+  'utf8',
+);
 
 describe('TaskDetailPage.vue — screenshot gallery', () => {
   it('polls live via usePoll rather than a one-off onMounted load', () => {
@@ -132,5 +136,20 @@ describe('TaskDetailPage.vue — DS visual pass restructure (items 2-4)', () => 
     const order = ['<RunHistoryTimeline', '<TimelineRow'].map((marker) => history.indexOf(marker));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  // A screenshot of the rendered disclosure showed "Technical details" with
+  // no triangle: `display: flex` on a <summary> drops the browser's native
+  // ::marker (it only renders for the default `list-item` display), so a
+  // closed disclosure read as inert text with no affordance that it opens.
+  // NeedsYouInbox.vue's own summary.bs-inbox__group-head rule already hit
+  // this and documents the fix in its own comment ("flex drops the
+  // disclosure marker") — this rule must follow the same `list-item` +
+  // line-height shape, not flex + align-items, to keep the marker visible.
+  it('keeps the native disclosure marker on the Technical details summary (list-item, not flex)', () => {
+    const rule = PRIMITIVES_CSS.match(/\.bs-task-detail__tech-details summary \{([^}]*)\}/)?.[1];
+    expect(rule).toBeTruthy();
+    expect(rule).toMatch(/display:\s*list-item;/);
+    expect(rule).not.toMatch(/display:\s*flex;/);
   });
 });
