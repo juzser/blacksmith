@@ -306,6 +306,7 @@ defineExpose({ focusFirstCard });
         role="tab"
         class="bs-kanban-tabs__tab"
         :aria-selected="mobileActiveKey === col.key"
+        :aria-controls="`bs-kanban-panel-${col.key}`"
         :tabindex="mobileActiveKey === col.key ? 0 : -1"
         @click="selectMobileTab(col.key)"
       >
@@ -316,9 +317,12 @@ defineExpose({ focusFirstCard });
       <section
         v-for="col in columns"
         v-show="isColumnVisible(col.key)"
+        :id="`bs-kanban-panel-${col.key}`"
         :key="col.key"
         class="bs-kanban-col"
         :aria-label="`${col.label} column`"
+        :role="isPhoneWidth && mobileActiveKey === col.key ? 'tabpanel' : undefined"
+        :aria-labelledby="isPhoneWidth && mobileActiveKey === col.key ? `bs-kanban-tab-${col.key}` : undefined"
       >
         <div v-if="!isPhoneWidth" class="bs-kanban-col__head">
           <component

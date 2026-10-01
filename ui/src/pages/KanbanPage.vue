@@ -23,6 +23,7 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import { fetchKanban, fetchOverview, type KanbanColumn, selectableEpics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { ALL_EPICS, EPIC_LIST_UNAVAILABLE, epicOptions, retainedEpic } from '../lib/epicPicker.js';
@@ -34,6 +35,7 @@ const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Kanban' }]);
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
+const { isPhoneWidth } = useViewport();
 
 const epics = ref<string[]>([]);
 const selectedEpic = ref<string>(ALL_EPICS);
@@ -142,7 +144,7 @@ function goToTask(taskId: string) {
         <Button v-if="milestoneFilter" variant="ghost" size="sm" @click="milestoneFilter = null">
           Clear milestone filter
         </Button>
-        <Button variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
+        <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
       </template>
     </PageHeader>
 

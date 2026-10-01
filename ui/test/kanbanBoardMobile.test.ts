@@ -56,4 +56,19 @@ describe('KanbanBoard.vue — mobile column switcher (§3.1 Work/Kanban row)', (
   it('teleports the display-options control into the MobileTopBar overflow menu on phone', () => {
     expect(SRC).toMatch(/<Teleport[\s\S]{0,60}isPhoneWidth[\s\S]{0,400}KanbanDisplayOptions/);
   });
+
+  it('gives each mobile tab a stable id and points it at its panel via aria-controls', () => {
+    expect(SRC).toMatch(/:id="`bs-kanban-tab-\$\{col\.key\}`"/);
+    expect(SRC).toMatch(/:aria-controls="`bs-kanban-panel-\$\{col\.key\}`"/);
+  });
+
+  it('marks the visible column section as the tabpanel for its active tab', () => {
+    expect(SRC).toMatch(/:id="`bs-kanban-panel-\$\{col\.key\}`"/);
+    expect(SRC).toMatch(
+      /:role="isPhoneWidth && mobileActiveKey === col\.key \? 'tabpanel' : undefined"/,
+    );
+    expect(SRC).toMatch(
+      /:aria-labelledby="isPhoneWidth && mobileActiveKey === col\.key \? `bs-kanban-tab-\$\{col\.key\}` : undefined"/,
+    );
+  });
 });
