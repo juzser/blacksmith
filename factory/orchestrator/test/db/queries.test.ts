@@ -2,12 +2,13 @@ import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
 import {
   analytics,
   artifactById,
+  createQuoteMemo,
   DEFAULT_PROJECT,
   errorsPage,
   flowGraph,
@@ -1217,6 +1218,43 @@ describe('db/queries.ts', () => {
       } finally {
         missingHandle.sqlite.close();
       }
+    });
+
+    // S3 fix: kanban() used to re-walk every task's causal chain (and, on a
+    // miss, the epic-source-prompt fallback) from scratch, so N tasks in one
+    // epic paid for the shared ancestor events N times over. TASK_2/3/4 share
+    // most of their causal chain (each task-added row's parent is the
+    // previous task's own row) and all three sit under EPIC_ID, so a shared
+    // `QuoteMemo` should cut the combined query count well under what three
+    // independent, memo-less calls spend on the same chain.
+    it('shares the causal walk and epic fallback across tasks via one QuoteMemo', () => {
+      const countSelects = (run: () => void): number => {
+        const spy = vi.spyOn(handle.db, 'select');
+        run();
+        const n = spy.mock.calls.length;
+        spy.mockRestore();
+        return n;
+      };
+
+      const withoutMemo = countSelects(() => {
+        requestQuoteForTask(handle.db, TASK_2, SESSION_ID);
+        requestQuoteForTask(handle.db, TASK_3, SESSION_ID);
+        requestQuoteForTask(handle.db, TASK_4, SESSION_ID);
+      });
+
+      const memo = createQuoteMemo();
+      const withMemo = countSelects(() => {
+        requestQuoteForTask(handle.db, TASK_2, SESSION_ID, memo);
+        requestQuoteForTask(handle.db, TASK_3, SESSION_ID, memo);
+        requestQuoteForTask(handle.db, TASK_4, SESSION_ID, memo);
+      });
+
+      expect(withMemo).toBeLessThan(withoutMemo);
+
+      // The answers themselves must not change (behaviour preserved).
+      const quote2 = requestQuoteForTask(handle.db, TASK_2, SESSION_ID);
+      const quote4 = requestQuoteForTask(handle.db, TASK_4, SESSION_ID, memo);
+      expect(quote4).toEqual(quote2);
     });
   });
 

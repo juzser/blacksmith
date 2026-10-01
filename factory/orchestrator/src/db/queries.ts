@@ -1861,20 +1861,44 @@ function applyDecisionsLens(entries: TimelineEntry[]): TimelineEntry[] {
  * lookup, so asking for a chain that does not start in the named session
  * remains an empty answer rather than a silent redirect.
  */
-function causalChain(db: SmithDb, sessionId: string, eventId: string): TimelineEntry[] {
+type EventsRawRow = typeof eventsRaw.$inferSelect;
+
+/**
+ * Row cache shared across calls within one `kanban()` invocation (S3 fix):
+ * event ids are globally unique (see the docstring above), so a row fetched
+ * for one task's walk answers for every other walk that crosses the same
+ * event, and the session gate below still applies to it.
+ */
+function fetchEventRow(
+  db: SmithDb,
+  eventId: string,
+  cache?: Map<string, EventsRawRow | null>,
+): EventsRawRow | null {
+  if (cache?.has(eventId)) return cache.get(eventId) ?? null;
+  const row = db.select().from(eventsRaw).where(eq(eventsRaw.eventId, eventId)).get() ?? null;
+  cache?.set(eventId, row);
+  return row;
+}
+
+function causalChain(
+  db: SmithDb,
+  sessionId: string,
+  eventId: string,
+  eventCache?: Map<string, EventsRawRow | null>,
+): TimelineEntry[] {
   const chain: TimelineEntry[] = [];
   let currentId: string | null = eventId;
   const seen = new Set<string>();
   let first = true;
   while (currentId && !seen.has(currentId)) {
     seen.add(currentId);
-    const idMatch = eq(eventsRaw.eventId, currentId);
-    const row = db
-      .select()
-      .from(eventsRaw)
-      .where(first ? and(idMatch, eq(eventsRaw.sessionId, sessionId)) : idMatch)
-      .get();
+    const row = fetchEventRow(db, currentId, eventCache);
     if (!row) break;
+    // Ids are globally unique, so a row fetched for a different session's
+    // walk can still answer this one's first hop — but that hop is only
+    // valid when it actually named a row inside the requested session,
+    // same as the original `and(idMatch, eq(sessionId))` constraint.
+    if (first && row.sessionId !== sessionId) break;
     first = false;
     chain.unshift(toEntry(row));
     currentId = row.causalParent as string | null;
@@ -2065,8 +2089,13 @@ function epicIdOfIntegrationRef(taskRef: string): string | null {
   return taskRef.endsWith('/integration') ? taskRef.slice(0, -'/integration'.length) : null;
 }
 
-function nearestUserPrompt(db: SmithDb, sessionId: string, eventId: string): RequestQuote | null {
-  const chain = causalChain(db, sessionId, eventId);
+function nearestUserPrompt(
+  db: SmithDb,
+  sessionId: string,
+  eventId: string,
+  eventCache?: Map<string, EventsRawRow | null>,
+): RequestQuote | null {
+  const chain = causalChain(db, sessionId, eventId, eventCache);
   for (let i = chain.length - 1; i >= 0; i--) {
     const entry = chain[i];
     if (entry?.eventType !== 'user_prompt') continue;
@@ -2074,6 +2103,21 @@ function nearestUserPrompt(db: SmithDb, sessionId: string, eventId: string): Req
     if (row) return { prompt: row.prompt, ts: row.ts, eventId: row.eventId, source: 'task' };
   }
   return null;
+}
+
+/**
+ * Shared memo for one `kanban()` call (S3 fix): `events` is `causalChain`'s
+ * row cache, keyed by event id; `epicPrompt` caches `epicSourcePrompt`'s
+ * answer per epic, since the tasks sharing an epic also share its one
+ * source prompt.
+ */
+export interface QuoteMemo {
+  events: Map<string, EventsRawRow | null>;
+  epicPrompt: Map<string, RequestQuote | null>;
+}
+
+export function createQuoteMemo(): QuoteMemo {
+  return { events: new Map(), epicPrompt: new Map() };
 }
 
 /** "Epic started from" fallback (§4.7): the earliest `user_prompt` in the epic's session lineage. */
@@ -2099,15 +2143,31 @@ export function requestQuoteForTask(
   db: SmithDb,
   taskId: string,
   taskSessionId: string,
+  memo?: QuoteMemo,
 ): RequestQuote | null {
   const firstEvent = inLogOrder(
     db.select().from(eventsRaw).where(eq(eventsRaw.taskId, taskId)).all(),
   )[0];
   if (firstEvent) {
-    const taskQuote = nearestUserPrompt(db, firstEvent.sessionId, firstEvent.eventId);
+    const taskQuote = nearestUserPrompt(
+      db,
+      firstEvent.sessionId,
+      firstEvent.eventId,
+      memo?.events,
+    );
     if (taskQuote) return taskQuote;
   }
-  return epicSourcePrompt(db, taskSessionId);
+  // Two tasks named with the same epic share one `epicSourcePrompt` answer
+  // (same lineage walk, same earliest prompt), so the fallback is cached per
+  // epic rather than per task or per session.
+  const epicId = epicOfTaskId(taskId);
+  if (epicId !== null) {
+    const cached = memo?.epicPrompt.get(epicId);
+    if (cached !== undefined) return cached;
+  }
+  const quote = epicSourcePrompt(db, taskSessionId);
+  if (epicId !== null) memo?.epicPrompt.set(epicId, quote);
+  return quote;
 }
 
 export function kanban(
@@ -2262,10 +2322,14 @@ export function kanban(
       .map((e) => e.epicId),
   );
 
+  // DS3 S3 fix — one shared memo for every task's request-quote walk in this
+  // call: bounds the N+1 causal walk/epic-fallback cost that scaled with the
+  // task count (see QuoteMemo's doc comment).
+  const quoteMemo = createQuoteMemo();
   const columns = new Map<string, KanbanTask[]>();
   for (const t of taskRows) {
     const column = columns.get(t.taskStatus) ?? [];
-    const quote = requestQuoteForTask(db, t.taskId, t.sessionId);
+    const quote = requestQuoteForTask(db, t.taskId, t.sessionId, quoteMemo);
     column.push({
       taskId: t.taskId,
       taskStatus: t.taskStatus,
