@@ -1891,24 +1891,39 @@ function hasRecursiveForce(tokens: readonly string[]): boolean {
 
 /**
  * The same recursive-force cluster `hasRecursiveForce` reads out of a
- * tokenised word list, asked instead as a plain substring of raw,
- * unparsed text: `-` followed by letters spelling both a recursive flag
- * (`r`/`R`) and `f` somewhere in the run, or `--recursive` and `--force`
- * appearing anywhere in the text, in either order. This is what a
- * substitution body falls back to once it cannot be delimited with
- * confidence — an unterminated quote, an unbalanced paren, or a nesting
- * depth past `MAX_SUBSTITUTION_DEPTH` — and there is no word list left to
- * read: the text has not been dequoted or split, because the quoting that
- * would make that split meaningful is exactly what could not be read. Over-
- * matching here (a bundled flag that is not really `rm`'s, a comment
- * mentioning both words) is the same direction every fail-closed read in
- * this file already takes.
+ * tokenised word list, asked instead of two independent, linear scans over
+ * raw, unparsed text — one per flag, not one combined pattern — because
+ * there is no word list left to read: the text has not been dequoted or
+ * split, so a cluster split across tokens (`-r -f`, `-r --force`) has to be
+ * found without that split ever happening. This is what a substitution body
+ * falls back to once it cannot be delimited with confidence — an
+ * unterminated quote, an unbalanced paren, or a nesting depth past
+ * `MAX_SUBSTITUTION_DEPTH`.
+ *
+ * Each scan looks for its flag at the start of a token — the start of the
+ * text, or just past whitespace, a quote, `(`, a backtick, `;`, `|` or `&` —
+ * then either the flag's long spelling (`--recursive`, `--force`) or a
+ * single hyphen followed by nothing but letters containing the flag's
+ * letter (`-r`, `-R`, `-rf`, `-Rvf`). The long spelling is checked on its
+ * own branch, gated on a second, literal hyphen, rather than folded into
+ * the bundled-letter scan: `hasRecursiveForce` never reads `--force` as
+ * carrying a recursive flag, because its own bundled-flag test
+ * (`RM_SHORT_FLAG_RE`) is anchored to exactly one leading hyphen and
+ * `--force` has two, so it only ever matches `--force`'s own exact-token
+ * branch. A combined scan that let the recursive pattern walk into a second
+ * hyphen would read `--force`'s own tail letters — `f`, `o`, `r`, `c`, `e` —
+ * and find the `r` in "force", flagging a force-only invocation as
+ * recursive too. Splitting the hyphen count the same way `hasRecursiveForce`
+ * does keeps that false read out. Over-matching in every other direction (a
+ * bundled flag that is not really `rm`'s, a comment mentioning both words)
+ * is the same direction every fail-closed read in this file already takes.
  */
-const RAW_RECURSIVE_FORCE_RE = /-[A-Za-z]*(?:[rR][A-Za-z]*f|f[A-Za-z]*[rR])[A-Za-z]*/;
+const TOKEN_START = String.raw`(?:^|[\s'"(\`;|&])`;
+const RAW_RECURSIVE_FLAG_RE = new RegExp(`${TOKEN_START}-(?:-recursive\\b|[A-Za-z]*[rR][A-Za-z]*)`);
+const RAW_FORCE_FLAG_RE = new RegExp(`${TOKEN_START}-(?:-force\\b|[A-Za-z]*f[A-Za-z]*)`);
 
 function hasRecursiveForceInText(text: string): boolean {
-  if (RAW_RECURSIVE_FORCE_RE.test(text)) return true;
-  return /--recursive\b/.test(text) && /--force\b/.test(text);
+  return RAW_RECURSIVE_FLAG_RE.test(text) && RAW_FORCE_FLAG_RE.test(text);
 }
 
 /**
@@ -2367,10 +2382,14 @@ function extractSubstitutionBodies(segment: string): string[] | null {
  * `isUnboundedRemovalCommand` below. Nesting is attacker-controlled and
  * unbounded (`$($($(...)))`), and following it one JS stack frame per level
  * throws past a few hundred levels — so once `depth` reaches
- * `MAX_SUBSTITUTION_DEPTH`, this body is treated exactly like one that
- * could not be delimited at all, without even attempting the extraction
- * that would recurse further. That keeps both the call stack and the work
- * done bounded, however deep the nesting actually goes.
+ * `MAX_SUBSTITUTION_DEPTH`, extraction stops outright rather than reading
+ * whatever raw text is left: nesting sixteen levels deep is never a
+ * legitimate agent command, and a check this far past the point it can
+ * actually read the body has nothing to vouch for it with. Refusing here
+ * does not depend on `hasRecursiveForceInText` finding anything — it denies
+ * on depth alone, the same way an undelimitable body used to read as "found
+ * nothing" if it happened to carry no flags. That keeps both the call stack
+ * and the work done bounded, however deep the nesting actually goes.
  */
 const MAX_SUBSTITUTION_DEPTH = 16;
 
@@ -2380,7 +2399,7 @@ function hasUnsafeSubstitution(
   policy: GuardrailPolicy,
   depth = 0,
 ): boolean {
-  if (depth >= MAX_SUBSTITUTION_DEPTH) return hasRecursiveForceInText(segment);
+  if (depth >= MAX_SUBSTITUTION_DEPTH) return true;
   const bodies = extractSubstitutionBodies(segment);
   if (bodies === null) return hasRecursiveForceInText(segment);
   return bodies.some((body) => isUnboundedRemovalCommand(body, repoRoot, policy, depth + 1));

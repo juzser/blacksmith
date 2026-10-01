@@ -2028,6 +2028,55 @@ describe('evaluateCommand — an apostrophe inside a double-quoted substitution 
   });
 });
 
+// Past MAX_SUBSTITUTION_DEPTH, a substitution body is never actually read —
+// extraction is skipped outright before it could recurse the call stack any
+// further. The first pass of that cap still asked what it could not read:
+// `hasRecursiveForceInText` on text that was never extracted, split or
+// dequoted. A flag cluster split across tokens (`-r -f`, `-r --force`) only
+// ever matched that fallback when both letters landed in the same hyphen
+// run, so a payload nested past the cap, or one sitting behind a quote this
+// scanner could not close, read as flag-free even carrying both. Past the
+// cap there is no body left to vouch for either way, so this file now
+// refuses outright instead of reading one; short of the cap, the raw-text
+// fallback itself now reads a recursive flag and a force flag as two
+// independent token-shaped tests, so a split or long-form pair still denies.
+describe('evaluateCommand — a substitution nested past the read limit, or one a quote leaves unreadable', () => {
+  const nestEcho = (levels: number, inner: string) =>
+    `${'$(echo '.repeat(levels)}${inner}${')'.repeat(levels)}`;
+
+  it('denies 20 levels of $(echo $(echo …)) wrapping X=rm; $X -r -f /x — past the cap, refused without reading the flags', () => {
+    const command = nestEcho(20, 'X=rm; $X -r -f /x');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('denies 20 levels of $(echo $(echo …)) wrapping plain echo hi — past the cap, refused on depth alone', () => {
+    const command = nestEcho(20, 'echo hi');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it("denies echo 'unclosed span -r --force — an unterminated quote falls back to raw text, which now reads split flags", () => {
+    const command = "echo 'unclosed span -r --force";
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([[`git commit -m "it's -rf free"`], ['pnpm run test'], ['echo "$(date)"']])(
+    'allows %s — nothing removal-shaped, in or out of a substitution',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
+  it('allows 15 levels of $(echo $(echo …)) wrapping plain echo hi — short of the cap, read normally', () => {
+    const command = nestEcho(15, 'echo hi');
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+});
+
 // A commit or merge message is git's own free-text field. Every case in the
 // first half is an agent doing exactly what its output contract asks — writing
 // down what it did — and every one of them was refused before this block
