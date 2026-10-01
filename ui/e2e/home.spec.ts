@@ -81,7 +81,7 @@ test.describe('Home', () => {
   }) => {
     await page.goto('/overview');
     const view = page.getByRole('link', { name: 'View black-smith in Work' });
-    await expect(view).toHaveAttribute('href', '/kanban?project=black-smith');
+    await expect(view).toHaveAttribute('href', '/work/kanban?project=black-smith');
     await expect(page.getByText('2 epics in flight')).toBeVisible();
     await expect(page.getByText('epic in flights')).toHaveCount(0);
     // envkit is declared but has nothing running: no card for it.
@@ -130,7 +130,7 @@ test.describe('Home', () => {
     await expect(page.getByText('Just finished')).toBeVisible();
     await expect(page.getByRole('link', { name: 'epic-just-done' })).toHaveAttribute(
       'href',
-      '/kanban?epic=epic-just-done',
+      '/work/kanban?epic=epic-just-done',
     );
   });
 

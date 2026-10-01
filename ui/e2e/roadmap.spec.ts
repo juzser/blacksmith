@@ -5,8 +5,8 @@ test.describe('Roadmap', () => {
   test('renders milestones with progress and the mini-timeline (operator directive 4)', async ({
     page,
   }) => {
-    await page.goto('/roadmap');
-    await expect(page.locator('h1')).toHaveText('Roadmap');
+    await page.goto('/work/roadmap');
+    await expect(page.locator('h1')).toHaveText('Work');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
     // Round 6 ("display it as VueFlow"): the milestone name now appears
     // twice — once in its flow node, once in the sr-only order table — so this
@@ -24,7 +24,7 @@ test.describe('Roadmap', () => {
   test('renders as a VueFlow diagram with viewport controls and an sr-only order table', async ({
     page,
   }) => {
-    await page.goto('/roadmap');
+    await page.goto('/work/roadmap');
     await expect(page.locator('.roadmap-node').first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Fit view' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Zoom in' })).toBeVisible();
@@ -45,12 +45,12 @@ test.describe('Roadmap', () => {
     // and roadmapFlowEdges() only chains WITHIN a lane — so this fixture
     // renders zero edges. Straight-edge behaviour is covered where it can
     // actually be exercised, in ui/test/roadmapFlow.test.ts.
-    await page.goto('/roadmap');
+    await page.goto('/work/roadmap');
     await expect(page.locator('.roadmap-node--live').first()).toBeVisible();
   });
 
   test('search filters the milestone list', async ({ page }) => {
-    await page.goto('/roadmap');
+    await page.goto('/work/roadmap');
     await page
       .getByLabel('Search milestone name', { exact: true })
       .fill('no such milestone exists');
@@ -62,13 +62,13 @@ test.describe('Roadmap', () => {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto('/roadmap');
-        await expect(page.locator('h1')).toHaveText('Roadmap');
+        await page.goto('/work/roadmap');
+        await expect(page.locator('h1')).toHaveText('Work');
         await settleForShot(
           page,
           page.locator('.roadmap-node__title', { hasText: 'Phase 6b — Remaining pages' }),
         );
-        await shoot(page, `roadmap-${vpName}-${theme}`);
+        await shoot(page, `work-roadmap-${vpName}-${theme}`);
       });
     }
   }
