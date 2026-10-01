@@ -1588,6 +1588,8 @@ describe('spec-scoped findings (P9-9)', () => {
         taskStatus: 'completed',
         planVersion: 2,
         objective: 'Parse quoted values.',
+        title: null,
+        summary: null,
         claims: ['src/parse.ts'],
         budgetTokens: 1000,
         branch: 'smith/envkit/task-1b-parse-quotes',
