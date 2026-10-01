@@ -1,3 +1,4 @@
+import type { KanbanTask } from '../src/lib/api.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
@@ -15,7 +16,7 @@ const EPIC_OUTSIDE_IT = 'epic-1'; // db/fixtures.ts, project black-smith
 const NARROW_VIEWPORT = { width: 375, height: 812 };
 
 /** Full `KanbanTask` shape (ui/src/lib/api.ts) for a `page.route` stub board. */
-function task(taskId: string, taskStatus: string) {
+function task(taskId: string, taskStatus: string): KanbanTask {
   return {
     taskId,
     taskStatus,
@@ -266,7 +267,7 @@ test.describe('Kanban', () => {
     await expect(page.getByText('Fix the login button alignment')).toBeVisible();
 
     await page.getByRole('button', { name: 'Display options' }).click();
-    await page.getByLabel('Show summary').uncheck();
+    await page.getByLabel('Show summary', { exact: true }).uncheck();
 
     await expect(page.getByText('Fix the login button alignment')).toHaveCount(0);
   });

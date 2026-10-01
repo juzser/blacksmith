@@ -572,7 +572,10 @@ describe('lib/kanban.ts — isInteractiveDescendant() (S2 fix)', () => {
   const root = { tagName: 'DIV' };
 
   it('is false for the card root itself, even though the root also carries a role', () => {
-    const cardRoot = { tagName: 'DIV', getAttribute: (name: string) => (name === 'role' ? 'link' : null) };
+    const cardRoot = {
+      tagName: 'DIV',
+      getAttribute: (name: string) => (name === 'role' ? 'link' : null),
+    };
     expect(isInteractiveDescendant(cardRoot, cardRoot)).toBe(false);
   });
 
@@ -587,7 +590,10 @@ describe('lib/kanban.ts — isInteractiveDescendant() (S2 fix)', () => {
   });
 
   it('is true for a descendant carrying any role attribute', () => {
-    const roled = { tagName: 'SPAN', getAttribute: (name: string) => (name === 'role' ? 'img' : null) };
+    const roled = {
+      tagName: 'SPAN',
+      getAttribute: (name: string) => (name === 'role' ? 'img' : null),
+    };
     expect(isInteractiveDescendant(roled, root)).toBe(true);
   });
 
