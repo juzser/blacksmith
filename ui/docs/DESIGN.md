@@ -397,11 +397,14 @@ None of these composables changed for DS0 — the kit swap is presentational.
   Chosen so `KanbanBoard`'s own `select` emit (used for full-page navigation)
   and the peek panel's "open full task" affordance stay distinguishable at
   the call site.
-- **`RunHistoryTimeline`'s row component is still `TimelineRow` from
-  `components/ds/`,** not a `kit/`-ported equivalent — DS3's scope was the
-  Kanban/task-detail composites named above, not porting every `ds/`
-  composite forward; `runOutcomeKitTone()` bridges its tone mapping onto
-  `bs-tokens.css` in the meantime.
+- **`RunHistoryTimeline` renders its own row markup, not `TimelineRow`.**
+  Checked against the source during review: it has no import of or
+  reference to `TimelineRow` (which itself lives at
+  `components/TimelineRow.vue`, not under `components/ds/`) — it implements
+  its own `<ol>`/`<li>` list, icon mapping, and label function directly.
+  DS3's scope was the Kanban/task-detail composites named above, not porting
+  every `ds/` composite forward; `runOutcomeKitTone()` bridges its tone
+  mapping onto `bs-tokens.css` in the meantime.
 - **`agentWaitingThresholdMs` (4h) and `KANBAN_VIRTUALIZE_THRESHOLD` (30) are
   this slice's own chosen defaults.** Neither ds-spec.md nor design-spec.md
   names a number for either; both live in `lib/constants.ts` as named
