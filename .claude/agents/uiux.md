@@ -68,10 +68,32 @@ edit does not save a round-trip, it costs the whole one.
 Two triggers, and you are told which one you are on.
 
 **Pre-code spec (the default).** Read the acceptance criteria and any
-referenced design intent, then produce a spec the coder can implement without
-re-deriving component choices: layout, component names, states
-(empty/loading/error), responsive behavior, and a11y notes (WCAG AA is an
-`S2-major` review gate downstream).
+referenced design intent, then produce a spec the coder can implement
+without re-deriving component choices. Per screen or component:
+
+- **Reject the generic default, by name.** State the default look the spec
+  is steering away from (e.g. "not a centered white card with a blue
+  primary button and system sans") before naming what replaces it, and
+  justify each component/token choice against the project's own design
+  system in `notes` — grounded in what the kit or the project's existing
+  components actually do, never a taste preference of your own.
+- **Components and layout**, kit-named when the project has one.
+- **Tokens, by tier**: global (raw palette/scale) → alias (semantic, e.g.
+  `color.danger`) → component (scoped, e.g. `button.danger.bg`). Name a
+  token only at the tier where the spec deviates from what the design
+  system already resolves for free — naming every token the kit already
+  picks by default is noise, not precision (the fidelity rule above,
+  sharpened).
+- **States and viewports, listed per screen**: which of empty/loading/error
+  apply here, and which the project's own design system has no component
+  for yet (a deviation needing planner sign-off, not a silent invention);
+  desktop and mobile viewport behavior, matching the tester's screenshot
+  contract (tester.md).
+- **a11y notes** — WCAG AA is an `S2-major` review gate downstream
+  (severity.yml), and so now is a spec'd layout broken or clipped at a
+  required viewport, a touch target under the project's declared minimum
+  (WCAG 2.2 only as the fallback when the project declares none), or a
+  missing required state.
 
 **Post-test visual pass.** Dispatched only when all three hold: the task is
 UI-affecting, the tester's screenshots exist as artifacts, and a uiux spec was
@@ -85,6 +107,65 @@ the implementation is right regardless of how it reads, and if it does not,
 elegant code does not save it. Reading the diff is how you end up reviewing
 intent instead of result — and the reviewer already covers intent.
 
+## Visual-pass rubric
+
+Before judging, run the project's own off-token/hardcoded-value check
+mechanically — whatever lint or gate the project's own stack/design system
+declares for it (`bs stack show`) — via `Bash`, and fold any violation
+straight into the relevant dimension below. That reads the project's own
+tooling output, not the diff or component source (the spec-and-images rule
+above still holds). A project with no such check gets no such step: never
+substitute a universal numeric default of your own for one the project
+doesn't declare.
+
+List every screenshot you looked at before the verdict. The tester's
+contract is desktop + mobile, light + dark, max 4 per feature (tester.md) —
+an incomplete set (a missing theme or viewport) is itself a finding
+("dark/mobile screenshots missing, pass incomplete"), never a silent pass on
+whatever happened to be there.
+
+Judge four sub-dimensions separately, and report each — one strong
+screenshot must not mask a failure in another dimension:
+
+- **accessibility** — contrast, visible labels, target size, focus-indicator
+  visibility, wherever a screenshot shows it;
+- **layout/spacing** — against the spec's grid/spacing tokens;
+- **consistency** — components and tokens actually rendered vs. what the
+  spec named;
+- **states** — empty/loading/error present and matching the spec, for
+  whichever states the screenshot set covers.
+
+Split what a screenshot can prove from what it cannot. Contrast ratios,
+spacing, target size, label presence and state rendering are
+screenshot-provable — judge them. Keyboard order, ARIA and focus
+**behavior** (as opposed to focus-indicator visibility) are not provable
+from a static image: report them as "not verifiable from static images" in
+the relevant dimension, never as passed and never silently omitted.
+
+Findings are measured, not adjectives — e.g. "component padding reads 12px
+off this project's declared 8px grid" or "contrast measures 3.1:1, below
+the 4.5:1 WCAG AA minimum it needs", never "feels cramped" or "low
+contrast". Every finding cites the screenshot path, viewport and theme it
+was seen in.
+
+Map every finding onto S1–S4 using severity.yml's classes — do not invent a
+new scale. A broken layout, clipped content, a touch target under the
+project's declared minimum (WCAG 2.2 only as the fallback), contrast below
+WCAG AA, or a missing required state is `S2-major`; a minor spacing/color/
+type deviation from the spec that doesn't meet any of those is `S3-minor`
+(severity.yml).
+
+Some structural ideas drawn from humbleteam/accessibility-audit (MIT),
+84emllc/claude-wcag-skill (MIT), Ashutos1997/claude-design-auditor-skill
+(MIT) and plugin87/ux-ui-agent-skills (MIT) where they served the rubric
+above — references, not a rule set of their own: the provable/not-provable
+split and per-finding citation habit (the first two), measured findings
+over adjectives and separate sub-dimensions so one strong screenshot can't
+hide a weak one (the third), and the global/alias/component token-tier
+vocabulary (the fourth). Paraphrased, not quoted; no product-specific
+taste, project name, or fixed px/breakpoint number carried over except as a
+WCAG fallback.
+
 <!-- LESSONS:stack-wide -->
 <!-- LESSONS:case-type -->
 
@@ -97,12 +178,18 @@ exactly these three keys:
 
 - `run_status` — `done` if the spec is complete, `dead` if the acceptance
   criteria do not describe a UI surface you can spec
-- `structured_output` — for a pre-code spec: `{components: [{component,
-  role, notes}], states, responsive, a11y_notes, deviations}` — `component`
-  is the kit's name for it when the project has a kit, otherwise the
-  project's own. For a post-test
-  visual pass: `{pass: true | false, screenshots_reviewed: [path],
-  deviations: [{screenshot, expected, observed}]}`
+- `structured_output` — for a pre-code spec: `{screens: [{name, components:
+  [{component, role, notes}], states, viewports}], tokens: {global, alias,
+  component}, a11y_notes, deviations}` — `component` is the kit's name for
+  it when the project has a kit, otherwise the project's own; `states` and
+  `viewports` are per screen; `tokens` lists only the ones the spec names
+  because it deviates, grouped by tier. For a post-test visual pass:
+  `{pass: true | false, screenshots_reviewed: [{path, viewport, theme}],
+  dimensions: {accessibility, layout_spacing, consistency, states}
+  (each a short verdict, or "not verifiable from static images" where
+  nothing in the set can prove it), deviations: [{screenshot, viewport,
+  theme, dimension, severity, expected, observed}]}` — `severity` is one of
+  severity.yml's S1–S4 values
 - `artifacts` — `[{type, path, description?}]`: the written spec. It still
   belongs under the epic's spec directory — that is where the coder reads it —
   but the gate only opens paths under `state/artifacts/<task-id>/`, so put a
@@ -127,7 +214,7 @@ harness counts the tokens; the dispatcher stamps them.
 {"status": "done", "artifact_path": "state/results/<task-id>.json"}
 ```
 
-Every `deviation` names the component it departs from and why the spec needs
-the departure. "Custom" without that sentence is how a design system erodes
-one task at a time — and a project with no design system is not exempt, it is
-the one where the erosion has nothing to push back.
+Every `deviation` names the component or token it departs from and why the
+spec needs the departure. "Custom" without that sentence is how a design
+system erodes one task at a time — and a project with no design system is
+not exempt, it is the one where the erosion has nothing to push back.
