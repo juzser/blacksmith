@@ -2056,7 +2056,7 @@ function epicLabelFor(
   closedEpicIds: ReadonlySet<string>,
 ): string | null {
   if (!epicId) return null;
-  const label = `${project ?? 'black-smith'}: ${humanizeEpicId(epicId)}`;
+  const label = `${projectOf(project)}: ${humanizeEpicId(epicId)}`;
   return closedEpicIds.has(epicId) ? `${label} (finished)` : label;
 }
 

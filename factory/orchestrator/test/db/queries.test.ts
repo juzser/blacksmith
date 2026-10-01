@@ -821,6 +821,15 @@ describe('db/queries.ts', () => {
       ]);
     });
 
+    // epicLabelFor must read a tagged project through projectOf() (DEFAULT_PROJECT),
+    // not re-hardcode 'black-smith' as its own fallback literal.
+    it('labels a tagged task with its own project, not the hard-coded default', () => {
+      handle.db.update(tasks).set({ project: 'other-project' }).where(eq(tasks.taskId, TASK_1)).run();
+      const columns = kanban(handle.db, EPIC_ID);
+      const byStatus = Object.fromEntries(columns.map((c) => [c.taskStatus, c.tasks]));
+      expect(byStatus.completed?.[0]?.epicLabel).toBe('other-project: Epic 1');
+    });
+
     // Cross-provider UI check of 2026-09-14, fix (n): the card's chip read
     // "coder · mid" on a completed task as though someone were still on it.
     // The dispatch row says who was last sent; only the agents row says who
