@@ -910,6 +910,33 @@ describe('evaluateCommand — rule 2: force-push', () => {
     expect(d.allowed).toBe(true);
   });
 
+  // `checkForcePushSubcommandWord` found the `git` word itself by
+  // comparing its *dequoted* text to `git`, then checked the subcommand and
+  // everything after it for plainness — but never the `git` word's own raw
+  // spelling. `g\it push -f origin feat` dequotes to the word `git`, is found,
+  // and every word from `push` on is already plain, so nothing downstream
+  // ever objected: the regex-based checks below (`GIT_PUSH_ANYWHERE_RE`,
+  // `FORCE_PUSH_RE`) scan the *raw* segment text, where the backslash still
+  // breaks `\bgit\b`, so they never fire either. A `git` word read through a
+  // backslash is exactly as unreadable as a subcommand word read through one,
+  // so it gets the same fail-closed refusal.
+  it.each([
+    ['g\\it push -f origin feat'],
+    ['\\git push -f origin feat'],
+    ['gi\\t push -f origin feat'],
+    ['git pu\\sh -f origin feat'],
+    ['git push -\\f origin feat'],
+    ['git push --for\\ce origin feat'],
+    ['git push origin \\+feat'],
+    ['g\\it branch -D main'],
+  ])(
+    'denies %s — a backslash inside the command word hides it from the raw-text checks',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+      expect(ruleIds(d)).toContain('force-push');
+    },
+  );
+
   // Issue #273: the defence-in-depth branch above stripped *every*
   // whitespace character — not just the literal newline the line-
   // continuation trick leaves behind — before checking whether a non-plain
@@ -962,6 +989,17 @@ describe('evaluateCommand — rule 2: force-push', () => {
     },
   );
 
+  it.each([
+    ['git push origin feat'],
+    // An escaped character in an ordinary argument of a non-git command.
+    ['echo fo\\o'],
+    // A commit message containing a backslash is still prose, not a command.
+    ['git commit -m "line one \\ line two"'],
+  ])('allows %s — no disguised git word and nothing force-push shaped', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
   // Quote-splicing resolves to the exact word `git` with no embedded
   // whitespace at all (`g""it` dequotes to "git" directly), so it is caught
   // by the exact-match branch above the hidden one, unaffected by narrowing
@@ -972,6 +1010,48 @@ describe('evaluateCommand — rule 2: force-push', () => {
       ctx({ command: 'g""it push --force origin main', branch: 'feature' }),
       policy,
     );
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // The wrapper list ahead of `git` is open-ended (`sudo`, `env`, `time`,
+  // `timeout`, `xargs`, `nohup`, a bare `VAR=val` prefix, and more), so a
+  // search restricted to the word in command position would miss a
+  // disguised `git` sitting behind any wrapper it does not recognise; the
+  // whole-segment scan catches it regardless of what precedes it.
+  it.each([
+    ['sudo -u root g\\it push -f origin main'],
+    ['env -i g\\it push -f origin main'],
+    ['time -p g\\it push -f origin main'],
+    ['timeout 5 g\\it push -f origin main'],
+    ['VAR=1 g\\it push -f origin main'],
+  ])('denies %s — a wrapper does not hide a disguised git word', (command) => {
+    const d = evaluateCommand(ctx({ command, branch: 'feature' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  // IMPORTANT: rules 1 (push-to-protected), 3 (merge-into-protected) and 5
+  // (history-rewrite-on-protected) all read the raw segment text for a
+  // literal `git` word — `isGitSubcommand`'s `\bgit\b` match never fires on
+  // `g\it`, `gi\t` and the like. The refusal above, which reads the command
+  // word itself rather than the raw text, is the *only* thing standing
+  // between a disguised `git` word and those three rules' targets. Pinned so
+  // a future narrowing of this check cannot silently reopen push, merge or
+  // rebase to protected branches through a disguised `git` word.
+  it("denies g\\it push origin main from a side branch — rule 2 is rules 1/3/5's only cover", () => {
+    const d = evaluateCommand(
+      ctx({ command: 'g\\it push origin main', branch: 'feature' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it("denies g\\it merge feature-y on main — rule 2 is rules 1/3/5's only cover", () => {
+    const d = evaluateCommand(ctx({ command: 'g\\it merge feature-y', branch: 'main' }), policy);
+    expect(ruleIds(d)).toContain('force-push');
+  });
+
+  it("denies g\\it rebase -i HEAD~3 on main — rule 2 is rules 1/3/5's only cover", () => {
+    const d = evaluateCommand(ctx({ command: 'g\\it rebase -i HEAD~3', branch: 'main' }), policy);
     expect(ruleIds(d)).toContain('force-push');
   });
 });
@@ -1516,9 +1596,159 @@ describe('evaluateCommand — rule 6: unbounded-rm', () => {
     expect(d.allowed).toBe(true);
   });
 
+  // The whole-segment scan still only matches a word whose
+  // basename is exactly `rm` — `npm` and the quoted span `"rm is a
+  // command"` (one word, spaces and all, by `splitDequotedWords`'s own
+  // quoting rules) neither have that basename, so the scan never fires at
+  // all and the segment never reaches the arg/allowed-root read.
+  it.each([['npm run format'], ['echo "rm is a command"']])(
+    'allows %s — ordinary words that merely contain the letters rm',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(d.allowed).toBe(true);
+    },
+  );
+
   it('denies a bare relative token when the repo root is unknown (fails closed, mirroring guard.sh)', () => {
     const d = evaluateCommand(ctx({ command: 'rm -rf workspaces/foo', repoRoot: null }), policy);
     expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // `RM_ARGS_RE` reads flags from the raw
+  // text after a literal `rm `, and a quoted invocation's closing quote sits
+  // exactly where that regex wants whitespace, so the match fails and
+  // `extractRmArgs` returns none — read as "not forced" without the fix below.
+  // The word split already dequotes `"rm"`/`'rm'`/`"/bin/rm"` down to a
+  // plain `rm` word, so the flags are read from the words that follow it
+  // instead.
+  it.each([['"rm" -rf /x'], ["'rm' -rf /x"], ['"/bin/rm" -rf /x']])(
+    'denies %s — a quoted plain rm word still reads its flags',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it('allows "rm" -rf workspaces/foo — the quoted rm stays within an allowed root', () => {
+    const d = evaluateCommand(
+      ctx({ command: '"rm" -rf workspaces/foo', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // Same disguise as rule 2's `git` word: `RM_INVOKE_RE` matches
+  // the literal substring `rm`, so a backslash inside the word (`r\m`) hides
+  // the invocation from it entirely — no flags or paths are even read, the
+  // segment is treated as not invoking `rm` at all. A disguised `rm` is
+  // refused outright rather than parsed, since neither its flags nor its
+  // target can be trusted from a word that was never written plainly.
+  it.each([['r\\m -rf src/b'], ['\\rm -rf src/b']])(
+    'denies %s — a backslash inside the rm word hides it from the raw-text check',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it('allows an escaped character inside a word that only ends in rm', () => {
+    const d = evaluateCommand(ctx({ command: 'echo cha\\rm', repoRoot: '/repo' }), policy);
+    expect(d.allowed).toBe(true);
+  });
+
+  // The raw-text checks above still have a hole: an invocation can be
+  // hidden from `RM_INVOKE_RE` entirely. Reading the actual command word —
+  // ANSI-C decoded, dequoted, basename taken — catches it instead.
+  it("denies $'rm' -rf src — ANSI-C quoting still names rm as the command word", () => {
+    const d = evaluateCommand(ctx({ command: "$'rm' -rf src", repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it.each([['/bin/r\\m -rf src'], ['./r\\m -rf src']])(
+    'denies %s — a path glued onto a backslash-disguised rm word',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it('denies sudo r\\m -rf src — a wrapper word does not hide a disguised rm', () => {
+    const d = evaluateCommand(ctx({ command: 'sudo r\\m -rf src', repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // A plain path-prefixed command word (no quoting or backslash trick) names
+  // `rm` exactly as plainly as a bare `rm` does, so it gets the same
+  // allowed-roots analysis, not an outright refusal.
+  it('denies /bin/rm -rf /some/outside/path — a plain path-prefixed rm outside allowed roots', () => {
+    const d = evaluateCommand(
+      ctx({ command: '/bin/rm -rf /some/outside/path', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  it('allows /bin/rm -rf workspaces/foo — a plain path-prefixed rm under an allowed root', () => {
+    const d = evaluateCommand(
+      ctx({ command: '/bin/rm -rf workspaces/foo', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
+  });
+
+  // The wrapper list ahead of `rm` is open-ended, so a disguise scan
+  // restricted to command position would miss a disguised `rm` sitting
+  // behind any wrapper it does not recognise; the whole-segment scan
+  // catches it regardless of what precedes it, at the cost of also refusing
+  // `echo r\m` and `grep 'r'm file`.
+  it.each([
+    ['sudo -E r\\m -rf src'],
+    ['sudo -- r\\m -rf /x'],
+    ['env -u X r\\m -rf /x'],
+    ['nice -n 5 r\\m -rf /x'],
+    ['nohup r\\m -rf /x'],
+    ['xargs r\\m -rf'],
+    ['stdbuf -o0 r\\m -rf /x'],
+    ['ionice r\\m -rf /x'],
+    ['command -p r\\m -rf /x'],
+    ['exec -a x r\\m -rf /x'],
+  ])('denies %s — a wrapper does not hide a disguised rm word', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // Plain `rm` behind a wrapper is worse than a disguised one: deleting the
+  // old `RM_INVOKE_RE` as part of narrowing to command position removed the
+  // raw-text fallback entirely, so these were not even caught by accident.
+  it.each([
+    ['sudo -E rm -rf /x'],
+    ['timeout 5 rm -rf /x'],
+    ['xargs rm -rf /x'],
+    ['nohup rm -rf /x'],
+  ])('denies %s — a plain rm word behind a wrapper is still rm', (command) => {
+    const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+    expect(ruleIds(d)).toContain('unbounded-rm');
+  });
+
+  // `sh -c`/`bash -c`/`eval` hand a
+  // whole second command line to another shell, the same way rule 2's
+  // `isShellWrappedForceCandidate` already treats them. Stripping quotes
+  // turns the wrapped payload into ordinary words the ordinary rm read can
+  // see.
+  it.each([['sh -c "rm -rf /x"'], ['bash -c "rm -rf /x"']])(
+    'denies %s — rm hidden behind a shell -c wrapper',
+    (command) => {
+      const d = evaluateCommand(ctx({ command, repoRoot: '/repo' }), policy);
+      expect(ruleIds(d)).toContain('unbounded-rm');
+    },
+  );
+
+  it('allows sh -c "rm -rf workspaces/foo" — the wrapped rm stays within an allowed root', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'sh -c "rm -rf workspaces/foo"', repoRoot: '/repo' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
   });
 });
 
@@ -1547,6 +1777,18 @@ describe('evaluateCommand — a message payload is prose, not a command', () => 
       policy,
     );
     expect(ruleIds(d)).toEqual([]);
+  });
+
+  // The git-word scan reads every word of the segment, not
+  // just the one in command position — pinned so a disguised spelling inside
+  // a quoted, uncovered-subcommand argument (`git commit`, not `git push`)
+  // still stays allowed, since `git` itself is found plainly first.
+  it('allows git commit -m "see g\\it docs" — a disguised word inside commit prose', () => {
+    const d = evaluateCommand(
+      ctx({ command: 'git commit -m "see g\\it docs"', branch: 'feature-x' }),
+      policy,
+    );
+    expect(d.allowed).toBe(true);
   });
 
   it('allows a merge of a side branch whose message happens to name main', () => {
