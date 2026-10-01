@@ -4,11 +4,23 @@
 // KANBAN_VIRTUALIZE_THRESHOLD, and arrow-key/Space/Enter/Escape card
 // navigation. No drag-and-drop — a deliberate omission (§2.4b pattern 9),
 // not an oversight: the board is read-only, click/keyboard-to-navigate.
+import {
+  Ban,
+  Circle,
+  CircleCheck,
+  CircleDashed,
+  CircleX,
+  Ellipsis,
+  Eye,
+  Loader,
+  TriangleAlert,
+} from '@lucide/vue';
 import { computed, nextTick, ref } from 'vue';
 import type { KanbanTask } from '../lib/api.js';
 import { KANBAN_VIRTUALIZE_THRESHOLD } from '../lib/constants.js';
 import {
   capColumn,
+  columnTone,
   type GroupableTask,
   groupByKanban,
   isDoneStatus,
@@ -22,7 +34,24 @@ import {
 } from '../lib/kanbanDisplayOptions.js';
 import KanbanDisplayOptions from './KanbanDisplayOptions.vue';
 import KanbanTaskCard from './KanbanTaskCard.vue';
+import IconButton from './kit/IconButton.vue';
+import Popover from './kit/Popover.vue';
+import Tag from './kit/Tag.vue';
 import TaskPeekPanel from './TaskPeekPanel.vue';
+
+// ds-spec.md §2.2 KanbanBoard row — one decorative Lucide icon per column
+// tone (§2.2's "status icon ... coloured by the column's tone"). The tone
+// itself is columnTone() (lib/kanban.js), kept testable without a DOM.
+const TONE_ICON = {
+  done: CircleCheck,
+  review: Eye,
+  progress: Loader,
+  todo: Circle,
+  blocked: Ban,
+  danger: CircleX,
+  warning: TriangleAlert,
+  neutral: CircleDashed,
+} as const;
 
 const props = withDefaults(defineProps<{ tasks: KanbanTask[]; showAll?: boolean }>(), {
   showAll: false,
@@ -61,6 +90,18 @@ function hideColumn(key: string) {
 function restoreColumn(key: string) {
   options.value = { ...options.value, hidden: options.value.hidden.filter((h) => h !== key) };
   persist();
+}
+
+// One column menu open at a time (ds-spec.md §2.2's "a column menu behind a
+// sm IconButton Ellipsis 'Column menu'"), same Popover-as-menu pattern
+// KanbanDisplayOptions already uses for its own trigger+panel.
+const openColumnMenu = ref<string | null>(null);
+function toggleColumnMenu(key: string) {
+  openColumnMenu.value = openColumnMenu.value === key ? null : key;
+}
+function hideColumnFromMenu(key: string) {
+  hideColumn(key);
+  openColumnMenu.value = null;
 }
 
 const grouped = computed(() =>
@@ -182,9 +223,33 @@ defineExpose({ focusFirstCard });
     <div class="bs-kanban-board__columns">
       <section v-for="col in columns" :key="col.key" class="bs-kanban-col" :aria-label="`${col.label} column`">
         <div class="bs-kanban-col__head">
+          <component
+            :is="TONE_ICON[columnTone(options.groupBy, col.key)]"
+            :size="16"
+            :stroke-width="1.75"
+            class="bs-kanban-col__icon"
+            :style="{ color: `var(--bs-tone-${columnTone(options.groupBy, col.key)}-text)` }"
+            aria-hidden="true"
+          />
           <h3 class="bs-kanban-col__title">{{ col.label }}</h3>
-          <span class="bs-kanban-col__count">{{ col.total }}</span>
-          <button type="button" class="bs-kanban-col__hide" @click="hideColumn(col.key)">Hide column</button>
+          <Tag class="bs-kanban-col__count" tone="neutral" variant="outline" size="sm">{{ col.total }}</Tag>
+          <Popover
+            :open="openColumnMenu === col.key"
+            :label="`${col.label} column menu`"
+            @close="openColumnMenu = null"
+          >
+            <template #trigger>
+              <IconButton
+                :icon="Ellipsis"
+                label="Column menu"
+                size="sm"
+                @click="toggleColumnMenu(col.key)"
+              />
+            </template>
+            <button type="button" class="bs-kanban-col__hide" @click="hideColumnFromMenu(col.key)">
+              Hide column
+            </button>
+          </Popover>
         </div>
         <p v-if="col.total === 0" class="bs-kanban-col__empty">No tasks in {{ col.label }}.</p>
         <ul role="list" class="bs-kanban-col__list">

@@ -1675,9 +1675,10 @@ summary.bs-inbox__group-head {
   align-items: center;
   gap: var(--bs-space-2);
 }
+.bs-kanban-col__icon {
+  flex-shrink: 0;
+}
 .bs-kanban-col__count {
-  color: var(--bs-text-subtle);
-  font-size: var(--bs-text-xs);
   font-variant-numeric: tabular-nums;
 }
 .bs-kanban-col__title {
@@ -1689,6 +1690,9 @@ summary.bs-inbox__group-head {
   border: none;
   color: var(--bs-text-subtle);
   cursor: pointer;
+  padding: 0;
+  text-align: left;
+  font: inherit;
 }
 .bs-kanban-col__empty {
   color: var(--bs-text-subtle);

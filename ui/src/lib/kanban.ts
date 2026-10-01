@@ -287,6 +287,16 @@ export function epicKeyForTask(taskId: string): string | null {
   return idx > 0 ? taskId.slice(0, idx) : null;
 }
 
+/**
+ * ds-spec.md §2.2 KanbanBoard row — the column header's status icon tone.
+ * Only the `status` grouping has a column key that is itself a real
+ * task_status; the other groupings (project/epic/role) have no tone of
+ * their own and fall back to `neutral` rather than inventing one.
+ */
+export function columnTone(groupBy: KanbanGroupBy, key: string): KitTone {
+  return groupBy === 'status' ? taskStatusKitTone(key) : 'neutral';
+}
+
 export function groupByKanban<T extends GroupableTask>(
   tasks: readonly T[],
   groupBy: KanbanGroupBy,

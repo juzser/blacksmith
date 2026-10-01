@@ -7,6 +7,7 @@ import {
   agentNudgeDue,
   capColumn,
   cardChips,
+  columnTone,
   dependencyChainText,
   epicKeyForTask,
   foldIntoColumns,
@@ -555,5 +556,18 @@ describe('lib/kanban.ts — isDoneStatus() (DS3 pattern 7, column collapse)', ()
   it('reads any other status as not done', () => {
     expect(isDoneStatus('in-progress')).toBe(false);
     expect(isDoneStatus('failed')).toBe(false);
+  });
+});
+
+describe('lib/kanban.ts — columnTone() (ds-spec.md §2.2 column header icon)', () => {
+  it('reads the status grouping key as a real task_status tone', () => {
+    expect(columnTone('status', 'completed')).toBe('done');
+    expect(columnTone('status', 'blocked')).toBe('blocked');
+  });
+
+  it('falls back to neutral for groupings with no status of their own', () => {
+    expect(columnTone('project', 'some-project')).toBe('neutral');
+    expect(columnTone('epic', 'some-epic')).toBe('neutral');
+    expect(columnTone('role', 'coder')).toBe('neutral');
   });
 });
