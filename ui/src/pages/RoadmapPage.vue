@@ -375,6 +375,7 @@ async function closePeek() {
         :epic="selectedEpicData"
         @select="openPeek"
         @update:plan-version="setEpicPlanVersion"
+        @back-to-phase="selectPhase"
       />
     </div>
 

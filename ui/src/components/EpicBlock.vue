@@ -4,7 +4,6 @@
 // region, pointed at one epic instead of a whole phase.
 import { ChevronDown, ChevronUp } from '@lucide/vue';
 import { reactive } from 'vue';
-import { RouterLink } from 'vue-router';
 import { useViewport } from '../composables/useViewport.js';
 import type { PlanVersionOption } from '../lib/planVersion.js';
 import { taskCountLabel } from '../lib/roadmapSwimlane.js';
@@ -60,11 +59,15 @@ defineProps<{
   // Epic mode — set instead of the phase-mode props above.
   epic?: EpicModeData;
 }>();
-// `selectEpic` (DS4 S4 R6): a phone phase-mode row tap.
+// `selectEpic` (DS4 S4 R6): a phone phase-mode row tap. `backToPhase` (R1):
+// the phone epic-mode back link — imperative, not a RouterLink, because the
+// page's selected-phase/selected-epic state is local refs that only react
+// to a route change at mount, not to later URL edits.
 const emit = defineEmits<{
   select: [taskId: string];
   'update:planVersion': [value: string];
   selectEpic: [epicId: string];
+  backToPhase: [phaseId: string];
 }>();
 
 // Phase mode's per-epic "Show waves" toggle (spec §2): not persisted to the
@@ -84,13 +87,14 @@ function toggle(epic: EpicSection) {
   <div v-if="epic" class="eblock" role="region" :aria-label="`Epic ${epic.epicId}`">
     <!-- DS4 S4 R1 — phone back link, above the header, only when the phase
          for this epic is known. -->
-    <RouterLink
+    <button
       v-if="isPhoneWidth && epic.phase"
+      type="button"
       class="bs-roadmap-mobile__back"
-      :to="{ query: { phase: epic.phase.milestoneId } }"
+      @click="emit('backToPhase', epic.phase.milestoneId)"
     >
       &larr; {{ epic.phase.name }}
-    </RouterLink>
+    </button>
 
     <div class="esec-head">
       <b>{{ epic.epicId }}</b>

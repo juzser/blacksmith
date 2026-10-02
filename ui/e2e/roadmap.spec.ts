@@ -78,27 +78,21 @@ test.describe('Roadmap', () => {
     expect(pageScrollWidth).toBeLessThanOrEqual(pageClientWidth + 1);
   });
 
-  test('at 480px only the swimlane scrolls sideways, not the page', async ({ page }) => {
-    // Fix round 1 #9 dropped `.lane`'s min-width from 720px to 520px (spec
-    // and mock both say 520px). `.rm-scroll` only overflows once its own
-    // content width drops below that floor, which no longer happens at
-    // 768px (the old viewport here) — that leaves ~656px of room, comfortably
-    // above 520px. 480px leaves less room than the floor needs, which is what
-    // this test is actually for: the lane overflowing while the page itself
-    // does not.
+  // DS4 S4 — 480px is inside the phone breakpoint (<=640px), so the swimlane
+  // and its sideways-scrolling `.rm-scroll` fallback no longer render at all:
+  // the phone phase list replaces it outright (roadmapMobile.spec.ts covers
+  // that list's own behavior; this just confirms the swap and the no-scroll
+  // floor still hold at 480px specifically).
+  test('at 480px the swimlane is replaced by the phone phase list, no sideways scroll', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 480, height: 1024 });
     await page.goto('/work/roadmap');
-    await expect(page.locator('.rm-scroll')).toBeVisible();
+    await expect(page.locator('.rm-scroll')).toHaveCount(0);
+    await expect(page.locator('.bs-roadmap-mobile__list')).toBeVisible();
     const pageScrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     const pageClientWidth = await page.evaluate(() => document.documentElement.clientWidth);
-    // The document itself never grows wider than its viewport — only the
-    // `.rm-scroll` region inside the swimlane is allowed to overflow.
     expect(pageScrollWidth).toBeLessThanOrEqual(pageClientWidth + 1);
-    const laneOverflows = await page.evaluate(() => {
-      const el = document.querySelector('.rm-scroll');
-      return el ? el.scrollWidth > el.clientWidth : false;
-    });
-    expect(laneOverflows).toBe(true);
   });
 
   for (const theme of ['light', 'dark'] as const) {
@@ -174,13 +168,18 @@ test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', ()
     await expect(card).toBeFocused();
   });
 
-  test('touch targets clear 44px at 375px: wave cards and the Select trigger', async ({ page }) => {
+  // DS4 S4 R3 — at 375px WaveList renders compact (no cards), so the touch
+  // floor is checked on the wave row itself instead of `.wave-task-card`.
+  test('touch targets clear 44px at 375px: compact wave rows and the Select trigger', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/work/roadmap?epic=epic-9');
-    const card = page.locator('.wave-task-card').first();
-    await expect(card).toBeVisible();
+    const wave = page.locator('.wave').first();
+    await expect(wave).toBeVisible();
+    await expect(page.locator('.wave-task-card')).toHaveCount(0);
 
-    for (const locator of [card, page.getByLabel('Plan version', { exact: true })]) {
+    for (const locator of [wave, page.getByLabel('Plan version', { exact: true })]) {
       const box = await locator.boundingBox();
       expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -228,12 +227,15 @@ test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2,
     await expect(esec9.locator('.wave-list')).toBeVisible();
   });
 
-  test('touch target: the toggle clears 44px at 375px', async ({ page }) => {
+  // DS4 S4 — at 375px phase mode renders the phone stacked list instead of
+  // `.esec`/`.linkbtn` (roadmapMobile.spec.ts), so the floor here moves to
+  // the row that replaces the toggle.
+  test('touch target: the phone row clears 44px at 375px', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/work/roadmap?phase=phase-6b');
-    const toggle = page.locator('.esec', { hasText: 'epic-9' }).locator('.linkbtn');
-    await expect(toggle).toBeVisible();
-    const box = await toggle.boundingBox();
+    const row = page.locator('.bs-roadmap-mobile__row', { hasText: 'epic-9' });
+    await expect(row).toBeVisible();
+    const box = await row.boundingBox();
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });

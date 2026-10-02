@@ -2668,10 +2668,14 @@ summary.bs-inbox__group-head {
   display: inline-flex;
   align-items: center;
   min-height: var(--bs-touch);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
   font-size: var(--bs-text-sm);
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text-subtle);
-  text-decoration: none;
+  cursor: pointer;
 }
 .bs-roadmap-mobile__summary {
   display: flex;
@@ -2718,7 +2722,10 @@ summary.bs-inbox__group-head {
 }
 .bs-roadmap-mobile__row-status {
   margin-left: auto;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .bs-roadmap-mobile__waves {
   padding: 0 var(--bs-space-4) var(--bs-space-3);

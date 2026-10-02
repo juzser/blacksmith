@@ -58,6 +58,7 @@ describe('RoadmapPage.vue — phone branch (DS4 S4)', () => {
   it("derives each selected epic's phase for the back link (R1)", () => {
     expect(SFC).toMatch(/epicPhase\(/);
     expect(SFC).toMatch(/phase: epicPhase/);
+    expect(SFC).toMatch(/@back-to-phase="selectPhase"/);
   });
 });
 
@@ -83,10 +84,11 @@ describe('EpicBlock.vue — phone branch (DS4 S4)', () => {
     expect(EPIC_BLOCK).toMatch(/sec\.waves\.filter\(\(w\) => w\.kind === 'current'\)/);
   });
 
-  it('shows the back link only when the phase is known, at least --bs-touch tall (R1)', () => {
-    expect(EPIC_BLOCK).toMatch(/RouterLink/);
+  it('shows the back link only when the phase is known, emitting backToPhase imperatively (R1)', () => {
+    expect(EPIC_BLOCK).toMatch(/backToPhase:\s*\[phaseId: string\]/);
     expect(EPIC_BLOCK).toMatch(/v-if="isPhoneWidth && epic\.phase"/);
     expect(EPIC_BLOCK).toMatch(/bs-roadmap-mobile__back/);
+    expect(EPIC_BLOCK).toMatch(/emit\('backToPhase', epic\.phase\.milestoneId\)/);
   });
 
   it('epic mode always renders WaveList in compact form on phone (R3)', () => {
