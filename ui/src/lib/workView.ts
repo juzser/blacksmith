@@ -1,4 +1,4 @@
-// Work view (Kanban/Roadmap) switch logic (ds4-plan.md S1). Pure helpers so
+// Work view (Kanban/Roadmap) switch logic. Pure helpers so
 // WorkPage.vue, SegmentedControl and router.ts's legacy redirects stay thin
 // and testable without mounting a component or a router.
 import type { LocationQueryRaw } from 'vue-router';

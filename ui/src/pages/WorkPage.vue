@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Work (ds4-plan.md S1): a shared shell for the Kanban/Roadmap switch.
+// Work: a shared shell for the Kanban/Roadmap switch.
 // View-agnostic — the title/crumb read "Work" on both (operator decision),
 // and view-specific controls (Kanban's Clear-filter/Refresh) stay inside
 // their own page, not here. Reuses the old kit's `.app-page` wrapper rather
@@ -45,6 +45,7 @@ function onPickView(value: string) {
          own controls). Closing the overflow on pick is MobileTopBar's own
          job (it watches route.fullPath), not this component's. -->
     <Teleport to="#bs-mtopbar-overflow-extra">
+      <span class="bs-mtopbar__menu-label">View</span>
       <RadioGroup
         :model-value="currentView"
         :options="radioOptions"

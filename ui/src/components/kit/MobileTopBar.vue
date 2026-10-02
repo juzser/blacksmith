@@ -14,9 +14,11 @@ import { Ellipsis, Moon, Pause, Play, Settings, Sun } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { formatLiveStatus } from '../../lib/format.js';
+import Icon from './Icon.vue';
 import IconButton from './IconButton.vue';
 import MobileProjectSwitcher from './MobileProjectSwitcher.vue';
 import Popover from './Popover.vue';
+import Separator from './Separator.vue';
 
 const props = defineProps<{
   title: string;
@@ -41,8 +43,8 @@ function closeOverflow() {
 
 // Any navigation closes the overflow — in particular Work's "View" radio
 // group teleported in via #bs-mtopbar-overflow-extra, whose own change
-// handler routes rather than emitting a dedicated close event (ds4-plan.md
-// S1, uiux spec §3 focus return).
+// handler routes rather than emitting a dedicated close event (Work's view
+// switch, uiux spec §3 focus return).
 const route = useRoute();
 watch(() => route.fullPath, closeOverflow);
 
@@ -72,26 +74,38 @@ const dotLabel = computed(() => formatLiveStatus(props.live, props.lastEventAt, 
           @click="overflowOpen = !overflowOpen"
         />
       </template>
-      <div class="bs-mtopbar__overflow">
-        <IconButton
-          :icon="live ? Pause : Play"
-          :label="live ? 'Pause updates' : 'Resume updates'"
-          size="sm"
+      <div class="bs-mtopbar__overflow" role="menu" aria-label="More actions">
+        <button
+          type="button"
+          class="bs-mtopbar__menuitem"
+          role="menuitem"
           @click="
             emit('togglePause');
             closeOverflow();
           "
-        />
-        <IconButton
-          :icon="theme === 'dark' ? Sun : Moon"
-          :label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-          size="sm"
+        >
+          <Icon :icon="live ? Pause : Play" :size="16" />
+          <span>{{ live ? 'Pause live updates' : 'Resume live updates' }}</span>
+        </button>
+        <button
+          type="button"
+          class="bs-mtopbar__menuitem"
+          role="menuitem"
           @click="
             emit('toggleTheme');
             closeOverflow();
           "
-        />
-        <IconButton :icon="Settings" label="Settings" size="sm" disabled />
+        >
+          <Icon :icon="theme === 'dark' ? Sun : Moon" :size="16" />
+          <span>{{ theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme' }}</span>
+        </button>
+        <!-- "Open desktop view" is deferred, see ui/docs/DESIGN.md Known
+             deviations — no viewport-override mechanism exists yet. -->
+        <button type="button" class="bs-mtopbar__menuitem" role="menuitem" aria-disabled="true">
+          <Icon :icon="Settings" :size="16" />
+          <span>Settings</span>
+        </button>
+        <Separator />
         <!-- ds-spec.md §3.1 Work/Kanban row: page-specific overflow controls
              (e.g. Kanban's display options) teleport in here, same Teleport
              mechanism kit/Dialog.vue/Sheet.vue/Toast.vue already use. Kept

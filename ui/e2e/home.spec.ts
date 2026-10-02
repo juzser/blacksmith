@@ -206,6 +206,21 @@ test.describe('Home', () => {
       });
     }
   }
+
+  // Blast radius: MobileTopBar renders on every page, so its vertical
+  // overflow menu (DS4 S1 round 4) needs its own proof on Home too, not
+  // just Work (work.spec.ts).
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot mobile overflow/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await page.goto('/overview');
+      await page.getByRole('button', { name: 'More actions' }).click();
+      const menu = page.getByRole('menu', { name: 'More actions' });
+      await settleForShot(page, menu);
+      await shoot(page, `home-mobile-overflow-${theme}`);
+    });
+  }
 });
 
 test.describe('Home: Needs you inbox', () => {

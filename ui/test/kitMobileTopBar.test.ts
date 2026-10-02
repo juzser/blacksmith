@@ -43,6 +43,37 @@ describe('kit/MobileTopBar.vue', () => {
     expect(TOPBAR).toMatch(/<MobileProjectSwitcher\s+v-if="showProjectSwitcher"/);
     expect(TOPBAR).not.toMatch(/<ProjectSwitcher\s/);
   });
+
+  it('the overflow renders as a labeled vertical menu (ds-review.html .ph-menu)', () => {
+    expect(TOPBAR).toMatch(/role="menu"/);
+    const overflowStart = TOPBAR.indexOf('bs-mtopbar__overflow"');
+    const overflowBody = TOPBAR.slice(overflowStart);
+    const menuitemCount = overflowBody.match(/role="menuitem"/g)?.length ?? 0;
+    expect(menuitemCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the pause menu item label flips between pause and resume', () => {
+    expect(TOPBAR).toMatch(/Pause live updates/);
+    expect(TOPBAR).toMatch(/Resume live updates/);
+  });
+
+  it('the Settings menu item stays disabled, and a Separator sits before the extra slot', () => {
+    const overflowStart = TOPBAR.indexOf('bs-mtopbar__overflow"');
+    const overflowBody = TOPBAR.slice(overflowStart);
+    const settingsIdx = overflowBody.indexOf('Settings');
+    expect(settingsIdx).toBeGreaterThan(-1);
+    const settingsItem = overflowBody.slice(Math.max(0, settingsIdx - 200), settingsIdx + 50);
+    expect(settingsItem).toMatch(/aria-disabled="true"/);
+
+    const sepIdx = overflowBody.indexOf('<Separator');
+    const extraIdx = overflowBody.indexOf('bs-mtopbar-overflow-extra');
+    expect(sepIdx).toBeGreaterThan(-1);
+    expect(extraIdx).toBeGreaterThan(sepIdx);
+  });
+
+  it('no stale ds4-plan.md references remain (that file is not in the repo)', () => {
+    expect(TOPBAR).not.toMatch(/ds4-plan\.md/);
+  });
 });
 
 describe('.bs-mtopbar__project CSS (push-right onto a display: contents wrapper)', () => {

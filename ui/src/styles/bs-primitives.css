@@ -647,12 +647,14 @@ a:hover {
   color: var(--bs-text);
   cursor: pointer;
 }
-/* Mobile overflow (ds4-plan.md S1): the only live consumer is WorkPage's
-   view switch, teleported into the mobile top bar overflow, so the touch
-   target only needs widening at the mobile breakpoint. */
+/* Mobile overflow: the only live consumer is WorkPage's view switch,
+   teleported into the mobile top bar overflow, so the touch target only
+   needs widening at the mobile breakpoint. */
 @media (max-width: 640px) {
   .bs-radio {
     min-height: var(--bs-touch);
+    width: 100%;
+    padding: 0 var(--bs-space-2);
   }
 }
 
@@ -850,7 +852,7 @@ a:hover {
   padding-top: var(--bs-space-4);
 }
 
-/* SegmentedControl (ds4-plan.md S1, Work's Kanban/Roadmap switch): two
+/* SegmentedControl (Work's Kanban/Roadmap switch): two
    RouterLinks, no accent fill on the selected item (§1.9 accent budget) —
    --bs-surface-selected + aria-current="page" is the cue instead, same as
    the rest of this kit's non-accent active states. One size (md): the row
@@ -1410,10 +1412,53 @@ a:hover {
 .bs-mtopbar__dot[data-live='true'] {
   background: var(--bs-tone-done-text);
 }
+/* ds-review.html .ph-menu: a vertical labeled menu, not an icon-only row —
+   the icon-only overflow (round 3) left "View" and its Separator with
+   nothing to stack under (round 4 finding). */
 .bs-mtopbar__overflow {
-  min-width: 0;
+  min-width: 12rem;
   display: flex;
-  gap: var(--bs-space-1);
+  flex-direction: column;
+  gap: 0;
+}
+.bs-mtopbar__menuitem {
+  width: 100%;
+  min-height: var(--bs-touch);
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  padding: 0 var(--bs-space-2);
+  font: inherit;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--bs-radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.bs-mtopbar__menuitem:hover {
+  background: var(--bs-surface-selected);
+}
+.bs-mtopbar__menuitem[aria-disabled='true'] {
+  color: var(--bs-text-disabled);
+  cursor: default;
+}
+.bs-mtopbar__menuitem[aria-disabled='true']:hover {
+  background: transparent;
+}
+.bs-mtopbar__menuitem .bs-icon {
+  color: var(--bs-text-subtle);
+  flex-shrink: 0;
+}
+/* Visible "View" heading above WorkPage's teleported radio group — the
+   radiogroup's own aria-label is not enough on its own (uiux spec §3). */
+.bs-mtopbar__menu-label {
+  display: block;
+  padding: var(--bs-space-1) var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text-subtle);
 }
 /* Teleport target for page-specific overflow controls (ds-spec.md §3.1 Work/
    Kanban row) — `display: contents` so a teleported trigger sits inline with

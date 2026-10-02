@@ -51,7 +51,7 @@ const routes: RouteRecordRaw[] = [
     meta: { crumb: () => [{ label: 'Activity' }] },
   },
   {
-    // Work: a Kanban/Roadmap switch (ds4-plan.md S1), not two unrelated
+    // Work: a Kanban/Roadmap switch, not two unrelated
     // pages. /work/kanban and /work/roadmap are child routes so WorkPage.vue
     // can own the shared header/SegmentedControl above `<router-view>`; the
     // crumb/title read "Work" on both (operator decision, not a per-view

@@ -81,6 +81,44 @@ test.describe('Work switcher', () => {
     }
   });
 
+  test('phone: the overflow renders as a vertical labeled menu, View stacked below the built-ins (DS4 S1 round 4)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const menuitems = await menu.getByRole('menuitem').all();
+    expect(menuitems.length).toBeGreaterThanOrEqual(3);
+    const radios = await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio').all();
+    expect(radios.length).toBeGreaterThan(0);
+
+    const rows: { top: number; bottom: number }[] = [];
+    for (const item of menuitems) {
+      const box = await item.boundingBox();
+      if (!box) throw new Error('a menuitem has no box');
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      rows.push({ top: box.y, bottom: box.y + box.height });
+    }
+    for (const radio of radios) {
+      const box = await radio.locator('xpath=..').boundingBox();
+      if (!box) throw new Error('a View radio row has no box');
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      rows.push({ top: box.y, bottom: box.y + box.height });
+    }
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i];
+      const prev = rows[i - 1];
+      if (!row || !prev) throw new Error('row index out of range');
+      expect(row.top).toBeGreaterThanOrEqual(prev.bottom);
+    }
+
+    await expect(page.getByText('View', { exact: true })).toBeVisible();
+  });
+
   test('phone: the overflow popover stays fully inside the viewport (DS4 S1 round 2, S2-major finding 5)', async ({
     page,
   }) => {
