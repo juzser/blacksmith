@@ -16,9 +16,11 @@ const slots = useSlots();
 // wrapper div was still an in-flow item of the page's flex stack. A
 // position:absolute h1 (sr-only) takes no space itself, but its still-boxed
 // ancestors do, and the stack's `gap` is reserved around them regardless of
-// their own height, leaving an empty band above the next row (WorkPage,
-// SessionsPage, TimelinePage). Skipping the wrapper markup entirely for that
-// case, down to the bare sr-only h1, removes it as a stack item altogether.
+// their own height, leaving an empty band above the next row (WorkPage, the
+// only page using this component with nothing visible). Skipping the
+// wrapper markup entirely for that case, down to the bare sr-only h1,
+// removes it as a stack item altogether. ds/PageHeader.vue carries the same
+// fix for SessionsPage and TimelinePage, which use that component instead.
 const isEmpty = computed(
   () => !props.titleVisible && !props.description && !slots.status && !slots.actions,
 );
