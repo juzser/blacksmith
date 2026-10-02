@@ -109,22 +109,10 @@ test.describe('Manual refresh (design-spec §8)', () => {
  * Kanban, Timeline) answer it via their own `usePoll(...)`; Flow joined them
  * at the 15s cadence design-spec.md §8 states for Kanban/Timeline. Projects
  * is now part of Home (ds-spec.md §4.1), which polls too, so its tests run
- * against Home's per-project cards. Roadmap still does not, and the manual-refresh pages
- * above never will by design.
+ * against Home's per-project cards.
  *
  * The "re-fetches" tests bound their wait well under the 15s poll, so it is
  * the click that must produce the response, not the next tick.
- *
- * DS4 S3 §4: FlowPage is deleted outright, and its `/flow` replacement,
- * Roadmap's `?epic=` mode (RoadmapPage.vue), has no `usePoll(...)` call of
- * its own — it never did even in phase mode. The four Flow tests that used
- * to live here (topbar Refresh re-fetching the graph, keeping content on
- * screen during that refetch, a failed scope-switch fetch, an expanded wave
- * surviving a topbar Refresh) all proved behaviour that lived in
- * usePoll/triggerGlobalRefresh wiring FlowPage had and Roadmap does not —
- * there is no page left anywhere that answers the topbar Refresh with flow
- * data, so there is nothing left for them to re-point at. Dropped rather
- * than rewritten against a control that does not exist.
  */
 test.describe('Topbar Refresh reaches Home (D-243)', () => {
   test('Home: topbar Refresh re-fetches the overview', async ({ page }) => {
@@ -161,5 +149,91 @@ test.describe('Topbar Refresh reaches Home (D-243)', () => {
     // block above for why a retrying matcher would prove nothing here.
     expect(await page.locator('.bs-skeleton').count()).toBe(0);
     expect(await page.getByRole('link', { name: 'View black-smith in Work' }).count()).toBe(1);
+  });
+});
+
+/**
+ * DS4 S3 fix round 1 finding 2: epic mode (`RoadmapPage.vue`'s `?epic=`
+ * query) never answered the topbar Refresh and never polled, so a running
+ * epic's WaveList sat on whatever it fetched on load until a full page
+ * reload. These re-point the four FlowPage refresh tests Part C dropped
+ * (above) at that mode's own graph fetch, `/api/flow`.
+ */
+test.describe('Roadmap epic mode refresh (ds4-s3-uiux-spec.md §2, §8)', () => {
+  test('topbar Refresh re-fetches the epic graph and updates the waves', async ({ page }) => {
+    // Registered before goto(): the mount fetch must be the unmutated first
+    // call, so the refresh click below is unambiguously the second one.
+    let served = 0;
+    await page.route('**/api/flow*', async (route) => {
+      served += 1;
+      if (served === 1) {
+        await route.continue();
+        return;
+      }
+      // Second response only: flip every node to `completed` so the current
+      // wave empties out and the next one takes its place -- a change a page
+      // sitting on stale data could never show on its own.
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const node of body.nodes) node.taskStatus = 'completed';
+      await route.fulfill({ response, json: body });
+    });
+
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    const curWaveCards = () => page.locator('.wave.cur .wave-task-card').count();
+    await expect.poll(curWaveCards).toBe(1);
+
+    const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'));
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await refetched;
+
+    await expect.poll(curWaveCards).toBe(0);
+  });
+
+  // Same idiom as shell.spec.ts's "polls on a page that has no poll of its
+  // own": two requests within the 15s window prove the interval is running,
+  // not just the mount fetch. The change stream is blocked here, exactly as
+  // shouldRunInterval() (lib/eventStream.ts) documents: once the stream
+  // reaches `open`, the fallback interval stands down in favour of the
+  // stream's own `advanced` signal, which this fixture's static data never
+  // emits -- so an open stream would make this a test of the stream, not
+  // the poll usePoll wires on top of it.
+  test('polls the epic graph on its own 15s cadence', async ({ page }) => {
+    await page.route('**/api/stream*', (route) => route.abort('failed'));
+    let served = 0;
+    page.on('request', (r) => {
+      if (r.url().includes('/api/flow')) served += 1;
+    });
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    await expect.poll(() => served, { timeout: 20_000 }).toBeGreaterThanOrEqual(2);
+  });
+
+  // The background path (`loadEpicModeFlow({ background: true })`) must not
+  // reset `epicModeFlow` before the fetch lands -- unlike a foreground load,
+  // which shows a Skeleton while `epicModeFlow` is `undefined`.
+  test('keeps the waves on screen while a background refresh is in flight', async ({ page }) => {
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    await expect(page.locator('.wave-list')).toBeVisible();
+    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
+
+    await page.route('**/api/flow*', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await route.continue();
+    });
+    const inFlight = page.waitForRequest((r) => r.url().includes('/api/flow'));
+    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await inFlight;
+
+    // Read synchronously, inside the route's hold -- see the manual-refresh
+    // block above for why a retrying matcher would prove nothing here.
+    expect(await page.locator('.bs-skeleton').count()).toBe(0);
+    expect(await page.locator('.wave-list').count()).toBe(1);
   });
 });

@@ -19,6 +19,7 @@ import Skeleton from '../components/kit/Skeleton.vue';
 import RoadmapSwimlane from '../components/RoadmapSwimlane.vue';
 import TaskPeekPanel from '../components/TaskPeekPanel.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import {
@@ -38,7 +39,7 @@ import {
   milestoneStatusKitTone,
   milestoneStatusLabel,
 } from '../lib/taxonomy.js';
-import { buildWaveList, epicStatusFromFlow } from '../lib/waveList.js';
+import { buildWaveList, epicProject, epicStatusFromFlow } from '../lib/waveList.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -83,21 +84,35 @@ async function loadEpicFlow(epicId: string) {
 const epicModeFlow = ref<FlowGraph | 'failed' | undefined>(undefined);
 const epicPlanVersion = ref('');
 
-async function loadEpicModeFlow() {
+/**
+ * `background: true` is the poll/topbar-Refresh path (fix round 1 finding
+ * 2): it must not flash the Skeleton over data already on screen, so it
+ * neither resets `epicModeFlow` to `undefined` before fetching nor stomps
+ * good data with 'failed' on a transient error — the stale graph just stays
+ * up until the next successful fetch replaces it.
+ */
+async function loadEpicModeFlow(options: { background?: boolean } = {}) {
   if (!selectedEpic.value) return;
   const epicId = selectedEpic.value;
-  epicModeFlow.value = undefined;
+  const background = options.background ?? false;
+  if (!background) epicModeFlow.value = undefined;
   try {
-    epicModeFlow.value = await fetchFlow({
+    const flow = await fetchFlow({
       session: sessionScope.value,
       project: project.value,
       epic: epicId,
       planVersion: epicPlanVersion.value ? Number(epicPlanVersion.value) : undefined,
     });
+    epicModeFlow.value = flow;
   } catch {
-    epicModeFlow.value = 'failed';
+    if (!background) epicModeFlow.value = 'failed';
   }
 }
+
+// Fix round 1 finding 2: the old FlowPage polled at 15s (see git history) and
+// answered the topbar Refresh via usePoll's shared signal; RoadmapPage never
+// did, so a running epic's WaveList went stale until a manual reload.
+usePoll(() => loadEpicModeFlow({ background: true }), 15000);
 
 function epicIdsForPhase(phaseId: string | null): string[] {
   if (phaseId === null) return [];
@@ -182,7 +197,7 @@ const selectedEpicData = computed(() => {
       epicId,
       statusTone: 'neutral' as KitTone,
       statusLabel: 'Loading',
-      project: project.value ?? null,
+      project: epicProject(milestones.value ?? [], epicId, project.value ?? null),
       planVersionOptions: planVersionOptions(null),
       planVersion: epicPlanVersion.value,
       loading: true,
@@ -197,7 +212,7 @@ const selectedEpicData = computed(() => {
       epicId,
       statusTone: 'neutral' as KitTone,
       statusLabel: 'Unavailable',
-      project: project.value ?? null,
+      project: epicProject(milestones.value ?? [], epicId, project.value ?? null),
       planVersionOptions: planVersionOptions(null),
       planVersion: epicPlanVersion.value,
       loading: false,
@@ -212,7 +227,7 @@ const selectedEpicData = computed(() => {
     epicId,
     statusTone,
     statusLabel,
-    project: project.value ?? null,
+    project: epicProject(milestones.value ?? [], epicId, project.value ?? null),
     planVersionOptions: planVersionOptions(flow),
     planVersion: epicPlanVersion.value,
     loading: false,
