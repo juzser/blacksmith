@@ -18,13 +18,13 @@
 // docs/standards/stack.md's Workers-first rule, and would be the largest write
 // surface this dashboard has ever had. Left out rather than half-built.
 //
-// House pattern, same as RoadmapPage/FlowPage: the layout lives in pure
+// House pattern, same as RoadmapPage (and the retired FlowPage before it): the layout lives in pure
 // functions in lib/sessionsFlow.ts so it is unit-tested under
 // ui/vitest.config.ts's node environment (ui/test/sessionsFlow.test.ts)
 // instead of only through Playwright; this file holds markup, paint and
 // navigation only.
 //
-// Deviation, flagged (identical to RoadmapPage and FlowPage): @vue-flow/core
+// Deviation, flagged (identical to RoadmapPage and the retired FlowPage): @vue-flow/core
 // is the only graph package docs/standards/stack.md sanctions —
 // @vue-flow/minimap and @vue-flow/controls are not — so the viewport controls
 // are rebuilt from useVueFlow() inside a <Panel> and no minimap is faked.
@@ -552,8 +552,7 @@ function goToTask(taskId: string | null) {
       <p v-if="hiddenSessionsLine" class="sessions-canvas__more">{{ hiddenSessionsLine }}</p>
 
       <!-- sr-only alternative (a11y): a DOM graph carries no text alternative
-           for its ORDER, nor for which agent hangs off which run. Same pattern
-           as RoadmapPage's sequence table and FlowPage's task-DAG table. Over
+           for its ORDER, nor for which agent hangs off which run. Over
            the drawn bands only — what was hidden is in the toolbar summary,
            which is ordinary text and reaches AT already. -->
       <table class="sr-only">

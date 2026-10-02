@@ -98,7 +98,7 @@ onMounted(() => {
 });
 const { refresh } = usePoll(load, 15000);
 watch(selectedEpic, loadBoard);
-// Same split as FlowPage's, for the same reason: `loadBoard()` fetches only
+// Same split as the retired FlowPage's, for the same reason: `loadBoard()` fetches only
 // /api/kanban, so a project switch left the picker listing the previous
 // project's epics. Here the 15s poll re-ran `load()` and healed it eventually
 // — the operator just had up to fifteen seconds of a control offering epics
