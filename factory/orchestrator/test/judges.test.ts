@@ -7,9 +7,12 @@ import {
   foldJudgeTurns,
   JudgeError,
   outstandingJudges,
+  readJudgeArtifact,
   readJudgeTurns,
   recordJudgeDispatch,
   recordJudgeReport,
+  type UiuxDeviation,
+  uiuxDeviationsToEvidence,
 } from '../src/judges.js';
 
 describe('judges.ts', () => {
@@ -145,6 +148,153 @@ describe('judges.ts', () => {
       );
       expect(report.attested).toBe(true);
       expect(outstandingJudges(await turns())).toEqual([]);
+    });
+  });
+
+  // S2: a uiux task opens a pre-code spec turn and a post-test visual turn,
+  // and the old (task, role) fold key let one silently erase the other.
+  describe('uiux turn kinds (S2)', () => {
+    function uiuxDocument(deviations: unknown[]): Record<string, unknown> {
+      return {
+        run_status: 'done',
+        structured_output: { deviations },
+      };
+    }
+
+    async function writeArtifact(file: string, document: unknown) {
+      await writeFile(file, JSON.stringify(document));
+    }
+
+    it('spec and visual turns on one task coexist and close independently', async () => {
+      const specArtifact = path.join(artifactDir, 'uiux-spec.json');
+      const visualArtifact = path.join(artifactDir, 'uiux-visual.json');
+      await dispatch({ role: 'uiux', kind: 'spec', artifactPath: specArtifact });
+      await dispatch({ role: 'uiux', kind: 'visual', artifactPath: visualArtifact });
+
+      const open = outstandingJudges(await turns());
+      expect(open.map((t) => t.kind).sort()).toEqual(['spec', 'visual']);
+
+      await writeArtifact(specArtifact, uiuxDocument([]));
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', kind: 'spec', artifactPath: specArtifact },
+        ctx(),
+        opts(),
+      );
+      const afterSpec = outstandingJudges(await turns());
+      expect(afterSpec).toHaveLength(1);
+      expect(afterSpec[0]?.kind).toBe('visual');
+
+      await writeArtifact(visualArtifact, uiuxDocument([{ severity: 'S3-minor' }]));
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', kind: 'visual', artifactPath: visualArtifact },
+        ctx(),
+        opts(),
+      );
+      expect(outstandingJudges(await turns())).toEqual([]);
+    });
+
+    it('a real uiux visual object no longer throws, and its count equals its deviations', async () => {
+      const file = path.join(artifactDir, 'uiux-visual-count.json');
+      await writeArtifact(file, uiuxDocument([{ severity: 'S2-major' }, { severity: 'S3-minor' }]));
+      expect(readJudgeArtifact(file, 'uiux', 'epic-1/task-1', 'visual', opts())).toBe(2);
+    });
+
+    it('a real uiux spec object reports 0', async () => {
+      const file = path.join(artifactDir, 'uiux-spec-count.json');
+      await writeArtifact(file, uiuxDocument([{ token: 'color.border.default' }]));
+      expect(readJudgeArtifact(file, 'uiux', 'epic-1/task-1', 'spec', opts())).toBe(0);
+    });
+
+    it('legacy uiux events with no judge_kind still fold and close', async () => {
+      const file = path.join(artifactDir, 'uiux-legacy.json');
+      await dispatch({ role: 'uiux', artifactPath: file });
+      const open = await turns();
+      expect(open).toHaveLength(1);
+      expect(open[0]?.kind).toBeNull();
+
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true },
+        ctx(),
+        opts(),
+      );
+      expect(outstandingJudges(await turns())).toEqual([]);
+    });
+
+    it('an ambiguous report (two open uiux turns, no kind) errors clearly', async () => {
+      await dispatch({
+        role: 'uiux',
+        kind: 'spec',
+        artifactPath: path.join(artifactDir, 'a.json'),
+      });
+      await dispatch({
+        role: 'uiux',
+        kind: 'visual',
+        artifactPath: path.join(artifactDir, 'b.json'),
+      });
+
+      await expect(
+        recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true },
+          ctx(),
+          opts(),
+        ),
+      ).rejects.toThrow(/spec.*visual|visual.*spec/);
+    });
+
+    it('--kind on a non-uiux role is rejected', async () => {
+      await expect(dispatch({ role: 'reviewer', kind: 'spec' })).rejects.toBeInstanceOf(JudgeError);
+    });
+
+    it('non-uiux artifacts that are neither a list nor the grader object still throw judges.artifact-not-a-list', async () => {
+      const file = path.join(artifactDir, 'reviewer-bad.json');
+      await writeArtifact(file, { not: 'a list' });
+      try {
+        readJudgeArtifact(file, 'reviewer', 'epic-1/task-1');
+        throw new Error('expected readJudgeArtifact to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(JudgeError);
+        expect((err as JudgeError).code).toBe('judges.artifact-not-a-list');
+      }
+    });
+  });
+
+  describe('uiuxDeviationsToEvidence', () => {
+    it('maps a visual deviation onto the findings-evidence shape the gate consumes', () => {
+      const deviation: UiuxDeviation = {
+        screenshot: 'artifacts/screenshots/dashboard-dark-mobile.png',
+        viewport: 'mobile',
+        theme: 'dark',
+        dimension: 'accessibility',
+        severity: 'S2-major',
+        expected: 'contrast ratio >= 4.5:1',
+        observed: 'contrast ratio 2.1:1',
+      };
+      const [evidence] = uiuxDeviationsToEvidence([deviation]);
+      expect(evidence).toMatchObject({
+        file_path: deviation.screenshot,
+        finding_category: 'a11y',
+        severity: 'S2-major',
+        failure_scenario: {
+          inputs: 'viewport=mobile theme=dark',
+          expected: deviation.expected,
+          actual: deviation.observed,
+        },
+      });
+    });
+
+    it('maps a non-accessibility dimension to visual-design', () => {
+      const [evidence] = uiuxDeviationsToEvidence([
+        {
+          screenshot: 'artifacts/screenshots/kanban-light-desktop.png',
+          viewport: 'desktop',
+          theme: 'light',
+          dimension: 'layout_spacing',
+          severity: 'S3-minor',
+          expected: '16px gap',
+          observed: '8px gap',
+        },
+      ]);
+      expect(evidence?.finding_category).toBe('visual-design');
     });
   });
 
