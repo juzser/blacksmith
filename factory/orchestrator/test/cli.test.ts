@@ -9058,6 +9058,336 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // S2: `--uiux-visual` hands over a uiux visual pass's Result document
+    // (not a findings-evidence array) and must follow the same severity
+    // policy as every other judge's evidence.
+    describe('gate run --uiux-visual (uiux turn kinds)', () => {
+      async function gateFixture(sessionId: string): Promise<[string, string, string]> {
+        const worktreeDir = await committedWorktree(`uiux-visual-${sessionId}`);
+        const checksPath = path.join(scratchDir, `${sessionId}-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-result.json`);
+        await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        return [worktreeDir, checksPath, resultPath];
+      }
+
+      // The screenshot path has to fall under epic-1/task-1's claims
+      // (src/foo/*.ts in the shared PLAN fixture) for the gate to score the
+      // deviation against the task being gated instead of filing it as an
+      // unclaimed follow-up (D-41/P9-24's ownership check, exercised above
+      // with --evidence findings the same way).
+      function deviation(overrides: Record<string, unknown> = {}) {
+        return {
+          screenshot: 'src/foo/screenshot-desktop-light.ts',
+          viewport: 'desktop',
+          theme: 'light',
+          dimension: 'layout_spacing',
+          severity: 'S3-minor',
+          expected: '16px gutter',
+          observed: '8px gutter',
+          ...overrides,
+        };
+      }
+
+      async function visualFile(name: string, deviations: unknown[]): Promise<string> {
+        const filePath = path.join(scratchDir, `${name}.json`);
+        await writeFile(
+          filePath,
+          JSON.stringify({ run_status: 'done', structured_output: { deviations } }),
+        );
+        return filePath;
+      }
+
+      it('blocks the gate on an S2 deviation', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visual = await visualFile(`${sessionId}-visual-s2`, [
+          deviation({ severity: 'S2-major', dimension: 'accessibility' }),
+        ]);
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visual,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+
+        const raised = tail(sessionId, eventsDir)
+          .filter((r) => r.event_type === 'finding-raised')
+          .map((r) => r.payload);
+        expect(raised).toHaveLength(1);
+        expect(raised[0]?.found_by).toBe('uiux');
+        expect(raised[0]?.finding_category).toBe('a11y');
+        expect(raised[0]?.severity).toBe('S2-major');
+      });
+
+      it('does not block the gate on an S3 deviation', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visual = await visualFile(`${sessionId}-visual-s3`, [
+          deviation({ severity: 'S3-minor' }),
+        ]);
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visual,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+
+        const raised = tail(sessionId, eventsDir)
+          .filter((r) => r.event_type === 'finding-raised')
+          .map((r) => r.payload);
+        expect(raised).toHaveLength(1);
+        expect(raised[0]?.finding_category).toBe('visual-design');
+        expect(raised[0]?.severity).toBe('S3-minor');
+      });
+
+      // S2: a document with no `deviations` array, or one where it is not an
+      // array, used to mint nothing and let the gate pass silently. It must
+      // be refused the same way `readJudgeArtifact`'s uiux visual branch
+      // refuses it (judges.ts), not treated as a clean pass.
+      it('rejects a uiux visual document with no structured_output.deviations', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visualPath = path.join(scratchDir, `${sessionId}-visual-missing.json`);
+        await writeFile(visualPath, JSON.stringify({ run_status: 'done', structured_output: {} }));
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visualPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('judges.artifact-invalid-evidence');
+
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised).toHaveLength(0);
+      });
+
+      it('rejects a uiux visual document whose deviations is not an array', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visualPath = path.join(scratchDir, `${sessionId}-visual-not-array.json`);
+        await writeFile(
+          visualPath,
+          JSON.stringify({ run_status: 'done', structured_output: { deviations: 'none' } }),
+        );
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visualPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('judges.artifact-invalid-evidence');
+
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised).toHaveLength(0);
+      });
+
+      it('accepts an explicit empty deviations array as a clean pass', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visual = await visualFile(`${sessionId}-visual-empty`, []);
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visual,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised).toHaveLength(0);
+      });
+
+      // The uiux-visual hand-over closes the uiux visual turn exactly the way
+      // --evidence closes a reviewer's turn, independent of any spec turn
+      // still open on the same task.
+      it('closes the open uiux visual turn and leaves a same-task uiux spec turn open', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        await runCli([
+          'judge',
+          'dispatch',
+          '--role',
+          'uiux',
+          '--kind',
+          'spec',
+          '--task',
+          'epic-1/task-1',
+          '--artifact',
+          'spec.json',
+          '--model',
+          'claude-opus-5',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        const dispatchVisual = runCli([
+          'judge',
+          'dispatch',
+          '--role',
+          'uiux',
+          '--kind',
+          'visual',
+          '--task',
+          'epic-1/task-1',
+          '--artifact',
+          'visual.json',
+          '--model',
+          'claude-opus-5',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#1`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(dispatchVisual.status).toBe(0);
+
+        const visual = await visualFile(`${sessionId}-visual-close`, [
+          deviation({ severity: 'S3-minor' }),
+        ]);
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visual,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#2`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        // The gate still blocks here — the spec turn is deliberately left
+        // open — but that is judges-outstanding on the *spec* turn, not a
+        // sign the visual hand-over failed to close its own turn.
+        expect(result.status).toBe(1);
+
+        const outstanding = runCli([
+          'judge',
+          'outstanding',
+          '--task',
+          'epic-1/task-1',
+          '--session',
+          sessionId,
+          '--state-dir',
+          eventsDir,
+        ]);
+        const payload = JSON.parse(outstanding.stdout) as {
+          outstanding: Array<{ kind: string | null }>;
+        };
+        expect(payload.outstanding.map((t) => t.kind)).toEqual(['spec']);
+      });
+    });
+
     // D-42: a project's .blacksmith/crosscheck.yml overlay has to reach the
     // gate the same way it reaches `plan quorum`/`judge preflight` -- the gate
     // is where a blocking finding actually triggers a quorum case
@@ -9736,6 +10066,134 @@ describe('cli.ts (built binary)', () => {
           { role: 'security-reviewer', round: 1, declaredArtifact: artifact, reported: false },
         ],
       });
+    });
+
+    // S2: a typo in --kind used to filter every turn out silently, printing
+    // count 0 and exiting 0 while a real uiux turn was still open. An unknown
+    // kind must fail loudly instead of reading as "nothing outstanding".
+    it('outstanding rejects an unknown --kind rather than filtering everything out', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      const dispatched = judgeCli('dispatch', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'visual',
+        '--round',
+        '1',
+        '--artifact',
+        artifact,
+        '--model',
+        'claude-opus-5',
+      ]);
+      expect(dispatched.status).toBe(0);
+
+      const outstanding = judgeCli('outstanding', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--kind',
+        'visaul',
+      ]);
+      expect(outstanding.status).not.toBe(0);
+      expect(JSON.parse(outstanding.stdout).error.code).toBe('judges.invalid-kind');
+    });
+
+    it('outstanding --kind still filters to the matching turn when it is valid', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      const specArtifact = `${artifact}.spec`;
+      const specDispatch = judgeCli('dispatch', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'spec',
+        '--round',
+        '1',
+        '--artifact',
+        specArtifact,
+        '--model',
+        'claude-opus-5',
+      ]);
+      expect(specDispatch.status).toBe(0);
+      const visualDispatch = runCli([
+        'judge',
+        'dispatch',
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'visual',
+        '--round',
+        '1',
+        '--artifact',
+        artifact,
+        '--model',
+        'claude-opus-5',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#1`,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(visualDispatch.status).toBe(0);
+
+      const outstanding = judgeCli('outstanding', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--kind',
+        'visual',
+      ]);
+      expect(outstanding.status).toBe(1);
+      const payload = JSON.parse(outstanding.stdout) as {
+        outstanding: Array<{ kind: string | null }>;
+      };
+      expect(payload.outstanding.map((t) => t.kind)).toEqual(['visual']);
+    });
+
+    it('dispatch rejects an unknown --kind', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      const dispatched = judgeCli('dispatch', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'bogus',
+        '--round',
+        '1',
+        '--artifact',
+        artifact,
+        '--model',
+        'claude-opus-5',
+      ]);
+      expect(dispatched.status).not.toBe(0);
+      const error = JSON.parse(dispatched.stdout).error;
+      expect(error.code).toBe('judges.invalid-kind');
+      expect(error.message).toContain('bogus');
+    });
+
+    it('report rejects an unknown --kind', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      dispatchJudge(sessionId, eventsDir, 'uiux', artifact);
+
+      const reported = judgeCli('report', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'bogus',
+        '--artifact',
+        artifact,
+      ]);
+      expect(reported.status).not.toBe(0);
+      const error = JSON.parse(reported.stdout).error;
+      expect(error.code).toBe('judges.invalid-kind');
+      expect(error.message).toContain('bogus');
     });
 
     // EPIPE on a failing command must not launder its exit code to 0. The

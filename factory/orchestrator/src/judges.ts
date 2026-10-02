@@ -11,6 +11,7 @@ import {
   readLineageEvents,
   type StoredEvent,
 } from './events.js';
+import type { FindingEvidence } from './findings.js';
 import { JUDGE_TURN_ROLES } from './judgeRoles.js';
 import { type CompiledSchemaSet, compileSchemas, validateEachShape } from './schemas.js';
 import { isQualifiedTaskId, taskIdsMatch } from './taskId.js';
@@ -104,6 +105,55 @@ export interface EventContext {
   actor?: string;
 }
 
+/**
+ * `uiux` is the only role that can open more than one turn per task — a
+ * pre-code spec turn and a post-test visual turn — because a spec judgment
+ * and a screenshot judgment answer different questions and must close
+ * independently (S2). Every other role opens exactly one turn per task, so
+ * `kind` has nothing to disambiguate for it.
+ */
+const UIUX_ROLE = 'uiux';
+export type JudgeKind = 'spec' | 'visual';
+
+/**
+ * Exported so a caller that only has a kind to check, with no role to pair
+ * it with (e.g. `judge outstanding`'s `--kind` filter), can validate it
+ * against the same closed list `assertKindAllowed` uses, rather than
+ * defining the list a second time.
+ */
+export function isJudgeKind(value: unknown): value is JudgeKind {
+  return value === 'spec' || value === 'visual';
+}
+
+/** Read `judge_kind` back off a stored payload; anything else (absent, legacy) is "no kind". */
+function kindField(payload: Record<string, unknown>): JudgeKind | null {
+  return isJudgeKind(payload.judge_kind) ? payload.judge_kind : null;
+}
+
+/**
+ * `kind` is uiux-only. Any other role naming one is almost certainly a
+ * copy-pasted uiux command, not a real second turn — allowing it would let a
+ * reviewer open two turns under two kinds that nothing ever disambiguates
+ * back (every reader keys on role alone for the other five judges).
+ */
+function assertKindAllowed(role: string, kind: string | undefined): void {
+  if (kind === undefined) return;
+  if (!isJudgeKind(kind)) {
+    throw new JudgeError(
+      'judges.invalid-kind',
+      `"kind" must be "spec" or "visual"; got ${JSON.stringify(kind)}.`,
+      { kind },
+    );
+  }
+  if (role !== UIUX_ROLE) {
+    throw new JudgeError(
+      'judges.kind-not-allowed',
+      `"--kind" only applies to the "${UIUX_ROLE}" role, the only one that opens more than one turn per task; "${role}" opens one turn and takes no kind.`,
+      { agent_role: role, kind },
+    );
+  }
+}
+
 export interface JudgeDispatchInput {
   taskId: string;
   /** A taxonomy `agent` value; validated by appendEvent against the dispatch record's required dimensions. */
@@ -120,6 +170,8 @@ export interface JudgeDispatchInput {
   model: string;
   provider?: string;
   modelTier?: string;
+  /** uiux only: which of its two turns this dispatch opens. */
+  kind?: JudgeKind;
 }
 
 export interface JudgeReportInput {
@@ -131,12 +183,16 @@ export interface JudgeReportInput {
   artifactPath?: string;
   /** The genuinely clean case, said out loud: no artifact, recorded as an operator attestation. */
   noFindings?: boolean;
+  /** uiux only: which of its two open turns this report closes. Required when both are open. */
+  kind?: JudgeKind;
 }
 
 /** One judge turn: a dispatch that declared an artifact, and whether its report has landed. */
 export interface JudgeTurn {
   taskId: string;
   role: string;
+  /** Non-null only for `uiux`; every other role's turns are keyed on role alone. */
+  kind: JudgeKind | null;
   round: number;
   declaredArtifact: string;
   reported: boolean;
@@ -191,8 +247,11 @@ function findTurn(
   turns: readonly JudgeTurn[],
   taskId: string,
   role: string,
+  kind: JudgeKind | null,
 ): JudgeTurn | undefined {
-  const matching = turns.filter((t) => t.role === role && taskIdsMatch(t.taskId, taskId));
+  const matching = turns.filter(
+    (t) => t.role === role && t.kind === kind && taskIdsMatch(t.taskId, taskId),
+  );
   return matching.length === 1 ? matching[0] : undefined;
 }
 
@@ -243,13 +302,14 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
     // own comment).
     if (role === undefined || declaredArtifact === undefined || round === undefined) continue;
     if (!JUDGE_TURN_ROLE_SET.has(role)) continue;
+    const kind = kindField(record.payload);
     const dispatchedAt = record.ts;
     const artifactMtimeAtDispatch =
       typeof record.payload.artifact_mtime_at_dispatch === 'number'
         ? record.payload.artifact_mtime_at_dispatch
         : null;
 
-    const existing = findTurn(turns, recordTaskId, role);
+    const existing = findTurn(turns, recordTaskId, role, kind);
     if (existing !== undefined) {
       if (existing.round > round) continue;
       // The qualified spelling wins the row it names: it is the one a caller
@@ -267,6 +327,7 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
     turns.push({
       taskId: recordTaskId,
       role,
+      kind,
       round,
       declaredArtifact,
       reported: false,
@@ -284,7 +345,8 @@ export function foldJudgeTurns(events: readonly StoredEvent[], taskId?: string):
     if (taskId !== undefined && !taskIdsMatch(recordTaskId, taskId)) continue;
     const role = stringField(record.payload, 'agent_role');
     if (role === undefined) continue;
-    const turn = findTurn(turns, recordTaskId, role);
+    const kind = kindField(record.payload);
+    const turn = findTurn(turns, recordTaskId, role, kind);
     if (turn === undefined || turn.round !== numberField(record.payload, 'round')) continue;
     turn.reported = true;
     turn.reportedArtifact = stringField(record.payload, 'artifact_path') ?? null;
@@ -389,6 +451,7 @@ export async function recordJudgeDispatch(
       { task_id: input.taskId, agent_role: input.role },
     );
   }
+  assertKindAllowed(input.role, input.kind);
   if (!Number.isInteger(input.round) || input.round < 1) {
     throw new JudgeError(
       'judges.invalid-round',
@@ -429,6 +492,7 @@ export async function recordJudgeDispatch(
       round: input.round,
       declared_artifact: input.artifactPath,
       ...(priorMtime === null ? {} : { artifact_mtime_at_dispatch: priorMtime }),
+      ...(input.kind ? { judge_kind: input.kind } : {}),
     },
     input.taskId,
     { ...ctx, actor },
@@ -538,6 +602,72 @@ function graderFindingCount(parsed: unknown): number | undefined {
     (c) =>
       !(typeof c === 'object' && c !== null && (c as Record<string, unknown>).status === 'pass'),
   ).length;
+}
+
+/**
+ * Count what a uiux result document holds, for the turn `kind` it closes.
+ *
+ * uiux's declared artifact is always the Result object `{run_status,
+ * structured_output, artifacts}` (uiux.md), never a findings-evidence array —
+ * the bug this slice fixes is exactly that `readJudgeArtifact` used to throw
+ * on this real shape. A pre-code spec names no findings of its own (its
+ * `structured_output.deviations` are design-token departures the spec itself
+ * chose, not something to count against the task), so a `spec` turn is
+ * always 0. A post-test visual pass's `structured_output.deviations` IS the
+ * findings list — one entry per screenshot departure from the spec — so a
+ * `visual` turn counts them. `kind === null` is a legacy uiux turn dispatched
+ * before this slice; it has no way to say which shape it is, so it is read
+ * the lenient way — a real `deviations` array still counts, anything else is
+ * the pre-existing 0.
+ */
+function uiuxFindingCount(parsed: unknown, kind: JudgeKind | null): number | undefined {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return undefined;
+  // A spec turn's own `structured_output.deviations` are design-token
+  // departures the spec itself chose, never findings against the task, so a
+  // spec turn is always 0 regardless of what that array holds.
+  if (kind === 'spec') return 0;
+  const document = parsed as Record<string, unknown>;
+  const structured = document.structured_output;
+  const deviations =
+    typeof structured === 'object' && structured !== null
+      ? (structured as Record<string, unknown>).deviations
+      : undefined;
+  if (Array.isArray(deviations)) return deviations.length;
+  if (kind === 'visual') return undefined;
+  return 0;
+}
+
+/** One entry of a uiux visual pass's `structured_output.deviations` (uiux.md). */
+export interface UiuxDeviation {
+  screenshot: string;
+  viewport: string;
+  theme: string;
+  dimension: string;
+  severity: string;
+  expected: string;
+  observed: string;
+}
+
+/**
+ * Map a uiux visual pass's deviations onto the findings-evidence shape `gate
+ * run --evidence` already feeds `mintFindings` (`FindingEvidence`,
+ * findings.ts:454; schema factory/specs/schema/finding-evidence.schema.json).
+ * `dimension: 'accessibility'` is the `a11y` taxonomy category; every other
+ * dimension (layout_spacing, consistency, states) is a `visual-design`
+ * departure from the spec, not an accessibility one.
+ */
+export function uiuxDeviationsToEvidence(deviations: readonly UiuxDeviation[]): FindingEvidence[] {
+  return deviations.map((deviation) => ({
+    file_path: deviation.screenshot,
+    finding_category: deviation.dimension === 'accessibility' ? 'a11y' : 'visual-design',
+    severity: deviation.severity,
+    summary: `${deviation.dimension} deviation at ${deviation.viewport}/${deviation.theme}: ${deviation.expected}`,
+    failure_scenario: {
+      inputs: `viewport=${deviation.viewport} theme=${deviation.theme}`,
+      expected: deviation.expected,
+      actual: deviation.observed,
+    },
+  }));
 }
 
 let cachedTaxonomyForSchemas: Taxonomy | undefined;
@@ -670,6 +800,7 @@ export function readJudgeArtifact(
   artifactPath: string,
   role: string | undefined,
   taskId: string,
+  kind: JudgeKind | null = null,
   opts: EventOpts = {},
 ): number {
   let raw: string;
@@ -716,10 +847,24 @@ export function readJudgeArtifact(
   const graderCount = role === GRADER_ROLE ? graderFindingCount(parsed) : undefined;
   if (graderCount !== undefined) return graderCount;
 
+  if (role === UIUX_ROLE) {
+    const uiuxCount = uiuxFindingCount(parsed, kind);
+    if (uiuxCount !== undefined) return uiuxCount;
+    if (kind === 'visual') {
+      throw new JudgeError(
+        'judges.artifact-invalid-evidence',
+        `Judge artifact "${artifactPath}" is a uiux visual-pass result with no structured_output.deviations array. A visual pass reports its deviations, "[]" when it found none.`,
+        { artifact_path: artifactPath },
+      );
+    }
+  }
+
   const accepted =
     role === GRADER_ROLE
       ? 'a findings-evidence array or the grader result document ({run_status, structured_output: {criteria: [...]}})'
-      : 'a findings-evidence array';
+      : role === UIUX_ROLE
+        ? 'the uiux result document ({run_status, structured_output: {...}})'
+        : 'a findings-evidence array';
   throw new JudgeError(
     'judges.artifact-not-a-list',
     `Judge artifact "${artifactPath}" parsed to ${parsed === null ? 'null' : typeof parsed}, not ${accepted}. An empty review is "[]", written out.`,
@@ -731,9 +876,22 @@ function notDispatchedMessage(
   input: JudgeReportInput,
   turn: JudgeTurn | undefined,
   forRole: readonly JudgeTurn[],
+  kindAmbiguous: readonly JudgeTurn[],
 ): string {
-  if (forRole.length > 1) {
-    return `Task id "${input.taskId}" names a "${input.role}" turn in ${forRole.length} epics (${forRole.map((t) => t.taskId).join(', ')}). Report against the qualified id — closing one of them here would be a guess.`;
+  if (kindAmbiguous.length > 1) {
+    const kinds = kindAmbiguous.map((t) => t.kind ?? 'null').join(', ');
+    if (kindAmbiguous.every((t) => t.reported)) {
+      return `Task id "${input.taskId}" has ${kindAmbiguous.length} "${input.role}" turns (kinds: ${kinds}), all already reported. Report with "--kind" naming the one to re-report — picking one here would be a guess.`;
+    }
+    return `Task id "${input.taskId}" has ${kindAmbiguous.length} open "${input.role}" turns (kinds: ${kinds}). Report with "--kind" naming the one to close — closing one here would be a guess.`;
+  }
+  const distinctTaskIds = new Set(forRole.map((t) => t.taskId));
+  if (distinctTaskIds.size > 1) {
+    return `Task id "${input.taskId}" names a "${input.role}" turn in ${distinctTaskIds.size} epics (${forRole.map((t) => t.taskId).join(', ')}). Report against the qualified id — closing one of them here would be a guess.`;
+  }
+  if (turn === undefined && input.kind !== undefined && forRole.length > 0) {
+    const kinds = forRole.map((t) => t.kind ?? 'null').join(', ');
+    return `No "${input.kind}" ${input.role} dispatch on ${input.taskId} (dispatched kinds: ${kinds}). Dispatch it with "--kind ${input.kind}" first, or report against a kind that was dispatched.`;
   }
   if (turn === undefined) {
     return `No judge dispatch for role "${input.role}" on ${input.taskId}. Record the dispatch first — a report with no dispatch behind it proves nothing about coverage.`;
@@ -751,24 +909,50 @@ export async function recordJudgeReport(
   ctx: EventContext,
   opts: EventOpts = {},
 ): Promise<JudgeReport> {
+  assertKindAllowed(input.role, input.kind);
+  const kind = input.kind ?? null;
   const turns = await readJudgeTurns(input.taskId, ctx, opts);
-  const forRole = turns.filter((t) => t.role === input.role);
-  // More than one is a bare id that two epics both claim a turn for. Closing
-  // either would be a guess, and `foldJudgeTurns` refuses the same ambiguity,
-  // so the report emitted here would close nothing on the next read anyway.
-  const turn = forRole.length === 1 ? forRole[0] : undefined;
+  const forRole = turns.filter(
+    (t) => t.role === input.role && taskIdsMatch(t.taskId, input.taskId),
+  );
+  // More than one distinct task id among same-role turns is a bare id that
+  // two epics both claim a turn for. More than one turn on the SAME task id
+  // (same role, same taskId) is the uiux spec/visual pair, disambiguated by
+  // `kind` instead — both cases are a guess to resolve on our own.
+  const distinctTaskIds = new Set(forRole.map((t) => t.taskId));
+  const epicAmbiguous = distinctTaskIds.size > 1;
+  // A kindless report picks among OPEN turns only, the same set
+  // `outstandingJudges` exposes — a closed turn is not a candidate to guess
+  // between, and the error must not count it as "open" either. With no turn
+  // open, every turn is a candidate again: one is a legacy re-report, two is
+  // the same guess, and must not silently re-report the first.
+  const openForRole = forRole.filter((t) => !t.reported);
+  const candidates = openForRole.length > 0 ? openForRole : forRole;
+  const kindAmbiguous = !epicAmbiguous && kind === null && candidates.length > 1;
+  const turn =
+    epicAmbiguous || kindAmbiguous
+      ? undefined
+      : kind === null
+        ? candidates[0]
+        : forRole.find((t) => t.kind === kind);
   if (turn === undefined || (input.round !== undefined && input.round !== turn.round)) {
-    throw new JudgeError('judges.not-dispatched', notDispatchedMessage(input, turn, forRole), {
-      task_id: input.taskId,
-      agent_role: input.role,
-      round: input.round ?? null,
-    });
+    throw new JudgeError(
+      'judges.not-dispatched',
+      notDispatchedMessage(input, turn, forRole, kindAmbiguous ? candidates : []),
+      {
+        task_id: input.taskId,
+        agent_role: input.role,
+        round: input.round ?? null,
+      },
+    );
   }
 
   const artifactPath = input.noFindings ? null : (input.artifactPath ?? turn.declaredArtifact);
   if (artifactPath !== null) assertArtifactFresh(artifactPath, turn);
   const findingCount =
-    artifactPath === null ? 0 : readJudgeArtifact(artifactPath, input.role, input.taskId, opts);
+    artifactPath === null
+      ? 0
+      : readJudgeArtifact(artifactPath, input.role, input.taskId, turn.kind, opts);
 
   const stored = await emit(
     JUDGE_REPORT_EVENT_TYPE,
@@ -778,6 +962,7 @@ export async function recordJudgeReport(
       artifact_path: artifactPath,
       finding_count: findingCount,
       ...(input.noFindings ? { attested_by: ATTESTED_BY } : {}),
+      ...(turn.kind ? { judge_kind: turn.kind } : {}),
     },
     input.taskId,
     ctx,
