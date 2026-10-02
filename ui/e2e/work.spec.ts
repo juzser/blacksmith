@@ -264,6 +264,31 @@ test.describe('Work switcher', () => {
     expect(box.x + box.width).toBeLessThanOrEqual(VIEWPORTS.mobile.width);
   });
 
+  // UI audit fix round 2: the Work page header renders only an sr-only h1
+  // (the crumb carries the visible title), so nothing in it should be a flex
+  // item of .app-page's gapped stack — the toolbar must sit right at the
+  // page's own top padding, not a stack gap below it (see PageHeader.vue's
+  // isEmpty branch).
+  test('the toolbar sits at the page top padding, with no leftover band above it', async ({
+    page,
+  }) => {
+    await page.goto('/work/kanban');
+    const toolbar = page.locator('.bs-kanban-page__toolbar');
+    await expect(toolbar).toBeVisible();
+
+    const pagePadding = await page.evaluate(() => {
+      const el = document.querySelector('.app-page');
+      if (!el) throw new Error('.app-page not found');
+      return Number.parseFloat(getComputedStyle(el).paddingTop);
+    });
+
+    const pageBox = await page.locator('.app-page').boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
+    if (!pageBox || !toolbarBox) throw new Error('the page or toolbar has no box');
+
+    expect(Math.abs(toolbarBox.y - pageBox.y - pagePadding)).toBeLessThanOrEqual(1);
+  });
+
   test('no horizontal scroll at 375px on either view', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     for (const path of ['/work/kanban', '/work/roadmap']) {
