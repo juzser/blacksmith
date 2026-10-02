@@ -51,7 +51,7 @@ describe('.bs-mtopbar__project CSS (push-right onto a display: contents wrapper)
     expect(match?.[0]).not.toMatch(/margin-left: auto/);
   });
 
-  it('puts the push-right on .bs-mproject__trigger, the wrapper\'s one real flex item', () => {
+  it("puts the push-right on .bs-mproject__trigger, the wrapper's one real flex item", () => {
     const match = CSS.match(/\.bs-mtopbar__project > \.bs-mproject__trigger \{[\s\S]*?\}/);
     expect(match?.[0]).toMatch(/margin-left: auto/);
   });

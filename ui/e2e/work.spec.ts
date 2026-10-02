@@ -73,9 +73,9 @@ test.describe('Work switcher', () => {
     await expect(panel).toBeVisible();
 
     const box = await panel.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.x).toBeGreaterThanOrEqual(0);
-    expect(box!.x + box!.width).toBeLessThanOrEqual(VIEWPORTS.mobile.width);
+    if (!box) throw new Error('the overflow popover has no box');
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(VIEWPORTS.mobile.width);
   });
 
   test('no horizontal scroll at 375px on either view', async ({ page }) => {
