@@ -1596,6 +1596,7 @@ describe('spec-scoped findings (P9-9)', () => {
         createdAt: '2026-08-08T00:00:00.000Z',
         updatedAt: '2026-08-08T00:00:00.000Z',
         project: 'black-smith',
+        terminalAt: '2026-08-08T00:00:00.000Z',
         // This suite is about the closing spec review, not the gate record —
         // a task the log holds a real gate run for keeps it that way (D-138).
         gate: { gateOutcome: true, resultRecorded: true },

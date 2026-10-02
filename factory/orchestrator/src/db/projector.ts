@@ -367,6 +367,8 @@ export interface TaskFoldRow {
   updatedAt: string;
   /** Phase 6b — plain-string project identifier, see schema.ts's project comment. */
   project: string | null;
+  /** DS4 S5a round 2 — see schema.ts's `tasks.terminalAt` comment. */
+  terminalAt: string | null;
 }
 
 /**
@@ -732,6 +734,7 @@ export function foldTasks(
         createdAt: ts,
         updatedAt: ts,
         project: null,
+        terminalAt: null,
       };
       // Not every id an event carries is a task, and a ref that is not a
       // task must never surface as a kanban card. Three shapes are refused by
@@ -853,13 +856,18 @@ export function foldTasks(
       }
       case 'wave-merged': {
         for (const taskId of waveTaskIds(record)) {
-          touch(taskId, record.ts, record.session_id).taskStatus = 'completed';
+          const row = touch(taskId, record.ts, record.session_id);
+          // First terminal transition wins — see schema.ts's terminalAt comment.
+          if (row.terminalAt === null) row.terminalAt = record.ts;
+          row.taskStatus = 'completed';
         }
         break;
       }
       case 'task-superseded': {
         if (!eventTask) break;
-        touch(eventTask, record.ts, record.session_id).taskStatus = 'superseded';
+        const row = touch(eventTask, record.ts, record.session_id);
+        if (row.terminalAt === null) row.terminalAt = record.ts;
+        row.taskStatus = 'superseded';
         break;
       }
       case 'error-logged': {
@@ -881,7 +889,11 @@ export function foldTasks(
           // major: the write path requires the field, so its absence means a
           // log this reader does not own.
           if (NOTE_ONLY_SEVERITIES.has(p.severity ?? '')) continue;
-          row.taskStatus = p.error?.startsWith('coordination.') ? 'escalated' : 'blocked';
+          const nextStatus = p.error?.startsWith('coordination.') ? 'escalated' : 'blocked';
+          // Only `escalated` is terminal (TERMINAL_TASK_STATUSES); `blocked` is
+          // not, so it never sets terminalAt.
+          if (nextStatus === 'escalated' && row.terminalAt === null) row.terminalAt = record.ts;
+          row.taskStatus = nextStatus;
         }
         break;
       }
@@ -1597,6 +1609,7 @@ export function projectTasks(
           createdAt: task.createdAt,
           updatedAt: task.updatedAt,
           project: task.project,
+          terminalAt: task.terminalAt,
         })
         .run();
     }

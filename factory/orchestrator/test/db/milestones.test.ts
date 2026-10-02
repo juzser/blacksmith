@@ -238,6 +238,28 @@ describe('milestones projection + roadmap queries', () => {
       );
     }
 
+    async function dispatchTask(taskId: string): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'planner',
+          event_type: 'dispatch_decision',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'small',
+            model: 'claude-haiku-4-5',
+            reason: 'ship it',
+          },
+        },
+        { stateDir },
+      );
+    }
+
     async function mergeTasks(taskIds: string[]): Promise<void> {
       const parent = await tick();
       await appendEvent(
@@ -254,23 +276,44 @@ describe('milestones projection + roadmap queries', () => {
       );
     }
 
-    it('reports startedAt from the earliest task activity and finishedAt from the last once every task is terminal', async () => {
+    async function errorLog(taskId: string): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'error-logged',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            error: 'execution.tool-failure',
+            severity: 'S2-major',
+            task_ref: taskId,
+            detail: 'a later flow (e.g. lessons/audit) named this already-done task',
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    it('reports startedAt from the earliest DISPATCH, not the earliest task-added (planning != starting)', async () => {
       await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
       await planTask('epic-dates/task-a');
-      await planTask('epic-dates/task-b');
+      const dbPathNoDispatch = path.join(dbDir, 'no-dispatch.db');
+      await rebuild(dbPathNoDispatch, 'all', { stateDir, roadmapPath });
+      const noDispatchHandle = openDb(dbPathNoDispatch);
+      const noDispatchPage = roadmapPage(noDispatchHandle.db);
+      noDispatchHandle.sqlite.close();
+      const noDispatchPhase = noDispatchPage.find((m) => m.milestoneId === 'phase-c');
+      // Planned but never dispatched: not "not scheduled" as started.
+      expect(noDispatchPhase?.startedAt).toBeNull();
+      expect(noDispatchPhase?.epics).toEqual([
+        { epicId: 'epic-dates', startedAt: null, finishedAt: null },
+      ]);
 
-      const dbPathOpen = path.join(dbDir, 'open.db');
-      await rebuild(dbPathOpen, 'all', { stateDir, roadmapPath });
-      const openHandle = openDb(dbPathOpen);
-      const openPage = roadmapPage(openHandle.db);
-      openHandle.sqlite.close();
-      const openPhase = openPage.find((m) => m.milestoneId === 'phase-c');
-      // Still open: finishedAt is null even though the tasks exist.
-      expect(openPhase?.startedAt).not.toBeNull();
-      expect(openPhase?.finishedAt).toBeNull();
-
-      await mergeTasks(['epic-dates/task-a', 'epic-dates/task-b']);
-      const lastMergeTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+      await dispatchTask('epic-dates/task-a');
+      const dispatchTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
 
       const dbPath = path.join(dbDir, 'smith.db');
       await rebuild(dbPath, 'all', { stateDir, roadmapPath });
@@ -279,10 +322,55 @@ describe('milestones projection + roadmap queries', () => {
       handle.sqlite.close();
 
       const phaseC = page.find((m) => m.milestoneId === 'phase-c');
-      expect(phaseC?.startedAt).toBe(openPhase?.startedAt);
-      expect(phaseC?.finishedAt).toBe(lastMergeTs);
+      expect(phaseC?.startedAt).toBe(dispatchTs);
+      expect(phaseC?.finishedAt).toBeNull();
+    });
+
+    it('reports finishedAt from the first terminal transition, unmoved by a LATER error-logged naming an already-done task', async () => {
+      await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
+      await planTask('epic-dates/task-a'); // T0
+      await dispatchTask('epic-dates/task-a'); // T1
+      const startedTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+
+      await mergeTasks(['epic-dates/task-a']); // T2
+      const mergedTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+
+      await errorLog('epic-dates/task-a'); // T3 — names the already-merged task
+
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      const phaseC = page.find((m) => m.milestoneId === 'phase-c');
+      expect(phaseC?.startedAt).toBe(startedTs);
+      // Drift regression: finishedAt must stay T2, never the T3 touch.
+      expect(phaseC?.finishedAt).toBe(mergedTs);
       expect(phaseC?.epics).toEqual([
-        { epicId: 'epic-dates', startedAt: phaseC?.startedAt, finishedAt: lastMergeTs },
+        { epicId: 'epic-dates', startedAt: startedTs, finishedAt: mergedTs },
+      ]);
+    });
+
+    it('leaves finishedAt null for a phase (and its epic) while one of its tasks is still open', async () => {
+      await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
+      await planTask('epic-dates/task-a');
+      await dispatchTask('epic-dates/task-a');
+      await mergeTasks(['epic-dates/task-a']);
+
+      await planTask('epic-dates/task-b');
+      await dispatchTask('epic-dates/task-b'); // dispatched, never merged
+
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      const phaseC = page.find((m) => m.milestoneId === 'phase-c');
+      expect(phaseC?.finishedAt).toBeNull();
+      expect(phaseC?.epics).toEqual([
+        { epicId: 'epic-dates', startedAt: phaseC?.startedAt, finishedAt: null },
       ]);
     });
   });

@@ -142,6 +142,7 @@ function taskRow(overrides: Partial<EpicTaskRow> = {}): EpicTaskRow {
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
     project: null,
+    terminalAt: null,
     // D-138: the default is a task that really was gated — both events the
     // gate writes for the same task id. Tests about the missing-evidence
     // cases override it rather than the other way round, so every test that

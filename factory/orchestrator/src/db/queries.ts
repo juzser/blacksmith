@@ -431,22 +431,23 @@ export interface MilestoneProgress {
   recentDone?: MilestoneTaskRef[];
   nextUp?: MilestoneTaskRef[];
   /**
-   * DS4 S5a — pulled ahead of S2 (decision D4) so the Roadmap swimlane's bars
-   * are not all dashed "not scheduled". Derived from `tasks.createdAt`/
-   * `updatedAt`, columns the projection already maintains: `touch()`
-   * (db/projector.ts) stamps `createdAt` on the first event that names the
-   * task — usually `task-added` or the `dispatch_decision` that starts it,
-   * whichever the log carries first for that id — and rewrites `updatedAt` on
-   * every event after, including the `wave-merged` that completes it. No new
-   * column or migration is needed.
+   * DS4 S5a round 2 (review findings — see db/queries.ts's taskDateRange()).
    *
-   * `startedAt` is the earliest `createdAt` across the milestone's tasks, or
-   * `null` with no tasks at all. `finishedAt` is the latest `updatedAt`, but
-   * only once every task has reached a status `TERMINAL_TASK_STATUSES` calls
-   * over (completed, waived, superseded, failed or escalated) — the same
-   * "still open" complement `inFlightEpics()` above reads; while any task is
-   * open, there is no completion date yet, so it stays `null` rather than
-   * reporting a stale one.
+   * `startedAt` is the earliest `dispatches.ts` (schema.ts, indexed on
+   * `task_id`) across the milestone's tasks — not `tasks.createdAt`, which is
+   * usually the `task-added` timestamp at PLAN time, not when work began. A
+   * task never dispatched contributes no date; `null` when no task in the
+   * milestone has one (nothing scheduled yet), so its bar renders dashed
+   * rather than claiming a start that never happened.
+   *
+   * `finishedAt` is the latest `tasks.terminalAt` (schema.ts — the `ts` of
+   * the event that FIRST moved each task into `TERMINAL_TASK_STATUSES`), but
+   * only once every task in the milestone has reached one of those statuses
+   * — the same "still open" complement `inFlightEpics()` above reads. It is
+   * deliberately not `tasks.updatedAt`: that column keeps moving after a task
+   * is done (an `error-logged` naming an already-terminal task, from a later
+   * lessons/audit flow, rewrites it via `touch()` without reopening the
+   * task), which pushed a milestone's reported finish days past its real one.
    */
   startedAt: string | null;
   finishedAt: string | null;
@@ -831,6 +832,7 @@ function milestoneProgressRows(
       ? db.select().from(edges).where(edgeSessionCond).all()
       : db.select().from(edges).all()
     : [];
+  const dispatchStartByTask = earliestDispatchByTask(db, scope);
 
   return milestoneRows.map((m) => {
     const epicIds = JSON.parse(m.epicIds) as string[];
@@ -858,10 +860,13 @@ function milestoneProgressRows(
       ? milestoneTaskRefs(milestoneTasks, taskRows, edgeRows)
       : undefined;
 
-    const { startedAt, finishedAt } = taskDateRange(milestoneTasks);
+    const { startedAt, finishedAt } = taskDateRange(milestoneTasks, dispatchStartByTask);
     const epicDates: EpicDates[] = epicIds.map((epicId) => ({
       epicId,
-      ...taskDateRange(milestoneTasks.filter((t) => t.epicId === epicId)),
+      ...taskDateRange(
+        milestoneTasks.filter((t) => t.epicId === epicId),
+        dispatchStartByTask,
+      ),
     }));
 
     return {
@@ -888,23 +893,56 @@ function milestoneProgressRows(
 }
 
 /**
- * The earliest `createdAt` and, once every row is terminal, the latest
- * `updatedAt` of a set of task rows. See MilestoneProgress.startedAt for why
- * these two columns are the right source. Shared by the milestone-level and
- * per-epic rollups in milestoneProgressRows() so the two never disagree about
- * how a date is derived.
+ * Every task's earliest `dispatch_decision` timestamp, across the whole
+ * scope, in one query — not per milestone or per epic, so a roadmap with N
+ * milestones costs one scan of `dispatches` rather than N. A task never
+ * dispatched has no entry. Shared by taskDateRange()'s milestone-level and
+ * per-epic rollups.
+ */
+function earliestDispatchByTask(db: SmithDb, scope: Scope): Map<string, string> {
+  const sessionCond = scopedToSessions(dispatches.sessionId, scope);
+  const rows = sessionCond
+    ? db
+        .select({ taskId: dispatches.taskId, ts: dispatches.ts })
+        .from(dispatches)
+        .where(sessionCond)
+        .all()
+    : db.select({ taskId: dispatches.taskId, ts: dispatches.ts }).from(dispatches).all();
+  const earliest = new Map<string, string>();
+  for (const row of rows) {
+    if (!row.taskId) continue;
+    const current = earliest.get(row.taskId);
+    if (current === undefined || row.ts < current) earliest.set(row.taskId, row.ts);
+  }
+  return earliest;
+}
+
+/**
+ * `startedAt` is the earliest dispatch among a set of task rows (via
+ * `dispatchStartByTask`, see earliestDispatchByTask()), or `null` if none of
+ * them has one. `finishedAt` is the latest `terminalAt`, but only once every
+ * row is terminal — see MilestoneProgress.startedAt for why these are the
+ * right sources. Shared by the milestone-level and per-epic rollups in
+ * milestoneProgressRows() so the two never disagree about how a date is
+ * derived.
  */
 function taskDateRange(
-  rows: readonly { createdAt: string; updatedAt: string; taskStatus: string }[],
+  rows: readonly { taskId: string; terminalAt: string | null; taskStatus: string }[],
+  dispatchStartByTask: ReadonlyMap<string, string>,
 ): { startedAt: string | null; finishedAt: string | null } {
-  if (rows.length === 0) return { startedAt: null, finishedAt: null };
-  let startedAt = rows[0]?.createdAt as string;
-  let finishedAt = rows[0]?.updatedAt as string;
+  let startedAt: string | null = null;
+  let finishedAt: string | null = null;
   let allTerminal = true;
   for (const row of rows) {
-    if (row.createdAt < startedAt) startedAt = row.createdAt;
-    if (row.updatedAt > finishedAt) finishedAt = row.updatedAt;
-    if (!TERMINAL_TASK_STATUSES.has(row.taskStatus)) allTerminal = false;
+    const dispatchedAt = dispatchStartByTask.get(row.taskId);
+    if (dispatchedAt !== undefined && (startedAt === null || dispatchedAt < startedAt)) {
+      startedAt = dispatchedAt;
+    }
+    if (!TERMINAL_TASK_STATUSES.has(row.taskStatus)) {
+      allTerminal = false;
+    } else if (row.terminalAt !== null && (finishedAt === null || row.terminalAt > finishedAt)) {
+      finishedAt = row.terminalAt;
+    }
   }
   return { startedAt, finishedAt: allTerminal ? finishedAt : null };
 }
