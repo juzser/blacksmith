@@ -39,3 +39,65 @@ describe('RoadmapPage.vue — standalone-epic task count (fix round 4 #1)', () =
     expect(EPIC_BLOCK).toMatch(/No tasks tracked/);
   });
 });
+
+// DS4 S4 — phone Roadmap (<=640px), gated on isPhoneWidth throughout (spec
+// "Gate" line). Source-text scrape, same convention as the block above: no
+// DOM harness in this vitest config, so the actual rendering is exercised by
+// ui/e2e/roadmapMobile.spec.ts instead.
+describe('RoadmapPage.vue — phone branch (DS4 S4)', () => {
+  it('imports useViewport and hides the swimlane on phone', () => {
+    expect(SFC).toMatch(/useViewport/);
+    expect(SFC).toMatch(/<RoadmapSwimlane\s+v-if="!isPhoneWidth"/);
+  });
+
+  it("shows a phase-picker Select on phone, over the swimlane's own phase rows (R4)", () => {
+    expect(SFC).toMatch(/phaseOptions/);
+    expect(SFC).toMatch(/isPhoneWidth && !selectedEpicData/);
+  });
+
+  it("derives each selected epic's phase for the back link (R1)", () => {
+    expect(SFC).toMatch(/epicPhase\(/);
+    expect(SFC).toMatch(/phase: epicPhase/);
+  });
+});
+
+describe('EpicBlock.vue — phone branch (DS4 S4)', () => {
+  it('renders the phone phase-mode list only under isPhoneWidth', () => {
+    expect(EPIC_BLOCK).toMatch(/useViewport/);
+    expect(EPIC_BLOCK).toMatch(/<template v-if="isPhoneWidth">/);
+    expect(EPIC_BLOCK).toMatch(/bs-roadmap-mobile__row/);
+  });
+
+  it('a row tap emits selectEpic, not a RouterLink into the link (R6)', () => {
+    expect(EPIC_BLOCK).toMatch(/selectEpic:\s*\[epicId: string\]/);
+    expect(EPIC_BLOCK).toMatch(/emit\('selectEpic', sec\.epicId\)/);
+  });
+
+  it('the waves <details> is a sibling of the row, not nested in it (R6)', () => {
+    const rowBody = EPIC_BLOCK.match(/class="bs-roadmap-mobile__row"[\s\S]*?<\/button>/)?.[0] ?? '';
+    expect(rowBody).not.toBe('');
+    expect(rowBody).not.toMatch(/<details/);
+  });
+
+  it('passes only the current wave into the phase <details> compact WaveList (R3)', () => {
+    expect(EPIC_BLOCK).toMatch(/sec\.waves\.filter\(\(w\) => w\.kind === 'current'\)/);
+  });
+
+  it('shows the back link only when the phase is known, at least --bs-touch tall (R1)', () => {
+    expect(EPIC_BLOCK).toMatch(/RouterLink/);
+    expect(EPIC_BLOCK).toMatch(/v-if="isPhoneWidth && epic\.phase"/);
+    expect(EPIC_BLOCK).toMatch(/bs-roadmap-mobile__back/);
+  });
+
+  it('epic mode always renders WaveList in compact form on phone (R3)', () => {
+    expect(EPIC_BLOCK).toMatch(/:compact="isPhoneWidth"/);
+  });
+
+  it('shows a Tag instead of ProgressBarMini for a zero-task row', () => {
+    expect(EPIC_BLOCK).toMatch(/<Tag v-else tone="todo" size="sm">Todo<\/Tag>/);
+  });
+
+  it('uses mobileEpicStatusLine for the phone row status text', () => {
+    expect(EPIC_BLOCK).toMatch(/mobileEpicStatusLine\(sec\)/);
+  });
+});

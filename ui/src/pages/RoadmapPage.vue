@@ -5,16 +5,16 @@
 // SessionsPage; it is unused on this page now (the retired FlowPage was its
 // other consumer).
 //
-// Below 640px the swimlane's own `.rm-scroll` region still scrolls sideways
-// rather than reflowing into a stacked phone layout — a real phone layout is
-// S4, out of scope here; this is the simplest fallback that avoids the page
-// itself scrolling sideways.
+// DS4 S4 — below 640px (`isPhoneWidth`) the swimlane is hidden entirely and
+// replaced by a phase-picker Select (R4) feeding the same EpicBlock, whose
+// own phone branch (phase list / epic back-link) is gated the same way.
 import { Map as MapIcon } from '@lucide/vue';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import EpicBlock from '../components/EpicBlock.vue';
 import Banner from '../components/kit/Banner.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
+import Select from '../components/kit/Select.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import RoadmapSwimlane from '../components/RoadmapSwimlane.vue';
 import TaskPeekPanel from '../components/TaskPeekPanel.vue';
@@ -22,6 +22,7 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import {
   type FlowGraph,
   fetchFlow,
@@ -39,7 +40,7 @@ import {
   milestoneStatusKitTone,
   milestoneStatusLabel,
 } from '../lib/taxonomy.js';
-import { buildWaveList, epicProject, epicStatusFromFlow } from '../lib/waveList.js';
+import { buildWaveList, epicPhase, epicProject, epicStatusFromFlow } from '../lib/waveList.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -47,6 +48,7 @@ const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Roadmap' }]);
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
+const { isPhoneWidth } = useViewport();
 
 const milestones = ref<MilestoneProgress[] | null>(null);
 const epics = ref<string[]>([]);
@@ -189,6 +191,14 @@ const swimlane = computed(() => {
   return buildSwimlane(milestones.value, new Date());
 });
 
+// DS4 S4 R4 — the phone phase picker, over the same phase data the swimlane
+// uses (not a hand-rolled dropdown).
+const phaseOptions = computed(() =>
+  swimlane.value.rows
+    .filter((row) => row.kind === 'phase')
+    .map((row) => ({ value: row.id, label: row.label })),
+);
+
 const selectedPhaseData = computed(
   () => (milestones.value ?? []).find((m) => m.milestoneId === selectedPhase.value) ?? null,
 );
@@ -211,6 +221,7 @@ const selectedEpicData = computed(() => {
       tasksTotal: 0,
       tasksCompleted: 0,
       waves: [],
+      phase: epicPhase(milestones.value ?? [], epicId),
     };
   }
   if (flow === 'failed') {
@@ -226,6 +237,7 @@ const selectedEpicData = computed(() => {
       tasksTotal: 0,
       tasksCompleted: 0,
       waves: [],
+      phase: epicPhase(milestones.value ?? [], epicId),
     };
   }
   const { statusTone, statusLabel } = epicStatusFromFlow(flow);
@@ -241,6 +253,7 @@ const selectedEpicData = computed(() => {
     tasksTotal: flow.nodes.length,
     tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
     waves: buildWaveList(flow),
+    phase: epicPhase(milestones.value ?? [], epicId),
   };
 });
 
@@ -328,11 +341,22 @@ async function closePeek() {
 
     <div v-else class="rm-stack">
       <RoadmapSwimlane
+        v-if="!isPhoneWidth"
         :swimlane="swimlane"
         :selected-phase="selectedPhase"
         :selected-epic="selectedEpic"
         @select-phase="selectPhase"
         @select-epic="selectEpic"
+      />
+      <!-- DS4 S4 R4 — phone phase picker, phase mode only (epic mode shows
+           the back link instead, EpicBlock.vue R1). -->
+      <Select
+        v-if="isPhoneWidth && !selectedEpicData"
+        class="bs-roadmap-mobile__phase-select"
+        :model-value="selectedPhase ?? ''"
+        :options="phaseOptions"
+        aria-label="Phase"
+        @update:model-value="selectPhase"
       />
 
       <EpicBlock
@@ -344,6 +368,7 @@ async function closePeek() {
         :tasks-completed="selectedPhaseData.tasksCompleted"
         :epics="epicSections"
         @select="openPeek"
+        @select-epic="selectEpic"
       />
       <EpicBlock
         v-else-if="selectedEpicData"

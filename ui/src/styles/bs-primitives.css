@@ -2640,6 +2640,99 @@ summary.bs-inbox__group-head {
   }
 }
 
+/* DS4 S4 — phone Roadmap (<=640px). The project-name Tag truncates instead
+   of wrapping the esec-head row, and R2 drops the plan-version Select to its
+   own full-width, touch-tall row under the id/status/project line. */
+.eh-project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 10rem;
+}
+@media (max-width: 640px) {
+  .esec-head .select-trailing {
+    flex: 1 1 100%;
+    width: 100%;
+    margin-left: 0;
+    min-height: var(--bs-touch);
+  }
+}
+
+/* DS4 S4 — phone-only phase-mode list (EpicBlock.vue, modelled on
+   NeedsYouInbox's .bs-inbox__row pattern) and the epic-mode back link above
+   the header. */
+.bs-roadmap-mobile__phase-select {
+  width: 100%;
+}
+.bs-roadmap-mobile__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--bs-touch);
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  text-decoration: none;
+}
+.bs-roadmap-mobile__summary {
+  display: flex;
+  gap: var(--bs-space-4);
+}
+.bs-roadmap-mobile__summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-roadmap-mobile__summary-value {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-roadmap-mobile__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+}
+.bs-roadmap-mobile__item + .bs-roadmap-mobile__item {
+  border-top: 1px solid var(--bs-border);
+}
+.bs-roadmap-mobile__row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: var(--bs-touch);
+  gap: var(--bs-space-3);
+  padding: var(--bs-space-3) var(--bs-space-4);
+  background: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.bs-roadmap-mobile__row-id {
+  font-weight: var(--bs-font-weight-medium);
+  flex-shrink: 0;
+}
+.bs-roadmap-mobile__row-status {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.bs-roadmap-mobile__waves {
+  padding: 0 var(--bs-space-4) var(--bs-space-3);
+  border-top: 1px solid var(--bs-border);
+}
+.bs-roadmap-mobile__waves summary {
+  min-height: var(--bs-touch);
+  display: flex;
+  align-items: center;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+
 /* DS4 S3 — WaveList.vue: one .wave <section> per wave, past/cur/next read
    the same modifier names ds-review.html uses. */
 .wave-list {
