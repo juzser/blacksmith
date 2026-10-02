@@ -453,13 +453,54 @@ export interface MilestoneProgress {
   finishedAt: string | null;
   /** Same derivation, one row per epic this milestone maps (roadmap.md's `epics:` list), for the swimlane's per-epic bars. */
   epics: EpicDates[];
+  /** DS4 S5b — this milestone's tasks folded into the same 4 buckets as each epic's `statusCounts` below. */
+  statusCounts: StatusCounts;
 }
+
+/**
+ * DS4 S5b — the Kanban board's status->column fold (`ui/src/lib/kanban.ts`'s
+ * `COLUMN_FOR_STATUS`), condensed from its 5 (+2 hidden) columns to the
+ * Roadmap's 4 — see `statusBucketForTaskStatus()`.
+ */
+export interface StatusCounts {
+  done: number;
+  review: number;
+  inProgress: number;
+  todo: number;
+  /**
+   * DS4 S5b fix round 1 — tasks in status `superseded`, counted separately
+   * from `done` so `done` can stay exactly `TERMINAL_OK_TASK_STATUSES`
+   * (`tasksCompleted`'s own set). The UI draws no column for it; it exists so
+   * `done + review + inProgress + todo + superseded === tasksTotal` holds
+   * without silently inflating `done`.
+   */
+  superseded: number;
+}
+
+/**
+ * DS4 S5b — an epic's own status, derived from `statusCounts`: every task
+ * done is `done`; any open task puts it at least at `in_progress`, rising to
+ * `review` only when every open task is itself in the review bucket; no open
+ * task and nothing done yet is `todo` (also the answer for an epic with no
+ * tasks at all — see roadmapPage()'s caller doc).
+ */
+export type EpicStatus = 'done' | 'review' | 'in_progress' | 'todo';
 
 /** DS4 S5a — one epic's startedAt/finishedAt, see MilestoneProgress.startedAt. */
 export interface EpicDates {
   epicId: string;
   startedAt: string | null;
   finishedAt: string | null;
+  /** DS4 S5b — same 4-bucket fold as MilestoneProgress.statusCounts, scoped to this epic's tasks. */
+  statusCounts: StatusCounts;
+  /** DS4 S5b — derived from statusCounts, see EpicStatus. */
+  status: EpicStatus;
+  /** DS4 S5b — this epic's milestone's own project (roadmap.md's `- project:` bullet; MilestoneProgress.project), since an epic belongs to exactly the one milestone roadmap.md maps it under. */
+  project: string;
+  /** DS4 S5b — the epic's latest `integration-pr-opened` URL (kanban()'s own prUrlByEpic, shared via prUrlsByEpic()), or null when there is none. */
+  prUrl: string | null;
+  /** DS4 S5b — the prompt behind this epic (requestQuoteForTask()'s epic fallback, epicSourcePrompt()), or null when none is recorded. */
+  sourcePrompt: RequestQuote | null;
 }
 
 export interface MilestoneTaskRef {
@@ -805,6 +846,75 @@ function milestoneTaskRefs(
 }
 
 /**
+ * DS4 S5b fix round 1 — folds one `task_status` into the same grouping
+ * `ui/src/lib/kanban.ts`'s `COLUMN_FOR_STATUS` already uses for the Kanban
+ * board's columns, condensed from its 5 (+2 hidden) columns to the Roadmap's
+ * 5:
+ *   - Kanban's "Todo" column (todo, ready) -> 'todo'.
+ *   - Kanban's "Reviewing" column (reviewing, merging) -> 'review'.
+ *   - Kanban's "Completed" column (completed, waived) -> 'done': exactly
+ *     `TERMINAL_OK_TASK_STATUSES`, the same set `tasksCompleted` on the same
+ *     payload already uses, so the two numbers never disagree (fix round 1,
+ *     finding 1).
+ *   - `superseded` -> its own bucket, not `done`: a replanned-away task ended
+ *     the diff, not well, and folding it into `done` read an epic that was
+ *     replanned away as fully shipped. Kept out of the switch's `default` on
+ *     purpose, same reason: nobody confuses it with the fail-open case below.
+ *   - Everything else (Kanban's "In progress" and "Blocked" columns, plus
+ *     `failed`) -> 'inProgress': still open work, whether or not somebody is
+ *     actively on it right now. `failed` is terminal to the projector but a
+ *     person is still holding it (taskStatus.ts's HELD_OPEN_BY_AN_OPERATOR),
+ *     same as `escalated`/`blocked` already here. A status this switch
+ *     doesn't yet know about (taxonomy.yml adding a 13th tomorrow) falls here
+ *     too — open rather than silently counted as done.
+ * Exhaustive over this fold (every input lands in exactly one bucket), so the
+ * five counts a caller builds from it always sum to the row count they were
+ * built from.
+ */
+export function statusBucketForTaskStatus(taskStatus: string): keyof StatusCounts {
+  if (TERMINAL_OK_TASK_STATUSES.has(taskStatus)) return 'done';
+  switch (taskStatus) {
+    case 'todo':
+    case 'ready':
+      return 'todo';
+    case 'reviewing':
+    case 'merging':
+      return 'review';
+    case 'superseded':
+      return 'superseded';
+    default:
+      return 'inProgress';
+  }
+}
+
+function countStatuses(rows: readonly { taskStatus: string }[]): StatusCounts {
+  const counts: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 };
+  for (const row of rows) counts[statusBucketForTaskStatus(row.taskStatus)] += 1;
+  return counts;
+}
+
+/**
+ * DS4 S5b fix round 1 — EpicStatus from a StatusCounts + its total, over the
+ * epic's LIVE tasks (`tasksTotal` minus `superseded`): a replanned-away task
+ * is not part of what's left to ship, so it neither counts toward `done` nor
+ * holds the epic open. Every live task done is `done`; any task in the
+ * review or inProgress buckets means at least `in_progress`, rising to
+ * `review` only when every non-done live task is itself in the review bucket
+ * (no inProgress, no todo left over); otherwise, with nothing done and
+ * nothing open yet, `todo` — also the answer for a zero-task epic and for an
+ * epic whose tasks are ALL superseded (`live === 0`, so `done === live` is
+ * never true).
+ */
+function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
+  const live = tasksTotal - counts.superseded;
+  if (live > 0 && counts.done === live) return 'done';
+  if (counts.review > 0 || counts.inProgress > 0) {
+    return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
+  }
+  return 'todo';
+}
+
+/**
  * Join factory/specs/roadmap.md's milestones (db/schema.ts's `milestones`
  * table) with each milestone's mapped epics' task/token stats. A milestone
  * with no epics mapped yet (roadmap.md's `epics: []`) reports zero tasks —
@@ -833,6 +943,12 @@ function milestoneProgressRows(
       : db.select().from(edges).all()
     : [];
   const dispatchStartByTask = earliestDispatchByTask(db, scope);
+  // DS4 S5b — both prefetched once per call: prUrlByEpic is one scan of
+  // eventsRaw (same read kanban() shares via prUrlsByEpic()); epicPromptMemo
+  // bounds epicSourcePrompt()'s lineage walk to once per distinct epic id,
+  // not once per task, mirroring dispatchStartByTask's per-call prefetch above.
+  const prUrlByEpic = prUrlsByEpic(db);
+  const epicPromptMemo = new Map<string, RequestQuote | null>();
 
   return milestoneRows.map((m) => {
     const epicIds = JSON.parse(m.epicIds) as string[];
@@ -861,13 +977,26 @@ function milestoneProgressRows(
       : undefined;
 
     const { startedAt, finishedAt } = taskDateRange(milestoneTasks, dispatchStartByTask);
-    const epicDates: EpicDates[] = epicIds.map((epicId) => ({
-      epicId,
-      ...taskDateRange(
-        milestoneTasks.filter((t) => t.epicId === epicId),
-        dispatchStartByTask,
-      ),
-    }));
+    const epicDates: EpicDates[] = epicIds.map((epicId) => {
+      const epicTasks = milestoneTasks.filter((t) => t.epicId === epicId);
+      const statusCounts = countStatuses(epicTasks);
+      let sourcePrompt: RequestQuote | null = null;
+      if (epicPromptMemo.has(epicId)) {
+        sourcePrompt = epicPromptMemo.get(epicId) ?? null;
+      } else if (epicTasks[0] !== undefined) {
+        sourcePrompt = epicSourcePrompt(db, epicTasks[0].sessionId);
+        epicPromptMemo.set(epicId, sourcePrompt);
+      }
+      return {
+        epicId,
+        ...taskDateRange(epicTasks, dispatchStartByTask),
+        statusCounts,
+        status: epicStatusFromCounts(statusCounts, epicTasks.length),
+        project: m.project,
+        prUrl: prUrlByEpic.get(epicId) ?? null,
+        sourcePrompt,
+      };
+    });
 
     return {
       milestoneId: m.milestoneId,
@@ -878,6 +1007,7 @@ function milestoneProgressRows(
       epicIds,
       tasksTotal: milestoneTasks.length,
       tasksCompleted,
+      statusCounts: countStatuses(milestoneTasks),
       tokensSpent,
       tokensBudget: hasBudget ? tokensBudget : null,
       unmeasured,
@@ -2187,6 +2317,27 @@ function epicIdOfIntegrationRef(taskRef: string): string | null {
   return taskRef.endsWith('/integration') ? taskRef.slice(0, -'/integration'.length) : null;
 }
 
+/**
+ * DS4 S5b — every epic's latest `integration-pr-opened` URL, keyed by
+ * epic id. Extracted out of `kanban()` (where this lived inline) so
+ * `roadmapPage()` can share the exact same read instead of keeping a second
+ * copy; `inLogOrder` means a later row for the same epic overwrites an
+ * earlier one, so the map always holds the latest PR.
+ */
+function prUrlsByEpic(db: SmithDb): Map<string, string> {
+  const integrationRows = inLogOrder(
+    db.select().from(eventsRaw).where(eq(eventsRaw.eventType, 'integration-pr-opened')).all(),
+  );
+  const result = new Map<string, string>();
+  for (const r of integrationRows) {
+    const epicRef = r.taskId ? epicIdOfIntegrationRef(r.taskId) : null;
+    if (!epicRef) continue;
+    const payload = JSON.parse(r.payload) as { pr_url?: string };
+    if (typeof payload.pr_url === 'string') result.set(epicRef, payload.pr_url);
+  }
+  return result;
+}
+
 function nearestUserPrompt(
   db: SmithDb,
   sessionId: string,
@@ -2218,8 +2369,13 @@ export function createQuoteMemo(): QuoteMemo {
   return { events: new Map(), epicPrompt: new Map() };
 }
 
-/** "Epic started from" fallback (§4.7): the earliest `user_prompt` in the epic's session lineage. */
-function epicSourcePrompt(db: SmithDb, anySessionIdInEpic: string): RequestQuote | null {
+/**
+ * "Epic started from" fallback (§4.7): the earliest `user_prompt` in the
+ * epic's session lineage. Exported (DS4 S5b) so `milestoneProgressRows()`
+ * can reuse it for `epics[].sourcePrompt` — same shape `requestQuoteForTask()`
+ * returns, so `RequestQuote.vue` renders it unchanged.
+ */
+export function epicSourcePrompt(db: SmithDb, anySessionIdInEpic: string): RequestQuote | null {
   const lineage = projectedLineage(db, anySessionIdInEpic);
   if (lineage.length === 0) return null;
   const rows = inLogOrder(
@@ -2381,16 +2537,9 @@ export function kanban(
 
   // DS3 item 2 — epic-level integration PR url, keyed by epic_id (there is no
   // per-task PR concept today, only the epic's own integration-pr-opened).
-  const integrationRows = inLogOrder(
-    db.select().from(eventsRaw).where(eq(eventsRaw.eventType, 'integration-pr-opened')).all(),
-  );
-  const prUrlByEpic = new Map<string, string>();
-  for (const r of integrationRows) {
-    const epicRef = r.taskId ? epicIdOfIntegrationRef(r.taskId) : null;
-    if (!epicRef) continue;
-    const payload = JSON.parse(r.payload) as { pr_url?: string };
-    if (typeof payload.pr_url === 'string') prUrlByEpic.set(epicRef, payload.pr_url);
-  }
+  // DS4 S5b — extracted to prUrlsByEpic() so roadmapPage() shares this exact
+  // read instead of keeping a second copy.
+  const prUrlByEpic = prUrlsByEpic(db);
 
   // DS3 item 2 — this task's dependency edges, resolved against the task rows
   // already in scope; a dependsOn id outside scope resolves to a null title/status.

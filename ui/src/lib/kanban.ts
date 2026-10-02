@@ -8,7 +8,11 @@ import { isTaskOver, type KitTone, taskStatusKitTone } from './taxonomy.js';
 export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'Completed'] as const;
 export type KanbanColumnName = (typeof KANBAN_COLUMNS)[number];
 
-const COLUMN_FOR_STATUS: Record<string, KanbanColumnName> = {
+// DS4 S5b fix round 1 — exported (with HIDDEN_BY_DEFAULT below) so
+// ui/test/kanban.test.ts can guard this mapping against db/queries.ts's
+// statusBucketForTaskStatus() without a second, hand-copied roster. Read
+// only; nothing in this module's own behavior changes.
+export const COLUMN_FOR_STATUS: Record<string, KanbanColumnName> = {
   todo: 'Todo',
   ready: 'Todo',
   'in-progress': 'In progress',
@@ -21,7 +25,7 @@ const COLUMN_FOR_STATUS: Record<string, KanbanColumnName> = {
   waived: 'Completed',
 };
 
-const HIDDEN_BY_DEFAULT = new Set(['failed', 'superseded']);
+export const HIDDEN_BY_DEFAULT = new Set(['failed', 'superseded']);
 
 /** Board column for a task_status, or null when it's hidden from the default (non-"All") board. */
 export function columnForStatus(taskStatus: string, showAll = false): KanbanColumnName | null {

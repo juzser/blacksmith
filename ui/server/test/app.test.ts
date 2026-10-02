@@ -768,7 +768,29 @@ describe('ui/server app.ts', () => {
           milestoneId: string;
           startedAt: string | null;
           finishedAt: string | null;
-          epics: { epicId: string; startedAt: string | null; finishedAt: string | null }[];
+          statusCounts: {
+            done: number;
+            review: number;
+            inProgress: number;
+            todo: number;
+            superseded: number;
+          };
+          epics: {
+            epicId: string;
+            startedAt: string | null;
+            finishedAt: string | null;
+            statusCounts: {
+              done: number;
+              review: number;
+              inProgress: number;
+              todo: number;
+              superseded: number;
+            };
+            status: string;
+            project: string;
+            prUrl: string | null;
+            sourcePrompt: { prompt: string; ts: string; eventId: string; source: string } | null;
+          }[];
         }>
       >(res);
     const phaseA = body.find((m) => m.milestoneId === 'phase-a');
@@ -776,9 +798,33 @@ describe('ui/server app.ts', () => {
     // merged), so there is a start date but no finish date yet.
     expect(typeof phaseA?.startedAt).toBe('string');
     expect(phaseA?.finishedAt).toBeNull();
+    // DS4 S5b — status breakdown/status/project/prUrl/sourcePrompt all pass
+    // through unchanged (task-1 done, task-2 reviewing, task-3/4 inProgress).
+    expect(phaseA?.statusCounts).toEqual({
+      done: 1,
+      review: 1,
+      inProgress: 2,
+      todo: 0,
+      superseded: 0,
+    });
     expect(phaseA?.epics).toEqual([
-      { epicId: EPIC_ID, startedAt: phaseA?.startedAt, finishedAt: null },
+      {
+        epicId: EPIC_ID,
+        startedAt: phaseA?.startedAt,
+        finishedAt: null,
+        statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0, superseded: 0 },
+        status: 'in_progress',
+        project: 'black-smith',
+        prUrl: null,
+        sourcePrompt: phaseA?.epics[0]?.sourcePrompt,
+      },
     ]);
+    expect(phaseA?.epics[0]?.sourcePrompt).toMatchObject({
+      prompt: expect.any(String),
+      ts: expect.any(String),
+      eventId: expect.any(String),
+      source: expect.stringMatching(/^(task|epic)$/),
+    });
     closeApp(handle);
   });
 
