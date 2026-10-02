@@ -127,11 +127,27 @@ export interface MilestoneProgress {
   finishedAt: string | null;
   /** Same derivation, one row per epic this milestone maps, for the Roadmap swimlane's per-epic bars. */
   epics: EpicDates[];
+  /** DS4 S5b — this milestone's tasks folded into the same 4 buckets as each epic's `statusCounts` below. */
+  statusCounts: StatusCounts;
 }
+/** DS4 S5b — the Kanban board's status->column fold, condensed to 4 buckets. See orchestrator queries.ts's StatusCounts. */
+export interface StatusCounts {
+  done: number;
+  review: number;
+  inProgress: number;
+  todo: number;
+}
+/** DS4 S5b — an epic's own status, derived from its statusCounts. See orchestrator queries.ts's EpicStatus. */
+export type EpicStatus = 'done' | 'review' | 'in_progress' | 'todo';
 export interface EpicDates {
   epicId: string;
   startedAt: string | null;
   finishedAt: string | null;
+  statusCounts: StatusCounts;
+  status: EpicStatus;
+  project: string;
+  prUrl: string | null;
+  sourcePrompt: RequestQuote | null;
 }
 export interface RecentDispatch {
   eventId: string;

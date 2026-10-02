@@ -20,6 +20,7 @@ function milestone(overrides: Partial<MilestoneProgress>): MilestoneProgress {
     startedAt: null,
     finishedAt: null,
     epics: [],
+    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0 },
     ...overrides,
   };
 }

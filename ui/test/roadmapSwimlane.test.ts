@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { MilestoneProgress } from '../src/lib/api.js';
+import type { EpicDates, MilestoneProgress } from '../src/lib/api.js';
 import {
   barState,
   buildAxisMarks,
@@ -31,6 +31,20 @@ function milestone(overrides: Partial<MilestoneProgress>): MilestoneProgress {
     startedAt: null,
     finishedAt: null,
     epics: [],
+    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0 },
+    ...overrides,
+  };
+}
+
+function epic(overrides: Partial<EpicDates> & Pick<EpicDates, 'epicId'>): EpicDates {
+  return {
+    startedAt: null,
+    finishedAt: null,
+    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0 },
+    status: 'todo',
+    project: 'demo',
+    prUrl: null,
+    sourcePrompt: null,
     ...overrides,
   };
 }
@@ -70,12 +84,12 @@ describe('buildSwimlane', () => {
         startedAt: '2025-12-01T00:00:00.000Z',
         finishedAt: null,
         epics: [
-          {
+          epic({
             epicId: 'epic-a',
             startedAt: '2025-12-01T00:00:00.000Z',
             finishedAt: '2025-12-20T00:00:00.000Z',
-          },
-          { epicId: 'epic-b', startedAt: '2026-01-05T00:00:00.000Z', finishedAt: null },
+          }),
+          epic({ epicId: 'epic-b', startedAt: '2026-01-05T00:00:00.000Z', finishedAt: null }),
         ],
       }),
     ];
@@ -114,7 +128,9 @@ describe('buildSwimlane', () => {
         milestoneId: 'phase-1',
         startedAt: '2026-01-01T00:00:00.000Z',
         finishedAt: null,
-        epics: [{ epicId: 'epic-a', startedAt: '2026-01-10T00:00:00.000Z', finishedAt: null }],
+        epics: [
+          epic({ epicId: 'epic-a', startedAt: '2026-01-10T00:00:00.000Z', finishedAt: null }),
+        ],
       }),
     ];
     const lane = buildSwimlane(milestones, NOW);
@@ -150,16 +166,16 @@ describe('buildSwimlane', () => {
         finishedAt: null,
         epicIds: ['epic-long', 'epic-short'],
         epics: [
-          {
+          epic({
             epicId: 'epic-long',
             startedAt: '2026-01-10T00:00:00.000Z',
             finishedAt: '2026-01-14T00:00:00.000Z',
-          },
-          {
+          }),
+          epic({
             epicId: 'epic-short',
             startedAt: '2026-01-13T00:00:00.000Z',
             finishedAt: '2026-01-14T00:00:00.000Z',
-          },
+          }),
         ],
       }),
     ];
