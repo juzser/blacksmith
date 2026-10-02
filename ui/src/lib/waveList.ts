@@ -39,7 +39,8 @@ export function epicStatusFromFlow(flow: Pick<FlowGraph, 'nodes'>): EpicStatus {
     total === 0 ? 'todo' : completed === total ? 'completed' : anyInFlight ? 'in-progress' : 'todo';
   return {
     statusTone: status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral',
-    statusLabel: status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
+    statusLabel:
+      status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
   };
 }
 
@@ -105,8 +106,8 @@ function taskInfo(node: FlowNode | undefined, taskId: string, edges: FlowEdge[])
 export function buildWaveList(graph: Pick<FlowGraph, 'waves' | 'nodes' | 'edges'>): WaveInfo[] {
   const nodeById = new Map(graph.nodes.map((n) => [n.taskId, n]));
   const total = graph.waves.length;
-  const isPast = graph.waves.map((ids) =>
-    ids.length > 0 && ids.every((id) => isTaskOver(nodeById.get(id)?.taskStatus ?? '')),
+  const isPast = graph.waves.map(
+    (ids) => ids.length > 0 && ids.every((id) => isTaskOver(nodeById.get(id)?.taskStatus ?? '')),
   );
   const currentIndex = isPast.findIndex((past) => !past);
 

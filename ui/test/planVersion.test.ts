@@ -43,11 +43,6 @@ describe('planVersionOptions() (D-165)', () => {
 
   it('sorts newest first and drops duplicates, whatever order the server sent', () => {
     const options = planVersionOptions(graph([1, 3, 1, 2], []));
-    expect(options.map((o) => o.label)).toEqual([
-      'Plan: latest (v3)',
-      'v3',
-      'v2',
-      'v1',
-    ]);
+    expect(options.map((o) => o.label)).toEqual(['Plan: latest (v3)', 'v3', 'v2', 'v1']);
   });
 });

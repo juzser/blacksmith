@@ -7,7 +7,11 @@ import {
   epicStatusFromFlow,
 } from '../src/lib/waveList.js';
 
-function node(taskId: string, taskStatus: string, workingAgentRole: string | null = null): FlowNode {
+function node(
+  taskId: string,
+  taskStatus: string,
+  workingAgentRole: string | null = null,
+): FlowNode {
   return {
     taskId,
     taskStatus,
@@ -79,13 +83,17 @@ describe('buildWaveList() (DS4 S3 §2)', () => {
 
 describe('epicStatusFromFlow() (DS4 S1/S3 shared status logic)', () => {
   it('reads "To do" for an epic with no tasks', () => {
-    expect(epicStatusFromFlow({ nodes: [] })).toEqual({ statusTone: 'neutral', statusLabel: 'To do' });
+    expect(epicStatusFromFlow({ nodes: [] })).toEqual({
+      statusTone: 'neutral',
+      statusLabel: 'To do',
+    });
   });
 
   it('reads "Done" when every task is over', () => {
-    expect(
-      epicStatusFromFlow({ nodes: [node('t1', 'completed'), node('t2', 'waived')] }),
-    ).toEqual({ statusTone: 'done', statusLabel: 'Done' });
+    expect(epicStatusFromFlow({ nodes: [node('t1', 'completed'), node('t2', 'waived')] })).toEqual({
+      statusTone: 'done',
+      statusLabel: 'Done',
+    });
   });
 
   it('reads "In progress" when some tasks are over and at least one is not', () => {
@@ -119,7 +127,10 @@ describe('dependencyLine() (DS4 S3 §2/§6)', () => {
 // DS4 S3 fix round 1 finding 3: epic mode passed the project-filter value
 // straight into EpicBlock, so "All projects" (no filter) never showed a Tag
 // at all. epicProject() derives it from the epic's own milestone instead.
-function milestone(project: string, epicIds: string[]): Pick<MilestoneProgress, 'project' | 'epicIds'> {
+function milestone(
+  project: string,
+  epicIds: string[],
+): Pick<MilestoneProgress, 'project' | 'epicIds'> {
   return { project, epicIds };
 }
 
