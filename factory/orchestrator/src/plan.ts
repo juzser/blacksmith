@@ -74,6 +74,13 @@ export interface PlanOpts {
   specsDir?: string;
   taxonomy?: Taxonomy;
   schemas?: CompiledSchemaSet;
+  /**
+   * The plan version being amended, when the caller has it. `validatePlan`
+   * uses it only to grandfather `plan.ui-flag-missing` on a task carried
+   * forward unchanged from before the rule existed (U2 S1 R2) — it never
+   * relaxes any other check.
+   */
+  previous?: PlanFile;
 }
 
 export type PlanValidationResult = { valid: true } | { valid: false; errors: ValidationIssue[] };
@@ -415,6 +422,96 @@ function describeAllowed(err: TaxonomyError): string {
  */
 const GLOB_CHARS = /[*?[{]/;
 
+/** Extensions that make a claimed path a UI-visible surface (U2 D3). */
+const UI_EXTENSION_RE = /\.(tsx|jsx|vue|svelte|css|scss|sass|less|html)$/i;
+
+/**
+ * Whether a task spec is flagged as changing what a user sees. An absent
+ * `ui_affecting` means false at the gate (U2 D3) — work already running must
+ * not be blocked by a flag it predates.
+ */
+export function isUiAffecting(spec: TaskSpecRecord): boolean {
+  return spec.ui_affecting === true;
+}
+
+/**
+ * `plan.ui-flag-missing`: a task that claims a UI-extension path must say,
+ * one way or the other, whether it is UI-affecting. An absent flag reads as
+ * false everywhere else in the factory (U2 D3), but silently reading false
+ * here would let a visibly UI-shaped task skip the uiux judge turn by
+ * omission rather than by a reviewed `ui_affecting: false`. Only the
+ * absence of the key is an error; an explicit `false` passes.
+ */
+function uiFlagMissing(t: TaskSpecRecord): ValidationIssue[] {
+  if (t.ui_affecting !== undefined) return [];
+  const claims = Array.isArray(t.claims)
+    ? t.claims.filter((c): c is string => typeof c === 'string')
+    : [];
+  const firstMatch = claims.find((c) => UI_EXTENSION_RE.test(c));
+  if (firstMatch === undefined) return [];
+  return [
+    {
+      path: '/ui_affecting',
+      message: `Task "${t.task_id}" claims UI-extension path "${firstMatch}" but has no ui_affecting flag (plan.ui-flag-missing). Set ui_affecting: true or false explicitly.`,
+    },
+  ];
+}
+
+/**
+ * Order-insensitive structural equality for the plain-JSON-shaped values a
+ * task record is made of (strings, numbers, booleans, null, arrays, plain
+ * objects). Arrays compare positionally — `claims` order is meaningful — and
+ * objects compare by key set and value, regardless of key order, since a
+ * record rebuilt via `{ ...t, ... }` and one authored by hand may list the
+ * same fields in different orders without differing in content.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (isPlainObject(a) || isPlainObject(b)) {
+    if (!isPlainObject(a) || !isPlainObject(b)) return false;
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((k) => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));
+  }
+  return false;
+}
+
+/**
+ * Whether `t` is exempt from `plan.ui-flag-missing` because the previous
+ * plan version already carried this exact task_id with no `ui_affecting` key,
+ * as a verbatim carry-forward. The operator's binding decision (S2 fix round
+ * 2): work already in flight must not be blocked by a flag that predates it,
+ * so a task `draftNextVersion` carries forward unchanged is grandfathered
+ * rather than stamped `ui_affecting: false` — that would claim a decision
+ * nobody made.
+ *
+ * "Unchanged" means the whole record, not just `claims`: `draftNextVersion`
+ * rewrites only `plan_version` (every carried task) and `task_status` (the
+ * dead `superseded` record a supersede leaves behind) — so a record that
+ * matches the previous one on every other field is something the plan editor
+ * itself carried forward, never content a human or a supersede replacement
+ * wrote. A supersede replacement that keeps the old task_id (D-121) writes
+ * new content under that id — a changed description or deps included, even
+ * when the claims happen to match (S1 fix round 3) — so it fails this
+ * comparison and still needs the flag.
+ *
+ * `added` tasks and v1 tasks have no previous record to match, so they are
+ * never exempt.
+ */
+function isGrandfatheredUiFlag(t: TaskSpecRecord, previous: PlanFile | undefined): boolean {
+  if (previous === undefined) return false;
+  const prevTask = previous.tasks.find((p) => p.task_id === t.task_id);
+  if (prevTask === undefined || prevTask.ui_affecting !== undefined) return false;
+  const { plan_version: _pv1, task_status: _ts1, ...prevRest } = prevTask;
+  const { plan_version: _pv2, task_status: _ts2, ...rest } = t;
+  return deepEqual(prevRest, rest);
+}
+
 /**
  * A `keeps_exports` promise is a file the task swears to keep the exports of,
  * and the post-run verifier reads it back against the task's diff. Three
@@ -503,6 +600,11 @@ export function validatePlan(plan: PlanFile, opts: PlanOpts = {}): PlanValidatio
     }
     for (const issue of unkeptPromises(t, result.valid ? [] : result.errors)) {
       errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
+    }
+    if (!isGrandfatheredUiFlag(t, opts.previous)) {
+      for (const issue of uiFlagMissing(t)) {
+        errors.push({ path: `/tasks/${t.task_id}${issue.path}`, message: issue.message });
+      }
     }
     if (t.plan_version !== plan.version) {
       errors.push({

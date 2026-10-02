@@ -130,6 +130,47 @@ describe('compileSchemas + validateRecord', () => {
     expect(result.valid).toBe(true);
   });
 
+  it.each([true, false])('accepts ui_affecting: %s on a task-spec', (ui_affecting) => {
+    const result = validateRecord(schemas, taxonomy, 'task-spec', {
+      task_id: 'epic-1/task-1',
+      epic_id: 'epic-1',
+      plan_version: 1,
+      objective: 'Do the thing.',
+      output_schema_ref: 'result.schema.json',
+      acceptance_criteria: ['it works'],
+      claims: ['src/foo/**'],
+      budget: { tokens: 1000, diff_lines: 100, max_turns: 10 },
+      contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+      case: 'feature',
+      origin: 'user',
+      task_status: 'todo',
+      ui_affecting,
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects a non-boolean ui_affecting on a task-spec', () => {
+    const result = validateRecord(schemas, taxonomy, 'task-spec', {
+      task_id: 'epic-1/task-1',
+      epic_id: 'epic-1',
+      plan_version: 1,
+      objective: 'Do the thing.',
+      output_schema_ref: 'result.schema.json',
+      acceptance_criteria: ['it works'],
+      claims: ['src/foo/**'],
+      budget: { tokens: 1000, diff_lines: 100, max_turns: 10 },
+      contract: { functional_clauses: ['do the thing'], nonfunctional_clauses: [] },
+      case: 'feature',
+      origin: 'user',
+      task_status: 'todo',
+      ui_affecting: 'yes',
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.path === '/ui_affecting')).toBe(true);
+    }
+  });
+
   it('rejects a lesson with an invalid date-time (ajv-formats)', () => {
     const result = validateRecord(schemas, taxonomy, 'lesson', {
       lesson_id: 'lesson-1',

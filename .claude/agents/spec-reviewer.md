@@ -83,6 +83,11 @@ dropped if not spelled out (`error.spec.missing-nonfunctional`) — this is
 your primary hunting ground alongside `spec-gap`, `spec-ambiguity`, and
 `spec-conflict`.
 
+Check the `ui_affecting` flag against the prose: a task whose summary or
+acceptance criteria mention UI surface (screen, page, layout, button, style,
+theme, mobile, component, copy on screen…) but does not carry
+`ui_affecting: true` is a finding — silent UI work skips the uiux judge turn.
+
 ## Rules
 
 - Independence: never the planner's own model/session.

@@ -7,6 +7,7 @@ import {
   diffPlans,
   draftNextVersion,
   impliedSpecsDir,
+  isUiAffecting,
   latestPlanVersion,
   livePlanTasks,
   loadPlan,
@@ -75,6 +76,27 @@ describe('plan.ts', () => {
 
   it('throws a typed error when the plan file does not exist', () => {
     expect(() => loadPlan('epic-1', 99, { specsDir })).toThrow(PlanError);
+  });
+
+  it('loads an old plan with no ui_affecting field; isUiAffecting reads false', async () => {
+    const plan: PlanFile = {
+      epic_id: 'epic-1',
+      version: 1,
+      status: 'active',
+      tasks: [task()],
+      edges: [],
+    };
+    await writePlanFixture(plan);
+    const loaded = loadPlan('epic-1', 1, { specsDir });
+    expect(isUiAffecting(loaded.tasks[0] as TaskSpecRecord)).toBe(false);
+  });
+
+  describe('isUiAffecting', () => {
+    it('is true only when the flag is exactly true', () => {
+      expect(isUiAffecting(task({ ui_affecting: true }))).toBe(true);
+      expect(isUiAffecting(task({ ui_affecting: false }))).toBe(false);
+      expect(isUiAffecting(task())).toBe(false);
+    });
   });
 
   describe('validatePlan', () => {
@@ -221,6 +243,121 @@ describe('plan.ts', () => {
 
       it('accepts a plan without the field, which is every plan written before it', () => {
         expect(validatePlan(planWith({}))).toEqual({ valid: true });
+      });
+    });
+
+    describe('ui_affecting / plan.ui-flag-missing', () => {
+      function planWith(overrides: Record<string, unknown>): PlanFile {
+        return {
+          epic_id: 'epic-1',
+          version: 1,
+          status: 'active',
+          tasks: [task(overrides)],
+          edges: [],
+        };
+      }
+
+      it('errors when a task claims a UI-extension path with no ui_affecting key', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.tsx'] }));
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toContainEqual({
+            path: '/tasks/epic-1/task-1/ui_affecting',
+            message: expect.stringMatching(
+              /plan\.ui-flag-missing.*src\/App\.tsx|src\/App\.tsx.*plan\.ui-flag-missing/,
+            ),
+          });
+        }
+      });
+
+      it('passes when the flag is explicitly false', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.tsx'], ui_affecting: false }));
+        expect(result.valid).toBe(true);
+      });
+
+      it('passes when the flag is explicitly true', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.tsx'], ui_affecting: true }));
+        expect(result.valid).toBe(true);
+      });
+
+      it('catches an uppercase extension', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.TSX'] }));
+        expect(result.valid).toBe(false);
+      });
+
+      it('does not flag a .ts-only claim', () => {
+        const result = validatePlan(planWith({ claims: ['src/App.ts'] }));
+        expect(result.valid).toBe(true);
+      });
+    });
+
+    describe('grandfathering carried-forward tasks (U2 S1 R2)', () => {
+      function v1(): PlanFile {
+        return {
+          epic_id: 'epic-1',
+          version: 1,
+          status: 'active',
+          tasks: [task({ claims: ['ui/src/App.vue'] })],
+          edges: [],
+        };
+      }
+
+      it('does not flag a legacy task draftNextVersion carries forward unchanged', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {});
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(true);
+      });
+
+      it('still flags an added task with no flag, naming only that task', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {
+          added: [task({ task_id: 'epic-1/task-2', claims: ['ui/src/New.tsx'] })],
+        });
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]?.path).toBe('/tasks/epic-1/task-2/ui_affecting');
+        }
+      });
+
+      it('still flags a supersede replacement with no flag, even under the same task_id', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {
+          supersede: {
+            'epic-1/task-1': task({ claims: ['ui/src/App.vue', 'ui/src/Extra.vue'] }),
+          },
+        });
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]?.path).toBe('/tasks/epic-1/task-1/ui_affecting');
+        }
+      });
+
+      it('still flags every task in a v1 plan (no previous version to grandfather against)', () => {
+        const result = validatePlan(v1());
+        expect(result.valid).toBe(false);
+      });
+
+      it('still flags a supersede replacement with the same claims but a changed description (U2 S1 R3)', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {
+          supersede: {
+            'epic-1/task-1': task({
+              claims: ['ui/src/App.vue'],
+              objective: 'Do a different thing.',
+            }),
+          },
+        });
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]?.path).toBe('/tasks/epic-1/task-1/ui_affecting');
+        }
       });
     });
 

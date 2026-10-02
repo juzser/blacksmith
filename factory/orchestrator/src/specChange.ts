@@ -277,7 +277,7 @@ export async function proposeSpecChange(
   // out after the write is unrecoverable; the cost of finding it out here is a
   // refusal the worker can still answer.
   const draft = draftNextVersion(plan, request.changes ?? {});
-  const validation = validatePlan(draft, opts);
+  const validation = validatePlan(draft, { ...opts, previous: plan });
   if (!validation.valid) {
     throw new SpecChangeError(
       'spec-change.proposal-invalid-draft',
