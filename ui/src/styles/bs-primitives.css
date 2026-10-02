@@ -2839,14 +2839,17 @@ summary.bs-inbox__group-head {
   min-width: 0;
   flex-wrap: nowrap;
 }
+/* DS4 S4 fix round 4 — the % number overlapped the Tag: .pmini's
+   min-width: 0 let the track + number overflow the box. The track is now
+   the element that gives way (it may shrink to 0), while .pmini keeps its
+   default content-based min-width so the number never loses space. */
 .wave-list--compact .tb-right .pmini {
   flex: 1 1 auto;
-  min-width: 0;
 }
 .wave-list--compact .tb-right .pmini .ptrack {
   flex: 1 1 auto;
   width: auto;
-  min-width: var(--bs-space-6);
+  min-width: 0;
 }
 .wave-list--compact .tb-right .pmini .bs-pnum,
 .wave-list--compact .tb-right .bs-tag {

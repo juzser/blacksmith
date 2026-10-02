@@ -121,14 +121,14 @@ describe('bs-primitives.css — current wave row on one line (fix round 2)', () 
     expect(decl).toMatch(/flex-wrap:\s*nowrap/);
   });
 
-  it('makes the ProgressBarMini the element that shrinks, with a token minimum (fix round 3)', () => {
+  it('makes the track the element that shrinks, not the number (fix round 4)', () => {
     const pmini = rule('.wave-list--compact .tb-right .pmini');
     expect(pmini).toMatch(/flex:\s*1\s*1\s*auto/);
-    expect(pmini).toMatch(/min-width:\s*0/);
+    expect(pmini).not.toMatch(/min-width:\s*0/);
 
     const track = rule('.wave-list--compact .tb-right .pmini .ptrack');
     expect(track).toMatch(/flex:\s*1\s*1\s*auto/);
-    expect(track).toMatch(/min-width:\s*var\(--bs-space-\d\)/);
+    expect(track).toMatch(/min-width:\s*0/);
   });
 
   it('keeps the % and the Tag from shrinking in compact mode (fix round 3)', () => {

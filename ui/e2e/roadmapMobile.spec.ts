@@ -211,6 +211,49 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
     });
   }
 
+  // S4 fix round 4 — the % number must never overlap the Tag: the track
+  // is the element that gives way when space is short.
+  for (const [label, url] of [
+    ['phase', '/work/roadmap?phase=phase-6b'],
+    ['epic', '/work/roadmap?epic=epic-9'],
+  ] as const) {
+    test(`the current wave row's % and Tag never overlap in ${label} mode at 375px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(url);
+      if (label === 'phase') {
+        const summary = page.locator('.bs-roadmap-mobile__waves summary').first();
+        await expect(summary).toBeVisible();
+        if ((await page.locator('.wave.cur').count()) === 0) {
+          await summary.click();
+        }
+      }
+      const curRow = page.locator('.wave.cur').first();
+      await expect(curRow).toBeVisible();
+
+      const pnum = curRow.locator('.bs-pnum').first();
+      const tag = curRow.locator('.bs-tag').first();
+      const pnumBox = await pnum.boundingBox();
+      const tagBox = await tag.boundingBox();
+      expect(pnumBox).not.toBeNull();
+      expect(tagBox).not.toBeNull();
+
+      const pnumRight = (pnumBox?.x ?? 0) + (pnumBox?.width ?? 0);
+      const pnumTop = pnumBox?.y ?? 0;
+      const pnumBottom = pnumTop + (pnumBox?.height ?? 0);
+      const tagLeft = tagBox?.x ?? 0;
+      const tagTop = tagBox?.y ?? 0;
+      const tagBottom = tagTop + (tagBox?.height ?? 0);
+
+      const verticallyOverlaps = pnumTop < tagBottom && tagTop < pnumBottom;
+      const horizontallyOverlaps = pnumRight > tagLeft;
+      expect(verticallyOverlaps && horizontallyOverlaps).toBe(false);
+
+      expect(tagLeft - pnumRight).toBeGreaterThanOrEqual(4);
+    });
+  }
+
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot phone phase mode/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
