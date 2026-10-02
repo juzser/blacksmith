@@ -6,6 +6,7 @@ import {
   agentChip,
   agentNudgeDue,
   attemptLabel,
+  COLUMN_FOR_STATUS,
   capColumn,
   cardChips,
   columnTone,
@@ -18,6 +19,7 @@ import {
   isInteractiveDescendant,
   KANBAN_COLUMNS,
   KANBAN_PAGE_SIZE,
+  type KanbanColumnName,
   subStatusSummary,
   visibleTaskCount,
 } from '../src/lib/kanban.js';
@@ -519,6 +521,70 @@ describe('lib/kanban.ts — every status the taxonomy declares reaches a column'
     expect(
       foldIntoColumns([{ taskId: 't1', taskStatus: 'queued' }], true).flatMap((c) => c.tasks),
     ).toEqual([]);
+  });
+});
+
+describe('lib/kanban.ts — COLUMN_FOR_STATUS agrees with the orchestrator Roadmap fold (DS4 S5b fix round 1, finding 2)', () => {
+  it('folds every declared task_status to the same bucket as db/queries.ts statusBucketForTaskStatus()', async () => {
+    // statusBucketForTaskStatus() (factory/orchestrator/src/db/queries.ts) is
+    // a second, hand-copied switch over this same mapping, with nothing
+    // tying the two together before this test. A future taxonomy.yml change
+    // that moves a status to a different Kanban column would silently leave
+    // the Roadmap's statusCounts disagreeing with the board it is supposed
+    // to summarize.
+    const { statusBucketForTaskStatus } = await import(
+      '../../factory/orchestrator/src/db/queries.js'
+    );
+
+    const yml = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        '..',
+        'factory',
+        'policies',
+        'taxonomy.yml',
+      ),
+      'utf8',
+    );
+    const declared = yml.match(/\ntask_status:\s*\[([^\]]+)\]/);
+    if (!declared) throw new Error('taxonomy.yml declares no task_status list');
+    const statuses = (declared[1] as string)
+      .split(',')
+      .map((v) => v.replace(/#.*$/, '').trim())
+      .filter(Boolean);
+    // Anti-vacuity.
+    expect(statuses.length).toBeGreaterThan(0);
+
+    // The fold this test pins: Kanban's "Todo" -> todo; "In progress"/
+    // "Blocked" -> inProgress; "Reviewing" -> review; "Completed" -> done;
+    // hidden `superseded` -> its own bucket; hidden `failed` -> inProgress
+    // (a person is still holding it, see taskStatus.ts).
+    const BUCKET_FOR_COLUMN: Record<KanbanColumnName, string> = {
+      Todo: 'todo',
+      'In progress': 'inProgress',
+      Blocked: 'inProgress',
+      Reviewing: 'review',
+      Completed: 'done',
+    };
+
+    for (const status of statuses) {
+      let expectedBucket: string;
+      if (status === 'superseded') {
+        expectedBucket = 'superseded';
+      } else if (status === 'failed') {
+        expectedBucket = 'inProgress';
+      } else {
+        const column = COLUMN_FOR_STATUS[status];
+        if (!column) {
+          throw new Error(
+            `taxonomy.yml declares '${status}', which neither COLUMN_FOR_STATUS nor the hidden set classifies`,
+          );
+        }
+        expectedBucket = BUCKET_FOR_COLUMN[column];
+      }
+      expect(statusBucketForTaskStatus(status), status).toBe(expectedBucket);
+    }
   });
 });
 

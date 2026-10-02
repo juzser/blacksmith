@@ -467,6 +467,14 @@ export interface StatusCounts {
   review: number;
   inProgress: number;
   todo: number;
+  /**
+   * DS4 S5b fix round 1 — tasks in status `superseded`, counted separately
+   * from `done` so `done` can stay exactly `TERMINAL_OK_TASK_STATUSES`
+   * (`tasksCompleted`'s own set). The UI draws no column for it; it exists so
+   * `done + review + inProgress + todo + superseded === tasksTotal` holds
+   * without silently inflating `done`.
+   */
+  superseded: number;
 }
 
 /**
@@ -838,22 +846,30 @@ function milestoneTaskRefs(
 }
 
 /**
- * DS4 S5b — folds one `task_status` into the same grouping `ui/src/lib/
- * kanban.ts`'s `COLUMN_FOR_STATUS` already uses for the Kanban board's
- * columns, condensed from its 5 (+2 hidden) columns to the Roadmap's 4:
+ * DS4 S5b fix round 1 — folds one `task_status` into the same grouping
+ * `ui/src/lib/kanban.ts`'s `COLUMN_FOR_STATUS` already uses for the Kanban
+ * board's columns, condensed from its 5 (+2 hidden) columns to the Roadmap's
+ * 5:
  *   - Kanban's "Todo" column (todo, ready) -> 'todo'.
  *   - Kanban's "Reviewing" column (reviewing, merging) -> 'review'.
- *   - Kanban's "Completed" column (completed, waived), plus `superseded`
- *     (the one status `taskStatus.ts`'s `CLOSED_TO_FURTHER_WORK` adds to
- *     completed/waived) -> 'done': nothing more will land on any of these.
+ *   - Kanban's "Completed" column (completed, waived) -> 'done': exactly
+ *     `TERMINAL_OK_TASK_STATUSES`, the same set `tasksCompleted` on the same
+ *     payload already uses, so the two numbers never disagree (fix round 1,
+ *     finding 1).
+ *   - `superseded` -> its own bucket, not `done`: a replanned-away task ended
+ *     the diff, not well, and folding it into `done` read an epic that was
+ *     replanned away as fully shipped. Kept out of the switch's `default` on
+ *     purpose, same reason: nobody confuses it with the fail-open case below.
  *   - Everything else (Kanban's "In progress" and "Blocked" columns, plus
  *     `failed`) -> 'inProgress': still open work, whether or not somebody is
- *     actively on it right now. A status this switch doesn't yet know about
- *     (taxonomy.yml adding a 13th tomorrow) falls here too — open rather
- *     than silently counted as done.
- * Exhaustive over this fold (every input lands in exactly one bucket), so
- * the four counts a caller builds from it always sum to the row count they
- * were built from.
+ *     actively on it right now. `failed` is terminal to the projector but a
+ *     person is still holding it (taskStatus.ts's HELD_OPEN_BY_AN_OPERATOR),
+ *     same as `escalated`/`blocked` already here. A status this switch
+ *     doesn't yet know about (taxonomy.yml adding a 13th tomorrow) falls here
+ *     too — open rather than silently counted as done.
+ * Exhaustive over this fold (every input lands in exactly one bucket), so the
+ * five counts a caller builds from it always sum to the row count they were
+ * built from.
  */
 export function statusBucketForTaskStatus(taskStatus: string): keyof StatusCounts {
   switch (taskStatus) {
@@ -865,29 +881,35 @@ export function statusBucketForTaskStatus(taskStatus: string): keyof StatusCount
       return 'review';
     case 'completed':
     case 'waived':
-    case 'superseded':
       return 'done';
+    case 'superseded':
+      return 'superseded';
     default:
       return 'inProgress';
   }
 }
 
 function countStatuses(rows: readonly { taskStatus: string }[]): StatusCounts {
-  const counts: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0 };
+  const counts: StatusCounts = { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 };
   for (const row of rows) counts[statusBucketForTaskStatus(row.taskStatus)] += 1;
   return counts;
 }
 
 /**
- * DS4 S5b — EpicStatus from a StatusCounts + its total: every task done is
- * `done`; any task in the review or inProgress buckets means at least
- * `in_progress`, rising to `review` only when every non-done task is itself
- * in the review bucket (no inProgress, no todo left over); otherwise, with
- * nothing done and nothing open yet, `todo` — also the answer for a
- * zero-task epic (0 === 0 is not "all done", so it falls through to here).
+ * DS4 S5b fix round 1 — EpicStatus from a StatusCounts + its total, over the
+ * epic's LIVE tasks (`tasksTotal` minus `superseded`): a replanned-away task
+ * is not part of what's left to ship, so it neither counts toward `done` nor
+ * holds the epic open. Every live task done is `done`; any task in the
+ * review or inProgress buckets means at least `in_progress`, rising to
+ * `review` only when every non-done live task is itself in the review bucket
+ * (no inProgress, no todo left over); otherwise, with nothing done and
+ * nothing open yet, `todo` — also the answer for a zero-task epic and for an
+ * epic whose tasks are ALL superseded (`live === 0`, so `done === live` is
+ * never true).
  */
 function epicStatusFromCounts(counts: StatusCounts, tasksTotal: number): EpicStatus {
-  if (tasksTotal > 0 && counts.done === tasksTotal) return 'done';
+  const live = tasksTotal - counts.superseded;
+  if (live > 0 && counts.done === live) return 'done';
   if (counts.review > 0 || counts.inProgress > 0) {
     return counts.inProgress === 0 && counts.todo === 0 ? 'review' : 'in_progress';
   }

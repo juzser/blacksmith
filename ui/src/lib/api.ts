@@ -136,6 +136,8 @@ export interface StatusCounts {
   review: number;
   inProgress: number;
   todo: number;
+  /** DS4 S5b fix round 1 — tasks in status `superseded`, see orchestrator queries.ts's StatusCounts. */
+  superseded: number;
 }
 /** DS4 S5b — an epic's own status, derived from its statusCounts. See orchestrator queries.ts's EpicStatus. */
 export type EpicStatus = 'done' | 'review' | 'in_progress' | 'todo';

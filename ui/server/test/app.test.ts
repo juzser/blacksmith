@@ -768,12 +768,24 @@ describe('ui/server app.ts', () => {
           milestoneId: string;
           startedAt: string | null;
           finishedAt: string | null;
-          statusCounts: { done: number; review: number; inProgress: number; todo: number };
+          statusCounts: {
+            done: number;
+            review: number;
+            inProgress: number;
+            todo: number;
+            superseded: number;
+          };
           epics: {
             epicId: string;
             startedAt: string | null;
             finishedAt: string | null;
-            statusCounts: { done: number; review: number; inProgress: number; todo: number };
+            statusCounts: {
+              done: number;
+              review: number;
+              inProgress: number;
+              todo: number;
+              superseded: number;
+            };
             status: string;
             project: string;
             prUrl: string | null;
@@ -788,13 +800,19 @@ describe('ui/server app.ts', () => {
     expect(phaseA?.finishedAt).toBeNull();
     // DS4 S5b — status breakdown/status/project/prUrl/sourcePrompt all pass
     // through unchanged (task-1 done, task-2 reviewing, task-3/4 inProgress).
-    expect(phaseA?.statusCounts).toEqual({ done: 1, review: 1, inProgress: 2, todo: 0 });
+    expect(phaseA?.statusCounts).toEqual({
+      done: 1,
+      review: 1,
+      inProgress: 2,
+      todo: 0,
+      superseded: 0,
+    });
     expect(phaseA?.epics).toEqual([
       {
         epicId: EPIC_ID,
         startedAt: phaseA?.startedAt,
         finishedAt: null,
-        statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0 },
+        statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0, superseded: 0 },
         status: 'in_progress',
         project: 'black-smith',
         prUrl: null,

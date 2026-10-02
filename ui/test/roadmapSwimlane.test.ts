@@ -31,7 +31,7 @@ function milestone(overrides: Partial<MilestoneProgress>): MilestoneProgress {
     startedAt: null,
     finishedAt: null,
     epics: [],
-    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0 },
+    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 },
     ...overrides,
   };
 }
@@ -40,7 +40,7 @@ function epic(overrides: Partial<EpicDates> & Pick<EpicDates, 'epicId'>): EpicDa
   return {
     startedAt: null,
     finishedAt: null,
-    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0 },
+    statusCounts: { done: 0, review: 0, inProgress: 0, todo: 0, superseded: 0 },
     status: 'todo',
     project: 'demo',
     prUrl: null,

@@ -170,13 +170,19 @@ describe('milestones projection + roadmap queries', () => {
       // finding was waived; task-3 escalated and task-4 left in-progress
       // (both fall to the default 'inProgress' bucket) -- see
       // statusBucketForTaskStatus()'s doc comment.
-      expect(phaseA?.statusCounts).toEqual({ done: 1, review: 1, inProgress: 2, todo: 0 });
+      expect(phaseA?.statusCounts).toEqual({
+        done: 1,
+        review: 1,
+        inProgress: 2,
+        todo: 0,
+        superseded: 0,
+      });
       expect(phaseA?.epics).toMatchObject([
         {
           epicId: EPIC_ID,
           startedAt: phaseA?.startedAt,
           finishedAt: null,
-          statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0 },
+          statusCounts: { done: 1, review: 1, inProgress: 2, todo: 0, superseded: 0 },
           status: 'in_progress',
           project: 'black-smith',
           prUrl: null,
@@ -193,19 +199,30 @@ describe('milestones projection + roadmap queries', () => {
       // No epics mapped and no tasks -- no activity to derive a date from.
       expect(phaseB?.startedAt).toBeNull();
       expect(phaseB?.finishedAt).toBeNull();
-      expect(phaseB?.statusCounts).toEqual({ done: 0, review: 0, inProgress: 0, todo: 0 });
+      expect(phaseB?.statusCounts).toEqual({
+        done: 0,
+        review: 0,
+        inProgress: 0,
+        todo: 0,
+        superseded: 0,
+      });
       expect(phaseB?.epics).toEqual([]);
     });
 
-    it("sums statusCounts' four buckets to tasksTotal, at both the milestone and the epic level", async () => {
+    it("sums statusCounts' five buckets to tasksTotal, at both the milestone and the epic level", async () => {
       const dbPath = path.join(dbDir, 'smith.db');
       await rebuild(dbPath, 'all', { stateDir, roadmapPath });
       const handle = openDb(dbPath);
       const page = roadmapPage(handle.db);
       handle.sqlite.close();
 
-      const sumOf = (c: { done: number; review: number; inProgress: number; todo: number }) =>
-        c.done + c.review + c.inProgress + c.todo;
+      const sumOf = (c: {
+        done: number;
+        review: number;
+        inProgress: number;
+        todo: number;
+        superseded: number;
+      }) => c.done + c.review + c.inProgress + c.todo + c.superseded;
 
       for (const m of page) {
         expect(sumOf(m.statusCounts)).toBe(m.tasksTotal);
@@ -214,8 +231,158 @@ describe('milestones projection + roadmap queries', () => {
       // equal the same tasksTotal as the milestone it rolls up into.
       const phaseA = page.find((m) => m.milestoneId === 'phase-a');
       expect(
-        sumOf(phaseA?.epics[0]?.statusCounts ?? { done: 0, review: 0, inProgress: 0, todo: 0 }),
+        sumOf(
+          phaseA?.epics[0]?.statusCounts ?? {
+            done: 0,
+            review: 0,
+            inProgress: 0,
+            todo: 0,
+            superseded: 0,
+          },
+        ),
       ).toBe(phaseA?.tasksTotal);
+    });
+
+    it('done === tasksCompleted for every milestone (both are exactly TERMINAL_OK_TASK_STATUSES)', async () => {
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      for (const m of page) {
+        expect(m.statusCounts.done).toBe(m.tasksCompleted);
+      }
+    });
+  });
+
+  describe('roadmapPage() statusCounts.superseded (DS4 S5b fix round 1, finding 1)', () => {
+    const SUPERSEDED_ROADMAP = `# Roadmap
+
+## Phase S — superseded/failed fixtures
+- id: phase-s
+- status: in-progress
+- epics: [epic-super]
+- goal: Covers done/superseded/failed interplay.
+`;
+
+    // task-added's initial task_status is honored as long as the row isn't
+    // already terminal (projector.ts's guard) — the row is born 'todo', so
+    // this sets the status directly, with no dispatch/gate ceremony needed
+    // for a fixture that only cares about the terminal value.
+    async function addTask(taskId: string, taskStatus: string): Promise<void> {
+      const events = await readEvents(SESSION_ID, { stateDir });
+      const parent = events[events.length - 1]?.event_id ?? null;
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            epic_id: 'epic-super',
+            case: 'feature',
+            origin: 'user',
+            task_status: taskStatus,
+            plan_version: 1,
+            objective: 'Ship it.',
+            claims: [`src/${taskId.replace('/', '-')}.ts`],
+            budget_tokens: 100,
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    async function buildAndRoadmap() {
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+      return page.find((m) => m.milestoneId === 'phase-s');
+    }
+
+    beforeEach(async () => {
+      // Reuses the outer beforeEach's already-open SESSION_ID log (one
+      // session-start per log) and its own separate epic id (epic-super),
+      // so these tasks neither collide with nor need buildFixture()'s own
+      // four (TASK_1..TASK_4, epic-1).
+      await writeFile(roadmapPath, SUPERSEDED_ROADMAP, 'utf8');
+    });
+
+    it('one completed + one waived task: done matches tasksCompleted (both 2), nothing superseded', async () => {
+      await addTask('epic-super/task-1', 'completed');
+      await addTask('epic-super/task-2', 'waived');
+      const phaseS = await buildAndRoadmap();
+
+      expect(phaseS?.tasksCompleted).toBe(2);
+      expect(phaseS?.statusCounts).toEqual({
+        done: 2,
+        review: 0,
+        inProgress: 0,
+        todo: 0,
+        superseded: 0,
+      });
+    });
+
+    it('one completed + one superseded task: done === tasksCompleted (1), superseded counted separately, epic reads done', async () => {
+      await addTask('epic-super/task-1', 'completed');
+      await addTask('epic-super/task-2', 'superseded');
+      const phaseS = await buildAndRoadmap();
+
+      expect(phaseS?.tasksCompleted).toBe(1);
+      expect(phaseS?.statusCounts).toEqual({
+        done: 1,
+        review: 0,
+        inProgress: 0,
+        todo: 0,
+        superseded: 1,
+      });
+      // The five-bucket sum still accounts for every task.
+      const c = phaseS?.statusCounts;
+      expect(
+        (c?.done ?? 0) +
+          (c?.review ?? 0) +
+          (c?.inProgress ?? 0) +
+          (c?.todo ?? 0) +
+          (c?.superseded ?? 0),
+      ).toBe(phaseS?.tasksTotal);
+      // The replanned-away task is not "still open": the one live task shipped.
+      expect(phaseS?.epics[0]?.status).toBe('done');
+    });
+
+    it('one completed + one failed task: epic reads in_progress (a person is still holding the failed task)', async () => {
+      await addTask('epic-super/task-1', 'completed');
+      await addTask('epic-super/task-2', 'failed');
+      const phaseS = await buildAndRoadmap();
+
+      expect(phaseS?.statusCounts).toEqual({
+        done: 1,
+        review: 0,
+        inProgress: 1,
+        todo: 0,
+        superseded: 0,
+      });
+      expect(phaseS?.epics[0]?.status).toBe('in_progress');
+    });
+
+    it('an epic whose tasks are ALL superseded reads todo (nothing live to call done)', async () => {
+      await addTask('epic-super/task-1', 'superseded');
+      await addTask('epic-super/task-2', 'superseded');
+      const phaseS = await buildAndRoadmap();
+
+      expect(phaseS?.tasksCompleted).toBe(0);
+      expect(phaseS?.statusCounts).toEqual({
+        done: 0,
+        review: 0,
+        inProgress: 0,
+        todo: 0,
+        superseded: 2,
+      });
+      expect(phaseS?.epics[0]?.status).toBe('todo');
     });
   });
 
@@ -434,6 +601,7 @@ describe('milestones projection + roadmap queries', () => {
         review: 1,
         inProgress: 0,
         todo: 0,
+        superseded: 0,
       });
       expect(phaseC?.epics[0]?.status).toBe('review');
     });
@@ -735,6 +903,7 @@ describe('roadmapPage() epics[].sourcePrompt — absent case', () => {
         review: 0,
         inProgress: 0,
         todo: 1,
+        superseded: 0,
       });
       expect(phaseD?.epics[0]?.status).toBe('todo');
     } finally {
