@@ -196,7 +196,7 @@ one thing this playbook never asks you to.
      primitive, not only the task's screens. The tester determines that
      list — from the screenshot suite already on disk or from the
      primitive's importers — and records it alongside the screenshots it
-     captures. The four-shot-per-feature cap (tester.md) still applies per
+     captures. The "max 4 per feature" screenshot cap (tester.md) still applies per
      screen; it is the screen count that grows, not the shots on each one.
 6. Dispatch **`grader`** (`.claude/agents/grader.md`) — bounded rubric
    loop, `profile.graderRounds` rounds (2 at `huge`, 1 below; never more

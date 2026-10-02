@@ -127,8 +127,9 @@ whatever happened to be there.
 Judge four sub-dimensions separately, and report each — one strong
 screenshot must not mask a failure in another dimension:
 
-- **accessibility** — contrast, visible labels, target size, focus-indicator
-  visibility, wherever a screenshot shows it;
+- **accessibility** — contrast, visible labels, focus-indicator
+  visibility, wherever a screenshot shows it, plus the measured touch
+  targets below;
 - **layout/spacing** — against the spec's grid/spacing tokens;
 - **consistency** — components and tokens actually rendered vs. what the
   spec named;
@@ -171,7 +172,7 @@ what this checks for.
 
 Map every finding onto S1–S4 using severity.yml's classes — do not invent a
 new scale. A broken layout, clipped content, a touch target under the
-project's declared minimum (WCAG 2.2 only as the fallback), contrast below
+minimum the touch-target paragraph above names, contrast below
 WCAG AA, or a missing required state is `S2-major`; a minor spacing/color/
 type deviation from the spec that doesn't meet any of those is `S3-minor`
 (severity.yml).
