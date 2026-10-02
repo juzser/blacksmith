@@ -458,28 +458,58 @@ function uiFlagMissing(t: TaskSpecRecord): ValidationIssue[] {
 }
 
 /**
+ * Order-insensitive structural equality for the plain-JSON-shaped values a
+ * task record is made of (strings, numbers, booleans, null, arrays, plain
+ * objects). Arrays compare positionally — `claims` order is meaningful — and
+ * objects compare by key set and value, regardless of key order, since a
+ * record rebuilt via `{ ...t, ... }` and one authored by hand may list the
+ * same fields in different orders without differing in content.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((v, i) => deepEqual(v, b[i]));
+  }
+  if (isPlainObject(a) || isPlainObject(b)) {
+    if (!isPlainObject(a) || !isPlainObject(b)) return false;
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    return aKeys.every((k) => Object.hasOwn(b, k) && deepEqual(a[k], b[k]));
+  }
+  return false;
+}
+
+/**
  * Whether `t` is exempt from `plan.ui-flag-missing` because the previous
- * plan version already carried this exact task_id with no `ui_affecting` key
- * and the same claims. The operator's binding decision (S2 fix round 2): work
- * already in flight must not be blocked by a flag that predates it, so a task
- * `draftNextVersion` carries forward unchanged is grandfathered rather than
- * stamped `ui_affecting: false` — that would claim a decision nobody made.
+ * plan version already carried this exact task_id with no `ui_affecting` key,
+ * as a verbatim carry-forward. The operator's binding decision (S2 fix round
+ * 2): work already in flight must not be blocked by a flag that predates it,
+ * so a task `draftNextVersion` carries forward unchanged is grandfathered
+ * rather than stamped `ui_affecting: false` — that would claim a decision
+ * nobody made.
+ *
+ * "Unchanged" means the whole record, not just `claims`: `draftNextVersion`
+ * rewrites only `plan_version` (every carried task) and `task_status` (the
+ * dead `superseded` record a supersede leaves behind) — so a record that
+ * matches the previous one on every other field is something the plan editor
+ * itself carried forward, never content a human or a supersede replacement
+ * wrote. A supersede replacement that keeps the old task_id (D-121) writes
+ * new content under that id — a changed description or deps included, even
+ * when the claims happen to match (S1 fix round 3) — so it fails this
+ * comparison and still needs the flag.
  *
  * `added` tasks and v1 tasks have no previous record to match, so they are
- * never exempt. A supersede replacement that keeps the old task_id (D-121)
- * writes new content under that id, so its claims differ from the previous
- * record's and it does not match either — it still needs the flag. The dead
- * `superseded` record `draftNextVersion` leaves behind keeps the old claims
- * verbatim, so it matches and is exempt too, which is correct: it is inert
- * history that nothing will ever dispatch again.
+ * never exempt.
  */
 function isGrandfatheredUiFlag(t: TaskSpecRecord, previous: PlanFile | undefined): boolean {
   if (previous === undefined) return false;
   const prevTask = previous.tasks.find((p) => p.task_id === t.task_id);
   if (prevTask === undefined || prevTask.ui_affecting !== undefined) return false;
-  const prevClaims = Array.isArray(prevTask.claims) ? prevTask.claims : [];
-  const claims = Array.isArray(t.claims) ? t.claims : [];
-  return prevClaims.length === claims.length && prevClaims.every((c, i) => c === claims[i]);
+  const { plan_version: _pv1, task_status: _ts1, ...prevRest } = prevTask;
+  const { plan_version: _pv2, task_status: _ts2, ...rest } = t;
+  return deepEqual(prevRest, rest);
 }
 
 /**

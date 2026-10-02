@@ -341,6 +341,24 @@ describe('plan.ts', () => {
         const result = validatePlan(v1());
         expect(result.valid).toBe(false);
       });
+
+      it('still flags a supersede replacement with the same claims but a changed description (U2 S1 R3)', () => {
+        const prev = v1();
+        const draft = draftNextVersion(prev, {
+          supersede: {
+            'epic-1/task-1': task({
+              claims: ['ui/src/App.vue'],
+              objective: 'Do a different thing.',
+            }),
+          },
+        });
+        const result = validatePlan(draft, { previous: prev });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors).toHaveLength(1);
+          expect(result.errors[0]?.path).toBe('/tasks/epic-1/task-1/ui_affecting');
+        }
+      });
     });
 
     it('reports schema-invalid tasks without throwing', () => {
