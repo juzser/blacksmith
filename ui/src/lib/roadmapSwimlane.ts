@@ -60,36 +60,38 @@ export interface Swimlane {
 const UPCOMING_STUB_WIDTH = 8;
 const MIN_BAR_WIDTH = 2;
 const FALLBACK_SPAN_MS = 1000 * 60 * 60 * 24 * 30;
+/** Padding either side of the real data span, as a fraction of that span. */
+const BOUNDS_PADDING_FRACTION = 0.15;
 
 function clamp(value: number, min = 0, max = 100): number {
   return Math.min(max, Math.max(min, value));
 }
 
 /**
- * Fix round 1 #2 — the raw end (latest of any date, or `now`) used to equal
- * `now` whenever nothing ran past today, pinning the now-line to exactly
- * 100% (the right edge, under the overflow clip). Padding the end out to the
- * end of next month guarantees `end > now` always, so the now-line — and the
- * months axis — always has room past today.
+ * Fix round 2 #1 — the axis used to be forced to span at least two calendar
+ * months regardless of the actual data, so a real project running for days
+ * or weeks collapsed to a sliver next to that forced width and every bar hit
+ * `MIN_BAR_WIDTH`. The domain now fits the real earliest-start/latest-
+ * end-or-now span, padded by a fraction of that span on both sides, so a
+ * short project still reads as proportional bars.
+ *
+ * Fix round 1 #2's invariant still holds: the padding is strictly positive
+ * whenever there is any real span at all (and the fallback span otherwise),
+ * so `end` is always past `now` and the now-line never pins to the right
+ * edge.
  */
-function paddedEnd(rawEnd: number, now: Date): number {
-  const endOfNextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1) - 1;
-  return Math.max(rawEnd, endOfNextMonth);
-}
-
 function computeBounds(ranges: DateRange[], now: Date): { start: number; end: number } {
   const times: number[] = [now.getTime()];
   for (const r of ranges) {
     if (r.startedAt !== null) times.push(Date.parse(r.startedAt));
     if (r.finishedAt !== null) times.push(Date.parse(r.finishedAt));
   }
-  let start = Math.min(...times);
-  let end = paddedEnd(Math.max(...times), now);
-  if (start === end) {
-    start -= FALLBACK_SPAN_MS;
-    end += FALLBACK_SPAN_MS;
-  }
-  return { start, end };
+  const rawStart = Math.min(...times);
+  const rawEnd = Math.max(...times);
+  const span = rawEnd - rawStart;
+  if (span === 0) return { start: rawStart - FALLBACK_SPAN_MS, end: rawEnd + FALLBACK_SPAN_MS };
+  const padding = span * BOUNDS_PADDING_FRACTION;
+  return { start: rawStart - padding, end: rawEnd + padding };
 }
 
 function pct(t: number, bounds: { start: number; end: number }): number {
@@ -112,6 +114,52 @@ export function buildMonthMarks(bounds: { start: number; end: number }): MonthMa
     cursor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
   }
   return marks;
+}
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+const WEEK_MS = DAY_MS * 7;
+
+export type TickUnit = 'day' | 'week' | 'month';
+
+/** Fix round 2 #1 — now that the axis fits the real span, a short project
+ * (days/weeks) needs finer ticks than a calendar month, or it would show
+ * zero or one month mark. */
+export function chooseTickUnit(bounds: { start: number; end: number }): TickUnit {
+  const span = bounds.end - bounds.start;
+  if (span <= DAY_MS * 21) return 'day';
+  if (span <= DAY_MS * 90) return 'week';
+  return 'month';
+}
+
+function buildFixedStepMarks(bounds: { start: number; end: number }, stepMs: number): MonthMark[] {
+  const marks: MonthMark[] = [];
+  const startDate = new Date(bounds.start);
+  let cursor = Date.UTC(
+    startDate.getUTCFullYear(),
+    startDate.getUTCMonth(),
+    startDate.getUTCDate(),
+  );
+  while (cursor <= bounds.end) {
+    marks.push({
+      label: new Date(cursor).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        timeZone: 'UTC',
+      }),
+      left: clamp(pct(cursor, bounds)),
+    });
+    cursor += stepMs;
+  }
+  return marks;
+}
+
+/** Dispatches to day/week/month ticks by span — the production entry point
+ * `buildSwimlane` calls this instead of `buildMonthMarks` directly. */
+export function buildAxisMarks(bounds: { start: number; end: number }): MonthMark[] {
+  const unit = chooseTickUnit(bounds);
+  if (unit === 'day') return buildFixedStepMarks(bounds, DAY_MS);
+  if (unit === 'week') return buildFixedStepMarks(bounds, WEEK_MS);
+  return buildMonthMarks(bounds);
 }
 
 function computeBar(
@@ -169,7 +217,7 @@ export function buildSwimlane(milestones: MilestoneProgress[], now: Date): Swiml
       });
     }
   }
-  return { rows, nowOffset: clamp(pct(now.getTime(), bounds)), months: buildMonthMarks(bounds) };
+  return { rows, nowOffset: clamp(pct(now.getTime(), bounds)), months: buildAxisMarks(bounds) };
 }
 
 /** A project with no declared phases: one row per epic, no dates available

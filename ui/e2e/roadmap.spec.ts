@@ -50,9 +50,8 @@ test.describe('Roadmap', () => {
     // of them is ever `not-scheduled` — that state only exists on envkit's
     // phase-7 (no tasks at all), which only renders on the all-projects view.
     await page.goto('/work/roadmap');
-    await expect(
-      page.locator('.lrow.sub', { hasText: 'epic-10' }).locator('.lbar.past'),
-    ).toBeVisible();
+    const pastBar = page.locator('.lrow.sub', { hasText: 'epic-10' }).locator('.lbar.past');
+    await expect(pastBar).toBeVisible();
     await expect(
       page.locator('.lrow.sub', { hasText: 'epic-9' }).locator('.lbar.now'),
     ).toBeVisible();
@@ -60,6 +59,15 @@ test.describe('Roadmap', () => {
       page.locator('.lrow.sub', { hasText: 'epic-11' }).locator('.lbar.up'),
     ).toBeVisible();
     await expect(page.getByText('Not scheduled').first()).toBeVisible();
+
+    // Fix round 2 #2: a done/past bar must read as filled (done), not as an
+    // empty, near-transparent box that looks unstarted.
+    const pastStyle = await pastBar.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { backgroundColor: style.backgroundColor, opacity: Number(style.opacity) };
+    });
+    expect(pastStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+    expect(pastStyle.opacity).toBeLessThan(1);
   });
 
   test('no sideways page scroll at 390px on /work/roadmap', async ({ page }) => {

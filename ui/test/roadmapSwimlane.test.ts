@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { MilestoneProgress } from '../src/lib/api.js';
 import {
   barState,
+  buildAxisMarks,
   buildEpicOnlySwimlane,
   buildMonthMarks,
   buildSwimlane,
+  chooseTickUnit,
   hasRoadmapContent,
   taskCountLabel,
 } from '../src/lib/roadmapSwimlane.js';
@@ -119,7 +121,7 @@ describe('buildSwimlane', () => {
     expect(lane.nowOffset).toBeLessThan(100);
   });
 
-  it('exposes month marks spanning the padded axis', () => {
+  it('exposes axis marks within the fitted bounds', () => {
     const milestones = [
       milestone({
         milestoneId: 'phase-1',
@@ -133,9 +135,68 @@ describe('buildSwimlane', () => {
       expect(m.left).toBeGreaterThanOrEqual(0);
       expect(m.left).toBeLessThanOrEqual(100);
     }
-    // NOW is in January 2026; padding to the end of next month guarantees
-    // at least Jan/Feb show up.
-    expect(lane.months.map((m) => m.label)).toEqual(expect.arrayContaining(['Jan', 'Feb']));
+  });
+
+  it('fits the axis to the real span instead of forcing a two-month minimum (fix round 2 #1)', () => {
+    // A project spanning a handful of days around NOW used to still padded
+    // out to a forced two-calendar-month axis, collapsing every bar to
+    // MIN_BAR_WIDTH. Two epics with genuinely different real durations must
+    // now render genuinely different (and much wider than the old 2%
+    // floor) bar widths.
+    const milestones = [
+      milestone({
+        milestoneId: 'phase-1',
+        startedAt: '2026-01-10T00:00:00.000Z',
+        finishedAt: null,
+        epicIds: ['epic-long', 'epic-short'],
+        epics: [
+          {
+            epicId: 'epic-long',
+            startedAt: '2026-01-10T00:00:00.000Z',
+            finishedAt: '2026-01-14T00:00:00.000Z',
+          },
+          {
+            epicId: 'epic-short',
+            startedAt: '2026-01-13T00:00:00.000Z',
+            finishedAt: '2026-01-14T00:00:00.000Z',
+          },
+        ],
+      }),
+    ];
+    const lane = buildSwimlane(milestones, NOW);
+    const long = lane.rows.find((r) => r.id === 'epic-long')?.bar;
+    const short = lane.rows.find((r) => r.id === 'epic-short')?.bar;
+    expect(long?.width).toBeGreaterThan(20);
+    expect(short?.width).toBeGreaterThan(5);
+    expect(long?.width ?? 0).toBeGreaterThan(short?.width ?? 0);
+  });
+});
+
+describe('chooseTickUnit (fix round 2 #1)', () => {
+  it('picks day ticks for a short span', () => {
+    expect(chooseTickUnit({ start: 0, end: 1000 * 60 * 60 * 24 * 10 })).toBe('day');
+  });
+
+  it('picks week ticks for a medium span', () => {
+    expect(chooseTickUnit({ start: 0, end: 1000 * 60 * 60 * 24 * 60 })).toBe('week');
+  });
+
+  it('picks month ticks for a long span', () => {
+    expect(chooseTickUnit({ start: 0, end: 1000 * 60 * 60 * 24 * 200 })).toBe('month');
+  });
+});
+
+describe('buildAxisMarks (fix round 2 #1)', () => {
+  it('dispatches to day-stepped marks for a short span', () => {
+    const bounds = { start: Date.UTC(2026, 0, 1), end: Date.UTC(2026, 0, 5) };
+    const marks = buildAxisMarks(bounds);
+    expect(marks.length).toBeGreaterThan(1);
+    expect(marks[0]?.left).toBe(0);
+  });
+
+  it('dispatches to month marks for a long span (same as buildMonthMarks)', () => {
+    const bounds = { start: Date.UTC(2026, 0, 15), end: Date.UTC(2026, 6, 10) };
+    expect(buildAxisMarks(bounds)).toEqual(buildMonthMarks(bounds));
   });
 });
 

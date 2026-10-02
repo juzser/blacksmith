@@ -66,6 +66,11 @@
   --bs-tone-review-subtle: #f4f0fe;
   --bs-tone-progress-text: #1d4ed8;
   --bs-tone-progress-subtle: #eaf1ff;
+  /* Roadmap fix round 2 #1 — no existing muted/faded alias was found
+     (uiux spec's instruction: add one only if none exists). Theme-
+     independent (an opacity multiplier, not a color), so it lives only
+     here, not duplicated in the `.dark` block. */
+  --bs-roadmap-bar-past-opacity: 0.6;
   --bs-tone-todo-text: #53565c;
   --bs-tone-todo-subtle: #f1f1f2;
   --bs-tone-blocked-text: #b45309;

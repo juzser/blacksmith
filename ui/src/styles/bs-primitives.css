@@ -2470,9 +2470,13 @@ summary.bs-inbox__group-head {
   height: 100%;
   border-radius: var(--bs-radius-sm);
 }
+/* Fix round 2 #2: a near-transparent fill with a border read as an empty,
+   unstarted box (the opposite of "done"). A done/past bar is a filled,
+   faded solid bar — same tone the done Tag uses, muted by the new
+   past-opacity token rather than a second color. */
 .lbar.past {
-  background: var(--bs-tone-neutral-subtle);
-  border: 1px solid var(--bs-border-bold);
+  background: var(--bs-tone-done-text);
+  opacity: var(--bs-roadmap-bar-past-opacity);
 }
 .lbar.now {
   background: var(--bs-tone-progress-text);
