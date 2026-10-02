@@ -2,19 +2,29 @@
 // DS4 S2/S3 — EpicBlock. Phase mode (unchanged from S2, now with the "Show
 // waves" toggle) and epic mode (new in S3, spec §1): the same `.eblock`
 // region, pointed at one epic instead of a whole phase.
-import { ChevronDown, ChevronUp } from '@lucide/vue';
-import { reactive } from 'vue';
+import { ChevronDown, ChevronUp, Copy, ExternalLink } from '@lucide/vue';
+import { reactive, ref } from 'vue';
 import { useViewport } from '../composables/useViewport.js';
+import type { RequestQuote as RequestQuoteData, StatusCounts } from '../lib/api.js';
+import { copyToClipboard } from '../lib/clipboard.js';
 import type { PlanVersionOption } from '../lib/planVersion.js';
 import { taskCountLabel } from '../lib/roadmapSwimlane.js';
 import type { KitTone } from '../lib/taxonomy.js';
-import { mobileEpicStatusLine, type WaveInfo } from '../lib/waveList.js';
+import {
+  isHttpsUrl,
+  mobileEpicStatusLine,
+  statusCountsBar,
+  type WaveInfo,
+} from '../lib/waveList.js';
+import IconButton from './kit/IconButton.vue';
 import ProgressBar from './kit/ProgressBar.vue';
 import ProgressBarMini from './kit/ProgressBarMini.vue';
 import ProgressRing from './kit/ProgressRing.vue';
 import Select from './kit/Select.vue';
 import Skeleton from './kit/Skeleton.vue';
 import Tag from './kit/Tag.vue';
+import Tooltip from './kit/Tooltip.vue';
+import RequestQuote from './RequestQuote.vue';
 import WaveList from './WaveList.vue';
 
 const { isPhoneWidth } = useViewport();
@@ -46,6 +56,13 @@ export interface EpicModeData {
   waves: WaveInfo[];
   /** DS4 S4 R1 — the phase that lists this epic, for the phone back link. */
   phase: { milestoneId: string; name: string } | null;
+  /** DS4 S5c §1 — server-computed task counts; falls back to the single
+   *  done/total bar below when absent. */
+  statusCounts?: StatusCounts;
+  /** DS4 S5c §4 — only an https URL renders the "Open ... PR" button. */
+  prUrl?: string | null;
+  /** DS4 S5c §3 — the "Epic started from" quote; nothing renders when null. */
+  sourcePrompt?: RequestQuoteData | null;
 }
 
 defineProps<{
@@ -56,9 +73,34 @@ defineProps<{
   tasksTotal?: number;
   tasksCompleted?: number;
   epics?: EpicSection[];
+  /** DS4 S5c §1 — phase-mode's own stacked bar, same server data. */
+  statusCounts?: StatusCounts;
   // Epic mode — set instead of the phase-mode props above.
   epic?: EpicModeData;
 }>();
+
+/** DS4 S5c §1 — statusCounts-aware segments/aria-label, falling back to the
+ *  existing single done/total bar when the server gives no counts. */
+function progressBar(counts: StatusCounts | undefined, completed: number, total: number) {
+  if (counts) return statusCountsBar(counts);
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+  return {
+    segments: [{ tone: 'success' as const, value: pct }],
+    ariaLabel: `${completed} of ${total} tasks done (${pct}%)`,
+  };
+}
+
+// DS4 S5c §4 — "Copy epic id" feedback: flips the IconButton's label to
+// "Copied" for a beat on success, stays put (no "Copied") on rejection.
+const copyLabel = ref('Copy epic id');
+async function onCopyEpicId(epicId: string) {
+  const ok = await copyToClipboard(epicId);
+  if (!ok) return;
+  copyLabel.value = 'Copied';
+  setTimeout(() => {
+    copyLabel.value = 'Copy epic id';
+  }, 1500);
+}
 // `selectEpic` (DS4 S4 R6): a phone phase-mode row tap. `backToPhase` (R1):
 // the phone epic-mode back link — imperative, not a RouterLink, because the
 // page's selected-phase/selected-epic state is local refs that only react
@@ -98,6 +140,23 @@ function toggle(epic: EpicSection) {
 
     <div class="esec-head">
       <b>{{ epic.epicId }}</b>
+      <IconButton
+        :icon="Copy"
+        :label="copyLabel"
+        size="sm"
+        @click="onCopyEpicId(epic.epicId)"
+      />
+      <Tooltip v-if="epic.prUrl && isHttpsUrl(epic.prUrl)" mode="describe" text="Open integration PR on GitHub">
+        <a
+          :href="epic.prUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="bs-iconbtn bs-iconbtn--sm"
+          aria-label="Open integration PR on GitHub"
+        >
+          <ExternalLink :size="16" aria-hidden="true" />
+        </a>
+      </Tooltip>
       <Tag :tone="epic.statusTone" size="sm">{{ epic.statusLabel }}</Tag>
       <Tag v-if="epic.project" tone="neutral" variant="outline" size="sm" class="eh-project">{{
         epic.project
@@ -118,11 +177,12 @@ function toggle(epic: EpicSection) {
       <div class="card-title">{{ taskCountLabel(epic.tasksTotal, epic.tasksCompleted) }}</div>
       <div class="barrow">
         <ProgressBar
-          :segments="[{ tone: 'success', value: Math.round((epic.tasksCompleted / epic.tasksTotal) * 100) }]"
-          :label="`${epic.epicId} progress`"
+          :segments="progressBar(epic.statusCounts, epic.tasksCompleted, epic.tasksTotal).segments"
+          :label="progressBar(epic.statusCounts, epic.tasksCompleted, epic.tasksTotal).ariaLabel"
         />
         <span class="pnum bar-pct">{{ Math.round((epic.tasksCompleted / epic.tasksTotal) * 100) }}%</span>
       </div>
+      <RequestQuote v-if="epic.sourcePrompt" :quote="epic.sourcePrompt" />
       <!-- DS4 S4 R3 — epic mode always shows WaveList in compact form on
            phone: past, current and upcoming, one line each. -->
       <WaveList :waves="epic.waves" :compact="isPhoneWidth" @select="emit('select', $event)" />
@@ -193,8 +253,8 @@ function toggle(epic: EpicSection) {
         <div class="card-title">{{ taskCountLabel(tasksTotal ?? 0, tasksCompleted ?? 0) }}</div>
         <div class="barrow">
           <ProgressBar
-            :segments="[{ tone: 'success', value: Math.round(((tasksCompleted ?? 0) / (tasksTotal ?? 1)) * 100) }]"
-            :label="`${name} progress`"
+            :segments="progressBar(statusCounts, tasksCompleted ?? 0, tasksTotal ?? 0).segments"
+            :label="progressBar(statusCounts, tasksCompleted ?? 0, tasksTotal ?? 0).ariaLabel"
           />
           <span class="pnum bar-pct">{{ Math.round(((tasksCompleted ?? 0) / (tasksTotal ?? 1)) * 100) }}%</span>
         </div>

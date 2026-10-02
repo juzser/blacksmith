@@ -40,7 +40,14 @@ import {
   milestoneStatusKitTone,
   milestoneStatusLabel,
 } from '../lib/taxonomy.js';
-import { buildWaveList, epicPhase, epicProject, epicStatusFromFlow } from '../lib/waveList.js';
+import {
+  buildWaveList,
+  epicDatesFor,
+  epicPhase,
+  epicProject,
+  epicStatusFromFlow,
+  epicStatusFromServerStatus,
+} from '../lib/waveList.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -240,7 +247,10 @@ const selectedEpicData = computed(() => {
       phase: epicPhase(milestones.value ?? [], epicId),
     };
   }
-  const { statusTone, statusLabel } = epicStatusFromFlow(flow);
+  const epicDates = epicDatesFor(milestones.value ?? [], epicId);
+  const { statusTone, statusLabel } = epicDates
+    ? epicStatusFromServerStatus(epicDates.status)
+    : epicStatusFromFlow(flow);
   return {
     epicId,
     statusTone,
@@ -254,6 +264,9 @@ const selectedEpicData = computed(() => {
     tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
     waves: buildWaveList(flow),
     phase: epicPhase(milestones.value ?? [], epicId),
+    statusCounts: epicDates?.statusCounts,
+    prUrl: epicDates?.prUrl ?? null,
+    sourcePrompt: epicDates?.sourcePrompt ?? null,
   };
 });
 
@@ -284,7 +297,10 @@ const epicSections = computed(() => {
         waves: [],
       };
     }
-    const { statusTone, statusLabel } = epicStatusFromFlow(flow);
+    const epicDates = epicDatesFor(milestones.value ?? [], epicId);
+    const { statusTone, statusLabel } = epicDates
+      ? epicStatusFromServerStatus(epicDates.status)
+      : epicStatusFromFlow(flow);
     return {
       epicId,
       statusTone,
@@ -366,6 +382,7 @@ async function closePeek() {
         :status-label="milestoneStatusLabel(selectedPhaseData.status)"
         :tasks-total="selectedPhaseData.tasksTotal"
         :tasks-completed="selectedPhaseData.tasksCompleted"
+        :status-counts="selectedPhaseData.statusCounts"
         :epics="epicSections"
         @select="openPeek"
         @select-epic="selectEpic"
