@@ -5,7 +5,7 @@
 // environment rather than resting on a mount.
 import type { FlowEdge, FlowGraph, FlowNode } from './api.js';
 import { edgeWords } from './edgeWords.js';
-import { isTaskOver } from './taxonomy.js';
+import { isTaskOver, type KitTone } from './taxonomy.js';
 
 export type WaveKind = 'past' | 'current' | 'upcoming';
 
@@ -16,6 +16,31 @@ export interface WaveTaskInfo {
   workingAgentRole: string | null;
   /** §2's "After T3 · uses its output" line, or null with no incoming edge. */
   dependencyLine: string | null;
+}
+
+export interface EpicStatus {
+  statusTone: KitTone;
+  statusLabel: string;
+}
+
+/**
+ * DS4 S2/S3 — one epic's status tone/label, derived from its FlowGraph.
+ * Shared between phase mode's `epicSections` and epic mode's header (spec
+ * §1: "a status Tag, from the same status tone/label logic as
+ * `epicSections` and `selectedEpicData`"). The label is always one of a
+ * fixed three, so the tone keys off that label rather than off whichever
+ * task status happens to be driving `anyInFlight` (fix round 2 #3).
+ */
+export function epicStatusFromFlow(flow: Pick<FlowGraph, 'nodes'>): EpicStatus {
+  const total = flow.nodes.length;
+  const completed = flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length;
+  const anyInFlight = flow.nodes.some((n) => !isTaskOver(n.taskStatus));
+  const status =
+    total === 0 ? 'todo' : completed === total ? 'completed' : anyInFlight ? 'in-progress' : 'todo';
+  return {
+    statusTone: status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral',
+    statusLabel: status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
+  };
 }
 
 export interface WaveInfo {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowEdge, FlowGraph, FlowNode } from '../src/lib/api.js';
-import { buildWaveList, dependencyLine } from '../src/lib/waveList.js';
+import { buildWaveList, dependencyLine, epicStatusFromFlow } from '../src/lib/waveList.js';
 
 function node(taskId: string, taskStatus: string, workingAgentRole: string | null = null): FlowNode {
   return {
@@ -69,6 +69,31 @@ describe('buildWaveList() (DS4 S3 §2)', () => {
       dependencyLine: 'After t1 · uses its output',
     });
     expect(waves[0]?.tasks[0]?.dependencyLine).toBeNull();
+  });
+});
+
+describe('epicStatusFromFlow() (DS4 S1/S3 shared status logic)', () => {
+  it('reads "To do" for an epic with no tasks', () => {
+    expect(epicStatusFromFlow({ nodes: [] })).toEqual({ statusTone: 'neutral', statusLabel: 'To do' });
+  });
+
+  it('reads "Done" when every task is over', () => {
+    expect(
+      epicStatusFromFlow({ nodes: [node('t1', 'completed'), node('t2', 'waived')] }),
+    ).toEqual({ statusTone: 'done', statusLabel: 'Done' });
+  });
+
+  it('reads "In progress" when some tasks are over and at least one is not', () => {
+    expect(
+      epicStatusFromFlow({ nodes: [node('t1', 'completed'), node('t2', 'in-progress')] }),
+    ).toEqual({ statusTone: 'progress', statusLabel: 'In progress' });
+  });
+
+  it('reads "In progress" for any not-yet-over mix, even all-todo (existing S2 semantics)', () => {
+    expect(epicStatusFromFlow({ nodes: [node('t1', 'todo'), node('t2', 'todo')] })).toEqual({
+      statusTone: 'progress',
+      statusLabel: 'In progress',
+    });
   });
 });
 
