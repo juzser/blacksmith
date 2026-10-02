@@ -199,6 +199,15 @@ const epicSections = computed(() => {
 
 <template>
   <div>
+    <div class="bs-roadmap-page__toolbar">
+      <div class="bs-roadmap-page__toolbar-actions">
+        <!-- WorkPage teleports the Kanban/Roadmap SegmentedControl here on
+             desktop/tablet (UI audit, fix round 1; merge-main fix round 2) —
+             see WorkPage.vue and KanbanPage.vue's matching toolbar. -->
+        <span id="bs-work-view-switch" />
+      </div>
+    </div>
+
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 
     <template v-else-if="loading">

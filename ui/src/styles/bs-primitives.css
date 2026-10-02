@@ -218,14 +218,14 @@ a:hover {
   opacity: 0.5;
 }
 .bs-btn--primary {
-  background: var(--bs-accent);
-  color: var(--bs-text-on-accent);
+  background: var(--bs-btn-primary-bg);
+  color: var(--bs-btn-primary-text);
 }
 .bs-btn--primary:hover {
-  background: var(--bs-accent-hover);
+  background: var(--bs-btn-primary-bg-hover);
 }
 .bs-btn--primary:active:not([aria-disabled='true']) {
-  background: var(--bs-accent-pressed);
+  background: var(--bs-btn-primary-bg-pressed);
 }
 .bs-btn--secondary {
   background: var(--bs-surface-sunken);
@@ -1914,6 +1914,21 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtlest);
   font-variant-numeric: tabular-nums;
 }
+/* Merge-main fix round 2: Roadmap's own toolbar, carrying only the
+   Kanban/Roadmap view switch (teleported in by WorkPage.vue) — the Roadmap
+   page itself has no search/filter controls of its own in S2. */
+.bs-roadmap-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--bs-space-2);
+}
+.bs-roadmap-page__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  margin-left: auto;
+}
 .bs-kanban-page__skeletons {
   display: flex;
   gap: var(--bs-space-4);
@@ -1952,6 +1967,20 @@ summary.bs-inbox__group-head {
      already wins — no !important needed. */
   font-variant-numeric: tabular-nums;
   border-radius: var(--bs-radius-full);
+  /* Tag's tone="neutral" variant="subtle" sets background inline (Tag.vue)
+     to --bs-tone-neutral-subtle, which aliases --bs-surface-sunken — the
+     exact token .bs-kanban-col itself is painted with, so the fill was
+     invisible (UI audit, fix round 1). !important overrides that inline
+     style; --bs-border is the example the finding itself names ("a neutral
+     border-tone token used as a background"), already contrast-checked as
+     text against --bs-tone-neutral-text in both themes (AA, see
+     kanbanCountFill.test.ts). Fix round 2 review: Tag.vue always sets
+     background inline (Tag.vue's `style` computed), and inline style beats
+     any stylesheet class regardless of selector specificity — only
+     !important or a Tag prop can win here. A prop would be a new knob on a
+     shared component for this one call site, which fails the >=2-call-site
+     bar for a new abstraction; !important stays. */
+  background: var(--bs-border) !important;
 }
 .bs-kanban-col__title {
   margin: 0;

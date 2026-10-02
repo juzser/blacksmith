@@ -227,6 +227,32 @@ test.describe('Timeline', () => {
     await expect(page.getByText('No events match these filters.')).toHaveCount(0);
   });
 
+  // UI audit fix round 3: `<PageHeader title="Timeline" />` has nothing
+  // visible (title hidden, no description/status/actions), so ds/PageHeader
+  // must skip its `.ds-ph` wrapper the same way kit/PageHeader does — else
+  // the empty wrapper stays an in-flow item of `.app-page`'s gapped stack and
+  // leaves a band above the toolbar (same claim as work.spec.ts's toolbar
+  // test).
+  test('the toolbar sits at the page top padding, with no leftover band above it', async ({
+    page,
+  }) => {
+    await page.goto('/timeline');
+    const toolbar = page.locator('.ds-toolbar');
+    await expect(toolbar).toBeVisible();
+
+    const pagePadding = await page.evaluate(() => {
+      const el = document.querySelector('.app-page');
+      if (!el) throw new Error('.app-page not found');
+      return Number.parseFloat(getComputedStyle(el).paddingTop);
+    });
+
+    const pageBox = await page.locator('.app-page').boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
+    if (!pageBox || !toolbarBox) throw new Error('the page or toolbar has no box');
+
+    expect(Math.abs(toolbarBox.y - pageBox.y - pagePadding)).toBeLessThanOrEqual(1);
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {

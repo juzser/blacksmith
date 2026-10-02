@@ -154,6 +154,9 @@ function goToTask(taskId: string) {
              its own. -->
         <span id="bs-kanban-page-toolbar-extra" />
         <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
+        <!-- WorkPage teleports the Kanban/Roadmap SegmentedControl here on
+             desktop/tablet (UI audit, fix round 1) — see WorkPage.vue. -->
+        <span id="bs-work-view-switch" />
       </div>
     </div>
 

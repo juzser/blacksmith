@@ -326,7 +326,7 @@ defineExpose({ focusFirstCard });
             aria-hidden="true"
           />
           <h3 class="bs-kanban-col__title">{{ col.label }}</h3>
-          <Tag class="bs-kanban-col__count" tone="neutral" variant="outline" size="sm">{{ col.total }}</Tag>
+          <Tag class="bs-kanban-col__count" tone="neutral" variant="subtle" size="sm">{{ col.total }}</Tag>
           <Popover
             :open="openColumnMenu === col.key"
             :label="`${col.label} column menu`"

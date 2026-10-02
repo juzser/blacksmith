@@ -32,11 +32,21 @@ function onPickView(value: string) {
 
 <template>
   <div class="app-page app-page--full-bleed">
-    <PageHeader title="Work">
-      <template #actions>
-        <SegmentedControl :items="segItems" />
-      </template>
-    </PageHeader>
+    <PageHeader title="Work" />
+
+    <!-- Desktop/tablet: the switch shares the toolbar row each view already
+         renders (#bs-work-view-switch, next to Epic select / task count /
+         Refresh) instead of a PageHeader row of its own — that row held
+         nothing but this once the h1 went sr-only, leaving an empty band
+         above the toolbar (UI audit, fix round 1). `defer` (Vue 3.5) lets
+         the target mount later in the same pass, since it lives inside the
+         child route page, not a sibling mounted ahead of it. .bs-segctl
+         still hides itself below --bs-bp-mobile (bs-primitives.css), so this is a
+         no-op on phone, where the switch lives only in the overflow menu
+         below. -->
+    <Teleport to="#bs-work-view-switch" defer>
+      <SegmentedControl :items="segItems" />
+    </Teleport>
 
     <!-- Must render before <router-view> so this teleports above Kanban's
          own display-options teleport inside #bs-mtopbar-overflow-extra
