@@ -57,7 +57,10 @@ defineProps<{
         <b>{{ epic.epicId }}</b>
         <Tag :tone="epic.statusTone" size="sm">{{ epic.statusLabel }}</Tag>
         <template v-if="epic.tasksTotal === null">
-          <Skeleton width="140px" :height="14" />
+          <!-- ds-allow-hardcode: placeholder width for the "N of M tasks done"
+               label while loading, not a layout/spacing token (same exception
+               as KanbanPage's skeleton column width). -->
+          <Skeleton width="140px" :height="14" /><!-- ds-allow-hardcode -->
         </template>
         <template v-else-if="epic.failed">
           <span class="muted small">Could not load this epic's tasks.</span>

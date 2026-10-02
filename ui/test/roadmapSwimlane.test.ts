@@ -184,6 +184,14 @@ describe('chooseTickUnit (fix round 2 #1)', () => {
   it('picks month ticks for a long span', () => {
     expect(chooseTickUnit({ start: 0, end: 1000 * 60 * 60 * 24 * 200 })).toBe('month');
   });
+
+  it('picks minute ticks for a span under about 2 hours (fix round 3 #2)', () => {
+    expect(chooseTickUnit({ start: 0, end: 1000 * 60 * 10 })).toBe('minute');
+  });
+
+  it('picks hour ticks for a sub-day span (fix round 3 #2)', () => {
+    expect(chooseTickUnit({ start: 0, end: 1000 * 60 * 60 * 6 })).toBe('hour');
+  });
 });
 
 describe('buildAxisMarks (fix round 2 #1)', () => {
@@ -197,6 +205,20 @@ describe('buildAxisMarks (fix round 2 #1)', () => {
   it('dispatches to month marks for a long span (same as buildMonthMarks)', () => {
     const bounds = { start: Date.UTC(2026, 0, 15), end: Date.UTC(2026, 6, 10) };
     expect(buildAxisMarks(bounds)).toEqual(buildMonthMarks(bounds));
+  });
+
+  it('shows at least 3 readable ticks for a fixture that spans minutes (fix round 3 #2)', () => {
+    const bounds = { start: Date.UTC(2026, 0, 15, 9, 0), end: Date.UTC(2026, 0, 15, 9, 10) };
+    const marks = buildAxisMarks(bounds);
+    expect(marks.length).toBeGreaterThanOrEqual(3);
+    expect(marks.every((m) => /^\d{2}:\d{2}$/.test(m.label))).toBe(true);
+  });
+
+  it('shows at least 3 readable ticks for a sub-day span (fix round 3 #2)', () => {
+    const bounds = { start: Date.UTC(2026, 0, 15, 0, 0), end: Date.UTC(2026, 0, 15, 6, 0) };
+    const marks = buildAxisMarks(bounds);
+    expect(marks.length).toBeGreaterThanOrEqual(3);
+    expect(marks.every((m) => /^\d{2}:\d{2}$/.test(m.label))).toBe(true);
   });
 });
 

@@ -116,19 +116,57 @@ export function buildMonthMarks(bounds: { start: number; end: number }): MonthMa
   return marks;
 }
 
-const DAY_MS = 1000 * 60 * 60 * 24;
+const MINUTE_MS = 1000 * 60;
+const HOUR_MS = MINUTE_MS * 60;
+const DAY_MS = HOUR_MS * 24;
 const WEEK_MS = DAY_MS * 7;
 
-export type TickUnit = 'day' | 'week' | 'month';
+export type TickUnit = 'minute' | 'hour' | 'day' | 'week' | 'month';
 
 /** Fix round 2 #1 — now that the axis fits the real span, a short project
  * (days/weeks) needs finer ticks than a calendar month, or it would show
- * zero or one month mark. */
+ * zero or one month mark.
+ *
+ * Fix round 3 #2 — a fixture that spans only minutes (e.g. a demo clock
+ * ticking seconds-per-event) fell into the day bucket and rendered one
+ * calendar-day tick for its whole, sub-hour lane. `minute`/`hour` units
+ * cover anything under a day so the axis always has at least 3 ticks. */
 export function chooseTickUnit(bounds: { start: number; end: number }): TickUnit {
   const span = bounds.end - bounds.start;
+  if (span <= HOUR_MS * 2) return 'minute';
+  if (span <= DAY_MS) return 'hour';
   if (span <= DAY_MS * 21) return 'day';
   if (span <= DAY_MS * 90) return 'week';
   return 'month';
+}
+
+/** Largest candidate step (ms) that still guarantees >=3 ticks across
+ * `span` (a step at most span/2 means floor(span/step)+1 >= 3). Falls back
+ * to the smallest candidate for a span too short for even that. */
+function pickStep(span: number, candidatesMs: readonly number[]): number {
+  let chosen = candidatesMs[0] as number;
+  for (const c of candidatesMs) {
+    if (c <= span / 2) chosen = c;
+  }
+  return chosen;
+}
+
+function buildTimeMarks(bounds: { start: number; end: number }, stepMs: number): MonthMark[] {
+  const marks: MonthMark[] = [];
+  let cursor = bounds.start;
+  while (cursor <= bounds.end) {
+    marks.push({
+      label: new Date(cursor).toLocaleString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+        timeZone: 'UTC',
+      }),
+      left: clamp(pct(cursor, bounds)),
+    });
+    cursor += stepMs;
+  }
+  return marks;
 }
 
 function buildFixedStepMarks(bounds: { start: number; end: number }, stepMs: number): MonthMark[] {
@@ -157,6 +195,13 @@ function buildFixedStepMarks(bounds: { start: number; end: number }, stepMs: num
  * `buildSwimlane` calls this instead of `buildMonthMarks` directly. */
 export function buildAxisMarks(bounds: { start: number; end: number }): MonthMark[] {
   const unit = chooseTickUnit(bounds);
+  const span = bounds.end - bounds.start;
+  if (unit === 'minute') {
+    return buildTimeMarks(bounds, pickStep(span, [MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS]));
+  }
+  if (unit === 'hour') {
+    return buildTimeMarks(bounds, pickStep(span, [HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 4 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS]));
+  }
   if (unit === 'day') return buildFixedStepMarks(bounds, DAY_MS);
   if (unit === 'week') return buildFixedStepMarks(bounds, WEEK_MS);
   return buildMonthMarks(bounds);
