@@ -156,7 +156,7 @@ function toggle(epic: EpicSection) {
       <ul class="bs-roadmap-mobile__list" role="list">
         <li v-for="sec in epics" :key="sec.epicId" class="bs-roadmap-mobile__item">
           <button type="button" class="bs-roadmap-mobile__row" @click="emit('selectEpic', sec.epicId)">
-            <span class="bs-roadmap-mobile__row-id">{{ sec.epicId }}</span>
+            <span class="bs-roadmap-mobile__row-id" :title="sec.epicId">{{ sec.epicId }}</span>
             <ProgressBarMini
               v-if="sec.tasksTotal"
               :value="sec.tasksCompleted ?? 0"
@@ -168,12 +168,17 @@ function toggle(epic: EpicSection) {
             <span class="bs-roadmap-mobile__row-status muted small">{{ mobileEpicStatusLine(sec) }}</span>
           </button>
           <details v-if="sec.tasksTotal" class="bs-roadmap-mobile__waves" :open="isOpen(sec)">
-            <summary>Waves of {{ sec.epicId }} &middot; {{ sec.waves.length }}</summary>
-            <WaveList
-              :waves="sec.waves.filter((w) => w.kind === 'current')"
-              compact
-              @select="emit('select', $event)"
-            />
+            <summary>
+              Waves of {{ sec.epicId }} &middot; {{ sec.waves.length }}
+              <ChevronDown class="bs-roadmap-mobile__chev" :size="16" aria-hidden="true" />
+            </summary>
+            <div class="bs-roadmap-mobile__waves-body">
+              <WaveList
+                :waves="sec.waves.filter((w) => w.kind === 'current')"
+                compact
+                @select="emit('select', $event)"
+              />
+            </div>
           </details>
         </li>
       </ul>

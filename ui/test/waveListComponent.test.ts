@@ -25,4 +25,13 @@ describe('WaveList.vue — compact prop (DS4 S4 R3)', () => {
   it('never renders the full bar or WaveTaskCards when compact', () => {
     expect(SRC).toMatch(/v-if="!compact && wave\.kind === 'current'"/);
   });
+
+  // S4 fix round 1 #4 — compact wave rows kept .wave card chrome (border
+  // box, background). Compact must render flat rows like the mock's .mrow:
+  // no card, a border-bottom separator only. The `wave-list--compact`
+  // modifier class carries the override, not a change to the per-wave
+  // element/class names, so desktop output (compact=false) stays untouched.
+  it('adds a wave-list--compact modifier class only when compact, leaving per-wave classes untouched', () => {
+    expect(SRC).toMatch(/class="wave-list"\s+:class="\{\s*'wave-list--compact':\s*compact\s*\}"/);
+  });
 });

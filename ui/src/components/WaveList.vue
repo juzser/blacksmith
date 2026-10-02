@@ -22,7 +22,7 @@ function modifier(kind: WaveInfo['kind']): 'past' | 'cur' | 'next' {
 </script>
 
 <template>
-  <div class="wave-list">
+  <div class="wave-list" :class="{ 'wave-list--compact': compact }">
     <section v-for="wave in waves" :key="wave.index" class="wave" :class="modifier(wave.kind)">
       <div class="whead">
         <span>

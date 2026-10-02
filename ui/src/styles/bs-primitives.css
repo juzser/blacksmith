@@ -2704,10 +2704,11 @@ summary.bs-inbox__group-head {
 }
 .bs-roadmap-mobile__row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   width: 100%;
   min-height: var(--bs-touch);
-  gap: var(--bs-space-3);
+  gap: var(--bs-space-1) var(--bs-space-3);
   padding: var(--bs-space-3) var(--bs-space-4);
   background: none;
   border: 0;
@@ -2717,27 +2718,40 @@ summary.bs-inbox__group-head {
   cursor: pointer;
 }
 .bs-roadmap-mobile__row-id {
-  font-weight: var(--bs-font-weight-medium);
-  flex-shrink: 0;
-}
-.bs-roadmap-mobile__row-status {
-  margin-left: auto;
   min-width: 0;
+  flex-shrink: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: var(--bs-font-weight-medium);
 }
-.bs-roadmap-mobile__waves {
-  padding: 0 var(--bs-space-4) var(--bs-space-3);
-  border-top: 1px solid var(--bs-border);
+.bs-roadmap-mobile__row-status {
+  flex-basis: 100%;
+  min-width: 0;
 }
 .bs-roadmap-mobile__waves summary {
   min-height: var(--bs-touch);
   display: flex;
   align-items: center;
+  gap: var(--bs-space-2);
+  padding: 0 var(--bs-space-4);
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtle);
   cursor: pointer;
+}
+.bs-roadmap-mobile__chev {
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: transform var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-roadmap-mobile__waves[open] > summary {
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-roadmap-mobile__waves[open] > summary .bs-roadmap-mobile__chev {
+  transform: rotate(180deg);
+}
+.bs-roadmap-mobile__waves-body {
+  padding: var(--bs-space-3) var(--bs-space-4);
 }
 
 /* DS4 S3 — WaveList.vue: one .wave <section> per wave, past/cur/next read
@@ -2764,6 +2778,26 @@ summary.bs-inbox__group-head {
 }
 .wave.past {
   color: var(--bs-text-subtle);
+}
+/* DS4 S4 fix round 1 #4 — compact (phone) WaveList rows: flat rows like
+   the mock's .mrow, no card chrome, a border-bottom separator only (none
+   on the last row). The selector list beats .wave.cur/.wave.next on
+   specificity so the card styling above is fully overridden. */
+.wave-list--compact {
+  gap: 0;
+}
+.wave-list--compact .wave,
+.wave-list--compact .wave.cur,
+.wave-list--compact .wave.next {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: var(--bs-space-2) 0;
+  border-bottom: 1px solid var(--bs-border);
+}
+.wave-list--compact .wave:last-child {
+  border-bottom: 0;
 }
 .whead {
   display: flex;

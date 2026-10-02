@@ -102,4 +102,21 @@ describe('EpicBlock.vue — phone branch (DS4 S4)', () => {
   it('uses mobileEpicStatusLine for the phone row status text', () => {
     expect(EPIC_BLOCK).toMatch(/mobileEpicStatusLine\(sec\)/);
   });
+
+  it('keeps the full epic id in a title attribute once the row shrinks it (S4 fix round 1 #5)', () => {
+    expect(EPIC_BLOCK).toMatch(
+      /<span class="bs-roadmap-mobile__row-id" :title="sec\.epicId">\{\{ sec\.epicId \}\}<\/span>/,
+    );
+  });
+
+  it('marks the waves <details> summary with a rotating chevron, aria-hidden (S4 fix round 1 #3)', () => {
+    const summaryBody = EPIC_BLOCK.match(/<summary>[\s\S]*?<\/summary>/)?.[0] ?? '';
+    expect(summaryBody).not.toBe('');
+    expect(summaryBody).toMatch(/<ChevronDown class="bs-roadmap-mobile__chev"/);
+    expect(summaryBody).toMatch(/aria-hidden="true"/);
+  });
+
+  it('wraps the open waves body so a closed <details> is only the summary (S4 fix round 1 #2)', () => {
+    expect(EPIC_BLOCK).toMatch(/<div class="bs-roadmap-mobile__waves-body">[\s\S]*?<WaveList/);
+  });
 });
