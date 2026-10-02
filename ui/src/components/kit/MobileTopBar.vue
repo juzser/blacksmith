@@ -110,6 +110,19 @@ function onMenuKeydown(event: KeyboardEvent) {
   }
 }
 
+// DS4 S1 round 7 (WAI-ARIA APG menu button pattern): Tab/Shift+Tab is left
+// unhandled in onMenuKeydown above — focus is meant to move on naturally,
+// not be trapped — so closing on Tab-out is caught here instead, once focus
+// has actually left. relatedTarget inside menuEl covers focus landing on a
+// nested, teleported-in control (Kanban's display-options Popover panel is
+// teleported into #bs-mtopbar-overflow-extra, which lives inside menuEl, not
+// outside it) without treating that as "left the menu".
+function onMenuFocusout(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (next && (menuEl.value?.contains(next) || triggerWrap.value?.contains(next))) return;
+  closeOverflow();
+}
+
 watch(overflowOpen, (open) => {
   if (open) nextTick(() => focusItemAt(0));
 });
@@ -157,6 +170,7 @@ const dotLabel = computed(() => formatLiveStatus(props.live, props.lastEventAt, 
         role="menu"
         aria-label="More actions"
         @keydown="onMenuKeydown"
+        @focusout="onMenuFocusout"
       >
         <button
           type="button"
@@ -184,10 +198,11 @@ const dotLabel = computed(() => formatLiveStatus(props.live, props.lastEventAt, 
           <Icon :icon="theme === 'dark' ? Sun : Moon" :size="16" />
           <span>{{ theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme' }}</span>
         </button>
-        <!-- "Open desktop view" is deferred, see ui/docs/DESIGN.md Known
-             deviations — no viewport-override mechanism exists yet. Stays
-             focusable (round 6): aria-disabled, not the native disabled
-             attribute, so the arrow-key walk still reaches it. -->
+        <!-- This row stays aria-disabled, not the native disabled attribute
+             (round 6), so the arrow-key walk still reaches it; the mock's
+             "Open desktop view" item is a separate, deferred control (see
+             ui/docs/DESIGN.md Known deviations — no viewport-override
+             mechanism exists yet), not this one. -->
         <button
           type="button"
           class="bs-mtopbar__menuitem"

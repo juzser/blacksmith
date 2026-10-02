@@ -51,7 +51,7 @@ function onPickView(value: string) {
          (LessonsPage). tabindex is "-1" by default; MobileTopBar owns the
          roving tabindex across the whole menu. -->
     <Teleport to="#bs-mtopbar-overflow-extra">
-      <span class="bs-mtopbar__menu-label">View</span>
+      <span class="bs-mtopbar__menu-label" aria-hidden="true">View</span>
       <div class="bs-mtopbar__viewgroup" role="group" aria-label="View">
         <button
           v-for="opt in radioOptions"

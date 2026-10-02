@@ -112,6 +112,27 @@ test.describe('Work switcher', () => {
     await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   });
 
+  test('phone: Tab out of the menu closes it (WAI-ARIA APG menu button pattern, DS4 S1 round 7)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    const trigger = page.getByRole('button', { name: 'More actions' });
+    await trigger.click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const items = menu.locator('[role="menuitem"], [role="menuitemradio"]');
+    const count = await items.count();
+    await page.keyboard.press('End');
+    await expect(items.nth(count - 1)).toBeFocused();
+    await page.keyboard.press('Tab');
+
+    await expect(menu).toBeHidden();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
   test('phone: ArrowDown from the first item walks every menu item in order and wraps, Home/End jump (DS4 S1 round 6)', async ({
     page,
   }) => {

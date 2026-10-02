@@ -52,6 +52,8 @@ function onGroupByChange(value: string) {
         class="bs-mtopbar__menuitem"
         role="menuitem"
         tabindex="-1"
+        aria-haspopup="dialog"
+        :aria-expanded="open"
         @click="open ? emit('close') : emit('open')"
       >
         <Icon :icon="SlidersHorizontal" :size="16" />

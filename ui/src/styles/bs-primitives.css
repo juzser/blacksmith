@@ -1451,14 +1451,16 @@ a:hover {
   color: var(--bs-text-subtle);
   flex-shrink: 0;
 }
-/* Visible "View" heading above WorkPage's teleported radio group — the
-   radiogroup's own aria-label is not enough on its own (uiux spec §3). */
+/* Visible "View" heading above WorkPage's teleported role="group" of
+   menuitemradio buttons — the group's own aria-label is not enough on its
+   own (uiux spec §3), and the span itself is aria-hidden (it would otherwise
+   duplicate that aria-label to a screen reader). */
 .bs-mtopbar__menu-label {
   display: block;
   padding: var(--bs-space-1) var(--bs-space-2);
-  font-size: var(--bs-text-xs);
+  font-size: var(--bs-text-sm);
   font-weight: var(--bs-font-weight-semibold);
-  color: var(--bs-text-subtle);
+  color: var(--bs-text);
 }
 /* Teleport target for page-specific overflow controls (ds-spec.md §3.1 Work/
    Kanban row) — `display: contents` so a teleported trigger sits inline with
