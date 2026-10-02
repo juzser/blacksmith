@@ -872,6 +872,7 @@ function milestoneTaskRefs(
  * built from.
  */
 export function statusBucketForTaskStatus(taskStatus: string): keyof StatusCounts {
+  if (TERMINAL_OK_TASK_STATUSES.has(taskStatus)) return 'done';
   switch (taskStatus) {
     case 'todo':
     case 'ready':
@@ -879,9 +880,6 @@ export function statusBucketForTaskStatus(taskStatus: string): keyof StatusCount
     case 'reviewing':
     case 'merging':
       return 'review';
-    case 'completed':
-    case 'waived':
-      return 'done';
     case 'superseded':
       return 'superseded';
     default:

@@ -9,7 +9,7 @@ export const KANBAN_COLUMNS = ['Todo', 'In progress', 'Reviewing', 'Blocked', 'C
 export type KanbanColumnName = (typeof KANBAN_COLUMNS)[number];
 
 // DS4 S5b fix round 1 — exported (with HIDDEN_BY_DEFAULT below) so
-// kanbanStatusFold.test.ts can guard this mapping against db/queries.ts's
+// ui/test/kanban.test.ts can guard this mapping against db/queries.ts's
 // statusBucketForTaskStatus() without a second, hand-copied roster. Read
 // only; nothing in this module's own behavior changes.
 export const COLUMN_FOR_STATUS: Record<string, KanbanColumnName> = {
