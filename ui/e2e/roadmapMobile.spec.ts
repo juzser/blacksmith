@@ -169,6 +169,48 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
     expect(rowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
+  // S4 fix round 3 — information beats bar length: the current wave row's
+  // title + done count must stay fully visible (un-truncated), with the
+  // ProgressBarMini shrinking instead, in both phase mode and epic mode.
+  for (const [label, url] of [
+    ['phase', '/work/roadmap?phase=phase-6b'],
+    ['epic', '/work/roadmap?epic=epic-9'],
+  ] as const) {
+    test(`the current wave row shows "0/1 done" un-truncated in ${label} mode at 375px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.goto(url);
+      if (label === 'phase') {
+        const summary = page.locator('.bs-roadmap-mobile__waves summary').first();
+        await expect(summary).toBeVisible();
+        if ((await page.locator('.wave.cur').count()) === 0) {
+          await summary.click();
+        }
+      }
+      const curRow = page.locator('.wave.cur').first();
+      await expect(curRow).toBeVisible();
+      await expect(curRow).toContainText('0/1 done');
+
+      const titleWrap = curRow.locator('.whead > span:first-child').first();
+      const [scrollWidth, clientWidth] = await titleWrap.evaluate((el) => [
+        el.scrollWidth,
+        el.clientWidth,
+      ]);
+      expect(scrollWidth).toBeLessThanOrEqual(clientWidth);
+
+      const title = curRow.locator('.wave__title').first();
+      const tag = curRow.locator('.bs-tag').first();
+      const titleBox = await title.boundingBox();
+      const tagBox = await tag.boundingBox();
+      expect(titleBox).not.toBeNull();
+      expect(tagBox).not.toBeNull();
+      const titleCenterY = (titleBox?.y ?? 0) + (titleBox?.height ?? 0) / 2;
+      const tagCenterY = (tagBox?.y ?? 0) + (tagBox?.height ?? 0) / 2;
+      expect(Math.abs(titleCenterY - tagCenterY)).toBeLessThan(4);
+    });
+  }
+
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot phone phase mode/${theme}`, async ({ page }) => {
       await setTheme(page, theme);

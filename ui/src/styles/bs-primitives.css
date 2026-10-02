@@ -2815,29 +2815,41 @@ summary.bs-inbox__group-head {
 .whead .small {
   font-size: var(--bs-text-xs);
 }
-/* DS4 S4 fix round 2 — compact mode only: keep the current wave row on one
-   line (ruling R3). The title shrinks with an ellipsis instead of wrapping
-   the row onto a second line; .tb-right stays full width. Desktop .whead
-   above is untouched. */
+/* DS4 S4 fix round 3 — compact mode only: keep the current wave row on one
+   line (ruling R3) WITHOUT truncating the title or the done count
+   (information beats bar length). The title + done count span stays at its
+   natural width; .tb-right takes the remaining space and the
+   ProgressBarMini inside it is the element that actually shrinks. The %
+   and the Tag never shrink. Desktop .whead above is untouched. */
 .wave-list--compact .whead {
   flex: 1;
   min-width: 0;
   flex-wrap: nowrap;
 }
 .wave-list--compact .whead > span:first-child {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 .wave-list--compact .wave__title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
   white-space: nowrap;
 }
 .wave-list--compact .tb-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.wave-list--compact .tb-right .pmini {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wave-list--compact .tb-right .pmini .ptrack {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: var(--bs-space-6);
+}
+.wave-list--compact .tb-right .pmini .bs-pnum,
+.wave-list--compact .tb-right .bs-tag {
   flex-shrink: 0;
 }
 .wave__title {

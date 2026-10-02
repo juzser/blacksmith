@@ -100,24 +100,41 @@ describe('bs-primitives.css — current wave row on one line (fix round 2)', () 
     expect(decl).not.toMatch(/flex:\s*1/);
   });
 
-  it('lets the title shrink with an ellipsis so it cannot force horizontal scroll', () => {
+  it('keeps the title at its natural width instead of ellipsizing it (fix round 3)', () => {
     const decl = rule('.wave-list--compact .wave__title');
-    expect(decl).toMatch(/min-width:\s*0/);
-    expect(decl).toMatch(/overflow:\s*hidden/);
-    expect(decl).toMatch(/text-overflow:\s*ellipsis/);
-    expect(decl).toMatch(/white-space:\s*nowrap/);
-  });
-
-  it('keeps the title + meta wrapper from wrapping onto a second line, ellipsizing instead', () => {
-    const decl = rule('.wave-list--compact .whead > span:first-child');
-    expect(decl).toMatch(/min-width:\s*0/);
-    expect(decl).toMatch(/overflow:\s*hidden/);
-    expect(decl).toMatch(/text-overflow:\s*ellipsis/);
-    expect(decl).toMatch(/white-space:\s*nowrap/);
-  });
-
-  it('keeps .tb-right from shrinking in compact mode', () => {
-    const decl = rule('.wave-list--compact .tb-right');
     expect(decl).toMatch(/flex-shrink:\s*0/);
+    expect(decl).toMatch(/white-space:\s*nowrap/);
+    expect(decl).not.toMatch(/text-overflow:\s*ellipsis/);
+  });
+
+  it('keeps the title + done-count wrapper at its natural width instead of ellipsizing it (fix round 3)', () => {
+    const decl = rule('.wave-list--compact .whead > span:first-child');
+    expect(decl).toMatch(/flex-shrink:\s*0/);
+    expect(decl).toMatch(/white-space:\s*nowrap/);
+    expect(decl).not.toMatch(/text-overflow:\s*ellipsis/);
+  });
+
+  it('lets .tb-right take the remaining space instead of staying fixed (fix round 3)', () => {
+    const decl = rule('.wave-list--compact .tb-right');
+    expect(decl).toMatch(/flex:\s*1\s*1\s*auto/);
+    expect(decl).toMatch(/min-width:\s*0/);
+    expect(decl).toMatch(/flex-wrap:\s*nowrap/);
+  });
+
+  it('makes the ProgressBarMini the element that shrinks, with a token minimum (fix round 3)', () => {
+    const pmini = rule('.wave-list--compact .tb-right .pmini');
+    expect(pmini).toMatch(/flex:\s*1\s*1\s*auto/);
+    expect(pmini).toMatch(/min-width:\s*0/);
+
+    const track = rule('.wave-list--compact .tb-right .pmini .ptrack');
+    expect(track).toMatch(/flex:\s*1\s*1\s*auto/);
+    expect(track).toMatch(/min-width:\s*var\(--bs-space-\d\)/);
+  });
+
+  it('keeps the % and the Tag from shrinking in compact mode (fix round 3)', () => {
+    const match = CSS.match(
+      /\.wave-list--compact \.tb-right \.pmini \.bs-pnum,\s*\n?\s*\.wave-list--compact \.tb-right \.bs-tag\s*\{([^}]*)\}/,
+    );
+    expect(match?.[1]).toMatch(/flex-shrink:\s*0/);
   });
 });
