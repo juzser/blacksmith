@@ -187,7 +187,9 @@ test.describe('Timeline', () => {
     ).toBeVisible();
 
     const after = Number((await count.innerText()).split(' ')[0]);
-    expect(after).toBe(2);
+    // DS4 S5c added a second user_prompt (multiProjectFixture.ts, epic-9's
+    // sourcePrompt), so "All sessions" now carries 3 prompt-kind rows, not 2.
+    expect(after).toBe(3);
     expect(after).toBeLessThan(before);
 
     await shoot(page, 'timeline-prompts-desktop-light');
