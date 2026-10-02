@@ -249,6 +249,27 @@ export function agentStatusKitTone(status: string): KitTone {
   return TONE_TO_KIT_TONE[agentStatusTone(status)];
 }
 
+/** roadmap.md milestone status -> kit `Tag` tone (DS4 S2, Roadmap's EpicBlock). */
+export function milestoneStatusKitTone(status: string): KitTone {
+  return TONE_TO_KIT_TONE[milestoneStatusTone(status)];
+}
+
+/**
+ * Fix round 1 #4 — roadmap.md milestone status -> humanized label, the same
+ * treatment `epicSections` already gives epic status text in
+ * RoadmapPage.vue, so the phase Tag never renders a raw `in-progress`.
+ */
+const MILESTONE_STATUS_LABEL: Record<string, string> = {
+  planned: 'Planned',
+  'in-progress': 'In progress',
+  completed: 'Done',
+};
+
+/** Unknown statuses pass through as-is — same fallback shape as the tone maps. */
+export function milestoneStatusLabel(status: string): string {
+  return MILESTONE_STATUS_LABEL[status] ?? status;
+}
+
 const RUN_KIND_DEFAULT_KIT_TONE: Record<string, KitTone> = {
   dispatch: 'progress',
   'judge-report': 'review',

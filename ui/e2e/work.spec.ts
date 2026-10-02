@@ -13,7 +13,7 @@ test.describe('Work switcher', () => {
 
     await page.getByRole('link', { name: 'Roadmap' }).click();
     await expect(page).toHaveURL(/\/work\/roadmap$/);
-    await expect(page.locator('.roadmap-node').first()).toBeVisible();
+    await expect(page.locator('.lrow').first()).toBeVisible();
 
     await page.goBack();
     await expect(page).toHaveURL(/\/work\/kanban$/);
@@ -269,25 +269,30 @@ test.describe('Work switcher', () => {
   // item of .app-page's gapped stack — the toolbar must sit right at the
   // page's own top padding, not a stack gap below it (see PageHeader.vue's
   // isEmpty branch).
-  test('the toolbar sits at the page top padding, with no leftover band above it', async ({
-    page,
-  }) => {
-    await page.goto('/work/kanban');
-    const toolbar = page.locator('.bs-kanban-page__toolbar');
-    await expect(toolbar).toBeVisible();
+  for (const [path, toolbarClass] of [
+    ['/work/kanban', '.bs-kanban-page__toolbar'],
+    ['/work/roadmap', '.bs-roadmap-page__toolbar'],
+  ] as const) {
+    test(`the toolbar sits at the page top padding, with no leftover band above it (${path})`, async ({
+      page,
+    }) => {
+      await page.goto(path);
+      const toolbar = page.locator(toolbarClass);
+      await expect(toolbar).toBeVisible();
 
-    const pagePadding = await page.evaluate(() => {
-      const el = document.querySelector('.app-page');
-      if (!el) throw new Error('.app-page not found');
-      return Number.parseFloat(getComputedStyle(el).paddingTop);
+      const pagePadding = await page.evaluate(() => {
+        const el = document.querySelector('.app-page');
+        if (!el) throw new Error('.app-page not found');
+        return Number.parseFloat(getComputedStyle(el).paddingTop);
+      });
+
+      const pageBox = await page.locator('.app-page').boundingBox();
+      const toolbarBox = await toolbar.boundingBox();
+      if (!pageBox || !toolbarBox) throw new Error('the page or toolbar has no box');
+
+      expect(Math.abs(toolbarBox.y - pageBox.y - pagePadding)).toBeLessThanOrEqual(1);
     });
-
-    const pageBox = await page.locator('.app-page').boundingBox();
-    const toolbarBox = await toolbar.boundingBox();
-    if (!pageBox || !toolbarBox) throw new Error('the page or toolbar has no box');
-
-    expect(Math.abs(toolbarBox.y - pageBox.y - pagePadding)).toBeLessThanOrEqual(1);
-  });
+  }
 
   test('no horizontal scroll at 375px on either view', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });

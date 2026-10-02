@@ -1914,6 +1914,21 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtlest);
   font-variant-numeric: tabular-nums;
 }
+/* Merge-main fix round 2: Roadmap's own toolbar, carrying only the
+   Kanban/Roadmap view switch (teleported in by WorkPage.vue) — the Roadmap
+   page itself has no search/filter controls of its own in S2. */
+.bs-roadmap-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--bs-space-2);
+}
+.bs-roadmap-page__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  margin-left: auto;
+}
 .bs-kanban-page__skeletons {
   display: flex;
   gap: var(--bs-space-4);
@@ -2346,5 +2361,248 @@ summary.bs-inbox__group-head {
 }
 .bs-run-history__empty {
   margin: 0;
+  color: var(--bs-text-subtle);
+}
+
+/* Fix round 1 #5 — the page-level stack wrapping the swimlane and
+   EpicBlock, so the two never sit flush against each other. */
+.rm-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+}
+
+/* DS4 S2 — Roadmap swimlane (RoadmapSwimlane.vue). Class names match
+   ui/docs/ds-review.html's #p-roadmap mock so the app renders pixel-for-pixel
+   against the signed-off reference. `.rm-scroll` is the only region that
+   scrolls sideways; rows are plain reset buttons sized to the touch floor. */
+.rm-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Also-fix: the one source for the label column width. `.lrow`, `.months`
+     and `.now-track` all read this instead of repeating — or deriving pixel
+     math from — the literal 160px. `.months` and `.lane` are siblings here,
+     so it lives on their shared parent, not on `.lane` alone. */
+  --rm-label-col: 160px;
+}
+.lane {
+  position: relative;
+  /* Fix round 1 #9: spec and mock both say 520px; the mock frame never needs
+     more, so 520px (not the prior 720px) is what ships. */
+  min-width: 520px;
+  display: flex;
+  flex-direction: column;
+}
+/* Fix round 1 #1 — month labels share `.lrow`'s own grid columns (label col
+   + 1fr track col), so `.months-row`'s 1fr is the exact same coordinate
+   space `.track`'s bars use — a mark's `left`% lands on the same axis as a
+   bar's, no separate pixel math. */
+.months {
+  display: grid;
+  grid-template-columns: var(--rm-label-col) 1fr;
+  gap: var(--bs-space-3);
+  padding: 0 var(--bs-space-3);
+  margin-bottom: var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-weight: 500;
+}
+.months-row {
+  position: relative;
+  height: 1em;
+}
+.months-mark {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.months-mark:first-child {
+  transform: none;
+}
+.lrow {
+  display: grid;
+  grid-template-columns: var(--rm-label-col) 1fr;
+  align-items: center;
+  gap: var(--bs-space-3);
+  width: 100%;
+  min-height: var(--bs-touch);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border: none;
+  border-bottom: 1px solid var(--bs-border);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.lrow.sub {
+  grid-template-columns: var(--rm-label-col) 1fr;
+  padding-left: var(--bs-space-6);
+}
+.lrow.sel {
+  background: var(--bs-surface-selected);
+  /* Fix round 1 #3 — a left rule marks the selected row, not just a fill. */
+  box-shadow: inset 2px 0 0 var(--bs-border-bold);
+}
+.lrow:hover {
+  background: var(--bs-surface-sunken);
+}
+.lrow.sel:hover {
+  /* Fix round 1 #3 — hover must not erase the selected background. */
+  background: var(--bs-surface-selected);
+}
+.lname {
+  font-size: var(--bs-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track {
+  position: relative;
+  height: var(--bs-space-4);
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+}
+.lbar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: var(--bs-radius-sm);
+}
+/* Fix round 2 #2 / fix round 4 #2: a near-transparent fill with a border
+   read as an empty, unstarted box (the opposite of "done"). Spec §1: "past:
+   a faded solid bar" — the same chart token as the "now" bar, muted by the
+   past-opacity token, not a second colour (the mock agrees). */
+.lbar.past {
+  background: var(--bs-tone-progress-text);
+  opacity: var(--bs-roadmap-bar-past-opacity);
+}
+.lbar.now {
+  background: var(--bs-tone-progress-text);
+}
+.lbar.up {
+  background: var(--bs-tone-progress-subtle);
+  border: 1px dashed var(--bs-tone-progress-text);
+}
+.lbar-unscheduled {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  border: 1px dashed var(--bs-border-bold);
+  border-radius: var(--bs-radius-sm);
+}
+/* Fix round 1 #2 / also-fix — `.now-track` repeats `.lrow`'s own grid (same
+   `--rm-label-col` + gap) instead of a pixel inset tied to the label column,
+   so `.nowline`'s `left`% lives in the track column's own coordinate space —
+   a label-column change moves both and the line stays put. */
+.now-track {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--rm-label-col) 1fr;
+  gap: var(--bs-space-3);
+  padding: 0 var(--bs-space-3);
+  pointer-events: none;
+}
+.now-track__col {
+  position: relative;
+}
+.nowline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--bs-tone-danger-text);
+}
+.nowline__dot {
+  position: absolute;
+  top: calc(-1 * var(--bs-space-1));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-tone-danger-text);
+  animation: bs-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.nowline__label {
+  /* Visible only under prefers-reduced-motion (below) — screen-reader text
+     otherwise, since the line + dot already carry the meaning visually. */
+  position: absolute;
+  top: calc(-1 * var(--bs-space-5));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-tone-danger-text);
+  white-space: nowrap;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nowline__dot {
+    animation: none;
+  }
+  .nowline__label {
+    opacity: 1;
+  }
+}
+
+/* DS4 S2 — EpicBlock.vue (phase mode). */
+.eblock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  padding: var(--bs-space-4);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  background: var(--bs-surface-raised);
+}
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-weight: 600;
+}
+.card-title {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.barrow {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.pnum {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+  flex-shrink: 0;
+}
+.esec {
+  padding-top: var(--bs-space-2);
+  border-top: 1px solid var(--bs-border);
+}
+.esec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  flex-wrap: wrap;
+}
+.esec-head .muted {
+  color: var(--bs-text-subtle);
+}
+.esec-head .small {
+  font-size: var(--bs-text-xs);
+}
+.pnum.bar-pct {
+  font-weight: 600;
+}
+.card-sum {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+}
+.card-sum.muted {
   color: var(--bs-text-subtle);
 }

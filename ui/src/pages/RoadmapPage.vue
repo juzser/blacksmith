@@ -1,284 +1,273 @@
 <script setup lang="ts">
-// Roadmap — design-spec.md §5.4. Phase 6b additions: operator directive 4 —
-// a project identity chip per milestone, and a mini-timeline under each
-// progress bar (3 most recent DONE tasks, success tone + relative ts; 3 NEXT
-// tasks, neutral, plan/dependency order).
+// Roadmap — DS4 S2 rewrite (signed-off spec). Replaces the VueFlow canvas
+// with a plain horizontal swimlane (RoadmapSwimlane.vue) plus a goal/epics
+// card (EpicBlock.vue, phase mode only — epic mode and the wave toggle are
+// S3). `@vue-flow/core` stays a dependency for FlowPage/SessionsPage; it is
+// simply unused on this page now.
 //
-// Operator directive (Phase 6b round 6): "in the dashboard, the roadmap
-// section, display it as VueFlow" — the card list becomes a @vue-flow/core
-// diagram, same sanctioned dependency and same house pattern as FlowPage
-// (custom DOM nodes styled with kit tokens, useVueFlow() viewport controls in
-// a Panel rather than the unsanctioned @vue-flow/controls package, sr-only
-// table alternative). Nothing the cards showed was dropped: each node still
-// carries name + status Lozenge + identity chips + goal + ProgressBar + the
-// Recent/Next mini-timeline, and both navigations (header → kanban filtered
-// to the milestone, timeline row → task detail) are unchanged.
-//
-// The graph's shape is dictated by the data, not by taste: MilestoneProgress
-// (api.ts:58-72) has `sequence` and NO dependency field, so the only edge
-// this API can justify is "next in sequence". It is drawn as a chain, one
-// lane per project, left to right — see lib/roadmapFlow.ts, which holds the
-// layout as pure functions so it is unit-tested under ui/vitest.config.ts's
-// node environment instead of only through Playwright.
-//
-// Operator directive (Phase 6b round 8): "draw the connector lines between
-// nodes straight, and animate the node that is running" — edges become
-// `type: 'straight'`
-// (a milestone node is content-sized, so same-lane nodes share a top edge but
-// not a height, and Vue Flow's default bezier bowed between their offset
-// handles), and .roadmap-node--live gains a pulsing ring on top of its live
-// border. See ds-components.css for why that ring animates box-shadow and
-// never opacity.
-//
-// Deviation, flagged (same as FlowPage): @vue-flow/minimap and
-// @vue-flow/controls are NOT in docs/standards/stack.md's sanctioned list —
-// only "@vue-flow/core" is — so controls are rebuilt from useVueFlow() and
-// no minimap is faked. FlowPage's absolutely-positioned wave bands are
-// deliberately NOT copied here: those are painted in canvas coordinates and
-// so drift out of register as soon as the user pans. Lanes are identified
-// instead by the project IdentityChip that every node already carries, which
-// stays correct under pan and zoom.
-import '@vue-flow/core/dist/style.css';
-import { Panel, useVueFlow, VueFlow } from '@vue-flow/core';
+// Below 640px the swimlane's own `.rm-scroll` region still scrolls sideways
+// rather than reflowing into a stacked phone layout — a real phone layout is
+// S4, out of scope here; this is the simplest fallback that avoids the page
+// itself scrolling sideways.
+import { Map as MapIcon } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
-import Banner from '../components/ds/Banner.vue';
-import Button from '../components/ds/Button.vue';
-import EmptyState from '../components/ds/EmptyState.vue';
-import Lozenge from '../components/ds/Lozenge.vue';
-import Skeleton from '../components/ds/Skeleton.vue';
-import Toolbar from '../components/ds/Toolbar.vue';
-import IdentityChip from '../components/IdentityChip.vue';
-import ProgressBar from '../components/ProgressBar.vue';
+import { useRoute, useRouter } from 'vue-router';
+import EpicBlock from '../components/EpicBlock.vue';
+import Banner from '../components/kit/Banner.vue';
+import EmptyState from '../components/kit/EmptyState.vue';
+import Skeleton from '../components/kit/Skeleton.vue';
+import RoadmapSwimlane from '../components/RoadmapSwimlane.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
-import { fetchRoadmap, type MilestoneProgress } from '../lib/api.js';
-import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { formatRelative, summarize } from '../lib/format.js';
+import { useSessionContext } from '../composables/useSessionContext.js';
 import {
-  partitionByKind,
-  roadmapFlowEdges,
-  roadmapFlowNodes,
-  roadmapLanes,
-} from '../lib/roadmapFlow.js';
-import { milestoneStatusTone } from '../lib/taxonomy.js';
+  type FlowGraph,
+  fetchFlow,
+  fetchOverview,
+  fetchRoadmap,
+  type MilestoneProgress,
+  selectableEpics,
+} from '../lib/api.js';
+import { defaultSelection } from '../lib/roadmapSelection.js';
+import {
+  buildEpicOnlySwimlane,
+  buildSwimlane,
+  hasRoadmapContent,
+  taskCountLabel,
+} from '../lib/roadmapSwimlane.js';
+import {
+  isTaskOver,
+  type KitTone,
+  milestoneStatusKitTone,
+  milestoneStatusLabel,
+} from '../lib/taxonomy.js';
 
 const router = useRouter();
+const route = useRoute();
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Roadmap' }]);
 const { project } = useProjectContext();
-const { zoomIn, zoomOut, fitView } = useVueFlow();
+const { sessionScope, sessionKey } = useSessionContext();
 
-/** Null until a fetch lands. That distinction is the whole guard on the empty state below. */
 const milestones = ref<MilestoneProgress[] | null>(null);
+const epics = ref<string[]>([]);
+const activeEpics = ref<string[]>([]);
 const error = ref<string | null>(null);
 const loading = ref(true);
-const search = ref('');
-/**
- * Operator directive (Phase 10): the page answers "what has this factory
- * built", so it opens on the projects the factory built FOR someone and
- * leaves its own ten phases and the dogfood project's four milestones
- * behind the toggle. Not persisted -- the default is the directive, and a
- * remembered preference would quietly make it something else.
- */
-const showInternal = ref(false);
+
+const selectedPhase = ref<string | null>(null);
+const selectedEpic = ref<string | null>(null);
+
+/** One in-flight (or settled) FlowGraph fetch per epic this phase/project shows. */
+const epicFlows = ref<Map<string, FlowGraph | 'failed'>>(new Map());
+
+async function loadEpicFlow(epicId: string) {
+  try {
+    const flow = await fetchFlow({
+      session: sessionScope.value,
+      project: project.value,
+      epic: epicId,
+    });
+    epicFlows.value.set(epicId, flow);
+  } catch {
+    epicFlows.value.set(epicId, 'failed');
+  }
+  // Map mutation alone does not trigger a ref's reactivity; replace it.
+  epicFlows.value = new Map(epicFlows.value);
+}
+
+function epicIdsForPhase(phaseId: string | null): string[] {
+  if (phaseId === null) return [];
+  const phase = (milestones.value ?? []).find((m) => m.milestoneId === phaseId);
+  return phase ? phase.epicIds : [];
+}
+
+function ensureEpicFlowsLoaded(epicIds: string[]) {
+  for (const epicId of epicIds) {
+    if (!epicFlows.value.has(epicId)) loadEpicFlow(epicId);
+  }
+}
 
 async function load() {
-  error.value = null;
-  loading.value = true;
   try {
-    milestones.value = await fetchRoadmap(undefined, project.value);
+    const [roadmap, overview] = await Promise.all([
+      fetchRoadmap(sessionScope.value, project.value),
+      fetchOverview(sessionScope.value, project.value),
+    ]);
+    milestones.value = roadmap;
+    epics.value = selectableEpics(overview);
+    activeEpics.value = overview.epicsActivelyRunning;
+    error.value = null;
+
+    const fromQuery = {
+      phase: typeof route.query.phase === 'string' ? route.query.phase : null,
+      epic: typeof route.query.epic === 'string' ? route.query.epic : null,
+    };
+    const selection = defaultSelection(roadmap, activeEpics.value, epics.value, fromQuery);
+    selectedPhase.value = selection.phaseId;
+    selectedEpic.value = selection.epicId;
+    ensureEpicFlowsLoaded(epicIdsForPhase(selectedPhase.value));
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
     loading.value = false;
   }
 }
+
 onMounted(load);
-watch(project, load);
+watch([project, sessionKey], load);
 
-const filtered = computed(() =>
-  (milestones.value ?? []).filter((m) => m.name.toLowerCase().includes(search.value.toLowerCase())),
-);
-
-const partition = computed(() => partitionByKind(filtered.value, showInternal.value));
-const shown = computed(() => partition.value.shown);
-
-// Operator directive 4 (Phase 6b round 3): group by project — but only when
-// NOT already scoped to one project (project.value set, e.g.
-// /p/:project/roadmap) and the filtered set actually spans more than one.
-// Same rule as the old SectionHeading grouping, now expressed as lanes.
-const lanes = computed(() => roadmapLanes(shown.value, project.value));
-const flowNodes = computed(() => roadmapFlowNodes(lanes.value));
-const flowEdges = computed(() =>
-  roadmapFlowEdges(lanes.value).map((e) => ({
-    ...e,
-    // Same edge treatment as FlowPage: dashed, --ds-text-subtlest (--ds-border
-    // measured 1.27:1 against the canvas and is invisible; subtlest clears the
-    // 3:1 UI-graphics floor in both themes). The `straight` edge type that
-    // makes these connectors run direct instead of bowing comes from
-    // roadmapFlow.ts, where it is unit-tested — only the paint is set here.
-    style: { strokeDasharray: '4,4', strokeWidth: 1.5, stroke: 'var(--ds-text-subtlest)' },
-  })),
-);
-
-function goToKanban(m: MilestoneProgress) {
-  router.push({ path: '/work/kanban', query: { milestone: m.milestoneId } });
+function selectPhase(phaseId: string) {
+  selectedPhase.value = phaseId;
+  selectedEpic.value = null;
+  router.replace({ query: { ...route.query, phase: phaseId, epic: undefined } });
+  ensureEpicFlowsLoaded(epicIdsForPhase(phaseId));
 }
 
-function goToTask(taskId: string) {
-  router.push(`/tasks/${encodeURIComponent(taskId)}`);
+function selectEpic(epicId: string) {
+  selectedEpic.value = epicId;
+  selectedPhase.value = null;
+  router.replace({ query: { ...route.query, epic: epicId, phase: undefined } });
+  ensureEpicFlowsLoaded([epicId]);
 }
+
+const swimlane = computed(() => {
+  if (!milestones.value) return { rows: [], nowOffset: 50, months: [] };
+  if (milestones.value.length === 0) return buildEpicOnlySwimlane(epics.value);
+  return buildSwimlane(milestones.value, new Date());
+});
+
+const selectedPhaseData = computed(
+  () => (milestones.value ?? []).find((m) => m.milestoneId === selectedPhase.value) ?? null,
+);
+
+/**
+ * Fix round 4 #1: the epic-only project's default selection (no milestones,
+ * `selectedPhaseData` is null) used to fall through to a fabricated
+ * zero-task label regardless of the epic's real tasks. Read the same
+ * `epicFlows` source `epicSections` uses below: loading while the flow
+ * hasn't resolved yet, "No tasks tracked" only once it really has 0 tasks.
+ */
+const selectedEpicData = computed(() => {
+  if (!selectedEpic.value) return null;
+  const flow = epicFlows.value.get(selectedEpic.value);
+  if (flow === undefined) return { loading: true as const, total: 0, completed: 0 };
+  if (flow === 'failed') return { loading: false as const, total: 0, completed: 0 };
+  return {
+    loading: false as const,
+    total: flow.nodes.length,
+    completed: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
+  };
+});
+
+/** Phase mode only (S2) — epic-standalone mode is S3. */
+const epicSections = computed(() => {
+  const phase = selectedPhaseData.value;
+  if (!phase) return [];
+  return phase.epicIds.map((epicId) => {
+    const flow = epicFlows.value.get(epicId);
+    if (flow === undefined) {
+      return {
+        epicId,
+        statusTone: 'neutral' as KitTone,
+        statusLabel: 'Loading',
+        tasksTotal: null,
+        tasksCompleted: null,
+      };
+    }
+    if (flow === 'failed') {
+      return {
+        epicId,
+        statusTone: 'neutral' as KitTone,
+        statusLabel: 'Unavailable',
+        tasksTotal: 0,
+        tasksCompleted: 0,
+        failed: true,
+      };
+    }
+    const total = flow.nodes.length;
+    const completed = flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length;
+    const anyInFlight = flow.nodes.some((n) => !isTaskOver(n.taskStatus));
+    const status =
+      total === 0
+        ? 'todo'
+        : completed === total
+          ? 'completed'
+          : anyInFlight
+            ? 'in-progress'
+            : 'todo';
+    // Fix round 2 #3: the label is always one of a fixed three ("Done" /
+    // "In progress" / "To do"), so the tone must key off that same label,
+    // not off whichever specific task status happens to be driving
+    // `anyInFlight` — a `reviewing`/`grading` task made the epic Tag purple
+    // while still reading "In progress", disagreeing with the phase Tag
+    // right above it (spec: "the progress tone for 'In progress'").
+    const statusTone: KitTone =
+      status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral';
+    return {
+      epicId,
+      statusTone,
+      statusLabel:
+        status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
+      tasksTotal: total,
+      tasksCompleted: completed,
+    };
+  });
+});
 </script>
 
 <template>
   <div>
-    <Toolbar :count="`${shown.length} milestones`">
-      <input v-model="search" type="search" class="raw-input" aria-label="Search milestone name" placeholder="Search name…" style="height: var(--ds-control-height); border: 1px solid var(--ds-border); border-radius: var(--ds-radius-control); padding: 0 var(--ds-space-2); background: var(--ds-surface); color: var(--ds-text)" />
-      <!-- The filter says out loud what it is holding back. A page that
-           silently dropped fourteen of fourteen rows would look broken
-           rather than filtered (D-119). -->
-      <Button
-        v-if="partition.hiddenCount > 0 || showInternal"
-        variant="outline"
-        size="sm"
-        :aria-pressed="showInternal"
-        @click="showInternal = !showInternal"
-      >
-        {{ showInternal ? 'Hide the factory’s own roadmap' : `Show the factory’s own roadmap (${partition.hiddenCount})` }}
-      </Button>
-      <!-- WorkPage teleports the Kanban/Roadmap SegmentedControl here on
-           desktop/tablet (UI audit, fix round 1) — see WorkPage.vue. -->
-      <template #end><span id="bs-work-view-switch" /></template>
-    </Toolbar>
+    <div class="bs-roadmap-page__toolbar">
+      <div class="bs-roadmap-page__toolbar-actions">
+        <!-- WorkPage teleports the Kanban/Roadmap SegmentedControl here on
+             desktop/tablet (UI audit, fix round 1; merge-main fix round 2) —
+             see WorkPage.vue and KanbanPage.vue's matching toolbar. -->
+        <span id="bs-work-view-switch" />
+      </div>
+    </div>
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 
     <template v-else-if="loading">
-      <Skeleton height="560" />
+      <Skeleton :height="200" />
     </template>
 
-    <!-- Two different emptinesses, and they must not read alike. Nothing
-         built yet is the expected state of a fresh clone and says what to do
-         about it; nothing MATCHING is a filter the operator can widen. -->
-    <EmptyState v-else-if="canClaimEmpty(milestones !== null, shown.length) && partition.hiddenCount > 0 && search === ''" icon="map">
-      This factory has not built a project yet. The {{ partition.hiddenCount }} milestone{{ partition.hiddenCount === 1 ? '' : 's' }} it does hold belong to itself and to {{ partition.hiddenProjects.join(', ') }}. Run <code>/bs new</code> to start one.
-    </EmptyState>
+    <EmptyState
+      v-else-if="!hasRoadmapContent(milestones ?? [], epics)"
+      :icon="MapIcon"
+      title="No roadmap yet."
+      body="Phases and epics will appear here once work starts."
+    />
 
-    <EmptyState v-else-if="canClaimEmpty(milestones !== null, shown.length)" icon="map">No milestones match these filters.</EmptyState>
+    <div v-else class="rm-stack">
+      <RoadmapSwimlane
+        :swimlane="swimlane"
+        :selected-phase="selectedPhase"
+        :selected-epic="selectedEpic"
+        @select-phase="selectPhase"
+        @select-epic="selectEpic"
+      />
 
-    <template v-else>
-      <div class="roadmap-canvas">
-        <VueFlow :nodes="flowNodes" :edges="flowEdges" :nodes-draggable="false" fit-view-on-init>
-          <!--
-            Fix-round (uiux S2 #8 + S3 #9), carried into the node template
-            unchanged: the block is NOT one big role="button" wrapping the
-            mini-timeline's own <button> rows — nested interactive elements
-            confuse both a screen reader's element list and Space/Enter
-            handling. Only the header is interactive (role="link", matching
-            ProjectsPage/TaskCard); the timeline rows are plain siblings.
-          -->
-          <template #node-milestone="{ data }">
-            <article class="roadmap-node" :class="{ 'roadmap-node--live': data.status === 'in-progress' }">
-              <div
-                role="link"
-                tabindex="0"
-                :aria-label="`${data.name}, ${data.status}, opens kanban filtered to this milestone`"
-                style="cursor: pointer"
-                @click="goToKanban(data)"
-                @keydown.enter="goToKanban(data)"
-              >
-                <div style="display: flex; align-items: center; gap: var(--ds-space-2); flex-wrap: wrap">
-                  <span class="roadmap-node__title">{{ data.name }}</span>
-                  <Lozenge :tone="milestoneStatusTone(data.status)">{{ data.status }}</Lozenge>
-                </div>
-                <div style="display: flex; flex-wrap: wrap; gap: var(--ds-space-1); margin-top: var(--ds-space-1)">
-                  <IdentityChip :id="data.project" />
-                  <IdentityChip v-for="e in data.epicIds" :key="e" :id="e" />
-                </div>
-                <!-- A milestone goal is free text and can run long; the node
-                     shows a one-line summary and keeps the full goal in the
-                     native tooltip (same rule as FlowPage's node title). -->
-                <p v-if="data.goal" class="roadmap-node__goal" :title="data.goal">{{ summarize(data.goal, 110) }}</p>
-              </div>
-
-              <div style="margin-top: var(--ds-space-2)">
-                <ProgressBar :value="data.tasksCompleted" :total="data.tasksTotal || 1" :label="`${data.name} progress`" />
-              </div>
-
-              <div class="mini-timeline">
-                <div class="mini-timeline__col">
-                  <span class="mini-timeline__label">Recent</span>
-                  <div v-if="(data.recentDone ?? []).length === 0" style="font-size: var(--ds-text-xs); color: var(--ds-text-subtlest)">Nothing done yet.</div>
-                  <button
-                    v-for="t in data.recentDone"
-                    :key="t.taskId"
-                    type="button"
-                    class="mini-timeline__row"
-                    style="background: none; border: none; padding: 0; cursor: pointer; color: inherit; text-align: left"
-                    :title="t.title ?? t.taskId"
-                    @click="goToTask(t.taskId)"
-                  >
-                    <span class="mini-timeline__dot" style="background: var(--ds-success-bold)" />
-                    <span class="mini-timeline__row-title">{{ t.title ?? t.taskId }}</span>
-                    <span class="mini-timeline__row-meta">{{ formatRelative(t.updatedAt) }}</span>
-                  </button>
-                </div>
-                <div class="mini-timeline__col">
-                  <span class="mini-timeline__label">Next</span>
-                  <div v-if="(data.nextUp ?? []).length === 0" style="font-size: var(--ds-text-xs); color: var(--ds-text-subtlest)">Nothing queued.</div>
-                  <button
-                    v-for="t in data.nextUp"
-                    :key="t.taskId"
-                    type="button"
-                    class="mini-timeline__row"
-                    style="background: none; border: none; padding: 0; cursor: pointer; color: inherit; text-align: left"
-                    :title="t.title ?? t.taskId"
-                    @click="goToTask(t.taskId)"
-                  >
-                    <span class="mini-timeline__dot" style="background: var(--ds-border)" />
-                    <span class="mini-timeline__row-title">{{ t.title ?? t.taskId }}</span>
-                    <span class="mini-timeline__row-meta">{{ t.dependencyReady ? 'ready' : 'blocked' }}</span>
-                  </button>
-                </div>
-              </div>
-            </article>
-          </template>
-
-          <Panel position="bottom-left">
-            <div style="display: flex; gap: var(--ds-space-1)">
-              <Button variant="outline" size="icon-sm" aria-label="Zoom in" icon="plus" @click="zoomIn()" />
-              <Button variant="outline" size="icon-sm" aria-label="Zoom out" icon="minus" @click="zoomOut()" />
-              <Button variant="outline" size="sm" @click="fitView()">Fit view</Button>
-            </div>
-          </Panel>
-        </VueFlow>
-      </div>
-
-      <!-- sr-only alternative (a11y — a DOM graph carries no text alternative
-           for its ORDER; the nodes themselves are readable, the sequence is
-           not). Same pattern as FlowPage's task-DAG table. -->
-      <table class="sr-only">
-        <caption>Roadmap: {{ shown.length }} milestones in sequence order</caption>
-        <thead>
-          <tr>
-            <th scope="col">Milestone</th>
-            <th scope="col">Project</th>
-            <th scope="col">Status</th>
-            <th scope="col">Sequence</th>
-            <th scope="col">Tasks done</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="m in shown" :key="`${m.project}::${m.milestoneId}`">
-            <td>{{ m.name }}</td>
-            <td>{{ m.project }}</td>
-            <td>{{ m.status }}</td>
-            <td>{{ m.sequence }}</td>
-            <td>{{ m.tasksCompleted }} of {{ m.tasksTotal }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </template>
+      <EpicBlock
+        v-if="selectedPhaseData"
+        :name="selectedPhaseData.name"
+        :status-tone="milestoneStatusKitTone(selectedPhaseData.status)"
+        :status-label="milestoneStatusLabel(selectedPhaseData.status)"
+        :tasks-total="selectedPhaseData.tasksTotal"
+        :tasks-completed="selectedPhaseData.tasksCompleted"
+        :epics="epicSections"
+      />
+      <template v-else-if="selectedEpicData">
+        <Skeleton v-if="selectedEpicData.loading" width="140px" :height="14" /><!-- ds-allow-hardcode -->
+        <p v-else class="muted">
+          {{
+            selectedEpicData.total > 0
+              ? taskCountLabel(selectedEpicData.total, selectedEpicData.completed)
+              : 'No tasks tracked'
+          }}
+        </p>
+      </template>
+    </div>
   </div>
 </template>

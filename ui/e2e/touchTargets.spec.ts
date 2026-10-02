@@ -29,7 +29,6 @@ const INTERACTIVE_SELECTOR =
 const FIXME_PAGES: Record<string, string> = {
   sessions: 'session list rows are shorter than --bs-touch; redesigned in its own slice',
   timeline: 'timeline event rows are shorter than --bs-touch; redesigned in its own slice',
-  roadmap: 'roadmap milestone rows are shorter than --bs-touch; redesigned in its own slice',
 };
 
 interface Measurement {

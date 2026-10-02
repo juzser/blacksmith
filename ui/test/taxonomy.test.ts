@@ -14,6 +14,7 @@ import {
   isTaskOver,
   lessonStatusTone,
   MILESTONE_STATUS_TONE,
+  milestoneStatusLabel,
   milestoneStatusTone,
   planStatusTone,
   runOutcomeKitTone,
@@ -148,6 +149,13 @@ describe('lib/taxonomy.ts — design-spec.md §3 mapping', () => {
 
   it('MILESTONE_STATUS_TONE covers roadmap.ts MILESTONE_STATUSES exactly (fails on drift)', () => {
     expect(Object.keys(MILESTONE_STATUS_TONE).sort()).toEqual([...MILESTONE_STATUSES].sort());
+  });
+
+  it('humanizes roadmap.md MilestoneStatus for display (fix round 1 #4)', () => {
+    expect(milestoneStatusLabel('planned')).toBe('Planned');
+    expect(milestoneStatusLabel('in-progress')).toBe('In progress');
+    expect(milestoneStatusLabel('completed')).toBe('Done');
+    expect(milestoneStatusLabel('unknown-status')).toBe('unknown-status');
   });
 
   it('maps agents.status (live/done/error/superseded) — NOT run_status', () => {

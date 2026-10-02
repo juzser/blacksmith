@@ -83,8 +83,13 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const { buildFixture, EPIC_ID } = await import(
     path.join(REPO_ROOT, 'factory', 'orchestrator', 'test', 'db', 'fixtures.ts')
   );
-  const { buildMultiProjectFixture, DEMO_HUB_EPIC_A, DEMO_HUB_EPIC_B, DEMO_HUB_PROJECT } =
-    await import(path.join(here, 'multiProjectFixture.ts'));
+  const {
+    buildMultiProjectFixture,
+    DEMO_HUB_EPIC_A,
+    DEMO_HUB_EPIC_B,
+    DEMO_HUB_EPIC_C,
+    DEMO_HUB_PROJECT,
+  } = await import(path.join(here, 'multiProjectFixture.ts'));
   const { rebuild } = await import(
     path.join(REPO_ROOT, 'factory', 'orchestrator', 'src', 'db', 'projector.ts')
   );
@@ -112,7 +117,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   // its id.
   await writeFile(
     roadmapPath,
-    `## Phase 6a — Dashboard foundation\n- id: phase-6a\n- status: in-progress\n- epics: [${EPIC_ID}]\n- project: black-smith\n- goal: Overview, Timeline, Kanban.\n\n## Phase 6b — Remaining pages\n- id: phase-6b\n- status: in-progress\n- epics: [${DEMO_HUB_EPIC_A}, ${DEMO_HUB_EPIC_B}]\n- project: ${DEMO_HUB_PROJECT}\n- goal: Roadmap, Flow, Task detail, Lessons, Errors, Analytics, Projects hub.\n\n## Phase 7 — envkit bootstrap\n- id: phase-7\n- status: planned\n- epics: []\n- project: envkit\n- goal: Declared on the roadmap; not one task planned against it yet.\n`,
+    `## Phase 6a — Dashboard foundation\n- id: phase-6a\n- status: in-progress\n- epics: [${EPIC_ID}]\n- project: black-smith\n- goal: Overview, Timeline, Kanban.\n\n## Phase 6b — Remaining pages\n- id: phase-6b\n- status: in-progress\n- epics: [${DEMO_HUB_EPIC_A}, ${DEMO_HUB_EPIC_B}, ${DEMO_HUB_EPIC_C}]\n- project: ${DEMO_HUB_PROJECT}\n- goal: Roadmap, Flow, Task detail, Lessons, Errors, Analytics, Projects hub.\n\n## Phase 7 — envkit bootstrap\n- id: phase-7\n- status: planned\n- epics: []\n- project: envkit\n- goal: Declared on the roadmap; not one task planned against it yet.\n`,
     'utf8',
   );
 
