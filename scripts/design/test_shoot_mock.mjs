@@ -56,3 +56,27 @@ test('rejects a frame id that does not exist in the mock', async () => {
     fs.rmSync(outDir, { recursive: true, force: true });
   }
 });
+
+test('rejects an unknown theme', async () => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shoot-mock-'));
+  try {
+    await assert.rejects(
+      shootFrame({ mockPath: MOCK_PATH, frame: 'p-home', viewport: 'desktop', theme: 'sepia' }, outDir),
+      /unknown theme/,
+    );
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('rejects a frame id that is not a plain p-<page> slug', async () => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'shoot-mock-'));
+  try {
+    await assert.rejects(
+      shootFrame({ mockPath: MOCK_PATH, frame: 'p-../../escape', viewport: 'desktop', theme: 'light' }, outDir),
+      /invalid frame id/,
+    );
+  } finally {
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});

@@ -41,6 +41,10 @@ export async function shootFrame(
   if (theme !== 'light' && theme !== 'dark') {
     throw new Error(`unknown theme "${theme}", expected light or dark`);
   }
+  // The id names the output file too, so only a plain slug may reach path.join.
+  if (!/^p-[a-z0-9-]+$/.test(frame ?? '')) {
+    throw new Error(`invalid frame id "${frame}", expected p-<page>`);
+  }
 
   fs.mkdirSync(outDir, { recursive: true });
   const pageName = frame.replace(/^p-/, '');
