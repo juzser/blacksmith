@@ -1540,7 +1540,24 @@ async function main(): Promise<number> {
     // requirePositionals is what makes it true, and it runs first.
     const [planFile] = requirePositionals(positional, usageFor('plan validate')) as [string];
     const plan = readJsonFile<PlanFile>(planFile);
-    const result = validatePlan(plan);
+    // Grandfathering (plan.ui-flag-missing, U2 S1 R2) needs the version this
+    // one amends. It is readable here only when the file sits where
+    // `impliedSpecsDir` expects a plan to sit (`<specsDir>/<epicId>/plan-vN.json`)
+    // and the previous version is actually on disk beside it; a validate run
+    // against a bare fixture or a file moved elsewhere gets no previous and
+    // validates without the exemption, same as before this change.
+    let previous: PlanFile | undefined;
+    if (plan.version > 1) {
+      const specsDir = impliedSpecsDir(planFile, plan.epic_id);
+      if (specsDir !== null) {
+        try {
+          previous = loadPlan(plan.epic_id, plan.version - 1, { specsDir });
+        } catch {
+          // No readable previous version alongside this file.
+        }
+      }
+    }
+    const result = validatePlan(plan, previous ? { previous } : {});
     printJson(result);
     return result.valid ? 0 : 1;
   }

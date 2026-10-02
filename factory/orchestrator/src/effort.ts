@@ -3,7 +3,14 @@ import { parse as parseYaml } from 'yaml';
 import type { PlanQuorumPolicy } from './crosscheck.js';
 import { SmithError } from './errors.js';
 import { EFFORT_POLICY_PATH } from './paths.js';
-import { EFFORT_TIERS, type EffortTier, isEffortTier, type PlanFile } from './plan.js';
+import {
+  EFFORT_TIERS,
+  type EffortTier,
+  isEffortTier,
+  isUiAffecting,
+  type PlanFile,
+  type TaskSpecRecord,
+} from './plan.js';
 import { evaluatePlanSecurityTriggers, type PlanQuorumSecurityTrigger } from './planQuorum.js';
 
 /**
@@ -55,7 +62,10 @@ function tierRank(tier: EffortTier): number {
 }
 
 const PRE_CODE_RESEARCH = ['when-needed', 'never'] as const;
-const PRE_CODE_UIUX = ['always', 'when-ui-criterion', 'never'] as const;
+// 'never' is not a parseable value: wave.md already says preCodeUiux cannot
+// be turned off, so a policy file that still spells it out should fail to
+// parse rather than silently skip the uiux judge turn on every UI task (U2).
+const PRE_CODE_UIUX = ['always', 'when-ui-criterion'] as const;
 const SPEC_REVIEW_ROUNDS = ['until-clean', 'single-pass'] as const;
 const PLAN_QUORUM = ['always', 'when-triggered'] as const;
 const CLOSING_SPEC_REVIEW = ['always', 'when-plan-amended'] as const;
@@ -161,6 +171,16 @@ function requireStringList(value: unknown, where: string, minLength: number): st
     );
   }
   return value.map(String);
+}
+
+/**
+ * Whether a task must get the uiux judge turn: either the task itself is
+ * flagged `ui_affecting` (plan.ts isUiAffecting), or the tier's own profile
+ * says every task does (`preCodeUiux: 'always'`). `when-ui-criterion` adds
+ * nothing here — that arm is read off the flag already.
+ */
+export function requiresUiux(spec: TaskSpecRecord, profile: EffortProfile): boolean {
+  return isUiAffecting(spec) || profile.preCodeUiux === 'always';
 }
 
 function parseProfile(node: unknown, tier: EffortTier): EffortProfile {

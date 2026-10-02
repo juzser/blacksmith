@@ -406,13 +406,20 @@ export interface DependencyLike {
  * TaskCard's footer dependency line (DS3 pattern 6, §4.2's "dependency
  * chain in words"). Only the first dependency is named, with a "+N more"
  * tail for the rest — the footer is a one-line summary, not a full list.
+ *
+ * Audit finding 6: a dependency whose status already reads "done" (the
+ * taxonomy's completed/waived tone, per isDoneStatus()) is nothing the task
+ * is still waiting on, so it is filtered out before picking which one to
+ * name and before counting the "+N more" tail. "Waits for: nothing" now
+ * also covers the case where every dependency is already done.
  */
 export function dependencyChainText(dependencies: DependencyLike[]): string {
-  const first = dependencies[0];
+  const waiting = dependencies.filter((d) => !d.status || !isDoneStatus(d.status));
+  const first = waiting[0];
   if (!first) return 'Waits for: nothing';
   const label = first.title ?? first.taskId;
   const status = first.status ? ` (${first.status})` : '';
-  const rest = dependencies.length - 1;
+  const rest = waiting.length - 1;
   const extra = rest > 0 ? ` +${rest} more` : '';
   return `Waits for: ${label}${status}${extra}`;
 }

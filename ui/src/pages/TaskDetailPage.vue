@@ -52,6 +52,7 @@ import {
   type TimelineEntry,
 } from '../lib/api.js';
 import { taskLabel } from '../lib/format.js';
+import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
 import {
@@ -258,7 +259,7 @@ const factsRowText = computed(() => {
       >
         <template #status>
           <Tag :tone="taskStatusKitTone(detail.task.taskStatus)" variant="subtle" size="sm">
-            {{ detail.task.taskStatus }}
+            {{ titleCase(detail.task.taskStatus) }}
           </Tag>
           <AgentChip v-if="agentChipTask" :task="agentChipTask" />
         </template>
@@ -394,7 +395,7 @@ const factsRowText = computed(() => {
               <dt>Plan version</dt>
               <dd>{{ detail.task.planVersion ?? '-' }}</dd>
               <dt>Status</dt>
-              <dd><Tag :tone="taskStatusKitTone(detail.task.taskStatus)" size="sm">{{ detail.task.taskStatus }}</Tag></dd>
+              <dd><Tag :tone="taskStatusKitTone(detail.task.taskStatus)" size="sm">{{ titleCase(detail.task.taskStatus) }}</Tag></dd>
               <dt>Origin</dt>
               <dd><Tag v-if="detail.task.origin" variant="outline" size="sm">{{ detail.task.origin }}</Tag><template v-else>-</template></dd>
               <dt>Case</dt>

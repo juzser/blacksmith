@@ -163,6 +163,17 @@ describe('specChange — a worker proposes, the operator decides', () => {
       expect(events.filter((e) => e.record.event_type === PLAN_AMENDED_EVENT)).toHaveLength(0);
     });
 
+    it('is not blocked by a legacy UI task the proposal never touches (U2 S1 R2 grandfathering)', async () => {
+      const plan = planFixture();
+      const first = plan.tasks[0];
+      if (first === undefined) throw new Error('unreachable');
+      plan.tasks.push({ ...first, task_id: 'envkit/task-2-ui', claims: ['ui/src/Legacy.vue'] });
+
+      const proposal = await proposeSpecChange({ ...proposeInput(), plan }, rootCtx(), opts());
+
+      expect(proposal.status).toBe('open');
+    });
+
     it("carries the worker's argument and the applied diff, so approval reads rather than re-derives", async () => {
       const proposal = await proposeSpecChange(proposeInput(), rootCtx(), opts());
 

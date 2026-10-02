@@ -80,6 +80,14 @@ each task edits its own section inside its own claims, or one docs task takes
 edges from the others. Target `widest >= 2` when the plan has two or more
 tasks, or say in `planner_notes` why the work is a chain.
 
+Set `ui_affecting: true` on every task that changes what a user sees —
+components, styles, templates, or copy rendered on screen. Set it explicitly
+to `false` when a task claims a UI-extension path (`.tsx`, `.jsx`, `.vue`,
+`.svelte`, `.css`, `.scss`, `.sass`, `.less`, `.html`) without a visible
+change (a refactor, a type-only edit, a test file). `validatePlan` errors on
+such a claim when the flag is absent at all — an absent flag is never silent
+UI work, it is a plan the operator has to fix before it runs.
+
 ## Living spec doc (architecture §11)
 
 You own the epic's living spec markdown: every worker reads it before
@@ -99,7 +107,9 @@ a planner edit outside that root is a claim violation like any other.
 specs conforming to `factory/specs/schema/task-spec.schema.json`, one object
 per task. Populate the optional `title` (short human-facing label) and
 `summary` (one-line description) fields when you have a natural one to give;
-leave them out rather than restating `objective`. When rendering a verdict
+leave them out rather than restating `objective`. Populate `ui_affecting`
+(`true` or `false`) on every task — see the claims guidance above; an absent
+flag fails `validatePlan` when the task claims a UI-extension path. When rendering a verdict
 instead, write
 `factory/specs/active/<epic-id>/verdict-v<n>.json`:
 `{plan_version, criteria: [{criterion, status: "pass" | "fail", evidence}],
