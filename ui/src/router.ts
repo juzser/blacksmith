@@ -76,12 +76,10 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/kanban', redirect: legacyWorkRedirect('/work/kanban') },
   { path: '/roadmap', redirect: legacyWorkRedirect('/work/roadmap') },
-  {
-    path: '/flow',
-    name: 'flow',
-    component: () => import('./pages/FlowPage.vue'),
-    meta: { crumb: () => [{ label: 'Flow' }] },
-  },
+  // DS4 S3 §4: /flow is retired — the epic filter is now the Roadmap's own
+  // `?epic=` selection. `legacyWorkRedirect` already carries the full query
+  // string, so `/flow?epic=X` lands on `/work/roadmap?epic=X`.
+  { path: '/flow', redirect: legacyWorkRedirect('/work/roadmap') },
   {
     path: '/lessons',
     name: 'lessons',
