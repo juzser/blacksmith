@@ -152,9 +152,9 @@ describe('foldErrorEvents', () => {
     expect(new Set(values).size).toBe(4);
   });
 
-  it('maps all ten gate-blocked reasons, read from GATE_BLOCKED_REASONS (AC4)', () => {
+  it('maps all fourteen gate-blocked reasons, read from GATE_BLOCKED_REASONS (AC4)', () => {
     // Read off errorIssues.ts's own table, not a second hand-typed list here.
-    expect(GATE_BLOCKED_REASONS).toHaveLength(10);
+    expect(GATE_BLOCKED_REASONS).toHaveLength(14);
     for (const reason of GATE_BLOCKED_REASONS as GateBlockedReason[]) {
       const result = foldErrorEvents(
         [gateBlocked('epic-1/task-a', reason)],

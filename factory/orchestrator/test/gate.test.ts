@@ -1110,6 +1110,107 @@ describe('gate.ts (integration)', () => {
     });
   });
 
+  // U2 S3: a ui-affecting task owes a reviewed, fresh screenshot set before
+  // the diff goes any further (D2/D3/D4/D6). `checkUiux` itself is unit-tested
+  // in uiuxGate.test.ts; this suite is about wiring it into the gate stage.
+  describe('uiux gate stage', () => {
+    it('skips the stage for a task whose plan record has no ui_affecting flag (D3)', async () => {
+      const outcome = await runGate(baseInput({ uiAffecting: false }), ctx(), { stateDir });
+      expect(outcome).toMatchObject({ outcome: 'pass', uiuxCheck: 'skipped' });
+    });
+
+    it('records the stage as unverifiable, and does not block, with no --plan at all (D6)', async () => {
+      const outcome = await runGate(baseInput(), ctx(), { stateDir });
+      expect(outcome).toMatchObject({ outcome: 'pass', uiuxCheck: 'unverifiable' });
+    });
+
+    it('blocks a ui-affecting task with no closed uiux spec turn', async () => {
+      const outcome = await runGate(baseInput({ uiAffecting: true }), ctx(), { stateDir });
+      expect(outcome).toMatchObject({
+        outcome: 'blocked',
+        reason: 'uiux-spec-missing',
+        testResult: null,
+      });
+    });
+
+    it('passes a ui-affecting task once the spec turn, screenshots and visual turn are all fresh', async () => {
+      await recordJudgeDispatch(
+        {
+          taskId: 'epic-1/task-1',
+          role: 'uiux',
+          round: 1,
+          artifactPath: path.join(stateDir, 'spec.json'),
+          model: 'claude-opus-5',
+          kind: 'spec',
+        },
+        ctx(),
+        { stateDir },
+      );
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true, kind: 'spec' },
+        ctx(),
+        { stateDir },
+      );
+
+      const home = path.join(artifactsDir, 'epic-1', 'task-1');
+      await mkdir(home, { recursive: true });
+      for (const name of [
+        'home-desktop-light.png',
+        'home-desktop-dark.png',
+        'home-mobile-light.png',
+        'home-mobile-dark.png',
+      ]) {
+        await writeFile(path.join(home, name), 'png-bytes');
+      }
+      const head = git(['rev-parse', 'HEAD']);
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'tester',
+          event_type: 'artifact-check-result',
+          task_id: 'epic-1/task-1',
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            ok: true,
+            checked: 4,
+            home,
+            issues: [],
+            head,
+            screenshots: [
+              { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light' },
+              { path: 'home-desktop-dark.png', viewport: 'desktop', theme: 'dark' },
+              { path: 'home-mobile-light.png', viewport: 'mobile', theme: 'light' },
+              { path: 'home-mobile-dark.png', viewport: 'mobile', theme: 'dark' },
+            ],
+          },
+        },
+        { stateDir },
+      );
+
+      await recordJudgeDispatch(
+        {
+          taskId: 'epic-1/task-1',
+          role: 'uiux',
+          round: 1,
+          artifactPath: path.join(stateDir, 'visual.json'),
+          model: 'claude-opus-5',
+          kind: 'visual',
+        },
+        ctx(),
+        { stateDir },
+      );
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true, kind: 'visual' },
+        ctx(),
+        { stateDir },
+      );
+
+      const outcome = await runGate(baseInput({ uiAffecting: true }), ctx(), { stateDir });
+      expect(outcome).toMatchObject({ outcome: 'pass', uiuxCheck: 'checked' });
+    });
+  });
+
   // D-34/P9-14: the grader runs before the gates so its rubric result can
   // inform them, and no code path in the orchestrator ever opened a grader
   // verdict file. Inside one wave, two graders on the same role and the same
@@ -2555,5 +2656,65 @@ describe('recordTaskResult', () => {
     );
     const events = await readEvents(sessionId, { stateDir });
     expect(events.some((e) => e.record.event_type === 'gate-outcome')).toBe(false);
+  });
+
+  // U2 S3: `results record --worktree <dir>` is the tester's freshness proof
+  // (D2) — the sha its screenshots were shot at, plus which of the Result's
+  // artifacts are screenshots at all. Neither rides on the Result itself
+  // (result.schema.json is additionalProperties:false): both land on
+  // `artifact-check-result`'s payload instead.
+  it('records head and screenshots on artifact-check-result when given --worktree', async () => {
+    const worktreeDir = await mkdtemp(path.join(tmpdir(), 'smith-record-result-wt-'));
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: worktreeDir });
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: worktreeDir });
+      execFileSync('git', ['config', 'user.name', 'Test'], { cwd: worktreeDir });
+      await writeFile(path.join(worktreeDir, 'README.md'), '# repo\n');
+      execFileSync('git', ['add', '.'], { cwd: worktreeDir });
+      execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: worktreeDir });
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: worktreeDir,
+        encoding: 'utf8',
+      }).trim();
+
+      const home = path.join(artifactsDir, 'epic-1', 'task-2');
+      await mkdir(home, { recursive: true });
+      await writeFile(path.join(home, 'home-desktop-light.png'), 'png-bytes');
+
+      await recordTaskResult(
+        {
+          taskId: 'epic-1/task-2',
+          result: resultFixture({
+            task_id: 'epic-1/task-2',
+            artifacts: [{ type: 'screenshot', path: 'home-desktop-light.png' }],
+          }),
+          artifactsDir,
+          worktreeDir,
+        },
+        ctx(),
+        { stateDir },
+      );
+
+      const events = await readEvents(sessionId, { stateDir });
+      const check = events.find((e) => e.record.event_type === 'artifact-check-result');
+      expect(check?.record.payload.head).toBe(head);
+      expect(check?.record.payload.screenshots).toEqual([
+        { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light' },
+      ]);
+    } finally {
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('omits head and screenshots when no --worktree is given', async () => {
+    await recordTaskResult(
+      { taskId: 'epic-1/task-2', result: resultFixture({ task_id: 'epic-1/task-2' }) },
+      ctx(),
+      { stateDir },
+    );
+    const events = await readEvents(sessionId, { stateDir });
+    const check = events.find((e) => e.record.event_type === 'artifact-check-result');
+    expect(check?.record.payload.head).toBeUndefined();
+    expect(check?.record.payload.screenshots).toBeUndefined();
   });
 });

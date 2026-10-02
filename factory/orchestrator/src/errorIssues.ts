@@ -23,6 +23,10 @@ export type GateBlockedReason =
   | 'not-committed'
   | 'deps-missing'
   | 'judges-outstanding'
+  | 'uiux-spec-missing'
+  | 'screenshots-missing'
+  | 'screenshots-stale'
+  | 'uiux-visual-missing'
   | 'grader-invalid'
   | 'grader-fail'
   | 'tests-failed'
@@ -36,6 +40,10 @@ const GATE_BLOCKED_ERROR_CLASSES: Record<GateBlockedReason, string> = {
   'not-committed': 'gate.blocked.not-committed',
   'deps-missing': 'gate.blocked.deps-missing',
   'judges-outstanding': 'gate.blocked.judges-outstanding',
+  'uiux-spec-missing': 'gate.blocked.uiux-spec-missing',
+  'screenshots-missing': 'gate.blocked.screenshots-missing',
+  'screenshots-stale': 'gate.blocked.screenshots-stale',
+  'uiux-visual-missing': 'gate.blocked.uiux-visual-missing',
   'grader-invalid': 'gate.blocked.grader-invalid',
   'grader-fail': 'gate.blocked.grader-fail',
   'tests-failed': 'gate.blocked.tests-failed',

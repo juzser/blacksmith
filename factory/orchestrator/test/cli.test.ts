@@ -9388,6 +9388,88 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // U2 S3/D4: `bs uiux check` is a preflight over the exact same `checkUiux`
+    // the gate stage calls, so the two must never disagree about the same
+    // fixture -- here, a ui-affecting task with no uiux turns dispatched at
+    // all yet, which both must call uiux-spec-missing.
+    describe('bs uiux check (agrees with the gate, U2 S3)', () => {
+      it('blocks on the same reason the gate stage would block on', async () => {
+        const { sessionId, eventsDir } = await session();
+        const uiPlan = {
+          ...PLAN,
+          tasks: PLAN.tasks.map((t) =>
+            t.task_id === 'epic-1/task-1' ? { ...t, ui_affecting: true } : t,
+          ),
+        };
+        const planPath = path.join(scratchDir, `${sessionId}-ui-plan.json`);
+        await writeFile(planPath, JSON.stringify(uiPlan));
+
+        const worktreeDir = await committedWorktree(`uiux-check-${sessionId}`);
+        const checksPath = path.join(scratchDir, `${sessionId}-ui-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-ui-result.json`);
+        await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+
+        const check = runCli([
+          'uiux',
+          'check',
+          '--task',
+          'epic-1/task-1',
+          '--plan',
+          planPath,
+          '--worktree',
+          worktreeDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(check.status).toBe(1);
+        expect(JSON.parse(check.stdout)).toEqual({
+          outcome: 'blocked',
+          reason: 'uiux-spec-missing',
+        });
+
+        const gate = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(gate.status).toBe(1);
+        const gateOutcome = JSON.parse(gate.stdout);
+        expect(gateOutcome.outcome).toBe('blocked');
+        expect(gateOutcome.reason).toBe('uiux-spec-missing');
+      });
+    });
+
     // D-42: a project's .blacksmith/crosscheck.yml overlay has to reach the
     // gate the same way it reaches `plan quorum`/`judge preflight` -- the gate
     // is where a blocking finding actually triggers a quorum case
@@ -12636,6 +12718,57 @@ describe('cli.ts (built binary)', () => {
         expect(status).toBe(1);
         expect(JSON.parse(stdout).error.code).toBe('results.agent-wrote-owned-field');
         expect(recordedPayload('res-10')).toBeUndefined();
+      });
+    });
+
+    // U2 S3/D2: freshness is proven by the HEAD recorded alongside the
+    // tester's own results record call, not an mtime or a self-written
+    // manifest -- so `--worktree` is what makes that sha part of the record.
+    describe('--worktree (freshness, U2 S3)', () => {
+      it('records head and screenshots on artifact-check-result when given --worktree', async () => {
+        const worktreeDir = await committedWorktree('results-record-worktree');
+        const head = runOrThrow('git', ['rev-parse', 'HEAD'], { cwd: worktreeDir }).stdout.trim();
+        const home = path.join(artifactsDir(), 'epic-1', 'task-2');
+        mkdirSync(home, { recursive: true });
+        writeFileSync(path.join(home, 'home-desktop-light.png'), 'png-bytes');
+        const root = seedSession('res-11');
+        const file = writeResult('res-11-result.json', {
+          artifacts: [{ type: 'screenshot', path: 'home-desktop-light.png' }],
+        });
+
+        const { status } = record('res-11', root, file, [
+          '--artifacts-dir',
+          artifactsDir(),
+          '--worktree',
+          worktreeDir,
+        ]);
+
+        expect(status).toBe(0);
+        const tail = runCli(['event', 'tail', 'res-11', '--state-dir', eventsDir()]);
+        const check = JSON.parse(tail.stdout).find(
+          (e: { record: { event_type: string } }) =>
+            e.record.event_type === 'artifact-check-result',
+        );
+        expect(check.record.payload.head).toBe(head);
+        expect(check.record.payload.screenshots).toEqual([
+          { path: 'home-desktop-light.png', viewport: 'desktop', theme: 'light' },
+        ]);
+      });
+
+      it('omits head and screenshots when no --worktree is given', () => {
+        const root = seedSession('res-12');
+        const file = writeResult('res-12-result.json');
+
+        const { status } = record('res-12', root, file);
+
+        expect(status).toBe(0);
+        const tail = runCli(['event', 'tail', 'res-12', '--state-dir', eventsDir()]);
+        const check = JSON.parse(tail.stdout).find(
+          (e: { record: { event_type: string } }) =>
+            e.record.event_type === 'artifact-check-result',
+        );
+        expect(check.record.payload.head).toBeUndefined();
+        expect(check.record.payload.screenshots).toBeUndefined();
       });
     });
   });

@@ -593,9 +593,16 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'results record',
     positionals: '',
-    flags: `--task <task-id> --result <result.json> [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--task <task-id> --result <result.json> [--agent <role> --provider <name> --model-tier <tier> [--input-tokens <n> --output-tokens <n>]] [--artifacts-dir <dir>] [--worktree <dir>] ${EVENTS_DIR}`,
     summary:
-      "Project a worker's Result on its own, with no worktree to certify and no tests to run: schema-check, task-result-recorded, artifact-check. Wave.md's tester has no gate to run one through; this is how its screenshots reach the dashboard the moment it finishes. Exit 1 when blocked.",
+      "Project a worker's Result on its own, with no worktree to certify and no tests to run: schema-check, task-result-recorded, artifact-check. Wave.md's tester has no gate to run one through; this is how its screenshots reach the dashboard the moment it finishes. --worktree records that worktree's HEAD and the Result's screenshot artifacts, the freshness evidence the uiux gate stage reads back. Exit 1 when blocked.",
+  },
+  {
+    command: 'uiux check',
+    positionals: '',
+    flags: `--task <task-id> --plan <plan.json> [--worktree <dir>] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    summary:
+      'Preflight for the gate uiux stage: the same checkUiux a flagged task is gated on, so a dispatcher can ask before running the whole gate. Exit 1 when blocked.',
   },
   {
     command: 'coverage check',
