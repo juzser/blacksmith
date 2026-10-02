@@ -1078,6 +1078,20 @@ function mintFromUiuxVisual(filePath: string, taskId: string): RaiseFindingInput
  * worse answer than reporting its budget as not-declared. Ambiguity still
  * throws — two tasks the id could equally mean is a question, not an absence.
  */
+function budgetFromFlags(flags: Record<string, string>, taskId: string): TaskBudget | undefined {
+  if (!flags.plan) return undefined;
+  const plan = readJsonFile<PlanFile>(flags.plan);
+  let resolved: string;
+  try {
+    resolved = resolveTaskId(plan, taskId);
+  } catch (err) {
+    if (err instanceof SmithError && err.code === 'plan.unknown-task') return undefined;
+    throw err;
+  }
+  const budget = plan.tasks.find((t) => t.task_id === resolved)?.budget;
+  return typeof budget === 'object' && budget !== null ? (budget as TaskBudget) : undefined;
+}
+
 /**
  * The task's `ui_affecting` flag off `--plan` (U2 D3/D6), for the gate's uiux
  * stage: `undefined` means no `--plan` was given at all, so the stage cannot
@@ -1098,20 +1112,6 @@ function uiAffectingFromFlags(flags: Record<string, string>, taskId: string): bo
   }
   const spec = plan.tasks.find((t) => t.task_id === resolved);
   return spec ? isUiAffecting(spec) : undefined;
-}
-
-function budgetFromFlags(flags: Record<string, string>, taskId: string): TaskBudget | undefined {
-  if (!flags.plan) return undefined;
-  const plan = readJsonFile<PlanFile>(flags.plan);
-  let resolved: string;
-  try {
-    resolved = resolveTaskId(plan, taskId);
-  } catch (err) {
-    if (err instanceof SmithError && err.code === 'plan.unknown-task') return undefined;
-    throw err;
-  }
-  const budget = plan.tasks.find((t) => t.task_id === resolved)?.budget;
-  return typeof budget === 'object' && budget !== null ? (budget as TaskBudget) : undefined;
 }
 
 /**

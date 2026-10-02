@@ -111,13 +111,13 @@ export async function checkUiux(
   }
 
   const haveCombos = new Set(tester.screenshots.map((s) => `${s.viewport}:${s.theme}`));
-  const allComboesPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
+  const allCombosPresent = REQUIRED_COMBOS.every(([viewport, theme]) =>
     haveCombos.has(`${viewport}:${theme}`),
   );
   const allOnDisk = tester.screenshots.every(
     (s) => resolveArtifactPath(input.taskId, s.path, input.artifactsDir) !== null,
   );
-  if (!allComboesPresent || !allOnDisk) {
+  if (!allCombosPresent || !allOnDisk) {
     return { outcome: 'blocked', reason: 'screenshots-missing' };
   }
 
