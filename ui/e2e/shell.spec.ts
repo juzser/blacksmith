@@ -135,6 +135,28 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     );
   });
 
+  // ds-spec.md line 722: --bs-touch is 44px. MobileTopBar's IconButtons
+  // render at IconButton's "sm" box (22px, bs-primitives.css), below that
+  // floor until the ≤640px .bs-iconbtn media rule grows the hit area
+  // (operator 2026-10-02).
+  test('MobileTopBar icon buttons meet the 44px touch target at the mobile viewport', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/kanban');
+
+    const trigger = page.getByRole('button', { name: 'More actions' });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
+    expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+
+    await trigger.click();
+    const pause = page.getByRole('button', { name: 'Pause updates' });
+    const pauseBox = await pause.boundingBox();
+    expect(pauseBox?.width).toBeGreaterThanOrEqual(44);
+    expect(pauseBox?.height).toBeGreaterThanOrEqual(44);
+  });
+
   test('the breadcrumb updates immediately on navigation, before page data arrives', async ({
     page,
   }) => {

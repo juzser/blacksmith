@@ -6,6 +6,21 @@
    and `check_tokens.py` can point at each independently. No page imports
    ui/src/components/kit/ yet — see ui/docs/DESIGN.md, "Provenance". */
 
+/* Dense-UI link default (ds-spec.md §1.1 line 131): a bare <a>/RouterLink
+   underlines on hover only, not at rest — Home's "What the factory decided
+   recently" list underlined every row until this landed (operator
+   2026-10-02). Prose links are out of this kit's scope and keep the
+   browser's permanent underline; a more specific selector (.bs-btn, .bs-tag,
+   etc.) always wins the tie against this bare-element rule regardless. */
+a {
+  color: var(--bs-link-text);
+  text-decoration: none;
+  text-decoration-color: var(--bs-link-underline);
+}
+a:hover {
+  text-decoration: underline;
+}
+
 @keyframes bs-fade {
   from {
     opacity: 0;
@@ -108,6 +123,17 @@
   width: 28px;
   height: 28px;
   border: 1px solid var(--bs-border);
+}
+/* MobileTopBar's overflow-trigger and overflow-menu IconButtons render at
+   22-28px, below the 44px --bs-touch floor (ds-spec.md line 722). min-width/
+   min-height only grow the hit area past the explicit width/height above —
+   the glyph keeps its own size — and only below 640px, so desktop is
+   unaffected. */
+@media (max-width: 640px) {
+  .bs-iconbtn {
+    min-width: var(--bs-touch);
+    min-height: var(--bs-touch);
+  }
 }
 /* inverse (Batch C, Toast's dismiss button) — mirrors the old kit's
    .ds-toast__dismiss:hover rule verbatim (ds-components.css): colour rides
@@ -223,7 +249,12 @@
 }
 .bs-btn--link {
   background: transparent;
-  color: var(--bs-accent);
+  /* ds-spec.md §1.1 line 126: accent is not for links; line 131 gives links
+     their own pair of tokens instead, same ones the shared `a` rule below
+     uses, so a RouterLink wearing .bs-btn--link looks the same as a bare
+     dense-UI link next to it (Home's "View"/"Open"/"Review"). */
+  color: var(--bs-link-text);
+  text-decoration-color: var(--bs-link-underline);
   text-underline-offset: 4px;
 }
 .bs-btn--link:hover {
@@ -312,7 +343,10 @@
 }
 .bs-tag--sm {
   height: 16px;
-  padding: 0 var(--bs-space-1);
+  /* 4px (--bs-space-1) read as no padding at all on Home's "Escalation"/
+     "Waiver" tags (operator 2026-10-02); --bs-space-2 (8px) clears a 6px
+     floor without touching the fixed 16px height above. */
+  padding: 0 var(--bs-space-2);
 }
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
