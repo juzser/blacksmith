@@ -3,10 +3,11 @@
 // ui/docs/DESIGN.md "Reference") to a PNG, so a visual pass can set an app
 // screenshot beside the frame it must match.
 //
-// A "frame" is a `<h3 id="p-<page>">` heading inside the mock's "Từng
-// trang" section plus every sibling element up to (not including) the next
-// page heading — the before/after notes and the example markup together,
-// which is what a reviewer actually compares against the app.
+// A "frame" is a `<h3 id="p-<page>">` heading inside the mock's "Each
+// page: before and after" section plus every sibling element up to (not
+// including) the next page heading — the before/after notes and the
+// example markup together, which is what a reviewer actually compares
+// against the app.
 //
 // Usage:
 //   node scripts/design/shoot_mock.mjs <frame-id> <desktop|mobile> <light|dark> <out-dir>
