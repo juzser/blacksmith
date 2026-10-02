@@ -9,6 +9,38 @@ nothing here needs an account, a token, or a second clone. This file is the
 kit's rulebook: on conflict between it and any older note below, this file
 wins, because there is no upstream left to defer to.
 
+## Reference
+
+[`ds-review.html`](ds-review.html) is the binding visual reference
+(operator, 2026-10-02: the mock is good as it is — the real code just needs
+to follow it exactly). Every screen built from the kit must match its frame
+for that page, at desktop and 375px, light and dark.
+[`ds-spec.md`](ds-spec.md) is the written spec for the same design. Where
+the two disagree, the spec text governs and the mismatch is flagged in the
+PR that hits it.
+
+To open the mock locally: open `ui/docs/ds-review.html` directly in a
+browser (`open ui/docs/ds-review.html` on macOS) — it is a static file with
+no build step. The theme toggle button (`#themeBtn`) toggles `data-theme`
+on `<html>` between `light` and `dark`.
+
+Each page frame is an `id="p-<page>"` heading inside the mock's "per-page
+before/after" section, followed by its before/after notes and example
+markup:
+
+| Frame id      | Route                            |
+| ------------- | --------------------------------- |
+| `p-home`      | Home / overview                   |
+| `p-kanban`    | Work: Kanban board                 |
+| `p-roadmap`   | Work: roadmap (incl. epic page)    |
+| `p-task`      | Task detail                        |
+| `p-activity`  | Activity                           |
+| `p-cost`      | Cost & quality                     |
+| `p-lessons`   | Lessons                            |
+
+`scripts/design/shoot_mock.mjs` renders a frame to a PNG (viewport +
+theme), for a visual pass to set beside the matching app screenshot.
+
 **Provenance.** This kit (the "BS kit": `bs-` prefixed tokens and classes)
 was authored in-repo, 2026-09-30, supersedes the HDS-derived kit retired the
 same day — see git history for the prior file if a comparison is ever
