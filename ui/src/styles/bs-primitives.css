@@ -218,14 +218,14 @@ a:hover {
   opacity: 0.5;
 }
 .bs-btn--primary {
-  background: var(--bs-accent);
-  color: var(--bs-text-on-accent);
+  background: var(--bs-btn-primary-bg);
+  color: var(--bs-btn-primary-text);
 }
 .bs-btn--primary:hover {
-  background: var(--bs-accent-hover);
+  background: var(--bs-btn-primary-bg-hover);
 }
 .bs-btn--primary:active:not([aria-disabled='true']) {
-  background: var(--bs-accent-pressed);
+  background: var(--bs-btn-primary-bg-pressed);
 }
 .bs-btn--secondary {
   background: var(--bs-surface-sunken);

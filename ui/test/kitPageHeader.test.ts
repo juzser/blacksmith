@@ -27,4 +27,13 @@ describe('kit/PageHeader.vue', () => {
     expect(PAGE_HEADER).toMatch(/bs-ph__title/);
     expect(PAGE_HEADER).not.toMatch(/ds-ph/);
   });
+
+  // Operator fix: the top bar's crumb already shows the page name, so the h1
+  // is visually hidden (sr-only) unless a page opts in via titleVisible
+  // (Task detail, whose title is the task name, not a crumb duplicate).
+  it('hides the title visually by default, keeping it for screen readers', () => {
+    expect(PAGE_HEADER).toMatch(/titleVisible\?:\s*boolean/);
+    expect(PAGE_HEADER).toMatch(/titleVisible:\s*false/);
+    expect(PAGE_HEADER).toMatch(/:class="\{ 'sr-only': !titleVisible \}"/);
+  });
 });
