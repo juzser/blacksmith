@@ -501,7 +501,9 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * comparison and still needs the flag.
  *
  * A task_id can hold several rows (dead `superseded` records plus the live
- * one), so a row is exempt when ANY previous row of that id matches it.
+ * one), so a row is exempt when ANY previous row of that id matches it. A
+ * supersede replacement that restores the exact content of an existing row
+ * is therefore exempt too: that content already stood unflagged.
  *
  * `added` tasks and v1 tasks have no previous record to match, so they are
  * never exempt.

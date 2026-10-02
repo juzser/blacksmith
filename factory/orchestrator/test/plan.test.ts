@@ -351,6 +351,8 @@ describe('plan.ts', () => {
           };
         }
 
+        // The dead row comes first on purpose: a first-match lookup compares
+        // the live row against it and wrongly flags the live row.
         it('does not flag rows carried forward verbatim, whichever previous row they match', () => {
           const prev = multiRow();
           const draft = draftNextVersion(prev, {});
@@ -372,6 +374,15 @@ describe('plan.ts', () => {
               true,
             );
           }
+        });
+
+        it('does not flag a supersede replacement that restores an existing row verbatim', () => {
+          const prev = multiRow();
+          const draft = draftNextVersion(prev, {
+            supersede: { 'epic-1/task-1': task({ claims: ['ui/src/Old.vue'] }) },
+          });
+          const result = validatePlan(draft, { previous: prev });
+          expect(result).toEqual({ valid: true });
         });
       });
 
