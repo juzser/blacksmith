@@ -3834,6 +3834,7 @@ async function main(): Promise<number> {
         taskId,
         result,
         ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+        ...(flags.worktree ? { worktreeDir: flags.worktree } : {}),
       },
       ctx,
       eventOptsFromFlags(flags),

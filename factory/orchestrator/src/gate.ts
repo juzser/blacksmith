@@ -19,6 +19,7 @@ import {
   SPEC_FINDING_SCOPE,
   transition,
 } from './findings.js';
+import { runGit } from './git.js';
 import { type JudgeTurn, outstandingJudges, readJudgeTurns } from './judges.js';
 import type { JudgeBudget } from './providers/types.js';
 import {
@@ -41,6 +42,7 @@ import { type AddedTask, readAddedTasks } from './taskEvents.js';
 import { taskIdsMatch } from './taskId.js';
 import { loadTaxonomy, type Taxonomy } from './taxonomy.js';
 import { type CheckCommand, type RunResult, run as runTestgate } from './testgate.js';
+import { checkUiux, type UiuxBlockReason } from './uiuxGate.js';
 
 // No GateError: a gate failing is the gate working. Every outcome here comes
 // back as a verdict the caller records, never as an exception the caller
@@ -119,6 +121,13 @@ export interface GateInput {
    */
   budget?: TaskBudget;
   coverage?: GateCoverageOptions;
+  /**
+   * The task's `ui_affecting` flag, read off its plan entry (U2 D3: absent
+   * counts as `false`). `undefined` means no `--plan` was given at all — the
+   * gate cannot resolve the flag either way, so the uiux stage records
+   * "unverifiable" rather than guessing and does not block (U2 D6).
+   */
+  uiAffecting?: boolean;
 }
 
 /**
@@ -213,6 +222,8 @@ export type GateOutcome =
       budgetCheck?: BudgetCheck;
       /** Present exactly when a coverage check ran (P9-25). */
       coverageEvidence?: CoverageEvidence;
+      /** Present exactly when a `--plan` let the stage resolve `ui_affecting` (U2 S3). */
+      uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
     }
   | {
       outcome: 'blocked';
@@ -223,6 +234,7 @@ export type GateOutcome =
         | 'not-committed'
         | 'deps-missing'
         | 'judges-outstanding'
+        | UiuxBlockReason
         | 'grader-invalid'
         | 'grader-fail'
         | 'tests-failed'
@@ -253,6 +265,7 @@ export type GateOutcome =
       outstandingJudges?: JudgeTurn[];
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
+      uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
     }
   | {
       outcome: 'pass-with-waivers-pending';
@@ -266,6 +279,7 @@ export type GateOutcome =
       specFindings?: Finding[];
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
+      uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
     };
 
 let cachedTaxonomy: Taxonomy | undefined;
@@ -414,6 +428,32 @@ export interface RecordTaskResultInput {
   result: unknown;
   /** Where artifact homes live; defaults to `state/artifacts` (P9-22). */
   artifactsDir?: string;
+  /**
+   * `results record --worktree` (U2 S3): the tester's HEAD at the moment it
+   * shot its screenshots, proof the uiux gate stage checks freshness against
+   * (U2 D2). Never written onto the Result itself — `result.schema.json` is
+   * `additionalProperties: false` — so it rides on `artifact-check-result`'s
+   * payload instead, alongside the screenshot set this call found among the
+   * Result's artifacts.
+   */
+  worktreeDir?: string;
+}
+
+/** `name-desktop-light.png` and the three siblings a visual pass has to cover. */
+const SCREENSHOT_RE = /-(desktop|mobile)-(light|dark)\.png$/;
+
+function screenshotsFromArtifacts(
+  artifacts: readonly ArtifactDecl[],
+): { path: string; viewport: string; theme: string }[] {
+  const shots: { path: string; viewport: string; theme: string }[] = [];
+  for (const a of artifacts) {
+    const match = SCREENSHOT_RE.exec(a.path);
+    const viewport = match?.[1];
+    const theme = match?.[2];
+    if (viewport !== undefined && theme !== undefined)
+      shots.push({ path: a.path, viewport, theme });
+  }
+  return shots;
 }
 
 export type RecordTaskResultOutcome =
@@ -469,6 +509,13 @@ export async function recordTaskResult(
     taskId: input.taskId,
     artifactsDir: input.artifactsDir,
   });
+  const freshness =
+    input.worktreeDir !== undefined
+      ? {
+          head: runGit(input.worktreeDir, ['rev-parse', 'HEAD']),
+          screenshots: screenshotsFromArtifacts(artifacts),
+        }
+      : {};
   await emit(
     'artifact-check-result',
     {
@@ -476,6 +523,7 @@ export async function recordTaskResult(
       checked: artifactCheck.checked,
       home: artifactCheck.home,
       issues: artifactCheck.issues,
+      ...freshness,
     },
     input.taskId,
     ctx,
@@ -1292,6 +1340,46 @@ export async function runGate(
     );
   }
 
+  // U2 S3: a ui-affecting task owes a reviewed, fresh screenshot set before
+  // the diff goes any further, measured against this run's own commit (D2).
+  // `uiAffecting` absent means no `--plan` was given at all, so the flag
+  // cannot be resolved either way — the stage records that honestly rather
+  // than guessing, and does not block (D6). `uiAffecting: false` (including a
+  // task with no flag at all, D3) means the stage has nothing to check.
+  let uiuxCheck: 'checked' | 'skipped' | 'unverifiable' = 'skipped';
+  if (input.uiAffecting === undefined) {
+    uiuxCheck = 'unverifiable';
+  } else if (input.uiAffecting) {
+    uiuxCheck = 'checked';
+    const uiux = await checkUiux(
+      {
+        taskId: input.taskId,
+        ...(commitCheck.head === null ? {} : { head: commitCheck.head }),
+        artifactsDir: input.artifactsDir,
+      },
+      ctx,
+      opts,
+    );
+    if (uiux.outcome === 'blocked') {
+      return finalize(
+        {
+          outcome: 'blocked',
+          taskId: input.taskId,
+          reason: uiux.reason,
+          testResult: null,
+          schemaErrors: [],
+          blockingFindings: [],
+          artifactIssues: [],
+          commitCheck,
+          uiuxCheck,
+        },
+        ctx,
+        opts,
+      );
+    }
+  }
+  const uiuxStatus = { uiuxCheck };
+
   // Before the tests, not after: the grader has already run, and if its rubric
   // says the criteria were not met the diff bounces whatever the suite says —
   // so a full test run here is spent for nothing. It sits behind the commit
@@ -1317,6 +1405,7 @@ export async function runGate(
           blockingFindings: [],
           artifactIssues: [],
           commitCheck,
+          ...uiuxStatus,
         },
         ctx,
         opts,
@@ -1358,6 +1447,7 @@ export async function runGate(
         artifactIssues: [],
         commitCheck,
         ...budget,
+        ...uiuxStatus,
       },
       ctx,
       opts,
@@ -1405,6 +1495,7 @@ export async function runGate(
           commitCheck,
           ...budget,
           ...withCoverage,
+          ...uiuxStatus,
         },
         ctx,
         opts,
@@ -1445,6 +1536,7 @@ export async function runGate(
         ...diverted,
         ...budget,
         ...withCoverage,
+        ...uiuxStatus,
       },
       ctx,
       opts,
@@ -1463,6 +1555,7 @@ export async function runGate(
         ...diverted,
         ...budget,
         ...withCoverage,
+        ...uiuxStatus,
       },
       ctx,
       opts,
@@ -1479,6 +1572,7 @@ export async function runGate(
       ...diverted,
       ...budget,
       ...withCoverage,
+      ...uiuxStatus,
     },
     ctx,
     opts,
