@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FlowGraph, FlowNode } from '../src/lib/api.js';
-import { planVersionOptions } from '../src/lib/flowLayout.js';
+import { planVersionOptions } from '../src/lib/planVersion.js';
 
 // D-165: the picker used to be derived from `graph.nodes` — the tasks the
 // server had ALREADY filtered to one plan version. It could therefore only
