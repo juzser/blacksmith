@@ -2,6 +2,7 @@ import type { RouteLocationNormalizedLoaded, RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
 import type { Crumb } from './composables/useBreadcrumb.js';
 import { homeRedirect } from './lib/homeRoute.js';
+import { legacyWorkRedirect } from './lib/workView.js';
 
 // Routes: Home (ds-spec.md §4.1, Overview + Projects merged) renders at
 // `/overview` in global mode and at `/p/:project/overview` scoped to one
@@ -50,17 +51,31 @@ const routes: RouteRecordRaw[] = [
     meta: { crumb: () => [{ label: 'Activity' }] },
   },
   {
-    path: '/kanban',
-    name: 'kanban',
-    component: () => import('./pages/KanbanPage.vue'),
-    meta: { crumb: () => [{ label: 'Work' }] },
+    // Work: a Kanban/Roadmap switch, not two unrelated
+    // pages. /work/kanban and /work/roadmap are child routes so WorkPage.vue
+    // can own the shared header/SegmentedControl above `<router-view>`; the
+    // crumb/title read "Work" on both (operator decision, not a per-view
+    // label). `/kanban` and `/roadmap` below redirect here, query kept.
+    path: '/work',
+    component: () => import('./pages/WorkPage.vue'),
+    children: [
+      { path: '', redirect: '/work/kanban' },
+      {
+        path: 'kanban',
+        name: 'work-kanban',
+        component: () => import('./pages/KanbanPage.vue'),
+        meta: { crumb: () => [{ label: 'Work' }] },
+      },
+      {
+        path: 'roadmap',
+        name: 'work-roadmap',
+        component: () => import('./pages/RoadmapPage.vue'),
+        meta: { crumb: () => [{ label: 'Work' }] },
+      },
+    ],
   },
-  {
-    path: '/roadmap',
-    name: 'roadmap',
-    component: () => import('./pages/RoadmapPage.vue'),
-    meta: { crumb: () => [{ label: 'Roadmap' }] },
-  },
+  { path: '/kanban', redirect: legacyWorkRedirect('/work/kanban') },
+  { path: '/roadmap', redirect: legacyWorkRedirect('/work/roadmap') },
   {
     path: '/flow',
     name: 'flow',
@@ -91,7 +106,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./pages/TaskDetailPage.vue'),
     props: true,
     meta: {
-      crumb: (r) => [{ label: 'Work', to: '/kanban' }, { label: String(r.params.taskId) }],
+      crumb: (r) => [{ label: 'Work', to: '/work/kanban' }, { label: String(r.params.taskId) }],
     },
   },
 ];

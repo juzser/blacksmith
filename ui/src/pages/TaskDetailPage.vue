@@ -126,7 +126,7 @@ onMounted(() => {
   // success path, leaving the previous page's trail above a failed task and, on
   // the way in, above the skeleton too (D-230). SessionsPage says the same
   // thing about its own project switch.
-  setBreadcrumb([{ label: 'Kanban', to: '/kanban' }, { label: props.taskId }]);
+  setBreadcrumb([{ label: 'Work', to: '/work/kanban' }, { label: props.taskId }]);
   load();
   loadHistory();
 });

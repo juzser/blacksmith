@@ -94,7 +94,7 @@ test.describe('Manual refresh (design-spec §8)', () => {
 
   // The control: §8's other two polling surfaces already satisfy this, so a
   // sweep that passed everywhere for the wrong reason would show up here.
-  for (const path of ['/timeline', '/kanban']) {
+  for (const path of ['/timeline', '/work/kanban']) {
     test(`${path} still offers its Refresh control`, async ({ page }) => {
       await page.goto(path);
       await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();

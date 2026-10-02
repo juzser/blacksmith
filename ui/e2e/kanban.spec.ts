@@ -2,7 +2,7 @@ import type { KanbanTask } from '../src/lib/api.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
-// Two epics from two different projects. A bare /kanban carries no project
+// Two epics from two different projects. A bare /work/kanban carries no project
 // scope, so both are on the same board — which is what makes "every epic"
 // something a card can be counted for rather than only a heading to read.
 const SCOPED_EPIC = 'epic-9'; // multiProjectFixture.ts, project demo-hub
@@ -47,8 +47,8 @@ async function mockBoard(
 
 test.describe('Kanban', () => {
   test('renders the board grouped by status and a11y basics', async ({ page }) => {
-    await page.goto('/kanban');
-    await expect(page.locator('h1')).toHaveText('Kanban');
+    await page.goto('/work/kanban');
+    await expect(page.locator('h1')).toHaveText('Work');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
     await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
     await expect(page.getByRole('region', { name: 'Completed column' })).toBeVisible();
@@ -60,7 +60,7 @@ test.describe('Kanban', () => {
   test('clicking a task card opens the peek panel, whose "Open full page" link navigates', async ({
     page,
   }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     const firstCard = page.locator('.bs-kanban-card').first();
     await expect(firstCard).toBeVisible();
     // `.bs-kanban-card__id` is the shortId (taskId.split('/').pop()) — enough
@@ -77,7 +77,7 @@ test.describe('Kanban', () => {
     await expect(page.getByRole('tablist', { name: 'Task detail sections' })).toBeVisible();
   });
 
-  // Entered on `?epic=`, not on a bare /kanban, because `selectedEpic` starts
+  // Entered on `?epic=`, not on a bare /work/kanban, because `selectedEpic` starts
   // at ALL_EPICS. Deep-linking to one epic first is what makes the switch a
   // switch, and the epic-9 card the proof that widening the picker widened
   // the board's task list rather than only its heading.
@@ -88,7 +88,7 @@ test.describe('Kanban', () => {
     const taskCountText = () => page.getByText(/^\d+ tasks$/).innerText();
     const taskCount = async () => Number((await taskCountText()).split(' ')[0]);
 
-    await page.goto(`/kanban?epic=${SCOPED_EPIC}`);
+    await page.goto(`/work/kanban?epic=${SCOPED_EPIC}`);
     await expect.poll(taskCountText).not.toBe('0 tasks');
     const scopedCount = await taskCount();
 
@@ -107,8 +107,8 @@ test.describe('Kanban', () => {
     // set, leaving the operator on the skeleton row forever — a state
     // indistinguishable from "still loading" (D-222).
     await page.route('**/api/overview*', (route) => route.abort('failed'));
-    await page.goto('/kanban');
-    await expect(page.locator('h1')).toHaveText('Kanban');
+    await page.goto('/work/kanban');
+    await expect(page.locator('h1')).toHaveText('Work');
     await expect(page.locator('.bs-skeleton')).toHaveCount(0);
     await expect(page.locator('.bs-banner')).toBeVisible();
     // The board's own endpoint is healthy, so the tasks still arrive.
@@ -125,7 +125,7 @@ test.describe('Kanban', () => {
       { taskStatus: 'failed', tasks: [task('epic-1/task-2', 'failed')] },
       { taskStatus: 'superseded', tasks: [task('epic-1/task-3', 'superseded')] },
     ]);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
 
     await expect(page.getByText(/^\d+ tasks$/)).toHaveText('1 tasks');
     await expect(page.locator('.bs-kanban-card')).toHaveCount(1);
@@ -137,7 +137,7 @@ test.describe('Kanban', () => {
     await mockBoard(page, [
       { taskStatus: 'superseded', tasks: [task('epic-1/task-9', 'superseded')] },
     ]);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await expect(page.getByText(/^\d+ tasks$/)).toHaveText('0 tasks');
     await expect(page.getByText('No tasks match these filters.')).toBeVisible();
   });
@@ -152,7 +152,7 @@ test.describe('Kanban', () => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await route.continue();
     });
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     const skeleton = page.locator('.bs-skeleton').first();
     await expect(skeleton).toBeVisible();
     const box = await skeleton.boundingBox();
@@ -162,7 +162,7 @@ test.describe('Kanban', () => {
   // Pattern 7 — the display-options Popover's Group by Select re-folds the
   // board into a different set of columns, without a reload.
   test('switching group-by changes how the board is grouped', async ({ page }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Display options' }).click();
@@ -180,7 +180,7 @@ test.describe('Kanban', () => {
   // via a guarded localStorage accessor, so a reload keeps the operator's
   // chosen view instead of resetting to the status board every time.
   test('display options persist across a reload', async ({ page }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await page.getByRole('button', { name: 'Display options' }).click();
     await page.getByLabel('Group by', { exact: true }).selectOption('project');
     await expect(page.getByRole('region', { name: 'demo-hub column' })).toBeVisible();
@@ -202,7 +202,7 @@ test.describe('Kanban', () => {
     await mockBoard(page, [
       { taskStatus: 'todo', tasks: [task('epic-1/task-1', 'todo'), task('epic-1/task-2', 'todo')] },
     ]);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
 
     const firstCard = page.locator('.bs-kanban-card').nth(0);
     const secondCard = page.locator('.bs-kanban-card').nth(1);
@@ -234,7 +234,7 @@ test.describe('Kanban', () => {
         tasks: [{ ...task('epic-1/task-1', 'todo'), prUrl: 'https://example.com/pr/1' }],
       },
     ]);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
 
     const link = page.getByRole('link', { name: 'Open PR' });
     await link.focus();
@@ -261,7 +261,7 @@ test.describe('Kanban', () => {
         ],
       },
     ]);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
 
     await expect(page.getByText('Fix the login button alignment')).toBeVisible();
 
@@ -275,7 +275,7 @@ test.describe('Kanban', () => {
   // scroll internally if they need to, the document never does.
   test('the 375px board never scrolls the page sideways', async ({ page }) => {
     await page.setViewportSize(NARROW_VIEWPORT);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
     const overflows = await page.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -303,11 +303,11 @@ test.describe('Kanban', () => {
     const aborted = page.waitForEvent('requestfailed', (req) =>
       req.url().includes('/api/overview'),
     );
-    await page.goto('/kanban');
-    await expect(page.locator('h1')).toHaveText('Kanban');
+    await page.goto('/work/kanban');
+    await expect(page.locator('h1')).toHaveText('Work');
     await aborted;
     await page.waitForTimeout(150);
-    await shoot(page, 'kanban-epics-unavailable-desktop-light');
+    await shoot(page, 'work-kanban-epics-unavailable-desktop-light');
   });
 
   // Same shape as the Timeline's: a 15s poll whose `loadBoard()` cleared
@@ -325,7 +325,7 @@ test.describe('Kanban', () => {
       await new Promise((resolve) => setTimeout(resolve, 12_000));
       await route.abort('failed').catch(() => {});
     });
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
 
     // Resolves the moment the refetch is issued -- i.e. the moment `load()`
@@ -349,7 +349,7 @@ test.describe('Kanban', () => {
       page.getByLabel('Epic', { exact: true }).locator('option').allTextContents();
     const projectSwitcher = page.getByLabel('Project', { exact: true });
 
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await expect(page.locator('.bs-kanban-card').first()).toBeVisible();
     // Proof the population is not empty before anything is claimed absent.
     expect(await epicOptions()).toEqual(expect.arrayContaining(['epic-1', 'epic-9']));
@@ -365,10 +365,10 @@ test.describe('Kanban', () => {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto('/kanban');
-        await expect(page.locator('h1')).toHaveText('Kanban');
+        await page.goto('/work/kanban');
+        await expect(page.locator('h1')).toHaveText('Work');
         await settleForShot(page, page.locator('.bs-kanban-card').first());
-        await shoot(page, `kanban-${vpName}-${theme}`);
+        await shoot(page, `work-kanban-${vpName}-${theme}`);
       });
     }
   }
@@ -377,7 +377,7 @@ test.describe('Kanban', () => {
   // at a time, and clicking a second tab switches which one is on screen.
   test('mobile: switching tabs switches the visible column', async ({ page }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     const tablist = page.getByRole('tablist', { name: 'Kanban columns' });
     await expect(tablist).toBeVisible();
     // Every column stays mounted (v-show, not v-if) so a tab click only
@@ -413,7 +413,7 @@ test.describe('Kanban', () => {
     test(`screenshot mobile/tab2/${theme}`, async ({ page }) => {
       await setTheme(page, theme);
       await page.setViewportSize(VIEWPORTS.mobile);
-      await page.goto('/kanban');
+      await page.goto('/work/kanban');
       const tablist = page.getByRole('tablist', { name: 'Kanban columns' });
       await expect(tablist).toBeVisible();
       // Pick a tab that is not already the default-selected one, so the
@@ -424,7 +424,7 @@ test.describe('Kanban', () => {
         .getAttribute('id');
       await page.locator(`[id="${otherTabId}"]`).click();
       await settleForShot(page, page.locator('.bs-kanban-col:visible'));
-      await shoot(page, `kanban-mobile-tab2-${theme}`);
+      await shoot(page, `work-kanban-mobile-tab2-${theme}`);
     });
   }
 });

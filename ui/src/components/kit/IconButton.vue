@@ -24,8 +24,23 @@ const props = withDefaults(
      * Defaults to 'default', today's only behaviour.
      */
     tone?: 'default' | 'inverse';
+    /**
+     * DS4 S1 round 6: the phone overflow's "..." trigger needs
+     * aria-haspopup="menu" + aria-expanded (WAI-ARIA APG menu pattern). Both
+     * optional — every other IconButton call site is a plain button with
+     * neither.
+     */
+    /**
+     * ariaExpanded needs an explicit `default` key below, even `undefined`
+     * itself — Vue's prop resolution otherwise treats an absent
+     * Boolean-typed prop as `false` rather than undefined, and every other
+     * IconButton call site that never passes it would render a bogus
+     * `aria-expanded="false"`.
+     */
+    ariaHaspopup?: 'menu';
+    ariaExpanded?: boolean;
   }>(),
-  { size: 'md', tone: 'default' },
+  { size: 'md', tone: 'default', ariaExpanded: undefined },
 );
 
 const emit = defineEmits<{ click: [MouseEvent] }>();
@@ -44,6 +59,8 @@ function onClick(event: MouseEvent) {
       :class="[`bs-iconbtn--${size}`, { 'bs-iconbtn--inverse': tone === 'inverse' }]"
       :aria-label="label"
       :aria-disabled="disabled ? 'true' : undefined"
+      :aria-haspopup="ariaHaspopup"
+      :aria-expanded="ariaExpanded"
       @click="onClick"
     >
       <Icon :icon="icon" :size="16" />

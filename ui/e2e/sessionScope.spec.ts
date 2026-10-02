@@ -40,13 +40,13 @@ async function firstSession(page: import('@playwright/test').Page): Promise<stri
 
 test.describe('Session scope', () => {
   test('offers the picker only on Activity and Roadmap (ds-spec.md §3)', async ({ page }) => {
-    for (const path of ['/timeline', '/roadmap']) {
+    for (const path of ['/timeline', '/work/roadmap']) {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} offers the picker`).toBeVisible();
     }
     for (const path of [
       '/sessions',
-      '/kanban',
+      '/work/kanban',
       '/flow',
       '/errors',
       '/analytics',

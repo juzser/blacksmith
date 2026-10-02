@@ -29,7 +29,8 @@ describe('router.ts meta.crumb', () => {
   it('renames the shell routes to their SidebarNav labels', () => {
     const byName = new Map(routeBodies());
     expect(byName.get('overview-global')).toMatch(/crumb: \(\) => \[\{ label: 'Home' \}\]/);
-    expect(byName.get('kanban')).toMatch(/crumb: \(\) => \[\{ label: 'Work' \}\]/);
+    expect(byName.get('work-kanban')).toMatch(/crumb: \(\) => \[\{ label: 'Work' \}\]/);
+    expect(byName.get('work-roadmap')).toMatch(/crumb: \(\) => \[\{ label: 'Work' \}\]/);
     expect(byName.get('timeline')).toMatch(/crumb: \(\) => \[\{ label: 'Activity' \}\]/);
     expect(byName.get('analytics')).toMatch(/crumb: \(\) => \[\{ label: 'Cost & quality' \}\]/);
     expect(byName.get('lessons')).toMatch(/crumb: \(\) => \[\{ label: 'Lessons' \}\]/);
@@ -38,7 +39,7 @@ describe('router.ts meta.crumb', () => {
   it('derives task-detail crumb from route params, not page data', () => {
     const byName = new Map(routeBodies());
     const body = byName.get('task-detail') ?? '';
-    expect(body).toMatch(/label: 'Work', to: '\/kanban'/);
+    expect(body).toMatch(/label: 'Work', to: '\/work\/kanban'/);
     expect(body).toMatch(/label: String\(r\.params\.taskId\)/);
   });
 });

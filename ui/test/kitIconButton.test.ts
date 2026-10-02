@@ -59,4 +59,19 @@ describe('kit/IconButton.vue', () => {
   it('applies a bs-iconbtn--inverse class when tone is inverse', () => {
     expect(ICON_BUTTON).toMatch(/bs-iconbtn--inverse/);
   });
+
+  // DS4 S1 round 6 regression: declaring `ariaExpanded?: boolean` with no
+  // explicit default makes Vue's own prop resolution cast an absent value to
+  // `false` (Boolean-type props default to false, not undefined, unless a
+  // `default` key — even `undefined` — is present in withDefaults). Every
+  // other IconButton call site that never passes ariaExpanded then rendered
+  // a bogus `aria-expanded="false"`, which broke button[aria-expanded="false"]
+  // sweeps elsewhere in the app (e.g. the Timeline disclosure chevrons).
+  it('defaults ariaExpanded to undefined explicitly, so an absent prop renders no attribute', () => {
+    const match = ICON_BUTTON.match(
+      /withDefaults\(\s*defineProps<\{[\s\S]*?\}>\(\),\s*\{([\s\S]*?)\}\s*,?\s*\)/,
+    );
+    expect(match).not.toBeNull();
+    expect(match?.[1]).toMatch(/ariaExpanded:\s*undefined/);
+  });
 });

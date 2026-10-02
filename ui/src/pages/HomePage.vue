@@ -94,7 +94,7 @@ const budget = computed(() => (overview.value ? budgetSummary(overview.value.tok
 const budgetDelta = computed(() => budgetDeltaSentence(overview.value?.budgetUsedPctPointDelta1h ?? null));
 
 function workLink(p: string) {
-  return { path: '/kanban', query: { project: p } };
+  return { path: '/work/kanban', query: { project: p } };
 }
 </script>
 
@@ -142,7 +142,7 @@ function workLink(p: string) {
           <h3 class="bs-home__subhead">Just finished</h3>
           <ul class="bs-home__list">
             <li v-for="e in justFinished" :key="e.epicId" class="bs-home__line">
-              <RouterLink :to="{ path: '/kanban', query: { epic: e.epicId } }">{{ e.epicId }}</RouterLink>
+              <RouterLink :to="{ path: '/work/kanban', query: { epic: e.epicId } }">{{ e.epicId }}</RouterLink>
               <span>finished</span>
               <RelativeTime :iso="e.closedAt" />
             </li>

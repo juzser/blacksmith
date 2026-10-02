@@ -73,7 +73,7 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
   // mounts, every role-based assertion above still passes, and the operator
   // gets a column of unstyled text — so assert the CSS itself took effect.
   test('bs-* tokens resolve on :root, per theme', async ({ page }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     const token = (name: string) =>
       page.evaluate(
         (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(),
@@ -90,7 +90,7 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
   });
 
   test('the sidebar is laid out by bs-primitives, not the UA default', async ({ page }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     const side = page.locator('nav.bs-side');
     await expect(side).toBeVisible();
     const style = await side.evaluate((el) => {
@@ -107,7 +107,7 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
 
 test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
   test('SidebarNav lists the 5 shell items and marks the active one', async ({ page }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     const nav = page.getByRole('navigation', { name: 'Primary' });
     for (const label of ['Home', 'Work', 'Activity', 'Cost & quality', 'Lessons']) {
       await expect(nav.getByRole('button', { name: label })).toBeVisible();
@@ -119,7 +119,7 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     page,
   }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
 
     await expect(page.locator('.bs-mtopbar')).toBeVisible();
     const tabbar = page.getByRole('navigation', { name: 'Primary' });
@@ -180,7 +180,7 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
   test('the breadcrumb updates immediately on navigation, before page data arrives', async ({
     page,
   }) => {
-    await page.goto('/kanban');
+    await page.goto('/work/kanban');
     await page
       .getByRole('navigation', { name: 'Primary' })
       .getByRole('button', { name: 'Activity' })

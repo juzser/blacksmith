@@ -5,6 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'kit');
 const TOPBAR = readFileSync(join(KIT, 'MobileTopBar.vue'), 'utf8');
+const CSS = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
+  'utf8',
+);
 
 describe('kit/MobileTopBar.vue', () => {
   it('has no hamburger/nav trigger — the phone shell has no Sheet to open (ds-spec.md §3)', () => {
@@ -38,5 +42,48 @@ describe('kit/MobileTopBar.vue', () => {
   it('shows a compact MobileProjectSwitcher only when the route is scoped', () => {
     expect(TOPBAR).toMatch(/<MobileProjectSwitcher\s+v-if="showProjectSwitcher"/);
     expect(TOPBAR).not.toMatch(/<ProjectSwitcher\s/);
+  });
+
+  it('the overflow renders as a labeled vertical menu (ds-review.html .ph-menu)', () => {
+    expect(TOPBAR).toMatch(/role="menu"/);
+    const overflowStart = TOPBAR.indexOf('bs-mtopbar__overflow"');
+    const overflowBody = TOPBAR.slice(overflowStart);
+    const menuitemCount = overflowBody.match(/role="menuitem"/g)?.length ?? 0;
+    expect(menuitemCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the pause menu item label flips between pause and resume', () => {
+    expect(TOPBAR).toMatch(/Pause live updates/);
+    expect(TOPBAR).toMatch(/Resume live updates/);
+  });
+
+  it('the Settings menu item stays disabled, and a Separator sits before the extra slot', () => {
+    const overflowStart = TOPBAR.indexOf('bs-mtopbar__overflow"');
+    const overflowBody = TOPBAR.slice(overflowStart);
+    const settingsIdx = overflowBody.indexOf('Settings');
+    expect(settingsIdx).toBeGreaterThan(-1);
+    const settingsItem = overflowBody.slice(Math.max(0, settingsIdx - 200), settingsIdx + 50);
+    expect(settingsItem).toMatch(/aria-disabled="true"/);
+
+    const sepIdx = overflowBody.indexOf('<Separator');
+    const extraIdx = overflowBody.indexOf('bs-mtopbar-overflow-extra');
+    expect(sepIdx).toBeGreaterThan(-1);
+    expect(extraIdx).toBeGreaterThan(sepIdx);
+  });
+
+  it('no stale ds4-plan.md references remain (that file is not in the repo)', () => {
+    expect(TOPBAR).not.toMatch(/ds4-plan\.md/);
+  });
+});
+
+describe('.bs-mtopbar__project CSS (push-right onto a display: contents wrapper)', () => {
+  it('does not put margin-left: auto directly on the display: contents wrapper, where it has no effect', () => {
+    const match = CSS.match(/\.bs-mtopbar__project \{[\s\S]*?\}/);
+    expect(match?.[0]).not.toMatch(/margin-left: auto/);
+  });
+
+  it("puts the push-right on .bs-mproject__trigger, the wrapper's one real flex item", () => {
+    const match = CSS.match(/\.bs-mtopbar__project > \.bs-mproject__trigger \{[\s\S]*?\}/);
+    expect(match?.[0]).toMatch(/margin-left: auto/);
   });
 });

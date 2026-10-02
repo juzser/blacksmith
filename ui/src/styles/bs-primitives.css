@@ -666,6 +666,16 @@ a:hover {
   color: var(--bs-text);
   cursor: pointer;
 }
+/* Mobile overflow: the only live consumer is WorkPage's view switch,
+   teleported into the mobile top bar overflow, so the touch target only
+   needs widening at the mobile breakpoint. */
+@media (max-width: 640px) {
+  .bs-radio {
+    min-height: var(--bs-touch);
+    width: 100%;
+    padding: 0 var(--bs-space-2);
+  }
+}
 
 /* Chip (§2.1) — border+dot identity pattern ported from
    ui/src/components/IdentityChip.vue; colour never carries the label text
@@ -873,6 +883,50 @@ a:hover {
   .bs-tabs__tab {
     min-height: var(--bs-touch);
     min-width: var(--bs-touch);
+  }
+}
+
+/* SegmentedControl (Work's Kanban/Roadmap switch): two
+   RouterLinks, no accent fill on the selected item (§1.9 accent budget) —
+   --bs-surface-selected + aria-current="page" is the cue instead, same as
+   the rest of this kit's non-accent active states. One size (md): the row
+   is exactly --bs-touch (44px) tall so the item's own --bs-touch min-height
+   never exceeds it — a shorter row let the selected item's fill poke past
+   the 1px border (visual pass, DS4 S1 round 2, S2-major finding 1). */
+.bs-segctl {
+  display: flex;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+  height: var(--bs-touch);
+}
+.bs-segctl__item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--bs-touch);
+  padding: 0 var(--bs-space-3);
+  color: var(--bs-text-subtle);
+  text-decoration: none;
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+}
+.bs-segctl__item:hover {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+}
+.bs-segctl__item[aria-current='page'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+}
+.bs-segctl__item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+@media (max-width: 640px) {
+  .bs-segctl {
+    display: none;
   }
 }
 
@@ -1369,6 +1423,17 @@ a:hover {
 }
 .bs-mtopbar__project {
   max-width: 12ch;
+}
+/* .bs-mtopbar__project itself is display: contents (.bs-mproject, below) so
+   the "More actions" overflow trigger reaches the topbar's true right edge
+   — a display: contents box ignores its own margin (and width), so the
+   push-right has to land on its one real child, .bs-mproject__trigger, or
+   the switcher and everything after it (the dot, the overflow trigger)
+   stays wherever it falls in normal flow, leaving the trigger mid-topbar
+   with too little room to its left for the overflow panel's min-width and
+   clipping it off the left edge (visual pass, DS4 S1 round 2, S2-major
+   finding 5). */
+.bs-mtopbar__project > .bs-mproject__trigger {
   margin-left: auto;
 }
 .bs-mtopbar__dot {
@@ -1381,16 +1446,92 @@ a:hover {
 .bs-mtopbar__dot[data-live='true'] {
   background: var(--bs-tone-done-text);
 }
+/* ds-review.html .ph-menu: a vertical labeled menu, not an icon-only row —
+   the icon-only overflow (round 3) left "View" and its Separator with
+   nothing to stack under (round 4 finding). */
 .bs-mtopbar__overflow {
-  min-width: 0;
+  min-width: 12rem;
   display: flex;
-  gap: var(--bs-space-1);
+  flex-direction: column;
+  gap: 0;
+}
+.bs-mtopbar__menuitem {
+  width: 100%;
+  min-height: var(--bs-touch);
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  padding: 0 var(--bs-space-2);
+  font: inherit;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--bs-radius-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.bs-mtopbar__menuitem:hover {
+  background: var(--bs-surface-selected);
+}
+.bs-mtopbar__menuitem[aria-disabled='true'] {
+  color: var(--bs-text-disabled);
+  cursor: default;
+}
+.bs-mtopbar__menuitem[aria-disabled='true']:hover {
+  background: transparent;
+}
+.bs-mtopbar__menuitem .bs-icon {
+  color: var(--bs-text-subtle);
+  flex-shrink: 0;
+}
+/* Visible "View" heading above WorkPage's teleported role="group" of
+   menuitemradio buttons — the group's own aria-label is not enough on its
+   own (uiux spec §3), and the span itself is aria-hidden (it would otherwise
+   duplicate that aria-label to a screen reader). */
+.bs-mtopbar__menu-label {
+  display: block;
+  padding: var(--bs-space-1) var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-semibold);
+  color: var(--bs-text);
 }
 /* Teleport target for page-specific overflow controls (ds-spec.md §3.1 Work/
    Kanban row) — `display: contents` so a teleported trigger sits inline with
    the rest of the overflow row instead of inside its own box. */
 .bs-mtopbar__overflow-extra {
   display: contents;
+}
+/* WorkPage's "View" menuitemradio group (DS4 S1 round 6) — `display:
+   contents` for the same reason as .bs-mtopbar__overflow-extra above: its
+   buttons stack as direct rows of the overflow's own flex column, not inside
+   a second box. */
+.bs-mtopbar__viewgroup {
+  display: contents;
+}
+/* A CSS-drawn radio dot: menuitemradio items are buttons, not <input
+   type=radio> (round 6 — a radio input is not a valid child of role="menu"),
+   so the native control's look is redrawn here to match. */
+.bs-mtopbar__radio-dot {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--bs-radius-full);
+  border: 1.5px solid var(--bs-border-bold);
+}
+.bs-mtopbar__viewitem[aria-checked='true'] .bs-mtopbar__radio-dot {
+  border-color: var(--bs-accent);
+  background: radial-gradient(circle, var(--bs-accent) 0 40%, transparent 41%);
+}
+/* Pages with no page-specific extra (Home) leave the teleport target empty —
+   the Separator just above it must not render then, or it dangles under
+   "Settings" with nothing stacked below (DS4 S1 round 5, S3 finding 1). The
+   Work page always teleports its View switch in, so its Separator keeps
+   rendering. */
+.bs-mtopbar__overflow > .bs-sep:has(+ #bs-mtopbar-overflow-extra:empty) {
+  display: none;
 }
 /* ---- MobileProjectSwitcher (§3.1, finding 9): trigger + Popover list ---- */
 .bs-mproject {
@@ -1761,6 +1902,12 @@ summary.bs-inbox__group-head {
   display: flex;
   align-items: center;
   gap: var(--bs-space-2);
+}
+.bs-kanban-page__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  margin-left: auto;
 }
 .bs-kanban-page__count {
   font-size: var(--bs-text-xs);

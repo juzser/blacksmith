@@ -280,6 +280,7 @@ defineExpose({ focusFirstCard });
          mechanism the kit's own overlay components already use. -->
     <Teleport v-if="isPhoneWidth" to="#bs-mtopbar-overflow-extra">
       <KanbanDisplayOptions
+        as-menu-item
         :open="optionsOpen"
         :summary="options.summary"
         :group-by="options.groupBy"

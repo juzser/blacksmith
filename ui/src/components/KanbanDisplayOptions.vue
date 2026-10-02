@@ -5,6 +5,7 @@
 // same register as a single-step confirm.
 import { SlidersHorizontal } from '@lucide/vue';
 import type { KanbanGroupBy } from '../lib/kanban.js';
+import Icon from './kit/Icon.vue';
 import IconButton from './kit/IconButton.vue';
 import Popover from './kit/Popover.vue';
 import Select, { type SelectOption } from './kit/Select.vue';
@@ -14,6 +15,13 @@ const props = defineProps<{
   summary: boolean;
   groupBy: KanbanGroupBy;
   hidden: string[];
+  /**
+   * Phone overflow menu context (DS4 S1 round 5, S3 finding 2): every other
+   * entry in MobileTopBar's overflow is a full-width labeled row, icon and
+   * text on one line, at least --bs-touch tall — the desktop toolbar keeps
+   * its icon-only square button.
+   */
+  asMenuItem?: boolean;
 }>();
 const emit = defineEmits<{
   close: [];
@@ -38,7 +46,21 @@ function onGroupByChange(value: string) {
 <template>
   <Popover :open="open" label="Kanban display options" @close="emit('close')">
     <template #trigger>
+      <button
+        v-if="asMenuItem"
+        type="button"
+        class="bs-mtopbar__menuitem"
+        role="menuitem"
+        tabindex="-1"
+        aria-haspopup="dialog"
+        :aria-expanded="open"
+        @click="open ? emit('close') : emit('open')"
+      >
+        <Icon :icon="SlidersHorizontal" :size="16" />
+        <span>Display options</span>
+      </button>
       <IconButton
+        v-else
         :icon="SlidersHorizontal"
         label="Display options"
         @click="open ? emit('close') : emit('open')"

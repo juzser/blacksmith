@@ -16,7 +16,6 @@ import KanbanBoard from '../components/KanbanBoard.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
-import PageHeader from '../components/kit/PageHeader.vue';
 import Select from '../components/kit/Select.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
@@ -138,22 +137,19 @@ function goToTask(taskId: string) {
 </script>
 
 <template>
-  <div class="app-page app-page--full-bleed">
-    <PageHeader title="Kanban">
-      <template #actions>
-        <Button v-if="milestoneFilter" variant="ghost" size="sm" @click="milestoneFilter = null">
-          Clear milestone filter
-        </Button>
-        <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
-      </template>
-    </PageHeader>
-
+  <div>
     <div class="bs-kanban-page__toolbar">
       <label class="bs-kanban-page__toolbar-field">
         <span class="bs-kanban-page__count">Epic</span>
         <Select v-model="selectedEpic" :options="epicOptions(epics)" aria-label="Epic" />
       </label>
       <span class="bs-kanban-page__count">{{ taskCount }} tasks</span>
+      <div class="bs-kanban-page__toolbar-actions">
+        <Button v-if="milestoneFilter" variant="ghost" size="sm" @click="milestoneFilter = null">
+          Clear milestone filter
+        </Button>
+        <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
+      </div>
     </div>
 
     <Banner v-if="!error && epicsFailed" tone="warning" show-retry @retry="loadEpics">

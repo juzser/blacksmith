@@ -7,7 +7,7 @@ import type { NavItem } from './components/kit/types.js';
 // pages until their own DS replaces them.
 export const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: House, route: '/overview' },
-  { id: 'work', label: 'Work', icon: Kanban, route: '/kanban' },
+  { id: 'work', label: 'Work', icon: Kanban, route: '/work/kanban', matchPrefix: '/work' },
   { id: 'activity', label: 'Activity', icon: Activity, route: '/timeline' },
   {
     id: 'cost-quality',

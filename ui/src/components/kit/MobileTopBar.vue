@@ -11,11 +11,14 @@
 // path. Page-view options and "Open desktop view" are deferred, see
 // ui/docs/DESIGN.md Known deviations.
 import { Ellipsis, Moon, Pause, Play, Settings, Sun } from '@lucide/vue';
-import { computed, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { formatLiveStatus } from '../../lib/format.js';
+import Icon from './Icon.vue';
 import IconButton from './IconButton.vue';
 import MobileProjectSwitcher from './MobileProjectSwitcher.vue';
 import Popover from './Popover.vue';
+import Separator from './Separator.vue';
 
 const props = defineProps<{
   title: string;
@@ -34,9 +37,102 @@ const emit = defineEmits<{
 }>();
 
 const overflowOpen = ref(false);
+const menuEl = ref<HTMLElement | null>(null);
+const triggerWrap = ref<HTMLElement | null>(null);
+
 function closeOverflow() {
   overflowOpen.value = false;
 }
+
+function focusTrigger() {
+  triggerWrap.value?.querySelector('button')?.focus();
+}
+
+// DS4 S1 round 6 (WAI-ARIA APG menu pattern): the menu's items are not all
+// owned by this component — WorkPage teleports its "View" menuitemradio
+// group in, KanbanBoard teleports its "Display options" menuitem — so there
+// is no single Vue-owned list to keep in sync. Collected fresh from the DOM
+// on every keypress and on open instead.
+const MENU_ITEM_SELECTOR = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+function getMenuItems(): HTMLElement[] {
+  if (!menuEl.value) return [];
+  return Array.from(menuEl.value.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR));
+}
+
+// Roving tabindex: only the active item is in the tab order; arrow keys
+// move both the DOM focus and which item carries tabindex="0".
+function focusItemAt(index: number) {
+  const items = getMenuItems();
+  if (items.length === 0) return;
+  const wrapped = ((index % items.length) + items.length) % items.length;
+  for (const item of items) item.setAttribute('tabindex', '-1');
+  const target = items[wrapped];
+  target?.setAttribute('tabindex', '0');
+  target?.focus();
+}
+
+function onMenuKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    closeOverflow();
+    focusTrigger();
+    return;
+  }
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End'
+  ) {
+    return;
+  }
+  const items = getMenuItems();
+  if (items.length === 0) return;
+  // Focus may be inside nested, non-menu content (Kanban's display-options
+  // Popover panel: a checkbox, a <select>, a restore button) — those keep
+  // their own native keyboard behaviour, so only act when focus is on an
+  // actual menu item.
+  const current = items.indexOf(document.activeElement as HTMLElement);
+  if (current === -1) return;
+  event.preventDefault();
+  switch (event.key) {
+    case 'ArrowDown':
+      focusItemAt(current + 1);
+      break;
+    case 'ArrowUp':
+      focusItemAt(current - 1);
+      break;
+    case 'Home':
+      focusItemAt(0);
+      break;
+    case 'End':
+      focusItemAt(items.length - 1);
+      break;
+  }
+}
+
+// DS4 S1 round 7 (WAI-ARIA APG menu button pattern): Tab/Shift+Tab is left
+// unhandled in onMenuKeydown above — focus is meant to move on naturally,
+// not be trapped — so closing on Tab-out is caught here instead, once focus
+// has actually left. relatedTarget inside menuEl covers focus landing on a
+// nested, teleported-in control (Kanban's display-options Popover panel is
+// teleported into #bs-mtopbar-overflow-extra, which lives inside menuEl, not
+// outside it) without treating that as "left the menu".
+function onMenuFocusout(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (next && (menuEl.value?.contains(next) || triggerWrap.value?.contains(next))) return;
+  closeOverflow();
+}
+
+watch(overflowOpen, (open) => {
+  if (open) nextTick(() => focusItemAt(0));
+});
+
+// Any navigation closes the overflow — in particular Work's "View" radio
+// group teleported in via #bs-mtopbar-overflow-extra, whose own change
+// handler routes rather than emitting a dedicated close event (Work's view
+// switch, uiux spec §3 focus return).
+const route = useRoute();
+watch(() => route.fullPath, closeOverflow);
 
 // Same text LiveIndicator.vue composes inline (statusLabel + a conditional
 // RelativeTime), as a plain string here because this is an aria-label, not a
@@ -57,33 +153,67 @@ const dotLabel = computed(() => formatLiveStatus(props.live, props.lastEventAt, 
     <span class="bs-mtopbar__dot" :data-live="live" :aria-label="dotLabel"></span>
     <Popover :open="overflowOpen" label="More actions" @close="closeOverflow">
       <template #trigger>
-        <IconButton
-          :icon="Ellipsis"
-          label="More actions"
-          size="sm"
-          @click="overflowOpen = !overflowOpen"
-        />
+        <span ref="triggerWrap">
+          <IconButton
+            :icon="Ellipsis"
+            label="More actions"
+            size="sm"
+            aria-haspopup="menu"
+            :aria-expanded="overflowOpen"
+            @click="overflowOpen = !overflowOpen"
+          />
+        </span>
       </template>
-      <div class="bs-mtopbar__overflow">
-        <IconButton
-          :icon="live ? Pause : Play"
-          :label="live ? 'Pause updates' : 'Resume updates'"
-          size="sm"
+      <div
+        ref="menuEl"
+        class="bs-mtopbar__overflow"
+        role="menu"
+        aria-label="More actions"
+        @keydown="onMenuKeydown"
+        @focusout="onMenuFocusout"
+      >
+        <button
+          type="button"
+          class="bs-mtopbar__menuitem"
+          role="menuitem"
+          tabindex="-1"
           @click="
             emit('togglePause');
             closeOverflow();
           "
-        />
-        <IconButton
-          :icon="theme === 'dark' ? Sun : Moon"
-          :label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
-          size="sm"
+        >
+          <Icon :icon="live ? Pause : Play" :size="16" />
+          <span>{{ live ? 'Pause live updates' : 'Resume live updates' }}</span>
+        </button>
+        <button
+          type="button"
+          class="bs-mtopbar__menuitem"
+          role="menuitem"
+          tabindex="-1"
           @click="
             emit('toggleTheme');
             closeOverflow();
           "
-        />
-        <IconButton :icon="Settings" label="Settings" size="sm" disabled />
+        >
+          <Icon :icon="theme === 'dark' ? Sun : Moon" :size="16" />
+          <span>{{ theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme' }}</span>
+        </button>
+        <!-- This row stays aria-disabled, not the native disabled attribute
+             (round 6), so the arrow-key walk still reaches it; the mock's
+             "Open desktop view" item is a separate, deferred control (see
+             ui/docs/DESIGN.md Known deviations — no viewport-override
+             mechanism exists yet), not this one. -->
+        <button
+          type="button"
+          class="bs-mtopbar__menuitem"
+          role="menuitem"
+          tabindex="-1"
+          aria-disabled="true"
+        >
+          <Icon :icon="Settings" :size="16" />
+          <span>Settings</span>
+        </button>
+        <Separator />
         <!-- ds-spec.md §3.1 Work/Kanban row: page-specific overflow controls
              (e.g. Kanban's display options) teleport in here, same Teleport
              mechanism kit/Dialog.vue/Sheet.vue/Toast.vue already use. Kept

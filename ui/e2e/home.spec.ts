@@ -81,7 +81,7 @@ test.describe('Home', () => {
   }) => {
     await page.goto('/overview');
     const view = page.getByRole('link', { name: 'View black-smith in Work' });
-    await expect(view).toHaveAttribute('href', '/kanban?project=black-smith');
+    await expect(view).toHaveAttribute('href', '/work/kanban?project=black-smith');
     await expect(page.getByText('2 epics in flight')).toBeVisible();
     await expect(page.getByText('epic in flights')).toHaveCount(0);
     // envkit is declared but has nothing running: no card for it.
@@ -130,7 +130,7 @@ test.describe('Home', () => {
     await expect(page.getByText('Just finished')).toBeVisible();
     await expect(page.getByRole('link', { name: 'epic-just-done' })).toHaveAttribute(
       'href',
-      '/kanban?epic=epic-just-done',
+      '/work/kanban?epic=epic-just-done',
     );
   });
 
@@ -206,6 +206,68 @@ test.describe('Home', () => {
       });
     }
   }
+
+  // Blast radius: MobileTopBar renders on every page, so its vertical
+  // overflow menu (DS4 S1 round 4) needs its own proof on Home too, not
+  // just Work (work.spec.ts).
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot mobile overflow/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS.mobile);
+      await page.goto('/overview');
+      await page.getByRole('button', { name: 'More actions' }).click();
+      const menu = page.getByRole('menu', { name: 'More actions' });
+      await settleForShot(page, menu);
+      await shoot(page, `home-mobile-overflow-${theme}`);
+    });
+  }
+
+  // Home has no page-specific extra teleported into the overflow menu, so
+  // the Separator before the (empty) extra slot must not render — a visible
+  // separator with nothing stacked under it is a dangling rule (DS4 S1
+  // round 5, S3 finding 1).
+  test('phone: no separator follows the last menuitem when the overflow has no page extra', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/overview');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const menuitems = await menu.getByRole('menuitem').all();
+    expect(menuitems.length).toBeGreaterThan(0);
+
+    const separators = await menu.getByRole('separator').all();
+    for (const separator of separators) {
+      await expect(separator).not.toBeVisible();
+    }
+  });
+
+  // Home has no page-specific teleported extra, so this is the three
+  // built-in items only (Pause, Switch theme, Settings) — the walk still
+  // needs to wrap with just those three (DS4 S1 round 6).
+  test('phone: ArrowDown walks the three built-in menu items and wraps', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/overview');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const items = menu.getByRole('menuitem');
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(0)).toBeFocused();
+
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(2)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+
+    await page.keyboard.press('ArrowUp');
+    await expect(items.nth(2)).toBeFocused();
+  });
 });
 
 test.describe('Home: Needs you inbox', () => {
