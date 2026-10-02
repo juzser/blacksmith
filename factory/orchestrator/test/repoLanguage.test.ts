@@ -68,11 +68,27 @@ function hasProseExtension(name: string): boolean {
   return PROSE_EXTENSIONS.some((ext) => name.endsWith(ext));
 }
 
-/** Repo-relative prose files, minus runtime state and records of the past. */
+/**
+ * ui/docs/ds-review.html and ui/docs/ds-spec.md: the operator-approved
+ * visual mock and written spec for the dashboard redesign (ui/docs/
+ * DESIGN.md "Reference"; operator, 2026-10-02, Vietnamese, verbatim: "the
+ * ds-review page is good as it is; the real code just needs to follow it
+ * exactly"). Unlike the quotations this guard otherwise excludes, these are
+ * not a record of the past -- they are the live, binding design reference,
+ * and dozens of tests under ui/test already cite `ds-spec.md §...` as if it
+ * were a committed file. Excluded here, and only here: this guard is the
+ * one that would flag their prose, not `instructionSurface.ts`'s shared
+ * `excludedBecause`, which other guards (markdown-as-instructions scans)
+ * still apply to them.
+ */
+const DESIGN_REFERENCE = new Set(['ui/docs/ds-review.html', 'ui/docs/ds-spec.md']);
+
+/** Repo-relative prose files, minus runtime state, records of the past, and
+ * the design reference (see DESIGN_REFERENCE above). */
 function proseFiles(): string[] {
   return filesUnder(REPO_ROOT, hasProseExtension)
     .map((full) => path.relative(REPO_ROOT, full))
-    .filter((rel) => excludedBecause(rel) === undefined);
+    .filter((rel) => excludedBecause(rel) === undefined && !DESIGN_REFERENCE.has(rel));
 }
 
 interface Offence {
