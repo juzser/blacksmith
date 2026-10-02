@@ -98,7 +98,11 @@ from. The same certificate the coder is held to applies to you — the gate
 checks it before it runs a single check command, and a dirty worktree is
 `contract.uncommitted-work` with `testResult: null`, so the suite you just
 wrote never runs (D-30). Screenshots and traces under `state/results/` are
-outside the worktree and are not part of this commit.
+outside the worktree and are not part of this commit. The dispatcher
+projects your result with `bs results record --worktree <dir>` against this
+same worktree, recording its HEAD as the proof your screenshots are fresh
+(D2) — commit before that call, not after, or the recorded HEAD won't match
+what you shot.
 
 **2. Write the full result** to `state/results/<task-id>.json` — an object
 with exactly these three keys:

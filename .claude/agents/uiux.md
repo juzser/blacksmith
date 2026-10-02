@@ -195,7 +195,11 @@ WCAG fallback.
 
 Two parts, both mandatory.
 
-**1. Write the full spec** to `state/results/<task-id>.json` — an object with
+**1. Write the full spec** to `state/results/<task-id>.uiux-spec.json` for a
+pre-code spec, or `state/results/<task-id>.uiux-visual.json` for a post-test
+visual pass — never the bare `state/results/<task-id>.json`, which is the
+coder's and the tester's own result path, and the same task can carry both a
+spec and a visual-pass result over its lifetime. Each is an object with
 exactly these three keys:
 
 - `run_status` — `done` if the spec is complete, `dead` if the acceptance
@@ -237,8 +241,11 @@ harness counts the tokens; the dispatcher stamps them.
 **2. Return one line** as your final message — this JSON and nothing else:
 
 ```
-{"status": "done", "artifact_path": "state/results/<task-id>.json"}
+{"status": "done", "artifact_path": "state/results/<task-id>.uiux-spec.json"}
 ```
+
+(or `.uiux-visual.json` on a post-test visual pass, matching whichever file
+you wrote in part 1.)
 
 Every `deviation` names the component or token it departs from and why the
 spec needs the departure. "Custom" without that sentence is how a design

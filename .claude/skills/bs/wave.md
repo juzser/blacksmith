@@ -128,7 +128,11 @@ one thing this playbook never asks you to.
    <project-dir> <epic> <task-id>`.
 3. Pre-code, if the task needs it: dispatch `researcher` for an unknown, or
    `uiux` (`.claude/agents/uiux.md`) for any UI-affecting acceptance
-   criterion — before the coder starts, not after.
+   criterion — before the coder starts, not after. Bracket the uiux spec
+   turn with `bs judge dispatch --role uiux --kind spec` / `bs judge report
+   --role uiux --kind spec`, the same way every judge turn in steps 5–7 is
+   bracketed — the gate's uiux stage (step 7) reads this turn back and
+   blocks a flagged task that never closed it.
    - `profile.preCodeResearch` gates the researcher: `when-needed` is the
      line above, `never` (`small`) means the coder reading the repo *is* the
      brief. An epic that genuinely cannot start without a research brief is
@@ -176,15 +180,21 @@ one thing this playbook never asks you to.
    coverage and epic-level e2e/screenshots.
    - The moment it returns, project its result: `bs results record --task
      <task-id> --result <tester-result.json> --agent tester --provider <name>
-     --model-tier <tier> --session ... --plan-version N --causal-parent ...`.
-     `--agent` stamps the envelope, token_usage included, as `gate run` does. The tester has no worktree for step 7's gate and no
-     tests of its own to run, so it never reaches `gate run` — without this,
-     its screenshots sit in the result file and never reach the task page.
+     --model-tier <tier> --worktree <dir> --session ... --plan-version N
+     --causal-parent ...`. `--agent` stamps the envelope, token_usage
+     included, as `gate run` does; `--worktree` is the coder's worktree the
+     tester shares, and records the HEAD that proves the screenshots fresh
+     (D2) — step 7's uiux stage blocks `screenshots-stale` when this HEAD
+     doesn't match the gate's. The tester has no tests of its own to run, so
+     it never reaches `gate run` itself — without this, its screenshots sit
+     in the result file and never reach the task page.
    - Then the **uiux visual pass**, but only when all three hold: the task
      is UI-affecting, the tester actually returned screenshot artifacts, and
-     step 3 wrote a uiux spec for this task (agent-interviews.md N-6). Miss
-     any one and skip it — say so; a "visual pass" over screenshots that do
-     not exist is worse than no pass. Dispatch it with the spec path and the
+     step 3 wrote a uiux spec for this task (agent-interviews.md N-6). For a
+     UI-affecting task, miss any one and stop, do not skip — step 7's gate
+     blocks a flagged task with no fresh, reviewed screenshot set, so a
+     missing condition here is not a quiet pass-through to the gate, it is a
+     reason to fix the condition first. Dispatch it with the spec path and the
      image paths and **nothing else**: no diff, no components, no test code.
      The pass is a judgment about the rendered screen, and a uiux session
      that reads the diff ends up reviewing intent, which the reviewer
@@ -209,10 +219,15 @@ one thing this playbook never asks you to.
 7. Run the gate pipeline:
    `bs gate run <task-id> --worktree <dir> --checks checks.json --result
    result.json --grader state/results/<task-id>.grader-r<round>.json
-   --findings findings.json --session ... --plan-version N
+   --findings findings.json --plan <plan.json> --uiux-visual
+   state/results/<task-id>.uiux-visual.json --session ... --plan-version N
    --causal-parent ...` (schema check → grader verdict → tests → coverage
    evidence → findings intake → severity decision,
    `docs/guide/operator-guide/queue-and-gate.md` §5).
+   - `--plan` is what lets the gate's uiux stage read the task's
+     `ui_affecting` flag; without it the stage records "unverifiable" and
+     does not block. `--uiux-visual` hands over the visual pass's result
+     file when step 5 ran one — omit it for a task that is not UI-affecting.
    - `checks.json`'s unit check must be the project's full test command,
      never a hand-picked list of files — `gate run` runs each check command
      literally, with no narrowing of its own. Narrowing by changed files is
