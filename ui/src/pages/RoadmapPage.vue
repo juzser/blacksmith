@@ -147,6 +147,9 @@ function goToTask(taskId: string) {
       >
         {{ showInternal ? 'Hide the factory’s own roadmap' : `Show the factory’s own roadmap (${partition.hiddenCount})` }}
       </Button>
+      <!-- WorkPage teleports the Kanban/Roadmap SegmentedControl here on
+           desktop/tablet (UI audit, fix round 1) — see WorkPage.vue. -->
+      <template #end><span id="bs-work-view-switch" /></template>
     </Toolbar>
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>

@@ -15,7 +15,7 @@ describe('WorkPage.vue phone overflow (uiux spec §3)', () => {
   it('has one PageHeader titled Work, not per-view', () => {
     const headers = [...WORK_SRC.matchAll(/<PageHeader/g)];
     expect(headers).toHaveLength(1);
-    expect(WORK_SRC).toMatch(/<PageHeader title="Work">/);
+    expect(WORK_SRC).toMatch(/<PageHeader title="Work" \/>/);
   });
 
   it('teleports the View group to the shared overflow target, before <router-view>', () => {
@@ -44,7 +44,9 @@ describe('WorkPage.vue phone overflow (uiux spec §3)', () => {
   });
 
   it('places a Separator after the View group, inside the same teleport', () => {
-    const teleportBody = WORK_SRC.match(/<Teleport[\s\S]*?<\/Teleport>/)?.[0] ?? '';
+    const teleports = [...WORK_SRC.matchAll(/<Teleport[\s\S]*?<\/Teleport>/g)];
+    const teleportBody =
+      teleports.map((m) => m[0]).find((t) => t.includes('bs-mtopbar__viewgroup')) ?? '';
     const groupIdx = teleportBody.indexOf('bs-mtopbar__viewgroup');
     const sepIdx = teleportBody.indexOf('<Separator');
     expect(groupIdx).toBeGreaterThan(-1);

@@ -1952,6 +1952,15 @@ summary.bs-inbox__group-head {
      already wins — no !important needed. */
   font-variant-numeric: tabular-nums;
   border-radius: var(--bs-radius-full);
+  /* Tag's tone="neutral" variant="subtle" sets background inline (Tag.vue)
+     to --bs-tone-neutral-subtle, which aliases --bs-surface-sunken — the
+     exact token .bs-kanban-col itself is painted with, so the fill was
+     invisible (UI audit, fix round 1). !important overrides that inline
+     style; --bs-border is the example the finding itself names ("a neutral
+     border-tone token used as a background"), already contrast-checked as
+     text against --bs-tone-neutral-text in both themes (AA, see
+     kanbanCountFill.test.ts). */
+  background: var(--bs-border) !important;
 }
 .bs-kanban-col__title {
   margin: 0;
