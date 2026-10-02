@@ -430,6 +430,35 @@ export interface MilestoneProgress {
    */
   recentDone?: MilestoneTaskRef[];
   nextUp?: MilestoneTaskRef[];
+  /**
+   * DS4 S5a — pulled ahead of S2 (decision D4) so the Roadmap swimlane's bars
+   * are not all dashed "not scheduled". Derived from `tasks.createdAt`/
+   * `updatedAt`, columns the projection already maintains: `touch()`
+   * (db/projector.ts) stamps `createdAt` on the first event that names the
+   * task — usually `task-added` or the `dispatch_decision` that starts it,
+   * whichever the log carries first for that id — and rewrites `updatedAt` on
+   * every event after, including the `wave-merged` that completes it. No new
+   * column or migration is needed.
+   *
+   * `startedAt` is the earliest `createdAt` across the milestone's tasks, or
+   * `null` with no tasks at all. `finishedAt` is the latest `updatedAt`, but
+   * only once every task has reached a status `TERMINAL_TASK_STATUSES` calls
+   * over (completed, waived, superseded, failed or escalated) — the same
+   * "still open" complement `inFlightEpics()` above reads; while any task is
+   * open, there is no completion date yet, so it stays `null` rather than
+   * reporting a stale one.
+   */
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** Same derivation, one row per epic this milestone maps (roadmap.md's `epics:` list), for the swimlane's per-epic bars. */
+  epics: EpicDates[];
+}
+
+/** DS4 S5a — one epic's startedAt/finishedAt, see MilestoneProgress.startedAt. */
+export interface EpicDates {
+  epicId: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface MilestoneTaskRef {
@@ -829,6 +858,12 @@ function milestoneProgressRows(
       ? milestoneTaskRefs(milestoneTasks, taskRows, edgeRows)
       : undefined;
 
+    const { startedAt, finishedAt } = taskDateRange(milestoneTasks);
+    const epicDates: EpicDates[] = epicIds.map((epicId) => ({
+      epicId,
+      ...taskDateRange(milestoneTasks.filter((t) => t.epicId === epicId)),
+    }));
+
     return {
       milestoneId: m.milestoneId,
       name: m.name,
@@ -844,9 +879,34 @@ function milestoneProgressRows(
       project: m.project,
       kind: m.kind,
       errorIssuesEnabled: m.errorIssues,
+      startedAt,
+      finishedAt,
+      epics: epicDates,
       ...(refs ? { recentDone: refs.recentDone, nextUp: refs.nextUp } : {}),
     };
   });
+}
+
+/**
+ * The earliest `createdAt` and, once every row is terminal, the latest
+ * `updatedAt` of a set of task rows. See MilestoneProgress.startedAt for why
+ * these two columns are the right source. Shared by the milestone-level and
+ * per-epic rollups in milestoneProgressRows() so the two never disagree about
+ * how a date is derived.
+ */
+function taskDateRange(
+  rows: readonly { createdAt: string; updatedAt: string; taskStatus: string }[],
+): { startedAt: string | null; finishedAt: string | null } {
+  if (rows.length === 0) return { startedAt: null, finishedAt: null };
+  let startedAt = rows[0]?.createdAt as string;
+  let finishedAt = rows[0]?.updatedAt as string;
+  let allTerminal = true;
+  for (const row of rows) {
+    if (row.createdAt < startedAt) startedAt = row.createdAt;
+    if (row.updatedAt > finishedAt) finishedAt = row.updatedAt;
+    if (!TERMINAL_TASK_STATUSES.has(row.taskStatus)) allTerminal = false;
+  }
+  return { startedAt, finishedAt: allTerminal ? finishedAt : null };
 }
 
 /** Roadmap page (§5.4): every milestone with its progress + mini-timeline, in roadmap.md order. */

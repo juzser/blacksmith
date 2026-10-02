@@ -161,6 +161,13 @@ describe('milestones projection + roadmap queries', () => {
         tokensSpent: 2000, // task-1's task-result-recorded total_tokens
         tokensBudget: 4300, // sum of the 4 tasks' budget_tokens
       });
+      // task-3/task-4 are still open (escalated/confirmed finding, never
+      // terminal) -- finishedAt stays null even though task-1 completed.
+      expect(phaseA?.startedAt).not.toBeNull();
+      expect(phaseA?.finishedAt).toBeNull();
+      expect(phaseA?.epics).toEqual([
+        { epicId: EPIC_ID, startedAt: phaseA?.startedAt, finishedAt: null },
+      ]);
 
       const phaseB = page.find((m) => m.milestoneId === 'phase-b');
       expect(phaseB).toMatchObject({
@@ -169,6 +176,114 @@ describe('milestones projection + roadmap queries', () => {
         tokensSpent: 0,
         tokensBudget: null,
       });
+      // No epics mapped and no tasks -- no activity to derive a date from.
+      expect(phaseB?.startedAt).toBeNull();
+      expect(phaseB?.finishedAt).toBeNull();
+      expect(phaseB?.epics).toEqual([]);
+    });
+  });
+
+  describe('roadmapPage() dates (startedAt/finishedAt)', () => {
+    const DATES_ROADMAP = `# Roadmap
+
+## Phase C — All done
+- id: phase-c
+- status: completed
+- epics: [epic-dates]
+- goal: Two tasks, both merged.
+`;
+
+    let clock: number;
+
+    beforeEach(() => {
+      clock = Date.now();
+      vi.useFakeTimers({ toFake: ['Date'] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function tick(): Promise<string> {
+      clock += 60_000;
+      vi.setSystemTime(new Date(clock));
+      const events = await readEvents(SESSION_ID, { stateDir });
+      const last = events[events.length - 1];
+      if (!last) throw new Error('expected the fixture log to be non-empty');
+      return last.event_id;
+    }
+
+    async function planTask(taskId: string): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            epic_id: 'epic-dates',
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Ship it.',
+            claims: [`src/${taskId.replace('/', '-')}.ts`],
+            budget_tokens: 1000,
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    async function mergeTasks(taskIds: string[]): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'wave-merged',
+          task_id: taskIds[0],
+          plan_version: 1,
+          causal_parent: parent,
+          payload: { epic_id: 'epic-dates', task_ids: taskIds },
+        },
+        { stateDir },
+      );
+    }
+
+    it('reports startedAt from the earliest task activity and finishedAt from the last once every task is terminal', async () => {
+      await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
+      await planTask('epic-dates/task-a');
+      await planTask('epic-dates/task-b');
+
+      const dbPathOpen = path.join(dbDir, 'open.db');
+      await rebuild(dbPathOpen, 'all', { stateDir, roadmapPath });
+      const openHandle = openDb(dbPathOpen);
+      const openPage = roadmapPage(openHandle.db);
+      openHandle.sqlite.close();
+      const openPhase = openPage.find((m) => m.milestoneId === 'phase-c');
+      // Still open: finishedAt is null even though the tasks exist.
+      expect(openPhase?.startedAt).not.toBeNull();
+      expect(openPhase?.finishedAt).toBeNull();
+
+      await mergeTasks(['epic-dates/task-a', 'epic-dates/task-b']);
+      const lastMergeTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      const phaseC = page.find((m) => m.milestoneId === 'phase-c');
+      expect(phaseC?.startedAt).toBe(openPhase?.startedAt);
+      expect(phaseC?.finishedAt).toBe(lastMergeTs);
+      expect(phaseC?.epics).toEqual([
+        { epicId: 'epic-dates', startedAt: phaseC?.startedAt, finishedAt: lastMergeTs },
+      ]);
     });
   });
 

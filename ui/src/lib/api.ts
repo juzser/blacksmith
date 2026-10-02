@@ -122,6 +122,16 @@ export interface MilestoneProgress {
   kind: string;
   recentDone?: MilestoneTaskRef[];
   nextUp?: MilestoneTaskRef[];
+  /** DS4 S5a — earliest task activity / latest completion (null until every task is terminal). See orchestrator queries.ts's MilestoneProgress. */
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** Same derivation, one row per epic this milestone maps, for the Roadmap swimlane's per-epic bars. */
+  epics: EpicDates[];
+}
+export interface EpicDates {
+  epicId: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 export interface RecentDispatch {
   eventId: string;

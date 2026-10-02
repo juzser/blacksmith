@@ -758,6 +758,30 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  it("GET /api/roadmap passes through each milestone's startedAt/finishedAt and per-epic dates (DS4 S5a)", async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/roadmap');
+    expect(res.status).toBe(200);
+    const body =
+      await json<
+        Array<{
+          milestoneId: string;
+          startedAt: string | null;
+          finishedAt: string | null;
+          epics: { epicId: string; startedAt: string | null; finishedAt: string | null }[];
+        }>
+      >(res);
+    const phaseA = body.find((m) => m.milestoneId === 'phase-a');
+    // Fixture's epic-1 has an open task (task-3 escalates, task-4 is never
+    // merged), so there is a start date but no finish date yet.
+    expect(typeof phaseA?.startedAt).toBe('string');
+    expect(phaseA?.finishedAt).toBeNull();
+    expect(phaseA?.epics).toEqual([
+      { epicId: EPIC_ID, startedAt: phaseA?.startedAt, finishedAt: null },
+    ]);
+    closeApp(handle);
+  });
+
   it('GET /api/inbox lists the fixture escalated task as a row', async () => {
     const handle = app();
     const res = await handle.app.request('/api/inbox');
