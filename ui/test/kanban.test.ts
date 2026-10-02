@@ -548,6 +548,34 @@ describe('lib/kanban.ts — dependencyChainText() (DS3 pattern 6, footer)', () =
       ]),
     ).toBe('Waits for: Add login form (done) +2 more');
   });
+
+  it('skips a resolved (done-tone) first dependency and falls back to the next not-done one', () => {
+    expect(
+      dependencyChainText([
+        { taskId: 't1', title: 'Add directory search API', status: 'completed' },
+        { taskId: 't2', title: 'Add logout', status: 'todo' },
+      ]),
+    ).toBe('Waits for: Add logout (todo)');
+  });
+
+  it('reads "nothing" when every dependency is already resolved', () => {
+    expect(
+      dependencyChainText([
+        { taskId: 't1', title: 'Add login form', status: 'completed' },
+        { taskId: 't2', title: 'Add logout', status: 'waived' },
+      ]),
+    ).toBe('Waits for: nothing');
+  });
+
+  it('does not count a skipped resolved dependency toward the "+N more" tail', () => {
+    expect(
+      dependencyChainText([
+        { taskId: 't1', title: 'Add login form', status: 'completed' },
+        { taskId: 't2', title: 'Add logout', status: 'todo' },
+        { taskId: 't3', title: 'Add session', status: 'todo' },
+      ]),
+    ).toBe('Waits for: Add logout (todo) +1 more');
+  });
 });
 
 describe('lib/kanban.ts — isDoneStatus() (DS3 pattern 7, column collapse)', () => {
