@@ -20,7 +20,7 @@ const PAGES: Record<string, string> = {
 };
 
 const INTERACTIVE_SELECTOR =
-  'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], input, select';
+  'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="link"], input, select';
 
 // Pages whose remaining failures are page-specific list/row layouts, not a
 // shared primitive this sweep's CSS pass could reach — redesigned in its own
@@ -136,6 +136,7 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
       expect(touch).toBeGreaterThan(0);
 
       const measurements = await page.evaluate(measureInteractiveElements, INTERACTIVE_SELECTOR);
+      expect(measurements.length).toBeGreaterThan(0);
       // Sub-pixel rendering (fractional device-pixel rounding) can report a
       // box a fraction of a px under its CSS value; a tolerance this small
       // only absorbs that, never a real shortfall.
