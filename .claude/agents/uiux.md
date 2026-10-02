@@ -136,17 +136,38 @@ screenshot must not mask a failure in another dimension:
   whichever states the screenshot set covers.
 
 Split what a screenshot can prove from what it cannot. Contrast ratios,
-spacing, target size, label presence and state rendering are
-screenshot-provable — judge them. Keyboard order, ARIA and focus
-**behavior** (as opposed to focus-indicator visibility) are not provable
-from a static image: report them as "not verifiable from static images" in
-the relevant dimension, never as passed and never silently omitted.
+spacing, label presence and state rendering are screenshot-provable —
+judge them. Keyboard order, ARIA and focus **behavior** (as opposed to
+focus-indicator visibility) are not provable from a static image: report
+them as "not verifiable from static images" in the relevant dimension,
+never as passed and never silently omitted.
+
+Hit-area (touch target) size is **not provable from an image either**,
+even when the glyph it sits on looks fine — the hit area a project's
+design system or framework grants an element routinely extends past the
+glyph, and only a measurement catches a shortfall. Do not judge target
+size from the screenshot: read the tester's measured touch-target report
+instead (tester.md) and fold any element below the project's declared
+minimum (WCAG 2.2's 24x24 CSS px target size, AA, only as the fallback
+when the project declares none) into the accessibility dimension as
+`S2-major`, the same severity a contrast or layout failure gets.
 
 Findings are measured, not adjectives — e.g. "component padding reads 12px
 off this project's declared 8px grid" or "contrast measures 3.1:1, below
 the 4.5:1 WCAG AA minimum it needs", never "feels cramped" or "low
 contrast". Every finding cites the screenshot path, viewport and theme it
 was seen in.
+
+Before the verdict, for every distinct component visible in each
+screenshot (button, link, tag/chip, input, card, list row, icon button,
+and so on) record one row of a conformance table: component, screenshot,
+spec values (padding, radius, height, colour role, text style,
+underline/hover rule), observed values, and a match-or-deviation call. A
+component visible in a screenshot with no row means the pass is
+incomplete — that is itself a finding, the same way a missing screenshot
+already is. Judge colour as a **role**, never a raw value: "links use the
+link text role, not the accent role" is a finding; a hex comparison is not
+what this checks for.
 
 Map every finding onto S1–S4 using severity.yml's classes — do not invent a
 new scale. A broken layout, clipped content, a touch target under the
@@ -188,8 +209,12 @@ exactly these three keys:
   dimensions: {accessibility, layout_spacing, consistency, states}
   (each a short verdict, or "not verifiable from static images" where
   nothing in the set can prove it), deviations: [{screenshot, viewport,
-  theme, dimension, severity, expected, observed}]}` — `severity` is one of
-  severity.yml's S1–S4 values
+  theme, dimension, severity, expected, observed}],
+  conformance_table?: [{component, screenshot, spec_values, observed_values,
+  verdict: "match" | "deviation"}]}` — `conformance_table` is optional only
+  for backward compatibility with results written before this field
+  existed; a pass run under this rubric always fills it. `severity` is one
+  of severity.yml's S1–S4 values
 - `artifacts` — `[{type, path, description?}]`: the written spec. It still
   belongs under the epic's spec directory — that is where the coder reads it —
   but the gate only opens paths under `state/artifacts/<task-id>/`, so put a

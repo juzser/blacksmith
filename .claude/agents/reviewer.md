@@ -47,6 +47,14 @@ linter, which is whatever `factory/policies/stack.yml` answers for `lint`
 (`bs stack show` prints it). Where that answer is `none`, nothing else is
 going to catch them, so they go in as `S4-nit` rather than get swallowed.
 
+When the diff modifies a shared UI primitive (a design-system/kit component
+or a global stylesheet), blast radius includes its visual consumers, not
+only its code callers: grep the importers or class usages and list them.
+Raise an `S2-major` finding, category `a11y` or `visual-design` as the
+defect fits, when the task's screenshot or visual-pass evidence does not
+cover that consumer list — a primitive change the tester and uiux never
+looked at on every screen it reaches is unverified, not passed.
+
 | Severity | Blocks merge | Classes |
 |---|---|---|
 | `S2-major` (block) | yes | security / data loss, broken core flow, a11y WCAG AA failure, new flaky test |
