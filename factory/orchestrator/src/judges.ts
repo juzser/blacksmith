@@ -914,17 +914,21 @@ export async function recordJudgeReport(
   // `kind` instead — both cases are a guess to resolve on our own.
   const distinctTaskIds = new Set(forRole.map((t) => t.taskId));
   const epicAmbiguous = distinctTaskIds.size > 1;
-  const kindAmbiguous = !epicAmbiguous && kind === null && forRole.length > 1;
+  // A kindless report picks among OPEN turns only, the same set
+  // `outstandingJudges` exposes — a closed turn is not a candidate to guess
+  // between, and the error must not count it as "open" either.
+  const openForRole = forRole.filter((t) => !t.reported);
+  const kindAmbiguous = !epicAmbiguous && kind === null && openForRole.length > 1;
   const turn =
     epicAmbiguous || kindAmbiguous
       ? undefined
       : kind === null
-        ? (forRole[0] ?? undefined)
+        ? (openForRole[0] ?? forRole[0] ?? undefined)
         : forRole.find((t) => t.kind === kind);
   if (turn === undefined || (input.round !== undefined && input.round !== turn.round)) {
     throw new JudgeError(
       'judges.not-dispatched',
-      notDispatchedMessage(input, turn, forRole, kindAmbiguous ? forRole : []),
+      notDispatchedMessage(input, turn, forRole, kindAmbiguous ? openForRole : []),
       {
         task_id: input.taskId,
         agent_role: input.role,

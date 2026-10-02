@@ -220,6 +220,50 @@ describe('judges.ts', () => {
       expect(outstandingJudges(await turns())).toEqual([]);
     });
 
+    it('a kindless report closes the one open turn when the other is already closed (spec first)', async () => {
+      const specArtifact = path.join(artifactDir, 'order-spec-a.json');
+      const visualArtifact = path.join(artifactDir, 'order-visual-a.json');
+      await dispatch({ role: 'uiux', kind: 'spec', artifactPath: specArtifact });
+      await writeArtifact(specArtifact, uiuxDocument([]));
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', kind: 'spec', artifactPath: specArtifact },
+        ctx(),
+        opts(),
+      );
+
+      await dispatch({ role: 'uiux', kind: 'visual', artifactPath: visualArtifact });
+      await writeArtifact(visualArtifact, uiuxDocument([]));
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', artifactPath: visualArtifact },
+        ctx(),
+        opts(),
+      );
+
+      expect(outstandingJudges(await turns())).toEqual([]);
+    });
+
+    it('a kindless report closes the one open turn when the other is already closed (visual first)', async () => {
+      const specArtifact = path.join(artifactDir, 'order-spec-b.json');
+      const visualArtifact = path.join(artifactDir, 'order-visual-b.json');
+      await dispatch({ role: 'uiux', kind: 'visual', artifactPath: visualArtifact });
+      await writeArtifact(visualArtifact, uiuxDocument([]));
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', kind: 'visual', artifactPath: visualArtifact },
+        ctx(),
+        opts(),
+      );
+
+      await dispatch({ role: 'uiux', kind: 'spec', artifactPath: specArtifact });
+      await writeArtifact(specArtifact, uiuxDocument([]));
+      await recordJudgeReport(
+        { taskId: 'epic-1/task-1', role: 'uiux', artifactPath: specArtifact },
+        ctx(),
+        opts(),
+      );
+
+      expect(outstandingJudges(await turns())).toEqual([]);
+    });
+
     it('an ambiguous report (two open uiux turns, no kind) errors clearly', async () => {
       await dispatch({
         role: 'uiux',
