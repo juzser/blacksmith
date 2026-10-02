@@ -2640,6 +2640,120 @@ summary.bs-inbox__group-head {
   }
 }
 
+/* DS4 S4 — phone Roadmap (<=640px). The project-name Tag truncates instead
+   of wrapping the esec-head row, and R2 drops the plan-version Select to its
+   own full-width, touch-tall row under the id/status/project line. */
+.eh-project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 10rem;
+}
+@media (max-width: 640px) {
+  .esec-head .select-trailing {
+    flex: 1 1 100%;
+    width: 100%;
+    margin-left: 0;
+    min-height: var(--bs-touch);
+  }
+}
+
+/* DS4 S4 — phone-only phase-mode list (EpicBlock.vue, modelled on
+   NeedsYouInbox's .bs-inbox__row pattern) and the epic-mode back link above
+   the header. */
+.bs-roadmap-mobile__phase-select {
+  width: 100%;
+}
+.bs-roadmap-mobile__back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--bs-touch);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+.bs-roadmap-mobile__summary {
+  display: flex;
+  gap: var(--bs-space-4);
+}
+.bs-roadmap-mobile__summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-roadmap-mobile__summary-value {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-roadmap-mobile__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+}
+.bs-roadmap-mobile__item + .bs-roadmap-mobile__item {
+  border-top: 1px solid var(--bs-border);
+}
+.bs-roadmap-mobile__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+  min-height: var(--bs-touch);
+  gap: var(--bs-space-1) var(--bs-space-3);
+  padding: var(--bs-space-3) var(--bs-space-4);
+  background: none;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.bs-roadmap-mobile__row-id {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--bs-font-weight-medium);
+}
+.bs-roadmap-mobile__row-status {
+  flex-basis: 100%;
+  min-width: 0;
+}
+.bs-roadmap-mobile__waves summary {
+  min-height: var(--bs-touch);
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  padding: 0 var(--bs-space-4);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+.bs-roadmap-mobile__chev {
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: transform var(--bs-duration-fast) var(--bs-ease-standard);
+}
+.bs-roadmap-mobile__waves[open] > summary {
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-roadmap-mobile__waves[open] > summary .bs-roadmap-mobile__chev {
+  transform: rotate(180deg);
+}
+.bs-roadmap-mobile__waves-body {
+  padding: var(--bs-space-3) var(--bs-space-4);
+}
+
 /* DS4 S3 — WaveList.vue: one .wave <section> per wave, past/cur/next read
    the same modifier names ds-review.html uses. */
 .wave-list {
@@ -2665,6 +2779,29 @@ summary.bs-inbox__group-head {
 .wave.past {
   color: var(--bs-text-subtle);
 }
+/* DS4 S4 fix round 1 #4 — compact (phone) WaveList rows: flat rows like
+   the mock's .mrow, no card chrome, a border-bottom separator only (none
+   on the last row). The selector list beats .wave.cur/.wave.next on
+   specificity so the card styling above is fully overridden. */
+.wave-list--compact {
+  gap: 0;
+}
+.wave-list--compact .wave,
+.wave-list--compact .wave.cur,
+.wave-list--compact .wave.next {
+  display: flex;
+  align-items: center;
+  min-height: var(--bs-touch);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: var(--bs-space-2) 0;
+  border-bottom: 1px solid var(--bs-border);
+}
+.wave-list--compact .wave:last-child {
+  border-bottom: 0;
+}
 .whead {
   display: flex;
   align-items: center;
@@ -2677,6 +2814,46 @@ summary.bs-inbox__group-head {
 }
 .whead .small {
   font-size: var(--bs-text-xs);
+}
+/* DS4 S4 fix round 3 — compact mode only: keep the current wave row on one
+   line (ruling R3) WITHOUT truncating the title or the done count
+   (information beats bar length). The title + done count span stays at its
+   natural width; .tb-right takes the remaining space and the
+   ProgressBarMini inside it is the element that actually shrinks. The %
+   and the Tag never shrink. Desktop .whead above is untouched. */
+.wave-list--compact .whead {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.wave-list--compact .whead > span:first-child {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.wave-list--compact .wave__title {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.wave-list--compact .tb-right {
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+/* DS4 S4 fix round 4 — the % number overlapped the Tag: .pmini's
+   min-width: 0 let the track + number overflow the box. The track is now
+   the element that gives way (it may shrink to 0), while .pmini keeps its
+   default content-based min-width so the number never loses space. */
+.wave-list--compact .tb-right .pmini {
+  flex: 1 1 auto;
+}
+.wave-list--compact .tb-right .pmini .ptrack {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.wave-list--compact .tb-right .pmini .bs-pnum,
+.wave-list--compact .tb-right .bs-tag {
+  flex-shrink: 0;
 }
 .wave__title {
   display: inline;

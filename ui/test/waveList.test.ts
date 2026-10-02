@@ -3,8 +3,10 @@ import type { FlowEdge, FlowGraph, FlowNode, MilestoneProgress } from '../src/li
 import {
   buildWaveList,
   dependencyLine,
+  epicPhase,
   epicProject,
   epicStatusFromFlow,
+  mobileEpicStatusLine,
 } from '../src/lib/waveList.js';
 
 function node(
@@ -147,5 +149,85 @@ describe('epicProject() (DS4 S3 fix round 1 finding 3)', () => {
 
   it('falls back to null when no milestone lists the epic and no fallback is given', () => {
     expect(epicProject([], 'epic-9', null)).toBeNull();
+  });
+});
+
+// DS4 S4 R1: the phone epic-mode back link ("← {phase name}") renders only
+// when the phase for this epic is known.
+function phaseMilestone(
+  milestoneId: string,
+  name: string,
+  epicIds: string[],
+): Pick<MilestoneProgress, 'milestoneId' | 'name' | 'epicIds'> {
+  return { milestoneId, name, epicIds };
+}
+
+describe('epicPhase() (DS4 S4 R1)', () => {
+  it('finds the phase that lists this epic', () => {
+    const milestones = [
+      phaseMilestone('phase-6b', 'Phase 6b', ['epic-9']),
+      phaseMilestone('phase-7', 'Phase 7 — envkit bootstrap', ['epic-20']),
+    ];
+    expect(epicPhase(milestones, 'epic-9')).toEqual({ milestoneId: 'phase-6b', name: 'Phase 6b' });
+  });
+
+  it('returns null when no phase lists the epic', () => {
+    expect(epicPhase([phaseMilestone('phase-6b', 'Phase 6b', ['epic-9'])], 'epic-20')).toBeNull();
+  });
+});
+
+// DS4 S4 §1: the phone epic row's status line.
+describe('mobileEpicStatusLine() (DS4 S4 §1)', () => {
+  it('reads "No tasks tracked" for a zero-task epic', () => {
+    expect(
+      mobileEpicStatusLine({ statusLabel: 'To do', tasksTotal: 0, tasksCompleted: 0, waves: [] }),
+    ).toBe('No tasks tracked');
+  });
+
+  it('reads "Loading" while the epic flow is still in flight', () => {
+    expect(
+      mobileEpicStatusLine({
+        statusLabel: 'Loading',
+        tasksTotal: null,
+        tasksCompleted: null,
+        waves: [],
+      }),
+    ).toBe('Loading');
+  });
+
+  it("reads the failed copy when the epic's flow could not load", () => {
+    expect(
+      mobileEpicStatusLine({
+        statusLabel: 'Unavailable',
+        tasksTotal: 0,
+        tasksCompleted: 0,
+        failed: true,
+        waves: [],
+      }),
+    ).toBe("Could not load this epic's tasks.");
+  });
+
+  it('names the current wave for an in-progress epic', () => {
+    const g = graph(
+      [
+        node('t1', 'completed'),
+        node('t2', 'completed'),
+        node('t3', 'in-progress'),
+        node('t4', 'todo'),
+      ],
+      [['t1', 't2'], ['t3'], ['t4']],
+    );
+    const waves = buildWaveList(g);
+    expect(
+      mobileEpicStatusLine({ statusLabel: 'In progress', tasksTotal: 4, tasksCompleted: 2, waves }),
+    ).toBe('In progress · 2 of 4 · wave 2 of 3 running');
+  });
+
+  it('names no wave for a fully done epic', () => {
+    const g = graph([node('t1', 'completed'), node('t2', 'completed')], [['t1'], ['t2']]);
+    const waves = buildWaveList(g);
+    expect(
+      mobileEpicStatusLine({ statusLabel: 'Done', tasksTotal: 2, tasksCompleted: 2, waves }),
+    ).toBe('Done · 2 of 2');
   });
 });
