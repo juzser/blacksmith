@@ -272,6 +272,16 @@ a:hover {
   padding: 0 var(--bs-space-2);
   font-size: var(--bs-text-xs);
 }
+/* ≤640px: --sm/--md render at 28/32px, both under --bs-touch (visual-qa
+   phase B round 2) — min-height only, same mechanism as .bs-iconbtn above,
+   so the label/padding keep their own size and only the hit area grows.
+   Desktop (>640px) is unaffected. */
+@media (max-width: 640px) {
+  .bs-btn--sm,
+  .bs-btn--md {
+    min-height: var(--bs-touch);
+  }
+}
 /* §3.1: the one on-phone primary action (Home's inbox "Decide") needs a
    44px tap target and the full row width; additive modifiers, combined with
    an existing color variant (e.g. bs-btn--primary) rather than a new size
@@ -632,6 +642,15 @@ a:hover {
   resize: vertical;
   min-height: 80px;
 }
+/* ≤640px: padding-based height on .bs-input/.bs-select settles under
+   --bs-touch (visual-qa phase B round 2) — min-height floor only, the
+   textarea's own 80px floor already clears it. */
+@media (max-width: 640px) {
+  .bs-input,
+  .bs-select {
+    min-height: var(--bs-touch);
+  }
+}
 
 /* RadioGroup (§2.1) — ported unchanged contract. */
 .bs-radiogroup {
@@ -689,6 +708,13 @@ a:hover {
   font-size: 10px;
   font-weight: var(--bs-font-weight-semibold);
   flex-shrink: 0;
+}
+/* ≤640px: .bs-chip's own padding settles well under --bs-touch (visual-qa
+   phase B round 2) — min-height floor only, dot/avatar keep their size. */
+@media (max-width: 640px) {
+  .bs-chip {
+    min-height: var(--bs-touch);
+  }
 }
 
 /* Dialog / AlertDialog (§2.1, WAI-ARIA Dialog pattern) — AlertDialog wraps
@@ -840,6 +866,13 @@ a:hover {
 }
 .bs-tabs__panel {
   padding-top: var(--bs-space-4);
+}
+/* ≤640px: tab padding settles under --bs-touch (visual-qa phase B round 2) —
+   min-height floor only, label/underline keep their own size. */
+@media (max-width: 640px) {
+  .bs-tabs__tab {
+    min-height: var(--bs-touch);
+  }
 }
 
 /* Table (§2.1/§2.3) — .bs-tablewrap is the bordered/rounded outer frame
@@ -1367,6 +1400,7 @@ a:hover {
   align-items: center;
   gap: var(--bs-space-1);
   max-width: 12ch;
+  min-height: var(--bs-touch);
   padding: var(--bs-space-1) var(--bs-space-2);
   background: none;
   border: 1px solid var(--bs-border);

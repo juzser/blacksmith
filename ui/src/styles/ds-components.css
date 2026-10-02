@@ -182,6 +182,23 @@
   padding: 0;
   border-radius: var(--ds-radius-control);
 }
+/* ≤640px: the old kit's control-height steps (32px/24px) sit under
+   --bs-touch (visual-qa phase B round 2) — min-width/min-height floors only,
+   icon/label/padding keep their own size, same mechanism bs-primitives.css's
+   .bs-iconbtn already uses. Desktop (>640px) is unaffected. */
+@media (max-width: 640px) {
+  .ds-btn--default-size,
+  .ds-btn--sm,
+  .ds-btn--xs {
+    min-height: var(--bs-touch);
+  }
+  .ds-btn--icon,
+  .ds-btn--icon-sm,
+  .ds-btn--icon-xs {
+    min-width: var(--bs-touch);
+    min-height: var(--bs-touch);
+  }
+}
 
 /* Lozenge */
 .ds-loz {
@@ -737,6 +754,13 @@
 .ds-chip:hover {
   background: var(--ds-surface-sunken);
   color: var(--ds-text);
+}
+/* ≤640px: same --bs-touch floor as the control-height steps above
+   (visual-qa phase B round 2). */
+@media (max-width: 640px) {
+  .ds-chip {
+    min-height: var(--bs-touch);
+  }
 }
 .ds-chip[data-active="true"] {
   background: var(--ds-primary-subtle);
@@ -1384,6 +1408,15 @@
   outline: var(--ds-focus-width) solid var(--ds-focus-ring);
   outline-offset: 1px;
 }
+/* ≤640px: both call sites (RoadmapPage, TimelinePage) set height inline via
+   var(--ds-control-height); !important is the only way a stylesheet rule
+   can override an inline style's specificity (visual-qa phase B round 2;
+   precedent: .bs-skeleton--circle's border-radius override). */
+@media (max-width: 640px) {
+  .raw-input {
+    min-height: var(--bs-touch) !important;
+  }
+}
 
 /* --- Phase 6b primitives (ui/docs/DESIGN.md's inventory, built properly
    this phase — Select/Tabs/Dialog/AlertDialog/Popover/RadioGroup/Textarea).
@@ -1403,6 +1436,13 @@
 .ds-select:focus-visible {
   outline: var(--ds-focus-width) solid var(--ds-focus-ring);
   outline-offset: 1px;
+}
+/* ≤640px: same --bs-touch floor as the .ds-btn--* sizes above
+   (visual-qa phase B round 2); min-height only, width is content-driven. */
+@media (max-width: 640px) {
+  .ds-select {
+    min-height: var(--bs-touch);
+  }
 }
 
 /* Textarea */

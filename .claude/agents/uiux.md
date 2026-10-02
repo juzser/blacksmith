@@ -170,6 +170,10 @@ already is. Judge colour as a **role**, never a raw value: "links use the
 link text role, not the accent role" is a finding; a hex comparison is not
 what this checks for.
 
+When the project declares a reference mock or design file, the visual pass
+compares the app screenshots with the matching mock frames side by side and
+logs every difference as a deviation.
+
 Map every finding onto S1–S4 using severity.yml's classes — do not invent a
 new scale. A broken layout, clipped content, a touch target under the
 minimum the touch-target paragraph above names, contrast below
