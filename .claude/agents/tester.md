@@ -28,6 +28,23 @@ for a runner the project does not have.
   `shots/login-mobile-dark.png`) so the visual pass can check the set is
   complete without opening every file, and capture them from the final HEAD
   after the last fix round — a shot from an earlier round is stale evidence.
+  When the task's claims touch a shared primitive (a design-system/kit
+  component or a global stylesheet), re-shoot every screen that renders it
+  too, not only the task's own screens — derive that list from the
+  screenshot suite already on disk or from the primitive's importers, and
+  record which you used.
+- Touch-target measurement for every UI-affecting task: at the mobile
+  viewport, measure the bounding box of every interactive element (`button`,
+  `a[href]`, `input`, `select`, `[role=button]`, and the project's own
+  interactive component names where it has them) on each screen the task
+  shoots. Report every element whose measured box falls below the project's
+  declared minimum touch-target size, falling back to WCAG 2.2's 24x24 CSS
+  px target size (AA) when the project declares none. Write the report as
+  `touch-targets.json` beside the screenshots under
+  `state/artifacts/<task-id>/`: `{viewport, elements: [{selector, screen,
+  width, height, minimum, pass: true | false}]}`. A violation there is a
+  finding for the uiux visual pass to fold in as `S2-major` — you report
+  the measurement, you do not decide a waiver.
 - Tiered depth: core-flow tasks get edge-case tests + an e2e step; chores
   get happy-path only.
 - A flaky test your task introduces is **`S2-major`**, blocking merge.
@@ -92,12 +109,14 @@ with exactly these three keys:
   e2e: {passed, failed, skipped}, uncovered_paths}`; add `research_request`
   when you need the researcher, or `spec_change_request` when the criterion
   itself is wrong (see above)
-- `artifacts` — `[{type, path, description?}]`: screenshots, e2e traces,
-  coverage report. Screenshots matter beyond this task — a
-  UI-affecting task's visual pass reads them and nothing else, which is
-  exactly why they go under `state/artifacts/<task-id>/`, named relative to
-  it with viewport and theme in the name (`shots/login-mobile-dark.png`) or,
-  failing that, in `description`. The gate resolves every path in that home
+- `artifacts` — `[{type, path, description?}]`: screenshots, the
+  touch-target report, e2e traces, coverage report. Screenshots matter
+  beyond this task — a UI-affecting task's visual pass reads them and
+  nothing else, which is exactly why they go under
+  `state/artifacts/<task-id>/`, named relative to it with viewport and
+  theme in the name (`shots/login-mobile-dark.png`) or, failing that, in
+  `description`; the touch-target report is declared the same way
+  (`touch-targets.json`). The gate resolves every path in that home
   and blocks if one is elsewhere or absent; a directory is fine, so an html
   coverage report or a trace dir can be declared whole
 

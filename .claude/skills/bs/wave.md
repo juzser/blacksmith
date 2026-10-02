@@ -189,6 +189,15 @@ one thing this playbook never asks you to.
      The pass is a judgment about the rendered screen, and a uiux session
      that reads the diff ends up reviewing intent, which the reviewer
      already covers.
+   - **Blast radius.** When the task's claims touch a shared primitive (a
+     design-system/kit component or a global stylesheet), a screenshot of
+     the task's own screens is not the full surface: the tester re-shoots
+     and the uiux visual pass reviews every screen that renders that
+     primitive, not only the task's screens. The tester determines that
+     list — from the screenshot suite already on disk or from the
+     primitive's importers — and records it alongside the screenshots it
+     captures. The "max 4 per feature" screenshot cap (tester.md) still applies per
+     screen; it is the screen count that grows, not the shots on each one.
 6. Dispatch **`grader`** (`.claude/agents/grader.md`) — bounded rubric
    loop, `profile.graderRounds` rounds (2 at `huge`, 1 below; never more
    than 2, agent-constraints.md "grader (v3)"), before any gate
