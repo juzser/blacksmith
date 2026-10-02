@@ -13,7 +13,7 @@ test.describe('Work switcher', () => {
 
     await page.getByRole('link', { name: 'Roadmap' }).click();
     await expect(page).toHaveURL(/\/work\/roadmap$/);
-    await expect(page.locator('.roadmap-node').first()).toBeVisible();
+    await expect(page.locator('.lrow').first()).toBeVisible();
 
     await page.goBack();
     await expect(page).toHaveURL(/\/work\/kanban$/);

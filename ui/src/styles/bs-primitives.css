@@ -2334,3 +2334,148 @@ summary.bs-inbox__group-head {
   margin: 0;
   color: var(--bs-text-subtle);
 }
+
+/* DS4 S2 — Roadmap swimlane (RoadmapSwimlane.vue). Class names match
+   ui/docs/ds-review.html's #p-roadmap mock so the app renders pixel-for-pixel
+   against the signed-off reference. `.rm-scroll` is the only region that
+   scrolls sideways; rows are plain reset buttons sized to the touch floor. */
+.rm-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.lane {
+  position: relative;
+  min-width: 720px;
+  display: flex;
+  flex-direction: column;
+}
+.lrow {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: var(--bs-space-3);
+  width: 100%;
+  min-height: var(--bs-touch);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border: none;
+  border-bottom: 1px solid var(--bs-border);
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.lrow.sub {
+  grid-template-columns: 160px 1fr;
+  padding-left: var(--bs-space-6);
+}
+.lrow.sel {
+  background: var(--bs-surface-selected);
+}
+.lrow:hover {
+  background: var(--bs-surface-sunken);
+}
+.lname {
+  font-size: var(--bs-text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track {
+  position: relative;
+  height: var(--bs-space-4);
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+}
+.lbar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: var(--bs-radius-sm);
+}
+.lbar.past {
+  background: var(--bs-tone-neutral-subtle);
+  border: 1px solid var(--bs-border-bold);
+}
+.lbar.now {
+  background: var(--bs-tone-progress-text);
+}
+.lbar.up {
+  background: var(--bs-tone-progress-subtle);
+  border: 1px dashed var(--bs-tone-progress-text);
+}
+.lbar-unscheduled {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  border: 1px dashed var(--bs-border-bold);
+  border-radius: var(--bs-radius-sm);
+}
+.nowline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--bs-tone-danger-text, #c0392b);
+  pointer-events: none;
+}
+
+/* DS4 S2 — EpicBlock.vue (phase mode). */
+.eblock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  padding: var(--bs-space-4);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-lg);
+  background: var(--bs-surface-raised);
+}
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-weight: 600;
+}
+.card-title {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.barrow {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.pnum {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+  flex-shrink: 0;
+}
+.esec {
+  padding-top: var(--bs-space-2);
+  border-top: 1px solid var(--bs-border);
+}
+.esec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  flex-wrap: wrap;
+}
+.esec-head .muted {
+  color: var(--bs-text-subtle);
+}
+.esec-head .small {
+  font-size: var(--bs-text-xs);
+}
+.pnum.bar-pct {
+  font-weight: 600;
+}
+.card-sum {
+  margin: 0;
+  font-size: var(--bs-text-sm);
+}
+.card-sum.muted {
+  color: var(--bs-text-subtle);
+}
