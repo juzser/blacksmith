@@ -61,6 +61,20 @@ export function epicProject(
   return milestone?.project ?? fallback;
 }
 
+/**
+ * DS4 S4 R1 — the phase (milestone) that lists this epic, for the phone
+ * epic-mode back link ("← {phase name}"). Null when no phase lists it (the
+ * same "closed epic" edge case epicProject() above already handles), which
+ * the component reads as "render nothing".
+ */
+export function epicPhase(
+  milestones: Pick<MilestoneProgress, 'milestoneId' | 'name' | 'epicIds'>[],
+  epicId: string,
+): { milestoneId: string; name: string } | null {
+  const milestone = milestones.find((m) => m.epicIds.includes(epicId));
+  return milestone ? { milestoneId: milestone.milestoneId, name: milestone.name } : null;
+}
+
 export interface WaveInfo {
   /** 0-based position in graph.waves. */
   index: number;
@@ -96,6 +110,29 @@ function taskInfo(node: FlowNode | undefined, taskId: string, edges: FlowEdge[])
     workingAgentRole: node?.workingAgentRole ?? null,
     dependencyLine: dependencyLine(edges, taskId),
   };
+}
+
+/**
+ * DS4 S4 §1 — the phone phase-mode row's status line: "In progress · 9 of
+ * 14 · wave 3 of 4 running", "Done · 6 of 6" or "No tasks tracked".
+ * `tasksTotal`/`tasksCompleted` null means the per-epic flow fetch is still
+ * in flight (phase mode's `epicSections`, EpicBlock.vue); `failed` is that
+ * same fetch's error state. R7: never a made-up count — each branch here
+ * only reads fields the caller already has for real.
+ */
+export function mobileEpicStatusLine(input: {
+  statusLabel: string;
+  tasksTotal: number | null;
+  tasksCompleted: number | null;
+  failed?: boolean;
+  waves: WaveInfo[];
+}): string {
+  if (input.failed) return "Could not load this epic's tasks.";
+  if (input.tasksTotal === null || input.tasksCompleted === null) return 'Loading';
+  if (input.tasksTotal === 0) return 'No tasks tracked';
+  const current = input.waves.find((w) => w.kind === 'current');
+  const wavePart = current ? ` · wave ${current.index + 1} of ${current.total} running` : '';
+  return `${input.statusLabel} · ${input.tasksCompleted} of ${input.tasksTotal}${wavePart}`;
 }
 
 /**
