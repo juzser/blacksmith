@@ -500,16 +500,20 @@ function deepEqual(a: unknown, b: unknown): boolean {
  * when the claims happen to match (S1 fix round 3) — so it fails this
  * comparison and still needs the flag.
  *
+ * A task_id can hold several rows (dead `superseded` records plus the live
+ * one), so a row is exempt when ANY previous row of that id matches it.
+ *
  * `added` tasks and v1 tasks have no previous record to match, so they are
  * never exempt.
  */
 function isGrandfatheredUiFlag(t: TaskSpecRecord, previous: PlanFile | undefined): boolean {
   if (previous === undefined) return false;
-  const prevTask = previous.tasks.find((p) => p.task_id === t.task_id);
-  if (prevTask === undefined || prevTask.ui_affecting !== undefined) return false;
-  const { plan_version: _pv1, task_status: _ts1, ...prevRest } = prevTask;
   const { plan_version: _pv2, task_status: _ts2, ...rest } = t;
-  return deepEqual(prevRest, rest);
+  return previous.tasks.some((prevTask) => {
+    if (prevTask.task_id !== t.task_id || prevTask.ui_affecting !== undefined) return false;
+    const { plan_version: _pv1, task_status: _ts1, ...prevRest } = prevTask;
+    return deepEqual(prevRest, rest);
+  });
 }
 
 /**

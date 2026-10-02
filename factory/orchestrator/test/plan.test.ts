@@ -337,6 +337,44 @@ describe('plan.ts', () => {
         }
       });
 
+      describe('a task_id with several rows', () => {
+        function multiRow(): PlanFile {
+          return {
+            epic_id: 'epic-1',
+            version: 2,
+            status: 'active',
+            tasks: [
+              task({ claims: ['ui/src/Old.vue'], task_status: 'superseded' }),
+              task({ claims: ['ui/src/App.vue'] }),
+            ],
+            edges: [],
+          };
+        }
+
+        it('does not flag rows carried forward verbatim, whichever previous row they match', () => {
+          const prev = multiRow();
+          const draft = draftNextVersion(prev, {});
+          const result = validatePlan(draft, { previous: prev });
+          expect(result).toEqual({ valid: true });
+        });
+
+        it('still flags a supersede replacement with new content under that id', () => {
+          const prev = multiRow();
+          const draft = draftNextVersion(prev, {
+            supersede: {
+              'epic-1/task-1': task({ claims: ['ui/src/App.vue', 'ui/src/Extra.vue'] }),
+            },
+          });
+          const result = validatePlan(draft, { previous: prev });
+          expect(result.valid).toBe(false);
+          if (!result.valid) {
+            expect(result.errors.some((e) => e.path === '/tasks/epic-1/task-1/ui_affecting')).toBe(
+              true,
+            );
+          }
+        });
+      });
+
       it('still flags every task in a v1 plan (no previous version to grandfather against)', () => {
         const result = validatePlan(v1());
         expect(result.valid).toBe(false);
