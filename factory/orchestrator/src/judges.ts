@@ -115,7 +115,13 @@ export interface EventContext {
 const UIUX_ROLE = 'uiux';
 export type JudgeKind = 'spec' | 'visual';
 
-function isJudgeKind(value: unknown): value is JudgeKind {
+/**
+ * Exported so a caller that only has a kind to check, with no role to pair
+ * it with (e.g. `judge outstanding`'s `--kind` filter), can validate it
+ * against the same closed list `assertKindAllowed` uses, rather than
+ * defining the list a second time.
+ */
+export function isJudgeKind(value: unknown): value is JudgeKind {
   return value === 'spec' || value === 'visual';
 }
 

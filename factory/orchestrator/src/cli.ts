@@ -131,8 +131,11 @@ import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
 import {
+  isJudgeKind,
+  JudgeError,
   type JudgeKind,
   outstandingJudges,
+  readJudgeArtifact,
   readJudgeTurns,
   recordJudgeDispatch,
   recordJudgeReport,
@@ -1052,6 +1055,12 @@ function mintFromEvidence(
  * through.
  */
 function mintFromUiuxVisual(filePath: string, taskId: string): RaiseFindingInput[] {
+  // Reuse `readJudgeArtifact`'s uiux visual-branch validation (judges.ts)
+  // rather than re-checking the shape here: a document missing
+  // `structured_output.deviations`, or one where it is not an array, must
+  // raise `judges.artifact-invalid-evidence` instead of silently minting
+  // nothing and letting the gate pass on a wrong-shaped document (S2).
+  readJudgeArtifact(filePath, 'uiux', taskId, 'visual');
   const document = readJsonFile<{ structured_output?: { deviations?: UiuxDeviation[] } }>(filePath);
   const deviations = document.structured_output?.deviations ?? [];
   return mintFindings(uiuxDeviationsToEvidence(deviations), { taskId, foundBy: 'uiux' });
@@ -4728,6 +4737,17 @@ async function main(): Promise<number> {
     const taskId = requireFlag(flags, 'task');
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
+    // A typo such as `--kind visaul` must not read as "nothing outstanding":
+    // filtering on an unrecognised kind would silently match zero turns and
+    // exit 0 while a real one is still open (S2). Validate against the same
+    // closed list `assertKindAllowed` checks before filtering.
+    if (flags.kind !== undefined && !isJudgeKind(flags.kind)) {
+      throw new JudgeError(
+        'judges.invalid-kind',
+        `"--kind" must be "spec" or "visual"; got ${JSON.stringify(flags.kind)}.`,
+        { kind: flags.kind },
+      );
+    }
     const allOpen = outstandingJudges(await readJudgeTurns(taskId, { sessionId }, eventOpts));
     const open = flags.kind ? allOpen.filter((turn) => turn.kind === flags.kind) : allOpen;
     printJson({ taskId, sessionId, outstanding: open, count: open.length });

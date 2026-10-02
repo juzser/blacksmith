@@ -9187,6 +9187,113 @@ describe('cli.ts (built binary)', () => {
         expect(raised[0]?.severity).toBe('S3-minor');
       });
 
+      // S2: a document with no `deviations` array, or one where it is not an
+      // array, used to mint nothing and let the gate pass silently. It must
+      // be refused the same way `readJudgeArtifact`'s uiux visual branch
+      // refuses it (judges.ts), not treated as a clean pass.
+      it('rejects a uiux visual document with no structured_output.deviations', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visualPath = path.join(scratchDir, `${sessionId}-visual-missing.json`);
+        await writeFile(visualPath, JSON.stringify({ run_status: 'done', structured_output: {} }));
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visualPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('judges.artifact-invalid-evidence');
+
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised).toHaveLength(0);
+      });
+
+      it('rejects a uiux visual document whose deviations is not an array', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visualPath = path.join(scratchDir, `${sessionId}-visual-not-array.json`);
+        await writeFile(
+          visualPath,
+          JSON.stringify({ run_status: 'done', structured_output: { deviations: 'none' } }),
+        );
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visualPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(1);
+        expect(JSON.parse(result.stdout).error.code).toBe('judges.artifact-invalid-evidence');
+
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised).toHaveLength(0);
+      });
+
+      it('accepts an explicit empty deviations array as a clean pass', async () => {
+        const { sessionId, eventsDir, planPath } = await session();
+        const [worktreeDir, checksPath, resultPath] = await gateFixture(sessionId);
+        const visual = await visualFile(`${sessionId}-visual-empty`, []);
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--uiux-visual',
+          visual,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(result.status).toBe(0);
+
+        const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
+        expect(raised).toHaveLength(0);
+      });
+
       // The uiux-visual hand-over closes the uiux visual turn exactly the way
       // --evidence closes a reviewer's turn, independent of any spec turn
       // still open on the same task.
@@ -9959,6 +10066,134 @@ describe('cli.ts (built binary)', () => {
           { role: 'security-reviewer', round: 1, declaredArtifact: artifact, reported: false },
         ],
       });
+    });
+
+    // S2: a typo in --kind used to filter every turn out silently, printing
+    // count 0 and exiting 0 while a real uiux turn was still open. An unknown
+    // kind must fail loudly instead of reading as "nothing outstanding".
+    it('outstanding rejects an unknown --kind rather than filtering everything out', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      const dispatched = judgeCli('dispatch', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'visual',
+        '--round',
+        '1',
+        '--artifact',
+        artifact,
+        '--model',
+        'claude-opus-5',
+      ]);
+      expect(dispatched.status).toBe(0);
+
+      const outstanding = judgeCli('outstanding', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--kind',
+        'visaul',
+      ]);
+      expect(outstanding.status).not.toBe(0);
+      expect(JSON.parse(outstanding.stdout).error.code).toBe('judges.invalid-kind');
+    });
+
+    it('outstanding --kind still filters to the matching turn when it is valid', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      const specArtifact = `${artifact}.spec`;
+      const specDispatch = judgeCli('dispatch', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'spec',
+        '--round',
+        '1',
+        '--artifact',
+        specArtifact,
+        '--model',
+        'claude-opus-5',
+      ]);
+      expect(specDispatch.status).toBe(0);
+      const visualDispatch = runCli([
+        'judge',
+        'dispatch',
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'visual',
+        '--round',
+        '1',
+        '--artifact',
+        artifact,
+        '--model',
+        'claude-opus-5',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#1`,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(visualDispatch.status).toBe(0);
+
+      const outstanding = judgeCli('outstanding', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--kind',
+        'visual',
+      ]);
+      expect(outstanding.status).toBe(1);
+      const payload = JSON.parse(outstanding.stdout) as {
+        outstanding: Array<{ kind: string | null }>;
+      };
+      expect(payload.outstanding.map((t) => t.kind)).toEqual(['visual']);
+    });
+
+    it('dispatch rejects an unknown --kind', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      const dispatched = judgeCli('dispatch', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'bogus',
+        '--round',
+        '1',
+        '--artifact',
+        artifact,
+        '--model',
+        'claude-opus-5',
+      ]);
+      expect(dispatched.status).not.toBe(0);
+      const error = JSON.parse(dispatched.stdout).error;
+      expect(error.code).toBe('judges.invalid-kind');
+      expect(error.message).toContain('bogus');
+    });
+
+    it('report rejects an unknown --kind', async () => {
+      const { sessionId, eventsDir, artifact } = await judgeSession();
+      dispatchJudge(sessionId, eventsDir, 'uiux', artifact);
+
+      const reported = judgeCli('report', sessionId, eventsDir, [
+        '--task',
+        'epic-1/task-1',
+        '--role',
+        'uiux',
+        '--kind',
+        'bogus',
+        '--artifact',
+        artifact,
+      ]);
+      expect(reported.status).not.toBe(0);
+      const error = JSON.parse(reported.stdout).error;
+      expect(error.code).toBe('judges.invalid-kind');
+      expect(error.message).toContain('bogus');
     });
 
     // EPIPE on a failing command must not launder its exit code to 0. The
