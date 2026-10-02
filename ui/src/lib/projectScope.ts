@@ -24,5 +24,4 @@ export const SCOPABLE_ROUTES: ReadonlySet<string> = new Set([
   'analytics',
   'work-kanban',
   'work-roadmap',
-  'flow',
 ]);

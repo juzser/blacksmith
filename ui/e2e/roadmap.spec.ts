@@ -126,3 +126,126 @@ test.describe('Roadmap', () => {
     await shoot(page, 'work-roadmap-swimlane-768-light');
   });
 });
+
+// DS4 S3 §4: `/flow` is retired outright. Both redirects go through the
+// existing `legacyWorkRedirect()`, already proven generically elsewhere;
+// this is the one assertion specific to Roadmap's own new destination.
+test.describe('Roadmap: /flow retirement (ds4-s3-uiux-spec.md §4)', () => {
+  test('/flow lands on /work/roadmap', async ({ page }) => {
+    await page.goto('/flow');
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+  });
+
+  test('/flow?epic=X lands on /work/roadmap?epic=X', async ({ page }) => {
+    await page.goto('/flow?epic=epic-9');
+    await expect(page).toHaveURL(/\/work\/roadmap\?epic=epic-9\b/);
+  });
+});
+
+// DS4 S3 §1/§2/§3/§5: epic mode's WaveList, the peek, the "Show waves"
+// toggle and the phone touch-target floor. epic-9 (multiProjectFixture.ts)
+// is the fixture's past/current/upcoming target: task-1 and task-2 done
+// (past waves), task-3 in progress (the current wave, with cards), task-4
+// never dispatched (the upcoming wave).
+test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', () => {
+  test('shows the past, current and upcoming waves', async ({ page }) => {
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    await expect(page.locator('.wave-list')).toBeVisible();
+
+    await expect(page.locator('.wave.past')).toHaveCount(2);
+    const current = page.locator('.wave.cur');
+    await expect(current).toHaveCount(1);
+    await expect(current.locator('.wave-task-card')).toHaveCount(1);
+    await expect(page.locator('.wave.next')).toHaveCount(1);
+    // Upcoming waves show no cards (spec §2).
+    await expect(page.locator('.wave.next .wave-task-card')).toHaveCount(0);
+  });
+
+  test('clicking a wave card opens the peek; Esc returns focus to the card', async ({ page }) => {
+    await page.goto('/work/roadmap?epic=epic-9');
+    const card = page.locator('.wave-task-card').first();
+    await expect(card).toBeVisible();
+    await card.click();
+
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(card).toBeFocused();
+  });
+
+  test('touch targets clear 44px at 375px: wave cards and the Select trigger', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/work/roadmap?epic=epic-9');
+    const card = page.locator('.wave-task-card').first();
+    await expect(card).toBeVisible();
+
+    for (const locator of [card, page.getByLabel('Plan version', { exact: true })]) {
+      const box = await locator.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot epic mode desktop/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS.desktop);
+      await page.goto('/work/roadmap?epic=epic-9');
+      await settleForShot(page, page.locator('.wave-list'));
+      await shoot(page, `work-roadmap-epic-desktop-${theme}`);
+    });
+  }
+
+  test('screenshot epic mode 768/light', async ({ page }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize({ width: 768, height: 1024 });
+    await page.goto('/work/roadmap?epic=epic-9');
+    await settleForShot(page, page.locator('.wave-list'));
+    await shoot(page, 'work-roadmap-epic-768-light');
+  });
+});
+
+// DS4 S3 §2: phase mode's per-epic "Show waves" toggle — open by default on
+// an In-progress epic, closed on Done/To do (phase-6b, global-setup.ts: an
+// in-progress phase with demo-hub's epic-9/epic-10/epic-11).
+test.describe('Roadmap: phase mode "Show waves" toggle (ds4-s3-uiux-spec.md §2, §5)', () => {
+  test('flips aria-expanded and the WaveList with it', async ({ page }) => {
+    await page.goto('/work/roadmap?phase=phase-6b');
+    const esec9 = page.locator('.esec', { hasText: 'epic-9' });
+    const toggle = esec9.locator('.linkbtn');
+
+    // In progress -> open by default.
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(esec9.locator('.wave-list')).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(esec9.locator('.wave-list')).toHaveCount(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(esec9.locator('.wave-list')).toBeVisible();
+  });
+
+  test('touch target: the toggle clears 44px at 375px', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/work/roadmap?phase=phase-6b');
+    const toggle = page.locator('.esec', { hasText: 'epic-9' }).locator('.linkbtn');
+    await expect(toggle).toBeVisible();
+    const box = await toggle.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  });
+
+  test('screenshot phase waves desktop/light: one epic expanded, one collapsed', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/work/roadmap?phase=phase-6b');
+    // epic-9 (In progress) defaults open; epic-10 (Done) defaults closed.
+    await settleForShot(page, page.locator('.esec', { hasText: 'epic-9' }).locator('.wave-list'));
+    await shoot(page, 'work-roadmap-phase-waves-desktop-light');
+  });
+});

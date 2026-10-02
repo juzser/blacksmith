@@ -124,6 +124,7 @@ test.describe('Work switcher', () => {
     await expect(menu).toBeVisible();
 
     const items = menu.locator('[role="menuitem"], [role="menuitemradio"]');
+    await expect.poll(() => items.count()).toBeGreaterThanOrEqual(6); // see the round-6 walk test below
     const count = await items.count();
     await page.keyboard.press('End');
     await expect(items.nth(count - 1)).toBeFocused();
@@ -144,8 +145,10 @@ test.describe('Work switcher', () => {
     await expect(menu).toBeVisible();
 
     const items = menu.locator('[role="menuitem"], [role="menuitemradio"]');
+    // Wait for every item before counting: the menu can be visible a frame
+    // before its last item renders, and a count read then walks a short list.
+    await expect.poll(() => items.count()).toBeGreaterThanOrEqual(6); // Pause, theme, Settings, Kanban, Roadmap, Display options
     const count = await items.count();
-    expect(count).toBeGreaterThanOrEqual(6); // Pause, theme, Settings, Kanban, Roadmap, Display options
 
     // Opening the menu focuses the first item.
     await expect(items.nth(0)).toBeFocused();

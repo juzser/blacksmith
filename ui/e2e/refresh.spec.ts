@@ -109,13 +109,12 @@ test.describe('Manual refresh (design-spec §8)', () => {
  * Kanban, Timeline) answer it via their own `usePoll(...)`; Flow joined them
  * at the 15s cadence design-spec.md §8 states for Kanban/Timeline. Projects
  * is now part of Home (ds-spec.md §4.1), which polls too, so its tests run
- * against Home's per-project cards. Roadmap still does not, and the manual-refresh pages
- * above never will by design.
+ * against Home's per-project cards.
  *
  * The "re-fetches" tests bound their wait well under the 15s poll, so it is
  * the click that must produce the response, not the next tick.
  */
-test.describe('Topbar Refresh reaches Home and Flow (D-243)', () => {
+test.describe('Topbar Refresh reaches Home (D-243)', () => {
   test('Home: topbar Refresh re-fetches the overview', async ({ page }) => {
     await page.goto('/overview');
     await expect(page.getByRole('link', { name: 'View black-smith in Work' })).toBeVisible();
@@ -151,34 +150,78 @@ test.describe('Topbar Refresh reaches Home and Flow (D-243)', () => {
     expect(await page.locator('.bs-skeleton').count()).toBe(0);
     expect(await page.getByRole('link', { name: 'View black-smith in Work' }).count()).toBe(1);
   });
+});
 
-  test('Flow: topbar Refresh re-fetches the graph', async ({ page }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-
-    const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'), {
-      timeout: 5000,
+/**
+ * DS4 S3 fix round 1 finding 2: epic mode (`RoadmapPage.vue`'s `?epic=`
+ * query) never answered the topbar Refresh and never polled, so a running
+ * epic's WaveList sat on whatever it fetched on load until a full page
+ * reload. These re-point the four FlowPage refresh tests Part C dropped
+ * (above) at that mode's own graph fetch, `/api/flow`.
+ */
+test.describe('Roadmap epic mode refresh (ds4-s3-uiux-spec.md §2, §8)', () => {
+  test('topbar Refresh re-fetches the epic graph and updates the waves', async ({ page }) => {
+    // Registered before goto(): the mount fetch must be the unmutated first
+    // call, so the refresh click below is unambiguously the second one.
+    let served = 0;
+    await page.route('**/api/flow*', async (route) => {
+      served += 1;
+      if (served === 1) {
+        await route.continue();
+        return;
+      }
+      // Second response only: flip every node to `completed` so the current
+      // wave empties out and the next one takes its place -- a change a page
+      // sitting on stale data could never show on its own.
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const node of body.nodes) node.taskStatus = 'completed';
+      await route.fulfill({ response, json: body });
     });
+
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    const curWaveCards = () => page.locator('.wave.cur .wave-task-card').count();
+    await expect.poll(curWaveCards).toBe(1);
+
+    const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'));
     // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
     await page.getByRole('button', { name: 'Pause updates' }).click();
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await refetched;
+
+    await expect.poll(curWaveCards).toBe(0);
   });
 
-  test('Flow: keeps its content on screen while the topbar Refresh is in flight', async ({
-    page,
-  }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
+  // Same idiom as shell.spec.ts's "polls on a page that has no poll of its
+  // own": two requests within the 15s window prove the interval is running,
+  // not just the mount fetch. The change stream is blocked here, exactly as
+  // shouldRunInterval() (lib/eventStream.ts) documents: once the stream
+  // reaches `open`, the fallback interval stands down in favour of the
+  // stream's own `advanced` signal, which this fixture's static data never
+  // emits -- so an open stream would make this a test of the stream, not
+  // the poll usePoll wires on top of it.
+  test('polls the epic graph on its own 15s cadence', async ({ page }) => {
+    await page.route('**/api/stream*', (route) => route.abort('failed'));
+    let served = 0;
+    page.on('request', (r) => {
+      if (r.url().includes('/api/flow')) served += 1;
+    });
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    await expect.poll(() => served, { timeout: 20_000 }).toBeGreaterThanOrEqual(2);
+  });
+
+  // The background path (`loadEpicModeFlow({ background: true })`) must not
+  // reset `epicModeFlow` before the fetch lands -- unlike a foreground load,
+  // which shows a Skeleton while `epicModeFlow` is `undefined`.
+  test('keeps the waves on screen while a background refresh is in flight', async ({ page }) => {
+    await page.goto('/work/roadmap?epic=epic-9');
+    await expect(page.locator('.eblock')).toHaveAttribute('aria-label', 'Epic epic-9');
+    await expect(page.locator('.wave-list')).toBeVisible();
     await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
-    // Hold the graph fetch only. The page's refresh tick awaits the picker's
-    // /api/overview BEFORE load() runs, so a hold on every /api/** route
-    // would have parked the tick there and the reads below would have run
-    // before `loading` could ever have been raised -- a version that showed
-    // the skeleton on every load would have passed. Waiting for the graph
-    // request itself puts the reads inside load()'s in-flight window.
-    await page.route('**/api/flow**', async (route) => {
+    await page.route('**/api/flow*', async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       await route.continue();
     });
@@ -188,59 +231,9 @@ test.describe('Topbar Refresh reaches Home and Flow (D-243)', () => {
     await page.getByRole('button', { name: 'Refresh now' }).click();
     await inFlight;
 
-    expect(await page.locator('.ds-skeleton').count()).toBe(0);
-    expect(await page.locator('.flow-wave-label').count()).toBeGreaterThan(0);
-  });
-
-  // A scope switch is a reset load: the graph on hand is the old epic's, so
-  // when the new epic's fetch fails there is nothing true to draw under the
-  // banner -- not the previous scope's DAG beneath a toolbar that names the
-  // new one.
-  test('Flow: a scope switch whose fetch fails shows the banner alone', async ({ page }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-
-    await page.route('**/api/flow**', (route) => route.abort('failed'));
-    await page.getByLabel('Epic', { exact: true }).selectOption('epic-1');
-
-    await expect(page.locator('.ds-banner')).toBeVisible();
-    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
-    await expect(page.locator('.flow-node')).toHaveCount(0);
-  });
-
-  // Round 12's per-wave disclosure is view state, not graph data — a poll
-  // tick (or a topbar Refresh) must not fold an operator's open wave back up
-  // underneath them. retainFlowView() (lib/flowView.ts) is what load() now
-  // defers to instead of the unconditional reset load() used to do on every
-  // success.
-  test('Flow: an expanded wave survives a topbar Refresh', async ({ page }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-
-    const toggle = page.locator('.flow-wave-label__more').first();
-    await expect(toggle).toBeVisible();
-    const labelBeforeToggle = await toggle.textContent();
-    await toggle.click();
-    await expect(toggle).not.toHaveText(labelBeforeToggle ?? '');
-    const labelAfterToggle = await toggle.textContent();
-
-    // A response event fires before the page has parsed the body and Vue
-    // has flushed, so a bare waitForResponse could read the toggle before
-    // the re-render it is meant to check. Stamp the refetched graph and wait
-    // for the stamp to reach the DOM instead.
-    await page.route('**/api/flow**', async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      body.nodes[0].title = 'Refetched by the topbar';
-      await route.fulfill({ response, json: body });
-    });
-    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
-    await page.getByRole('button', { name: 'Pause updates' }).click();
-    await page.getByRole('button', { name: 'Refresh now' }).click();
-    await expect(
-      page.locator('.flow-node__title', { hasText: 'Refetched by the topbar' }),
-    ).toHaveCount(1);
-
-    await expect(toggle).toHaveText(labelAfterToggle ?? '');
+    // Read synchronously, inside the route's hold -- see the manual-refresh
+    // block above for why a retrying matcher would prove nothing here.
+    expect(await page.locator('.bs-skeleton').count()).toBe(0);
+    expect(await page.locator('.wave-list').count()).toBe(1);
   });
 });

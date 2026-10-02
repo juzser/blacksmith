@@ -2606,3 +2606,128 @@ summary.bs-inbox__group-head {
 .card-sum.muted {
   color: var(--bs-text-subtle);
 }
+
+/* DS4 S3 — EpicBlock epic mode: a project-name badge sits beside the status
+   Tag, and the plan-version Select trails the row (mirrors ds-review.html's
+   epic-selected frame: ".esec-head .select { margin-left: auto }"). */
+.esec-head .select-trailing {
+  margin-left: auto;
+}
+
+/* DS4 S3 — "Show waves" / "Hide waves" toggle (phase mode only), reusing
+   ds-review.html's own ".linkbtn" rule verbatim: no background/border, text
+   button sized by its own font, --bs-touch applied as a min target rather
+   than visible padding so it doesn't grow the esec-head row on desktop. */
+.linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: var(--bs-text-xs);
+  font-weight: 500;
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+.esec-head .linkbtn {
+  margin-left: auto;
+}
+@media (max-width: 640px) {
+  .linkbtn {
+    min-height: var(--bs-touch);
+  }
+}
+
+/* DS4 S3 — WaveList.vue: one .wave <section> per wave, past/cur/next read
+   the same modifier names ds-review.html uses. */
+.wave-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+.wave {
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  padding: var(--bs-space-3) var(--bs-space-4);
+}
+.wave.cur {
+  border-color: var(--bs-border-bold);
+  box-shadow: var(--bs-shadow-md);
+}
+.wave.next {
+  border-style: dashed;
+  background: transparent;
+  color: var(--bs-text-subtle);
+}
+.wave.past {
+  color: var(--bs-text-subtle);
+}
+.whead {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.whead .muted {
+  color: var(--bs-text-subtle);
+}
+.whead .small {
+  font-size: var(--bs-text-xs);
+}
+.wave__title {
+  display: inline;
+  margin: 0;
+  font-size: var(--bs-text-sm);
+  font-weight: 400;
+}
+.wave.cur .wave__title {
+  font-weight: 600;
+  color: var(--bs-text);
+}
+.tb-right {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  flex-wrap: wrap;
+}
+.wave-list__cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  margin-top: var(--bs-space-2);
+}
+
+/* DS4 S3 — WaveTaskCard.vue: a plain-button task card, smaller than
+   KanbanTaskCard (FlowNode carries none of its chip/comment/PR fields). */
+.wave-task-card {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--bs-space-2);
+  width: 100%;
+  min-height: var(--bs-touch);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.wave-task-card:hover {
+  background: var(--bs-surface-sunken);
+}
+.wave-task-card__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wave-task-card__dep {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--bs-text-xs);
+}

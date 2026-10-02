@@ -12,7 +12,10 @@ const PAGES: Record<string, string> = {
   timeline: '/timeline',
   kanban: '/kanban',
   roadmap: '/roadmap',
-  flow: '/flow',
+  // DS4 S3 §4: /flow is retired (the canvas has no replacement to sweep);
+  // its slot becomes Roadmap's epic mode, whose WaveList/WaveTaskCard/toggle
+  // are new surfaces the plain `/roadmap` phase-mode entry above never hits.
+  'roadmap epic mode': '/work/roadmap?epic=epic-9',
   lessons: '/lessons',
   errors: '/errors',
   analytics: '/analytics',

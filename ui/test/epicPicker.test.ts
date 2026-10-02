@@ -75,7 +75,7 @@ function page(name: string): string {
 }
 
 describe('the epic-picker pages source their control and their fetch guard from lib', () => {
-  for (const name of ['KanbanPage.vue', 'FlowPage.vue']) {
+  for (const name of ['KanbanPage.vue']) {
     it(`${name} builds its options through epicOptions()`, () => {
       const src = page(name);
       expect(src).toContain('epicOptions(');

@@ -10,6 +10,7 @@ import {
   formatRelative,
   formatRelativeVerbose,
   pluralize,
+  shortTaskId,
   summarize,
   taskLabel,
 } from '../src/lib/format.js';
@@ -252,6 +253,22 @@ describe('lib/format.ts taskLabel()', () => {
 
   it('handles an id with no task- prefix by just spacing and capitalizing it', () => {
     expect(taskLabel('cleanup-orphan-rows')).toBe('Cleanup orphan rows');
+  });
+});
+
+// DS4 S3 fix round 1 finding 4: WaveTaskCard had no id at all. shortTaskId()
+// is the same derivation KanbanTaskCard.vue's own `shortId` computed used
+// inline, pulled out so both cards share it rather than each keeping a
+// private copy of the same `split('/').pop()`.
+describe('lib/format.ts shortTaskId()', () => {
+  it('takes the last path segment of a task id', () => {
+    expect(shortTaskId('epic-9/task-3-build-directory-search-ui')).toBe(
+      'task-3-build-directory-search-ui',
+    );
+  });
+
+  it('returns the id unchanged when it has no epic path segment', () => {
+    expect(shortTaskId('task-3-fix-lint')).toBe('task-3-fix-lint');
   });
 });
 
