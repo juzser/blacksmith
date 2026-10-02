@@ -114,8 +114,19 @@ test.describe('Manual refresh (design-spec §8)', () => {
  *
  * The "re-fetches" tests bound their wait well under the 15s poll, so it is
  * the click that must produce the response, not the next tick.
+ *
+ * DS4 S3 §4: FlowPage is deleted outright, and its `/flow` replacement,
+ * Roadmap's `?epic=` mode (RoadmapPage.vue), has no `usePoll(...)` call of
+ * its own — it never did even in phase mode. The four Flow tests that used
+ * to live here (topbar Refresh re-fetching the graph, keeping content on
+ * screen during that refetch, a failed scope-switch fetch, an expanded wave
+ * surviving a topbar Refresh) all proved behaviour that lived in
+ * usePoll/triggerGlobalRefresh wiring FlowPage had and Roadmap does not —
+ * there is no page left anywhere that answers the topbar Refresh with flow
+ * data, so there is nothing left for them to re-point at. Dropped rather
+ * than rewritten against a control that does not exist.
  */
-test.describe('Topbar Refresh reaches Home and Flow (D-243)', () => {
+test.describe('Topbar Refresh reaches Home (D-243)', () => {
   test('Home: topbar Refresh re-fetches the overview', async ({ page }) => {
     await page.goto('/overview');
     await expect(page.getByRole('link', { name: 'View black-smith in Work' })).toBeVisible();
@@ -150,97 +161,5 @@ test.describe('Topbar Refresh reaches Home and Flow (D-243)', () => {
     // block above for why a retrying matcher would prove nothing here.
     expect(await page.locator('.bs-skeleton').count()).toBe(0);
     expect(await page.getByRole('link', { name: 'View black-smith in Work' }).count()).toBe(1);
-  });
-
-  test('Flow: topbar Refresh re-fetches the graph', async ({ page }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-
-    const refetched = page.waitForResponse((r) => r.url().includes('/api/flow'), {
-      timeout: 5000,
-    });
-    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
-    await page.getByRole('button', { name: 'Pause updates' }).click();
-    await page.getByRole('button', { name: 'Refresh now' }).click();
-    await refetched;
-  });
-
-  test('Flow: keeps its content on screen while the topbar Refresh is in flight', async ({
-    page,
-  }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
-
-    // Hold the graph fetch only. The page's refresh tick awaits the picker's
-    // /api/overview BEFORE load() runs, so a hold on every /api/** route
-    // would have parked the tick there and the reads below would have run
-    // before `loading` could ever have been raised -- a version that showed
-    // the skeleton on every load would have passed. Waiting for the graph
-    // request itself puts the reads inside load()'s in-flight window.
-    await page.route('**/api/flow**', async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      await route.continue();
-    });
-    const inFlight = page.waitForRequest((r) => r.url().includes('/api/flow'));
-    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
-    await page.getByRole('button', { name: 'Pause updates' }).click();
-    await page.getByRole('button', { name: 'Refresh now' }).click();
-    await inFlight;
-
-    expect(await page.locator('.ds-skeleton').count()).toBe(0);
-    expect(await page.locator('.flow-wave-label').count()).toBeGreaterThan(0);
-  });
-
-  // A scope switch is a reset load: the graph on hand is the old epic's, so
-  // when the new epic's fetch fails there is nothing true to draw under the
-  // banner -- not the previous scope's DAG beneath a toolbar that names the
-  // new one.
-  test('Flow: a scope switch whose fetch fails shows the banner alone', async ({ page }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-
-    await page.route('**/api/flow**', (route) => route.abort('failed'));
-    await page.getByLabel('Epic', { exact: true }).selectOption('epic-1');
-
-    await expect(page.locator('.ds-banner')).toBeVisible();
-    await expect(page.locator('.bs-skeleton')).toHaveCount(0);
-    await expect(page.locator('.flow-node')).toHaveCount(0);
-  });
-
-  // Round 12's per-wave disclosure is view state, not graph data — a poll
-  // tick (or a topbar Refresh) must not fold an operator's open wave back up
-  // underneath them. retainFlowView() (lib/flowView.ts) is what load() now
-  // defers to instead of the unconditional reset load() used to do on every
-  // success.
-  test('Flow: an expanded wave survives a topbar Refresh', async ({ page }) => {
-    await page.goto('/flow');
-    await expect(page.locator('.flow-wave-label').first()).toBeVisible();
-
-    const toggle = page.locator('.flow-wave-label__more').first();
-    await expect(toggle).toBeVisible();
-    const labelBeforeToggle = await toggle.textContent();
-    await toggle.click();
-    await expect(toggle).not.toHaveText(labelBeforeToggle ?? '');
-    const labelAfterToggle = await toggle.textContent();
-
-    // A response event fires before the page has parsed the body and Vue
-    // has flushed, so a bare waitForResponse could read the toggle before
-    // the re-render it is meant to check. Stamp the refetched graph and wait
-    // for the stamp to reach the DOM instead.
-    await page.route('**/api/flow**', async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      body.nodes[0].title = 'Refetched by the topbar';
-      await route.fulfill({ response, json: body });
-    });
-    // Refresh is aria-disabled while live (ds-spec.md §2.2) — pause first.
-    await page.getByRole('button', { name: 'Pause updates' }).click();
-    await page.getByRole('button', { name: 'Refresh now' }).click();
-    await expect(
-      page.locator('.flow-node__title', { hasText: 'Refetched by the topbar' }),
-    ).toHaveCount(1);
-
-    await expect(toggle).toHaveText(labelAfterToggle ?? '');
   });
 });

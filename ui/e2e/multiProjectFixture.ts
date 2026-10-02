@@ -40,7 +40,9 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
   );
   let parent = root.event_id;
 
-  // --- epic-9: a 3-wave chain (root -> mid -> leaf), root/mid done, leaf running ---
+  // --- epic-9: a 4-wave chain (root -> mid -> leaf -> next), root/mid done,
+  // leaf running, next not yet dispatched — DS4 S3 §8's past/current/upcoming
+  // WaveList fixture target (ds4-s3-uiux-spec.md §8).
   const tasks9 = [
     {
       id: `${DEMO_HUB_EPIC_A}/task-1`,
@@ -56,6 +58,11 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
       id: `${DEMO_HUB_EPIC_A}/task-3`,
       objective: 'Build the directory search UI.',
       status: 'in-progress',
+    },
+    {
+      id: `${DEMO_HUB_EPIC_A}/task-4`,
+      objective: 'Write the directory search docs.',
+      status: 'todo',
     },
   ];
   for (const t of tasks9) {
@@ -111,12 +118,29 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
     opts,
   );
   parent = edge9b.event_id;
+  const edge9c = await appendEdge(
+    {
+      session_id: MULTI_PROJECT_SESSION_ID,
+      actor: 'system',
+      task_id: tasks9[3]?.id as string,
+      plan_version: planVersion,
+      causal_parent: parent,
+      project,
+      payload: { depends_on: tasks9[2]?.id },
+    },
+    { edge_type: 'artifact', edge_provenance: 'observed' },
+    opts,
+  );
+  parent = edge9c.event_id;
 
-  // task-1/task-2 dispatched and completed; task-3 dispatched and STILL LIVE (no terminal event).
-  // task-2 runs on a second provider at the same tier, so the Analytics cost
-  // buckets — keyed by the (model_tier, provider) pair — hold two rows for one
-  // tier. That pair is what the §5.8 charts have to roll up (D-221).
+  // task-1/task-2 dispatched and completed; task-3 dispatched and STILL LIVE
+  // (no terminal event); task-4 never dispatched at all — the upcoming wave
+  // (ds4-s3-uiux-spec.md §8). task-2 runs on a second provider at the same
+  // tier, so the Analytics cost buckets — keyed by the (model_tier,
+  // provider) pair — hold two rows for one tier. That pair is what the §5.8
+  // charts have to roll up (D-221).
   for (const [i, t] of tasks9.entries()) {
+    if (i === 3) continue; // task-4 stays todo/undispatched -> upcoming wave.
     const taskProvider = i === 1 ? 'codex' : 'claude';
     const dispatch = await appendEvent(
       {

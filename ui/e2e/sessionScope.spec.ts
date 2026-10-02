@@ -47,7 +47,6 @@ test.describe('Session scope', () => {
     for (const path of [
       '/sessions',
       '/work/kanban',
-      '/flow',
       '/errors',
       '/analytics',
       '/overview',
