@@ -7,6 +7,7 @@
 import type { EventOpts } from '../../factory/orchestrator/src/events.js';
 import { appendEdge, appendEvent, readEvents } from '../../factory/orchestrator/src/events.js';
 import { raiseFinding, transition } from '../../factory/orchestrator/src/findings.js';
+import { recordUserPrompt } from '../../factory/orchestrator/src/prompts.js';
 import { recordJudgeRun } from '../../factory/orchestrator/src/quorum.js';
 
 async function lastEventId(sessionId: string, opts: EventOpts): Promise<string> {
@@ -132,6 +133,35 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
     opts,
   );
   parent = edge9c.event_id;
+
+  // DS4 S5c — the operator prompt behind this session, so `epics[].sourcePrompt`
+  // ("Epic started from") has something real to render on epic-9's selected
+  // block (roadmap.spec.ts). A session has one lineage, so every epic in this
+  // fixture shares this one quote — that mirrors `epicSourcePrompt()`'s own
+  // session-wide walk, not a fixture shortcut.
+  const prompt = await recordUserPrompt(
+    'Build an employee directory with search, so new hires can find who owns what.',
+    { sessionId: MULTI_PROJECT_SESSION_ID, planVersion, causalParent: parent },
+    opts,
+  );
+  parent = prompt.event_id;
+
+  // DS4 S5c — epic-9's integration PR, so the "Open integration PR on
+  // GitHub" icon button (EpicBlock.vue) has a real https link to render.
+  const integrationPr = await appendEvent(
+    {
+      session_id: MULTI_PROJECT_SESSION_ID,
+      actor: 'merge-queue',
+      event_type: 'integration-pr-opened',
+      task_id: `${DEMO_HUB_EPIC_A}/integration`,
+      plan_version: planVersion,
+      causal_parent: parent,
+      project,
+      payload: { pr_url: 'https://github.com/example-org/demo-hub/pull/42' },
+    },
+    opts,
+  );
+  parent = integrationPr.event_id;
 
   // task-1/task-2 dispatched and completed; task-3 dispatched and STILL LIVE
   // (no terminal event); task-4 never dispatched at all — the upcoming wave

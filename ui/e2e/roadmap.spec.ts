@@ -205,6 +205,73 @@ test.describe('Roadmap: epic mode WaveList (ds4-s3-uiux-spec.md §1-3, §5)', ()
   });
 });
 
+// DS4 S5c — server-derived epic header: the stacked status bar, the "Epic
+// started from" quote, and the Copy-id/Open-PR icon buttons. epic-9 is the
+// fixture's one epic with a recorded user_prompt and an integration PR
+// (multiProjectFixture.ts).
+test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
+  test('shows the stacked status bar, the sourcePrompt quote and both icon buttons', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap?epic=epic-9');
+    const head = page.locator('.esec-head');
+
+    await expect(head.getByRole('button', { name: 'Copy epic id' })).toBeVisible();
+    await expect(head.getByRole('link', { name: 'Open integration PR on GitHub' })).toHaveAttribute(
+      'href',
+      'https://github.com/example-org/demo-hub/pull/42',
+    );
+
+    await expect(page.locator('.bs-pbar').first()).toBeVisible();
+
+    const quote = page.locator('.bs-request-quote');
+    await expect(quote).toBeVisible();
+    await expect(quote.locator('.bs-request-quote__label')).toHaveText('Epic started from');
+    await expect(quote.locator('.bs-request-quote__text')).toContainText(
+      'Build an employee directory',
+    );
+  });
+
+  test('copying the epic id flips the button label to "Copied"', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.goto('/work/roadmap?epic=epic-9');
+    const copyBtn = page.locator('.esec-head').getByRole('button', { name: 'Copy epic id' });
+    await copyBtn.click();
+    await expect(page.locator('.esec-head').getByRole('button', { name: 'Copied' })).toBeVisible();
+  });
+
+  test('touch targets clear 44px at 375px: Copy id and Open PR icon buttons, no horizontal scroll', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/work/roadmap?epic=epic-9');
+    const head = page.locator('.esec-head');
+
+    for (const locator of [
+      head.getByRole('button', { name: 'Copy epic id' }),
+      head.getByRole('link', { name: 'Open integration PR on GitHub' }),
+    ]) {
+      const box = await locator.boundingBox();
+      expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+
+    const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    expect(scrollWidth).toBeLessThanOrEqual(clientWidth + 1);
+  });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`screenshot epic header server reads desktop/${theme}`, async ({ page }) => {
+      await setTheme(page, theme);
+      await page.setViewportSize(VIEWPORTS.desktop);
+      await page.goto('/work/roadmap?epic=epic-9');
+      await settleForShot(page, page.locator('.esec-head'));
+      await shoot(page, `work-roadmap-epic-header-desktop-${theme}`);
+    });
+  }
+});
+
 // DS4 S3 §2: phase mode's per-epic "Show waves" toggle — open by default on
 // an In-progress epic, closed on Done/To do (phase-6b, global-setup.ts: an
 // in-progress phase with demo-hub's epic-9/epic-10/epic-11).
