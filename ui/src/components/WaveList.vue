@@ -2,13 +2,18 @@
 // DS4 S3 §2 — WaveList: one <section> per wave (past, current, upcoming),
 // each with a visible heading. Used by EpicBlock in both phase mode (behind
 // the "Show waves" toggle) and epic mode (always shown, no toggle).
+//
+// DS4 S4 R3 — `compact` (default false): the phone layout's one-line-per-wave
+// mode. `compact` false must render byte-identical to before this prop
+// existed, so every new branch below only widens what already guarded
+// `wave.kind === 'past'`/`'current'`, never replaces it.
 import type { WaveInfo } from '../lib/waveList.js';
 import ProgressBar from './kit/ProgressBar.vue';
 import ProgressBarMini from './kit/ProgressBarMini.vue';
 import Tag from './kit/Tag.vue';
 import WaveTaskCard from './WaveTaskCard.vue';
 
-defineProps<{ waves: WaveInfo[] }>();
+withDefaults(defineProps<{ waves: WaveInfo[]; compact?: boolean }>(), { compact: false });
 const emit = defineEmits<{ select: [taskId: string] }>();
 
 function modifier(kind: WaveInfo['kind']): 'past' | 'cur' | 'next' {
@@ -28,7 +33,7 @@ function modifier(kind: WaveInfo['kind']): 'past' | 'cur' | 'next' {
         </span>
         <span class="tb-right">
           <ProgressBarMini
-            v-if="wave.kind === 'past'"
+            v-if="compact || wave.kind === 'past'"
             :value="wave.doneCount"
             :max="wave.taskCount"
             tone="success"
@@ -40,7 +45,7 @@ function modifier(kind: WaveInfo['kind']): 'past' | 'cur' | 'next' {
         </span>
       </div>
 
-      <template v-if="wave.kind === 'current'">
+      <template v-if="!compact && wave.kind === 'current'">
         <div class="barrow">
           <ProgressBar :segments="[{ tone: 'success', value: wave.pct }]" :label="`Wave ${wave.index + 1} progress`" />
           <span class="pnum bar-pct">{{ wave.pct }}%</span>
