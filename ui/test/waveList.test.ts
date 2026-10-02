@@ -186,7 +186,12 @@ describe('mobileEpicStatusLine() (DS4 S4 §1)', () => {
 
   it('reads "Loading" while the epic flow is still in flight', () => {
     expect(
-      mobileEpicStatusLine({ statusLabel: 'Loading', tasksTotal: null, tasksCompleted: null, waves: [] }),
+      mobileEpicStatusLine({
+        statusLabel: 'Loading',
+        tasksTotal: null,
+        tasksCompleted: null,
+        waves: [],
+      }),
     ).toBe('Loading');
   });
 
@@ -204,7 +209,12 @@ describe('mobileEpicStatusLine() (DS4 S4 §1)', () => {
 
   it('names the current wave for an in-progress epic', () => {
     const g = graph(
-      [node('t1', 'completed'), node('t2', 'completed'), node('t3', 'in-progress'), node('t4', 'todo')],
+      [
+        node('t1', 'completed'),
+        node('t2', 'completed'),
+        node('t3', 'in-progress'),
+        node('t4', 'todo'),
+      ],
       [['t1', 't2'], ['t3'], ['t4']],
     );
     const waves = buildWaveList(g);
