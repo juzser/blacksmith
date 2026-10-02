@@ -256,6 +256,7 @@ const factsRowText = computed(() => {
       <PageHeader
         :title="taskLabel(detail.task.taskId, detail.task.objective)"
         :description="objectiveDescription(detail.task.taskId, detail.task.objective)"
+        title-visible
       >
         <template #status>
           <Tag :tone="taskStatusKitTone(detail.task.taskStatus)" variant="subtle" size="sm">

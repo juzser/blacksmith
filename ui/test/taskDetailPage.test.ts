@@ -31,6 +31,13 @@ describe('TaskDetailPage.vue — screenshot gallery', () => {
     expect(SFC).toMatch(/a\.type === 'screenshot'/);
     expect(SFC).toMatch(/IMAGE_EXTENSIONS\.test\(a\.path\)/);
   });
+
+  // Operator fix: the crumb reads the plain taskId, but PageHeader's title
+  // is taskLabel() (the task name when there is one) — not a pure
+  // duplicate, so this page opts out of the default sr-only title.
+  it('keeps its PageHeader title visible, since it differs from the crumb', () => {
+    expect(SFC).toMatch(/<PageHeader[\s\S]{0,200}title-visible/);
+  });
 });
 
 // Task 2 (friendly role labels), re-skinned onto the kit in DS3 item 4: the

@@ -46,6 +46,14 @@
   --bs-accent-hover: #1e46b8;
   --bs-accent-pressed: #173a99;
   --bs-accent-subtle: #eaf1ff;
+  /* Primary button only (operator 2026-10-02): a bright yellow, dedicated
+     tokens so --bs-accent (links, focus rings, selection) stays untouched.
+     Text is dark in both themes — WCAG AA checked against bg/hover/pressed,
+     see the commit that introduced these for the ratios. */
+  --bs-btn-primary-bg: #f2c200;
+  --bs-btn-primary-bg-hover: #d9ad00;
+  --bs-btn-primary-bg-pressed: #bf9900;
+  --bs-btn-primary-text: #151619;
   --bs-link-text: var(--bs-text);
   --bs-link-underline: var(--bs-text-subtlest);
   --bs-tooltip-bg: #26272b;
@@ -209,6 +217,12 @@
   --bs-accent-hover: #9db7eb;
   --bs-accent-pressed: #b2c8f3;
   --bs-accent-subtle: #1b2435;
+  /* Flat/muted (desaturated) yellow in dark mode, same dedicated-token
+     rationale as the light block above. */
+  --bs-btn-primary-bg: #b89b4a;
+  --bs-btn-primary-bg-hover: #c7ac5c;
+  --bs-btn-primary-bg-pressed: #a68b3d;
+  --bs-btn-primary-text: #151619;
   --bs-link-text: var(--bs-text);
   --bs-link-underline: var(--bs-text-subtlest);
   --bs-tooltip-bg: var(--bs-surface-selected);

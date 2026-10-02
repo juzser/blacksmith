@@ -27,4 +27,25 @@ describe('kit/PageHeader.vue', () => {
     expect(PAGE_HEADER).toMatch(/bs-ph__title/);
     expect(PAGE_HEADER).not.toMatch(/ds-ph/);
   });
+
+  // Operator fix: the top bar's crumb already shows the page name, so the h1
+  // is visually hidden (sr-only) unless a page opts in via titleVisible
+  // (Task detail, whose title is the task name, not a crumb duplicate).
+  it('hides the title visually by default, keeping it for screen readers', () => {
+    expect(PAGE_HEADER).toMatch(/titleVisible\?:\s*boolean/);
+    expect(PAGE_HEADER).toMatch(/titleVisible:\s*false/);
+    expect(PAGE_HEADER).toMatch(/:class="\{ 'sr-only': !titleVisible \}"/);
+  });
+
+  // Fix round 2: a hidden title with no description/status/actions must not
+  // leave the `.bs-ph` wrapper (and its flex-item ancestors) as an in-flow
+  // item of the page's stack — that reserved the stack's gap even though the
+  // wrapper rendered zero visible height (work-kanban-desktop-dark.png).
+  it('skips the .bs-ph wrapper entirely when nothing is visible, rendering only the sr-only h1', () => {
+    expect(PAGE_HEADER).toMatch(/v-if="!isEmpty"\s+class="bs-ph"/);
+    expect(PAGE_HEADER).toMatch(/<h1 v-else class="bs-ph__title sr-only">/);
+    expect(PAGE_HEADER).toMatch(
+      /isEmpty\s*=\s*computed\(\s*\(\)\s*=>\s*!props\.titleVisible\s*&&\s*!props\.description\s*&&\s*!slots\.status\s*&&\s*!slots\.actions/,
+    );
+  });
 });

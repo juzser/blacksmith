@@ -17,6 +17,10 @@ const PRIMITIVES_CSS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-primitives.css'),
   'utf8',
 );
+const TOKENS_CSS = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'styles', 'bs-tokens.css'),
+  'utf8',
+);
 
 describe('kit/Button.vue', () => {
   it('declares the five variants from §2.1, nothing else', () => {
@@ -85,5 +89,42 @@ describe('.bs-btn primitive (bs-primitives.css) — anchor-safe', () => {
     const rule = PRIMITIVES_CSS.match(/\.bs-btn\s*\{([^}]*)\}/)?.[1];
     expect(rule).toBeTruthy();
     expect(rule).toMatch(/text-decoration:\s*none;/);
+  });
+});
+
+// Operator fix (2026-10-02): the primary button is a dedicated yellow, not
+// --bs-accent (links/focus/selection keep their blue). Dedicated tokens so
+// the two colour roles can never drift back together by accident.
+describe('.bs-btn--primary — dedicated yellow tokens, not --bs-accent', () => {
+  it('reads bg/hover/pressed/text from --bs-btn-primary-* tokens', () => {
+    const rule = PRIMITIVES_CSS.match(/\.bs-btn--primary\s*\{([^}]*)\}/)?.[1];
+    expect(rule).toMatch(/background:\s*var\(--bs-btn-primary-bg\);/);
+    expect(rule).toMatch(/color:\s*var\(--bs-btn-primary-text\);/);
+    expect(PRIMITIVES_CSS).toMatch(
+      /\.bs-btn--primary:hover\s*\{\s*background:\s*var\(--bs-btn-primary-bg-hover\);/,
+    );
+    expect(PRIMITIVES_CSS).toMatch(
+      /\.bs-btn--primary:active:not\(\[aria-disabled='true'\]\)\s*\{\s*background:\s*var\(--bs-btn-primary-bg-pressed\);/,
+    );
+  });
+
+  it('never reads --bs-accent, so links/focus rings/selection stay untouched', () => {
+    const rule = PRIMITIVES_CSS.slice(
+      PRIMITIVES_CSS.indexOf('.bs-btn--primary'),
+      PRIMITIVES_CSS.indexOf('.bs-btn--secondary'),
+    );
+    expect(rule).not.toMatch(/--bs-accent\b/);
+  });
+
+  it('defines all four tokens in both the light (:root) and dark (:root.dark) blocks', () => {
+    const darkIdx = TOKENS_CSS.indexOf(':root.dark {');
+    const light = TOKENS_CSS.slice(0, darkIdx);
+    const dark = TOKENS_CSS.slice(darkIdx);
+    for (const block of [light, dark]) {
+      expect(block).toMatch(/--bs-btn-primary-bg:\s*#[0-9a-f]{6};/);
+      expect(block).toMatch(/--bs-btn-primary-bg-hover:\s*#[0-9a-f]{6};/);
+      expect(block).toMatch(/--bs-btn-primary-bg-pressed:\s*#[0-9a-f]{6};/);
+      expect(block).toMatch(/--bs-btn-primary-text:\s*#[0-9a-f]{6};/);
+    }
   });
 });
