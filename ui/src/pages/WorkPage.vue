@@ -17,7 +17,10 @@ const route = useRoute();
 const router = useRouter();
 
 const segItems = computed(() =>
-  WORK_VIEWS.map((v) => ({ to: { path: v.path, query: switchQuery(route.query) }, label: v.label })),
+  WORK_VIEWS.map((v) => ({
+    to: { path: v.path, query: switchQuery(route.query) },
+    label: v.label,
+  })),
 );
 const radioOptions = WORK_VIEWS.map((v) => ({ value: v.value, label: v.label }));
 const currentView = computed(() => workViewFromRouteName(route.name));

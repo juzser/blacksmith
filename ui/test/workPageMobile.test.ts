@@ -5,7 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 const WORK_SRC = readFileSync(join(SRC_DIR, 'pages', 'WorkPage.vue'), 'utf8');
-const MOBILE_TOPBAR_SRC = readFileSync(join(SRC_DIR, 'components', 'kit', 'MobileTopBar.vue'), 'utf8');
+const MOBILE_TOPBAR_SRC = readFileSync(
+  join(SRC_DIR, 'components', 'kit', 'MobileTopBar.vue'),
+  'utf8',
+);
 const KANBAN_SRC = readFileSync(join(SRC_DIR, 'pages', 'KanbanPage.vue'), 'utf8');
 
 describe('WorkPage.vue phone overflow (uiux spec §3)', () => {
@@ -16,10 +19,7 @@ describe('WorkPage.vue phone overflow (uiux spec §3)', () => {
   });
 
   it('teleports the View radio group to the shared overflow target, before <router-view>', () => {
-    const template = WORK_SRC.slice(WORK_SRC.indexOf('<template>')).replace(
-      /<!--[\s\S]*?-->/g,
-      '',
-    );
+    const template = WORK_SRC.slice(WORK_SRC.indexOf('<template>')).replace(/<!--[\s\S]*?-->/g, '');
     const teleportIdx = template.indexOf('#bs-mtopbar-overflow-extra');
     const routerViewIdx = template.indexOf('<router-view');
     expect(teleportIdx).toBeGreaterThan(-1);
