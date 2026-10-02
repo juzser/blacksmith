@@ -141,6 +141,25 @@ const selectedPhaseData = computed(
   () => (milestones.value ?? []).find((m) => m.milestoneId === selectedPhase.value) ?? null,
 );
 
+/**
+ * Fix round 4 #1: the epic-only project's default selection (no milestones,
+ * `selectedPhaseData` is null) used to fall through to a fabricated
+ * zero-task label regardless of the epic's real tasks. Read the same
+ * `epicFlows` source `epicSections` uses below: loading while the flow
+ * hasn't resolved yet, "No tasks tracked" only once it really has 0 tasks.
+ */
+const selectedEpicData = computed(() => {
+  if (!selectedEpic.value) return null;
+  const flow = epicFlows.value.get(selectedEpic.value);
+  if (flow === undefined) return { loading: true as const, total: 0, completed: 0 };
+  if (flow === 'failed') return { loading: false as const, total: 0, completed: 0 };
+  return {
+    loading: false as const,
+    total: flow.nodes.length,
+    completed: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
+  };
+});
+
 /** Phase mode only (S2) — epic-standalone mode is S3. */
 const epicSections = computed(() => {
   const phase = selectedPhaseData.value;
@@ -239,7 +258,16 @@ const epicSections = computed(() => {
         :tasks-completed="selectedPhaseData.tasksCompleted"
         :epics="epicSections"
       />
-      <p v-else-if="selectedEpic" class="muted">{{ taskCountLabel(0, 0) }}</p>
+      <template v-else-if="selectedEpicData">
+        <Skeleton v-if="selectedEpicData.loading" width="140px" :height="14" /><!-- ds-allow-hardcode -->
+        <p v-else class="muted">
+          {{
+            selectedEpicData.total > 0
+              ? taskCountLabel(selectedEpicData.total, selectedEpicData.completed)
+              : 'No tasks tracked'
+          }}
+        </p>
+      </template>
     </div>
   </div>
 </template>
