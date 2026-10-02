@@ -6,12 +6,14 @@
    and `check_tokens.py` can point at each independently. No page imports
    ui/src/components/kit/ yet — see ui/docs/DESIGN.md, "Provenance". */
 
-/* Dense-UI link default (ds-spec.md §1.1 line 131): a bare <a>/RouterLink
-   underlines on hover only, not at rest — Home's "What the factory decided
-   recently" list underlined every row until this landed (operator
-   2026-10-02). Prose links are out of this kit's scope and keep the
-   browser's permanent underline; a more specific selector (.bs-btn, .bs-tag,
-   etc.) always wins the tie against this bare-element rule regardless. */
+/* Dense-UI link default (ds-spec.md §1.1 line 131): this bare `a` selector
+   applies to every anchor in the app, not just dense-UI ones — it underlines
+   on hover only, not at rest — Home's "What the factory decided recently"
+   list underlined every row until this landed (operator 2026-10-02). A more
+   specific selector (.bs-btn, .bs-tag, etc.) always wins the tie against
+   this bare-element rule. If prose content (rendered markdown) arrives
+   later, it must opt back into a permanent underline with its own scoped
+   rule — this one does not carve out an exception for it. */
 a {
   color: var(--bs-link-text);
   text-decoration: none;
