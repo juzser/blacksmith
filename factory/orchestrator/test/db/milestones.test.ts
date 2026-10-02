@@ -161,6 +161,13 @@ describe('milestones projection + roadmap queries', () => {
         tokensSpent: 2000, // task-1's task-result-recorded total_tokens
         tokensBudget: 4300, // sum of the 4 tasks' budget_tokens
       });
+      // task-3/task-4 are still open (escalated/confirmed finding, never
+      // terminal) -- finishedAt stays null even though task-1 completed.
+      expect(phaseA?.startedAt).not.toBeNull();
+      expect(phaseA?.finishedAt).toBeNull();
+      expect(phaseA?.epics).toEqual([
+        { epicId: EPIC_ID, startedAt: phaseA?.startedAt, finishedAt: null },
+      ]);
 
       const phaseB = page.find((m) => m.milestoneId === 'phase-b');
       expect(phaseB).toMatchObject({
@@ -169,6 +176,202 @@ describe('milestones projection + roadmap queries', () => {
         tokensSpent: 0,
         tokensBudget: null,
       });
+      // No epics mapped and no tasks -- no activity to derive a date from.
+      expect(phaseB?.startedAt).toBeNull();
+      expect(phaseB?.finishedAt).toBeNull();
+      expect(phaseB?.epics).toEqual([]);
+    });
+  });
+
+  describe('roadmapPage() dates (startedAt/finishedAt)', () => {
+    const DATES_ROADMAP = `# Roadmap
+
+## Phase C — All done
+- id: phase-c
+- status: completed
+- epics: [epic-dates]
+- goal: Two tasks, both merged.
+`;
+
+    let clock: number;
+
+    beforeEach(() => {
+      clock = Date.now();
+      vi.useFakeTimers({ toFake: ['Date'] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function tick(): Promise<string> {
+      clock += 60_000;
+      vi.setSystemTime(new Date(clock));
+      const events = await readEvents(SESSION_ID, { stateDir });
+      const last = events[events.length - 1];
+      if (!last) throw new Error('expected the fixture log to be non-empty');
+      return last.event_id;
+    }
+
+    async function planTask(taskId: string): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'planner',
+          event_type: 'task-added',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            epic_id: 'epic-dates',
+            case: 'feature',
+            origin: 'user',
+            task_status: 'todo',
+            plan_version: 1,
+            objective: 'Ship it.',
+            claims: [`src/${taskId.replace('/', '-')}.ts`],
+            budget_tokens: 1000,
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    async function dispatchTask(taskId: string): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'planner',
+          event_type: 'dispatch_decision',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            agent_role: 'coder',
+            provider: 'claude',
+            model_tier: 'small',
+            model: 'claude-haiku-4-5',
+            reason: 'ship it',
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    async function mergeTasks(taskIds: string[]): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'wave-merged',
+          task_id: taskIds[0],
+          plan_version: 1,
+          causal_parent: parent,
+          payload: { epic_id: 'epic-dates', task_ids: taskIds },
+        },
+        { stateDir },
+      );
+    }
+
+    async function errorLog(taskId: string): Promise<void> {
+      const parent = await tick();
+      await appendEvent(
+        {
+          session_id: SESSION_ID,
+          actor: 'system',
+          event_type: 'error-logged',
+          task_id: taskId,
+          plan_version: 1,
+          causal_parent: parent,
+          payload: {
+            error: 'execution.tool-failure',
+            severity: 'S2-major',
+            task_ref: taskId,
+            detail: 'a later flow (e.g. lessons/audit) named this already-done task',
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    it('reports startedAt from the earliest DISPATCH, not the earliest task-added (planning != starting)', async () => {
+      await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
+      await planTask('epic-dates/task-a');
+      const dbPathNoDispatch = path.join(dbDir, 'no-dispatch.db');
+      await rebuild(dbPathNoDispatch, 'all', { stateDir, roadmapPath });
+      const noDispatchHandle = openDb(dbPathNoDispatch);
+      const noDispatchPage = roadmapPage(noDispatchHandle.db);
+      noDispatchHandle.sqlite.close();
+      const noDispatchPhase = noDispatchPage.find((m) => m.milestoneId === 'phase-c');
+      // Planned but never dispatched: not "not scheduled" as started.
+      expect(noDispatchPhase?.startedAt).toBeNull();
+      expect(noDispatchPhase?.epics).toEqual([
+        { epicId: 'epic-dates', startedAt: null, finishedAt: null },
+      ]);
+
+      await dispatchTask('epic-dates/task-a');
+      const dispatchTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      const phaseC = page.find((m) => m.milestoneId === 'phase-c');
+      expect(phaseC?.startedAt).toBe(dispatchTs);
+      expect(phaseC?.finishedAt).toBeNull();
+    });
+
+    it('reports finishedAt from the first terminal transition, unmoved by a LATER error-logged naming an already-done task', async () => {
+      await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
+      await planTask('epic-dates/task-a'); // T0
+      await dispatchTask('epic-dates/task-a'); // T1
+      const startedTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+
+      await mergeTasks(['epic-dates/task-a']); // T2
+      const mergedTs = (await readEvents(SESSION_ID, { stateDir })).at(-1)?.record.ts;
+
+      await errorLog('epic-dates/task-a'); // T3 — names the already-merged task
+
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      const phaseC = page.find((m) => m.milestoneId === 'phase-c');
+      expect(phaseC?.startedAt).toBe(startedTs);
+      // Drift regression: finishedAt must stay T2, never the T3 touch.
+      expect(phaseC?.finishedAt).toBe(mergedTs);
+      expect(phaseC?.epics).toEqual([
+        { epicId: 'epic-dates', startedAt: startedTs, finishedAt: mergedTs },
+      ]);
+    });
+
+    it('leaves finishedAt null for a phase (and its epic) while one of its tasks is still open', async () => {
+      await writeFile(roadmapPath, DATES_ROADMAP, 'utf8');
+      await planTask('epic-dates/task-a');
+      await dispatchTask('epic-dates/task-a');
+      await mergeTasks(['epic-dates/task-a']);
+
+      await planTask('epic-dates/task-b');
+      await dispatchTask('epic-dates/task-b'); // dispatched, never merged
+
+      const dbPath = path.join(dbDir, 'smith.db');
+      await rebuild(dbPath, 'all', { stateDir, roadmapPath });
+      const handle = openDb(dbPath);
+      const page = roadmapPage(handle.db);
+      handle.sqlite.close();
+
+      const phaseC = page.find((m) => m.milestoneId === 'phase-c');
+      expect(phaseC?.finishedAt).toBeNull();
+      expect(phaseC?.epics).toEqual([
+        { epicId: 'epic-dates', startedAt: phaseC?.startedAt, finishedAt: null },
+      ]);
     });
   });
 

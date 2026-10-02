@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `terminal_at` text;

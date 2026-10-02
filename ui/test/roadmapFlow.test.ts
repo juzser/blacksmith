@@ -25,6 +25,9 @@ function m(over: Partial<MilestoneProgress> & { milestoneId: string }): Mileston
     unmeasured: 0,
     project: 'black-smith',
     kind: 'factory',
+    startedAt: null,
+    finishedAt: null,
+    epics: [],
     ...over,
   };
 }
