@@ -40,7 +40,6 @@ import {
   type KitTone,
   milestoneStatusKitTone,
   milestoneStatusLabel,
-  taskStatusKitTone,
 } from '../lib/taxonomy.js';
 
 const router = useRouter();
@@ -178,15 +177,17 @@ const epicSections = computed(() => {
           : anyInFlight
             ? 'in-progress'
             : 'todo';
-    const tone =
-      total > 0
-        ? taskStatusKitTone(
-            flow.nodes.find((n) => !isTaskOver(n.taskStatus))?.taskStatus ?? 'completed',
-          )
-        : 'neutral';
+    // Fix round 2 #3: the label is always one of a fixed three ("Done" /
+    // "In progress" / "To do"), so the tone must key off that same label,
+    // not off whichever specific task status happens to be driving
+    // `anyInFlight` — a `reviewing`/`grading` task made the epic Tag purple
+    // while still reading "In progress", disagreeing with the phase Tag
+    // right above it (spec: "the progress tone for 'In progress'").
+    const statusTone: KitTone =
+      status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral';
     return {
       epicId,
-      statusTone: status === 'completed' ? ('done' as KitTone) : tone,
+      statusTone,
       statusLabel:
         status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
       tasksTotal: total,
