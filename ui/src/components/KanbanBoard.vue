@@ -262,25 +262,16 @@ defineExpose({ focusFirstCard });
 
 <template>
   <div ref="boardEl" class="bs-kanban-board" @keydown="onBoardKeydown">
-    <div v-if="!isPhoneWidth" class="bs-kanban-board__toolbar">
+    <!-- The display-options trigger has no row of its own: it teleports into
+         whichever toolbar owns this width — KanbanPage's page toolbar on
+         desktop (sharing a row with the Epic select and Refresh, per the
+         ds-review.html Work/Kanban desktop frame), the MobileTopBar overflow
+         menu on phone (`as-menu-item`, the same Teleport mechanism the kit's
+         own overlay components already use). KanbanBoard keeps owning the
+         display-options state either way — only the mount point moves. -->
+    <Teleport :to="isPhoneWidth ? '#bs-mtopbar-overflow-extra' : '#bs-kanban-page-toolbar-extra'">
       <KanbanDisplayOptions
-        :open="optionsOpen"
-        :summary="options.summary"
-        :group-by="options.groupBy"
-        :hidden="options.hidden"
-        @open="optionsOpen = true"
-        @close="optionsOpen = false"
-        @update:summary="setSummary"
-        @update:group-by="setGroupBy"
-        @restore="restoreColumn"
-      />
-    </div>
-    <!-- ds-spec.md §3.1 Work/Kanban row: the display-options trigger moves
-         into the MobileTopBar overflow menu on phone, via the same Teleport
-         mechanism the kit's own overlay components already use. -->
-    <Teleport v-if="isPhoneWidth" to="#bs-mtopbar-overflow-extra">
-      <KanbanDisplayOptions
-        as-menu-item
+        :as-menu-item="isPhoneWidth"
         :open="optionsOpen"
         :summary="options.summary"
         :group-by="options.groupBy"

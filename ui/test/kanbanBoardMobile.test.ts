@@ -39,8 +39,8 @@ describe('KanbanBoard.vue — mobile column switcher (§3.1 Work/Kanban row)', (
     expect(SRC).toMatch(/v-if="!isPhoneWidth" class="bs-kanban-col__head"/);
   });
 
-  it('hides the desktop toolbar (display options trigger) on phone', () => {
-    expect(SRC).toMatch(/v-if="!isPhoneWidth" class="bs-kanban-board__toolbar"/);
+  it('no longer renders a standalone desktop toolbar row for the display-options trigger', () => {
+    expect(SRC).not.toMatch(/bs-kanban-board__toolbar/);
   });
 
   it('renders compact cards on phone', () => {
@@ -53,8 +53,10 @@ describe('KanbanBoard.vue — mobile column switcher (§3.1 Work/Kanban row)', (
     );
   });
 
-  it('teleports the display-options control into the MobileTopBar overflow menu on phone', () => {
+  it('teleports the display-options control to the MobileTopBar overflow menu on phone, the page toolbar on desktop', () => {
     expect(SRC).toMatch(/<Teleport[\s\S]{0,60}isPhoneWidth[\s\S]{0,400}KanbanDisplayOptions/);
+    expect(SRC).toMatch(/#bs-mtopbar-overflow-extra/);
+    expect(SRC).toMatch(/#bs-kanban-page-toolbar-extra/);
   });
 
   it('gives each mobile tab a stable id and points it at its panel via aria-controls', () => {

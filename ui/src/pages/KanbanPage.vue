@@ -148,6 +148,11 @@ function goToTask(taskId: string) {
         <Button v-if="milestoneFilter" variant="ghost" size="sm" @click="milestoneFilter = null">
           Clear milestone filter
         </Button>
+        <!-- KanbanBoard teleports its display-options trigger here on desktop
+             (`#bs-kanban-page-toolbar-extra`), so the board's one control
+             shares this row with the Epic select instead of a toolbar row of
+             its own. -->
+        <span id="bs-kanban-page-toolbar-extra" />
         <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
       </div>
     </div>
