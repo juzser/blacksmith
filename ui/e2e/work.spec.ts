@@ -62,6 +62,22 @@ test.describe('Work switcher', () => {
     await expect(radiogroup).toBeHidden();
   });
 
+  test('phone: the overflow popover stays fully inside the viewport (DS4 S1 round 2, S2-major finding 5)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const panel = page.getByRole('dialog', { name: 'More actions' });
+    await expect(panel).toBeVisible();
+
+    const box = await panel.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(VIEWPORTS.mobile.width);
+  });
+
   test('no horizontal scroll at 375px on either view', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     for (const path of ['/work/kanban', '/work/roadmap']) {

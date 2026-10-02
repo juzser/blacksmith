@@ -797,15 +797,16 @@
 /* SegmentedControl (ds4-plan.md S1, Work's Kanban/Roadmap switch): two
    RouterLinks, no accent fill on the selected item (§1.9 accent budget) —
    --bs-surface-selected + aria-current="page" is the cue instead, same as
-   the rest of this kit's non-accent active states. One size (md): 36px row
-   height, but items meet --bs-touch (44px) even while the control itself is
-   hidden ≤640px, so a future non-hidden caller stays safe. */
+   the rest of this kit's non-accent active states. One size (md): the row
+   is exactly --bs-touch (44px) tall so the item's own --bs-touch min-height
+   never exceeds it — a shorter row let the selected item's fill poke past
+   the 1px border (visual pass, DS4 S1 round 2, S2-major finding 1). */
 .bs-segctl {
   display: flex;
   border: 1px solid var(--bs-border);
   border-radius: var(--bs-radius-md);
   background: var(--bs-surface);
-  height: 36px;
+  height: var(--bs-touch);
 }
 .bs-segctl__item {
   flex: 1;
@@ -1330,6 +1331,17 @@
 }
 .bs-mtopbar__project {
   max-width: 12ch;
+}
+/* .bs-mtopbar__project itself is display: contents (.bs-mproject, below) so
+   the "More actions" overflow trigger reaches the topbar's true right edge
+   — a display: contents box ignores its own margin (and width), so the
+   push-right has to land on its one real child, .bs-mproject__trigger, or
+   the switcher and everything after it (the dot, the overflow trigger)
+   stays wherever it falls in normal flow, leaving the trigger mid-topbar
+   with too little room to its left for the overflow panel's min-width and
+   clipping it off the left edge (visual pass, DS4 S1 round 2, S2-major
+   finding 5). */
+.bs-mtopbar__project > .bs-mproject__trigger {
   margin-left: auto;
 }
 .bs-mtopbar__dot {

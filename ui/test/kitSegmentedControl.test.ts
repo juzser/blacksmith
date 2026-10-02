@@ -50,6 +50,13 @@ describe('.bs-segctl CSS (uiux spec §1)', () => {
     expect(match?.[0]).toMatch(/min-height: var\(--bs-touch\)/);
   });
 
+  it('the control itself is at least as tall as the item min-height, so the selected fill cannot overflow the border', () => {
+    const controlMatch = CSS.match(/\.bs-segctl \{[\s\S]*?\}/);
+    const itemMatch = CSS.match(/\.bs-segctl__item \{[\s\S]*?\}/);
+    expect(controlMatch?.[0]).toMatch(/height: var\(--bs-touch\)/);
+    expect(itemMatch?.[0]).toMatch(/min-height: var\(--bs-touch\)/);
+  });
+
   it('uses the kit default focus-visible ring, not a component-scoped override', () => {
     const match = CSS.match(/\.bs-segctl__item:focus-visible \{[\s\S]*?\}/);
     expect(match?.[0]).toMatch(
