@@ -15,7 +15,7 @@
 import { Clock, Quote } from '@lucide/vue';
 import { computed } from 'vue';
 import type { KanbanTask } from '../lib/api.js';
-import { taskLabel } from '../lib/format.js';
+import { shortTaskId, taskLabel } from '../lib/format.js';
 import {
   agentChip,
   attemptLabel,
@@ -40,7 +40,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ select: [taskId: string] }>();
 
-const shortId = computed(() => props.task.taskId.split('/').pop() ?? props.task.taskId);
+const shortId = computed(() => shortTaskId(props.task.taskId));
 const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
 const chips = computed(() => cardChips(props.task, props.groupBy));
 // Audit finding 5: the meta-row role label duplicated the same role

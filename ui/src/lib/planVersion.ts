@@ -18,8 +18,10 @@ export interface PlanVersionOption {
  */
 export function planVersionOptions(graph: FlowGraph | null): PlanVersionOption[] {
   const versions = [...new Set(graph?.planVersions ?? [])].sort((a, b) => b - a);
+  const latest = versions[0];
+  const defaultLabel = latest === undefined ? 'Current plan' : `Plan: latest (v${latest})`;
   return [
-    { value: '', label: 'Current plan' },
+    { value: '', label: defaultLabel },
     ...versions.map((v) => ({ value: String(v), label: `v${v}` })),
   ];
 }

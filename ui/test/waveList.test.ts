@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { FlowEdge, FlowGraph, FlowNode } from '../src/lib/api.js';
-import { buildWaveList, dependencyLine, epicStatusFromFlow } from '../src/lib/waveList.js';
+import type { FlowEdge, FlowGraph, FlowNode, MilestoneProgress } from '../src/lib/api.js';
+import {
+  buildWaveList,
+  dependencyLine,
+  epicProject,
+  epicStatusFromFlow,
+} from '../src/lib/waveList.js';
 
 function node(taskId: string, taskStatus: string, workingAgentRole: string | null = null): FlowNode {
   return {
@@ -108,5 +113,28 @@ describe('dependencyLine() (DS4 S3 §2/§6)', () => {
       { task: 't3', dependsOn: 't2', edgeType: 'claim-order', edgeProvenance: 'plan' },
     ];
     expect(dependencyLine(edges, 't3')).toBe('After t1 · uses its output +1 more');
+  });
+});
+
+// DS4 S3 fix round 1 finding 3: epic mode passed the project-filter value
+// straight into EpicBlock, so "All projects" (no filter) never showed a Tag
+// at all. epicProject() derives it from the epic's own milestone instead.
+function milestone(project: string, epicIds: string[]): Pick<MilestoneProgress, 'project' | 'epicIds'> {
+  return { project, epicIds };
+}
+
+describe('epicProject() (DS4 S3 fix round 1 finding 3)', () => {
+  it('finds the project of the milestone that lists this epic', () => {
+    const milestones = [milestone('black-smith', ['epic-1']), milestone('demo-hub', ['epic-9'])];
+    expect(epicProject(milestones, 'epic-9', null)).toBe('demo-hub');
+  });
+
+  it('falls back to the given value when no milestone lists the epic', () => {
+    const milestones = [milestone('black-smith', ['epic-1'])];
+    expect(epicProject(milestones, 'epic-9', 'fallback-project')).toBe('fallback-project');
+  });
+
+  it('falls back to null when no milestone lists the epic and no fallback is given', () => {
+    expect(epicProject([], 'epic-9', null)).toBeNull();
   });
 });

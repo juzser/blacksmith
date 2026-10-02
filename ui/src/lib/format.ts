@@ -326,6 +326,16 @@ const SHORT_TASK_LABEL_MAX = 60;
  * capitalizes the first letter. The raw id is not lost — callers keep it in
  * a `title` tooltip.
  */
+/**
+ * The last `/`-separated segment of a task id — `KanbanTaskCard.vue`'s own
+ * `shortId` computed, pulled out here so `WaveTaskCard.vue` (DS4 S3 fix
+ * round 1 finding 4) can show the same id without a second copy of the
+ * one-liner.
+ */
+export function shortTaskId(taskId: string): string {
+  return taskId.split('/').pop() ?? taskId;
+}
+
 export function taskLabel(taskId: string, title?: string): string {
   const trimmedTitle = title?.trim();
   if (trimmedTitle && trimmedTitle.length <= SHORT_TASK_LABEL_MAX) return trimmedTitle;

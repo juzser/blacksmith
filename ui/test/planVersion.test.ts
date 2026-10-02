@@ -28,13 +28,13 @@ describe('planVersionOptions() (D-165)', () => {
     // The v2 plan is what is being shown; v1 is what the operator wants back.
     const options = planVersionOptions(graph([2, 1], [node('epic-b/task-b2', 2)]));
     expect(options).toEqual([
-      { value: '', label: 'Current plan' },
+      { value: '', label: 'Plan: latest (v2)' },
       { value: '2', label: 'v2' },
       { value: '1', label: 'v1' },
     ]);
   });
 
-  it('always leads with the unfiltered default', () => {
+  it('always leads with the unfiltered default, "Current plan" when there is no version to name', () => {
     expect(planVersionOptions(null)).toEqual([{ value: '', label: 'Current plan' }]);
     expect(planVersionOptions(graph([], [node('epic-a/task-a1', null)]))).toEqual([
       { value: '', label: 'Current plan' },
@@ -43,6 +43,11 @@ describe('planVersionOptions() (D-165)', () => {
 
   it('sorts newest first and drops duplicates, whatever order the server sent', () => {
     const options = planVersionOptions(graph([1, 3, 1, 2], []));
-    expect(options.map((o) => o.label)).toEqual(['Current plan', 'v3', 'v2', 'v1']);
+    expect(options.map((o) => o.label)).toEqual([
+      'Plan: latest (v3)',
+      'v3',
+      'v2',
+      'v1',
+    ]);
   });
 });

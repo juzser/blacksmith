@@ -3,7 +3,7 @@
 // out of the .vue file so the three-way past/current/upcoming split and the
 // dependency-line composition are unit-tested under vitest's node
 // environment rather than resting on a mount.
-import type { FlowEdge, FlowGraph, FlowNode } from './api.js';
+import type { FlowEdge, FlowGraph, FlowNode, MilestoneProgress } from './api.js';
 import { edgeWords } from './edgeWords.js';
 import { isTaskOver, type KitTone } from './taxonomy.js';
 
@@ -41,6 +41,23 @@ export function epicStatusFromFlow(flow: Pick<FlowGraph, 'nodes'>): EpicStatus {
     statusTone: status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral',
     statusLabel: status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
   };
+}
+
+/**
+ * DS4 S3 fix round 1 finding 3 — epic mode's Tag used the project-filter
+ * value directly, which is empty under "All projects"; `FlowGraph` carries
+ * no project field to fall back on either. Derived instead from the
+ * roadmap's own milestones, each of which already names the project its
+ * epics belong to. Falls back to the given value only when no milestone
+ * lists this epic (a closed epic the current roadmap no longer shows).
+ */
+export function epicProject(
+  milestones: Pick<MilestoneProgress, 'project' | 'epicIds'>[],
+  epicId: string,
+  fallback: string | null,
+): string | null {
+  const milestone = milestones.find((m) => m.epicIds.includes(epicId));
+  return milestone?.project ?? fallback;
 }
 
 export interface WaveInfo {
