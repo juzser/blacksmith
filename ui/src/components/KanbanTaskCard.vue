@@ -17,6 +17,7 @@ import { computed } from 'vue';
 import type { KanbanTask } from '../lib/api.js';
 import { taskLabel } from '../lib/format.js';
 import {
+  agentChip,
   attemptLabel,
   cardChips,
   dependencyChainText,
@@ -42,7 +43,14 @@ const emit = defineEmits<{ select: [taskId: string] }>();
 const shortId = computed(() => props.task.taskId.split('/').pop() ?? props.task.taskId);
 const title = computed(() => taskLabel(props.task.taskId, props.task.title ?? undefined));
 const chips = computed(() => cardChips(props.task, props.groupBy));
-const showRoleLabel = computed(() => props.groupBy !== 'role' && props.task.agentRole);
+// Audit finding 5: the meta-row role label duplicated the same role
+// AgentChip already shows ("Finding checker" next to "Finding checker ·
+// working"). Gate on the same agentChip() AgentChip.vue itself renders from,
+// so the label only shows when there is no chip to carry the role.
+const chip = computed(() => agentChip(props.task));
+const showRoleLabel = computed(
+  () => props.groupBy !== 'role' && !!props.task.agentRole && !chip.value,
+);
 const footerDependency = computed(() => dependencyChainText(props.task.dependencies));
 const showSummary = computed(() => !!props.summaryEnabled && !!props.task.requestFirstLine);
 const attemptLabelText = computed(() => attemptLabel(props.task));
@@ -89,13 +97,12 @@ function onKeydown(event: KeyboardEvent) {
 
     <div v-if="chips.chips.length > 0" class="bs-kanban-card__row bs-kanban-card__chips">
       <Tag
-        v-for="chip in chips.chips.slice(0, compact ? 1 : 2)"
-        :key="chip.text"
-        :tone="chip.tone ?? 'neutral'"
-        variant="outline"
+        v-for="cardChip in chips.chips.slice(0, compact ? 1 : 2)"
+        :key="cardChip.text"
+        :tone="cardChip.tone ?? 'neutral'"
         size="sm"
       >
-        {{ chip.text }}
+        {{ cardChip.text }}
       </Tag>
       <span v-if="!compact && chips.overflow > 0" class="bs-kanban-card__overflow">+{{ chips.overflow }}</span>
     </div>

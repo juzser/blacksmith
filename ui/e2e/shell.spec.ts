@@ -135,6 +135,48 @@ test.describe('DS1 shell nav (ds-spec.md §3, §3.1)', () => {
     );
   });
 
+  // ds-spec.md line 722: --bs-touch is 44px. IconButtons render at their "sm"
+  // or "md" box (22/28px, bs-primitives.css), below that floor until the
+  // ≤640px .bs-iconbtn media rule grows the hit area (operator 2026-10-02).
+  // Collected generically (`.bs-iconbtn:visible`) rather than a hard-coded
+  // list, so a new icon button anywhere in the shell is covered automatically
+  // (review follow-up, 2026-10-02).
+  test('every visible .bs-iconbtn meets the 44px touch target at the mobile viewport', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+
+    async function measureVisible(screen: string) {
+      const buttons = page.locator('.bs-iconbtn:visible');
+      const count = await buttons.count();
+      for (let i = 0; i < count; i++) {
+        const el = buttons.nth(i);
+        const name = (await el.getAttribute('aria-label')) ?? `button #${i}`;
+        const box = await el.boundingBox();
+        expect(box?.width, `${screen}: "${name}" is narrower than 44px`).toBeGreaterThanOrEqual(44);
+        expect(box?.height, `${screen}: "${name}" is shorter than 44px`).toBeGreaterThanOrEqual(44);
+      }
+      return count;
+    }
+
+    // Home: only the shell's own MobileTopBar trigger renders here.
+    await page.goto('/overview');
+    await measureVisible('Home');
+
+    // Kanban: the column "..." menu only exists at desktop width (the phone
+    // layout swaps the column head for tabs instead), so it never reaches
+    // `:visible` here — the generic locator reflects that without special-
+    // casing it.
+    await page.goto('/kanban');
+    await measureVisible('Kanban (overflow closed)');
+
+    // Opening MobileTopBar's overflow menu reveals Pause/Resume, the theme
+    // toggle, the disabled Settings placeholder, and (teleported in by
+    // KanbanBoard) the display-options trigger.
+    await page.getByRole('button', { name: 'More actions' }).click();
+    await measureVisible('Kanban (overflow open, incl. display options)');
+  });
+
   test('the breadcrumb updates immediately on navigation, before page data arrives', async ({
     page,
   }) => {
