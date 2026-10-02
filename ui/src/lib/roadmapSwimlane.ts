@@ -197,10 +197,16 @@ export function buildAxisMarks(bounds: { start: number; end: number }): MonthMar
   const unit = chooseTickUnit(bounds);
   const span = bounds.end - bounds.start;
   if (unit === 'minute') {
-    return buildTimeMarks(bounds, pickStep(span, [MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS]));
+    return buildTimeMarks(
+      bounds,
+      pickStep(span, [MINUTE_MS, 5 * MINUTE_MS, 10 * MINUTE_MS, 15 * MINUTE_MS, 30 * MINUTE_MS]),
+    );
   }
   if (unit === 'hour') {
-    return buildTimeMarks(bounds, pickStep(span, [HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 4 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS]));
+    return buildTimeMarks(
+      bounds,
+      pickStep(span, [HOUR_MS, 2 * HOUR_MS, 3 * HOUR_MS, 4 * HOUR_MS, 6 * HOUR_MS, 12 * HOUR_MS]),
+    );
   }
   if (unit === 'day') return buildFixedStepMarks(bounds, DAY_MS);
   if (unit === 'week') return buildFixedStepMarks(bounds, WEEK_MS);
