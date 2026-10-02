@@ -66,12 +66,19 @@ describe('bs-primitives.css — roadmap mobile waves disclosure (fix round 1 #2,
 
 describe('bs-primitives.css — WaveList compact flat rows (fix round 1 #4)', () => {
   it('strips the card chrome under the compact modifier, border-bottom only', () => {
-    const decl = rule('.wave-list--compact .wave,\\s*\\n?\\s*.wave-list--compact .wave.cur,\\s*\\n?\\s*.wave-list--compact .wave.next');
+    const decl = rule(
+      '.wave-list--compact .wave,\\s*\\n?\\s*.wave-list--compact .wave.cur,\\s*\\n?\\s*.wave-list--compact .wave.next',
+    );
     const compactBlock = CSS.slice(CSS.indexOf('.wave-list--compact .wave'));
     expect(compactBlock).toMatch(/border:\s*0/);
     expect(compactBlock).toMatch(/background:\s*none/);
     expect(compactBlock).toMatch(/border-bottom:\s*1px solid var\(--bs-border\)/);
     void decl;
+  });
+
+  it('keeps the compact row at the --bs-touch floor (roadmap.spec.ts touch-target regression)', () => {
+    const compactBlock = CSS.slice(CSS.indexOf('.wave-list--compact .wave'));
+    expect(compactBlock).toMatch(/min-height:\s*var\(--bs-touch\)/);
   });
 
   it('removes the separator on the last row', () => {

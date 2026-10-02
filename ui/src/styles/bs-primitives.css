@@ -2789,6 +2789,9 @@ summary.bs-inbox__group-head {
 .wave-list--compact .wave,
 .wave-list--compact .wave.cur,
 .wave-list--compact .wave.next {
+  display: flex;
+  align-items: center;
+  min-height: var(--bs-touch);
   background: none;
   border: 0;
   border-radius: 0;

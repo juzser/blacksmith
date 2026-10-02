@@ -111,9 +111,7 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
   // S4 fix round 1 #5 — a long epic id must ellipsis, not overflow the
   // page. Stubbed via route interception (not a fixture change) so the
   // shared multiProjectFixture.ts stays untouched.
-  test('a long epic id ellipsizes without causing horizontal scroll at 375px', async ({
-    page,
-  }) => {
+  test('a long epic id ellipsizes without causing horizontal scroll at 375px', async ({ page }) => {
     const LONG_EPIC_ID =
       'epic-9-with-an-identifier-so-long-no-phone-screen-should-ever-have-to-fit-it-on-one-line';
     await page.route('**/api/roadmap**', async (route) => {
