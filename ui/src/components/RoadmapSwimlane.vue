@@ -17,8 +17,28 @@ const emit = defineEmits<{ selectPhase: [string]; selectEpic: [string] }>();
 
 <template>
   <div class="rm-scroll" tabindex="0" role="region" aria-label="Roadmap, scrolls sideways">
+    <div v-if="swimlane.months.length > 0" class="months" aria-hidden="true">
+      <span />
+      <div class="months-row">
+        <span
+          v-for="m in swimlane.months"
+          :key="`${m.label}:${m.left}`"
+          class="months-mark"
+          :style="{ left: `${m.left}%` }"
+          >{{ m.label }}</span
+        >
+      </div>
+    </div>
     <div class="lane" aria-label="Roadmap">
-      <span class="nowline" aria-hidden="true" :style="{ left: `${swimlane.nowOffset}%` }" />
+      <div class="now-track" aria-hidden="true">
+        <span />
+        <div class="now-track__col">
+          <span class="nowline" :style="{ left: `${swimlane.nowOffset}%` }">
+            <span class="nowline__dot" />
+            <span class="nowline__label">Now</span>
+          </span>
+        </div>
+      </div>
       <template v-for="row in swimlane.rows" :key="`${row.kind}:${row.id}`">
         <button
           type="button"

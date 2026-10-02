@@ -2335,6 +2335,14 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
 }
 
+/* Fix round 1 #5 — the page-level stack wrapping the swimlane and
+   EpicBlock, so the two never sit flush against each other. */
+.rm-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-4);
+}
+
 /* DS4 S2 — Roadmap swimlane (RoadmapSwimlane.vue). Class names match
    ui/docs/ds-review.html's #p-roadmap mock so the app renders pixel-for-pixel
    against the signed-off reference. `.rm-scroll` is the only region that
@@ -2342,16 +2350,50 @@ summary.bs-inbox__group-head {
 .rm-scroll {
   overflow-x: auto;
   overflow-y: hidden;
+  /* Also-fix: the one source for the label column width. `.lrow`, `.months`
+     and `.now-track` all read this instead of repeating — or deriving pixel
+     math from — the literal 160px. `.months` and `.lane` are siblings here,
+     so it lives on their shared parent, not on `.lane` alone. */
+  --rm-label-col: 160px;
 }
 .lane {
   position: relative;
-  min-width: 720px;
+  /* Fix round 1 #9: spec and mock both say 520px; the mock frame never needs
+     more, so 520px (not the prior 720px) is what ships. */
+  min-width: 520px;
   display: flex;
   flex-direction: column;
 }
+/* Fix round 1 #1 — month labels share `.lrow`'s own grid columns (label col
+   + 1fr track col), so `.months-row`'s 1fr is the exact same coordinate
+   space `.track`'s bars use — a mark's `left`% lands on the same axis as a
+   bar's, no separate pixel math. */
+.months {
+  display: grid;
+  grid-template-columns: var(--rm-label-col) 1fr;
+  gap: var(--bs-space-3);
+  padding: 0 var(--bs-space-3);
+  margin-bottom: var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
+  font-weight: 500;
+}
+.months-row {
+  position: relative;
+  height: 1em;
+}
+.months-mark {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.months-mark:first-child {
+  transform: none;
+}
 .lrow {
   display: grid;
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: var(--rm-label-col) 1fr;
   align-items: center;
   gap: var(--bs-space-3);
   width: 100%;
@@ -2366,14 +2408,20 @@ summary.bs-inbox__group-head {
   cursor: pointer;
 }
 .lrow.sub {
-  grid-template-columns: 160px 1fr;
+  grid-template-columns: var(--rm-label-col) 1fr;
   padding-left: var(--bs-space-6);
 }
 .lrow.sel {
   background: var(--bs-surface-selected);
+  /* Fix round 1 #3 — a left rule marks the selected row, not just a fill. */
+  box-shadow: inset 2px 0 0 var(--bs-border-bold);
 }
 .lrow:hover {
   background: var(--bs-surface-sunken);
+}
+.lrow.sel:hover {
+  /* Fix round 1 #3 — hover must not erase the selected background. */
+  background: var(--bs-surface-selected);
 }
 .lname {
   font-size: var(--bs-text-sm);
@@ -2414,13 +2462,59 @@ summary.bs-inbox__group-head {
   border: 1px dashed var(--bs-border-bold);
   border-radius: var(--bs-radius-sm);
 }
+/* Fix round 1 #2 / also-fix — `.now-track` repeats `.lrow`'s own grid (same
+   `--rm-label-col` + gap) instead of a pixel inset tied to the label column,
+   so `.nowline`'s `left`% lives in the track column's own coordinate space —
+   a label-column change moves both and the line stays put. */
+.now-track {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: var(--rm-label-col) 1fr;
+  gap: var(--bs-space-3);
+  padding: 0 var(--bs-space-3);
+  pointer-events: none;
+}
+.now-track__col {
+  position: relative;
+}
 .nowline {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 1px;
-  background: var(--bs-tone-danger-text, #c0392b);
-  pointer-events: none;
+  background: var(--bs-tone-danger-text);
+}
+.nowline__dot {
+  position: absolute;
+  top: calc(-1 * var(--bs-space-1));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-tone-danger-text);
+  animation: bs-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+.nowline__label {
+  /* Visible only under prefers-reduced-motion (below) — screen-reader text
+     otherwise, since the line + dot already carry the meaning visually. */
+  position: absolute;
+  top: calc(-1 * var(--bs-space-5));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-tone-danger-text);
+  white-space: nowrap;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nowline__dot {
+    animation: none;
+  }
+  .nowline__label {
+    opacity: 1;
+  }
 }
 
 /* DS4 S2 — EpicBlock.vue (phase mode). */

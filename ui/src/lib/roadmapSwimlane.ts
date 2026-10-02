@@ -42,10 +42,19 @@ export interface SwimlaneRow {
   bar: SwimlaneBar | null;
 }
 
+export interface MonthMark {
+  /** e.g. "Jan". */
+  label: string;
+  /** Percent (0-100) from the lane's left edge. */
+  left: number;
+}
+
 export interface Swimlane {
   rows: SwimlaneRow[];
   /** Percent (0-100) position of the now-line. */
   nowOffset: number;
+  /** Month labels along the same time axis as the bars (fix round 1 #1). */
+  months: MonthMark[];
 }
 
 const UPCOMING_STUB_WIDTH = 8;
@@ -56,6 +65,18 @@ function clamp(value: number, min = 0, max = 100): number {
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * Fix round 1 #2 — the raw end (latest of any date, or `now`) used to equal
+ * `now` whenever nothing ran past today, pinning the now-line to exactly
+ * 100% (the right edge, under the overflow clip). Padding the end out to the
+ * end of next month guarantees `end > now` always, so the now-line — and the
+ * months axis — always has room past today.
+ */
+function paddedEnd(rawEnd: number, now: Date): number {
+  const endOfNextMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1) - 1;
+  return Math.max(rawEnd, endOfNextMonth);
+}
+
 function computeBounds(ranges: DateRange[], now: Date): { start: number; end: number } {
   const times: number[] = [now.getTime()];
   for (const r of ranges) {
@@ -63,7 +84,7 @@ function computeBounds(ranges: DateRange[], now: Date): { start: number; end: nu
     if (r.finishedAt !== null) times.push(Date.parse(r.finishedAt));
   }
   let start = Math.min(...times);
-  let end = Math.max(...times);
+  let end = paddedEnd(Math.max(...times), now);
   if (start === end) {
     start -= FALLBACK_SPAN_MS;
     end += FALLBACK_SPAN_MS;
@@ -73,6 +94,24 @@ function computeBounds(ranges: DateRange[], now: Date): { start: number; end: nu
 
 function pct(t: number, bounds: { start: number; end: number }): number {
   return ((t - bounds.start) / (bounds.end - bounds.start)) * 100;
+}
+
+/** Fix round 1 #1 — one mark per calendar month boundary within bounds,
+ * same axis the bars and now-line are computed against. UTC throughout so
+ * the labels don't drift between a dev machine's zone and CI's. */
+export function buildMonthMarks(bounds: { start: number; end: number }): MonthMark[] {
+  const marks: MonthMark[] = [];
+  const startDate = new Date(bounds.start);
+  let cursor = Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), 1);
+  while (cursor <= bounds.end) {
+    const d = new Date(cursor);
+    marks.push({
+      label: d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+      left: clamp(pct(cursor, bounds)),
+    });
+    cursor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+  }
+  return marks;
 }
 
 function computeBar(
@@ -130,7 +169,7 @@ export function buildSwimlane(milestones: MilestoneProgress[], now: Date): Swiml
       });
     }
   }
-  return { rows, nowOffset: clamp(pct(now.getTime(), bounds)) };
+  return { rows, nowOffset: clamp(pct(now.getTime(), bounds)), months: buildMonthMarks(bounds) };
 }
 
 /** A project with no declared phases: one row per epic, no dates available
@@ -140,6 +179,7 @@ export function buildEpicOnlySwimlane(epics: readonly string[]): Swimlane {
   return {
     rows: epics.map((id) => ({ kind: 'epic' as const, id, label: id, bar: null })),
     nowOffset: 50,
+    months: [],
   };
 }
 

@@ -3,6 +3,7 @@ import type { MilestoneProgress } from '../src/lib/api.js';
 import {
   barState,
   buildEpicOnlySwimlane,
+  buildMonthMarks,
   buildSwimlane,
   hasRoadmapContent,
   taskCountLabel,
@@ -103,6 +104,53 @@ describe('buildSwimlane', () => {
     const lane = buildSwimlane(milestones, NOW);
     expect(lane.nowOffset).toBeGreaterThanOrEqual(0);
     expect(lane.nowOffset).toBeLessThanOrEqual(100);
+  });
+
+  it('never pins the now-line to the right edge, even when every bar runs to today (fix round 1 #2)', () => {
+    const milestones = [
+      milestone({
+        milestoneId: 'phase-1',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+        epics: [{ epicId: 'epic-a', startedAt: '2026-01-10T00:00:00.000Z', finishedAt: null }],
+      }),
+    ];
+    const lane = buildSwimlane(milestones, NOW);
+    expect(lane.nowOffset).toBeLessThan(100);
+  });
+
+  it('exposes month marks spanning the padded axis', () => {
+    const milestones = [
+      milestone({
+        milestoneId: 'phase-1',
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+      }),
+    ];
+    const lane = buildSwimlane(milestones, NOW);
+    expect(lane.months.length).toBeGreaterThan(0);
+    for (const m of lane.months) {
+      expect(m.left).toBeGreaterThanOrEqual(0);
+      expect(m.left).toBeLessThanOrEqual(100);
+    }
+    // NOW is in January 2026; padding to the end of next month guarantees
+    // at least Jan/Feb show up.
+    expect(lane.months.map((m) => m.label)).toEqual(expect.arrayContaining(['Jan', 'Feb']));
+  });
+});
+
+describe('buildMonthMarks', () => {
+  it('returns one mark per calendar month boundary within bounds, left-to-right', () => {
+    const bounds = {
+      start: Date.UTC(2026, 0, 15),
+      end: Date.UTC(2026, 2, 10),
+    };
+    const marks = buildMonthMarks(bounds);
+    expect(marks.map((m) => m.label)).toEqual(['Jan', 'Feb', 'Mar']);
+    expect(marks[0]?.left).toBe(0);
+    for (let i = 1; i < marks.length; i++) {
+      expect(marks[i]!.left).toBeGreaterThan(marks[i - 1]!.left);
+    }
   });
 });
 

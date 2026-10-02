@@ -37,8 +37,9 @@ test.describe('Analytics', () => {
       .filter({ has: page.getByText('Cost per task by model tier') });
     const labels = tierCard.locator('.ds-bars__x');
     await expect(labels).toHaveText(['mid']);
-    // 2000 + 1300 + 5000 tokens over three tasks.
-    await expect(tierCard.locator('.ds-bars__v')).toHaveText(['2767']);
+    // 2000 + 1300 + 5000 + 900 + 1000 tokens over five tasks (fix round 1 #6
+    // added epic-10's two finished tasks, both mid tier, to the fixture).
+    await expect(tierCard.locator('.ds-bars__v')).toHaveText(['2040']);
   });
 
   // Its sibling plotted each provider's total token spend under a title the
@@ -51,9 +52,10 @@ test.describe('Analytics', () => {
       .locator('.ds-card')
       .filter({ has: page.getByText('Cost per task by provider') });
     await expect(providerCard.locator('.ds-bars__x')).toHaveText(['claude', 'codex']);
-    // claude: 3300 over two tasks. codex: 5000 over one — a total of 3300
-    // would have made claude the more expensive of the two.
-    await expect(providerCard.locator('.ds-bars__v')).toHaveText(['1650', '5000']);
+    // claude: 2000 + 1300 + 900 over three tasks = 1400. codex: 5000 + 1000
+    // over two tasks = 3000 (fix round 1 #6 added epic-10's two finished
+    // tasks, reusing these same claude/codex mid-tier buckets).
+    await expect(providerCard.locator('.ds-bars__v')).toHaveText(['1400', '3000']);
     await expect(providerCard.getByRole('img')).toHaveAttribute(
       'aria-label',
       /Tokens per task by provider/,

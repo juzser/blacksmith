@@ -26,8 +26,59 @@ test.describe('Roadmap', () => {
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
-  test('at 768px only the swimlane scrolls sideways, not the page', async ({ page }) => {
-    await page.setViewportSize({ width: 768, height: 1024 });
+  test('renders all four bar states: past, now, upcoming, not-scheduled (fix round 1 #6)', async ({
+    page,
+  }) => {
+    // epic-10 (both tasks finished) reads "past" independent of the clock.
+    // epic-9 (task-3 still live) reads "now" once the clock sits at or after
+    // its dispatch. epic-11 (dispatched last, never started relative to
+    // "now") reads "upcoming" only before its own dispatch. The fixture
+    // packs every event onto a single-second-per-event timeline
+    // (fixtureClock.ts), so epic-9's dispatch is a handful of seconds before
+    // epic-11's, not hours — the clock has to land strictly between the two,
+    // not merely "24h before epic-11", or it also lands before epic-9's own
+    // dispatch and reads epic-9 as "upcoming" too.
+    const roadmap = await page.request.get('/api/roadmap?project=demo-hub');
+    const milestones: Array<{ epics: Array<{ epicId: string; startedAt: string | null }> }> =
+      await roadmap.json();
+    const epic11 = milestones.flatMap((m) => m.epics).find((e) => e.epicId === 'epic-11');
+    if (!epic11?.startedAt) throw new Error('expected epic-11 to have a startedAt');
+    const justBeforeEpic11 = new Date(new Date(epic11.startedAt).getTime() - 500);
+    await page.clock.setFixedTime(justBeforeEpic11);
+
+    // Unscoped: demo-hub's own three epics cover past/now/upcoming, but none
+    // of them is ever `not-scheduled` — that state only exists on envkit's
+    // phase-7 (no tasks at all), which only renders on the all-projects view.
+    await page.goto('/work/roadmap');
+    await expect(
+      page.locator('.lrow.sub', { hasText: 'epic-10' }).locator('.lbar.past'),
+    ).toBeVisible();
+    await expect(
+      page.locator('.lrow.sub', { hasText: 'epic-9' }).locator('.lbar.now'),
+    ).toBeVisible();
+    await expect(
+      page.locator('.lrow.sub', { hasText: 'epic-11' }).locator('.lbar.up'),
+    ).toBeVisible();
+    await expect(page.getByText('Not scheduled').first()).toBeVisible();
+  });
+
+  test('no sideways page scroll at 390px on /work/roadmap', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/work/roadmap');
+    const pageScrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const pageClientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    expect(pageScrollWidth).toBeLessThanOrEqual(pageClientWidth + 1);
+  });
+
+  test('at 480px only the swimlane scrolls sideways, not the page', async ({ page }) => {
+    // Fix round 1 #9 dropped `.lane`'s min-width from 720px to 520px (spec
+    // and mock both say 520px). `.rm-scroll` only overflows once its own
+    // content width drops below that floor, which no longer happens at
+    // 768px (the old viewport here) — that leaves ~656px of room, comfortably
+    // above 520px. 480px leaves less room than the floor needs, which is what
+    // this test is actually for: the lane overflowing while the page itself
+    // does not.
+    await page.setViewportSize({ width: 480, height: 1024 });
     await page.goto('/work/roadmap');
     await expect(page.locator('.rm-scroll')).toBeVisible();
     const pageScrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);

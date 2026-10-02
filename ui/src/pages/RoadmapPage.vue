@@ -39,6 +39,7 @@ import {
   isTaskOver,
   type KitTone,
   milestoneStatusKitTone,
+  milestoneStatusLabel,
   taskStatusKitTone,
 } from '../lib/taxonomy.js';
 
@@ -132,7 +133,7 @@ function selectEpic(epicId: string) {
 }
 
 const swimlane = computed(() => {
-  if (!milestones.value) return { rows: [], nowOffset: 50 };
+  if (!milestones.value) return { rows: [], nowOffset: 50, months: [] };
   if (milestones.value.length === 0) return buildEpicOnlySwimlane(epics.value);
   return buildSwimlane(milestones.value, new Date());
 });
@@ -210,7 +211,7 @@ const epicSections = computed(() => {
       body="Phases and epics will appear here once work starts."
     />
 
-    <template v-else>
+    <div v-else class="rm-stack">
       <RoadmapSwimlane
         :swimlane="swimlane"
         :selected-phase="selectedPhase"
@@ -223,12 +224,12 @@ const epicSections = computed(() => {
         v-if="selectedPhaseData"
         :name="selectedPhaseData.name"
         :status-tone="milestoneStatusKitTone(selectedPhaseData.status)"
-        :status-label="selectedPhaseData.status"
+        :status-label="milestoneStatusLabel(selectedPhaseData.status)"
         :tasks-total="selectedPhaseData.tasksTotal"
         :tasks-completed="selectedPhaseData.tasksCompleted"
         :epics="epicSections"
       />
       <p v-else-if="selectedEpic" class="muted">{{ taskCountLabel(0, 0) }}</p>
-    </template>
+    </div>
   </div>
 </template>

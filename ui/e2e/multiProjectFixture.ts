@@ -20,6 +20,7 @@ export const MULTI_PROJECT_SESSION_ID = 'sess-multiproject-fixture';
 export const DEMO_HUB_PROJECT = 'demo-hub';
 export const DEMO_HUB_EPIC_A = 'epic-9';
 export const DEMO_HUB_EPIC_B = 'epic-10';
+export const DEMO_HUB_EPIC_C = 'epic-11';
 
 export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
   const planVersion = 1;
@@ -198,7 +199,15 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
     );
     parent = added.event_id;
   }
-  for (const [t, provider] of [[tasks10[0], 'codex'] as const, [tasks10[1], 'deepseek'] as const]) {
+  // Fix round 1 #6: both tasks are finished (terminal), so epic-10 reads
+  // "past" on the swimlane regardless of the viewer's clock (barState checks
+  // finishedAt first). Reusing the claude/mid and codex/mid buckets epic-9
+  // already feeds keeps Analytics' tier/provider labels unchanged — only
+  // their totals grow (see analytics.spec.ts for the recomputed values).
+  for (const [t, provider, tokens] of [
+    [tasks10[0], 'claude', { input_tokens: 600, output_tokens: 300, total_tokens: 900 }] as const,
+    [tasks10[1], 'codex', { input_tokens: 700, output_tokens: 300, total_tokens: 1000 }] as const,
+  ]) {
     if (!t) continue;
     const dispatch = await appendEvent(
       {
@@ -212,15 +221,107 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
         payload: {
           agent_role: 'coder',
           provider,
-          model_tier: 'small',
+          model_tier: 'mid',
           model: `${provider}:default`,
           reason: t.objective,
         },
       },
       opts,
     );
-    parent = dispatch.event_id; // both left live — parallel wave, both currently running.
+    parent = dispatch.event_id;
+    const result = await appendEvent(
+      {
+        session_id: MULTI_PROJECT_SESSION_ID,
+        actor: 'coder',
+        event_type: 'task-result-recorded',
+        task_id: t.id,
+        plan_version: planVersion,
+        causal_parent: parent,
+        project,
+        payload: {
+          task_id: t.id,
+          run_status: 'done',
+          structured_output: {},
+          artifacts: [],
+          token_usage: tokens,
+          agent: 'coder',
+          provider,
+          model_tier: 'mid',
+        },
+      },
+      opts,
+    );
+    parent = result.event_id;
+    // `task-result-recorded` only files artifacts (projector.ts) — it is
+    // `wave-merged` that actually flips `taskStatus` to `completed` and stamps
+    // `terminalAt`, which is what `taskDateRange()` requires before an epic's
+    // `finishedAt` can read non-null. Without this, epic-10 never clears
+    // `allTerminal` and the swimlane bar stays stuck on `now`.
+    const merged = await appendEvent(
+      {
+        session_id: MULTI_PROJECT_SESSION_ID,
+        actor: 'merge-queue',
+        event_type: 'wave-merged',
+        task_id: t.id,
+        plan_version: planVersion,
+        causal_parent: parent,
+        project,
+        payload: { task_ids: [t.id] },
+      },
+      opts,
+    );
+    parent = merged.event_id;
   }
+
+  // --- epic-11: a single task, dispatched last so its re-stamped timestamp
+  // is the latest in this session file (fixtureClock.ts re-stamps by index),
+  // and never completed, so it reads "upcoming" once the viewer's clock sits
+  // before this dispatch (roadmap.spec.ts fetches /api/roadmap at runtime to
+  // read the real startedAt and sets the clock just ahead of it).
+  const task11 = { id: `${DEMO_HUB_EPIC_C}/task-1`, objective: 'Draft the renewal-reminder flow.' };
+  const added11 = await appendEvent(
+    {
+      session_id: MULTI_PROJECT_SESSION_ID,
+      actor: 'planner',
+      event_type: 'task-added',
+      task_id: task11.id,
+      plan_version: planVersion,
+      causal_parent: parent,
+      project,
+      payload: {
+        epic_id: DEMO_HUB_EPIC_C,
+        case: 'feature',
+        origin: 'user',
+        task_status: 'todo',
+        plan_version: planVersion,
+        objective: task11.objective,
+        claims: ['src/renewal-reminder.ts'],
+        budget_tokens: 900,
+      },
+    },
+    opts,
+  );
+  parent = added11.event_id;
+  const dispatch11 = await appendEvent(
+    {
+      session_id: MULTI_PROJECT_SESSION_ID,
+      actor: 'planner',
+      event_type: 'dispatch_decision',
+      task_id: task11.id,
+      plan_version: planVersion,
+      causal_parent: parent,
+      project,
+      payload: {
+        agent_role: 'coder',
+        provider: 'claude',
+        model_tier: 'mid',
+        model: 'claude-sonnet-5',
+        reason: task11.objective,
+      },
+    },
+    opts,
+  );
+  parent = dispatch11.event_id; // left live — the "upcoming" fixture target.
 
   // An epic-level dispatch: a planner works on the epic itself, so its payload
   // names `epic_id` and carries no task at all. Half the dispatches in a real
