@@ -30,10 +30,17 @@ const props = withDefaults(
      * optional — every other IconButton call site is a plain button with
      * neither.
      */
+    /**
+     * ariaExpanded needs an explicit `default` key below, even `undefined`
+     * itself — Vue's prop resolution otherwise treats an absent
+     * Boolean-typed prop as `false` rather than undefined, and every other
+     * IconButton call site that never passes it would render a bogus
+     * `aria-expanded="false"`.
+     */
     ariaHaspopup?: 'menu';
     ariaExpanded?: boolean;
   }>(),
-  { size: 'md', tone: 'default' },
+  { size: 'md', tone: 'default', ariaExpanded: undefined },
 );
 
 const emit = defineEmits<{ click: [MouseEvent] }>();
