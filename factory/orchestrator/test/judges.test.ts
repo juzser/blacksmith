@@ -293,6 +293,22 @@ describe('judges.ts', () => {
       ).rejects.toThrow(/already reported.*--kind/);
     });
 
+    it('a report naming a kind that was never dispatched says which kinds were', async () => {
+      await dispatch({
+        role: 'uiux',
+        kind: 'spec',
+        artifactPath: path.join(artifactDir, 'only-spec.json'),
+      });
+
+      await expect(
+        recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'uiux', kind: 'visual', noFindings: true },
+          ctx(),
+          opts(),
+        ),
+      ).rejects.toThrow(/"visual".*dispatched kinds: spec/);
+    });
+
     it('an ambiguous report (two open uiux turns, no kind) errors clearly', async () => {
       await dispatch({
         role: 'uiux',

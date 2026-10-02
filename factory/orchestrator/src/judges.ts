@@ -889,6 +889,10 @@ function notDispatchedMessage(
   if (distinctTaskIds.size > 1) {
     return `Task id "${input.taskId}" names a "${input.role}" turn in ${distinctTaskIds.size} epics (${forRole.map((t) => t.taskId).join(', ')}). Report against the qualified id — closing one of them here would be a guess.`;
   }
+  if (turn === undefined && input.kind !== undefined && forRole.length > 0) {
+    const kinds = forRole.map((t) => t.kind ?? 'null').join(', ');
+    return `No "${input.kind}" ${input.role} dispatch on ${input.taskId} (dispatched kinds: ${kinds}). Dispatch it with "--kind ${input.kind}" first, or report against a kind that was dispatched.`;
+  }
   if (turn === undefined) {
     return `No judge dispatch for role "${input.role}" on ${input.taskId}. Record the dispatch first — a report with no dispatch behind it proves nothing about coverage.`;
   }
