@@ -154,6 +154,7 @@ import {
 import {
   diffPlans,
   impliedSpecsDir,
+  isUiAffecting,
   latestPlanVersion,
   livePlanTasks,
   loadPlan,
@@ -1077,6 +1078,28 @@ function mintFromUiuxVisual(filePath: string, taskId: string): RaiseFindingInput
  * worse answer than reporting its budget as not-declared. Ambiguity still
  * throws — two tasks the id could equally mean is a question, not an absence.
  */
+/**
+ * The task's `ui_affecting` flag off `--plan` (U2 D3/D6), for the gate's uiux
+ * stage: `undefined` means no `--plan` was given at all, so the stage cannot
+ * resolve the flag either way and records "unverifiable" rather than guess
+ * (D6). A `--plan` that does not name the task, same as `budgetFromFlags`,
+ * is read as `undefined` too — a follow-up task no plan version has been cut
+ * for yet is not grounds to force the uiux stage one way or the other.
+ */
+function uiAffectingFromFlags(flags: Record<string, string>, taskId: string): boolean | undefined {
+  if (!flags.plan) return undefined;
+  const plan = readJsonFile<PlanFile>(flags.plan);
+  let resolved: string;
+  try {
+    resolved = resolveTaskId(plan, taskId);
+  } catch (err) {
+    if (err instanceof SmithError && err.code === 'plan.unknown-task') return undefined;
+    throw err;
+  }
+  const spec = plan.tasks.find((t) => t.task_id === resolved);
+  return spec ? isUiAffecting(spec) : undefined;
+}
+
 function budgetFromFlags(flags: Record<string, string>, taskId: string): TaskBudget | undefined {
   if (!flags.plan) return undefined;
   const plan = readJsonFile<PlanFile>(flags.plan);
@@ -3791,6 +3814,7 @@ async function main(): Promise<number> {
         ...(graderVerdict !== undefined ? { graderVerdict } : {}),
         ...(budget ? { budget } : {}),
         ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+        uiAffecting: uiAffectingFromFlags(flags, taskId),
         crosscheck: { policy: loadCrosscheckPolicy(undefined, { projectDir }) },
       },
       ctx,
@@ -3841,6 +3865,36 @@ async function main(): Promise<number> {
     );
     printJson(outcome);
     return outcome.outcome === 'blocked' ? 1 : 0;
+  }
+
+  // U2 S3/D4: the preflight for the gate's uiux stage, over the same
+  // checkUiux the stage itself calls — so a dispatcher can ask "is this task's
+  // screenshot set fresh and reviewed yet" without staging a whole gate run,
+  // and the two can never disagree about the same fixture.
+  if (namespace === 'uiux' && action === 'check') {
+    const { checkUiux } = await import('./uiuxGate.js');
+    const taskId = requireFlag(flags, 'task');
+    const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
+    const resolved = resolveTaskId(plan, taskId);
+    const spec = plan.tasks.find((t) => t.task_id === resolved);
+    const ctx = eventContextFromFlags(flags);
+    const opts = eventOptsFromFlags(flags);
+    if (!spec || !isUiAffecting(spec)) {
+      printJson({ outcome: 'pass' });
+      return 0;
+    }
+    const head = flags.worktree ? runGit(flags.worktree, ['rev-parse', 'HEAD']) : undefined;
+    const result = await checkUiux(
+      {
+        taskId: resolved,
+        ...(head !== undefined ? { head } : {}),
+        ...(flags['artifacts-dir'] ? { artifactsDir: flags['artifacts-dir'] } : {}),
+      },
+      ctx,
+      opts,
+    );
+    printJson(result);
+    return result.outcome === 'blocked' ? 1 : 0;
   }
 
   // D-40/P9-25: the gate's coverage evidence, without staging a gate run.
