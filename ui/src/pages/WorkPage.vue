@@ -41,7 +41,7 @@ function onPickView(value: string) {
          above the toolbar (UI audit, fix round 1). `defer` (Vue 3.5) lets
          the target mount later in the same pass, since it lives inside the
          child route page, not a sibling mounted ahead of it. .bs-segctl
-         still hides itself under 640px (bs-primitives.css), so this is a
+         still hides itself below --bs-bp-mobile (bs-primitives.css), so this is a
          no-op on phone, where the switch lives only in the overflow menu
          below. -->
     <Teleport to="#bs-work-view-switch" defer>
