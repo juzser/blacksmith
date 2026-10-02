@@ -275,10 +275,11 @@
    text, border) all come from Tag.vue's own :style binding (three variants
    reusing the same two --bs-tone-<tone>-text/-subtle tokens, see that
    file's comment) — this file only carries shape and box geometry, which
-   is tone-independent. Pill radius on all three variants: the old kit's
-   .ds-loz gave --subtle/--bold a squarer --ds-radius-control and only
-   --outline the pill --ds-radius-pill, an inconsistency this file does not
-   carry forward — one shape reads as one component regardless of variant.
+   is tone-independent. §1.6 radius: tags use --bs-radius-sm (4px), same as
+   every other chip, on all three variants — one shape reads as one
+   component regardless of variant; a call site that wants the round "pill"
+   shape (a count badge, for instance) opts in with its own modifier class
+   rather than this base class drifting back to full-round.
    No sm/md split existed in the old kit (.ds-loz was a single fixed 20px
    height); both new sizes share bs-tokens.css's smallest font-size token
    (--bs-text-xs, 12px — there is no smaller one) with line-height: 1 and a
@@ -291,7 +292,7 @@
   gap: var(--bs-space-1);
   width: fit-content;
   flex-shrink: 0;
-  border-radius: var(--bs-radius-full);
+  border-radius: var(--bs-radius-sm);
   font-size: var(--bs-text-xs);
   font-weight: var(--bs-font-weight-medium);
   line-height: 1;
@@ -394,6 +395,14 @@
   display: flex;
   align-items: center;
   gap: var(--bs-space-2);
+}
+/* Audit finding 3, §3.1: at the mobile breakpoint the H1 and its status tag
+   no longer share a row — the title takes full width, tags wrap below it. */
+@media (max-width: 640px) {
+  .bs-ph__titlerow {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 .bs-ph__title {
   font-size: var(--bs-text-xl);
@@ -605,14 +614,17 @@
 
 /* Chip (§2.1) — border+dot identity pattern ported from
    ui/src/components/IdentityChip.vue; colour never carries the label text
-   (contrast), only the border and the decorative dot/avatar swatch. */
+   (contrast), only the border and the decorative dot/avatar swatch. §1.6
+   radius: "chips, tags" both take --bs-radius-sm — the dot/avatar below are
+   "avatars, dots" and keep --bs-radius-full, but the chip's own body does
+   not. */
 .bs-chip {
   display: inline-flex;
   align-items: center;
   gap: var(--bs-space-1);
   padding: var(--bs-space-1) var(--bs-space-2);
   border: 1px solid var(--bs-border);
-  border-radius: var(--bs-radius-full);
+  border-radius: var(--bs-radius-sm);
   font-size: var(--bs-text-xs);
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text-subtle);
@@ -1721,7 +1733,12 @@ summary.bs-inbox__group-head {
   flex-shrink: 0;
 }
 .bs-kanban-col__count {
+  /* §2.2 "count pill" — a genuine pill, not a status tag, so it keeps the
+     round shape via its own modifier rather than .bs-tag's base radius.
+     Declared after .bs-tag so normal cascade order (same specificity)
+     already wins — no !important needed. */
   font-variant-numeric: tabular-nums;
+  border-radius: var(--bs-radius-full);
 }
 .bs-kanban-col__title {
   margin: 0;
