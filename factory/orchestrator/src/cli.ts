@@ -131,10 +131,13 @@ import { integrationHeadSha, runIntegrationCheck } from './integration.js';
 import { previewOutcomes, reportErrors } from './issueReporter.js';
 import { judgePreflight } from './judgePreflight.js';
 import {
+  type JudgeKind,
   outstandingJudges,
   readJudgeTurns,
   recordJudgeDispatch,
   recordJudgeReport,
+  type UiuxDeviation,
+  uiuxDeviationsToEvidence,
 } from './judges.js';
 import { addMcpSurface, resolveMcpSurface, runMcpCheck } from './mcp.js';
 import {
@@ -1038,6 +1041,20 @@ function mintFromEvidence(
       ...scope,
     }),
   );
+}
+
+/**
+ * Mint a uiux visual pass's deviations under the `uiux` judge. `--uiux-visual`
+ * hands over the whole Result document (uiux.md's output contract), not a
+ * findings-evidence array, so this reads `structured_output.deviations` the
+ * same way `readJudgeArtifact`'s uiux branch does (judges.ts) before handing
+ * the mapped evidence to the same `mintFindings` every other judge goes
+ * through.
+ */
+function mintFromUiuxVisual(filePath: string, taskId: string): RaiseFindingInput[] {
+  const document = readJsonFile<{ structured_output?: { deviations?: UiuxDeviation[] } }>(filePath);
+  const deviations = document.structured_output?.deviations ?? [];
+  return mintFindings(uiuxDeviationsToEvidence(deviations), { taskId, foundBy: 'uiux' });
 }
 
 /**
@@ -3657,6 +3674,7 @@ async function main(): Promise<number> {
     const findingsInput = [
       ...(flags.findings ? readFindingsInputFile(flags.findings) : []),
       ...mintFromEvidence(args, taskId),
+      ...(flags['uiux-visual'] ? mintFromUiuxVisual(flags['uiux-visual'], taskId) : []),
     ];
     const lessons = flags.lessons ? parseLessons(readFileSync(flags.lessons, 'utf8')) : [];
     const ctx = eventContextFromFlags(flags);
@@ -3692,18 +3710,26 @@ async function main(): Promise<number> {
     // verdict document is not a findings list, so until `judge report` learned
     // the shape the grader's turn stayed open with its verdict on the command
     // line, and the gate blocked on the judge it was about to read.
-    const evidenceGiven = evidenceSources(args);
-    const graderGiven = flags.grader ? [{ foundBy: 'grader', file: flags.grader }] : [];
-    const handedIn = [...evidenceGiven, ...graderGiven];
+    const evidenceGiven: { foundBy: string; file: string; kind?: JudgeKind }[] =
+      evidenceSources(args);
+    const graderGiven: { foundBy: string; file: string; kind?: JudgeKind }[] = flags.grader
+      ? [{ foundBy: 'grader', file: flags.grader }]
+      : [];
+    const uiuxVisualGiven = flags['uiux-visual']
+      ? [{ foundBy: 'uiux', file: flags['uiux-visual'], kind: 'visual' as JudgeKind }]
+      : [];
+    const handedIn = [...evidenceGiven, ...graderGiven, ...uiuxVisualGiven];
     if (handedIn.length > 0) {
       const turns = await readJudgeTurns(taskId, ctx, eventOptsFromFlags(flags));
       const closed = new Set<string>();
-      for (const { foundBy, file } of handedIn) {
-        if (closed.has(foundBy)) continue;
-        if (!turns.some((t) => t.role === foundBy && !t.reported)) continue;
-        closed.add(foundBy);
+      for (const { foundBy, file, kind } of handedIn) {
+        const closeKey = kind ? `${foundBy}:${kind}` : foundBy;
+        if (closed.has(closeKey)) continue;
+        if (!turns.some((t) => t.role === foundBy && t.kind === (kind ?? null) && !t.reported))
+          continue;
+        closed.add(closeKey);
         await recordJudgeReport(
-          { taskId, role: foundBy, artifactPath: file },
+          { taskId, role: foundBy, artifactPath: file, ...(kind ? { kind } : {}) },
           ctx,
           eventOptsFromFlags(flags),
         );
@@ -4660,6 +4686,9 @@ async function main(): Promise<number> {
         model: requireFlag(flags, 'model'),
         ...(flags.provider ? { provider: flags.provider } : {}),
         ...(flags['model-tier'] ? { modelTier: flags['model-tier'] } : {}),
+        // uiux only: which of its two turns this dispatch opens; recordJudgeDispatch
+        // rejects it for any other role.
+        ...(flags.kind ? { kind: flags.kind as JudgeKind } : {}),
       },
       eventContextFromFlags(flags),
       eventOptsFromFlags(flags),
@@ -4684,6 +4713,8 @@ async function main(): Promise<number> {
         // Here the role is already named by --role, so the valueless spelling
         // is the right one and 'true' means what it says.
         ...(flags['no-findings'] === 'true' ? { noFindings: true } : {}),
+        // uiux only: which of its two open turns this closes; required when both are open.
+        ...(flags.kind ? { kind: flags.kind as JudgeKind } : {}),
       },
       eventContextFromFlags(flags),
       eventOptsFromFlags(flags),
@@ -4697,7 +4728,8 @@ async function main(): Promise<number> {
     const taskId = requireFlag(flags, 'task');
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(sessionId, eventOpts);
-    const open = outstandingJudges(await readJudgeTurns(taskId, { sessionId }, eventOpts));
+    const allOpen = outstandingJudges(await readJudgeTurns(taskId, { sessionId }, eventOpts));
+    const open = flags.kind ? allOpen.filter((turn) => turn.kind === flags.kind) : allOpen;
     printJson({ taskId, sessionId, outstanding: open, count: open.length });
     return open.length > 0 ? 1 : 0;
   }

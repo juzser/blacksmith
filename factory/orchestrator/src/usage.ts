@@ -587,7 +587,7 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'gate run',
     positionals: '<task-id>',
-    flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
+    flags: `--worktree <dir> --checks <checks.json> --result <result.json> [--project <dir>] [--base <ref>] [--grader <file>] [--agent <role> --provider <name> --model-tier <tier> --input-tokens <n> --output-tokens <n>] [--evidence <file> --found-by <role> [--found-by-provider <name>]] [--findings <file>] [--no-findings <role>] [--uiux-visual <file>] [--lessons <lessons.md>] [--plan <file>] [--run-all] [--artifacts-dir <dir>] ${EVENTS_DIR}`,
     summary: 'The per-task gate: schema, tests, coverage, findings. Exit 1 when blocked.',
   },
   {
@@ -790,20 +790,21 @@ export const COMMANDS: readonly CommandDoc[] = [
   {
     command: 'judge dispatch',
     positionals: '',
-    flags: `--task <task-id> --role <role> --artifact <file> --model <id> [--round <n>] [--provider <name>] [--model-tier <tier>] ${EVENTS_DIR}`,
-    summary: 'Declare the file a judge owes, so a turn that never came back is visible.',
+    flags: `--task <task-id> --role <role> --artifact <file> --model <id> [--round <n>] [--provider <name>] [--model-tier <tier>] [--kind <spec|visual>] ${EVENTS_DIR}`,
+    summary:
+      'Declare the file a judge owes, so a turn that never came back is visible. --kind only applies to uiux, which opens a spec turn and a visual turn per task.',
   },
   {
     command: 'judge report',
     positionals: '',
-    flags: `--task <task-id> --role <role> [--round <n>] [--artifact <file>] [--no-findings] ${EVENTS_DIR}`,
+    flags: `--task <task-id> --role <role> [--round <n>] [--artifact <file>] [--no-findings] [--kind <spec|visual>] ${EVENTS_DIR}`,
     summary:
-      'Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case.',
+      "Close a judge turn against the artifact it declared, written during this turn. --no-findings attests the clean case. --kind picks which of uiux's two open turns to close when both are open.",
   },
   {
     command: 'judge outstanding',
     positionals: '',
-    flags: '--session <id> --task <task-id> [--state-dir <dir>]',
+    flags: '--session <id> --task <task-id> [--kind <spec|visual>] [--state-dir <dir>]',
     summary:
       'Print { taskId, sessionId, outstanding, count } for the judge turns still owed on a task. Exit 1 while count is non-zero.',
   },
