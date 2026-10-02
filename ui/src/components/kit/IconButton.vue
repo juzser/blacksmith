@@ -24,6 +24,14 @@ const props = withDefaults(
      * Defaults to 'default', today's only behaviour.
      */
     tone?: 'default' | 'inverse';
+    /**
+     * DS4 S1 round 6: the phone overflow's "..." trigger needs
+     * aria-haspopup="menu" + aria-expanded (WAI-ARIA APG menu pattern). Both
+     * optional — every other IconButton call site is a plain button with
+     * neither.
+     */
+    ariaHaspopup?: 'menu';
+    ariaExpanded?: boolean;
   }>(),
   { size: 'md', tone: 'default' },
 );
@@ -44,6 +52,8 @@ function onClick(event: MouseEvent) {
       :class="[`bs-iconbtn--${size}`, { 'bs-iconbtn--inverse': tone === 'inverse' }]"
       :aria-label="label"
       :aria-disabled="disabled ? 'true' : undefined"
+      :aria-haspopup="ariaHaspopup"
+      :aria-expanded="ariaExpanded"
       @click="onClick"
     >
       <Icon :icon="icon" :size="16" />

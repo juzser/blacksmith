@@ -51,6 +51,7 @@ function onGroupByChange(value: string) {
         type="button"
         class="bs-mtopbar__menuitem"
         role="menuitem"
+        tabindex="-1"
         @click="open ? emit('close') : emit('open')"
       >
         <Icon :icon="SlidersHorizontal" :size="16" />

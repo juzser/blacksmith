@@ -18,7 +18,7 @@ describe('WorkPage.vue phone overflow (uiux spec §3)', () => {
     expect(WORK_SRC).toMatch(/<PageHeader title="Work">/);
   });
 
-  it('teleports the View radio group to the shared overflow target, before <router-view>', () => {
+  it('teleports the View group to the shared overflow target, before <router-view>', () => {
     const template = WORK_SRC.slice(WORK_SRC.indexOf('<template>')).replace(/<!--[\s\S]*?-->/g, '');
     const teleportIdx = template.indexOf('#bs-mtopbar-overflow-extra');
     const routerViewIdx = template.indexOf('<router-view');
@@ -27,20 +27,28 @@ describe('WorkPage.vue phone overflow (uiux spec §3)', () => {
     expect(teleportIdx).toBeLessThan(routerViewIdx);
   });
 
-  it('labels the radio group "View" with two options, Kanban then Roadmap', () => {
+  it('labels the View group "View" with two menuitemradio options, Kanban then Roadmap', () => {
+    expect(WORK_SRC).toMatch(/role="group"/);
     expect(WORK_SRC).toMatch(/aria-label="View"/);
-    expect(WORK_SRC).toMatch(/name="work-view"/);
+    expect(WORK_SRC).toMatch(/role="menuitemradio"/);
+    expect(WORK_SRC).toMatch(/:aria-checked="currentView === opt\.value"/);
     expect(WORK_SRC).toMatch(
       /WORK_VIEWS\.map\(\(v\) => \(\{ value: v\.value, label: v\.label \}\)\)/,
     );
   });
 
-  it('places a Separator after the radio group, inside the same teleport', () => {
+  it('is not the kit RadioGroup/radiogroup — not a valid child of role="menu" (DS4 S1 round 6)', () => {
+    expect(WORK_SRC).not.toMatch(/<RadioGroup/);
+    expect(WORK_SRC).not.toMatch(/role="radiogroup"/);
+    expect(WORK_SRC).not.toMatch(/input type="radio"/);
+  });
+
+  it('places a Separator after the View group, inside the same teleport', () => {
     const teleportBody = WORK_SRC.match(/<Teleport[\s\S]*?<\/Teleport>/)?.[0] ?? '';
-    const radioIdx = teleportBody.indexOf('<RadioGroup');
+    const groupIdx = teleportBody.indexOf('bs-mtopbar__viewgroup');
     const sepIdx = teleportBody.indexOf('<Separator');
-    expect(radioIdx).toBeGreaterThan(-1);
-    expect(sepIdx).toBeGreaterThan(radioIdx);
+    expect(groupIdx).toBeGreaterThan(-1);
+    expect(sepIdx).toBeGreaterThan(groupIdx);
   });
 });
 

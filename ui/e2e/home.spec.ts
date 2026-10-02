@@ -243,6 +243,31 @@ test.describe('Home', () => {
       await expect(separator).not.toBeVisible();
     }
   });
+
+  // Home has no page-specific teleported extra, so this is the three
+  // built-in items only (Pause, Switch theme, Settings) — the walk still
+  // needs to wrap with just those three (DS4 S1 round 6).
+  test('phone: ArrowDown walks the three built-in menu items and wraps', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/overview');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const items = menu.getByRole('menuitem');
+    await expect(items).toHaveCount(3);
+    await expect(items.nth(0)).toBeFocused();
+
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(2)).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+
+    await page.keyboard.press('ArrowUp');
+    await expect(items.nth(2)).toBeFocused();
+  });
 });
 
 test.describe('Home: Needs you inbox', () => {

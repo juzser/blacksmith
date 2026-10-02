@@ -1466,6 +1466,29 @@ a:hover {
 .bs-mtopbar__overflow-extra {
   display: contents;
 }
+/* WorkPage's "View" menuitemradio group (DS4 S1 round 6) — `display:
+   contents` for the same reason as .bs-mtopbar__overflow-extra above: its
+   buttons stack as direct rows of the overflow's own flex column, not inside
+   a second box. */
+.bs-mtopbar__viewgroup {
+  display: contents;
+}
+/* A CSS-drawn radio dot: menuitemradio items are buttons, not <input
+   type=radio> (round 6 — a radio input is not a valid child of role="menu"),
+   so the native control's look is redrawn here to match. */
+.bs-mtopbar__radio-dot {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--bs-radius-full);
+  border: 1.5px solid var(--bs-border-bold);
+}
+.bs-mtopbar__viewitem[aria-checked='true'] .bs-mtopbar__radio-dot {
+  border-color: var(--bs-accent);
+  background: radial-gradient(circle, var(--bs-accent) 0 40%, transparent 41%);
+}
 /* Pages with no page-specific extra (Home) leave the teleport target empty —
    the Separator just above it must not render then, or it dangles under
    "Settings" with nothing stacked below (DS4 S1 round 5, S3 finding 1). The

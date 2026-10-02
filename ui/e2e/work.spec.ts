@@ -54,31 +54,118 @@ test.describe('Work switcher', () => {
     await page.goto('/work/kanban');
 
     await page.getByRole('button', { name: 'More actions' }).click();
-    const radiogroup = page.getByRole('radiogroup', { name: 'View' });
-    await expect(radiogroup).toBeVisible();
+    const group = page.getByRole('group', { name: 'View' });
+    await expect(group).toBeVisible();
 
-    await radiogroup.getByRole('radio', { name: 'Roadmap' }).check();
+    await group.getByRole('menuitemradio', { name: 'Roadmap' }).click();
     await expect(page).toHaveURL(/\/work\/roadmap$/);
-    await expect(radiogroup).toBeHidden();
+    await expect(group).toBeHidden();
   });
 
-  test('phone: both View radio rows meet the 44px touch target (DS4 S1 round 3, S2 finding 4)', async ({
+  test('phone: both View menuitemradio rows meet the 44px touch target (DS4 S1 round 3, S2 finding 4)', async ({
     page,
   }) => {
     await page.setViewportSize(VIEWPORTS.mobile);
     await page.goto('/work/kanban');
 
     await page.getByRole('button', { name: 'More actions' }).click();
-    const radiogroup = page.getByRole('radiogroup', { name: 'View' });
-    await expect(radiogroup).toBeVisible();
+    const group = page.getByRole('group', { name: 'View' });
+    await expect(group).toBeVisible();
 
-    const rows = await radiogroup.getByRole('radio').all();
+    const rows = await group.getByRole('menuitemradio').all();
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
-      const box = await row.locator('xpath=..').boundingBox();
-      if (!box) throw new Error('a View radio row has no box');
+      const box = await row.boundingBox();
+      if (!box) throw new Error('a View menuitemradio row has no box');
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
+  });
+
+  test('phone: the View items are menuitemradio with correct aria-checked, and the menu has no radiogroup/radio input (DS4 S1 round 6, S3 a11y finding)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    await expect(menu.getByRole('radiogroup')).toHaveCount(0);
+    await expect(menu.locator('input[type="radio"]')).toHaveCount(0);
+
+    const kanban = menu.getByRole('menuitemradio', { name: 'Kanban' });
+    const roadmap = menu.getByRole('menuitemradio', { name: 'Roadmap' });
+    await expect(kanban).toHaveAttribute('aria-checked', 'true');
+    await expect(roadmap).toHaveAttribute('aria-checked', 'false');
+  });
+
+  test('phone: the trigger has aria-haspopup=menu and aria-expanded', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    const trigger = page.getByRole('button', { name: 'More actions' });
+    await expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('phone: ArrowDown from the first item walks every menu item in order and wraps, Home/End jump (DS4 S1 round 6)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const items = menu.locator('[role="menuitem"], [role="menuitemradio"]');
+    const count = await items.count();
+    expect(count).toBeGreaterThanOrEqual(6); // Pause, theme, Settings, Kanban, Roadmap, Display options
+
+    // Opening the menu focuses the first item.
+    await expect(items.nth(0)).toBeFocused();
+
+    for (let i = 1; i < count; i += 1) {
+      await page.keyboard.press('ArrowDown');
+      await expect(items.nth(i)).toBeFocused();
+    }
+    // Wraps back to the first item.
+    await page.keyboard.press('ArrowDown');
+    await expect(items.nth(0)).toBeFocused();
+
+    await page.keyboard.press('End');
+    await expect(items.nth(count - 1)).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(items.nth(0)).toBeFocused();
+
+    // ArrowUp from the first item wraps to the last.
+    await page.keyboard.press('ArrowUp');
+    await expect(items.nth(count - 1)).toBeFocused();
+  });
+
+  test('phone: Enter switches the view, and Escape returns focus to the trigger (DS4 S1 round 6)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    const trigger = page.getByRole('button', { name: 'More actions' });
+    await trigger.click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    const roadmap = menu.getByRole('menuitemradio', { name: 'Roadmap' });
+    await roadmap.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/work\/roadmap$/);
+
+    await trigger.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
   });
 
   test('phone: the overflow renders as a vertical labeled menu, View stacked below the built-ins (DS4 S1 round 4)', async ({
@@ -95,19 +182,18 @@ test.describe('Work switcher', () => {
     // Built-ins (Pause, Switch theme, Settings) plus Kanban's display-options
     // row, now also a menuitem (DS4 S1 round 5, S3 finding 2).
     expect(menuitems.length).toBeGreaterThanOrEqual(4);
-    const radios = await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio').all();
+    const radios = await menu.getByRole('menuitemradio').all();
     expect(radios.length).toBeGreaterThan(0);
 
     // DOM order, not query order: a querySelectorAll-backed locator with a
     // grouped selector returns elements in document order, which on this
     // vertical flex column is also visual top-to-bottom order — menuitems
-    // and radios interleave (the Kanban row sits below the View radios).
-    const rowEls = await menu.locator('[role="menuitem"], [role="radio"]').all();
+    // and menuitemradios interleave (the Kanban row sits below the View
+    // rows).
+    const rowEls = await menu.locator('[role="menuitem"], [role="menuitemradio"]').all();
     const rows: { top: number; bottom: number }[] = [];
     for (const el of rowEls) {
-      const role = await el.getAttribute('role');
-      const target = role === 'radio' ? el.locator('xpath=..') : el;
-      const box = await target.boundingBox();
+      const box = await el.boundingBox();
       if (!box) throw new Error('a menu row has no box');
       expect(box.height).toBeGreaterThanOrEqual(44);
       rows.push({ top: box.y, bottom: box.y + box.height });
@@ -174,8 +260,8 @@ test.describe('Work switcher', () => {
       await page.setViewportSize(VIEWPORTS.mobile);
       await page.goto('/work/kanban');
       await page.getByRole('button', { name: 'More actions' }).click();
-      const radiogroup = page.getByRole('radiogroup', { name: 'View' });
-      await settleForShot(page, radiogroup);
+      const group = page.getByRole('group', { name: 'View' });
+      await settleForShot(page, group);
       await shoot(page, `work-mobile-overflow-${theme}`);
     });
   }

@@ -8,7 +8,6 @@
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '../components/kit/PageHeader.vue';
-import RadioGroup from '../components/kit/RadioGroup.vue';
 import SegmentedControl from '../components/kit/SegmentedControl.vue';
 import Separator from '../components/kit/Separator.vue';
 import { switchQuery, WORK_VIEWS, workViewFromRouteName } from '../lib/workView.js';
@@ -41,18 +40,33 @@ function onPickView(value: string) {
 
     <!-- Must render before <router-view> so this teleports above Kanban's
          own display-options teleport inside #bs-mtopbar-overflow-extra
-         (uiux spec §3: View radio group, Separator, then the active view's
-         own controls). Closing the overflow on pick is MobileTopBar's own
-         job (it watches route.fullPath), not this component's. -->
+         (uiux spec §3: View group, Separator, then the active view's own
+         controls). Closing the overflow on pick is MobileTopBar's own job
+         (it watches route.fullPath), not this component's.
+
+         DS4 S1 round 6 (S3 a11y finding): `role="menuitemradio"` buttons,
+         not kit's RadioGroup component — a radiogroup of native radio
+         inputs is not a valid child of the overflow's `role="menu"`, and
+         RadioGroup keeps its unchanged contract for its other caller
+         (LessonsPage). tabindex is "-1" by default; MobileTopBar owns the
+         roving tabindex across the whole menu. -->
     <Teleport to="#bs-mtopbar-overflow-extra">
       <span class="bs-mtopbar__menu-label">View</span>
-      <RadioGroup
-        :model-value="currentView"
-        :options="radioOptions"
-        name="work-view"
-        aria-label="View"
-        @update:model-value="onPickView"
-      />
+      <div class="bs-mtopbar__viewgroup" role="group" aria-label="View">
+        <button
+          v-for="opt in radioOptions"
+          :key="opt.value"
+          type="button"
+          class="bs-mtopbar__menuitem bs-mtopbar__viewitem"
+          role="menuitemradio"
+          tabindex="-1"
+          :aria-checked="currentView === opt.value"
+          @click="onPickView(opt.value)"
+        >
+          <span class="bs-mtopbar__radio-dot" aria-hidden="true"></span>
+          <span>{{ opt.label }}</span>
+        </button>
+      </div>
       <Separator />
     </Teleport>
 
