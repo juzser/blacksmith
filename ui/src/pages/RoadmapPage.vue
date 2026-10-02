@@ -83,6 +83,7 @@ async function loadEpicFlow(epicId: string) {
  */
 const epicModeFlow = ref<FlowGraph | 'failed' | undefined>(undefined);
 const epicPlanVersion = ref('');
+let epicModeFlowSeq = 0;
 
 /**
  * `background: true` is the poll/topbar-Refresh path (fix round 1 finding
@@ -95,6 +96,9 @@ async function loadEpicModeFlow(options: { background?: boolean } = {}) {
   if (!selectedEpic.value) return;
   const epicId = selectedEpic.value;
   const background = options.background ?? false;
+  // A later fetch (another epic, another plan version) supersedes this one:
+  // a slow poll response must not overwrite what the operator now picked.
+  const seq = ++epicModeFlowSeq;
   if (!background) epicModeFlow.value = undefined;
   try {
     const flow = await fetchFlow({
@@ -103,8 +107,10 @@ async function loadEpicModeFlow(options: { background?: boolean } = {}) {
       epic: epicId,
       planVersion: epicPlanVersion.value ? Number(epicPlanVersion.value) : undefined,
     });
+    if (seq !== epicModeFlowSeq) return;
     epicModeFlow.value = flow;
   } catch {
+    if (seq !== epicModeFlowSeq) return;
     if (!background) epicModeFlow.value = 'failed';
   }
 }
