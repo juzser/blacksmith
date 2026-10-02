@@ -2815,6 +2815,31 @@ summary.bs-inbox__group-head {
 .whead .small {
   font-size: var(--bs-text-xs);
 }
+/* DS4 S4 fix round 2 — compact mode only: keep the current wave row on one
+   line (ruling R3). The title shrinks with an ellipsis instead of wrapping
+   the row onto a second line; .tb-right stays full width. Desktop .whead
+   above is untouched. */
+.wave-list--compact .whead {
+  flex: 1;
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.wave-list--compact .whead > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wave-list--compact .wave__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wave-list--compact .tb-right {
+  flex-shrink: 0;
+}
 .wave__title {
   display: inline;
   margin: 0;

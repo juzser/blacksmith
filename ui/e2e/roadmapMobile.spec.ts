@@ -145,6 +145,30 @@ test.describe('Roadmap mobile (DS4 S4)', () => {
     expect(pageScrollWidth).toBeLessThanOrEqual(pageClientWidth);
   });
 
+  // S4 fix round 2 — the current wave row must stay on one line: the Tag
+  // shares the same line as the bold title, not wrapped underneath.
+  test('the current wave row keeps its Tag on the same line as the title at 375px', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/work/roadmap?epic=epic-9');
+    const curRow = page.locator('.wave.cur');
+    await expect(curRow).toBeVisible();
+
+    const title = curRow.locator('.wave__title');
+    const tag = curRow.locator('.bs-tag');
+    const titleBox = await title.boundingBox();
+    const tagBox = await tag.boundingBox();
+    expect(titleBox).not.toBeNull();
+    expect(tagBox).not.toBeNull();
+    const titleCenterY = (titleBox?.y ?? 0) + (titleBox?.height ?? 0) / 2;
+    const tagCenterY = (tagBox?.y ?? 0) + (tagBox?.height ?? 0) / 2;
+    expect(Math.abs(titleCenterY - tagCenterY)).toBeLessThan(4);
+
+    const rowBox = await curRow.boundingBox();
+    expect(rowBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  });
+
   for (const theme of ['light', 'dark'] as const) {
     test(`screenshot phone phase mode/${theme}`, async ({ page }) => {
       await setTheme(page, theme);

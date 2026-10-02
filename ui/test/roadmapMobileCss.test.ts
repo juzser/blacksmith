@@ -85,3 +85,39 @@ describe('bs-primitives.css — WaveList compact flat rows (fix round 1 #4)', ()
     expect(CSS).toMatch(/\.wave-list--compact \.wave:last-child\s*\{[^}]*border-bottom:\s*0/);
   });
 });
+
+describe('bs-primitives.css — current wave row on one line (fix round 2)', () => {
+  it('keeps .whead from wrapping onto a second line in compact mode only', () => {
+    const decl = rule('.wave-list--compact .whead');
+    expect(decl).toMatch(/flex:\s*1/);
+    expect(decl).toMatch(/min-width:\s*0/);
+    expect(decl).toMatch(/flex-wrap:\s*nowrap/);
+  });
+
+  it('leaves the unscoped .whead untouched, so desktop stays byte-identical', () => {
+    const decl = rule('.whead');
+    expect(decl).toMatch(/flex-wrap:\s*wrap/);
+    expect(decl).not.toMatch(/flex:\s*1/);
+  });
+
+  it('lets the title shrink with an ellipsis so it cannot force horizontal scroll', () => {
+    const decl = rule('.wave-list--compact .wave__title');
+    expect(decl).toMatch(/min-width:\s*0/);
+    expect(decl).toMatch(/overflow:\s*hidden/);
+    expect(decl).toMatch(/text-overflow:\s*ellipsis/);
+    expect(decl).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it('keeps the title + meta wrapper from wrapping onto a second line, ellipsizing instead', () => {
+    const decl = rule('.wave-list--compact .whead > span:first-child');
+    expect(decl).toMatch(/min-width:\s*0/);
+    expect(decl).toMatch(/overflow:\s*hidden/);
+    expect(decl).toMatch(/text-overflow:\s*ellipsis/);
+    expect(decl).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it('keeps .tb-right from shrinking in compact mode', () => {
+    const decl = rule('.wave-list--compact .tb-right');
+    expect(decl).toMatch(/flex-shrink:\s*0/);
+  });
+});
