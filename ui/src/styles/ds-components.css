@@ -191,6 +191,7 @@
   .ds-btn--sm,
   .ds-btn--xs {
     min-height: var(--bs-touch);
+    min-width: var(--bs-touch);
   }
   .ds-btn--icon,
   .ds-btn--icon-sm,

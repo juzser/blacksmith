@@ -868,10 +868,11 @@ a:hover {
   padding-top: var(--bs-space-4);
 }
 /* ≤640px: tab padding settles under --bs-touch (visual-qa phase B round 2) —
-   min-height floor only, label/underline keep their own size. */
+   min-height and min-width floor, label/underline keep their own size. */
 @media (max-width: 640px) {
   .bs-tabs__tab {
     min-height: var(--bs-touch);
+    min-width: var(--bs-touch);
   }
 }
 
