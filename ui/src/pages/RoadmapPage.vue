@@ -1,22 +1,23 @@
 <script setup lang="ts">
-// Roadmap — DS4 S2 rewrite (signed-off spec). Replaces the VueFlow canvas
-// with a plain horizontal swimlane (RoadmapSwimlane.vue) plus a goal/epics
-// card (EpicBlock.vue, phase mode only — epic mode and the wave toggle are
-// S3). `@vue-flow/core` stays a dependency for FlowPage/SessionsPage; it is
-// simply unused on this page now.
+// Roadmap — DS4 S2/S3. Replaces the VueFlow canvas with a plain horizontal
+// swimlane (RoadmapSwimlane.vue) plus a goal/epics card (EpicBlock.vue),
+// in phase mode or epic mode. `@vue-flow/core` stays a dependency for
+// SessionsPage; it is unused on this page now (the retired FlowPage was its
+// other consumer).
 //
 // Below 640px the swimlane's own `.rm-scroll` region still scrolls sideways
 // rather than reflowing into a stacked phone layout — a real phone layout is
 // S4, out of scope here; this is the simplest fallback that avoids the page
 // itself scrolling sideways.
 import { Map as MapIcon } from '@lucide/vue';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import EpicBlock from '../components/EpicBlock.vue';
 import Banner from '../components/kit/Banner.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import RoadmapSwimlane from '../components/RoadmapSwimlane.vue';
+import TaskPeekPanel from '../components/TaskPeekPanel.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
@@ -28,19 +29,16 @@ import {
   type MilestoneProgress,
   selectableEpics,
 } from '../lib/api.js';
+import { planVersionOptions } from '../lib/planVersion.js';
 import { defaultSelection } from '../lib/roadmapSelection.js';
-import {
-  buildEpicOnlySwimlane,
-  buildSwimlane,
-  hasRoadmapContent,
-  taskCountLabel,
-} from '../lib/roadmapSwimlane.js';
+import { buildEpicOnlySwimlane, buildSwimlane, hasRoadmapContent } from '../lib/roadmapSwimlane.js';
 import {
   isTaskOver,
   type KitTone,
   milestoneStatusKitTone,
   milestoneStatusLabel,
 } from '../lib/taxonomy.js';
+import { buildWaveList, epicStatusFromFlow } from '../lib/waveList.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -76,6 +74,31 @@ async function loadEpicFlow(epicId: string) {
   epicFlows.value = new Map(epicFlows.value);
 }
 
+/**
+ * Epic mode's own flow + plan-version state, separate from `epicFlows`
+ * above: switching the plan-version Select re-fetches with a specific
+ * `planVersion`, and that must not overwrite the phase-mode cache's
+ * current-plan entry for the same epic.
+ */
+const epicModeFlow = ref<FlowGraph | 'failed' | undefined>(undefined);
+const epicPlanVersion = ref('');
+
+async function loadEpicModeFlow() {
+  if (!selectedEpic.value) return;
+  const epicId = selectedEpic.value;
+  epicModeFlow.value = undefined;
+  try {
+    epicModeFlow.value = await fetchFlow({
+      session: sessionScope.value,
+      project: project.value,
+      epic: epicId,
+      planVersion: epicPlanVersion.value ? Number(epicPlanVersion.value) : undefined,
+    });
+  } catch {
+    epicModeFlow.value = 'failed';
+  }
+}
+
 function epicIdsForPhase(phaseId: string | null): string[] {
   if (phaseId === null) return [];
   const phase = (milestones.value ?? []).find((m) => m.milestoneId === phaseId);
@@ -107,6 +130,7 @@ async function load() {
     selectedPhase.value = selection.phaseId;
     selectedEpic.value = selection.epicId;
     ensureEpicFlowsLoaded(epicIdsForPhase(selectedPhase.value));
+    if (selectedEpic.value) loadEpicModeFlow();
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -129,6 +153,13 @@ function selectEpic(epicId: string) {
   selectedPhase.value = null;
   router.replace({ query: { ...route.query, epic: epicId, phase: undefined } });
   ensureEpicFlowsLoaded([epicId]);
+  epicPlanVersion.value = '';
+  loadEpicModeFlow();
+}
+
+function setEpicPlanVersion(value: string) {
+  epicPlanVersion.value = value;
+  loadEpicModeFlow();
 }
 
 const swimlane = computed(() => {
@@ -141,26 +172,58 @@ const selectedPhaseData = computed(
   () => (milestones.value ?? []).find((m) => m.milestoneId === selectedPhase.value) ?? null,
 );
 
-/**
- * Fix round 4 #1: the epic-only project's default selection (no milestones,
- * `selectedPhaseData` is null) used to fall through to a fabricated
- * zero-task label regardless of the epic's real tasks. Read the same
- * `epicFlows` source `epicSections` uses below: loading while the flow
- * hasn't resolved yet, "No tasks tracked" only once it really has 0 tasks.
- */
+/** Epic mode (spec §1) — one epic, standalone, built from `epicModeFlow`. */
 const selectedEpicData = computed(() => {
   if (!selectedEpic.value) return null;
-  const flow = epicFlows.value.get(selectedEpic.value);
-  if (flow === undefined) return { loading: true as const, total: 0, completed: 0 };
-  if (flow === 'failed') return { loading: false as const, total: 0, completed: 0 };
+  const epicId = selectedEpic.value;
+  const flow = epicModeFlow.value;
+  if (flow === undefined) {
+    return {
+      epicId,
+      statusTone: 'neutral' as KitTone,
+      statusLabel: 'Loading',
+      project: project.value ?? null,
+      planVersionOptions: planVersionOptions(null),
+      planVersion: epicPlanVersion.value,
+      loading: true,
+      error: false,
+      tasksTotal: 0,
+      tasksCompleted: 0,
+      waves: [],
+    };
+  }
+  if (flow === 'failed') {
+    return {
+      epicId,
+      statusTone: 'neutral' as KitTone,
+      statusLabel: 'Unavailable',
+      project: project.value ?? null,
+      planVersionOptions: planVersionOptions(null),
+      planVersion: epicPlanVersion.value,
+      loading: false,
+      error: true,
+      tasksTotal: 0,
+      tasksCompleted: 0,
+      waves: [],
+    };
+  }
+  const { statusTone, statusLabel } = epicStatusFromFlow(flow);
   return {
-    loading: false as const,
-    total: flow.nodes.length,
-    completed: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
+    epicId,
+    statusTone,
+    statusLabel,
+    project: project.value ?? null,
+    planVersionOptions: planVersionOptions(flow),
+    planVersion: epicPlanVersion.value,
+    loading: false,
+    error: false,
+    tasksTotal: flow.nodes.length,
+    tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
+    waves: buildWaveList(flow),
   };
 });
 
-/** Phase mode only (S2) — epic-standalone mode is S3. */
+/** Phase mode (S2/S3) — one section per epic, each with its own WaveList. */
 const epicSections = computed(() => {
   const phase = selectedPhaseData.value;
   if (!phase) return [];
@@ -173,6 +236,7 @@ const epicSections = computed(() => {
         statusLabel: 'Loading',
         tasksTotal: null,
         tasksCompleted: null,
+        waves: [],
       };
     }
     if (flow === 'failed') {
@@ -183,37 +247,38 @@ const epicSections = computed(() => {
         tasksTotal: 0,
         tasksCompleted: 0,
         failed: true,
+        waves: [],
       };
     }
-    const total = flow.nodes.length;
-    const completed = flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length;
-    const anyInFlight = flow.nodes.some((n) => !isTaskOver(n.taskStatus));
-    const status =
-      total === 0
-        ? 'todo'
-        : completed === total
-          ? 'completed'
-          : anyInFlight
-            ? 'in-progress'
-            : 'todo';
-    // Fix round 2 #3: the label is always one of a fixed three ("Done" /
-    // "In progress" / "To do"), so the tone must key off that same label,
-    // not off whichever specific task status happens to be driving
-    // `anyInFlight` — a `reviewing`/`grading` task made the epic Tag purple
-    // while still reading "In progress", disagreeing with the phase Tag
-    // right above it (spec: "the progress tone for 'In progress'").
-    const statusTone: KitTone =
-      status === 'completed' ? 'done' : status === 'in-progress' ? 'progress' : 'neutral';
+    const { statusTone, statusLabel } = epicStatusFromFlow(flow);
     return {
       epicId,
       statusTone,
-      statusLabel:
-        status === 'completed' ? 'Done' : status === 'in-progress' ? 'In progress' : 'To do',
-      tasksTotal: total,
-      tasksCompleted: completed,
+      statusLabel,
+      tasksTotal: flow.nodes.length,
+      tasksCompleted: flow.nodes.filter((n) => isTaskOver(n.taskStatus)).length,
+      waves: buildWaveList(flow),
     };
   });
 });
+
+// Pattern 9 (KanbanBoard.vue) — a WaveTaskCard click opens TaskPeekPanel;
+// Escape returns focus to the card that opened it.
+const peekTaskId = ref<string | null>(null);
+let lastFocusedCard: HTMLElement | null = null;
+
+function openPeek(taskId: string) {
+  lastFocusedCard = document.activeElement as HTMLElement | null;
+  peekTaskId.value = taskId;
+}
+async function closePeek() {
+  const card = lastFocusedCard;
+  peekTaskId.value = null;
+  // Dialog's inert-release runs on unmount, one render flush after this —
+  // see KanbanBoard.vue's closePeek() for the same wait.
+  await nextTick();
+  card?.focus();
+}
 </script>
 
 <template>
@@ -257,17 +322,21 @@ const epicSections = computed(() => {
         :tasks-total="selectedPhaseData.tasksTotal"
         :tasks-completed="selectedPhaseData.tasksCompleted"
         :epics="epicSections"
+        @select="openPeek"
       />
-      <template v-else-if="selectedEpicData">
-        <Skeleton v-if="selectedEpicData.loading" width="140px" :height="14" /><!-- ds-allow-hardcode -->
-        <p v-else class="muted">
-          {{
-            selectedEpicData.total > 0
-              ? taskCountLabel(selectedEpicData.total, selectedEpicData.completed)
-              : 'No tasks tracked'
-          }}
-        </p>
-      </template>
+      <EpicBlock
+        v-else-if="selectedEpicData"
+        :epic="selectedEpicData"
+        @select="openPeek"
+        @update:plan-version="setEpicPlanVersion"
+      />
     </div>
+
+    <TaskPeekPanel
+      v-if="peekTaskId"
+      :task-id="peekTaskId"
+      @close="closePeek"
+      @open-full="(id) => router.push(`/tasks/${encodeURIComponent(id)}`)"
+    />
   </div>
 </template>
