@@ -1923,11 +1923,6 @@ summary.bs-inbox__group-head {
   display: flex;
   flex-direction: column;
 }
-.bs-kanban-board__toolbar {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: var(--bs-space-3);
-}
 .bs-kanban-board__columns {
   display: flex;
   gap: var(--bs-space-4);

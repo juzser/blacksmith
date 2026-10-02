@@ -159,6 +159,28 @@ test.describe('Kanban', () => {
     expect(box?.height ?? 0).toBeGreaterThan(100);
   });
 
+  // UI audit finding (S3): the desktop toolbar used to read as two
+  // single-control rows — the page toolbar (Epic, count, Refresh) and
+  // KanbanBoard's own row holding only the display-options trigger. The
+  // trigger now teleports into the page toolbar, so there is exactly one
+  // row, and it shares a top with the Epic select.
+  test('desktop: the display-options trigger shares one toolbar row with the Epic select', async ({
+    page,
+  }) => {
+    await page.goto('/work/kanban');
+    await expect(page.getByRole('region', { name: 'Todo column' })).toBeVisible();
+
+    await expect(page.locator('.bs-kanban-board__toolbar')).toHaveCount(0);
+
+    const epicBox = await page.getByLabel('Epic', { exact: true }).boundingBox();
+    const trigger = page.getByRole('button', { name: 'Display options' });
+    await expect(trigger).toBeVisible();
+    const triggerBox = await trigger.boundingBox();
+    expect(epicBox).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(Math.abs((epicBox?.y ?? 0) - (triggerBox?.y ?? 0))).toBeLessThanOrEqual(8);
+  });
+
   // Pattern 7 — the display-options Popover's Group by Select re-folds the
   // board into a different set of columns, without a reload.
   test('switching group-by changes how the board is grouped', async ({ page }) => {
