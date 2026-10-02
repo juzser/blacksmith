@@ -62,6 +62,25 @@ test.describe('Work switcher', () => {
     await expect(radiogroup).toBeHidden();
   });
 
+  test('phone: both View radio rows meet the 44px touch target (DS4 S1 round 3, S2 finding 4)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const radiogroup = page.getByRole('radiogroup', { name: 'View' });
+    await expect(radiogroup).toBeVisible();
+
+    const rows = await radiogroup.getByRole('radio').all();
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const box = await row.locator('xpath=..').boundingBox();
+      if (!box) throw new Error('a View radio row has no box');
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+  });
+
   test('phone: the overflow popover stays fully inside the viewport (DS4 S1 round 2, S2-major finding 5)', async ({
     page,
   }) => {

@@ -50,7 +50,19 @@ describe('switchQuery', () => {
 describe('legacyWorkRedirect', () => {
   it('redirects to the given target path, keeping the full query', () => {
     const redirect = legacyWorkRedirect('/work/kanban');
-    const to = { query: { epic: 'e1', milestone: 'm1' } } as Parameters<typeof redirect>[0];
-    expect(redirect(to)).toEqual({ path: '/work/kanban', query: { epic: 'e1', milestone: 'm1' } });
+    const to = { query: { epic: 'e1', milestone: 'm1' }, hash: '' } as Parameters<
+      typeof redirect
+    >[0];
+    expect(redirect(to)).toEqual({
+      path: '/work/kanban',
+      query: { epic: 'e1', milestone: 'm1' },
+      hash: '',
+    });
+  });
+
+  it('keeps the hash when redirecting', () => {
+    const redirect = legacyWorkRedirect('/work/kanban');
+    const to = { query: { epic: 'e1' }, hash: '#task-42' } as Parameters<typeof redirect>[0];
+    expect(redirect(to)).toEqual({ path: '/work/kanban', query: { epic: 'e1' }, hash: '#task-42' });
   });
 });

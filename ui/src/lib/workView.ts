@@ -38,5 +38,9 @@ export function workViewFromRouteName(name: unknown): WorkView {
  * same target, full query string kept (unlike switchQuery, which only
  * carries three keys when the SegmentedControl changes view). */
 export function legacyWorkRedirect(targetPath: string) {
-  return (to: { query: LocationQueryRaw }) => ({ path: targetPath, query: to.query });
+  return (to: { query: LocationQueryRaw; hash: string }) => ({
+    path: targetPath,
+    query: to.query,
+    hash: to.hash,
+  });
 }

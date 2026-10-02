@@ -602,6 +602,14 @@
   color: var(--bs-text);
   cursor: pointer;
 }
+/* Mobile overflow (ds4-plan.md S1): the only live consumer is WorkPage's
+   view switch, teleported into the mobile top bar overflow, so the touch
+   target only needs widening at the mobile breakpoint. */
+@media (max-width: 640px) {
+  .bs-radio {
+    min-height: var(--bs-touch);
+  }
+}
 
 /* Chip (§2.1) — border+dot identity pattern ported from
    ui/src/components/IdentityChip.vue; colour never carries the label text
