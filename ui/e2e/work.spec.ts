@@ -92,20 +92,23 @@ test.describe('Work switcher', () => {
     await expect(menu).toBeVisible();
 
     const menuitems = await menu.getByRole('menuitem').all();
-    expect(menuitems.length).toBeGreaterThanOrEqual(3);
+    // Built-ins (Pause, Switch theme, Settings) plus Kanban's display-options
+    // row, now also a menuitem (DS4 S1 round 5, S3 finding 2).
+    expect(menuitems.length).toBeGreaterThanOrEqual(4);
     const radios = await page.getByRole('radiogroup', { name: 'View' }).getByRole('radio').all();
     expect(radios.length).toBeGreaterThan(0);
 
+    // DOM order, not query order: a querySelectorAll-backed locator with a
+    // grouped selector returns elements in document order, which on this
+    // vertical flex column is also visual top-to-bottom order — menuitems
+    // and radios interleave (the Kanban row sits below the View radios).
+    const rowEls = await menu.locator('[role="menuitem"], [role="radio"]').all();
     const rows: { top: number; bottom: number }[] = [];
-    for (const item of menuitems) {
-      const box = await item.boundingBox();
-      if (!box) throw new Error('a menuitem has no box');
-      expect(box.height).toBeGreaterThanOrEqual(44);
-      rows.push({ top: box.y, bottom: box.y + box.height });
-    }
-    for (const radio of radios) {
-      const box = await radio.locator('xpath=..').boundingBox();
-      if (!box) throw new Error('a View radio row has no box');
+    for (const el of rowEls) {
+      const role = await el.getAttribute('role');
+      const target = role === 'radio' ? el.locator('xpath=..') : el;
+      const box = await target.boundingBox();
+      if (!box) throw new Error('a menu row has no box');
       expect(box.height).toBeGreaterThanOrEqual(44);
       rows.push({ top: box.y, bottom: box.y + box.height });
     }
@@ -117,6 +120,25 @@ test.describe('Work switcher', () => {
     }
 
     await expect(page.getByText('View', { exact: true })).toBeVisible();
+  });
+
+  test('phone: the display-options row is a labeled row that still opens display options (DS4 S1 round 5, S3 finding 2)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/work/kanban');
+
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const row = page.getByRole('menuitem', { name: 'Display options' });
+    await expect(row).toBeVisible();
+    await expect(row).toHaveText(/Display options/);
+
+    const box = await row.boundingBox();
+    if (!box) throw new Error('the display-options row has no box');
+    expect(box.height).toBeGreaterThanOrEqual(44);
+
+    await row.click();
+    await expect(page.getByText('Show summary')).toBeVisible();
   });
 
   test('phone: the overflow popover stays fully inside the viewport (DS4 S1 round 2, S2-major finding 5)', async ({

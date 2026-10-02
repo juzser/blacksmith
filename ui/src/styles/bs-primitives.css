@@ -1466,6 +1466,14 @@ a:hover {
 .bs-mtopbar__overflow-extra {
   display: contents;
 }
+/* Pages with no page-specific extra (Home) leave the teleport target empty —
+   the Separator just above it must not render then, or it dangles under
+   "Settings" with nothing stacked below (DS4 S1 round 5, S3 finding 1). The
+   Work page always teleports its View switch in, so its Separator keeps
+   rendering. */
+.bs-mtopbar__overflow > .bs-sep:has(+ #bs-mtopbar-overflow-extra:empty) {
+  display: none;
+}
 /* ---- MobileProjectSwitcher (§3.1, finding 9): trigger + Popover list ---- */
 .bs-mproject {
   display: contents;

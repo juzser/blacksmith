@@ -221,6 +221,28 @@ test.describe('Home', () => {
       await shoot(page, `home-mobile-overflow-${theme}`);
     });
   }
+
+  // Home has no page-specific extra teleported into the overflow menu, so
+  // the Separator before the (empty) extra slot must not render — a visible
+  // separator with nothing stacked under it is a dangling rule (DS4 S1
+  // round 5, S3 finding 1).
+  test('phone: no separator follows the last menuitem when the overflow has no page extra', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/overview');
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const menu = page.getByRole('menu', { name: 'More actions' });
+    await expect(menu).toBeVisible();
+
+    const menuitems = await menu.getByRole('menuitem').all();
+    expect(menuitems.length).toBeGreaterThan(0);
+
+    const separators = await menu.getByRole('separator').all();
+    for (const separator of separators) {
+      await expect(separator).not.toBeVisible();
+    }
+  });
 });
 
 test.describe('Home: Needs you inbox', () => {
