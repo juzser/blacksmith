@@ -153,3 +153,27 @@ describe('TaskDetailPage.vue — DS visual pass restructure (items 2-4)', () => 
     expect(rule).not.toMatch(/display:\s*flex;/);
   });
 });
+
+describe('TaskDetailPage.vue — humanized status tag (audit finding 6)', () => {
+  it('imports titleCase from lib/kanban.js, reusing the Kanban card humanizer', () => {
+    expect(SFC).toMatch(/import\s*\{[^}]*\btitleCase\b[^}]*\}\s*from\s*'\.\.\/lib\/kanban\.js'/);
+  });
+
+  it('never interpolates the raw taskStatus slug directly inside a status Tag', () => {
+    expect(SFC).not.toMatch(/<Tag[^>]*>\s*\{\{\s*detail\.task\.taskStatus\s*\}\}/);
+  });
+
+  it('wraps the status tag text in titleCase()', () => {
+    expect(SFC).toMatch(/\{\{\s*titleCase\(detail\.task\.taskStatus\)\s*\}\}/);
+  });
+});
+
+describe('TaskDetailPage.vue — mobile title row wrap (audit finding 3, §3.1)', () => {
+  it('wraps .bs-ph__titlerow to a column at the mobile breakpoint so the H1 and tags do not share a row', () => {
+    const rule = PRIMITIVES_CSS.match(
+      /@media \(max-width: 640px\) \{\s*\.bs-ph__titlerow \{([^}]*)\}/,
+    )?.[1];
+    expect(rule).toBeTruthy();
+    expect(rule).toMatch(/flex-direction:\s*column;/);
+  });
+});
