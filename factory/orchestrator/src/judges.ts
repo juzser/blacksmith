@@ -880,6 +880,9 @@ function notDispatchedMessage(
 ): string {
   if (kindAmbiguous.length > 1) {
     const kinds = kindAmbiguous.map((t) => t.kind ?? 'null').join(', ');
+    if (kindAmbiguous.every((t) => t.reported)) {
+      return `Task id "${input.taskId}" has ${kindAmbiguous.length} "${input.role}" turns (kinds: ${kinds}), all already reported. Report with "--kind" naming the one to re-report — picking one here would be a guess.`;
+    }
     return `Task id "${input.taskId}" has ${kindAmbiguous.length} open "${input.role}" turns (kinds: ${kinds}). Report with "--kind" naming the one to close — closing one here would be a guess.`;
   }
   const distinctTaskIds = new Set(forRole.map((t) => t.taskId));
@@ -916,19 +919,22 @@ export async function recordJudgeReport(
   const epicAmbiguous = distinctTaskIds.size > 1;
   // A kindless report picks among OPEN turns only, the same set
   // `outstandingJudges` exposes — a closed turn is not a candidate to guess
-  // between, and the error must not count it as "open" either.
+  // between, and the error must not count it as "open" either. With no turn
+  // open, every turn is a candidate again: one is a legacy re-report, two is
+  // the same guess, and must not silently re-report the first.
   const openForRole = forRole.filter((t) => !t.reported);
-  const kindAmbiguous = !epicAmbiguous && kind === null && openForRole.length > 1;
+  const candidates = openForRole.length > 0 ? openForRole : forRole;
+  const kindAmbiguous = !epicAmbiguous && kind === null && candidates.length > 1;
   const turn =
     epicAmbiguous || kindAmbiguous
       ? undefined
       : kind === null
-        ? (openForRole[0] ?? forRole[0] ?? undefined)
+        ? candidates[0]
         : forRole.find((t) => t.kind === kind);
   if (turn === undefined || (input.round !== undefined && input.round !== turn.round)) {
     throw new JudgeError(
       'judges.not-dispatched',
-      notDispatchedMessage(input, turn, forRole, kindAmbiguous ? openForRole : []),
+      notDispatchedMessage(input, turn, forRole, kindAmbiguous ? candidates : []),
       {
         task_id: input.taskId,
         agent_role: input.role,

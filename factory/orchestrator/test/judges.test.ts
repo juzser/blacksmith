@@ -264,6 +264,35 @@ describe('judges.ts', () => {
       expect(outstandingJudges(await turns())).toEqual([]);
     });
 
+    it('a kindless report after both uiux turns closed errors instead of re-reporting one', async () => {
+      const specArtifact = path.join(artifactDir, 'closed-spec.json');
+      const visualArtifact = path.join(artifactDir, 'closed-visual.json');
+      await dispatch({ role: 'uiux', kind: 'spec', artifactPath: specArtifact });
+      await dispatch({ role: 'uiux', kind: 'visual', artifactPath: visualArtifact });
+      await writeArtifact(specArtifact, uiuxDocument([]));
+      await writeArtifact(visualArtifact, uiuxDocument([]));
+      for (const kind of ['spec', 'visual'] as const) {
+        await recordJudgeReport(
+          {
+            taskId: 'epic-1/task-1',
+            role: 'uiux',
+            kind,
+            artifactPath: kind === 'spec' ? specArtifact : visualArtifact,
+          },
+          ctx(),
+          opts(),
+        );
+      }
+
+      await expect(
+        recordJudgeReport(
+          { taskId: 'epic-1/task-1', role: 'uiux', noFindings: true },
+          ctx(),
+          opts(),
+        ),
+      ).rejects.toThrow(/already reported.*--kind/);
+    });
+
     it('an ambiguous report (two open uiux turns, no kind) errors clearly', async () => {
       await dispatch({
         role: 'uiux',
