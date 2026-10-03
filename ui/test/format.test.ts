@@ -388,13 +388,13 @@ describe('lib/format.ts formatLiveStatus()', () => {
 
   it('appends the last activity when present, live', () => {
     expect(formatLiveStatus(true, '2026-08-04T11:55:00.000Z', now)).toBe(
-      'Live, last activity 5 min ago',
+      'Live · last activity 5 min ago',
     );
   });
 
   it('appends the last activity when present, paused', () => {
     expect(formatLiveStatus(false, '2026-08-04T11:55:00.000Z', now)).toBe(
-      'Paused, last activity 5 min ago',
+      'Paused · last activity 5 min ago',
     );
   });
 });
