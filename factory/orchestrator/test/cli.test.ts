@@ -8868,6 +8868,180 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // #294: a plan holds every superseded copy of a task alongside its live
+    // replacement (D-121), and `budgetFromFlags`/`uiAffectingFromFlags`/`uiux
+    // check` used a bare `plan.tasks.find`, which answers with whichever
+    // record `plan amend` happened to write first — the dead one. These read
+    // through `liveSpec` instead, the same rule `livePlanTasks` already
+    // applies for every other reader (plan.ts:~930).
+    describe('gate reads the live plan row, not a superseded one (#294)', () => {
+      /** The two-row fixture: a dead copy of task-1, then its live replacement. */
+      function supersededAndLivePlan(overrides: {
+        superseded: Record<string, unknown>;
+        live: Record<string, unknown>;
+      }) {
+        const [task1, ...rest] = PLAN.tasks;
+        return {
+          ...PLAN,
+          tasks: [
+            { ...task1, task_status: 'superseded', ...overrides.superseded },
+            { ...task1, task_status: 'todo', ...overrides.live },
+            ...rest,
+          ],
+        };
+      }
+
+      it('gate run budget check uses the live diff_lines cap, not a superseded one', async () => {
+        const { sessionId, eventsDir } = await session();
+        const worktreeDir = await committedWorktree(`p9-294-budget-${sessionId}`);
+        // Widen the diff past the superseded row's cap (100) but keep it under
+        // the live row's cap (300): only the live cap passes it.
+        await writeFile(
+          path.join(worktreeDir, 'wide.ts'),
+          `${Array.from({ length: 200 }, (_, i) => `export const v${i} = ${i};`).join('\n')}\n`,
+        );
+        git(worktreeDir, ['add', '.']);
+        git(worktreeDir, ['commit', '-q', '-m', 'widen diff']);
+
+        const checksPath = path.join(scratchDir, `${sessionId}-live-budget-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-live-budget-result.json`);
+        const planPath = path.join(scratchDir, `${sessionId}-live-budget-plan.json`);
+        await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        await writeFile(
+          planPath,
+          JSON.stringify(
+            supersededAndLivePlan({
+              superseded: { budget: { tokens: 1000, diff_lines: 100 } },
+              live: { budget: { tokens: 1000, diff_lines: 300 } },
+            }),
+          ),
+        );
+
+        const result = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          // Without an explicit base, measureDiff derives one from the branch
+          // name convention (smith/<epic>/integration), which committedWorktree
+          // never creates — the diff would stay unmeasurable rather than
+          // exercise the cap this test is about.
+          '--base',
+          'main',
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+
+        expect(result.status).toBe(0);
+        const outcome = JSON.parse(result.stdout);
+        // Reading the superseded row's diff_lines: 100 cap would have reported
+        // an overrun here; the live row's 300 cap passes it.
+        expect(outcome.budgetCheck.overruns).toEqual([]);
+      });
+
+      it('gate run and uiux check resolve ui_affecting off the live row, not a superseded one', async () => {
+        const { sessionId, eventsDir } = await session();
+        const worktreeDir = await committedWorktree(`p9-294-ui-${sessionId}`);
+        const checksPath = path.join(scratchDir, `${sessionId}-live-ui-checks.json`);
+        const resultPath = path.join(scratchDir, `${sessionId}-live-ui-result.json`);
+        const planPath = path.join(scratchDir, `${sessionId}-live-ui-plan.json`);
+        await writeFile(checksPath, JSON.stringify([{ name: 'test', cmd: 'true' }]));
+        await writeFile(
+          resultPath,
+          JSON.stringify({
+            task_id: 'epic-1/task-1',
+            run_status: 'done',
+            structured_output: {},
+            artifacts: [],
+            token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+            agent: 'coder',
+            provider: 'claude',
+            model_tier: 'mid',
+          }),
+        );
+        // The superseded row says ui_affecting: false; the live replacement
+        // says true. A reader stuck on the superseded row would skip the uiux
+        // stage entirely instead of blocking on the missing screenshot set.
+        await writeFile(
+          planPath,
+          JSON.stringify(
+            supersededAndLivePlan({
+              superseded: { ui_affecting: false },
+              live: { ui_affecting: true },
+            }),
+          ),
+        );
+
+        const check = runCli([
+          'uiux',
+          'check',
+          '--task',
+          'epic-1/task-1',
+          '--plan',
+          planPath,
+          '--worktree',
+          worktreeDir,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(check.status).toBe(1);
+        expect(JSON.parse(check.stdout)).toEqual({
+          outcome: 'blocked',
+          reason: 'uiux-spec-missing',
+        });
+
+        const gate = runCli([
+          'gate',
+          'run',
+          'epic-1/task-1',
+          '--worktree',
+          worktreeDir,
+          '--checks',
+          checksPath,
+          '--result',
+          resultPath,
+          '--plan',
+          planPath,
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--state-dir',
+          eventsDir,
+        ]);
+        expect(gate.status).toBe(1);
+        expect(JSON.parse(gate.stdout).reason).toBe('uiux-spec-missing');
+      });
+    });
+
     // D-32/P9-13. A task normally has several judges, and `gate run` paired one
     // `--evidence` with one `--found-by`, so passing two judges' findings
     // through one gate meant concatenating them under a single attribution —
