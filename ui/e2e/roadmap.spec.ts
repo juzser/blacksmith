@@ -230,6 +230,24 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
     await expect(quote.locator('.bs-request-quote__text')).toContainText(
       'Build an employee directory',
     );
+    // DS4 S5c fix round 1, fix 2 — this quote is short enough not to clamp
+    // at 3 lines, so "Show more" must not render.
+    await expect(quote.locator('.bs-request-quote__toggle')).toHaveCount(0);
+  });
+
+  test('header order: id, Copy, PR, project chip, status Tag (DS4 S5c fix round 1, fix 6)', async ({
+    page,
+  }) => {
+    await page.goto('/work/roadmap?epic=epic-9');
+    const head = page.locator('.esec-head');
+    const chipIndex = await head
+      .locator('.eh-project')
+      .evaluate((el) => Array.from(el.parentElement?.children ?? []).indexOf(el));
+    const tagIndex = await head
+      .locator('.bs-tag')
+      .last()
+      .evaluate((el) => Array.from(el.parentElement?.children ?? []).indexOf(el));
+    expect(chipIndex).toBeLessThan(tagIndex);
   });
 
   test('copying the epic id flips the button label to "Copied"', async ({ page, context }) => {
@@ -240,7 +258,7 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
     await expect(page.locator('.esec-head').getByRole('button', { name: 'Copied' })).toBeVisible();
   });
 
-  test('touch targets clear 44px at 375px: Copy id and Open PR icon buttons, no horizontal scroll', async ({
+  test('touch targets clear 44px at 375px: Copy id, Open PR icon buttons and the quote link, no horizontal scroll', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 375, height: 812 });
@@ -250,6 +268,10 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
     for (const locator of [
       head.getByRole('button', { name: 'Copy epic id' }),
       head.getByRole('link', { name: 'Open integration PR on GitHub' }),
+      // DS4 S5c fix round 1, fix 1 — "View in timeline" (epic-9's quote is
+      // short, so only the link renders here; the toggle gets its own check
+      // against a long, clamped quote on Task Detail).
+      page.locator('.bs-request-quote__link'),
     ]) {
       const box = await locator.boundingBox();
       expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);

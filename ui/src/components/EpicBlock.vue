@@ -96,9 +96,11 @@ function progressBar(counts: StatusCounts | undefined, completed: number, total:
 // DS4 S5c fix round 1, fix 8 — useCopyFeedback owns the timeout id so it is
 // cleared on unmount and before re-arming; the watch below resets the idle
 // label (and cancels a pending flash) when the epic id itself changes.
-const { label: copyLabel, flash: flashCopied, reset: resetCopyLabel } = useCopyFeedback(
-  'Copy epic id',
-);
+const {
+  label: copyLabel,
+  flash: flashCopied,
+  reset: resetCopyLabel,
+} = useCopyFeedback('Copy epic id');
 async function onCopyEpicId(epicId: string) {
   const ok = await copyToClipboard(epicId);
   if (!ok) return;

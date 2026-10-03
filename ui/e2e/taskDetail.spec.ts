@@ -17,6 +17,43 @@ test.describe('Task detail', () => {
     );
   });
 
+  // DS4 S5c fix round 1, fix 2 — task-1's quote is the short epic-level
+  // fallback (multiProjectFixture.ts), too short to clamp at 3 lines.
+  test('RequestQuote: a short quote shows no "Show more" toggle', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    const quote = page.locator('.bs-request-quote');
+    await expect(quote).toBeVisible();
+    await expect(quote.locator('.bs-request-quote__toggle')).toHaveCount(0);
+    await expect(quote.locator('.bs-request-quote__link')).toBeVisible();
+  });
+
+  // task-3 gets the long, task-specific prompt (multiProjectFixture.ts),
+  // long enough to overflow the 3-line clamp.
+  test('RequestQuote: a long quote shows "Show more" and expands on click', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    const quote = page.locator('.bs-request-quote');
+    const toggle = quote.locator('.bs-request-quote__toggle');
+    await expect(toggle).toHaveText('Show more');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveText('Show less');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  // DS4 S5c fix round 1, fix 1 — both controls clear 44px on phone.
+  test('RequestQuote touch targets clear 44px at 375px on Task Detail', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
+    const quote = page.locator('.bs-request-quote');
+    for (const locator of [
+      quote.locator('.bs-request-quote__toggle'),
+      quote.locator('.bs-request-quote__link'),
+    ]) {
+      const box = await locator.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+  });
+
   // Pattern 2 — the History tab's run history timeline (visual-pass item 3
   // moved it there from "What was asked"), fed by GET /api/tasks/:taskId/runs
   // (queries.ts's `taskRuns()`). This task has a dispatch row and a completed
