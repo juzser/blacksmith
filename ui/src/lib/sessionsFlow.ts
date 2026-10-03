@@ -530,6 +530,65 @@ export function sessionsFlowNodes(
 }
 
 /**
+ * Pixel gap `anchoredPhoneViewport()` leaves between the fitted bounds and the
+ * pane edge — the same 24px as `--ds-space-6`, the page's own left/section
+ * padding, so the anchored canvas lines up with the page around it rather
+ * than sitting flush against the screen edge.
+ */
+export const PHONE_ANCHOR_PADDING = 24;
+
+/**
+ * The phone-width replacement for `fitView()`'s centred viewport (visual pass
+ * S1: Sessions first view is clipped).
+ *
+ * `fitView()` centres the fitted bounds in the pane. At the `minZoom`
+ * SessionsPage sets for phone width (1, so a node is never shrunk below its
+ * native size), a graph wider than a 390px canvas cannot be fully fitted —
+ * `fitView` pans instead of shrinking — and centring crops both sides evenly,
+ * landing the leftmost column's titles off the left edge. Anchoring the
+ * bounds' top-left corner to the pane's padding instead crops only the far
+ * side the operator has to pan to anyway.
+ *
+ * `sessionsFlowNodes()` always starts its first row and column at (0, 0), but
+ * this reads the bounding box of whatever is passed rather than assuming
+ * that, so it stays correct if that ever changes. Returns `null` for an empty
+ * layout — there is nothing to anchor, and `fitView()` itself is a no-op then.
+ *
+ * `canvasSize`, when given alongside each node's measured `dimensions`, caps
+ * the padding rather than always spending the full amount: a graph that
+ * already fits inside the canvas (bandsPerRowFor chose its columns for this
+ * exact box) must not be pushed past the canvas's own far edge by a padding
+ * sized for the common case. Only the edge that would otherwise overflow is
+ * capped — a graph wider than the canvas still gets the full left padding and
+ * crops on the right exactly as it did without `canvasSize`.
+ */
+export function anchoredPhoneViewport(
+  nodes: readonly {
+    position: { x: number; y: number };
+    dimensions?: { width: number; height: number };
+  }[],
+  padding: number = PHONE_ANCHOR_PADDING,
+  canvasSize?: { width: number; height: number },
+): { x: number; y: number; zoom: number } | null {
+  if (nodes.length === 0) return null;
+  const minX = Math.min(...nodes.map((n) => n.position.x));
+  const minY = Math.min(...nodes.map((n) => n.position.y));
+  // screen = flow * zoom + {x, y}; at zoom 1 placing flow (minX, minY) at the
+  // pane's padding solves to {x, y} = {padding - minX, padding - minY}.
+  let x = padding - minX;
+  let y = padding - minY;
+  if (canvasSize) {
+    const maxX = Math.max(...nodes.map((n) => n.position.x + (n.dimensions?.width ?? 0)));
+    const maxY = Math.max(...nodes.map((n) => n.position.y + (n.dimensions?.height ?? 0)));
+    const graphWidth = maxX - minX;
+    const graphHeight = maxY - minY;
+    if (graphWidth <= canvasSize.width) x = Math.min(x, canvasSize.width - minX - graphWidth);
+    if (graphHeight <= canvasSize.height) y = Math.min(y, canvasSize.height - minY - graphHeight);
+  }
+  return { x, y, zoom: 1 };
+}
+
+/**
  * One edge per agent, and motion only where BOTH ends are moving. A working
  * agent under a run that has gone quiet is not animated: the pulse would be
  * claiming the session is producing something, and the event log — the only

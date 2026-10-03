@@ -4,6 +4,7 @@ import {
   AGENT_COLUMN_X,
   AGENT_STEP_Y,
   AGENT_VISIBLE_CAP,
+  anchoredPhoneViewport,
   BAND_COLUMN_STEP_X,
   BAND_GAP_Y,
   BAND_WIDTH,
@@ -11,6 +12,7 @@ import {
   bandsPerRowFor,
   FIT_MAX_ZOOM,
   MAX_BANDS_PER_ROW,
+  PHONE_ANCHOR_PADDING,
   runningGroups,
   SESSION_BAND_CAP,
   SESSION_NODE_H,
@@ -984,5 +986,59 @@ describe('lib/sessionsFlow.ts bandsPerRowFor() with expansion', () => {
   it('reads an omitted expansion set as nothing expanded', () => {
     const groups = unevenBands(6, 0, 10);
     expect(bandsPerRowFor(groups, 990, 640)).toBe(bandsPerRowFor(groups, 990, 640, new Set()));
+  });
+});
+
+describe('lib/sessionsFlow.ts anchoredPhoneViewport()', () => {
+  it('places the leftmost, topmost node at the pane padding, at zoom 1', () => {
+    const groups = unevenBands(3, 0, 2);
+    const nodes = sessionsFlowNodes(groups, NOW, 3);
+    const viewport = anchoredPhoneViewport(nodes);
+    expect(viewport).not.toBeNull();
+    const minX = Math.min(...nodes.map((n) => n.position.x));
+    const minY = Math.min(...nodes.map((n) => n.position.y));
+    // screen = flow * zoom + {x, y}; zoom 1, so flow min maps to padding.
+    expect(minX * 1 + (viewport?.x ?? Number.NaN)).toBeCloseTo(PHONE_ANCHOR_PADDING);
+    expect(minY * 1 + (viewport?.y ?? Number.NaN)).toBeCloseTo(PHONE_ANCHOR_PADDING);
+    expect(viewport?.zoom).toBe(1);
+  });
+
+  it('honours a custom padding', () => {
+    const nodes = sessionsFlowNodes(unevenBands(1, 0, 1), NOW, 1);
+    const viewport = anchoredPhoneViewport(nodes, 40);
+    expect(viewport?.x).toBeCloseTo(40 - Math.min(...nodes.map((n) => n.position.x)));
+    expect(viewport?.y).toBeCloseTo(40 - Math.min(...nodes.map((n) => n.position.y)));
+  });
+
+  it('returns null for an empty layout: nothing to anchor', () => {
+    expect(anchoredPhoneViewport([])).toBeNull();
+  });
+
+  it('caps the padding so a graph that already fits the canvas is not pushed past its far edge', () => {
+    // One 320-wide session card (no agents) on a 342px canvas: the full 24px
+    // padding would land its right edge at 344, 2px past the canvas.
+    const nodes = [{ position: { x: 0, y: 0 }, dimensions: { width: 320, height: 100 } }];
+    const viewport = anchoredPhoneViewport(nodes, PHONE_ANCHOR_PADDING, {
+      width: 342,
+      height: 900,
+    });
+    expect(viewport?.x).toBeCloseTo(22);
+    expect((viewport?.x ?? Number.NaN) + 320).toBeLessThanOrEqual(342);
+  });
+
+  it('still crops the far side when the graph is wider than the canvas, canvasSize given', () => {
+    // Three 320-wide columns laid 400px apart on a 342px canvas: the graph
+    // cannot fit regardless of padding, so the left edge keeps its full
+    // padding and the overflow lands on the right, same as without canvasSize.
+    const nodes = [
+      { position: { x: 0, y: 0 }, dimensions: { width: 320, height: 100 } },
+      { position: { x: 400, y: 0 }, dimensions: { width: 320, height: 100 } },
+      { position: { x: 800, y: 0 }, dimensions: { width: 320, height: 100 } },
+    ];
+    const viewport = anchoredPhoneViewport(nodes, PHONE_ANCHOR_PADDING, {
+      width: 342,
+      height: 900,
+    });
+    expect(viewport?.x).toBeCloseTo(PHONE_ANCHOR_PADDING);
   });
 });
