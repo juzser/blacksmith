@@ -322,7 +322,11 @@ one thing this playbook never asks you to.
     `breaks` exits 0 and is a note: the scanner reads text, not types
     (operator-guide/wave.md §2). Then admit into the
     merge queue: `bs queue run <epic> --project <project-dir>
-    --test-cmd "<cumulative test command>" --tasks tasks.json`. On a
+    --test-cmd "<cumulative test command>" --tasks tasks.json --plan
+    <plan.json> --session <id> --plan-version <n> --causal-parent
+    <event-id>` — the same write triple as every other dispatch above; a
+    merge that lands with no session to log it into is a fact the
+    timeline never gets. On a
     `rebase-conflict` outcome, dispatch **`merger`**
     (`.claude/agents/merger.md`) with both diffs + specs, and note three
     things the queue's own behaviour forces (agent-interviews.md N-12):
