@@ -574,6 +574,37 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
     expect(summary.blockers[0]).toContain('not terminal-OK');
   });
 
+  // A waiver is a close nobody gates: there is no gate run to find, by
+  // definition. It is shown separately as a waived task, never as a forged one.
+  it('does not flag a waived task that has no gate record, but still flags a completed one', () => {
+    const noGate = { gateOutcome: false, resultRecorded: false };
+    const waivedOnly = summarizeEpic(
+      'epic-1',
+      [taskRow(), taskRow({ taskId: 'epic-1/task-2', taskStatus: 'waived', gate: noGate })],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      alwaysEffort(),
+    );
+    expect(waivedOnly.ungatedTasks).toHaveLength(0);
+    expect(waivedOnly.blockers.some((b) => b.includes('nothing gated it'))).toBe(false);
+    expect(waivedOnly.mechanicallyReady).toBe(true);
+
+    const completed = summarizeEpic(
+      'epic-1',
+      [taskRow({ gate: noGate })],
+      [],
+      okIntegration(),
+      MCP_SURFACE_NOT_REQUIRED,
+      okSpecReview(),
+      okGoalCheck(),
+      alwaysEffort(),
+    );
+    expect(completed.ungatedTasks.map((t) => t.taskId)).toEqual(['epic-1/task-1']);
+  });
+
   it('is ready when every terminal-OK task carries both events', () => {
     const summary = summarizeEpic(
       'epic-1',

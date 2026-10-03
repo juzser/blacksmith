@@ -518,7 +518,7 @@ export interface EpicSummary {
    */
   undispatchedTasks: EpicTaskSummary[];
   /**
-   * Terminal-OK tasks the log holds no completed gate run for (D-138): either
+   * Completed tasks the log holds no completed gate run for (D-138): either
    * no `gate-outcome` at all, or one with no `task-result-recorded` beside it.
    * Their `taskStatus` is what the record CLAIMS; nothing shows it was earned.
    */
@@ -775,9 +775,12 @@ export function summarizeEpic(
   // D-138: only tasks claimed done are asked for evidence. One still in flight
   // has not been gated yet and already blocks for not being terminal-OK —
   // repeating it here would make an in-progress task read like a forged one.
+  // A waived task is never gated by definition (D-120): it has its own register.
   const ungated = tasks.filter(
     (t) =>
-      TERMINAL_OK_TASK_STATUSES.has(t.taskStatus) && !(t.gate.gateOutcome && t.gate.resultRecorded),
+      TERMINAL_OK_TASK_STATUSES.has(t.taskStatus) &&
+      t.taskStatus !== 'waived' &&
+      !(t.gate.gateOutcome && t.gate.resultRecorded),
   );
   const ungatedTasks: EpicTaskSummary[] = ungated.map((t) => ({
     taskId: t.taskId,
