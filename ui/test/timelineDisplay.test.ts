@@ -9,8 +9,8 @@ import {
   EVENT_KINDS,
   groupByDay,
   groupDispatches,
-  kindFor,
   KIND_OPTIONS,
+  kindFor,
   matchesKind,
   metaFor,
   nodesOfItem,
@@ -148,9 +148,9 @@ describe('lib/timelineDisplay.ts', () => {
     expect(
       verdictOutcome(entry({ eventType: 'schema-check-result', payload: { valid: false } })),
     ).toBe('fail');
-    expect(
-      verdictOutcome(entry({ eventType: 'testgate-result', payload: { pass: false } })),
-    ).toBe('fail');
+    expect(verdictOutcome(entry({ eventType: 'testgate-result', payload: { pass: false } }))).toBe(
+      'fail',
+    );
   });
 
   // D-169. Three testgate-result events on the factory's own log carry no
@@ -1088,7 +1088,9 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
   it('never leaves a kind unmapped for the whole gate_event taxonomy dimension', () => {
     const dimension = loadTaxonomy().dimensions.gate_event ?? [];
     expect(dimension.length).toBeGreaterThan(0);
-    const unmapped = dimension.filter((eventType) => !EVENT_KINDS.includes(kindFor(entry({ eventType }))));
+    const unmapped = dimension.filter(
+      (eventType) => !EVENT_KINDS.includes(kindFor(entry({ eventType }))),
+    );
     expect(unmapped).toEqual([]);
   });
 });
@@ -1096,10 +1098,14 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
 describe('lib/timelineDisplay.ts verdictOutcome()', () => {
   it('reads confirm/refute off a judge-verdict payload', () => {
     expect(
-      verdictOutcome(entry({ eventType: 'judge-verdict', payload: { ok: true, verdict: 'confirm' } })),
+      verdictOutcome(
+        entry({ eventType: 'judge-verdict', payload: { ok: true, verdict: 'confirm' } }),
+      ),
     ).toBe('pass');
     expect(
-      verdictOutcome(entry({ eventType: 'judge-verdict', payload: { ok: true, verdict: 'refute' } })),
+      verdictOutcome(
+        entry({ eventType: 'judge-verdict', payload: { ok: true, verdict: 'refute' } }),
+      ),
     ).toBe('fail');
   });
 
@@ -1167,7 +1173,11 @@ describe('lib/timelineDisplay.ts tsForItem() / nodesOfItem()', () => {
     // newest-first, so here the newest member sits first — a naive
     // "first wins" or "last wins" read would both happen to pass this case,
     // so the ids are deliberately scrambled relative to their timestamps.
-    const members = [node('2026-10-03T09:00:00.000', 'mid'), node('2026-10-03T11:00:00.000', 'newest'), node('2026-10-03T08:00:00.000', 'oldest')];
+    const members = [
+      node('2026-10-03T09:00:00.000', 'mid'),
+      node('2026-10-03T11:00:00.000', 'newest'),
+      node('2026-10-03T08:00:00.000', 'oldest'),
+    ];
     const [grouped] = groupDispatches(members);
     if (grouped?.kind !== 'group') throw new Error('expected a fold');
     expect(tsForItem(grouped)).toBe('2026-10-03T11:00:00.000');

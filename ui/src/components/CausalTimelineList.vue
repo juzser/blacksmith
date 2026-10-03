@@ -15,9 +15,9 @@ import {
   buildCausalTree,
   groupByDay,
   nodesOfItem,
+  type TimelineNode,
   timelineItems,
   tsForItem,
-  type TimelineNode,
 } from '../lib/timelineDisplay.js';
 import TimelineNodeList from './TimelineNodeList.vue';
 

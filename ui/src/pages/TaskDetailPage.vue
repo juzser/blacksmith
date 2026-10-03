@@ -55,13 +55,13 @@ import { taskLabel } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
-import { groupByDay } from '../lib/timelineDisplay.js';
 import {
   agentStatusKitTone,
   findingStatusKitTone,
   severityKitTone,
   taskStatusKitTone,
 } from '../lib/taxonomy.js';
+import { groupByDay } from '../lib/timelineDisplay.js';
 import { isWaivable } from '../lib/waivable.js';
 import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 

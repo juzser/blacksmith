@@ -759,7 +759,10 @@ function dayLabel(day: Date, nowIso: string): string {
  * `RunHistoryTimeline`'s own list are both newest-first already, and grouping
  * is the wrong place to second-guess that.
  */
-export function groupByDay<T extends { ts: string }>(items: readonly T[], nowIso: string): DayGroup<T>[] {
+export function groupByDay<T extends { ts: string }>(
+  items: readonly T[],
+  nowIso: string,
+): DayGroup<T>[] {
   const groups: DayGroup<T>[] = [];
   let currentKey: number | null = null;
   for (const item of items) {
