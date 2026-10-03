@@ -52,7 +52,7 @@ function tokens(run: TaskRun): string | null {
 </script>
 
 <template>
-  <ol v-if="runs.length > 0" class="bs-run-history">
+  <ol v-if="runs.length > 0" class="bs-run-history timeline-feed">
     <li v-for="run in runs" :key="run.eventId" class="timeline-row" :style="{ borderLeftColor: rowBarColor(run) }">
       <div class="timeline-row__main">
         <div class="timeline-row__head">

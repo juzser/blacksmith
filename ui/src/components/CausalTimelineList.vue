@@ -42,11 +42,13 @@ const dayGroups = computed(() => {
 <template>
   <template v-for="(group, gi) in dayGroups" :key="gi">
     <div class="timeline-day">{{ group.label }}</div>
-    <TimelineNodeList
-      :nodes="group.items.flatMap((g) => nodesOfItem(g.item))"
-      :expanded="expanded"
-      @toggle="(id) => emit('toggle', id)"
-      @select="(id) => emit('select', id)"
-    />
+    <div class="timeline-feed">
+      <TimelineNodeList
+        :nodes="group.items.flatMap((g) => nodesOfItem(g.item))"
+        :expanded="expanded"
+        @toggle="(id) => emit('toggle', id)"
+        @select="(id) => emit('select', id)"
+      />
+    </div>
   </template>
 </template>

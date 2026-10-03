@@ -1241,6 +1241,22 @@
 .timeline-day:first-child {
   margin-top: 0;
 }
+/* Item 3: a raised card frame around a day's rows (ds-review.html's `.feed`),
+   plus a 1px seam between adjacent rows (its `.ev` border-bottom), so rows on
+   the same background don't merge. Used both for the top-level day group and
+   for a dispatch group's expanded members (the mock's nested `.emembers`
+   card), which is why the selector reaches through an `ol` either way. */
+.timeline-feed {
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-md);
+  overflow: hidden;
+}
+.timeline-feed > ol > li:not(:last-child) > .timeline-row,
+.timeline-feed > ol > li.timeline-row:not(:last-child),
+.timeline-feed > li.timeline-row:not(:last-child) {
+  border-bottom: 1px solid var(--ds-border);
+}
 .timeline-row {
   display: flex;
   align-items: flex-start;

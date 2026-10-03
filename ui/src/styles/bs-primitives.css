@@ -2353,14 +2353,15 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-sm);
 }
 
-/* RunHistoryTimeline (DS3 §4.7 pattern 2) */
+/* RunHistoryTimeline (DS3 §4.7 pattern 2). Item 3: rows sit flush inside the
+   shared .timeline-feed card, with a 1px border-bottom seam between them
+   instead of a gap -- so no gap here. */
 .bs-run-history {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--bs-space-3);
 }
 .bs-run-history__label {
   font-size: var(--bs-text-sm);

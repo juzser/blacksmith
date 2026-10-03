@@ -380,14 +380,13 @@ const factsRowText = computed(() => {
               <div v-else-if="history.length > 0" style="margin-top: var(--ds-space-5)">
                 <template v-for="(group, gi) in historyDayGroups" :key="gi">
                   <div class="timeline-day">{{ group.label }}</div>
-                  <TimelineRow
-                    v-for="e in group.items"
-                    :key="e.eventId"
-                    :entry="e"
-                    :has-children="false"
-                    :expanded="false"
-                    :selectable="false"
-                  />
+                  <div class="timeline-feed">
+                    <ol style="list-style: none; margin: 0; padding: 0">
+                      <li v-for="e in group.items" :key="e.eventId">
+                        <TimelineRow :entry="e" :has-children="false" :expanded="false" :selectable="false" />
+                      </li>
+                    </ol>
+                  </div>
                 </template>
               </div>
               <EmptyState v-else :icon="HistoryIcon" title="No events recorded." body="Events this task produces will appear here." />
