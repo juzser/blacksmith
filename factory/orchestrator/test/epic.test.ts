@@ -3451,6 +3451,239 @@ describe('epic.ts closeEpic (D-43/P9-27)', () => {
       );
     });
   });
+
+  // Issue #270: `closeEpic` used to call `runEpicVerdict` unconditionally,
+  // which paid for the external quorum a second time on the same
+  // integration head `epic verdict` had already paid for.
+  describe('reusing a prior quorum decision instead of re-running it (issue #270)', () => {
+    const originalKey = process.env[DEEPSEEK_KEY_ENV];
+    const NEW_HEAD_SHA = '1a2b3c4d5e6f7081920a1b2c3d4e5f60718293a4';
+
+    beforeEach(() => {
+      process.env[DEEPSEEK_KEY_ENV] = 'sk-test-key';
+    });
+
+    afterEach(() => {
+      if (originalKey === undefined) delete process.env[DEEPSEEK_KEY_ENV];
+      else process.env[DEEPSEEK_KEY_ENV] = originalKey;
+    });
+
+    function crosscheck(fetchMock: ReturnType<typeof judgingFetch>) {
+      return {
+        policy: policyWith(
+          codexProvider({ mode: 'active', args: [JUDGE_CLI, 'success'] }),
+          deepseekProvider({ mode: 'active' }),
+        ),
+        fetchImpl: fetchMock,
+      };
+    }
+
+    function input(headSha: string) {
+      return {
+        epicId,
+        integrationHeadSha: headSha,
+        integrationBranch: `bs/${epicId}/integration`,
+        mcp: MCP_SURFACE_NOT_REQUIRED,
+        goal: goalStatus(),
+        effort: alwaysEffort(),
+      };
+    }
+
+    /** Re-certifies the checks the mechanical gate owns against `headSha` —
+     * what a real "a new commit landed" step does before a close is retried. */
+    async function recertifyAt(headSha: string) {
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'operator',
+          event_type: 'integration-check',
+          task_id: `${epicId}/integration`,
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            epic_id: epicId,
+            branch: `smith/${epicId}/integration`,
+            head_sha: headSha,
+            pass: true,
+            results: [{ name: 'lint', pass: true, exitCode: 0, tail: '' }],
+          },
+        },
+        { stateDir },
+      );
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'spec-reviewer',
+          event_type: SPEC_REVIEW_EVENT,
+          task_id: `${epicId}/integration`,
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            epic_id: epicId,
+            plan_version: 1,
+            head_sha: headSha,
+            reviewed_by: 'spec-reviewer',
+            finding_ids: [],
+            finding_count: 0,
+          },
+        },
+        { stateDir },
+      );
+    }
+
+    it('reuses the go decision on a close against the same head the verdict ran on', async () => {
+      await addTask('epic-1/task-1', 'completed');
+      await addIntegrationCheck();
+      await addSpecReview();
+      await addGoalCheck();
+      const fetchMock = judgingFetch('confirm');
+
+      const verdict = await runEpicVerdict(
+        { ...input(HEAD_SHA), crosscheck: crosscheck(fetchMock) },
+        ctx(),
+        { stateDir },
+      );
+      expect(verdict.outcome).toBe('go');
+      expect(fetchMock.mock.calls).toHaveLength(1);
+
+      const record = await closeEpic(
+        { ...input(HEAD_SHA), crosscheck: crosscheck(fetchMock) },
+        ctx(),
+        { stateDir },
+      );
+
+      // The provider was never asked again.
+      expect(fetchMock.mock.calls).toHaveLength(1);
+      expect(record.machineVerdict).toBe('go');
+      expect(record.closedBy).toBe('verdict');
+
+      const closed = await closedEvents();
+      expect(closed).toHaveLength(1);
+      const payload = closed[0]?.record.payload as Record<string, unknown>;
+      expect(payload.quorum_decision_reused).toBe(true);
+      expect(payload.quorum_decision_event_id).toBe(verdict.event_id);
+
+      const events = await readEvents(sessionId, { stateDir });
+      expect(events.filter((e) => e.record.event_type === 'quorum-decision')).toHaveLength(1);
+    });
+
+    it('re-runs the quorum when the integration head moved since the verdict', async () => {
+      await addTask('epic-1/task-1', 'completed');
+      await addIntegrationCheck();
+      await addSpecReview();
+      await addGoalCheck();
+      const fetchMock = judgingFetch('confirm');
+
+      const verdict = await runEpicVerdict(
+        { ...input(HEAD_SHA), crosscheck: crosscheck(fetchMock) },
+        ctx(),
+        { stateDir },
+      );
+      expect(verdict.outcome).toBe('go');
+      await recertifyAt(NEW_HEAD_SHA);
+
+      const record = await closeEpic(
+        { ...input(NEW_HEAD_SHA), crosscheck: crosscheck(fetchMock) },
+        ctx(),
+        { stateDir },
+      );
+
+      expect(fetchMock.mock.calls).toHaveLength(2);
+      expect(record.machineVerdict).toBe('go');
+      const closed = await closedEvents();
+      const payload = closed[0]?.record.payload as Record<string, unknown>;
+      expect(payload.quorum_decision_reused).toBe(false);
+
+      const events = await readEvents(sessionId, { stateDir });
+      expect(events.filter((e) => e.record.event_type === 'quorum-decision')).toHaveLength(2);
+    });
+
+    it('never reuses a no-go decision', async () => {
+      await addTask('epic-1/task-1', 'completed');
+      await addIntegrationCheck();
+      await addSpecReview();
+      await addGoalCheck();
+      const fetchMock = judgingFetch('refute');
+
+      const verdict = await runEpicVerdict(
+        { ...input(HEAD_SHA), crosscheck: crosscheck(fetchMock) },
+        ctx(),
+        { stateDir },
+      );
+      expect(verdict.outcome).toBe('hold');
+
+      const record = await closeEpic(
+        {
+          ...input(HEAD_SHA),
+          crosscheck: crosscheck(fetchMock),
+          overrideRationale: 'shipping over the refuted quorum anyway',
+        },
+        ctx(),
+        { stateDir },
+      );
+
+      // Refuted, not free to skip: the quorum ran again.
+      expect(fetchMock.mock.calls).toHaveLength(2);
+      expect(record.machineVerdict).toBe('hold');
+      const closed = await closedEvents();
+      const payload = closed[0]?.record.payload as Record<string, unknown>;
+      expect(payload.quorum_decision_reused).toBe(false);
+    });
+
+    it('never reuses a decision recorded before integration_head existed', async () => {
+      await addTask('epic-1/task-1', 'completed');
+      await addIntegrationCheck();
+      await addSpecReview();
+      await addGoalCheck();
+      // A legacy quorum-decision, written before issue #270 added
+      // `integration_head` to the payload.
+      await appendEvent(
+        {
+          session_id: sessionId,
+          actor: 'system',
+          event_type: 'quorum-decision',
+          task_id: `${epicId}/integration`,
+          plan_version: 1,
+          causal_parent: `${sessionId}#0`,
+          payload: {
+            task_id: `${epicId}/integration`,
+            epic_id: epicId,
+            finding_id: null,
+            trigger_reason: 'epic-final-verdict',
+            finder_provider: 'claude',
+            outcome: 'decided',
+            decision: 'confirm',
+            agreement: '2-of-2',
+            gating_participants: [],
+            escalation_reason: null,
+            rationales: [],
+            participants: [],
+            native_verdict: 'confirm',
+            ready: true,
+          },
+        },
+        { stateDir },
+      );
+      const fetchMock = judgingFetch('confirm');
+
+      const record = await closeEpic(
+        { ...input(HEAD_SHA), crosscheck: crosscheck(fetchMock) },
+        ctx(),
+        { stateDir },
+      );
+
+      // The legacy decision carries no integration_head, so it was never a
+      // candidate for reuse — the quorum ran fresh.
+      expect(fetchMock.mock.calls).toHaveLength(1);
+      expect(record.machineVerdict).toBe('go');
+      const closed = await closedEvents();
+      const payload = closed[0]?.record.payload as Record<string, unknown>;
+      expect(payload.quorum_decision_reused).toBe(false);
+
+      const events = await readEvents(sessionId, { stateDir });
+      expect(events.filter((e) => e.record.event_type === 'quorum-decision')).toHaveLength(2);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
