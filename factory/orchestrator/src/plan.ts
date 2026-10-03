@@ -927,7 +927,7 @@ export function nextVersion(prev: PlanFile, changes: PlanChanges, opts: PlanOpts
  * dead copies are set aside. Indexing the whole task list into a Map by id
  * silently answers with whichever record happened to be written last.
  */
-function liveSpec(plan: PlanFile, id: string): TaskSpecRecord | undefined {
+export function liveSpec(plan: PlanFile, id: string): TaskSpecRecord | undefined {
   let found: TaskSpecRecord | undefined;
   for (const t of plan.tasks) {
     if (t.task_id === id && t.task_status !== 'superseded') found = t;

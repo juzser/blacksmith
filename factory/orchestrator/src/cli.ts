@@ -157,6 +157,7 @@ import {
   isUiAffecting,
   latestPlanVersion,
   livePlanTasks,
+  liveSpec,
   loadPlan,
   type PlanChanges,
   type PlanFile,
@@ -1088,7 +1089,7 @@ function budgetFromFlags(flags: Record<string, string>, taskId: string): TaskBud
     if (err instanceof SmithError && err.code === 'plan.unknown-task') return undefined;
     throw err;
   }
-  const budget = plan.tasks.find((t) => t.task_id === resolved)?.budget;
+  const budget = liveSpec(plan, resolved)?.budget;
   return typeof budget === 'object' && budget !== null ? (budget as TaskBudget) : undefined;
 }
 
@@ -1110,7 +1111,7 @@ function uiAffectingFromFlags(flags: Record<string, string>, taskId: string): bo
     if (err instanceof SmithError && err.code === 'plan.unknown-task') return undefined;
     throw err;
   }
-  const spec = plan.tasks.find((t) => t.task_id === resolved);
+  const spec = liveSpec(plan, resolved);
   return spec ? isUiAffecting(spec) : undefined;
 }
 
@@ -1149,7 +1150,7 @@ function caseForDispatch(flags: Record<string, string>): string {
   if (flags['case-type']) return flags['case-type'];
   if (!flags.plan) return '';
   const taskId = requireFlag(flags, 'task');
-  const task = readJsonFile<PlanFile>(flags.plan).tasks.find((t) => t.task_id === taskId);
+  const task = liveSpec(readJsonFile<PlanFile>(flags.plan), taskId);
   if (!task) {
     throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
       taskId,
@@ -3885,7 +3886,7 @@ async function main(): Promise<number> {
     const taskId = requireFlag(flags, 'task');
     const plan = readJsonFile<PlanFile>(requireFlag(flags, 'plan'));
     const resolved = resolveTaskId(plan, taskId);
-    const spec = plan.tasks.find((t) => t.task_id === resolved);
+    const spec = liveSpec(plan, resolved);
     const ctx = eventContextFromFlags(flags);
     const opts = eventOptsFromFlags(flags);
     if (!spec || !isUiAffecting(spec)) {
