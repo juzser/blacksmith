@@ -54,6 +54,11 @@ function tokens(run: TaskRun): string | null {
 <template>
   <ol v-if="runs.length > 0" class="bs-run-history timeline-feed">
     <li v-for="run in runs" :key="run.eventId" class="timeline-row" :style="{ borderLeftColor: rowBarColor(run) }">
+      <!-- Item 3 (mock-conformance-4): a row here never has children, so it
+           takes the same leading placeholder column TimelineRow's childless
+           rows use, lining this list's text up with the Activity/History
+           TimelineRow list above it (ds-control-height-sm + the row's gap). -->
+      <span style="width: var(--ds-control-height-sm); flex-shrink: 0" aria-hidden="true" />
       <div class="timeline-row__main">
         <div class="timeline-row__head">
           <span class="timeline-row__ktag" :style="kindStyle(run)">{{ EVENT_KIND_LABEL[KIND_FOR_RUN[run.kind]] }}</span>
