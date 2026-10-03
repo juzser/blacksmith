@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { FlowEdge, FlowGraph, FlowNode, MilestoneProgress } from '../src/lib/api.js';
+import type {
+  FlowEdge,
+  FlowGraph,
+  FlowNode,
+  MilestoneProgress,
+  StatusCounts,
+} from '../src/lib/api.js';
 import {
   buildWaveList,
   dependencyLine,
   epicPhase,
   epicProject,
   epicStatusFromFlow,
+  epicStatusFromServerStatus,
+  isHttpsUrl,
   mobileEpicStatusLine,
+  statusCountsBar,
 } from '../src/lib/waveList.js';
 
 function node(
@@ -109,6 +118,71 @@ describe('epicStatusFromFlow() (DS4 S1/S3 shared status logic)', () => {
       statusTone: 'progress',
       statusLabel: 'In progress',
     });
+  });
+});
+
+// DS4 S5c §1 — statusCounts -> ProgressBar's stacked segments + aria-label.
+function counts(done: number, review: number, inProgress: number, todo: number): StatusCounts {
+  return { done, review, inProgress, todo, superseded: 0 };
+}
+
+describe('statusCountsBar() (DS4 S5c §1)', () => {
+  it('orders segments done, review, progress and excludes superseded from the total', () => {
+    const bar = statusCountsBar({ ...counts(13, 3, 4, 5), superseded: 7 });
+    expect(bar.segments.map((s) => s.tone)).toEqual(['done', 'review', 'progress']);
+    expect(bar.segments[0]).toMatchObject({ tone: 'done', value: 52 });
+  });
+
+  it('matches the mock aria-label when some tasks remain', () => {
+    const bar = statusCountsBar(counts(13, 3, 4, 5));
+    expect(bar.ariaLabel).toBe(
+      '13 of 25 tasks done (52%); the rest in review, in progress or todo',
+    );
+  });
+
+  it('drops the "the rest" clause once nothing remains', () => {
+    const bar = statusCountsBar(counts(10, 0, 0, 0));
+    expect(bar.ariaLabel).toBe('10 of 10 tasks done (100%)');
+  });
+
+  it('reads 0% for an all-zero total rather than dividing by zero', () => {
+    const bar = statusCountsBar(counts(0, 0, 0, 0));
+    expect(bar.segments.every((s) => s.value === 0)).toBe(true);
+    expect(bar.ariaLabel).toBe('0 of 0 tasks done (0%)');
+  });
+});
+
+describe('epicStatusFromServerStatus() (DS4 S5c §2)', () => {
+  it('maps every server status to the existing tone/label set', () => {
+    expect(epicStatusFromServerStatus('done')).toEqual({ statusTone: 'done', statusLabel: 'Done' });
+    expect(epicStatusFromServerStatus('review')).toEqual({
+      statusTone: 'review',
+      statusLabel: 'In review',
+    });
+    expect(epicStatusFromServerStatus('in_progress')).toEqual({
+      statusTone: 'progress',
+      statusLabel: 'In progress',
+    });
+    expect(epicStatusFromServerStatus('todo')).toEqual({
+      statusTone: 'todo',
+      statusLabel: 'To do',
+    });
+  });
+});
+
+describe('isHttpsUrl() (DS4 S5c §4)', () => {
+  it('accepts an https URL', () => {
+    expect(isHttpsUrl('https://github.com/example/pr/1')).toBe(true);
+  });
+
+  it('rejects null, http and other schemes', () => {
+    expect(isHttpsUrl(null)).toBe(false);
+    expect(isHttpsUrl('http://github.com/example/pr/1')).toBe(false);
+    expect(isHttpsUrl('javascript:alert(1)')).toBe(false);
+  });
+
+  it('rejects an unparsable value instead of throwing', () => {
+    expect(isHttpsUrl('not a url')).toBe(false);
   });
 });
 

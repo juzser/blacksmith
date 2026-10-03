@@ -120,3 +120,47 @@ describe('EpicBlock.vue — phone branch (DS4 S4)', () => {
     expect(EPIC_BLOCK).toMatch(/<div class="bs-roadmap-mobile__waves-body">[\s\S]*?<WaveList/);
   });
 });
+
+// DS4 S5c — /api/roadmap's statusCounts/status/prUrl/sourcePrompt wired into
+// the Roadmap UI. Same source-text-scrape convention: real rendering is
+// exercised by ui/e2e/roadmap*.spec.ts.
+describe('RoadmapPage.vue / EpicBlock.vue — server roadmap reads (DS4 S5c)', () => {
+  it('prefers the server status over the flow-derived guess, in both selectedEpicData and epicSections', () => {
+    expect(SFC).toMatch(/epicDatesFor\(milestones\.value/);
+    expect(SFC).toMatch(
+      /epicDates\s*\?\s*epicStatusFromServerStatus\(epicDates\.status\)\s*:\s*epicStatusFromFlow\(flow\)/,
+    );
+  });
+
+  it('still keeps the flow fetch — waves come from nowhere else', () => {
+    expect(SFC).toMatch(/fetchFlow/);
+    expect(SFC).toMatch(/buildWaveList\(flow\)/);
+  });
+
+  it('passes statusCounts through to both EpicBlock call sites', () => {
+    expect(SFC).toMatch(/:status-counts="selectedPhaseData\.statusCounts"/);
+    expect(SFC).toMatch(/statusCounts: epicDates\?\.statusCounts/);
+  });
+
+  it('builds the stacked bar from statusCounts with a fallback for the single done/total bar', () => {
+    expect(EPIC_BLOCK).toMatch(/function progressBar\(/);
+    expect(EPIC_BLOCK).toMatch(/if \(counts\) return statusCountsBar\(counts\);/);
+  });
+
+  it('gates the "Epic started from" quote on sourcePrompt, rendering nothing when null', () => {
+    expect(EPIC_BLOCK).toMatch(
+      /<RequestQuote v-if="epic\.sourcePrompt" :quote="epic\.sourcePrompt" \/>/,
+    );
+  });
+
+  it('renders "Copy epic id" via the shared clipboard helper', () => {
+    expect(EPIC_BLOCK).toMatch(/copyToClipboard/);
+    expect(EPIC_BLOCK).toMatch(/:label="copyLabel"/);
+  });
+
+  it('only renders the PR link for an https prUrl, as a real anchor opening in a new tab', () => {
+    expect(EPIC_BLOCK).toMatch(/epic\.prUrl && isHttpsUrl\(epic\.prUrl\)/);
+    expect(EPIC_BLOCK).toMatch(/target="_blank"/);
+    expect(EPIC_BLOCK).toMatch(/rel="noopener noreferrer"/);
+  });
+});

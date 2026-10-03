@@ -2109,6 +2109,14 @@ summary.bs-inbox__group-head {
   border-radius: var(--bs-radius-md);
   padding: var(--bs-space-3);
 }
+/* DS4 S5c fix round 1, fix 3 — label and timestamp on one row (mock's
+   .qlabel: label left, time right), not stacked. */
+.bs-request-quote__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
 .bs-request-quote__label {
   margin: 0;
   font-size: var(--bs-text-xs);
@@ -2133,8 +2141,15 @@ summary.bs-inbox__group-head {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* DS4 S5c fix round 1, fix 1 — same floor as .linkbtn/.bs-iconbtn: a min
+   height on the control itself (24px desktop) and a bump to the --bs-touch
+   tap target on phone, via min-height rather than visible padding so it
+   doesn't grow the row on desktop. */
 .bs-request-quote__toggle {
+  display: inline-flex;
+  align-items: center;
   align-self: flex-start;
+  min-height: 24px;
   background: none;
   border: none;
   color: var(--bs-tone-progress-text);
@@ -2143,8 +2158,19 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-sm);
 }
 .bs-request-quote__link {
+  display: inline-flex;
+  align-items: center;
   align-self: flex-start;
+  min-height: 24px;
+  color: var(--bs-link-text);
+  text-decoration-color: var(--bs-link-underline);
   font-size: var(--bs-text-sm);
+}
+@media (max-width: 640px) {
+  .bs-request-quote__toggle,
+  .bs-request-quote__link {
+    min-height: var(--bs-touch);
+  }
 }
 .bs-request-quote__empty {
   margin: 0;
@@ -2612,6 +2638,8 @@ summary.bs-inbox__group-head {
    epic-selected frame: ".esec-head .select { margin-left: auto }"). */
 .esec-head .select-trailing {
   margin-left: auto;
+  width: auto;
+  flex: 0 0 auto;
 }
 
 /* DS4 S3 — "Show waves" / "Hide waves" toggle (phase mode only), reusing

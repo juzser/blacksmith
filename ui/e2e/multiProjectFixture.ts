@@ -7,6 +7,7 @@
 import type { EventOpts } from '../../factory/orchestrator/src/events.js';
 import { appendEdge, appendEvent, readEvents } from '../../factory/orchestrator/src/events.js';
 import { raiseFinding, transition } from '../../factory/orchestrator/src/findings.js';
+import { recordUserPrompt } from '../../factory/orchestrator/src/prompts.js';
 import { recordJudgeRun } from '../../factory/orchestrator/src/quorum.js';
 
 async function lastEventId(sessionId: string, opts: EventOpts): Promise<string> {
@@ -39,6 +40,21 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
     opts,
   );
   let parent = root.event_id;
+
+  // DS4 S5c — the operator prompt behind this session, so `epics[].sourcePrompt`
+  // ("Epic started from") has something real to render on epic-9's selected
+  // block (roadmap.spec.ts). A session has one lineage, so every epic in this
+  // fixture shares this one quote — that mirrors `epicSourcePrompt()`'s own
+  // session-wide walk, not a fixture shortcut. Recorded first, right after
+  // the session root, so it stays the lineage's earliest prompt once the
+  // per-task prompt below (fix round 1, fix 2) lands later in the chain —
+  // `epicSourcePrompt()` always returns the earliest one.
+  const epicPrompt = await recordUserPrompt(
+    'Build an employee directory with search, so new hires can find who owns what.',
+    { sessionId: MULTI_PROJECT_SESSION_ID, planVersion, causalParent: parent },
+    opts,
+  );
+  parent = epicPrompt.event_id;
 
   // --- epic-9: a 4-wave chain (root -> mid -> leaf -> next), root/mid done,
   // leaf running, next not yet dispatched — DS4 S3 §8's past/current/upcoming
@@ -89,6 +105,21 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
       opts,
     );
     parent = added.event_id;
+    // DS4 S5c fix round 1, fix 2 — a long, task-specific request, recorded
+    // right after task-1's own first event so `requestQuoteForTask()`'s
+    // backward walk finds it (as "Request", not the "Epic started from"
+    // fallback) for task-2/3/4, whose own first events come after it in the
+    // chain. task-1 stays on the short epic-level fallback above: taskDetail
+    // e2e needs both a quote long enough to clamp at 3 lines (toggle shows)
+    // and one short enough not to (toggle hidden).
+    if (t.id === tasks9[0]?.id) {
+      const taskPrompt = await recordUserPrompt(
+        'The directory search API needs to support fuzzy name matching, team filters, and manager-chain lookups, because the old exact-match search sends people to the wrong desk constantly. Also return each person’s current project so the results page does not need a second round trip, and keep the response under 200ms for a 5,000-row org.',
+        { sessionId: MULTI_PROJECT_SESSION_ID, planVersion, causalParent: parent },
+        opts,
+      );
+      parent = taskPrompt.event_id;
+    }
   }
   const edge9a = await appendEdge(
     {
@@ -132,6 +163,23 @@ export async function buildMultiProjectFixture(opts: EventOpts): Promise<void> {
     opts,
   );
   parent = edge9c.event_id;
+
+  // DS4 S5c — epic-9's integration PR, so the "Open integration PR on
+  // GitHub" icon button (EpicBlock.vue) has a real https link to render.
+  const integrationPr = await appendEvent(
+    {
+      session_id: MULTI_PROJECT_SESSION_ID,
+      actor: 'merge-queue',
+      event_type: 'integration-pr-opened',
+      task_id: `${DEMO_HUB_EPIC_A}/integration`,
+      plan_version: planVersion,
+      causal_parent: parent,
+      project,
+      payload: { pr_url: 'https://github.com/example-org/demo-hub/pull/42' },
+    },
+    opts,
+  );
+  parent = integrationPr.event_id;
 
   // task-1/task-2 dispatched and completed; task-3 dispatched and STILL LIVE
   // (no terminal event); task-4 never dispatched at all — the upcoming wave

@@ -3,7 +3,14 @@
 // out of the .vue file so the three-way past/current/upcoming split and the
 // dependency-line composition are unit-tested under vitest's node
 // environment rather than resting on a mount.
-import type { FlowEdge, FlowGraph, FlowNode, MilestoneProgress } from './api.js';
+import type {
+  FlowEdge,
+  FlowGraph,
+  FlowNode,
+  MilestoneProgress,
+  EpicStatus as ServerEpicStatus,
+  StatusCounts,
+} from './api.js';
 import { edgeWords } from './edgeWords.js';
 import { isTaskOver, type KitTone } from './taxonomy.js';
 
@@ -44,6 +51,68 @@ export function epicStatusFromFlow(flow: Pick<FlowGraph, 'nodes'>): EpicStatus {
   };
 }
 
+export interface StackedBarSegment {
+  tone: 'done' | 'review' | 'progress';
+  value: number;
+}
+
+export interface StackedBar {
+  segments: StackedBarSegment[];
+  ariaLabel: string;
+}
+
+/**
+ * DS4 S5c §1 — `statusCounts` -> `kit/ProgressBar.vue`'s stacked segments.
+ * `superseded` is excluded from the total (ds-review.html's mock draws only
+ * done/review/in-progress, with the remaining, uncoloured track standing for
+ * todo). Values are percentages of the total, not raw counts, so they line
+ * up with `ProgressBar`'s own `denom = max(sum, 100)` sizing.
+ */
+export function statusCountsBar(counts: StatusCounts): StackedBar {
+  const total = counts.done + counts.review + counts.inProgress + counts.todo;
+  const pctOf = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
+  const donePct = pctOf(counts.done);
+  const restRemains = counts.review + counts.inProgress + counts.todo > 0;
+  const ariaLabel = restRemains
+    ? `${counts.done} of ${total} tasks done (${donePct}%); the rest in review, in progress or todo`
+    : `${counts.done} of ${total} tasks done (${donePct}%)`;
+  return {
+    segments: [
+      { tone: 'done', value: donePct },
+      { tone: 'review', value: pctOf(counts.review) },
+      { tone: 'progress', value: pctOf(counts.inProgress) },
+    ],
+    ariaLabel,
+  };
+}
+
+const SERVER_EPIC_STATUS: Record<ServerEpicStatus, EpicStatus> = {
+  done: { statusTone: 'done', statusLabel: 'Done' },
+  review: { statusTone: 'review', statusLabel: 'In review' },
+  in_progress: { statusTone: 'progress', statusLabel: 'In progress' },
+  todo: { statusTone: 'todo', statusLabel: 'To do' },
+};
+
+/**
+ * DS4 S5c §2 — `epics[].status` (server-computed) onto the same tone/label
+ * set `epicStatusFromFlow` uses, plus `review` (the flow-derived guess has no
+ * such bucket). Callers fall back to `epicStatusFromFlow` when the server
+ * gives no status at all.
+ */
+export function epicStatusFromServerStatus(status: ServerEpicStatus): EpicStatus {
+  return SERVER_EPIC_STATUS[status];
+}
+
+/** DS4 S5c §4 — only an `https:` `prUrl` renders the "Open ... PR" button. */
+export function isHttpsUrl(url: string | null): boolean {
+  if (!url) return false;
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * DS4 S3 fix round 1 finding 3 — epic mode's Tag used the project-filter
  * value directly, which is empty under "All projects"; `FlowGraph` carries
@@ -73,6 +142,23 @@ export function epicPhase(
 ): { milestoneId: string; name: string } | null {
   const milestone = milestones.find((m) => m.epicIds.includes(epicId));
   return milestone ? { milestoneId: milestone.milestoneId, name: milestone.name } : null;
+}
+
+/**
+ * DS4 S5c §2/§3/§4 — the `EpicDates` row (`status`, `statusCounts`, `prUrl`,
+ * `sourcePrompt`) `/api/roadmap` already attaches to the milestone that
+ * lists this epic. Null for an epic no current milestone lists, the same
+ * "closed epic" edge case `epicProject`/`epicPhase` above handle.
+ */
+export function epicDatesFor(
+  milestones: Pick<MilestoneProgress, 'epicIds' | 'epics'>[],
+  epicId: string,
+): MilestoneProgress['epics'][number] | null {
+  for (const milestone of milestones) {
+    const found = milestone.epics.find((e) => e.epicId === epicId);
+    if (found) return found;
+  }
+  return null;
 }
 
 export interface WaveInfo {

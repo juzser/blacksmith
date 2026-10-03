@@ -11,7 +11,16 @@
 import { computed } from 'vue';
 import { type ProgressTone, progressToneColor } from './progressTone.js';
 
-type Segment = { tone: ProgressTone | 'neutral'; value: number };
+// DS4 S5c §1 — 'done'/'review'/'progress' back the statusCounts stacked bar
+// (EpicBlock/RoadmapPage), additive alongside the existing ProgressTone set
+// WaveList.vue's per-wave bars still use.
+type Segment = { tone: ProgressTone | 'neutral' | 'done' | 'review' | 'progress'; value: number };
+
+const KIT_TONE_VAR: Record<'done' | 'review' | 'progress', string> = {
+  done: 'var(--bs-tone-done-text)',
+  review: 'var(--bs-tone-review-text)',
+  progress: 'var(--bs-tone-progress-text)',
+};
 
 const props = defineProps<{
   segments: Segment[];
@@ -35,7 +44,10 @@ function widthOf(segment: Segment): string {
 
 function colorOf(segment: Segment): string {
   if (segment.tone === 'neutral') return 'var(--bs-tone-neutral-text)';
-  return progressToneColor(segment.tone);
+  if (segment.tone in KIT_TONE_VAR) {
+    return KIT_TONE_VAR[segment.tone as keyof typeof KIT_TONE_VAR];
+  }
+  return progressToneColor(segment.tone as ProgressTone);
 }
 </script>
 
