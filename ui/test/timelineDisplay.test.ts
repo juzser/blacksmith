@@ -1122,7 +1122,7 @@ describe('lib/timelineDisplay.ts verdictOutcome()', () => {
     expect(verdictOutcome(entry({ eventType: 'session-start', payload: {} }))).toBeNull();
   });
 
-  it('reads pass/fail off a grader-verdict payload\'s overall field', () => {
+  it("reads pass/fail off a grader-verdict payload's overall field", () => {
     expect(
       verdictOutcome(entry({ eventType: 'grader-verdict', payload: { overall: 'pass' } })),
     ).toBe('pass');
