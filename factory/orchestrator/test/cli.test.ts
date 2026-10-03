@@ -2690,6 +2690,12 @@ describe('cli.ts (built binary)', () => {
 
     const tailResult = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
     expect(JSON.parse(tailResult.stdout)).toHaveLength(1); // admitting appended nothing
+
+    // No event appended means no id to chain a follower off, so the printed
+    // object carries no event_id key at all -- not an absent/undefined one,
+    // a missing one, the same convention `findings raise` uses for a
+    // suppressed finding.
+    expect('event_id' in JSON.parse(stdout)).toBe(false);
   });
 
   // Same reason as `scheduler run --dry accepts --no-self`: a flag declared
@@ -4493,6 +4499,44 @@ describe('cli.ts (built binary)', () => {
       expect(
         tail(sessionId, eventsDir).filter((r) => r.event_type === 'edge-recorded'),
       ).toHaveLength(1);
+    });
+
+    it('plan ingest: prints the event_id of the last event it appended (the edge, after the nodes)', async () => {
+      const { sessionId, eventsDir } = await session();
+      const planPath = path.join(scratchDir, `${sessionId}-dag-id.json`);
+      await writeFile(
+        planPath,
+        JSON.stringify({
+          ...PLAN,
+          edges: [
+            {
+              task: 'epic-1/task-2',
+              dependsOn: 'epic-1/task-1',
+              edge_type: 'artifact',
+              edge_provenance: 'declared',
+            },
+          ],
+        }),
+      );
+      const ingest = runCli([
+        'plan',
+        'ingest',
+        planPath,
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
+      ]);
+      expect(ingest.status).toBe(0);
+
+      const fullTail = JSON.parse(
+        runCli(['event', 'tail', sessionId, '--n', '100', '--state-dir', eventsDir]).stdout,
+      );
+      const last = fullTail[fullTail.length - 1];
+      expect(last.record.event_type).toBe('edge-recorded');
+      expect(JSON.parse(ingest.stdout).event_id).toBe(last.event_id);
     });
 
     it('wave check: logs wave-admitted under the plan spelling of a bare task id', async () => {

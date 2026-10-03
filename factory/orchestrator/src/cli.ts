@@ -1735,6 +1735,11 @@ async function main(): Promise<number> {
     // claims-and-edges only, so the input carries no crossings.
     const { computePlanParallelism } = await import('./waveSchedule.js');
     const parallelism = computePlanParallelism(plan, loadWorktreePolicy());
+    // The last event this call appended -- the edges, after the nodes, since
+    // emitEdgesRecorded runs after emitTasksAdded. A re-ingest that wrote
+    // neither (everything already on the log) appends nothing, so there is
+    // no id to print.
+    const lastEvent = edges.length > 0 ? edges[edges.length - 1] : written[written.length - 1];
     printJson({
       epic: plan.epic_id,
       version: plan.version,
@@ -1743,6 +1748,7 @@ async function main(): Promise<number> {
       skipped: plan.tasks.length - added,
       edges: edges.length,
       parallelism,
+      ...(lastEvent ? { event_id: lastEvent.event_id } : {}),
     });
     return 0;
   }
@@ -2269,7 +2275,8 @@ async function main(): Promise<number> {
   // the whole safety property: an operator can read what the policy would
   // have let run, and argue with it, before any of it moves. So this appends
   // no event, writes no worktree and starts no agent -- exactly the daemon's
-  // invariant, held by the command a person types too.
+  // invariant, held by the command a person types too. No event_id in the
+  // printed JSON either, for the same reason: there is never one to name.
   if (namespace === 'scheduler' && action === 'admit') {
     const { computeProposals, loadSchedulerPolicy } = await import('./scheduler.js');
     const { admitProposals } = await import('./autonomy.js');
