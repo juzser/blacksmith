@@ -235,8 +235,8 @@ test.describe('Home', () => {
     const menu = page.getByRole('menu', { name: 'More actions' });
     await expect(menu).toBeVisible();
 
-    const menuitems = await menu.getByRole('menuitem').all();
-    expect(menuitems.length).toBeGreaterThan(0);
+    const menuitemsLocator = menu.getByRole('menuitem');
+    await expect.poll(() => menuitemsLocator.count()).toBeGreaterThan(0);
 
     const separators = await menu.getByRole('separator').all();
     for (const separator of separators) {
