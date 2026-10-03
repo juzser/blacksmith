@@ -181,18 +181,14 @@ test.describe('Topbar Select sizing (PR #280 nit)', () => {
     }
   });
 
-  test('phone (375px): the topbar Select still clears --bs-touch', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto('/timeline');
-    const touch = await page.evaluate(() =>
-      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bs-touch')),
-    );
-    const selects = page.locator('select.bs-select:visible');
-    const count = await selects.count();
-    expect(count).toBeGreaterThan(0);
-    for (let i = 0; i < count; i++) {
-      const box = await selects.nth(i).boundingBox();
-      expect(box?.height, `phone Select #${i}`).toBeGreaterThanOrEqual(touch - 0.5);
-    }
-  });
+  // No phone-specific counterpart here: at <=640px the topbar itself swaps
+  // to MobileTopBar (App.vue's isPhoneWidth branch), which renders no inline
+  // Select at all -- the session/scope-width pickers this suite's desktop
+  // test above checks simply do not exist on that layout. The phone ">=
+  // --bs-touch" floor on the Selects that DO render at 375px (Roadmap's
+  // phase and plan-version Selects) is already asserted by
+  // roadmapMobile.spec.ts's "touch targets clear 44px at 375px" test, and
+  // every other page's visible Select is swept generically by
+  // `measureInteractiveElements` above (INTERACTIVE_SELECTOR includes
+  // `select`), at VIEWPORTS.mobile.
 });
