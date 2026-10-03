@@ -413,6 +413,12 @@ export function verdictOutcome(entry: TimelineEntry): 'pass' | 'fail' | 'errored
     if (p.verdict === 'refute') return 'fail';
     return null;
   }
+  if (entry.eventType === 'grader-verdict') {
+    const overall = (entry.payload as Record<string, unknown>).overall;
+    if (overall === 'pass') return 'pass';
+    if (overall === 'fail') return 'fail';
+    return null;
+  }
   if (entry.eventType in GATE_VERDICT_FIELD) {
     const verdict = gateVerdict(entry);
     return verdict === 'unrecorded' ? null : verdict;

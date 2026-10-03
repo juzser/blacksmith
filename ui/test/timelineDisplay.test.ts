@@ -1121,6 +1121,22 @@ describe('lib/timelineDisplay.ts verdictOutcome()', () => {
   it('says nothing for a row kind with no pass/fail concept', () => {
     expect(verdictOutcome(entry({ eventType: 'session-start', payload: {} }))).toBeNull();
   });
+
+  it('reads pass/fail off a grader-verdict payload\'s overall field', () => {
+    expect(
+      verdictOutcome(entry({ eventType: 'grader-verdict', payload: { overall: 'pass' } })),
+    ).toBe('pass');
+    expect(
+      verdictOutcome(entry({ eventType: 'grader-verdict', payload: { overall: 'fail' } })),
+    ).toBe('fail');
+  });
+
+  it('says nothing for a grader-verdict row with no overall recorded', () => {
+    expect(
+      verdictOutcome(entry({ eventType: 'grader-verdict', payload: { overall: null } })),
+    ).toBeNull();
+    expect(verdictOutcome(entry({ eventType: 'grader-verdict', payload: {} }))).toBeNull();
+  });
 });
 
 // Item 3: the day-grouping helper backing the Activity/History day headers.
