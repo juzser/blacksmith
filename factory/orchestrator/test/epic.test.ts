@@ -1849,6 +1849,8 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     expect(outcome.reason).toBe('mechanical-blockers');
     const after = await readEvents(sessionId, { stateDir });
     expect(after).toHaveLength(before.length);
+    // Nothing was appended, so there is no event to name.
+    expect(outcome.event_id).toBeUndefined();
   });
 
   // D-138, end to end and in the exact shape that shipped: a task the log
@@ -2149,6 +2151,8 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     const { quorum } = await quorumEvents();
     expect(quorum).toHaveLength(1);
     expect(quorum[0]?.record.payload).toMatchObject({ outcome: 'decided', decision: 'refute' });
+    // A quorum ran, so the outcome names the `quorum-decision` event it just appended.
+    expect(outcome.event_id).toBe(quorum[0]?.event_id);
   });
 
   it('goes when two active externals both confirm epic readiness', async () => {
@@ -2181,6 +2185,8 @@ describe('epic.ts runEpicVerdict (Phase 8, epic-final-verdict quorum trigger)', 
     expect(outcome.outcome).toBe('go');
     const { quorum } = await quorumEvents();
     expect(quorum[0]?.record.payload).toMatchObject({ outcome: 'decided', decision: 'confirm' });
+    // A quorum ran, so the outcome names the `quorum-decision` event it just appended.
+    expect(outcome.event_id).toBe(quorum[0]?.event_id);
   });
 
   it('holds with insufficient-providers when exactly one active external ran (fail-closed, §4)', async () => {

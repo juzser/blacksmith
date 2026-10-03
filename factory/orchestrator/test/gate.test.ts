@@ -143,6 +143,24 @@ describe('gate.ts (integration)', () => {
     expect(events.some((e) => e.record.event_type === 'testgate-result')).toBe(false);
   });
 
+  it('prints the event_id of the gate-outcome event it just appended, whatever the outcome', async () => {
+    const pass = await runGate(baseInput(), ctx(), { stateDir });
+    const passEvents = await readEvents(sessionId, { stateDir });
+    const passOutcomeEvent = passEvents[passEvents.length - 1];
+    expect(passOutcomeEvent?.record.event_type).toBe('gate-outcome');
+    expect(pass.event_id).toBe(passOutcomeEvent?.event_id);
+
+    const blocked = await runGate(
+      baseInput({ result: resultFixture({ run_status: 'not-a-real-status' }) }),
+      ctx(),
+      { stateDir },
+    );
+    const blockedEvents = await readEvents(sessionId, { stateDir });
+    const blockedOutcomeEvent = blockedEvents[blockedEvents.length - 1];
+    expect(blockedOutcomeEvent?.record.event_type).toBe('gate-outcome');
+    expect(blocked.event_id).toBe(blockedOutcomeEvent?.event_id);
+  });
+
   it('certifies the commit and reports it on a clean pass (P9-8)', async () => {
     const outcome = await runGate(baseInput({ baseRef: 'main' }), ctx(), { stateDir });
 
@@ -2537,6 +2555,8 @@ describe('recordTaskResult', () => {
     });
     if (outcome.outcome !== 'recorded') throw new Error('unreachable');
     expect(outcome.eventId).toMatch(/^sess-record-result#\d+$/);
+    // Additive snake_case alongside the pre-existing camelCase key, same value.
+    expect(outcome.event_id).toBe(outcome.eventId);
 
     const events = await readEvents(sessionId, { stateDir });
     const recorded = events.filter((e) => e.record.event_type === 'task-result-recorded');

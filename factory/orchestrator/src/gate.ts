@@ -224,6 +224,8 @@ export type GateOutcome =
       coverageEvidence?: CoverageEvidence;
       /** Present exactly when a `--plan` let the stage resolve `ui_affecting` (U2 S3). */
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
+      /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
+      event_id: string;
     }
   | {
       outcome: 'blocked';
@@ -266,6 +268,8 @@ export type GateOutcome =
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
+      /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
+      event_id: string;
     }
   | {
       outcome: 'pass-with-waivers-pending';
@@ -280,6 +284,8 @@ export type GateOutcome =
       budgetCheck?: BudgetCheck;
       coverageEvidence?: CoverageEvidence;
       uiuxCheck?: 'checked' | 'skipped' | 'unverifiable';
+      /** The `gate-outcome` event this call just appended -- always present, `finalize` runs exactly once per call. */
+      event_id: string;
     };
 
 let cachedTaxonomy: Taxonomy | undefined;
@@ -461,6 +467,8 @@ export type RecordTaskResultOutcome =
       outcome: 'recorded';
       taskId: string;
       eventId: string;
+      /** Same value as `eventId`, snake_case, matching every other write verb's printed id. */
+      event_id: string;
       /** True when this call matched a Result already on the log byte-for-byte and minted no new event. */
       deduped: boolean;
     }
@@ -543,6 +551,9 @@ export async function recordTaskResult(
     outcome: 'recorded',
     taskId: input.taskId,
     eventId: recorded.eventId,
+    // Additive alongside the existing `eventId` (camelCase, pre-existing):
+    // same value, snake_case, matching every other write verb's printed id.
+    event_id: recorded.eventId,
     deduped: recorded.deduped,
   };
 }
@@ -1637,17 +1648,26 @@ function runBudgetCheck(input: GateInput): BudgetCheck {
   }
 }
 
+// Plain `Omit` over a union collapses to the intersection of its branches'
+// keys, which drops `reason`/`pendingFindings` (only some branches have
+// them). Distributing over each branch first keeps the union shape.
+type UnfinalizedGateOutcome = GateOutcome extends infer T
+  ? T extends { event_id: string }
+    ? Omit<T, 'event_id'>
+    : T
+  : never;
+
 async function finalize(
-  outcome: GateOutcome,
+  outcome: UnfinalizedGateOutcome,
   ctx: GateContext,
   opts: EventOpts,
 ): Promise<GateOutcome> {
-  await emit(
+  const stored = await emit(
     'gate-outcome',
     { outcome: outcome.outcome, reason: 'reason' in outcome ? outcome.reason : null },
     outcome.taskId,
     ctx,
     opts,
   );
-  return outcome;
+  return { ...outcome, event_id: stored.event_id } as GateOutcome;
 }

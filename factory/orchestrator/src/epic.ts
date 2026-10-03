@@ -1416,13 +1416,22 @@ export interface EpicVerdictInput {
 }
 
 export type EpicVerdictOutcome =
-  | { outcome: 'go'; epicId: string; summary: EpicSummary; quorum?: QuorumResult }
+  | {
+      outcome: 'go';
+      epicId: string;
+      summary: EpicSummary;
+      quorum?: QuorumResult;
+      /** The `quorum-decision` event this call appended -- present exactly when `quorum` is, since both terminal outcomes that never ran one append nothing. */
+      event_id?: string;
+    }
   | {
       outcome: 'hold';
       epicId: string;
       summary: EpicSummary;
       reason: 'mechanical-blockers' | 'quorum-refuted' | 'disagreement' | 'insufficient-providers';
       quorum?: QuorumResult;
+      /** Same as above: present exactly when `quorum` is. */
+      event_id?: string;
     };
 
 function epicQuorumDecisionPayload(
@@ -1610,7 +1619,7 @@ export async function runEpicVerdict(
   }
 
   // Step 5 — emit exactly once, for any case that actually ran a quorum.
-  await appendEvent(
+  const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',
@@ -1628,7 +1637,7 @@ export async function runEpicVerdict(
     opts,
   );
 
-  return outcome;
+  return { ...outcome, event_id: stored.event_id };
 }
 
 /**
