@@ -519,6 +519,7 @@ gate_event:      [schema-check-result, artifact-check-result,
                   finding-raised, finding-reverified, finding-suppressed,
                   finding-transitioned, finding-reattributed,
                   severity-decisions, waiver-granted, waiver-denied,
+                  task-waiver-approved,
                   gate-outcome, issue-reported]
                   # schema-check-result — task Result vs result.schema.json
                   # artifact-check-result — every artifacts[].path in that
@@ -632,6 +633,10 @@ gate_event:      [schema-check-result, artifact-check-result,
                   #                       waiver-batch / log-only)
                   # waiver-granted/-denied — operator waiver-batch answer,
                   #                       keyed by finding fingerprint
+                  # task-waiver-approved — operator approval of one waived
+                  #                       task, keyed by task id; what the
+                  #                       epic gate accepts in place of a
+                  #                       gate run
                   # gate-outcome        — the composed gate pipeline's
                   #                       final structured result
                   # issue-reported      — issueReporter.ts's record of one

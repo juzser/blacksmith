@@ -11,6 +11,13 @@
    --causal-parent ... --actor operator`. S1/S2 findings are rejected by
    the command itself if attempted — they go through the escalation ladder
    instead, never a waiver.
+   Task waivers are a separate step. A task whose plan row says `waived`
+   carries no gate run, and the epic close holds it as a blocker ("waived
+   without operator approval") until the operator's approval is recorded.
+   Ask the operator, then run `bs waivers approve-task <task-id> --note
+   "<why>" --session ... --causal-parent ... --actor operator`. Only the
+   operator actor is accepted; an approval written under any other actor is
+   refused, and one appended by hand under another actor is not honoured.
 4. A denial discharges nothing — the finding stays open with no further
    move of its own, and an open finding blocks the epic verdict. The
    command's output carries `findingIdsToCarry`: every finding id this batch

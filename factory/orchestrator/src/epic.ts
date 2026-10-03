@@ -1,3 +1,4 @@
+import { isOperatorActor } from './actors.js';
 import { EPIC_CLOSED_EVENT_TYPE } from './agents-registry.js';
 import { type CrosscheckPolicy, loadCrosscheckPolicy } from './crosscheck.js';
 import { foldTasks, type TaskFoldRow } from './db/projector.js';
@@ -47,6 +48,7 @@ import {
   taskSuccessors,
 } from './spec.js';
 import { TERMINAL_OK_TASK_STATUSES, TERMINAL_TASK_STATUSES } from './taskStatus.js';
+import { TASK_WAIVER_APPROVED_EVENT } from './waivers.js';
 import {
   auditWaveConcurrency,
   WAVE_VERDICTS,
@@ -326,6 +328,11 @@ export interface TaskGateEvidence {
  */
 export interface EpicTaskRow extends TaskFoldRow {
   gate: TaskGateEvidence;
+  /**
+   * An operator-written `task-waiver-approved` exists for this task. What a
+   * `waived` row carries in place of a gate run; absent reads as "not approved".
+   */
+  waiverApproved?: boolean;
 }
 
 const GATE_OUTCOME_EVENT = 'gate-outcome';
@@ -347,15 +354,24 @@ export function withGateEvidence(
 ): EpicTaskRow[] {
   const gated = new Set<string>();
   const recorded = new Set<string>();
+  const approved = new Set<string>();
   for (const { record } of events) {
     if (!record.task_id) continue;
     if (record.event_type === GATE_OUTCOME_EVENT) gated.add(bareTaskId(epicId, record.task_id));
     else if (record.event_type === TASK_RESULT_EVENT)
       recorded.add(bareTaskId(epicId, record.task_id));
+    // `event append` is open to any actor, so the approval counts only when
+    // the operator wrote it.
+    else if (record.event_type === TASK_WAIVER_APPROVED_EVENT && isOperatorActor(record.actor))
+      approved.add(bareTaskId(epicId, record.task_id));
   }
   return tasks.map((t) => {
     const bare = bareTaskId(epicId, t.taskId);
-    return { ...t, gate: { gateOutcome: gated.has(bare), resultRecorded: recorded.has(bare) } };
+    return {
+      ...t,
+      gate: { gateOutcome: gated.has(bare), resultRecorded: recorded.has(bare) },
+      waiverApproved: approved.has(bare),
+    };
   });
 }
 
@@ -775,12 +791,18 @@ export function summarizeEpic(
   // D-138: only tasks claimed done are asked for evidence. One still in flight
   // has not been gated yet and already blocks for not being terminal-OK —
   // repeating it here would make an in-progress task read like a forged one.
-  // A waived task is never gated by definition (D-120): it has its own register.
+  // A waived task is never gated by definition (D-120): it has its own
+  // register, the operator's recorded approval. Without one it is a status
+  // typed into a plan, and still blocks.
+  const hasGateRun = (t: EpicTaskRow) => t.gate.gateOutcome && t.gate.resultRecorded;
   const ungated = tasks.filter(
     (t) =>
       TERMINAL_OK_TASK_STATUSES.has(t.taskStatus) &&
-      t.taskStatus !== 'waived' &&
-      !(t.gate.gateOutcome && t.gate.resultRecorded),
+      t.taskStatus !== WAIVED_TASK_STATUS &&
+      !hasGateRun(t),
+  );
+  const unapprovedWaived = tasks.filter(
+    (t) => t.taskStatus === WAIVED_TASK_STATUS && !hasGateRun(t) && !t.waiverApproved,
   );
   const ungatedTasks: EpicTaskSummary[] = ungated.map((t) => ({
     taskId: t.taskId,
@@ -997,6 +1019,10 @@ export function summarizeEpic(
       t.gate.gateOutcome
         ? `Task "${t.taskId}" is recorded ${t.taskStatus} and has a gate-outcome, but no task-result-recorded for it exists in the log. \`gate run\` writes both for the task it grades, so this outcome was written by hand — it is a claim, not a gate.`
         : `Task "${t.taskId}" is recorded ${t.taskStatus} with no gate-outcome in the log at all — nothing gated it. Run \`bs gate run\` for it, or supersede the record.`,
+    ),
+    ...unapprovedWaived.map(
+      (t) =>
+        `Task "${t.taskId}" is waived without operator approval — no gate run backs it and no operator approval is recorded. Record one: \`bs waivers approve-task ${t.taskId} --note <why> --actor operator ...\`, or complete the task.`,
     ),
     ...findingBlockers,
     // A record the fold could not read is a finding of UNKNOWN status, and

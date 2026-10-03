@@ -6939,6 +6939,36 @@ describe('cli.ts (built binary)', () => {
         expect(result.status).toBe(1);
         expect(JSON.parse(result.stdout).error.code).toBe('findings.unknown-finding');
       });
+
+      it('waivers approve-task records the operator approval, and refuses an agent actor', async () => {
+        const { sessionId, eventsDir } = await session();
+        const base = [
+          'waivers',
+          'approve-task',
+          'epic-1/task-2',
+          '--session',
+          sessionId,
+          '--causal-parent',
+          `${sessionId}#0`,
+          '--note',
+          'no longer needed',
+          '--state-dir',
+          eventsDir,
+        ];
+
+        const refused = runCli([...base, '--actor', 'coder']);
+        expect(refused.status).toBe(1);
+        expect(JSON.parse(refused.stdout).error.code).toBe('waivers.not-operator');
+
+        const ok = runCli([...base, '--actor', 'operator']);
+        expect(ok.status).toBe(0);
+        const approved = tail(sessionId, eventsDir).filter(
+          (r) => r.event_type === 'task-waiver-approved',
+        );
+        expect(approved).toHaveLength(1);
+        expect(approved[0]?.task_id).toBe('epic-1/task-2');
+        expect(approved[0]?.payload).toEqual({ operator_note: 'no longer needed' });
+      });
     });
 
     // D-33/P9-9: every judge in this factory returned findings against a diff,
