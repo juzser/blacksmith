@@ -6,16 +6,20 @@
 // as a different kind of thing rather than as several of the rows below it.
 import { computed } from 'vue';
 import { formatDateTime, formatTime } from '../lib/format.js';
+import { EVENT_KIND_LABEL } from '../lib/timelineDisplay.js';
 import type { DispatchGroup } from '../lib/timelineDisplay.js';
 import Icon from './ds/Icon.vue';
 
 const props = defineProps<{ group: DispatchGroup; expanded: boolean }>();
 const emit = defineEmits<{ toggle: [] }>();
 
-// Slate is dispatch_decision's own tint (timelineDisplay.ts tintFor): the fold
-// is the same kind of event, so it keeps the kind's colour. Only the glyph
-// changes — `layers` for many, `send` for one.
-const TINT = { bg: 'var(--ds-tint-slate)', fg: 'var(--ds-tint-slate-text)' };
+// Every member is a dispatch_decision, so the fold keeps that kind's own tag
+// and left bar (brief item 1) rather than a bespoke icon.
+const kindLabel = EVENT_KIND_LABEL.dispatch;
+const kindStyle = {
+  background: 'var(--bs-event-dispatch-subtle)',
+  color: 'var(--bs-event-dispatch-text)',
+};
 
 const span = computed(() => {
   const stamps = props.group.members.map((m) => m.entry.ts).sort();
@@ -29,7 +33,7 @@ const span = computed(() => {
 </script>
 
 <template>
-  <div class="timeline-row">
+  <div class="timeline-row" style="border-left-color: var(--bs-event-dispatch-text)">
     <button
       type="button"
       class="ds-btn ds-btn--ghost ds-btn--icon-xs"
@@ -41,11 +45,9 @@ const span = computed(() => {
     >
       <Icon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
     </button>
-    <span class="timeline-row__icon" :style="{ background: TINT.bg, color: TINT.fg }">
-      <Icon name="layers" :size="14" />
-    </span>
     <div class="timeline-row__main">
       <div class="timeline-row__head">
+        <span class="timeline-row__ktag" :style="kindStyle">{{ kindLabel }}</span>
         <span class="timeline-row__title">{{ group.label }}</span>
       </div>
       <span class="timeline-row__meta">{{ span }} · dispatch_decision</span>

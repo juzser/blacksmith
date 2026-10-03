@@ -1,22 +1,23 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { loadTaxonomy } from '../../factory/orchestrator/src/taxonomy.js';
-import { ICON_PATHS } from '../src/icons.js';
 import type { TimelineEntry } from '../src/lib/api.js';
 import {
   buildCausalTree,
   DISPATCH_GROUP_MIN,
   type DispatchGroup,
+  EVENT_KINDS,
+  groupByDay,
   groupDispatches,
-  iconFor,
+  kindFor,
   KIND_OPTIONS,
   matchesKind,
   metaFor,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
-  tintFor,
   titleFor,
+  verdictOutcome,
 } from '../src/lib/timelineDisplay.js';
 import { nth } from './helpers.js';
 
@@ -52,17 +53,15 @@ function groupAt(items: TimelineItem[], index: number): DispatchGroup {
 }
 
 describe('lib/timelineDisplay.ts', () => {
-  it('maps user_prompt to message-circle/blue', () => {
+  it('maps user_prompt to the prompt kind', () => {
     const e = entry({ eventType: 'user_prompt', payload: { prompt: 'hello' } });
-    expect(iconFor(e)).toBe('message-circle');
-    expect(tintFor(e)).toBe('blue');
+    expect(kindFor(e)).toBe('prompt');
     expect(titleFor(e)).toBe('hello');
   });
 
-  it('maps dispatch_decision to send/slate', () => {
+  it('maps dispatch_decision to the dispatch kind', () => {
     const e = entry({ eventType: 'dispatch_decision', payload: { agent_role: 'coder' } });
-    expect(iconFor(e)).toBe('send');
-    expect(tintFor(e)).toBe('slate');
+    expect(kindFor(e)).toBe('dispatch');
   });
 
   // Task 2 (friendly role labels): the row's own title text names the role
@@ -134,22 +133,22 @@ describe('lib/timelineDisplay.ts', () => {
     });
   });
 
-  it('picks shield-check for a passing gate-outcome, shield-alert for blocked', () => {
-    expect(iconFor(entry({ eventType: 'gate-outcome', payload: { outcome: 'pass' } }))).toBe(
-      'shield-check',
+  it('reads pass/fail from a gate-outcome payload', () => {
+    expect(verdictOutcome(entry({ eventType: 'gate-outcome', payload: { outcome: 'pass' } }))).toBe(
+      'pass',
     );
-    expect(iconFor(entry({ eventType: 'gate-outcome', payload: { outcome: 'blocked' } }))).toBe(
-      'shield-alert',
-    );
+    expect(
+      verdictOutcome(entry({ eventType: 'gate-outcome', payload: { outcome: 'blocked' } })),
+    ).toBe('fail');
   });
 
-  it('picks shield-alert for a failed schema-check-result / testgate-result', () => {
-    expect(iconFor(entry({ eventType: 'schema-check-result', payload: { valid: false } }))).toBe(
-      'shield-alert',
-    );
-    expect(iconFor(entry({ eventType: 'testgate-result', payload: { pass: false } }))).toBe(
-      'shield-alert',
-    );
+  it('reads pass/fail from schema-check-result / testgate-result', () => {
+    expect(
+      verdictOutcome(entry({ eventType: 'schema-check-result', payload: { valid: false } })),
+    ).toBe('fail');
+    expect(
+      verdictOutcome(entry({ eventType: 'testgate-result', payload: { pass: false } })),
+    ).toBe('fail');
   });
 
   // D-169. Three testgate-result events on the factory's own log carry no
@@ -161,7 +160,7 @@ describe('lib/timelineDisplay.ts', () => {
   // there is to say about it.
   it('reports no verdict rather than a pass when the field is absent (D-169)', () => {
     for (const eventType of ['testgate-result', 'schema-check-result', 'deps-check-result']) {
-      expect(iconFor(entry({ eventType, payload: {} }))).toBe('circle-alert');
+      expect(verdictOutcome(entry({ eventType, payload: {} }))).toBeNull();
     }
     expect(titleFor(entry({ eventType: 'testgate-result', payload: {} }))).toBe(
       'Test gate — no verdict recorded',
@@ -179,12 +178,12 @@ describe('lib/timelineDisplay.ts', () => {
   // `!== false` a *string* saying false read as a pass -- the worst of the
   // three cases, because the writer did record a failure.
   it('treats a non-boolean verdict as unrecorded, not as a pass (D-169)', () => {
-    expect(iconFor(entry({ eventType: 'testgate-result', payload: { pass: 'false' } }))).toBe(
-      'circle-alert',
-    );
-    expect(iconFor(entry({ eventType: 'schema-check-result', payload: { valid: null } }))).toBe(
-      'circle-alert',
-    );
+    expect(
+      verdictOutcome(entry({ eventType: 'testgate-result', payload: { pass: 'false' } })),
+    ).toBeNull();
+    expect(
+      verdictOutcome(entry({ eventType: 'schema-check-result', payload: { valid: null } })),
+    ).toBeNull();
   });
 
   // gate-outcome already tested `outcome` positively, so its icon was never
@@ -192,7 +191,6 @@ describe('lib/timelineDisplay.ts', () => {
   // Not observed on any real log -- fixed here because it is the fourth
   // branch of the same switch and the next reader should find one rule.
   it('names a missing gate outcome instead of trailing an empty dash (D-169)', () => {
-    expect(iconFor(entry({ eventType: 'gate-outcome', payload: {} }))).toBe('circle-alert');
     expect(titleFor(entry({ eventType: 'gate-outcome', payload: {} }))).toBe(
       'Gate outcome — no outcome recorded',
     );
@@ -202,12 +200,6 @@ describe('lib/timelineDisplay.ts', () => {
   // `history` row reads as trivia, and this one is the reason a green epic
   // was measuring the wrong node_modules.
   it('renders deps-check-result as the gate stage it is', () => {
-    expect(iconFor(entry({ eventType: 'deps-check-result', payload: { ok: false } }))).toBe(
-      'shield-alert',
-    );
-    expect(iconFor(entry({ eventType: 'deps-check-result', payload: { ok: true } }))).toBe(
-      'shield-check',
-    );
     expect(
       titleFor(
         entry({ eventType: 'deps-check-result', payload: { ok: false, detail: 'no .bin' } }),
@@ -222,7 +214,6 @@ describe('lib/timelineDisplay.ts', () => {
   describe('the free event types the timeline filter used to drop', () => {
     it('titles a session start with its note', () => {
       const e = entry({ eventType: 'session-start', payload: { note: 'dogfood run 2' } });
-      expect(iconFor(e)).toBe('play');
       expect(titleFor(e)).toBe('Session started — dogfood run 2');
       expect(titleFor(entry({ eventType: 'session-start', payload: {} }))).toBe('Session started');
     });
@@ -232,7 +223,6 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'task-result-recorded',
         payload: { run_status: 'done', agent: 'coder', diff_lines_changed: 42 },
       });
-      expect(iconFor(e)).toBe('file-check');
       expect(titleFor(e)).toBe('Task result — done (coder, 42 lines changed)');
     });
 
@@ -295,7 +285,6 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'judge-reported',
         payload: { agent_role: 'reviewer', round: 2, finding_count: 3 },
       });
-      expect(iconFor(e)).toBe('scale');
       expect(titleFor(e)).toBe('reviewer reported — 3 findings (round 2)');
       expect(
         titleFor(
@@ -312,14 +301,10 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'epic-closed',
         payload: { epic_id: 'dogfood-2', machine_verdict: 'pass', tasks_merged: 4 },
       });
-      expect(iconFor(e)).toBe('git-merge');
       expect(titleFor(e)).toBe('Epic closed — dogfood-2: pass, 4 tasks merged');
     });
 
     it('titles lesson events with the statement, not the id', () => {
-      expect(
-        iconFor(entry({ eventType: 'lesson-candidate-raised', payload: { statement: 'x' } })),
-      ).toBe('graduation-cap');
       expect(
         titleFor(
           entry({
@@ -383,7 +368,6 @@ describe('lib/timelineDisplay.ts', () => {
           reasons: ['merge-threshold', 'low-confidence'],
         },
       });
-      expect(iconFor(e)).toBe('rotate-cw');
       expect(titleFor(e)).toBe(
         'Recheck proposed — epic-9/task-3 (merge-threshold, low-confidence)',
       );
@@ -400,7 +384,6 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'maintenance-proposed',
         payload: { kind: 'maintenance', packages },
       });
-      expect(iconFor(e)).toBe('refresh-cw');
       expect(titleFor(e)).toBe('Maintenance proposed — 4 outdated (vite, vitest, hono +1)');
       expect(
         titleFor(entry({ eventType: 'maintenance-proposed', payload: { packages: [] } })),
@@ -418,7 +401,6 @@ describe('lib/timelineDisplay.ts', () => {
           occurrences: 2,
         },
       });
-      expect(iconFor(e)).toBe('triangle-alert');
       expect(titleFor(e)).toBe(
         'Error report proposed — AssertionError in epic/task-3 (2 occurrences)',
       );
@@ -445,19 +427,13 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'growth-review-due',
         payload: { kind: 'growth-review', cadenceDays: 14, lastReviewAt: '2026-08-01T09:00:00Z' },
       });
-      expect(iconFor(e)).toBe('map');
       expect(titleFor(e)).toBe('Growth review due — every 14 days, last 2026-08-01');
       expect(titleFor(entry({ eventType: 'growth-review-due', payload: {} }))).toBe(
         'Growth review due — every ? days',
       );
     });
 
-    /**
-     * The guard, not the examples. An icon name with no entry in ICON_PATHS
-     * renders nothing at all — Icon.vue is `v-if="path"` — so a typo here is a
-     * blank cell, not a broken build, and no assertion above would catch it.
-     */
-    it('gives every proposal an icon the registry actually has', () => {
+    it('gives every proposal a known kind and its own title', () => {
       const types = [
         'recheck-proposed',
         'maintenance-proposed',
@@ -465,8 +441,8 @@ describe('lib/timelineDisplay.ts', () => {
         'error-report-proposed',
       ];
       const missing = types
-        .map((eventType) => iconFor(entry({ eventType })))
-        .filter((name) => !(name in ICON_PATHS));
+        .map((eventType) => kindFor(entry({ eventType })))
+        .filter((kind) => !EVENT_KINDS.includes(kind));
       expect(missing).toEqual([]);
       expect(types.filter((eventType) => titleFor(entry({ eventType })) === eventType)).toEqual([]);
     });
@@ -500,9 +476,8 @@ describe('lib/timelineDisplay.ts', () => {
       );
     });
 
-    it('gives the row an icon the registry actually has, not the generic clock', () => {
-      expect(iconFor(pr) in ICON_PATHS).toBe(true);
-      expect(iconFor(pr)).not.toBe('history');
+    it('gives the row a known kind, not the generic fallback', () => {
+      expect(kindFor(pr)).toBe('merge');
     });
 
     it('still names the type when a hand-appended payload is thin', () => {
@@ -567,7 +542,6 @@ describe('lib/timelineDisplay.ts', () => {
           blocking: true,
         },
       });
-      expect(iconFor(e)).toBe('file-text');
       expect(titleFor(e)).toBe(
         'Spec change proposed by coder — epic-1/task-2:criterion-1: every value is single-line (blocking, 2 sites)',
       );
@@ -591,7 +565,6 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'spec-change-decided',
         payload: { decision: 'approved', plan_version: 2, rationale: 'the parser is right' },
       });
-      expect(iconFor(approved)).toBe('scale');
       expect(titleFor(approved)).toBe('Spec change approved — plan v2: the parser is right');
       expect(
         titleFor(
@@ -613,7 +586,6 @@ describe('lib/timelineDisplay.ts', () => {
           rationale: 'quoted newlines are legal',
         },
       });
-      expect(iconFor(e)).toBe('kanban');
       expect(titleFor(e)).toBe('Plan v2 amends v1 — 1 finding cited: quoted newlines are legal');
     });
 
@@ -648,13 +620,13 @@ describe('lib/timelineDisplay.ts', () => {
      * The guard, not the examples, and the whole dimension rather than the
      * types this feature happened to add: a graph_event the taxonomy grows
      * later is selectable by the Plan chip the day it is declared, and would
-     * render as its own event_type under an icon that draws nothing.
+     * render as its own event_type under a kind tag that was never taught it.
      */
-    it('gives every graph_event a title of its own and an icon the registry has', () => {
+    it('gives every graph_event a title of its own and a known kind', () => {
       const dimension = loadTaxonomy().dimensions.graph_event ?? [];
       expect(dimension.length).toBeGreaterThan(0);
       expect(
-        dimension.filter((eventType) => !(iconFor(entry({ eventType })) in ICON_PATHS)),
+        dimension.filter((eventType) => !EVENT_KINDS.includes(kindFor(entry({ eventType })))),
       ).toEqual([]);
       expect(dimension.filter((eventType) => titleFor(entry({ eventType })) === eventType)).toEqual(
         [],
@@ -669,7 +641,6 @@ describe('lib/timelineDisplay.ts', () => {
         payload: { note: 'artifact home relocation before the task-2 gate run' },
       });
       expect(titleFor(e)).toBe('artifact home relocation before the task-2 gate run');
-      expect(iconFor(e)).toBe('file-text');
     });
 
     // 28 of the 57 use `note`, 11 use `summary`, and the rest carry neither —
@@ -716,8 +687,8 @@ describe('lib/timelineDisplay.ts', () => {
     // Tinted with user_prompt rather than with the machine events: what these
     // two have in common is that a person wrote them, which is exactly the
     // grouping the "Prompts" chip selects on.
-    it('shares the operator tint with user_prompt', () => {
-      expect(tintFor(entry({ eventType: 'operator-note' }))).toBe('blue');
+    it('shares the prompt kind with user_prompt', () => {
+      expect(kindFor(entry({ eventType: 'operator-note' }))).toBe('prompt');
     });
   });
 
@@ -739,7 +710,6 @@ describe('lib/timelineDisplay.ts', () => {
           providers: ['codex', 'gemini'],
         },
       });
-      expect(iconFor(e)).toBe('eye');
       expect(titleFor(e)).toBe(
         'Cross-finding — 3 independent-only, 2 corroborated (codex, gemini)',
       );
@@ -771,11 +741,8 @@ describe('lib/timelineDisplay.ts', () => {
       );
     });
 
-    // The guard from the scheduler proposals, one event further out. `eye` is
-    // not in the kit's vendored 42-icon subset, so it is exactly the kind of
-    // name that renders a blank cell instead of failing a build.
-    it('gives the row an icon the registry actually has', () => {
-      expect(iconFor(entry({ eventType: 'cross-finding-reconciled' })) in ICON_PATHS).toBe(true);
+    it('gives the row a known kind', () => {
+      expect(kindFor(entry({ eventType: 'cross-finding-reconciled' }))).toBe('feedback');
     });
   });
 
@@ -1083,5 +1050,95 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
   it('falls back to the bare event type when there is no task', () => {
     const e = entry({ eventType: 'session-start', taskId: null, payload: {} });
     expect(metaFor(e)).toBe('session-start');
+  });
+});
+
+// Item 1 of the mock-conformance brief: every row wears one of the mock's
+// nine kind tags (ds-review.html's `.k-*` classes), never the old icon.
+describe('lib/timelineDisplay.ts kindFor()', () => {
+  it.each([
+    ['user_prompt', 'prompt'],
+    ['operator-note', 'prompt'],
+    ['dispatch_decision', 'dispatch'],
+    ['task-result-recorded', 'returned'],
+    ['finding-raised', 'finding'],
+    ['waiver-granted', 'finding'],
+    ['task-waiver-approved', 'finding'],
+    ['schema-check-result', 'gate'],
+    ['testgate-result', 'gate'],
+    ['gate-outcome', 'gate'],
+    ['grader-verdict', 'gate'],
+    ['wave-merged', 'merge'],
+    ['epic-closed', 'merge'],
+    ['integration-pr-opened', 'merge'],
+    ['error-logged', 'error'],
+    ['error-report-proposed', 'error'],
+    ['judge-verdict', 'feedback'],
+    ['judge-reported', 'feedback'],
+    ['cross-finding-reconciled', 'feedback'],
+    ['session-start', 'system'],
+    ['task-added', 'system'],
+    ['some-future-event-type', 'system'],
+  ] as const)('maps %s to %s', (eventType, kind) => {
+    expect(kindFor(entry({ eventType }))).toBe(kind);
+  });
+
+  it('never leaves a kind unmapped for the whole gate_event taxonomy dimension', () => {
+    const dimension = loadTaxonomy().dimensions.gate_event ?? [];
+    expect(dimension.length).toBeGreaterThan(0);
+    const unmapped = dimension.filter((eventType) => !EVENT_KINDS.includes(kindFor(entry({ eventType }))));
+    expect(unmapped).toEqual([]);
+  });
+});
+
+describe('lib/timelineDisplay.ts verdictOutcome()', () => {
+  it('reads confirm/refute off a judge-verdict payload', () => {
+    expect(
+      verdictOutcome(entry({ eventType: 'judge-verdict', payload: { ok: true, verdict: 'confirm' } })),
+    ).toBe('pass');
+    expect(
+      verdictOutcome(entry({ eventType: 'judge-verdict', payload: { ok: true, verdict: 'refute' } })),
+    ).toBe('fail');
+  });
+
+  it('says nothing for a judge-verdict run that never reached a verdict', () => {
+    expect(
+      verdictOutcome(entry({ eventType: 'judge-verdict', payload: { ok: false, verdict: null } })),
+    ).toBeNull();
+  });
+
+  it('says nothing for a row kind with no pass/fail concept', () => {
+    expect(verdictOutcome(entry({ eventType: 'session-start', payload: {} }))).toBeNull();
+  });
+});
+
+// Item 3: the day-grouping helper backing the Activity/History day headers.
+describe('lib/timelineDisplay.ts groupByDay()', () => {
+  // Local (zone-less) ISO strings, not UTC `Z` ones: groupByDay buckets by
+  // *local* calendar day (brief item 3), and a `Z` timestamp near midnight
+  // lands on a different local day depending on the runner's own TZ — e.g.
+  // it collapsed to one group under UTC+7. A zone-less string parses as the
+  // local day it names, so the fixture holds regardless of the host TZ.
+  const NOW = '2026-10-03T19:00:00.000';
+
+  it('labels today and yesterday, newest day first', () => {
+    const items = [
+      { ts: '2026-10-03T17:47:00.000', id: 'a' },
+      { ts: '2026-10-03T16:20:00.000', id: 'b' },
+      { ts: '2026-10-02T09:20:00.000', id: 'c' },
+    ];
+    const groups = groupByDay(items, NOW);
+    expect(groups.map((g) => g.label)).toEqual(['Today', 'Yesterday']);
+    expect(groups[0]?.items.map((i) => i.id)).toEqual(['a', 'b']);
+    expect(groups[1]?.items.map((i) => i.id)).toEqual(['c']);
+  });
+
+  it('falls back to a short date past yesterday', () => {
+    const items = [{ ts: '2026-09-29T08:00:00.000', id: 'd' }];
+    expect(groupByDay(items, NOW)[0]?.label).toBe('29 Sep');
+  });
+
+  it('returns no groups for an empty list', () => {
+    expect(groupByDay([], NOW)).toEqual([]);
   });
 });

@@ -1230,17 +1230,31 @@
   display: flex;
   align-items: flex-start;
   gap: var(--ds-space-2);
-  padding: var(--ds-space-2) 0;
+  padding: var(--ds-space-2) var(--ds-space-2) var(--ds-space-2) var(--ds-space-3);
+  border-left: 3px solid transparent;
 }
-.timeline-row__icon {
-  display: flex;
+/* Item 4: a prompt row gets a sunken background so it reads as quoted input,
+   not just another event (ds-review.html's `.ev.k-prompt`). */
+.timeline-row--prompt {
+  background: var(--bs-surface-sunken);
+}
+.timeline-row__ktag {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
+  padding: 2px var(--ds-space-2);
   border-radius: var(--ds-radius-pill);
-  margin-top: 2px;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  flex-shrink: 0;
+}
+.timeline-row__prompt {
+  margin: var(--ds-space-1) 0 0;
+  padding: 0;
+  border: 0;
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text);
+  overflow-wrap: anywhere;
 }
 .timeline-row__main {
   min-width: 0;
