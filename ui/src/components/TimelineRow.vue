@@ -120,6 +120,7 @@ const clickable = computed(
         <Lozenge v-else-if="verdict === 'fail'" tone="danger">
           <Icon name="x" :size="12" /> Failed
         </Lozenge>
+        <Lozenge v-else-if="verdict === 'errored'" tone="warning">Did not run</Lozenge>
       </div>
       <!-- The prompt text itself, verbatim, as the mock's k-prompt row quotes it
            (ds-review.html:1380) -- it is this row's whole "title", so it replaces

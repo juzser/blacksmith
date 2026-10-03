@@ -401,11 +401,14 @@ export function kindFor(entry: TimelineEntry): EventKind {
 /** Which payload field carries a verdict row's pass/fail outcome, for the
  * same-shaped tag `findingStatus` already renders via `Lozenge`. Only rows
  * with a real pass/fail reach a tag; `null` means "say nothing" rather than
- * guessing one (D-169's "unrecorded" rule, one level up). */
-export function verdictOutcome(entry: TimelineEntry): 'pass' | 'fail' | null {
+ * guessing one (D-169's "unrecorded" rule, one level up). `'errored'` is its
+ * own honest third answer for a judge-verdict run that never reached a
+ * verdict at all (`payload.ok === false`, e.g. a missing API key) -- that is
+ * not the work failing, so it must never read "Failed". */
+export function verdictOutcome(entry: TimelineEntry): 'pass' | 'fail' | 'errored' | null {
   if (entry.eventType === 'judge-verdict') {
     const p = entry.payload as Record<string, unknown>;
-    if (p.ok === false) return null;
+    if (p.ok === false) return 'errored';
     if (p.verdict === 'confirm') return 'pass';
     if (p.verdict === 'refute') return 'fail';
     return null;

@@ -1109,10 +1109,13 @@ describe('lib/timelineDisplay.ts verdictOutcome()', () => {
     ).toBe('fail');
   });
 
-  it('says nothing for a judge-verdict run that never reached a verdict', () => {
+  it('marks a judge run that errored out before reaching a verdict as "errored", not failed', () => {
+    // Item 5 of the mock-conformance-3 brief: `ok === false` is a judge run
+    // that never ran (e.g. "failed: provider.missing-api-key"), not a
+    // verdict that the work failed, so it must not read "Failed".
     expect(
       verdictOutcome(entry({ eventType: 'judge-verdict', payload: { ok: false, verdict: null } })),
-    ).toBeNull();
+    ).toBe('errored');
   });
 
   it('says nothing for a row kind with no pass/fail concept', () => {
