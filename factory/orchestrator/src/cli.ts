@@ -2828,20 +2828,27 @@ async function main(): Promise<number> {
     if (selectTestCmd !== undefined) assertSelectableTestCmd(selectTestCmd);
     const tasks =
       readJsonFile<Array<{ taskId: string; branch: string; worktreeDir: string }>>(tasksFile);
-    // D-46/P9-29: the queue is the only component that knows a branch landed,
-    // and it used to say so to stdout and nowhere else — which is why the
-    // projector's `completed` column was unreachable by machine. `--session`
-    // is what turns the run into a fact; without it the queue still runs, and
-    // still tells nobody.
-    const events = flags.session
-      ? { ctx: eventContextFromFlags(flags), ...eventOptsFromFlags(flags) }
-      : undefined;
+    // D-46/P9-29/#269: the queue is the only component that knows a branch
+    // landed, and it used to say so to stdout and nowhere else — which is why
+    // the projector's `completed` column was unreachable by machine, and why
+    // a wave that followed the playbook literally still left `wave-merged`
+    // unwritten. `--session` is what turns the run into a fact, so a run
+    // with no session to write it into is refused before any git write
+    // below, rather than left to merge and tell nobody.
+    if (!flags.session) {
+      throw new SmithError(
+        'cli.queue-run-needs-session',
+        'queue run merges task branches into the integration branch, so every merge must be logged: pass --session <id> --causal-parent <event-id> --plan <plan.json> (add --plan-version if the plan is not version 1).',
+        { epic },
+      );
+    }
+    const events = { ctx: eventContextFromFlags(flags), ...eventOptsFromFlags(flags) };
     // `--tasks` is hand-written, so its ids are whatever was typed. Minting
     // them from the plan before any git runs is the whole point of P9-29: a
     // bare id here would put `wave-merged` in the log under a spelling the
     // plan never used, which is how the dogfood epic folded one task instead
     // of six. Refuse the run whole rather than merge some and mislabel them.
-    if (events && !flags.plan) {
+    if (!flags.plan) {
       throw new SmithError(
         'cli.missing-flag',
         'queue run --session also needs --plan <plan.json>: a merge may only be logged under the task id the plan declares.',
@@ -2853,16 +2860,10 @@ async function main(): Promise<number> {
     // does not carry: the plan's `edges`, so a task never stacks with
     // something it depends_on, and — for a tasks-file entry that omits its
     // own `claims` — the plan's claim list, so a hand-typed batch run is not
-    // blind to a disjointness `wave admit` already knows. Same shape as the
-    // `--session` guard just above, and for the same reason: refuse the run
-    // whole rather than group some tasks correctly and others by guesswork.
-    if (flags.batch === 'true' && !flags.plan) {
-      throw new SmithError(
-        'cli.missing-flag',
-        'queue run --batch also needs --plan <plan.json>: grouping reads its dependency edges and claim lists from there.',
-        { epic },
-      );
-    }
+    // blind to a disjointness `wave admit` already knows. `--plan` is
+    // unconditionally required above since #269, so a batch run with none is
+    // already refused there.
+    //
     // `attemptCandidate` runs the epic's test command directly against the
     // whole batch candidate — there is no per-task file set to narrow it to,
     // so a `--select-test-cmd` template would either render nonsensically or

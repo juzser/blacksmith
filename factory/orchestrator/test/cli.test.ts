@@ -5831,6 +5831,52 @@ describe('cli.ts (built binary)', () => {
       });
     });
 
+    // #269: a merge the log cannot see is a merge nobody can prove happened.
+    // `queue run` must refuse before any git write, not merge silently and
+    // leave `wave-merged` unwritten the way the wave playbook's undocumented
+    // invocation used to.
+    it('queue run: refuses to merge at all without --session, and touches no branch', async () => {
+      const originDir = path.join(scratchDir, `p269-origin-${Date.now()}.git`);
+      const projectDir = path.join(scratchDir, `p269-project-${Date.now()}`);
+      runOrThrow('git', ['init', '-q', '--bare', '-b', 'main', originDir]);
+      runOrThrow('git', ['clone', '-q', originDir, projectDir]);
+      runOrThrow('git', ['config', 'user.email', 'test@example.com'], { cwd: projectDir });
+      runOrThrow('git', ['config', 'user.name', 'Test'], { cwd: projectDir });
+      await writeFile(path.join(projectDir, 'seed.txt'), 'seed\n');
+      runOrThrow('git', ['add', '.'], { cwd: projectDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'init'], { cwd: projectDir });
+      runOrThrow('git', ['push', '-q', 'origin', 'main'], { cwd: projectDir });
+      const headBefore = git(projectDir, ['rev-parse', 'HEAD']).trim();
+
+      const created = runCli(['worktree', 'create', projectDir, 'epic-1', 'task-1']);
+      expect(created.status).toBe(0);
+      const { worktreeDir, branch } = JSON.parse(created.stdout);
+      await writeFile(path.join(worktreeDir, 'task-1.txt'), 'task-1\n');
+      runOrThrow('git', ['add', '.'], { cwd: worktreeDir });
+      runOrThrow('git', ['commit', '-q', '-m', 'add task-1'], { cwd: worktreeDir });
+
+      const tasksPath = path.join(scratchDir, `p269-tasks-${Date.now()}.json`);
+      await writeFile(tasksPath, JSON.stringify([{ taskId: 'task-1', branch, worktreeDir }]));
+
+      const result = runCli([
+        'queue',
+        'run',
+        'epic-1',
+        '--project',
+        projectDir,
+        '--test-cmd',
+        'true',
+        '--tasks',
+        tasksPath,
+      ]);
+      expect(result.status).toBe(1);
+      expect(JSON.parse(result.stdout).error.code).toBe('cli.queue-run-needs-session');
+
+      runOrThrow('git', ['checkout', 'main'], { cwd: projectDir });
+      const headAfter = git(projectDir, ['rev-parse', 'HEAD']).trim();
+      expect(headAfter).toBe(headBefore);
+    });
+
     // The last id-minting hole: `--tasks` is a hand-written file, so a bare
     // id in it would have made queue.ts write `wave-merged` under a spelling
     // the plan never used — the exact divergence (D-14) that left the epic
@@ -5902,7 +5948,7 @@ describe('cli.ts (built binary)', () => {
     // epic's cumulative regression gate runs against an integration branch that
     // does not have the prerequisite on it yet.
     it('queue run: merges in dependency order, not the order the tasks file lists', async () => {
-      const { sessionId } = await session();
+      const { sessionId, eventsDir } = await session();
       const planPath = path.join(scratchDir, `${sessionId}-dep-plan.json`);
       await writeFile(
         planPath,
@@ -5957,6 +6003,12 @@ describe('cli.ts (built binary)', () => {
         tasksPath,
         '--plan',
         planPath,
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
       ]);
       expect(queued.status).toBe(0);
       expect(JSON.parse(queued.stdout).map((o: { taskId: string }) => o.taskId)).toEqual([
@@ -5966,9 +6018,10 @@ describe('cli.ts (built binary)', () => {
     });
 
     // merge-lanes: without --plan there is nowhere to read edges or claims
-    // from, so grouping would be guesswork — same refusal shape as the
-    // --session guard above, checked here for --batch's own message.
+    // from, so grouping would be guesswork. `--plan` is unconditionally
+    // required since #269, so --batch hits that same generic refusal.
     it('queue run --batch: refuses without --plan', async () => {
+      const { sessionId, eventsDir } = await session();
       const tasksPath = path.join(scratchDir, `batch-noplan-tasks-${Date.now()}.json`);
       await writeFile(
         tasksPath,
@@ -5985,10 +6038,16 @@ describe('cli.ts (built binary)', () => {
         '--tasks',
         tasksPath,
         '--batch',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
       ]);
       expect(result.status).toBe(1);
       const error = JSON.parse(result.stdout).error;
-      expect(error.message).toContain('--batch');
+      expect(error.code).toBe('cli.missing-flag');
       expect(error.message).toContain('--plan');
     });
 
@@ -5997,6 +6056,7 @@ describe('cli.ts (built binary)', () => {
     // while the outcome claimed it was selected would be the D-260 lie this
     // combination must refuse instead.
     it('queue run --batch: refuses with --select-test-cmd', async () => {
+      const { sessionId, eventsDir } = await session();
       const planPath = path.join(scratchDir, `batch-selecttest-plan-${Date.now()}.json`);
       await writeFile(planPath, JSON.stringify(PLAN));
       const tasksPath = path.join(scratchDir, `batch-selecttest-tasks-${Date.now()}.json`);
@@ -6019,6 +6079,12 @@ describe('cli.ts (built binary)', () => {
         '--batch',
         '--select-test-cmd',
         'pnpm test {files}',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
       ]);
       expect(result.status).toBe(1);
       const error = JSON.parse(result.stdout).error;
@@ -6032,7 +6098,7 @@ describe('cli.ts (built binary)', () => {
     // and the JSON shape gains a `batches` summary instead of staying a bare
     // outcomes array.
     it('queue run --batch: groups claim-disjoint tasks into one suite run', async () => {
-      const { sessionId } = await session();
+      const { sessionId, eventsDir } = await session();
       const planPath = path.join(scratchDir, `${sessionId}-batch-plan.json`);
       await writeFile(planPath, JSON.stringify(PLAN));
 
@@ -6074,6 +6140,12 @@ describe('cli.ts (built binary)', () => {
         '--plan',
         planPath,
         '--batch',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
       ]);
       expect(queued.status).toBe(0);
       const body = JSON.parse(queued.stdout);
@@ -6092,7 +6164,7 @@ describe('cli.ts (built binary)', () => {
     // before any test runs when the branch carries nothing to merge (D-30).
     // `suite_runs` must say 0, not the 1 it used to claim unconditionally.
     it('queue run --batch: a singleton group reports 0 suite runs when step refuses before testing', async () => {
-      const { sessionId } = await session();
+      const { sessionId, eventsDir } = await session();
       const planPath = path.join(scratchDir, `${sessionId}-batch-noop-plan.json`);
       await writeFile(planPath, JSON.stringify(PLAN));
 
@@ -6130,6 +6202,12 @@ describe('cli.ts (built binary)', () => {
         '--plan',
         planPath,
         '--batch',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
       ]);
       expect(queued.status).toBe(1);
       const body = JSON.parse(queued.stdout);
@@ -6144,7 +6222,7 @@ describe('cli.ts (built binary)', () => {
     // at the first batch that did not fully land (`allMerged` false), same
     // as the non-batch loop stopping at the first non-merged outcome.
     it('queue run --batch: bisects a failing group and stops the run there', async () => {
-      const { sessionId } = await session();
+      const { sessionId, eventsDir } = await session();
       const planPath = path.join(scratchDir, `${sessionId}-batch-bad-plan.json`);
       await writeFile(planPath, JSON.stringify(PLAN));
 
@@ -6187,6 +6265,12 @@ describe('cli.ts (built binary)', () => {
         '--plan',
         planPath,
         '--batch',
+        '--session',
+        sessionId,
+        '--causal-parent',
+        `${sessionId}#0`,
+        '--state-dir',
+        eventsDir,
       ]);
       expect(queued.status).toBe(1);
       const body = JSON.parse(queued.stdout);

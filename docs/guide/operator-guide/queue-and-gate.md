@@ -13,8 +13,16 @@ merge queue for one epic:
 bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
-  --tasks tasks.json
+  --tasks tasks.json \
+  --plan plans/epic-1.json \
+  --session sess-7 --causal-parent sess-7#0
 ```
+
+A merge that lands is a fact the log must carry (#269): `--session`,
+`--causal-parent` and `--plan` are all required, and the queue refuses
+before any git write when one is missing (`cli.queue-run-needs-session` /
+`cli.missing-flag`) rather than merging silently and leaving `wave-merged`
+unwritten.
 
 `tasks.json` is `Array<{ taskId, branch, worktreeDir }>`. Each task is
 admitted one at a time: certify there is a commit to merge → rebase onto
@@ -41,12 +49,11 @@ than for the factory running it, state it in the command
 `docs/runbooks/providers.md` means by passing it per command. The shell
 applies anything the command string sets after this strip.
 
-With `--plan`, *the merge order is the plan's, not the file's*: the ids are
-resolved against the plan and the set is then sorted topologically by the
-plan's dependency edges, tie-broken by task id, so a task never merges
-before one it declares `depends_on` (D-186). A cycle is refused whole
-(`queue.cyclic-dependency`). Without `--plan` — only allowed when you are
-also not passing `--session` — the file's order is all there is.
+*The merge order is the plan's, not the file's*: the ids are resolved
+against the plan and the set is then sorted topologically by the plan's
+dependency edges, tie-broken by task id, so a task never merges before one
+it declares `depends_on` (D-186). A cycle is refused whole
+(`queue.cyclic-dependency`).
 
 The certification comes first because a rebase, a test run and a merge all
 "succeed" against a branch that carries nothing — that is D-30, and §5a
@@ -55,11 +62,11 @@ not ahead of `bs/<epic>/integration` returns `nothing-to-merge` and is
 never rebased, so the uncommitted work is still sitting exactly where the
 agent left it when you go look.
 
-When `--session` is passed, the event envelope is checked before any of
-that too: an unknown `--causal-parent` is refused (`events.unknown-causal-parent`)
-before the rebase, the test run or the merge ever starts — not only once the
-queue tries and fails to log the merge afterwards, by which point the merge
-has already landed for real with nothing in the log to show for it. The same
+The event envelope is checked before any of that too: an unknown
+`--causal-parent` is refused (`events.unknown-causal-parent`) before the
+rebase, the test run or the merge ever starts — not only once the queue
+tries and fails to log the merge afterwards, by which point the merge has
+already landed for real with nothing in the log to show for it. The same
 holds for `--batch`, one check per batch group rather than per task, and
 for `integration check`, whose envelope is checked before any check runs.
 
@@ -121,7 +128,9 @@ bs queue run epic-1 \
   --project ../my-project \
   --test-cmd "pnpm test" \
   --select-test-cmd "pnpm vitest run {files}" \
-  --tasks tasks.json
+  --tasks tasks.json \
+  --plan plans/epic-1.json \
+  --session sess-7 --causal-parent sess-7#0
 ```
 
 After the rebase — so the change set is the task's commits replayed on the
@@ -179,6 +188,7 @@ bs queue run epic-1 \
   --test-cmd "pnpm test" \
   --tasks tasks.json \
   --plan plans/epic-1.json \
+  --session sess-7 --causal-parent sess-7#0 \
   --batch
 ```
 
@@ -189,11 +199,12 @@ group `depends_on` another one in it — stacks each group into a single
 candidate commit (`git merge-tree` + `commit-tree`, the same plumbing §4
 uses for a lone merge), and tests the *group* once instead of testing every
 task in it separately. A green group lands every task in it — one suite run
-for however many tasks it holds. `--batch` needs `--plan`: grouping reads
-its dependency edges and, for a `--tasks` entry that omits its own `claims`,
-the plan's claim list, the same way `--session` needs `--plan` to mint an id
-(§4 above). Without `--batch`, `queue run`'s behaviour, output shape and
-event log are unchanged — you have to opt in.
+for however many tasks it holds. `--batch` additionally needs `--plan`'s
+dependency edges and, for a `--tasks` entry that omits its own `claims`, its
+claim list — on top of the `--plan`/`--session`/`--causal-parent` envelope
+every `queue run` already requires (§4 above). Without `--batch`, `queue
+run`'s behaviour, output shape and event log are unchanged — you have to
+opt in.
 
 A red group does not fail every task in it. The queue bisects: split the
 group in half, retest each half's own candidate, and recurse into whichever

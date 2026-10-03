@@ -336,9 +336,11 @@ export const COMMANDS: readonly CommandDoc[] = [
     command: 'queue run',
     positionals: '<epic>',
     flags:
-      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> [--select-test-cmd <cmd>] [--batch] [--session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>]] [--state-dir <dir>]',
+      '--project <dir> --test-cmd <cmd> --tasks <tasks.json> --session <id> --causal-parent <event-id> --plan <plan.json> [--plan-version <n>] [--actor <name>] [--select-test-cmd <cmd>] [--batch] [--state-dir <dir>]',
     summary:
       'Serially rebase, test, and merge task branches into the integration branch. ' +
+      'A merge is a fact the log must carry, so --session/--causal-parent/--plan are required — ' +
+      'refuses before any git write without them. ' +
       '--batch (roadmap merge-lanes) groups claim-disjoint tasks with groupForBatch and ' +
       'tests each group once instead of once per task — see queue.ts and the operator guide.',
   },
