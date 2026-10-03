@@ -250,6 +250,33 @@ test.describe('Roadmap: epic header server reads (DS4 S5c)', () => {
     expect(chipIndex).toBeLessThan(tagIndex);
   });
 
+  test('desktop: the plan-version Select sits on the header row, compact (DS4 S5c fix round 2)', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/work/roadmap?epic=epic-9');
+    const head = page.locator('.esec-head');
+    const epicId = head.locator('b').first();
+    const select = page.getByLabel('Plan version', { exact: true });
+
+    await expect(select).toBeVisible();
+    const [headBox, idBox, selectBox] = await Promise.all([
+      head.boundingBox(),
+      epicId.boundingBox(),
+      select.boundingBox(),
+    ]);
+
+    // Same row as the epic id: their vertical spans overlap (a dropped-below
+    // row, by contrast, starts at or after the id row's bottom edge).
+    const idTop = idBox?.y ?? 0;
+    const idBottom = idTop + (idBox?.height ?? 0);
+    const selectTop = selectBox?.y ?? Number.POSITIVE_INFINITY;
+    const selectBottom = selectTop + (selectBox?.height ?? 0);
+    expect(selectTop).toBeLessThan(idBottom);
+    expect(selectBottom).toBeGreaterThan(idTop);
+    expect(selectBox?.width ?? Number.POSITIVE_INFINITY).toBeLessThan((headBox?.width ?? 0) / 2);
+  });
+
   test('copying the epic id flips the button label to "Copied"', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.goto('/work/roadmap?epic=epic-9');

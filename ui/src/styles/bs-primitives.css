@@ -2638,6 +2638,8 @@ summary.bs-inbox__group-head {
    epic-selected frame: ".esec-head .select { margin-left: auto }"). */
 .esec-head .select-trailing {
   margin-left: auto;
+  width: auto;
+  flex: 0 0 auto;
 }
 
 /* DS4 S3 — "Show waves" / "Hide waves" toggle (phase mode only), reusing
