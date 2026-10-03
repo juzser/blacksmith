@@ -1226,12 +1226,17 @@
 }
 
 /* --- Causal timeline (gap component §6.2.1) --- */
-/* Item 3: day separator above a day's rows (ds-review.html's `.day`). */
+/* Item 3: day separator above a day's rows (ds-review.html's `.day`).
+   margin-left lines its text up with a row's title: border (3px) + row
+   padding-left (space-3) + the leading chevron/placeholder column
+   (control-height-sm) + the row's gap (space-2) -- the same offset on
+   Activity and task History, since both share this class. */
 .timeline-day {
   font-size: var(--ds-text-xs);
   font-weight: var(--ds-weight-medium);
   color: var(--ds-text-subtlest);
-  margin: var(--ds-space-5) 0 var(--ds-space-2);
+  margin: var(--ds-space-5) 0 var(--ds-space-2)
+    calc(3px + var(--ds-space-3) + var(--ds-control-height-sm) + var(--ds-space-2));
 }
 .timeline-day:first-child {
   margin-top: 0;
