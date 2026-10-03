@@ -166,6 +166,16 @@ describe('readMeasuredSpend', () => {
     const spend = readMeasuredSpend([budgetCheck('task-1', 1)]);
     expect(spend.has('task-1')).toBe(false);
   });
+
+  it('draws the plausibility floor at exactly 100: 99 is unmeasured, 100 is measured', () => {
+    seq = 0;
+    const atFloor = readMeasuredSpend([result('task-1', 100)]);
+    expect(atFloor.get('task-1')).toBe(100);
+
+    seq = 0;
+    const belowFloor = readMeasuredSpend([result('task-1', 99)]);
+    expect(belowFloor.has('task-1')).toBe(false);
+  });
 });
 
 describe('checkBudgetAlarm', () => {

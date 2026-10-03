@@ -239,6 +239,57 @@ describe('db/queries.ts', () => {
       }
     });
 
+    it('treats a token count below the plausibility floor as unmeasured, not as near-zero spend', async () => {
+      // A placeholder like `token_usage: { total_tokens: 1 }` is not the
+      // `measured: false` shape above, but it is just as dishonest as real
+      // spend: isPlausibleTokenCount() must route it into unmeasuredByEpic
+      // the same way, or the epic's total reads as 1 token spent instead of
+      // "we don't know".
+      const session = 'sess-placeholder';
+      const epicId = 'epic-placeholder';
+      const taskMeasured = `${epicId}/task-measured`;
+      const taskPlaceholder = `${epicId}/task-placeholder`;
+      const ts = '2029-06-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', ts, { task_id: taskMeasured, budget_tokens: 1000 }, session) +
+          tiedLine('task-added', ts, { task_id: taskPlaceholder, budget_tokens: 500 }, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: taskMeasured,
+              run_status: 'done',
+              token_usage: { input_tokens: 700, output_tokens: 300, total_tokens: 1000 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            { task_id: taskPlaceholder, run_status: 'done', token_usage: { total_tokens: 1 } },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'placeholder.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const placeholder = openDb(dbPath);
+      try {
+        const result = overview(placeholder.db);
+        expect(result.tokensByEpic).toContainEqual({
+          epicId,
+          tokensSpent: 1000,
+          tokensBudget: 1500,
+          unmeasured: 1,
+        });
+      } finally {
+        placeholder.sqlite.close();
+      }
+    });
+
     it('scopes to one session when a sessionId is given', () => {
       const result = overview(handle.db, { sessionId: SESSION_ID });
       expect(result.liveAgentCount).toBe(2);
@@ -320,6 +371,41 @@ describe('db/queries.ts', () => {
         ).toBe(0);
       } finally {
         budget.sqlite.close();
+      }
+    });
+
+    it('does not count a placeholder token count as spend an hour ago', async () => {
+      // tokensSpentAt() folds task-result-recorded rows up to the cutoff the
+      // same way epicTokenMaps() folds the "now" total. A
+      // `token_usage: { total_tokens: 1 }` placeholder recorded well before
+      // the cutoff must not add 1 token to the historical spend either, or
+      // the delta reads as a tiny drop that never happened.
+      const session = 'sess-budget-placeholder';
+      const tied = '2030-01-01T00:00:00.000Z';
+      const task = `${EPIC_ID}/task-budget-placeholder`;
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine('task-added', tied, { task_id: task, budget_tokens: 1000 }, session) +
+          tiedLine(
+            'task-result-recorded',
+            tied,
+            { task_id: task, run_status: 'done', token_usage: { total_tokens: 1 } },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'budget-placeholder.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const budgetPlaceholder = openDb(dbPath);
+      try {
+        expect(
+          overview(budgetPlaceholder.db, {}, { nowIso: '2031-01-01T00:00:00.000Z' })
+            .budgetUsedPctPointDelta1h,
+        ).toBe(0);
+      } finally {
+        budgetPlaceholder.sqlite.close();
       }
     });
 
@@ -1665,6 +1751,60 @@ describe('db/queries.ts', () => {
         });
       } finally {
         costUnmeasured.sqlite.close();
+      }
+    });
+
+    it('treats a token count below the plausibility floor as unmeasured in the cost buckets too', async () => {
+      // Same bucket, the other dishonest shape: `token_usage: { total_tokens: 1 }`
+      // is a placeholder, not one real token. isPlausibleTokenCount() must
+      // route it into unmeasuredTaskCount, not add 1 into totalTokens.
+      const session = 'sess-cost-placeholder';
+      const ts = '2029-06-01T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'cost-epic/task-measured',
+              run_status: 'done',
+              provider: 'claude',
+              model_tier: 'small',
+              token_usage: { input_tokens: 400, output_tokens: 200, total_tokens: 600 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'cost-epic/task-placeholder',
+              run_status: 'done',
+              provider: 'claude',
+              model_tier: 'small',
+              token_usage: { total_tokens: 1 },
+            },
+            session,
+          ),
+        'utf8',
+      );
+
+      const dbPath = path.join(dbDir, 'cost-placeholder.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const costPlaceholder = openDb(dbPath);
+      try {
+        const result = analytics(costPlaceholder.db);
+        expect(result.costByModelTierAndProvider).toContainEqual({
+          modelTier: 'small',
+          provider: 'claude',
+          taskCount: 2,
+          totalTokens: 600,
+          avgTokensPerTask: 600,
+          unmeasuredTaskCount: 1,
+        });
+      } finally {
+        costPlaceholder.sqlite.close();
       }
     });
 
