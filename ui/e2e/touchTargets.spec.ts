@@ -156,3 +156,43 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
     });
   }
 });
+
+// PR #280 nit: .bs-select's padding-driven height (~38px) stood taller than
+// the 28-32px topbar buttons beside it (bs-primitives.css .bs-select).
+test.describe('Topbar Select sizing (PR #280 nit)', () => {
+  test('desktop: no taller than the tallest topbar button, plus 4px', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    // /timeline renders the session + scope-width Selects (sessionScope.spec.ts).
+    await page.goto('/timeline');
+    const topbar = page.locator('.app-topbar');
+    await expect(topbar).toBeVisible();
+
+    const maxButtonHeight = await topbar
+      .locator('.bs-iconbtn:visible, .bs-btn:visible')
+      .evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().height)));
+    expect(maxButtonHeight).toBeGreaterThan(0);
+
+    const selects = topbar.locator('select.bs-select:visible');
+    const count = await selects.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const box = await selects.nth(i).boundingBox();
+      expect(box?.height, `topbar Select #${i}`).toBeLessThanOrEqual(maxButtonHeight + 4);
+    }
+  });
+
+  test('phone (375px): the topbar Select still clears --bs-touch', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/timeline');
+    const touch = await page.evaluate(() =>
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--bs-touch')),
+    );
+    const selects = page.locator('select.bs-select:visible');
+    const count = await selects.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const box = await selects.nth(i).boundingBox();
+      expect(box?.height, `phone Select #${i}`).toBeGreaterThanOrEqual(touch - 0.5);
+    }
+  });
+});
