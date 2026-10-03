@@ -1125,9 +1125,20 @@ function uiAffectingFromFlags(flags: Record<string, string>, taskId: string): bo
 function claimsForDispatch(flags: Record<string, string>): string[] {
   if (!flags.plan) return [];
   const taskId = requireFlag(flags, 'task');
-  const owner = ownershipFromPlan(readJsonFile<PlanFile>(flags.plan)).find(
-    (t) => t.task_id === taskId,
-  );
+  const plan = readJsonFile<PlanFile>(flags.plan);
+  let resolved: string;
+  try {
+    resolved = resolveTaskId(plan, taskId);
+  } catch (err) {
+    if (err instanceof SmithError && err.code === 'plan.unknown-task') {
+      throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
+        taskId,
+        plan: flags.plan,
+      });
+    }
+    throw err;
+  }
+  const owner = ownershipFromPlan(plan).find((t) => t.task_id === resolved);
   if (!owner) {
     throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
       taskId,
@@ -1150,7 +1161,20 @@ function caseForDispatch(flags: Record<string, string>): string {
   if (flags['case-type']) return flags['case-type'];
   if (!flags.plan) return '';
   const taskId = requireFlag(flags, 'task');
-  const task = liveSpec(readJsonFile<PlanFile>(flags.plan), taskId);
+  const plan = readJsonFile<PlanFile>(flags.plan);
+  let resolved: string;
+  try {
+    resolved = resolveTaskId(plan, taskId);
+  } catch (err) {
+    if (err instanceof SmithError && err.code === 'plan.unknown-task') {
+      throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
+        taskId,
+        plan: flags.plan,
+      });
+    }
+    throw err;
+  }
+  const task = liveSpec(plan, resolved);
   if (!task) {
     throw new SmithError('cli.task-not-in-plan', `No task ${taskId} in ${flags.plan}.`, {
       taskId,
