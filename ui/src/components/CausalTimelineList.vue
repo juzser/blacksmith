@@ -41,21 +41,14 @@ const dayGroups = computed(() => {
 
 <template>
   <template v-for="(group, gi) in dayGroups" :key="gi">
-    <!-- One block per day group: the page (`.app-page`) is a flex column
-         with a `gap`, which lands between flex children. Wrapping the
-         header + its feed keeps that gap between day groups only, so
-         `.timeline-day`'s own margin-bottom (not gap + margin) sets the
-         ~8px to its own feed. -->
-    <div>
-      <div class="timeline-day">{{ group.label }}</div>
-      <div class="timeline-feed">
-        <TimelineNodeList
-          :nodes="group.items.flatMap((g) => nodesOfItem(g.item))"
-          :expanded="expanded"
-          @toggle="(id) => emit('toggle', id)"
-          @select="(id) => emit('select', id)"
-        />
-      </div>
+    <div class="timeline-day">{{ group.label }}</div>
+    <div class="timeline-feed">
+      <TimelineNodeList
+        :nodes="group.items.flatMap((g) => nodesOfItem(g.item))"
+        :expanded="expanded"
+        @toggle="(id) => emit('toggle', id)"
+        @select="(id) => emit('select', id)"
+      />
     </div>
   </template>
 </template>
