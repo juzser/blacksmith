@@ -1226,24 +1226,17 @@
 }
 
 /* --- Causal timeline (gap component §6.2.1) --- */
-/* Item 3: day separator above a day's rows (ds-review.html's `.day`).
-   margin-left lines its text up with a row's title: border (3px) + row
-   padding-left (space-3) + the leading chevron/placeholder column
-   (control-height-sm) + the row's gap (space-2) -- the same offset on
-   Activity and task History, since both share this class. */
+/* Item 3: day separator above a day's rows (ds-review.html's `.day`), flush
+   with the feed's own left edge -- no left margin. Activity wraps each
+   header + feed pair in one block (CausalTimelineList.vue) so the page's
+   flex `gap` lands between day groups, not between a header and its own
+   feed; History renders the pairs unwrapped in plain block flow, where
+   margin-top/-bottom alone already produce the same spacing. */
 .timeline-day {
   font-size: var(--ds-text-xs);
   font-weight: var(--ds-weight-medium);
   color: var(--ds-text-subtlest);
-  /* Bug fix (mock-conformance-4): the mock's own `.day` rule (ds-review.html)
-     reads `margin: var(--bs-space-5) 0 var(--bs-space-2)` -- this had
-     `--ds-space-5` instead, a token that doesn't exist in the ds scale, which
-     invalidates the whole shorthand (not just that one side) and collapses
-     margin-top AND margin-bottom to 0. That is why History's first day header
-     sat flush against the feed below it as well as the card above: one typo
-     broke both gaps at once. */
-  margin: var(--bs-space-5) 0 var(--ds-space-2)
-    calc(3px + var(--ds-space-3) + var(--ds-control-height-sm) + var(--ds-space-2));
+  margin: var(--bs-space-5) 0 var(--ds-space-2);
 }
 .timeline-day:first-child {
   margin-top: 0;
