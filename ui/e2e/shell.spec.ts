@@ -1,4 +1,5 @@
 import { expect, test } from './harness.js';
+import { setTheme } from './helpers.js';
 
 /**
  * The app shell's own poll (design-spec.md §8's first bullet and §A.6), and
@@ -102,6 +103,27 @@ test.describe('BS kit stylesheets are loaded (ds-spec.md §1, §3)', () => {
     expect(style.flexDirection).toBe('column');
     // --bs-sidebar-width is 15rem = 240px.
     expect(style.width).toBe('240px');
+  });
+
+  // PR #280 nit: the mark's dark-haired artwork disappeared against
+  // --bs-surface-sunken in dark mode (bs-primitives.css .bs-side__mark).
+  test('the sidebar mark gets a non-transparent backing plate in dark mode only', async ({
+    page,
+  }) => {
+    await setTheme(page, 'light');
+    await page.goto('/work/kanban');
+    const mark = page.locator('.bs-side__mark');
+    const side = page.locator('nav.bs-side');
+    const lightMark = await mark.evaluate((el) => getComputedStyle(el).backgroundColor);
+    // No rule touches .bs-side__mark in light mode: transparent, same as before.
+    expect(lightMark).toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+
+    await setTheme(page, 'dark');
+    await page.reload();
+    const darkMark = await mark.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const darkSide = await side.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(darkMark).not.toMatch(/rgba\(0, 0, 0, 0\)|transparent/);
+    expect(darkMark).not.toBe(darkSide);
   });
 });
 

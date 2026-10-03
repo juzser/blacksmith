@@ -156,3 +156,39 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
     });
   }
 });
+
+// PR #280 nit: .bs-select's padding-driven height (~38px) stood taller than
+// the 28-32px topbar buttons beside it (bs-primitives.css .bs-select).
+test.describe('Topbar Select sizing (PR #280 nit)', () => {
+  test('desktop: no taller than the tallest topbar button, plus 4px', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    // /timeline renders the session + scope-width Selects (sessionScope.spec.ts).
+    await page.goto('/timeline');
+    const topbar = page.locator('.app-topbar');
+    await expect(topbar).toBeVisible();
+
+    const maxButtonHeight = await topbar
+      .locator('.bs-iconbtn:visible, .bs-btn:visible')
+      .evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().height)));
+    expect(maxButtonHeight).toBeGreaterThan(0);
+
+    const selects = topbar.locator('select.bs-select:visible');
+    const count = await selects.count();
+    expect(count).toBeGreaterThan(0);
+    for (let i = 0; i < count; i++) {
+      const box = await selects.nth(i).boundingBox();
+      expect(box?.height, `topbar Select #${i}`).toBeLessThanOrEqual(maxButtonHeight + 4);
+    }
+  });
+
+  // No phone-specific counterpart here: at <=640px the topbar itself swaps
+  // to MobileTopBar (App.vue's isPhoneWidth branch), which renders no inline
+  // Select at all -- the session/scope-width pickers this suite's desktop
+  // test above checks simply do not exist on that layout. The phone ">=
+  // --bs-touch" floor on the Selects that DO render at 375px (Roadmap's
+  // phase and plan-version Selects) is already asserted by
+  // roadmapMobile.spec.ts's "touch targets clear 44px at 375px" test, and
+  // every other page's visible Select is swept generically by
+  // `measureInteractiveElements` above (INTERACTIVE_SELECTOR includes
+  // `select`), at VIEWPORTS.mobile.
+});

@@ -604,8 +604,7 @@ a:hover {
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */
 .bs-input,
-.bs-textarea,
-.bs-select {
+.bs-textarea {
   width: 100%;
   padding: var(--bs-space-2) var(--bs-space-3);
   background: var(--bs-surface);
@@ -616,6 +615,23 @@ a:hover {
   line-height: var(--bs-leading-base);
   outline: none;
   transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
+}
+/* Select is compact on desktop (ds-review.html:288 .select) -- the shared
+   .bs-input/.bs-textarea padding made it ~38px tall next to 28-32px topbar
+   buttons. min-height keeps a 24px floor; the <=640px rule below still
+   raises it to --bs-touch on phone. */
+.bs-select {
+  width: 100%;
+  padding: 2px var(--bs-space-2);
+  background: var(--bs-surface-raised);
+  color: var(--bs-text);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  font-size: var(--bs-text-base);
+  line-height: var(--bs-leading-base);
+  outline: none;
+  transition: border-color var(--bs-duration-fast) var(--bs-ease-standard);
+  min-height: var(--bs-space-5);
 }
 .bs-input::placeholder,
 .bs-textarea::placeholder {
@@ -1284,6 +1300,13 @@ a:hover {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
+  border-radius: var(--bs-radius-full);
+}
+/* Dark-mode-only plate: the mark's dark-haired artwork has transparent
+   margin inside its 24x24 box, so this shows through without resizing the
+   image. Light mode defines no rule here, so it stays transparent. */
+:root.dark .bs-side__mark {
+  background: var(--bs-side-mark-backing);
 }
 .bs-side__mark img {
   width: 100%;
