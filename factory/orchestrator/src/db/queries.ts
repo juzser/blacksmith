@@ -18,6 +18,7 @@ import {
   REGISTRY_EVENT_TYPES,
   TASK_RESULT_EVENT_TYPE,
 } from '../agents-registry.js';
+import { isPlausibleTokenCount } from '../budgetAlarm.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
 import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
@@ -756,7 +757,7 @@ function epicTokenMaps(
     const epicId = epicOf(resultTaskId(row));
     if (!epicId) continue;
     const total = row.payload.token_usage?.total_tokens;
-    if (typeof total === 'number') {
+    if (typeof total === 'number' && isPlausibleTokenCount(total)) {
       spentByEpic.set(epicId, (spentByEpic.get(epicId) ?? 0) + total);
     } else {
       spentByEpic.set(epicId, spentByEpic.get(epicId) ?? 0);
@@ -1615,7 +1616,7 @@ function tokensSpentAt(
     const payload = JSON.parse(r.payload) as TaskResultPayload;
     if (!epicOf(resultTaskId({ payload, envelopeTaskId: r.taskId }))) continue;
     const tokens = payload.token_usage?.total_tokens;
-    if (typeof tokens === 'number') total += tokens;
+    if (typeof tokens === 'number' && isPlausibleTokenCount(tokens)) total += tokens;
   }
   return total;
 }
@@ -3058,7 +3059,7 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
     const bucket = costBuckets.get(key) ?? { taskCount: 0, totalTokens: 0, unmeasuredTaskCount: 0 };
     bucket.taskCount += 1;
     const tokens = p.token_usage?.total_tokens;
-    if (typeof tokens === 'number') {
+    if (typeof tokens === 'number' && isPlausibleTokenCount(tokens)) {
       bucket.totalTokens += tokens;
     } else {
       bucket.unmeasuredTaskCount += 1;

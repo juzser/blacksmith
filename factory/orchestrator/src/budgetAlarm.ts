@@ -85,8 +85,12 @@ export interface EpicSpendCheck {
   projectedTokens: number;
   /** Tasks the log attributes to this epic, by bare id. */
   taskCount: number;
-  /** Of those, the ones with a recorded token count. */
+  /** Of those, the ones with a plausible recorded token count. */
   measuredTaskCount: number;
+  /** Of `taskCount`, the ones with no plausible recorded count — `taskCount -
+   * measuredTaskCount`, named so a placeholder 0/0 or 1/1 result is visible
+   * in the report rather than silently folded into "under". */
+  unmeasuredTaskCount: number;
   /** Tokens added to the projection, by the role they were priced from. */
   projectedFrom: Record<string, number>;
   /** Roles dispatched to this epic that budgets.yml declares no cap for. */
@@ -258,18 +262,32 @@ export function readMeasuredSpend(events: readonly StoredEvent[]): Map<string, n
       const usage = payload.token_usage;
       if (usage !== null && typeof usage === 'object') {
         const total = payloadNumber(usage as Record<string, unknown>, 'total_tokens');
-        if (total !== null) record(taskId, total);
+        if (total !== null && isPlausibleTokenCount(total)) record(taskId, total);
       }
       continue;
     }
 
     if (eventType === 'budget-check-result') {
       const used = payloadNumber(payload, 'tokensUsed');
-      if (used !== null) record(taskId, used);
+      if (used !== null && isPlausibleTokenCount(used)) record(taskId, used);
     }
   }
 
   return spend;
+}
+
+/**
+ * The smallest `total_tokens` a real agent turn plausibly produces. A single
+ * turn runs into the thousands, so a recorded count below this is far more
+ * likely a dispatcher's untouched placeholder (0/0 or 1/1) than a
+ * measurement, and is treated exactly like `{measured: false}` — projected at
+ * the dispatch's cap rather than recorded as spend.
+ */
+const IMPLAUSIBLE_TOKEN_FLOOR = 100;
+
+/** Shared by every other reader of `token_usage.total_tokens` (db/queries.ts), so the dashboard and stats agree with this alarm about what counts as measured. */
+export function isPlausibleTokenCount(total: number): boolean {
+  return total >= IMPLAUSIBLE_TOKEN_FLOOR;
 }
 
 const NUMBER = new Intl.NumberFormat('en-US');
@@ -325,8 +343,9 @@ function describe(
 ): string {
   const head =
     `${fmt(check.measuredTokens)} tokens measured across ${check.measuredTaskCount} of ` +
-    `${check.taskCount} task(s), ${fmt(check.projectedTokens)} projected, against a ` +
-    `${fmt(check.alarmTokens)} alarm and a ${fmt(check.capTokens)} cap.`;
+    `${check.taskCount} task(s) (${check.unmeasuredTaskCount} unmeasured), ` +
+    `${fmt(check.projectedTokens)} projected, against a ${fmt(check.alarmTokens)} alarm and a ` +
+    `${fmt(check.capTokens)} cap.`;
 
   const holes: string[] = [];
   if (check.rolesWithoutCap.length > 0) {
@@ -526,6 +545,7 @@ export function checkBudgetAlarm(
         projectedTokens,
         taskCount: acc.tasks.size,
         measuredTaskCount: acc.measuredTasks.size,
+        unmeasuredTaskCount: acc.tasks.size - acc.measuredTasks.size,
         projectedFrom,
         rolesWithoutCap,
         tasksOverPrice,
@@ -546,6 +566,7 @@ export function checkBudgetAlarm(
       projectedTokens: 0,
       taskCount: 0,
       measuredTaskCount: 0,
+      unmeasuredTaskCount: 0,
       projectedFrom: {},
       rolesWithoutCap: [],
       tasksOverPrice: [],
