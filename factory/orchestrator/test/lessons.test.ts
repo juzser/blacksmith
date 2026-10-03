@@ -2483,6 +2483,8 @@ describe('raiseLessonCandidate', () => {
     expect(raised?.record.actor).toBe('user');
     // Raised, not rejected: exactly one event.
     expect(logged.filter((e) => e.record.event_type === 'lesson-status-changed')).toHaveLength(0);
+    // Exactly one event was appended, so the id this call prints is that one.
+    expect(result.event_id).toBe(raised?.event_id);
   });
 
   it('derives a deterministic lesson_id from the statement, so a re-run collides instead of duplicating', async () => {
@@ -2686,6 +2688,9 @@ describe('raiseLessonCandidate', () => {
       lesson_id: second.lessonId,
       to_status: 'novelty-rejected',
     });
+    // Two events were appended for this call (raised, then rejected); the id
+    // printed is the last one, the status change a follower should hang off.
+    expect(second.event_id).toBe(rejection?.event_id);
   });
 
   it('keeps a polarity-conflicting near-duplicate as a candidate, flagged for a human', async () => {

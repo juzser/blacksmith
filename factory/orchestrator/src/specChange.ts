@@ -184,6 +184,8 @@ export interface ApproveSpecChangeResult {
   plan: PlanFile;
   diff: PlanDiff;
   sitesUnclaimed: readonly string[];
+  /** The id of the `spec-change-decided` event this call just appended, the last write it makes. */
+  event_id: string;
 }
 
 export interface RejectSpecChangeInput {
@@ -676,6 +678,7 @@ export async function approveSpecChange(
     plan: amendment.plan,
     diff: amendment.diff,
     sitesUnclaimed: amendment.sitesUnclaimed,
+    event_id: stored.event_id,
   };
 }
 

@@ -6369,6 +6369,14 @@ describe('cli.ts (built binary)', () => {
         const raised = tail(sessionId, eventsDir).filter((r) => r.event_type === 'finding-raised');
         expect(raised).toHaveLength(1);
         expect(raised[0]?.task_id).toBe('epic-1/task-1');
+
+        // Each raised finding carries the event_id of the finding-raised
+        // event it just appended, so a follower can chain off it directly.
+        const tailResult = runCli(['event', 'tail', sessionId, '--state-dir', eventsDir]);
+        const raisedEvent = JSON.parse(tailResult.stdout).find(
+          (e: { record: { event_type: string } }) => e.record.event_type === 'finding-raised',
+        );
+        expect(JSON.parse(result.stdout)[0].event_id).toBe(raisedEvent.event_id);
       });
 
       it('routes the finding to whoever claims the file, not to --task', async () => {

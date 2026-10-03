@@ -763,6 +763,38 @@ describe('findings.ts', () => {
       if (result.suppressed) throw new Error('unreachable');
       expect(result.finding.file_path).toBe('src/foo.ts');
     });
+
+    it('returns the event_id of the finding-raised event it just appended', async () => {
+      const result = await raiseFinding({ finding: draft(), filePath: 'src/foo.ts' }, rootCtx(), {
+        stateDir,
+      });
+      if (result.suppressed) throw new Error('unreachable');
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const raised = events.find((e) => e.record.event_type === 'finding-raised');
+      expect(raised).toBeDefined();
+      expect(result.event_id).toBe(raised?.event_id);
+    });
+
+    it('carries no event_id when the finding was suppressed and nothing was raised', async () => {
+      const waivable = { severity: 'S3-minor' };
+      const first = await raiseFinding(
+        { finding: draft(waivable), filePath: 'src/foo.ts' },
+        rootCtx(),
+        { stateDir },
+      );
+      if (first.suppressed) throw new Error('unreachable');
+      await grantWaiver(first.finding.fingerprint, 'known issue, accepted', rootCtx(), {
+        stateDir,
+      });
+
+      const second = await raiseFinding(
+        { finding: draft({ ...waivable, finding_id: 'finding-2' }), filePath: 'src/foo.ts' },
+        rootCtx(),
+        { stateDir },
+      );
+      expect(second.suppressed).toBe(true);
+      expect((second as unknown as { event_id?: string }).event_id).toBeUndefined();
+    });
   });
 
   describe('listFindings', () => {
@@ -1388,6 +1420,19 @@ describe('findings.ts', () => {
         expect(closed.finding_status).toBe('amended');
       });
 
+      it('returns the event_id of the finding-obligation-repaired event it just appended', async () => {
+        await pendingMalformed();
+        const repaired = await repairObligation(
+          { findingId: 'finding-spec', replaceWith: ['epic-1/task-4'], reason: 'drop the null' },
+          rootCtx(),
+          { stateDir },
+        );
+        const events = await readEvents(ctx.sessionId, { stateDir });
+        const last = events[events.length - 1];
+        expect(last?.record.event_type).toBe('finding-obligation-repaired');
+        expect(repaired.event_id).toBe(last?.event_id);
+      });
+
       // D-21 Part 4: mirrors isWaived's waiver-granted/waiver-denied fold --
       // last decision wins. Writing the two finding-obligation-repaired
       // events directly (bypassing repairObligation's own guards, which would
@@ -1790,6 +1835,18 @@ describe('findings.ts', () => {
 
       const [listed] = await listFindings(ctx.sessionId, {}, { stateDir });
       expect(listed?.finding_status).toBe('raised');
+    });
+
+    it('returns the event_id of the finding-reverified event it just appended', async () => {
+      await raiseFinding({ finding: draft(), filePath: 'src/foo.ts' }, rootCtx(), { stateDir });
+      const result = await reverifyFinding('finding-1', 'still reproduces', rootCtx(), {
+        stateDir,
+      });
+      const event = (await readEvents(ctx.sessionId, { stateDir })).find(
+        (e) => e.record.event_type === 'finding-reverified',
+      );
+      expect(event).toBeDefined();
+      expect(result.event_id).toBe(event?.event_id);
     });
   });
 });

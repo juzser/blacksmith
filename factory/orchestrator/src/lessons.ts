@@ -1574,6 +1574,12 @@ export interface RaiseLessonResult {
   possibleContradictionOf: string | null;
   /** Non-fatal shape problems — a lesson that compiles but can never fire. */
   warnings: string[];
+  /**
+   * The id of the last event this call appended: `lesson-candidate-raised`
+   * alone when novel, or the chained `lesson-status-changed` when the
+   * novelty gate rejected it — the one a follower should hang off.
+   */
+  event_id: string;
 }
 
 /** Deterministic default id, so re-running the same raise collides instead of duplicating. */
@@ -1739,8 +1745,9 @@ export async function raiseLessonCandidate(
     opts,
   );
 
+  let lastEventId = raisedEvent.event_id;
   if (!novelty.novel) {
-    await appendEvent(
+    const rejectedEvent = await appendEvent(
       {
         session_id: ctx.sessionId,
         actor: 'system',
@@ -1751,6 +1758,7 @@ export async function raiseLessonCandidate(
       },
       opts,
     );
+    lastEventId = rejectedEvent.event_id;
   }
 
   return {
@@ -1760,6 +1768,7 @@ export async function raiseLessonCandidate(
     mostSimilar: novelty.mostSimilar,
     possibleContradictionOf: contradictionOf,
     warnings,
+    event_id: lastEventId,
   };
 }
 
