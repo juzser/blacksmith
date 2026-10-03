@@ -4,7 +4,13 @@ import type { TimelineEntry } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { findingStatusTone, severityTone } from '../lib/taxonomy.js';
-import { EVENT_KIND_LABEL, kindFor, metaFor, titleFor, verdictOutcome } from '../lib/timelineDisplay.js';
+import {
+  EVENT_KIND_LABEL,
+  kindFor,
+  metaFor,
+  titleFor,
+  verdictOutcome,
+} from '../lib/timelineDisplay.js';
 import Icon from './ds/Icon.vue';
 import Lozenge from './ds/Lozenge.vue';
 
@@ -35,9 +41,7 @@ const kindStyle = computed(() => ({
   color: `var(--bs-event-${kind.value}-text)`,
 }));
 const rowBarColor = computed(() =>
-  kind.value === 'prompt'
-    ? `var(--bs-event-prompt-subtle)`
-    : `var(--bs-event-${kind.value}-text)`,
+  kind.value === 'prompt' ? `var(--bs-event-prompt-subtle)` : `var(--bs-event-${kind.value}-text)`,
 );
 const title = computed(() => titleFor(props.entry));
 const meta = computed(() => metaFor(props.entry));

@@ -6,8 +6,8 @@
 // as a different kind of thing rather than as several of the rows below it.
 import { computed } from 'vue';
 import { formatDateTime, formatTime } from '../lib/format.js';
-import { EVENT_KIND_LABEL } from '../lib/timelineDisplay.js';
 import type { DispatchGroup } from '../lib/timelineDisplay.js';
+import { EVENT_KIND_LABEL } from '../lib/timelineDisplay.js';
 import Icon from './ds/Icon.vue';
 
 const props = defineProps<{ group: DispatchGroup; expanded: boolean }>();

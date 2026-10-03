@@ -23,7 +23,9 @@ describe('TimelineRow.vue — role labels', () => {
 
   it('renders the role · tier label on the meta line, not a trailing chip', () => {
     expect(SFC).not.toMatch(/<IdentityChip/);
-    expect(SFC).toMatch(/<template v-if="dispatchAgent"> · \{\{ dispatchAgent\.label \}\}<\/template>/);
+    expect(SFC).toMatch(
+      /<template v-if="dispatchAgent"> · \{\{ dispatchAgent\.label \}\}<\/template>/,
+    );
   });
 });
 
