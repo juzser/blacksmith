@@ -46,6 +46,22 @@ exact same fingerprint (`finding-suppressed` event, not a duplicate
 waive an S1/S2 finding is rejected (`findings.not-waivable`); it must be
 fixed or go through the escalation ladder instead.
 
+**Waived tasks.** A task can also be waived as a whole — its plan row carries
+status `waived` — and a waived task has no gate run to show for it. The epic
+close therefore holds it as a blocker, "waived without operator approval",
+until you record the approval:
+
+```bash
+bs waivers approve-task epic-1/task-3 --note "superseded by task-5" --session <session-id> --plan-version 1 --causal-parent <event-id> --actor operator
+```
+
+The note is required, and the command refuses any actor other than the
+operator spellings above. An approval event appended under another actor is
+ignored by the gate. An approval is tied to the plan version it was given
+under (`--plan-version`); if a later plan version waives the task again, record
+a new approval. A waived task with an approval no longer blocks the close
+and is listed under the epic's waived tasks.
+
 **Same-mistake escalation.** A finding matching an approved lesson (same
 claim path + `finding_category`) is auto-escalated one severity level and
 tagged `judgment.same-mistake` — including over-engineering S3 → S2 once a

@@ -236,7 +236,12 @@ import {
   usageLine,
   usageText,
 } from './usage.js';
-import { applyBatch, pendingBatch, type WaiverBatchDecision } from './waivers.js';
+import {
+  applyBatch,
+  approveTaskWaiver,
+  pendingBatch,
+  type WaiverBatchDecision,
+} from './waivers.js';
 import {
   blocksAdmission,
   checkWaveBudget,
@@ -4549,6 +4554,19 @@ async function main(): Promise<number> {
     requireSession(sessionId, eventOpts);
     const pending = await pendingBatch(epic, { sessionId }, eventOpts);
     printJson(pending);
+    return 0;
+  }
+
+  if (namespace === 'waivers' && action === 'approve-task') {
+    const [taskId] = requirePositionals(positional, usageFor('waivers approve-task')) as [string];
+    const note = requireFlag(flags, 'note');
+    const event = await approveTaskWaiver(
+      taskId,
+      note,
+      eventContextFromFlags(flags),
+      eventOptsFromFlags(flags),
+    );
+    printJson(event);
     return 0;
   }
 

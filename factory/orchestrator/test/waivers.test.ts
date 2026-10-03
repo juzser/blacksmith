@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendEvent } from '../src/events.js';
+import { appendEvent, readEvents } from '../src/events.js';
 import {
   computeFingerprint,
   type Finding,
@@ -15,6 +15,7 @@ import {
 import { loadSeverityPolicy, SEVERITY_ORDER } from '../src/severity.js';
 import {
   applyBatch,
+  approveTaskWaiver,
   denyWaiver,
   grantWaiver,
   isWaived,
@@ -80,6 +81,40 @@ describe('waivers.ts', () => {
     it('is scoped per fingerprint', async () => {
       await grantWaiver('fp-1', 'accepted', ctx(), { stateDir });
       await expect(isWaived('fp-2', { sessionId }, { stateDir })).resolves.toBe(false);
+    });
+  });
+
+  describe('approveTaskWaiver', () => {
+    it('records the operator approval against the task, with its rationale', async () => {
+      const event = await approveTaskWaiver(
+        'epic-1/task-2',
+        'superseded by an upstream change',
+        { ...ctx(), actor: 'operator' },
+        { stateDir },
+      );
+      expect(event.record.event_type).toBe('task-waiver-approved');
+      expect(event.record.task_id).toBe('epic-1/task-2');
+      expect(event.record.actor).toBe('operator');
+      expect(event.record.payload).toEqual({ operator_note: 'superseded by an upstream change' });
+    });
+
+    it('defaults to the actor decisions made through the UI carry', async () => {
+      const event = await approveTaskWaiver('epic-1/task-2', 'ok', ctx(), { stateDir });
+      expect(event.record.actor).toBe('user');
+    });
+
+    it('refuses a non-operator actor and writes nothing', async () => {
+      const before = (await readEvents(sessionId, { stateDir })).length;
+      await expect(
+        approveTaskWaiver('epic-1/task-2', 'ok', { ...ctx(), actor: 'coder' }, { stateDir }),
+      ).rejects.toMatchObject({ code: 'waivers.not-operator' });
+      expect((await readEvents(sessionId, { stateDir })).length).toBe(before);
+    });
+
+    it('refuses an empty rationale', async () => {
+      await expect(
+        approveTaskWaiver('epic-1/task-2', '  ', { ...ctx(), actor: 'operator' }, { stateDir }),
+      ).rejects.toMatchObject({ code: 'waivers.note-required' });
     });
   });
 

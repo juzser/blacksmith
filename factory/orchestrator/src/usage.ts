@@ -733,6 +733,13 @@ export const COMMANDS: readonly CommandDoc[] = [
     summary: 'Apply a batch of operator waiver decisions.',
   },
   {
+    command: 'waivers approve-task',
+    positionals: '<task-id>',
+    flags: `--note <why> ${EVENTS_DIR}`,
+    summary:
+      'Record the operator approval of one waived task. Without it a waived task blocks the epic close; an approval counts only for the plan version it was given at or later. Requires --actor operator.',
+  },
+  {
     command: 'lessons candidates',
     positionals: '',
     // Only `candidates` takes `--state-dir` alongside STATS: it validates

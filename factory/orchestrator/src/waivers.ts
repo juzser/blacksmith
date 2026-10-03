@@ -1,3 +1,4 @@
+import { isOperatorActor } from './actors.js';
 import { SmithError } from './errors.js';
 import { appendEvent, type EventOpts, readLineageEvents, type StoredEvent } from './events.js';
 import type { EventContext, Finding, StaleEvidence } from './findings.js';
@@ -12,6 +13,9 @@ import {
 } from './findings.js';
 
 export class WaiverError extends SmithError {}
+
+/** The event `approveTaskWaiver` writes and epic.ts's withGateEvidence reads. */
+export const TASK_WAIVER_APPROVED_EVENT = 'task-waiver-approved';
 
 /**
  * Only S3/S4 findings are ever waived (severity.yml waiver_semantics) —
@@ -171,6 +175,50 @@ export async function grantWaiver(
   await reconcileFindingsToWaived(fingerprint, waiverEvent.event_id, ctx, opts);
 
   return waiverEvent;
+}
+
+/**
+ * Record the operator's approval of one task's waiver. A task reaches
+ * `waived` through its plan row, which carries no gate run; this event is the
+ * evidence the epic gate (epic.ts's withGateEvidence) looks for instead.
+ *
+ * Refused unless the actor is the operator (actors.ts) and a rationale is
+ * given: the approval is only worth anything as a person's recorded decision.
+ * The default actor is the one every other operator decision defaults to.
+ */
+export async function approveTaskWaiver(
+  taskId: string,
+  operatorNote: string,
+  ctx: EventContext,
+  opts: EventOpts = {},
+): Promise<StoredEvent> {
+  const actor = ctx.actor ?? 'user';
+  if (!isOperatorActor(actor)) {
+    throw new WaiverError(
+      'waivers.not-operator',
+      `Actor "${actor}" cannot approve a task waiver — only the operator can. Pass --actor operator.`,
+      { actor, taskId },
+    );
+  }
+  if (operatorNote.trim() === '') {
+    throw new WaiverError(
+      'waivers.note-required',
+      `Approving the waiver of task "${taskId}" needs a short rationale (--note).`,
+      { taskId },
+    );
+  }
+  return appendEvent(
+    {
+      session_id: ctx.sessionId,
+      actor,
+      event_type: TASK_WAIVER_APPROVED_EVENT,
+      task_id: taskId,
+      plan_version: ctx.planVersion,
+      causal_parent: ctx.causalParent,
+      payload: { operator_note: operatorNote },
+    },
+    opts,
+  );
 }
 
 /**

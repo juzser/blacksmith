@@ -574,6 +574,58 @@ describe('epic.ts summarizeEpic — gate evidence (D-138)', () => {
     expect(summary.blockers[0]).toContain('not terminal-OK');
   });
 
+  // A waiver is a close nobody gates, so it carries no gate run. What it must
+  // carry instead is the operator's recorded approval; without it the row is
+  // only a status someone typed into a plan.
+  describe('waived tasks need a recorded operator approval', () => {
+    const noGate = { gateOutcome: false, resultRecorded: false };
+    const run = (rows: EpicTaskRow[]) =>
+      summarizeEpic(
+        'epic-1',
+        rows,
+        [],
+        okIntegration(),
+        MCP_SURFACE_NOT_REQUIRED,
+        okSpecReview(),
+        okGoalCheck(),
+        alwaysEffort(),
+      );
+
+    it('exempts an approved waived task from the ungated check', () => {
+      const summary = run([
+        taskRow(),
+        taskRow({
+          taskId: 'epic-1/task-2',
+          taskStatus: 'waived',
+          gate: noGate,
+          waiverApproved: true,
+        }),
+      ]);
+      expect(summary.ungatedTasks).toHaveLength(0);
+      expect(summary.blockers).toEqual([]);
+      expect(summary.mechanicallyReady).toBe(true);
+      expect(summary.waivedTasks.map((t) => t.taskId)).toEqual(['epic-1/task-2']);
+    });
+
+    it('blocks a waived task with no approval, in words distinct from "nothing gated it"', () => {
+      const summary = run([
+        taskRow(),
+        taskRow({ taskId: 'epic-1/task-2', taskStatus: 'waived', gate: noGate }),
+      ]);
+      expect(summary.mechanicallyReady).toBe(false);
+      expect(summary.blockers).toHaveLength(1);
+      expect(summary.blockers[0]).toContain('epic-1/task-2');
+      expect(summary.blockers[0]).toContain('waived without operator approval');
+      expect(summary.blockers.some((b) => b.includes('nothing gated it'))).toBe(false);
+    });
+
+    it('still flags a completed task with no gate record', () => {
+      const summary = run([taskRow({ gate: noGate, waiverApproved: true })]);
+      expect(summary.ungatedTasks.map((t) => t.taskId)).toEqual(['epic-1/task-1']);
+      expect(summary.blockers.some((b) => b.includes('nothing gated it'))).toBe(true);
+    });
+  });
+
   it('is ready when every terminal-OK task carries both events', () => {
     const summary = summarizeEpic(
       'epic-1',
@@ -636,6 +688,68 @@ describe('epic.ts withGateEvidence (D-138)', () => {
       'epic-1',
     );
     expect(row?.gate).toEqual({ gateOutcome: false, resultRecorded: false });
+  });
+
+  describe('operator approval of a waived task', () => {
+    const approval = (taskId: string, actor: string): StoredEvent => {
+      const e = ev('task-waiver-approved', taskId);
+      return { ...e, record: { ...e.record, actor } };
+    };
+
+    it('is read off the log for the same task, spelled either way', () => {
+      const [row] = withGateEvidence(
+        [bareRow('task-1')],
+        [approval('epic-1/task-1', 'operator')],
+        'epic-1',
+      );
+      expect(row?.waiverApproved).toBe(true);
+    });
+
+    it('is not honoured when a non-operator wrote it', () => {
+      const [row] = withGateEvidence(
+        [bareRow('epic-1/task-1')],
+        [approval('epic-1/task-1', 'coder')],
+        'epic-1',
+      );
+      expect(row?.waiverApproved).toBe(false);
+    });
+
+    it('does not carry over to another task', () => {
+      const [row] = withGateEvidence(
+        [bareRow('epic-1/task-1')],
+        [approval('epic-1/task-2', 'operator')],
+        'epic-1',
+      );
+      expect(row?.waiverApproved).toBe(false);
+    });
+
+    // The approval is the operator's answer to the waiver they were shown. A
+    // later plan version that waives the task again is a different waiver.
+    describe('plan version', () => {
+      const approvalAt = (planVersion: number): StoredEvent => {
+        const e = approval('epic-1/task-1', 'operator');
+        return { ...e, record: { ...e.record, plan_version: planVersion } };
+      };
+      const rowAt = (planVersion: number): TaskFoldRow => ({
+        ...bareRow('epic-1/task-1'),
+        planVersion,
+      });
+
+      it('honours an approval given at the version the row was waived at', () => {
+        const [row] = withGateEvidence([rowAt(2)], [approvalAt(2)], 'epic-1');
+        expect(row?.waiverApproved).toBe(true);
+      });
+
+      it('does not honour an approval older than the row that is now waived', () => {
+        const [row] = withGateEvidence([rowAt(3)], [approvalAt(2)], 'epic-1');
+        expect(row?.waiverApproved).toBe(false);
+      });
+
+      it('honours a fresh approval given at the re-waived version', () => {
+        const [row] = withGateEvidence([rowAt(3)], [approvalAt(2), approvalAt(3)], 'epic-1');
+        expect(row?.waiverApproved).toBe(true);
+      });
+    });
   });
 
   // Both registers spell ids either way (D-46/P9-29): the fold row can carry
