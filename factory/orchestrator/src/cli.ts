@@ -1801,6 +1801,7 @@ async function main(): Promise<number> {
       // --findings does not cite -- surfaced the same way sitesUnclaimed is,
       // a fact for the operator to read off the result rather than a guard.
       warnings: result.warnings,
+      event_id: result.event_id,
     });
     return 0;
   }
@@ -1885,6 +1886,7 @@ async function main(): Promise<number> {
       sites: result.proposal.sites,
       sitesUnclaimed: result.sitesUnclaimed,
       diff: result.diff,
+      event_id: result.event_id,
     });
     return 0;
   }
@@ -4361,6 +4363,8 @@ async function main(): Promise<number> {
         attribution: isSpec ? SPEC_FINDING_SCOPE : routing.attribution,
         suppressed: result.suppressed,
         reason: routing.reason,
+        // A suppressed finding appended nothing, so it carries no event_id.
+        event_id: result.suppressed ? undefined : result.event_id,
       });
     }
     printJson(raised);
@@ -4464,8 +4468,8 @@ async function main(): Promise<number> {
     const ctx = eventContextFromFlags(flags);
     const eventOpts = eventOptsFromFlags(flags);
     requireSession(ctx.sessionId, eventOpts);
-    await reverifyFinding(findingId, flags.note ?? '', ctx, eventOpts);
-    printJson({ findingId, note: flags.note ?? '' });
+    const reverified = await reverifyFinding(findingId, flags.note ?? '', ctx, eventOpts);
+    printJson({ findingId, note: flags.note ?? '', event_id: reverified.event_id });
     return 0;
   }
 

@@ -379,6 +379,11 @@ describe('specChange — a worker proposes, the operator decides', () => {
       // And the fold now agrees with the decision.
       const listed = await listSpecChanges(ctx.sessionId, {}, opts());
       expect(listed[0]?.status).toBe('approved');
+
+      // The last event appended by this call is spec-change-decided, chained
+      // after amendPlan's own writes -- that's the id a follower should hang
+      // off.
+      expect(result.event_id).toBe(decided[0]?.event_id);
     });
 
     it("composes the rationale from the worker's own argument when the operator supplies none", async () => {

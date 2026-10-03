@@ -704,7 +704,12 @@ export function reattributeFinding(input: RaiseFindingInput, taskId: string): Ra
 }
 
 export type RaiseFindingResult =
-  | { suppressed: false; finding: Finding }
+  | {
+      suppressed: false;
+      finding: Finding;
+      /** The id of the `finding-raised` event this call just appended. */
+      event_id: string;
+    }
   | { suppressed: true; fingerprint: string; taskId: string };
 
 /**
@@ -804,7 +809,7 @@ export async function raiseFinding(
     return { suppressed: true, fingerprint, taskId: finding.task_id };
   }
 
-  await appendEvent(
+  const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? finding.found_by,
@@ -817,7 +822,7 @@ export async function raiseFinding(
     opts,
   );
 
-  return { suppressed: false, finding };
+  return { suppressed: false, finding, event_id: stored.event_id };
 }
 
 export interface FindingFilter {
@@ -1472,7 +1477,7 @@ export async function repairObligation(
   input: RepairObligationInput,
   ctx: EventContext,
   opts: EventOpts = {},
-): Promise<Finding> {
+): Promise<Finding & { event_id: string }> {
   const events = await readLineageEvents(ctx.sessionId, opts);
   let current: Finding | undefined;
   for (const { record } of events) {
@@ -1628,7 +1633,7 @@ export async function repairObligation(
     payload.amends_plan_version = current.amends_plan_version;
   }
 
-  await appendEvent(
+  const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'user',
@@ -1641,7 +1646,12 @@ export async function repairObligation(
     opts,
   );
 
-  return { ...current, amends_task_ids: toObligation, obligation_repair_reason: reason };
+  return {
+    ...current,
+    amends_task_ids: toObligation,
+    obligation_repair_reason: reason,
+    event_id: stored.event_id,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1814,7 +1824,7 @@ export async function reverifyFinding(
   note: string,
   ctx: EventContext,
   opts: EventOpts = {},
-): Promise<void> {
+): Promise<{ event_id: string }> {
   // Lineage (D-119): staleFindings reads the lineage, so the findings it names
   // as stale have to be re-verifiable from the session that was told about them.
   const events = await readLineageEvents(ctx.sessionId, opts);
@@ -1835,7 +1845,7 @@ export async function reverifyFinding(
     );
   }
 
-  await appendEvent(
+  const stored = await appendEvent(
     {
       session_id: ctx.sessionId,
       actor: ctx.actor ?? 'system',
@@ -1852,4 +1862,5 @@ export async function reverifyFinding(
     },
     opts,
   );
+  return { event_id: stored.event_id };
 }

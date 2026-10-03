@@ -494,6 +494,13 @@ export interface AmendPlanResult {
    * ever cites it again.
    */
   warnings: readonly string[];
+  /**
+   * The id of the LAST event this call appended. An amendment always cites
+   * at least one finding (the guard above refuses `findingIds.length === 0`),
+   * so the final `finding-transitioned` write below — not the earlier
+   * `plan-amended` — is the one a follower should chain off of.
+   */
+  event_id: string;
 }
 
 /**
@@ -758,12 +765,14 @@ export async function amendPlan(
     opts,
   );
 
+  let lastEventId = '';
   for (const finding of cited) {
-    await transition(finding.finding_id, AMEND_PENDING_STATUS, ctx, opts, {
+    const transitioned = await transition(finding.finding_id, AMEND_PENDING_STATUS, ctx, opts, {
       amendsTaskIds: obligations,
       amendsPlanVersion: amended.version,
     });
+    lastEventId = transitioned.event_id;
   }
 
-  return { plan: amended, diff, sitesUnclaimed: unclaimedSites, warnings };
+  return { plan: amended, diff, sitesUnclaimed: unclaimedSites, warnings, event_id: lastEventId };
 }

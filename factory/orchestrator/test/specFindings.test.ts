@@ -515,6 +515,27 @@ describe('spec-scoped findings (P9-9)', () => {
       expect(after[0]?.amends_plan_version).toBe(2);
     });
 
+    it('returns the event_id of the last finding-transitioned event it appended', async () => {
+      const finding = await raiseSpecFinding();
+      const result = await amendPlan(
+        {
+          plan: planFixture(),
+          findingIds: [finding.finding_id],
+          rationale: 'Criterion 3 moved.',
+          sites: ['src/parse.ts'],
+          changes: supersedeQuotes(),
+        },
+        rootCtx(),
+        { stateDir, specsDir },
+      );
+
+      const events = await readEvents(ctx.sessionId, { stateDir });
+      const transitioned = events.filter((e) => e.record.event_type === 'finding-transitioned');
+      const last = transitioned[transitioned.length - 1];
+      expect(last).toBeDefined();
+      expect(result.event_id).toBe(last?.event_id);
+    });
+
     it('obligates exactly added ∪ superseded — a carried task is not what answered the finding', async () => {
       const finding = await raiseSpecFinding();
       const plan = planFixture();
