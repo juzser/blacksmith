@@ -1264,6 +1264,18 @@
   padding: var(--ds-space-2) var(--ds-space-2) var(--ds-space-2) var(--ds-space-3);
   border-left: 3px solid transparent;
 }
+/* Item 4: at phone width the global icon-button rule (above) grows the
+   chevron's own box to --bs-touch for its hit area, which otherwise widens
+   this row's leading column past the no-children placeholder's fixed
+   control-height-sm, leaving an uneven gutter. A negative margin keeps the
+   chevron's real box (and so its measured touch target) at --bs-touch while
+   giving back the extra space to the row's layout, so both kinds of row
+   keep the same visible column width. */
+@media (max-width: 640px) {
+  .timeline-row > .ds-btn--icon-xs {
+    margin: calc((var(--ds-control-height-sm) - var(--bs-touch)) / 2);
+  }
+}
 /* Item 4: a prompt row gets a sunken background so it reads as quoted input,
    not just another event (ds-review.html's `.ev.k-prompt`). */
 .timeline-row--prompt {
