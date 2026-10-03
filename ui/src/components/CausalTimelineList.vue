@@ -45,7 +45,7 @@ const dayGroups = computed(() => {
          with a `gap`, which lands between flex children. Wrapping the
          header + its feed keeps that gap between day groups only, so
          `.timeline-day`'s own margin-bottom (not gap + margin) sets the
-         ~8px to its own feed. -->
+         `--ds-space-2` gap to its own feed. -->
     <div>
       <div class="timeline-day">{{ group.label }}</div>
       <div class="timeline-feed">

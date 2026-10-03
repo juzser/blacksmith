@@ -1249,7 +1249,7 @@
 .timeline-feed {
   background: var(--bs-surface-raised);
   border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-md);
+  border-radius: var(--bs-radius-md);
   overflow: hidden;
 }
 .timeline-feed > ol > li:not(:last-child) > .timeline-row,
