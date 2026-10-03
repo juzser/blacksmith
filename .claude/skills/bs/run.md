@@ -310,12 +310,14 @@ playbooks are written to prevent.
 
     Once the oracles pass, the judge call is real money when an external
     provider is `active` in `crosscheck.yml`: codex spends the operator's
-    ChatGPT quota, DeepSeek spends prepaid credit, and step 16 runs the
-    verdict again before it writes, so a clean close is two spends, not one
-    (one dogfooded epic wrote two `quorum-decision`s against its
-    integration ref, one from the verdict and one from the close).
-    Nothing in the `quorum-decision` payload names the purse, so say which
-    one it is to the operator before the first call, not after the second.
+    ChatGPT quota, DeepSeek spends prepaid credit. Say which purse it is to
+    the operator before this call, not after.
+
+    Step 16 no longer pays twice for the same integration head: the
+    `quorum-decision` this call writes now carries `integration_head`, and a
+    clean `go` against an unchanged head is reused rather than re-asked
+    (issue #270). Anything that invalidates it — a new commit, a `hold`, or a
+    decision from before `integration_head` existed — still re-runs.
 16. Record the close. The verdict above is a read-only probe and writes
     nothing; `epic close` is what makes it a fact in the log (D-43):
 
@@ -324,8 +326,9 @@ playbooks are written to prevent.
       --session <session-id> --plan-version <n> --causal-parent <event-id>
     ```
 
-    It re-runs the verdict, then emits `epic-closed` on `go` and refuses
-    (exit 1, no event) on `hold`. **Never pass `--override-rationale`
+    It reuses step 15's `go` decision when the integration head hasn't moved
+    (see step 15), otherwise re-runs the verdict, then emits `epic-closed` on
+    `go` and refuses (exit 1, no event) on `hold`. **Never pass `--override-rationale`
     yourself** — closing over a hold is the operator's call; ask for it and
     quote the blockers. If the epic was cut by `/bs audit`
     ([`audit.md`](audit.md) step 10), follow the close with

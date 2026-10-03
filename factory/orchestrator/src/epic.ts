@@ -1439,6 +1439,7 @@ function epicQuorumDecisionPayload(
   epicId: string,
   finderProvider: string,
   ready: boolean,
+  integrationHeadSha: string | null,
 ): Record<string, unknown> {
   const gating = quorum.gating;
   return {
@@ -1447,6 +1448,12 @@ function epicQuorumDecisionPayload(
     finding_id: null,
     trigger_reason: 'epic-final-verdict',
     finder_provider: finderProvider,
+    // The integration branch head this quorum ran against (issue #270).
+    // `closeEpic` reads this back to decide whether a later close can reuse
+    // this decision instead of paying for the quorum again. A decision from
+    // before this field existed carries no `integration_head` and is never
+    // reused (undefined matches no sha).
+    integration_head: integrationHeadSha,
     outcome: gating.outcome,
     decision: gating.outcome === 'decided' ? gating.decision : null,
     agreement: gating.outcome === 'decided' ? gating.agreement : null,
@@ -1490,17 +1497,26 @@ function resolvePlanRoster(epicId: string, planOpts: PlanOpts): EpicPlanRoster |
   }
 }
 
+/** What computeEpicSummary read and reduced, handed back so a caller that
+ * needs more than the summary (closeEpic's quorum-reuse check, issue #270)
+ * does not have to read the lineage a second time. */
+interface EpicSummaryComputation {
+  events: Awaited<ReturnType<typeof readLineageEvents>>;
+  summary: EpicSummary;
+}
+
 /**
- * Operator-invoked verdict for one epic: mechanical readiness first, then
- * (only when mechanically ready and it isn't free to skip) a cross-provider
- * quorum on the claim "this epic is ready to open its integration PR". Never
- * dispatches anything itself — the caller decides what to do with `go`/`hold`.
+ * The read-only half of `runEpicVerdict`: fold the lineage into the one
+ * `EpicSummary` every verdict is computed from. Split out so `closeEpic` can
+ * read the same summary and the same lineage events without re-running
+ * `runEpicVerdict`'s quorum step when it decides to reuse a prior decision
+ * (issue #270).
  */
-export async function runEpicVerdict(
+async function computeEpicSummary(
   input: EpicVerdictInput,
   ctx: EventContext,
-  opts: EventOpts = {},
-): Promise<EpicVerdictOutcome> {
+  opts: EventOpts,
+): Promise<EpicSummaryComputation> {
   // Lineage (D-119). An epic is not a session: `validateCausalParent`'s own
   // header calls chaining a fresh session onto a full one "the documented way
   // to run a large epic", and this verdict read one session. Split the real
@@ -1560,12 +1576,42 @@ export async function runEpicVerdict(
     taskSuccessors(events, input.epicId),
   );
 
+  return { events, summary };
+}
+
+/**
+ * Operator-invoked verdict for one epic: mechanical readiness first, then
+ * (only when mechanically ready and it isn't free to skip) a cross-provider
+ * quorum on the claim "this epic is ready to open its integration PR". Never
+ * dispatches anything itself — the caller decides what to do with `go`/`hold`.
+ */
+export async function runEpicVerdict(
+  input: EpicVerdictInput,
+  ctx: EventContext,
+  opts: EventOpts = {},
+): Promise<EpicVerdictOutcome> {
+  const { summary } = await computeEpicSummary(input, ctx, opts);
+
   // Step 1 — mechanical_oracles_first, literally: a deterministic blocker is
   // final. Zero judge calls, zero events (read-only projection).
   if (!summary.mechanicallyReady) {
     return { outcome: 'hold', epicId: input.epicId, summary, reason: 'mechanical-blockers' };
   }
 
+  return runEpicQuorumVerdict(input, ctx, opts, summary);
+}
+
+/**
+ * Steps 2-5 of `runEpicVerdict`, pulled out so `closeEpic` can skip straight
+ * to them with an `EpicSummary` it already has (and so it can skip them
+ * entirely when it reuses a prior decision instead, issue #270).
+ */
+async function runEpicQuorumVerdict(
+  input: EpicVerdictInput,
+  ctx: EventContext,
+  opts: EventOpts,
+  summary: EpicSummary,
+): Promise<EpicVerdictOutcome> {
   const policy = input.crosscheck?.policy ?? loadCrosscheckPolicy();
   const providers = enabledExternalProviders(policy);
 
@@ -1632,12 +1678,49 @@ export async function runEpicVerdict(
         input.epicId,
         nativeProvider,
         outcome.outcome === 'go',
+        input.integrationHeadSha,
       ),
     },
     opts,
   );
 
   return { ...outcome, event_id: stored.event_id };
+}
+
+/**
+ * Issue #270: `epic close` used to re-run `runEpicVerdict` unconditionally,
+ * paying for the external quorum a second time on the same integration head
+ * `epic verdict` just paid for. This looks for a prior `go` decision this
+ * close can stand on instead.
+ *
+ * Reuse requires the latest event in the lineage to BE that decision — i.e.
+ * nothing was appended between the verdict call that wrote it and this close
+ * — rather than independently re-proving every mechanical input the quorum
+ * depended on unchanged. The two are not quite the same (`mcp`/`goal` are
+ * resolved from the roadmap, not the event log), but cheaply reading "did
+ * anything happen since" and refusing reuse the moment it did is the
+ * conservative side of that gap, and this is the acceptable approximation
+ * the task spec calls for when the exact proof is not cheap.
+ *
+ * A decision from before `integration_head` existed carries no such field
+ * and is never reused — `undefined` matches no sha. Same for a `hold`
+ * (`ready: false`): only a `go` is ever stood on without re-asking.
+ */
+function findReusableQuorumDecision(
+  events: StoredEvent[],
+  epicId: string,
+  currentHeadSha: string | null,
+): { eventId: string } | null {
+  if (currentHeadSha === null || events.length === 0) return null;
+  const last = events[events.length - 1];
+  if (last === undefined) return null;
+  if (last.record.event_type !== 'quorum-decision') return null;
+  if (last.record.task_id !== `${epicId}/${RESERVED_TASK_ID}`) return null;
+  const payload = last.record.payload as Record<string, unknown>;
+  if (payload.trigger_reason !== 'epic-final-verdict') return null;
+  if (payload.integration_head !== currentHeadSha) return null;
+  if (payload.ready !== true) return null;
+  return { eventId: last.event_id };
 }
 
 /**
@@ -1839,8 +1922,9 @@ export async function closeEpic(
   // else. The question here is "does THIS session have a log", and only this
   // session's log answers it; a lineage read would be asking whether some
   // ancestor exists, which is not what the refusal below says. Nothing is lost
-  // — every DECISION this function makes comes from runEpicVerdict, and that
-  // reads the lineage.
+  // — every DECISION this function makes comes from computeEpicSummary and
+  // runEpicQuorumVerdict (or a reused quorum decision), and those read the
+  // lineage.
   const events = await readEvents(ctx.sessionId, opts);
   if (events.length === 0) {
     throw new EpicCloseError(
@@ -1859,7 +1943,43 @@ export async function closeEpic(
     );
   }
 
-  const verdict = await runEpicVerdict(input, ctx, opts);
+  // Issue #270: compute the same summary `runEpicVerdict` would, then — only
+  // when it is mechanically ready — look for a `go` quorum-decision already
+  // on record for this exact integration head before paying for a fresh
+  // quorum. A decision this call stands on is referenced by event id in the
+  // `epic-closed` payload below rather than re-run.
+  const { events: lineageEvents, summary: closeSummary } = await computeEpicSummary(
+    input,
+    ctx,
+    opts,
+  );
+  let verdict: EpicVerdictOutcome;
+  let reusedQuorumEventId: string | null = null;
+  if (!closeSummary.mechanicallyReady) {
+    verdict = {
+      outcome: 'hold',
+      epicId: input.epicId,
+      summary: closeSummary,
+      reason: 'mechanical-blockers',
+    };
+  } else {
+    const reusable = findReusableQuorumDecision(
+      lineageEvents,
+      input.epicId,
+      input.integrationHeadSha,
+    );
+    if (reusable) {
+      reusedQuorumEventId = reusable.eventId;
+      verdict = {
+        outcome: 'go',
+        epicId: input.epicId,
+        summary: closeSummary,
+        event_id: reusable.eventId,
+      };
+    } else {
+      verdict = await runEpicQuorumVerdict(input, ctx, opts, closeSummary);
+    }
+  }
   const blockers = verdict.outcome === 'hold' ? verdict.summary.blockers : [];
 
   if (verdict.outcome === 'hold' && rationale === '') {
@@ -1909,6 +2029,11 @@ export async function closeEpic(
         override_rationale: closedBy === 'operator-override' ? rationale : null,
         blockers,
         summary: epicSummaryPayload(verdict.summary),
+        // Issue #270: the quorum-decision this close stood on, by event id —
+        // present whether it ran fresh just now or was reused unchanged, null
+        // when no quorum ever ran (e.g. zero-cost default config).
+        quorum_decision_event_id: verdict.event_id ?? null,
+        quorum_decision_reused: reusedQuorumEventId !== null,
       },
     },
     opts,
