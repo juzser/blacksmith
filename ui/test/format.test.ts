@@ -9,6 +9,7 @@ import {
   formatMeasuredTokens,
   formatRelative,
   formatRelativeVerbose,
+  formatShortDateTime,
   pluralize,
   shortTaskId,
   summarize,
@@ -321,6 +322,24 @@ describe('lib/format.ts formatAbsolute()', () => {
 
   it('returns the raw input for an unparseable date', () => {
     expect(formatAbsolute('not-a-date')).toBe('not-a-date');
+  });
+});
+
+// RequestQuote.vue's timestamp (ds-review.html ~1239, ~1300: "12 Sep, 09:14" —
+// short month, comma, zero-padded 24h HH:MM, no year). Scoped to
+// RequestQuote only (DS4 S5c fix round 1, fix 4) — formatDateTime() keeps
+// its numeric DD/MM/YYYY shape for the pages that already render it.
+describe('lib/format.ts formatShortDateTime()', () => {
+  it('renders day, short month, comma, zero-padded 24h time', () => {
+    expect(formatShortDateTime('2026-09-12T09:14:00')).toBe('12 Sep, 09:14');
+  });
+
+  it('zero-pads single-digit hours and minutes but not the day of month', () => {
+    expect(formatShortDateTime('2026-01-05T03:07:00')).toBe('5 Jan, 03:07');
+  });
+
+  it('returns the raw input for an unparseable date', () => {
+    expect(formatShortDateTime('not-a-date')).toBe('not-a-date');
   });
 });
 

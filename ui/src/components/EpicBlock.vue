@@ -3,7 +3,8 @@
 // waves" toggle) and epic mode (new in S3, spec §1): the same `.eblock`
 // region, pointed at one epic instead of a whole phase.
 import { ChevronDown, ChevronUp, Copy, ExternalLink } from '@lucide/vue';
-import { reactive, ref } from 'vue';
+import { reactive, watch } from 'vue';
+import { useCopyFeedback } from '../composables/useCopyFeedback.js';
 import { useViewport } from '../composables/useViewport.js';
 import type { RequestQuote as RequestQuoteData, StatusCounts } from '../lib/api.js';
 import { copyToClipboard } from '../lib/clipboard.js';
@@ -65,7 +66,7 @@ export interface EpicModeData {
   sourcePrompt?: RequestQuoteData | null;
 }
 
-defineProps<{
+const props = defineProps<{
   // Phase mode.
   name?: string;
   statusTone?: KitTone;
@@ -92,15 +93,21 @@ function progressBar(counts: StatusCounts | undefined, completed: number, total:
 
 // DS4 S5c §4 — "Copy epic id" feedback: flips the IconButton's label to
 // "Copied" for a beat on success, stays put (no "Copied") on rejection.
-const copyLabel = ref('Copy epic id');
+// DS4 S5c fix round 1, fix 8 — useCopyFeedback owns the timeout id so it is
+// cleared on unmount and before re-arming; the watch below resets the idle
+// label (and cancels a pending flash) when the epic id itself changes.
+const { label: copyLabel, flash: flashCopied, reset: resetCopyLabel } = useCopyFeedback(
+  'Copy epic id',
+);
 async function onCopyEpicId(epicId: string) {
   const ok = await copyToClipboard(epicId);
   if (!ok) return;
-  copyLabel.value = 'Copied';
-  setTimeout(() => {
-    copyLabel.value = 'Copy epic id';
-  }, 1500);
+  flashCopied();
 }
+watch(
+  () => props.epic?.epicId,
+  () => resetCopyLabel('Copy epic id'),
+);
 // `selectEpic` (DS4 S4 R6): a phone phase-mode row tap. `backToPhase` (R1):
 // the phone epic-mode back link — imperative, not a RouterLink, because the
 // page's selected-phase/selected-epic state is local refs that only react
@@ -157,10 +164,10 @@ function toggle(epic: EpicSection) {
           <ExternalLink :size="16" aria-hidden="true" />
         </a>
       </Tooltip>
-      <Tag :tone="epic.statusTone" size="sm">{{ epic.statusLabel }}</Tag>
       <Tag v-if="epic.project" tone="neutral" variant="outline" size="sm" class="eh-project">{{
         epic.project
       }}</Tag>
+      <Tag :tone="epic.statusTone" size="sm">{{ epic.statusLabel }}</Tag>
       <Select
         class="select-trailing"
         :model-value="epic.planVersion"

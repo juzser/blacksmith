@@ -57,6 +57,22 @@ export function formatAbsolute(iso: string): string {
 }
 
 /**
+ * "12 Sep, 09:14" — RequestQuote.vue's timestamp (ds-review.html ~1239,
+ * ~1300: short month name, 24h time, no year). Scoped to RequestQuote only
+ * (DS4 S5c fix round 1, fix 4) — formatDateTime() above stays put for the
+ * pages that already render its numeric-month shape.
+ */
+export function formatShortDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = d.getDate();
+  const month = SHORT_MONTHS[d.getMonth()];
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${day} ${month}, ${hh}:${mi}`;
+}
+
+/**
  * `[how many of this unit make the next one, the suffix it renders as]`.
  *
  * The suffix is spelled out rather than taken from a unit word's first
