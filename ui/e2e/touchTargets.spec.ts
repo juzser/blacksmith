@@ -25,15 +25,6 @@ const PAGES: Record<string, string> = {
 const INTERACTIVE_SELECTOR =
   'button, a[href], [role="button"], [role="tab"], [role="menuitem"], [role="radio"], [role="link"], input, select';
 
-// Pages whose remaining failures are page-specific list/row layouts, not a
-// shared primitive this sweep's CSS pass could reach — redesigned in its own
-// slice rather than papered over here. No per-element allowlist: each of
-// these stays off until every element on its page clears the floor.
-const FIXME_PAGES: Record<string, string> = {
-  sessions: 'session list rows are shorter than --bs-touch; redesigned in its own slice',
-  timeline: 'timeline event rows are shorter than --bs-touch; redesigned in its own slice',
-};
-
 interface Measurement {
   name: string;
   width: number;
@@ -124,7 +115,6 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
     test(`${name} (${path}): every visible interactive element clears the hit-area floor`, async ({
       page,
     }) => {
-      test.fixme(name in FIXME_PAGES, FIXME_PAGES[name]);
       await page.setViewportSize(VIEWPORTS.mobile);
       await page.goto(path);
       await expect(page.locator('.bs-skeleton')).toHaveCount(0);

@@ -434,10 +434,12 @@ export function bandGridExtent(
  * private helper's rounding and re-copying it on every Vue Flow upgrade.
  *
  * Scored on the RAW fit zoom, deliberately un-clamped at the bottom: Vue Flow
- * will not zoom out past its own 0.5 floor, so a graph twice the canvas's width
- * is not shrunk to fit, it is cropped — and the first thing cropped is the
- * leftmost session card. Comparing clamped values would score that crop as a
- * tie with a layout that fits.
+ * will not zoom out past its own minZoom floor (0.5 by default; raised to 1 at
+ * phone width by SessionsPage so fitView never shrinks a node below its
+ * native size), so a graph twice the canvas's width is not shrunk to fit, it
+ * is cropped — and the first thing cropped is the leftmost session card.
+ * Comparing clamped values would score that crop as a tie with a layout that
+ * fits.
  */
 export function bandsPerRowFor(
   groups: SessionGroup[],

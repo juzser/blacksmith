@@ -1259,6 +1259,18 @@
   font-weight: var(--ds-weight-medium);
   overflow-wrap: anywhere;
 }
+/* ≤640px: the clickable title is a bare <button> (TimelineRow.vue) whose
+   inline reset leaves padding:0, so its hit box is only the text line
+   height — below --bs-touch. min-height + flex centering only; desktop
+   density (no min-height) is unaffected. Same breakpoint as the .ds-btn*
+   floors above. */
+@media (max-width: 640px) {
+  .timeline-row__title {
+    min-height: var(--bs-touch);
+    display: flex;
+    align-items: center;
+  }
+}
 .timeline-row__meta {
   font-size: var(--ds-text-xs);
   color: var(--ds-text-subtlest);

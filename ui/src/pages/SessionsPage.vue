@@ -44,6 +44,7 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import { agentScopeLabel } from '../lib/agentScope.js';
 import {
   fetchOverview,
@@ -79,7 +80,16 @@ const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
+const { isPhoneWidth } = useViewport();
 const { zoomIn, zoomOut, fitView, nodes: storeNodes } = useVueFlow();
+
+// At phone width (<=640px, same --bs-mobile breakpoint as the .ds-btn* touch
+// floors in ds-components.css) fitView() must never shrink a node below its
+// native ≥44px size — Vue Flow's own 0.5 default minZoom let it draw agent
+// cards at ~32px tall on a 390px canvas. Desktop keeps the 0.5 default
+// (Vue Flow's own floor), so `fitView()`'s pan-not-shrink behaviour there is
+// unchanged; on phone the pane pans instead of the nodes scaling down.
+const minZoom = computed(() => (isPhoneWidth.value ? 1 : 0.5));
 
 // Same cadence and same endpoint as Overview (design-spec.md §8: polling,
 // paused with the tab). This page is a second view of that one payload, so a
@@ -421,6 +431,7 @@ function goToTask(taskId: string | null) {
           :nodes="flowNodes"
           :edges="flowEdges"
           :nodes-draggable="false"
+          :min-zoom="minZoom"
           fit-view-on-init
         >
           <template #node-session="{ data: node }">
