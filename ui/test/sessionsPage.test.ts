@@ -39,3 +39,22 @@ describe('SessionsPage.vue — role labels', () => {
     expect(SFC).toContain('{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}');
   });
 });
+
+// Touch-target sweep: fit-to-view shrinks native-sized nodes below --bs-touch
+// on a 390px canvas. Raising minZoom to 1 at phone width (same breakpoint as
+// useViewport's isPhoneWidth) keeps fitView() from scaling nodes down; the
+// pane pans instead. Desktop keeps Vue Flow's own 0.5 default unchanged.
+describe('SessionsPage.vue — mobile minZoom floor', () => {
+  it('reads isPhoneWidth from the shared viewport composable', () => {
+    expect(SFC).toMatch(/from '\.\.\/composables\/useViewport\.js'/);
+    expect(SFC).toMatch(/const \{ isPhoneWidth \} = useViewport\(\);/);
+  });
+
+  it('computes minZoom as 1 on phone, 0.5 (Vue Flow default) otherwise', () => {
+    expect(SFC).toMatch(/const minZoom = computed\(\(\) => \(isPhoneWidth\.value \? 1 : 0\.5\)\);/);
+  });
+
+  it('binds minZoom onto the VueFlow canvas', () => {
+    expect(SFC).toMatch(/<VueFlow[\s\S]{0,200}:min-zoom="minZoom"/);
+  });
+});

@@ -44,6 +44,7 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import { agentScopeLabel } from '../lib/agentScope.js';
 import {
   fetchOverview,
@@ -65,6 +66,7 @@ import {
 import { roleLabel } from '../lib/roleLabels.js';
 import {
   AGENT_VISIBLE_CAP,
+  anchoredPhoneViewport,
   bandsPerRowFor,
   runningGroups,
   SESSION_BAND_CAP,
@@ -79,7 +81,40 @@ const router = useRouter();
 const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
-const { zoomIn, zoomOut, fitView, nodes: storeNodes } = useVueFlow();
+const { isPhoneWidth } = useViewport();
+const { zoomIn, zoomOut, fitView, setViewport, nodes: storeNodes } = useVueFlow();
+
+// At phone width (<=640px, same --bs-mobile breakpoint as the .ds-btn* touch
+// floors in ds-components.css) fitView() must never shrink a node below its
+// native ≥44px size — Vue Flow's own 0.5 default minZoom let it draw agent
+// cards at ~32px tall on a 390px canvas. Desktop keeps the 0.5 default
+// (Vue Flow's own floor), so `fitView()`'s pan-not-shrink behaviour there is
+// unchanged; on phone the pane pans instead of the nodes scaling down.
+const minZoom = computed(() => (isPhoneWidth.value ? 1 : 0.5));
+
+// At phone width, fitView() alone leaves the graph centred-and-cropped (visual
+// pass S1): every re-fit trigger — the init fit, "Fit view", a column-count
+// flip from a poll or a resize, and expanding a band — must go through this
+// instead of calling fitView() directly, or the anchor it just set gets
+// clobbered by the next centred fit. Desktop is untouched: anchoredPhoneViewport
+// only overrides the pan when isPhoneWidth, so fitView()'s own centring is all
+// that ever runs there.
+async function fitAndAnchor() {
+  await fitView();
+  if (!isPhoneWidth.value) return;
+  // canvasSize caps the anchor so a graph that already fits in the measured
+  // box (bandsPerRowFor chose its columns for this exact box) is never
+  // pushed past the canvas's own far edge by the padding alone.
+  const anchored = anchoredPhoneViewport(storeNodes.value, undefined, canvasSize.value);
+  if (anchored) await setViewport(anchored, { duration: 0 });
+}
+// VueFlow's own `fit-view-on-init` races its internal fitView() against this
+// page's anchor correction (both fire off the same node-dimensions update), so
+// phone width drives its OWN first fit from `nodes-initialized` instead and
+// leaves the prop (desktop only) to Vue Flow, unchanged from before this fix.
+function onNodesInitialized() {
+  if (isPhoneWidth.value) fitAndAnchor();
+}
 
 // Same cadence and same endpoint as Overview (design-spec.md §8: polling,
 // paused with the tab). This page is a second view of that one payload, so a
@@ -261,7 +296,7 @@ const bandsPerRow = computed(() =>
 // nodes yet at that point.
 watch(bandsPerRow, () => {
   nextTick(() => {
-    if (storeNodes.value.length > 0) fitView();
+    if (storeNodes.value.length > 0) fitAndAnchor();
   });
 });
 
@@ -270,7 +305,7 @@ watch(bandsPerRow, () => {
 // below the viewport the operator is looking at.
 watch(expandedSessions, () => {
   nextTick(() => {
-    if (storeNodes.value.length > 0) fitView();
+    if (storeNodes.value.length > 0) fitAndAnchor();
   });
 });
 
@@ -421,7 +456,9 @@ function goToTask(taskId: string | null) {
           :nodes="flowNodes"
           :edges="flowEdges"
           :nodes-draggable="false"
-          fit-view-on-init
+          :min-zoom="minZoom"
+          :fit-view-on-init="!isPhoneWidth"
+          @nodes-initialized="onNodesInitialized"
         >
           <template #node-session="{ data: node }">
             <article
@@ -536,7 +573,7 @@ function goToTask(taskId: string | null) {
             <div style="display: flex; gap: var(--ds-space-1)">
               <Button variant="outline" size="icon-sm" aria-label="Zoom in" icon="plus" @click="zoomIn()" />
               <Button variant="outline" size="icon-sm" aria-label="Zoom out" icon="minus" @click="zoomOut()" />
-              <Button variant="outline" size="sm" @click="fitView()">Fit view</Button>
+              <Button variant="outline" size="sm" @click="fitAndAnchor()">Fit view</Button>
             </div>
           </Panel>
         </VueFlow>
