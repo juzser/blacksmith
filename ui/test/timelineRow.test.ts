@@ -9,9 +9,10 @@ const SFC = readFileSync(
 );
 
 // Task 2 (friendly role labels): dispatch_decision is the one Timeline event
-// type that carries an agent role, rendered on its IdentityChip. The raw
-// `role · tier` stays reachable as a title tooltip (IdentityChip forwards an
-// unclaimed `title` onto its root element).
+// type that carries an agent role. Mock-conformance brief item 6 dropped the
+// trailing IdentityChip from this row -- the role/tier now renders as plain
+// text on the meta line instead, so there is no chip left to carry a title
+// tooltip (behaviour deleted, not moved: Kanban/Task detail keep the chip).
 describe('TimelineRow.vue — role labels', () => {
   it('imports roleLabel and routes dispatchAgent.label through it', () => {
     expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
@@ -20,9 +21,11 @@ describe('TimelineRow.vue — role labels', () => {
     );
   });
 
-  it('keeps the raw role · tier as a title tooltip on the dispatch agent chip', () => {
-    expect(SFC).toMatch(/title: p\.model_tier \? `\$\{p\.agent_role\} · \$\{p\.model_tier\}`/);
-    expect(SFC).toMatch(/<IdentityChip[^>]*:title="dispatchAgent\.title"/);
+  it('renders the role · tier label on the meta line, not a trailing chip', () => {
+    expect(SFC).not.toMatch(/<IdentityChip/);
+    expect(SFC).toMatch(
+      /<template v-if="dispatchAgent"> · \{\{ dispatchAgent\.label \}\}<\/template>/,
+    );
   });
 });
 
@@ -32,7 +35,7 @@ describe('TimelineRow.vue — role labels', () => {
 describe('TimelineRow.vue — task label tooltip', () => {
   it('keeps the raw taskId as a title tooltip on the meta line', () => {
     expect(SFC).toMatch(
-      /<span class="timeline-row__meta"[^>]*:title="entry\.taskId[^"]*"[^>]*>\{\{ formatDateTime\(entry\.ts\) \}\} · \{\{ meta \}\}<\/span>/,
+      /<span class="timeline-row__meta"[^>]*:title="entry\.taskId[^"]*"[^\s>]*\s*>\{\{ formatDateTime\(entry\.ts\) \}\} · \{\{ meta \}\}/,
     );
   });
 });

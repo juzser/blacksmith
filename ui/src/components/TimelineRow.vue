@@ -4,10 +4,15 @@ import type { TimelineEntry } from '../lib/api.js';
 import { formatDateTime } from '../lib/format.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { findingStatusTone, severityTone } from '../lib/taxonomy.js';
-import { iconFor, metaFor, tintFor, titleFor } from '../lib/timelineDisplay.js';
+import {
+  EVENT_KIND_LABEL,
+  kindFor,
+  metaFor,
+  titleFor,
+  verdictOutcome,
+} from '../lib/timelineDisplay.js';
 import Icon from './ds/Icon.vue';
 import Lozenge from './ds/Lozenge.vue';
-import IdentityChip from './IdentityChip.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -24,16 +29,24 @@ const props = withDefaults(
 );
 const emit = defineEmits<{ toggle: []; select: [taskId: string] }>();
 
-const TINT_STYLE: Record<string, { bg: string; fg: string }> = {
-  blue: { bg: 'var(--ds-tint-blue)', fg: 'var(--ds-tint-blue-text)' },
-  slate: { bg: 'var(--ds-tint-slate)', fg: 'var(--ds-tint-slate-text)' },
-  lilac: { bg: 'var(--ds-tint-lilac)', fg: 'var(--ds-tint-lilac-text)' },
-};
-
-const icon = computed(() => iconFor(props.entry));
-const tint = computed(() => TINT_STYLE[tintFor(props.entry)] ?? TINT_STYLE.blue);
+// Item 1 of the mock-conformance brief: a text kind tag plus a left colour
+// bar, drawn from the `--bs-event-<kind>-text/subtle` tokens, replace the
+// old icon+tint pair. k-prompt is the mock's one asymmetric case: its left
+// bar uses the *subtle* tone rather than the bold text tone every other
+// kind uses, so the bar reads as a tint, not a line (ds-review.html).
+const kind = computed(() => kindFor(props.entry));
+const kindLabel = computed(() => EVENT_KIND_LABEL[kind.value]);
+const kindStyle = computed(() => ({
+  background: `var(--bs-event-${kind.value}-subtle)`,
+  color: `var(--bs-event-${kind.value}-text)`,
+}));
+const rowBarColor = computed(() =>
+  kind.value === 'prompt' ? `var(--bs-event-prompt-subtle)` : `var(--bs-event-${kind.value}-text)`,
+);
 const title = computed(() => titleFor(props.entry));
 const meta = computed(() => metaFor(props.entry));
+const verdict = computed(() => verdictOutcome(props.entry));
+const isPrompt = computed(() => kind.value === 'prompt');
 
 const severity = computed(() => {
   const p = props.entry.payload as { severity?: string };
@@ -48,17 +61,16 @@ const findingStatus = computed(() => {
   );
 });
 
-// Operator directive 5 (Phase 6b round 3): dispatch_decision is the one
-// Timeline event type carrying an agent role/model tier — same combined
-// "role · tier" IdentityChip as Kanban (directive 2) and Task detail.
+// Item 6 of the mock-conformance brief: the mock has no trailing IdentityChip
+// on a dispatch row, so the role/model move into the meta line as plain text
+// instead (Kanban and Task detail still use the chip; only this row dropped
+// it — nothing else in TimelineRow depended on it).
 const dispatchAgent = computed(() => {
   if (props.entry.eventType !== 'dispatch_decision') return null;
   const p = props.entry.payload as { agent_role?: string; model_tier?: string };
   if (!p.agent_role) return null;
   return {
-    role: p.agent_role,
     label: p.model_tier ? `${roleLabel(p.agent_role)} · ${p.model_tier}` : roleLabel(p.agent_role),
-    title: p.model_tier ? `${p.agent_role} · ${p.model_tier}` : p.agent_role,
   };
 });
 
@@ -73,7 +85,7 @@ const clickable = computed(
 </script>
 
 <template>
-  <div class="timeline-row">
+  <div class="timeline-row" :class="{ 'timeline-row--prompt': isPrompt }" :style="{ borderLeftColor: rowBarColor }">
     <button
       v-if="hasChildren"
       type="button"
@@ -87,12 +99,11 @@ const clickable = computed(
       <Icon :name="expanded ? 'chevron-down' : 'chevron-right'" :size="14" />
     </button>
     <span v-else style="width: var(--ds-control-height-sm); flex-shrink: 0" aria-hidden="true" />
-    <span class="timeline-row__icon" :style="{ background: tint.bg, color: tint.fg }">
-      <Icon :name="icon" :size="14" />
-    </span>
     <div class="timeline-row__main">
       <div class="timeline-row__head">
+        <span class="timeline-row__ktag" :style="kindStyle">{{ kindLabel }}</span>
         <component
+          v-if="!isPrompt"
           :is="clickable ? 'button' : 'span'"
           :type="clickable ? 'button' : undefined"
           class="timeline-row__title"
@@ -103,14 +114,21 @@ const clickable = computed(
         </component>
         <Lozenge v-if="severity" :tone="severityTone(severity).tone" :variant="severityTone(severity).variant">{{ severity }}</Lozenge>
         <Lozenge v-if="findingStatus" :tone="findingStatusTone(findingStatus)">{{ findingStatus }}</Lozenge>
-        <IdentityChip
-          v-if="dispatchAgent"
-          :id="dispatchAgent.role"
-          :label="dispatchAgent.label"
-          :title="dispatchAgent.title"
-        />
+        <Lozenge v-if="verdict === 'pass'" tone="success">
+          <Icon name="circle-check" :size="12" /> Passed
+        </Lozenge>
+        <Lozenge v-else-if="verdict === 'fail'" tone="danger">
+          <Icon name="x" :size="12" /> Failed
+        </Lozenge>
+        <Lozenge v-else-if="verdict === 'errored'" tone="warning">Did not run</Lozenge>
       </div>
-      <span class="timeline-row__meta" :title="entry.taskId ?? undefined">{{ formatDateTime(entry.ts) }} · {{ meta }}</span>
+      <!-- The prompt text itself, verbatim, as the mock's k-prompt row quotes it
+           (ds-review.html:1380) -- it is this row's whole "title", so it replaces
+           the title span above rather than repeating it. -->
+      <blockquote v-if="isPrompt" class="timeline-row__prompt">{{ title }}</blockquote>
+      <span class="timeline-row__meta" :title="entry.taskId ?? undefined"
+        >{{ formatDateTime(entry.ts) }} · {{ meta }}<template v-if="dispatchAgent"> · {{ dispatchAgent.label }}</template></span
+      >
     </div>
   </div>
 </template>

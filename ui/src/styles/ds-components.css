@@ -1226,21 +1226,78 @@
 }
 
 /* --- Causal timeline (gap component §6.2.1) --- */
+/* Item 3: day separator above a day's rows (ds-review.html's `.day`), flush
+   with the feed's own left edge -- no left margin. Activity wraps each
+   header + feed pair in one block (CausalTimelineList.vue) so the page's
+   flex `gap` lands between day groups, not between a header and its own
+   feed; History renders the pairs unwrapped in plain block flow, where
+   margin-top/-bottom alone already produce the same spacing. */
+.timeline-day {
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtlest);
+  margin: var(--bs-space-5) 0 var(--ds-space-2);
+}
+.timeline-day:first-child {
+  margin-top: 0;
+}
+/* Item 3: a raised card frame around a day's rows (ds-review.html's `.feed`),
+   plus a 1px seam between adjacent rows (its `.ev` border-bottom), so rows on
+   the same background don't merge. Used both for the top-level day group and
+   for a dispatch group's expanded members (the mock's nested `.emembers`
+   card), which is why the selector reaches through an `ol` either way. */
+.timeline-feed {
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--bs-radius-md);
+  overflow: hidden;
+}
+.timeline-feed > ol > li:not(:last-child) > .timeline-row,
+.timeline-feed > ol > li.timeline-row:not(:last-child),
+.timeline-feed > li.timeline-row:not(:last-child) {
+  border-bottom: 1px solid var(--ds-border);
+}
 .timeline-row {
   display: flex;
   align-items: flex-start;
   gap: var(--ds-space-2);
-  padding: var(--ds-space-2) 0;
+  padding: var(--ds-space-2) var(--ds-space-2) var(--ds-space-2) var(--ds-space-3);
+  border-left: 3px solid transparent;
 }
-.timeline-row__icon {
-  display: flex;
+/* Item 4: at phone width the global icon-button rule (above) grows the
+   chevron's own box to --bs-touch for its hit area, which otherwise widens
+   this row's leading column past the no-children placeholder's fixed
+   control-height-sm, leaving an uneven gutter. A negative margin keeps the
+   chevron's real box (and so its measured touch target) at --bs-touch while
+   giving back the extra space to the row's layout, so both kinds of row
+   keep the same visible column width. */
+@media (max-width: 640px) {
+  .timeline-row > .ds-btn--icon-xs {
+    margin: calc((var(--ds-control-height-sm) - var(--bs-touch)) / 2);
+  }
+}
+/* Item 4: a prompt row gets a sunken background so it reads as quoted input,
+   not just another event (ds-review.html's `.ev.k-prompt`). */
+.timeline-row--prompt {
+  background: var(--bs-surface-sunken);
+}
+.timeline-row__ktag {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
+  padding: 2px var(--ds-space-2);
   border-radius: var(--ds-radius-pill);
-  margin-top: 2px;
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  flex-shrink: 0;
+}
+.timeline-row__prompt {
+  margin: var(--ds-space-1) 0 0;
+  padding: 0;
+  border: 0;
+  font-size: var(--ds-text-sm);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text);
+  overflow-wrap: anywhere;
 }
 .timeline-row__main {
   min-width: 0;
@@ -1866,6 +1923,18 @@
   margin: var(--ds-space-2) 0 0;
   font-size: var(--ds-text-xs);
   color: var(--ds-text-subtlest);
+}
+/* Item 9 of the mock-conformance brief: the zoom/fit cluster floated on the
+   bare canvas with no surface of its own. Same bordered-surface tokens the
+   app already uses for a floating control group (.ds-tablewrap's
+   border/radius/surface trio), not the flat Toolbar row layout. */
+.sessions-canvas__zoom-cluster {
+  display: flex;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-1);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-raised);
 }
 
 /* 320 wide against AGENT_COLUMN_X (380) leaves a 60px channel for the edge —

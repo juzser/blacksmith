@@ -49,8 +49,9 @@ const items = computed(() => timelineItems(props.nodes, props.fold));
         <div
           :id="`tl-group-${item.group.id}`"
           role="group"
+          class="timeline-feed"
           :hidden="!expanded.has(item.group.id)"
-          style="padding-left: 1.5rem"
+          style="margin-left: 1.5rem"
         >
           <TimelineNodeList
             v-if="expanded.has(item.group.id)"

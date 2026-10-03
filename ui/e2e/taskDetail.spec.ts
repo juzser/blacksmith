@@ -64,7 +64,7 @@ test.describe('Task detail', () => {
   }) => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
-    const rows = page.locator('.bs-run-history__row');
+    const rows = page.locator('.bs-run-history .timeline-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
     await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
@@ -159,7 +159,7 @@ test.describe('Task detail', () => {
         await page.setViewportSize(viewport);
         await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
         await page.getByRole('tab', { name: 'History' }).click();
-        await settleForShot(page, page.locator('.bs-run-history__row').first());
+        await settleForShot(page, page.locator('.bs-run-history .timeline-row').first());
         await shoot(page, `task-detail-history-${vpName}-${theme}`);
       });
     }

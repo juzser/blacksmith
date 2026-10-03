@@ -2353,52 +2353,15 @@ summary.bs-inbox__group-head {
   font-size: var(--bs-text-sm);
 }
 
-/* RunHistoryTimeline (DS3 §4.7 pattern 2) */
+/* RunHistoryTimeline (DS3 §4.7 pattern 2). Item 3: rows sit flush inside the
+   shared .timeline-feed card, with a 1px border-bottom seam between them
+   instead of a gap -- so no gap here. */
 .bs-run-history {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--bs-space-3);
-}
-.bs-run-history__row {
-  display: flex;
-  gap: var(--bs-space-2);
-  align-items: flex-start;
-}
-.bs-run-history__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--bs-radius-full);
-  flex-shrink: 0;
-  background: var(--bs-surface-sunken);
-  color: var(--bs-text-subtle);
-}
-.bs-run-history__icon--dispatch {
-  color: var(--bs-tone-progress-text);
-}
-.bs-run-history__icon--judge-report {
-  color: var(--bs-tone-review-text);
-}
-.bs-run-history__icon--result {
-  color: var(--bs-tone-done-text);
-}
-.bs-run-history__icon--error {
-  color: var(--bs-tone-danger-text);
-}
-.bs-run-history__main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-1);
-}
-.bs-run-history__head {
-  display: flex;
-  align-items: center;
-  gap: var(--bs-space-2);
 }
 .bs-run-history__label {
   font-size: var(--bs-text-sm);

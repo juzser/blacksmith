@@ -61,6 +61,7 @@ import {
   severityKitTone,
   taskStatusKitTone,
 } from '../lib/taxonomy.js';
+import { groupByDay } from '../lib/timelineDisplay.js';
 import { isWaivable } from '../lib/waivable.js';
 import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 
@@ -80,6 +81,11 @@ const historyLoading = ref(true);
 // error too: without one the tab fell through to "No events recorded for this
 // task." and told the operator the factory recorded nothing (D-224).
 const historyError = ref<string | null>(null);
+// Item 3: day headers over the History tab's flat event list, same rule as
+// Activity's CausalTimelineList — the list is already in the server's own
+// order (D-243 keeps this page from re-sorting under the operator), so
+// grouping only partitions it into calendar days, it never reorders it.
+const historyDayGroups = computed(() => groupByDay(history.value, new Date().toISOString()));
 
 async function load() {
   error.value = null;
@@ -371,15 +377,17 @@ const factsRowText = computed(() => {
               <Banner v-else-if="historyError" tone="danger" show-retry @retry="loadHistory">
                 {{ historyError }}
               </Banner>
-              <div v-else-if="history.length > 0">
-                <TimelineRow
-                  v-for="e in history"
-                  :key="e.eventId"
-                  :entry="e"
-                  :has-children="false"
-                  :expanded="false"
-                  :selectable="false"
-                />
+              <div v-else-if="history.length > 0" style="margin-top: var(--bs-space-5)">
+                <template v-for="(group, gi) in historyDayGroups" :key="gi">
+                  <div class="timeline-day">{{ group.label }}</div>
+                  <div class="timeline-feed">
+                    <ol style="list-style: none; margin: 0; padding: 0">
+                      <li v-for="e in group.items" :key="e.eventId">
+                        <TimelineRow :entry="e" :has-children="false" :expanded="false" :selectable="false" />
+                      </li>
+                    </ol>
+                  </div>
+                </template>
               </div>
               <EmptyState v-else :icon="HistoryIcon" title="No events recorded." body="Events this task produces will appear here." />
             </template>

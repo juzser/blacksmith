@@ -1,12 +1,11 @@
-// Timeline row anatomy (design-spec.md §5.2): icon+tint is decorative
-// grouping by EVENT KIND only, never status — actual outcome renders as a
-// Lozenge (taxonomy.ts) alongside it, never via tint alone.
+// Timeline row anatomy (ds-review.html's `.ev`/`.ktag`): the kind tag and
+// left colour bar are decorative grouping by EVENT KIND only, never status —
+// actual outcome renders as a Lozenge (taxonomy.ts) alongside it, never via
+// the kind colour alone.
 import type { TimelineEntry } from './api.js';
 import { taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
-
-export type RowTint = 'blue' | 'slate' | 'lilac';
 
 /** CausalTimelineList's pre-built causal-parent tree node (moved here, not
  * exported from a .vue SFC — see components/ds/types.ts's header comment
@@ -170,6 +169,30 @@ export function timelineItems(nodes: TimelineNode[], fold: boolean): TimelineIte
   return fold ? groupDispatches(nodes) : nodes.map((node) => ({ kind: 'entry', node }));
 }
 
+/**
+ * A `TimelineItem`'s own timestamp — the entry's own `ts` for a plain row, or
+ * the NEWEST member's `ts` for a folded dispatch group. Used to bucket the
+ * already-folded top-level list into day headers (brief item 3) without
+ * splitting a group across two days: the group goes under the day of its
+ * newest row, never its oldest or whichever member happens first in the
+ * fold's own order.
+ */
+export function tsForItem(item: TimelineItem): string {
+  if (item.kind === 'entry') return item.node.entry.ts;
+  return item.group.members.reduce(
+    (latest, m) => (m.entry.ts > latest ? m.entry.ts : latest),
+    item.group.members[0]?.entry.ts ?? '',
+  );
+}
+
+/** The raw `TimelineNode`s a `TimelineItem` stands for — one for a plain row,
+ * the whole run for a folded group — so a day bucket built from `tsForItem`
+ * can hand its members back to `TimelineNodeList` as a flat node list, which
+ * re-folds them identically (same nodes, same order). */
+export function nodesOfItem(item: TimelineItem): TimelineNode[] {
+  return item.kind === 'entry' ? [item.node] : item.group.members;
+}
+
 /** One FilterChips option, carrying the event types it selects rather than
  * relying on its `value` being an event type. `Prompts` is the reason: what an
  * operator means by it is "the rows a person wrote", which is two types today
@@ -287,119 +310,120 @@ export function matchesKind(entry: TimelineEntry, kinds: readonly string[]): boo
   return kinds.some((kind) => (TYPES_BY_KIND.get(kind) ?? [kind]).includes(entry.eventType));
 }
 
-export function iconFor(entry: TimelineEntry): string {
+/** The mock's nine row kinds (ds-review.html's `.k-*` classes): a row's type
+ * tag and left colour bar, drawn from `--bs-event-<kind>-text/subtle`. This
+ * replaces the old icon+tint pair — colour groups by kind only, never by
+ * status, and the tag text is what actually carries the kind (never colour
+ * alone). */
+export const EVENT_KINDS = [
+  'prompt',
+  'dispatch',
+  'returned',
+  'finding',
+  'gate',
+  'merge',
+  'error',
+  'feedback',
+  'system',
+] as const;
+
+export type EventKind = (typeof EVENT_KINDS)[number];
+
+export const EVENT_KIND_LABEL: Record<EventKind, string> = {
+  prompt: 'Prompt',
+  dispatch: 'Dispatched',
+  returned: 'Returned',
+  finding: 'Finding',
+  gate: 'Gate',
+  merge: 'Merge',
+  error: 'Error',
+  feedback: 'Feedback',
+  system: 'System',
+};
+
+/** Which of the nine mock kinds an event type renders as. Unknown types fall
+ * back to `system` rather than throwing, the same way `titleFor`'s default
+ * case prints the raw event_type instead of crashing on a taxonomy the
+ * dashboard hasn't caught up with yet. */
+export function kindFor(entry: TimelineEntry): EventKind {
   switch (entry.eventType) {
     case 'user_prompt':
-      return 'message-circle';
-    // Distinct from user_prompt's speech bubble: a prompt is an instruction
-    // given, a note is reasoning written down. Same voice, different act.
     case 'operator-note':
-      return 'file-text';
+      return 'prompt';
     case 'dispatch_decision':
-      return 'send';
-    case 'schema-check-result':
-    case 'deps-check-result':
-    case 'testgate-result':
-    case 'gate-outcome': {
-      const verdict = gateVerdict(entry);
-      if (verdict === 'unrecorded') return 'circle-alert';
-      return verdict === 'pass' ? 'shield-check' : 'shield-alert';
-    }
+      return 'dispatch';
+    case 'task-result-recorded':
+      return 'returned';
     case 'finding-raised':
+    case 'finding-reverified':
     case 'finding-suppressed':
     case 'finding-transitioned':
+    case 'finding-reattributed':
     case 'severity-decisions':
     case 'waiver-granted':
     case 'waiver-denied':
     case 'task-waiver-approved':
-      return 'shield-check';
+      return 'finding';
+    case 'schema-check-result':
+    case 'artifact-check-result':
+    case 'commit-check-result':
+    case 'deps-check-result':
+    case 'judges-outstanding':
+    case 'grader-verdict':
+    case 'budget-check-result':
+    case 'testgate-result':
+    case 'coverage-evidence':
+    case 'integration-check':
+    case 'spec-review-recorded':
+    case 'goal-check-recorded':
+    case 'quorum-decision':
+    case 'gate-outcome':
+    case 'issue-reported':
+      return 'gate';
+    case 'wave-merged':
+    case 'epic-closed':
+    case 'integration-pr-opened':
+      return 'merge';
     case 'error-logged':
-      return 'triangle-alert';
-    case 'session-start':
-      return 'play';
-    case 'task-result-recorded':
-      return 'file-check';
+    case 'error-report-proposed':
+      return 'error';
     case 'judge-verdict':
     case 'judge-reported':
-      return 'scale';
-    // The second eye, not a second scale: this row is one reader's independent
-    // pass over a diff, and it says what was seen rather than what was decided.
     case 'cross-finding-reconciled':
-      return 'eye';
-    // The one gate that reads outside the plan. Not a shield — a shield says
-    // "this artifact was checked against its own criteria", and the whole
-    // point of this row is that the criteria came from somewhere the planner
-    // could not reach.
-    case 'goal-check-recorded':
-      return 'target';
-    case 'epic-closed':
-      return 'git-merge';
-    case 'lesson-candidate-raised':
-    case 'lesson-edited':
-    case 'lesson-status-changed':
-      return 'graduation-cap';
-    // The scheduler's four proposals. Each gets the icon of the thing it is
-    // proposing rather than one shared "proposal" glyph, because the operator
-    // decides them one at a time and the icon is the first thing that says
-    // which decision this is.
-    case 'recheck-proposed':
-      return 'rotate-cw';
-    case 'maintenance-proposed':
-      return 'refresh-cw';
-    case 'growth-review-due':
-      return 'map';
-    case 'error-report-proposed':
-      return 'triangle-alert';
-    // The plan graph. Shape over source: a row here says what happened to the
-    // plan, and the glyph says which shape of change it was — added, removed,
-    // linked, admitted, merged — because that is what an operator scanning a
-    // plan's history is reading for. `wave-merged` shares `epic-closed`'s
-    // glyph on purpose: both rows are a merge landing, at different scopes.
-    case 'plan-version-created':
-    case 'plan-version-superseded':
-      return 'kanban';
-    case 'task-added':
-    case 'task-split':
-      return 'plus';
-    case 'task-superseded':
-      return 'minus';
-    case 'edge-recorded':
-      return 'chevron-right';
-    case 'wave-admitted':
-      return 'inbox';
-    case 'wave-merged':
-      return 'git-merge';
-    // A worker's proposal is a document — the spec glyph taxonomy.ts already
-    // uses for the `spec` error group — and the operator's answer to it is a
-    // verdict, which is the scale the judges get. The split is the point: one
-    // row is an ask and the other is the decision, and they are the two rows
-    // an operator has to tell apart at a glance to answer the first quickly.
     case 'spec-change-proposed':
-      return 'file-text';
     case 'spec-change-decided':
-      return 'scale';
-    // The PR lives on GitHub, not in this dashboard: the row is a pointer out,
-    // and the glyph says so before the operator reads the number.
-    case 'integration-pr-opened':
-      return 'external-link';
+      return 'feedback';
     default:
-      return 'history';
+      return 'system';
   }
 }
 
-export function tintFor(entry: TimelineEntry): RowTint {
-  switch (entry.eventType) {
-    // Both tints are blue because tint groups by kind, and the kind these two
-    // share is "a person wrote this" — the same grouping the Prompts filter
-    // selects on. Everything else on the timeline is the machine talking.
-    case 'user_prompt':
-    case 'operator-note':
-      return 'blue';
-    case 'dispatch_decision':
-      return 'slate';
-    default:
-      return 'lilac';
+/** Which payload field carries a verdict row's pass/fail outcome, for the
+ * same-shaped tag `findingStatus` already renders via `Lozenge`. Only rows
+ * with a real pass/fail reach a tag; `null` means "say nothing" rather than
+ * guessing one (D-169's "unrecorded" rule, one level up). `'errored'` is its
+ * own honest third answer for a judge-verdict run that never reached a
+ * verdict at all (`payload.ok === false`, e.g. a missing API key) -- that is
+ * not the work failing, so it must never read "Failed". */
+export function verdictOutcome(entry: TimelineEntry): 'pass' | 'fail' | 'errored' | null {
+  if (entry.eventType === 'judge-verdict') {
+    const p = entry.payload as Record<string, unknown>;
+    if (p.ok === false) return 'errored';
+    if (p.verdict === 'confirm') return 'pass';
+    if (p.verdict === 'refute') return 'fail';
+    return null;
   }
+  if (entry.eventType === 'grader-verdict') {
+    const overall = (entry.payload as Record<string, unknown>).overall;
+    if (overall === 'pass') return 'pass';
+    if (overall === 'fail') return 'fail';
+    return null;
+  }
+  if (entry.eventType in GATE_VERDICT_FIELD) {
+    const verdict = gateVerdict(entry);
+    return verdict === 'unrecorded' ? null : verdict;
+  }
+  return null;
 }
 
 /** Which payload field carries each gate event's verdict. */
@@ -692,4 +716,72 @@ export function titleFor(entry: TimelineEntry): string {
 
 export function metaFor(entry: TimelineEntry): string {
   return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+}
+
+const SHORT_MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** One day's header and the rows under it, in the input's own order. */
+export interface DayGroup<T> {
+  label: string;
+  items: T[];
+}
+
+function startOfLocalDay(iso: string): Date {
+  const d = new Date(iso);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** "Today" / "Yesterday" / "29 Sep" relative to `nowIso`, local time. Days
+ * further than yesterday never age into a third relative word — a week-old
+ * row reads "6 Sep", not "6 days ago" — because the list is a log, not a
+ * countdown. */
+function dayLabel(day: Date, nowIso: string): string {
+  const today = startOfLocalDay(nowIso);
+  const diffDays = Math.round((today.getTime() - day.getTime()) / 86_400_000);
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  return `${day.getDate()} ${SHORT_MONTHS[day.getMonth()]}`;
+}
+
+/**
+ * Groups an already newest-first list into day buckets, each headed "Today",
+ * "Yesterday" or a short date (brief item 3). Pure and clock-injected — `now`
+ * is a parameter, never `Date.now()` — so a test can fix "today" and assert a
+ * deterministic label instead of a label that only matches when the suite
+ * happens to run on the day it was written.
+ *
+ * The caller supplies items already in display order; this only partitions
+ * them by local calendar day, it does not re-sort — `buildCausalTree` and
+ * `RunHistoryTimeline`'s own list are both newest-first already, and grouping
+ * is the wrong place to second-guess that.
+ */
+export function groupByDay<T extends { ts: string }>(
+  items: readonly T[],
+  nowIso: string,
+): DayGroup<T>[] {
+  const groups: DayGroup<T>[] = [];
+  let currentKey: number | null = null;
+  for (const item of items) {
+    const day = startOfLocalDay(item.ts);
+    const key = day.getTime();
+    if (key !== currentKey) {
+      groups.push({ label: dayLabel(day, nowIso), items: [] });
+      currentKey = key;
+    }
+    groups[groups.length - 1]?.items.push(item);
+  }
+  return groups;
 }
