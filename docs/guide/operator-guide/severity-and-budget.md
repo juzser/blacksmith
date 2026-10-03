@@ -196,7 +196,7 @@ visible half reads clear while the whole bill does not.
 ### What it reports on the dogfood log today
 
 ```
-epic envkit-config-loader: 0 tokens measured across 0 of 5 tasks,
+epic envkit-config-loader: 0 tokens measured across 0 of 5 task(s) (5 unmeasured),
 1,150,000 projected, against a 1,400,000 alarm and a 2,000,000 cap.
 status: unverifiable — budgets.yml declares no cap for security-reviewer.
 ```
@@ -206,6 +206,10 @@ session's log holds no `task-result-recorded` and no `budget-check-result` event
 at all, so there is nothing to measure and the entire number is projection. An
 alarm built on measured spend alone would have printed "0 / 1,400,000 — under"
 and exited 0. That is the false clean this command exists to refuse.
+
+A task's `total_tokens` below a small plausibility floor (a placeholder like
+`0` or `1`, not a real agent turn) is treated the same way: as unmeasured,
+not as near-zero spend.
 
 ### Limits, stated plainly
 

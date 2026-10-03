@@ -139,6 +139,43 @@ describe('readMeasuredSpend', () => {
     const spend = readMeasuredSpend([stored('task-result-recorded', {}, 'task-1')]);
     expect(spend.has('task-1')).toBe(false);
   });
+
+  it('treats a placeholder total_tokens of 0 as unmeasured, not a zero bill', () => {
+    // A dispatcher that never fills in `--input-tokens`/`--output-tokens` can
+    // still write `token_usage.total_tokens: 0`. That is a dispatcher default,
+    // not a measurement of a real agent turn, which runs into the thousands.
+    seq = 0;
+    const spend = readMeasuredSpend([result('task-1', 0)]);
+    expect(spend.has('task-1')).toBe(false);
+  });
+
+  it('treats a placeholder total_tokens of 1 as unmeasured', () => {
+    seq = 0;
+    const spend = readMeasuredSpend([result('task-1', 1)]);
+    expect(spend.has('task-1')).toBe(false);
+  });
+
+  it('keeps a realistic total_tokens as measured', () => {
+    seq = 0;
+    const spend = readMeasuredSpend([result('task-1', 12_000)]);
+    expect(spend.get('task-1')).toBe(12_000);
+  });
+
+  it('treats a placeholder budget-check-result tokensUsed as unmeasured too', () => {
+    seq = 0;
+    const spend = readMeasuredSpend([budgetCheck('task-1', 1)]);
+    expect(spend.has('task-1')).toBe(false);
+  });
+
+  it('draws the plausibility floor at exactly 100: 99 is unmeasured, 100 is measured', () => {
+    seq = 0;
+    const atFloor = readMeasuredSpend([result('task-1', 100)]);
+    expect(atFloor.get('task-1')).toBe(100);
+
+    seq = 0;
+    const belowFloor = readMeasuredSpend([result('task-1', 99)]);
+    expect(belowFloor.has('task-1')).toBe(false);
+  });
 });
 
 describe('checkBudgetAlarm', () => {
@@ -238,6 +275,43 @@ describe('checkBudgetAlarm', () => {
     expect(epic?.measuredTokens).toBe(0);
     expect(epic?.projectedTokens).toBe(150_000);
     expect(epic?.projectedFrom).toEqual({ coder: 150_000 });
+  });
+
+  it('projects a coder dispatch at its cap when the only result is a placeholder count', () => {
+    // 0/0 or 1/1 token_usage is a dispatcher default, not a measurement — the
+    // task must be projected at the coder cap exactly as if nothing had been
+    // recorded, and counted as unmeasured.
+    seq = 0;
+    const report = checkBudgetAlarm(
+      [waveAdmitted('epic-1', ['task-1']), result('task-1', 1), dispatch('coder', 'task-1')],
+      POLICY,
+      OPTS,
+    );
+    const epic = report.epics[0];
+    expect(epic?.measuredTokens).toBe(0);
+    expect(epic?.measuredTaskCount).toBe(0);
+    expect(epic?.unmeasuredTaskCount).toBe(1);
+    expect(epic?.projectedTokens).toBe(150_000);
+    expect(epic?.projectedFrom).toEqual({ coder: 150_000 });
+  });
+
+  it('includes a placeholder-only task in the report’s unmeasured count', () => {
+    seq = 0;
+    const report = checkBudgetAlarm(
+      [
+        waveAdmitted('epic-1', ['task-1', 'task-2']),
+        result('task-1', 100_000),
+        dispatch('coder', 'task-1'),
+        result('task-2', 0),
+        dispatch('coder', 'task-2'),
+      ],
+      POLICY,
+      OPTS,
+    );
+    const epic = report.epics[0];
+    expect(epic?.taskCount).toBe(2);
+    expect(epic?.measuredTaskCount).toBe(1);
+    expect(epic?.unmeasuredTaskCount).toBe(1);
   });
 
   it('does not project the one worker dispatch the measured result paid for', () => {
