@@ -229,6 +229,7 @@ export const KIND_OPTIONS: readonly KindOption[] = [
       'severity-decisions',
       'waiver-granted',
       'waiver-denied',
+      'task-waiver-approved',
       'gate-outcome',
       'issue-reported',
     ],
@@ -310,6 +311,7 @@ export function iconFor(entry: TimelineEntry): string {
     case 'severity-decisions':
     case 'waiver-granted':
     case 'waiver-denied':
+    case 'task-waiver-approved':
       return 'shield-check';
     case 'error-logged':
       return 'triangle-alert';
@@ -534,6 +536,8 @@ export function titleFor(entry: TimelineEntry): string {
       return 'Waiver granted';
     case 'waiver-denied':
       return 'Waiver denied';
+    case 'task-waiver-approved':
+      return 'Task waiver approved';
     case 'error-logged':
       return `Error — ${String(p.error ?? '')}`;
     case 'task-added':
