@@ -570,7 +570,7 @@ function goToTask(taskId: string | null) {
           </template>
 
           <Panel position="bottom-left">
-            <div style="display: flex; gap: var(--ds-space-1)">
+            <div class="sessions-canvas__zoom-cluster">
               <Button variant="outline" size="icon-sm" aria-label="Zoom in" icon="plus" @click="zoomIn()" />
               <Button variant="outline" size="icon-sm" aria-label="Zoom out" icon="minus" @click="zoomOut()" />
               <Button variant="outline" size="sm" @click="fitAndAnchor()">Fit view</Button>

@@ -1891,6 +1891,18 @@
   font-size: var(--ds-text-xs);
   color: var(--ds-text-subtlest);
 }
+/* Item 9 of the mock-conformance brief: the zoom/fit cluster floated on the
+   bare canvas with no surface of its own. Same bordered-surface tokens the
+   app already uses for a floating control group (.ds-tablewrap's
+   border/radius/surface trio), not the flat Toolbar row layout. */
+.sessions-canvas__zoom-cluster {
+  display: flex;
+  gap: var(--ds-space-1);
+  padding: var(--ds-space-1);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-surface-raised);
+}
 
 /* 320 wide against AGENT_COLUMN_X (380) leaves a 60px channel for the edge —
    the same "node narrower than its step" rule .roadmap-node follows. */
