@@ -377,7 +377,7 @@ const factsRowText = computed(() => {
               <Banner v-else-if="historyError" tone="danger" show-retry @retry="loadHistory">
                 {{ historyError }}
               </Banner>
-              <div v-else-if="history.length > 0" style="margin-top: var(--ds-space-5)">
+              <div v-else-if="history.length > 0" style="margin-top: var(--bs-space-5)">
                 <template v-for="(group, gi) in historyDayGroups" :key="gi">
                   <div class="timeline-day">{{ group.label }}</div>
                   <div class="timeline-feed">
