@@ -3819,6 +3819,81 @@ describe('cli.ts (built binary)', () => {
     expect(JSON.parse(noRole.stdout).error.code).toBe('cli.missing-positional');
   });
 
+  it('lessons for-dispatch: resolves the task id the same way its siblings do (case-type)', () => {
+    const planPath = path.join(scratchDir, 'dispatch-case-plan.json');
+    const lessonsPath = path.join(scratchDir, 'dispatch-case-lessons.md');
+    writeFileSync(
+      planPath,
+      JSON.stringify({
+        epic_id: 'epic-1',
+        version: 1,
+        status: 'active',
+        tasks: [{ task_id: 'epic-1/task-1', case: 'bugfix', claims: [] }],
+        edges: [],
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      lessonsPath,
+      [
+        '## case-type',
+        '',
+        '### lesson-cli-case-1: reproduce first',
+        '',
+        '- lesson_id: lesson-cli-case-1',
+        '- finding_category: correctness',
+        '- case_type: bugfix',
+        '- statement: A bugfix without a reproducing test is a guess with a commit message.',
+        '',
+        '### lesson-cli-case-2: refactor only',
+        '',
+        '- lesson_id: lesson-cli-case-2',
+        '- finding_category: maintainability',
+        '- case_type: refactor',
+        '- statement: Never fold a refactor into a feature commit.',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    // `task-1` is the short form `resolveTaskId` accepts; the plan only
+    // names the long form `epic-1/task-1`. This used to throw
+    // `cli.task-not-in-plan` out of `caseForDispatch` even though the same
+    // `--task task-1` resolves fine for the gate (`budgetFromFlags`).
+    const scoped = runCli([
+      'lessons',
+      'for-dispatch',
+      'planner',
+      '--plan',
+      planPath,
+      '--task',
+      'task-1',
+      '--lessons',
+      lessonsPath,
+    ]);
+    expect(scoped.status).toBe(0);
+    const parsed = JSON.parse(scoped.stdout);
+    expect(parsed.lessons.map((l: { lessonId: string }) => l.lessonId)).toEqual([
+      'lesson-cli-case-1',
+    ]);
+    expect(parsed.text).toContain('A bugfix without a reproducing test');
+    expect(parsed.text).not.toContain('lesson-cli-case-2');
+
+    const unknownTask = runCli([
+      'lessons',
+      'for-dispatch',
+      'planner',
+      '--plan',
+      planPath,
+      '--task',
+      'task-9',
+      '--lessons',
+      lessonsPath,
+    ]);
+    expect(unknownTask.status).toBe(1);
+    expect(JSON.parse(unknownTask.stdout).error.code).toBe('cli.task-not-in-plan');
+  });
+
   it('lessons approve: refuses a terminal-status lesson, an unknown id, and a missing positional', () => {
     const sessionId = `cli-approve-${Date.now()}`;
     const eventsDir = path.join(scratchDir, 'approve-events');
