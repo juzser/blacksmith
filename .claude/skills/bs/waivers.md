@@ -17,7 +17,9 @@
    Ask the operator, then run `bs waivers approve-task <task-id> --note
    "<why>" --session ... --causal-parent ... --actor operator`. Only the
    operator actor is accepted; an approval written under any other actor is
-   refused, and one appended by hand under another actor is not honoured.
+   refused, and one appended by hand under another actor is not honoured. An
+   approval is tied to the plan version it is given under (`--plan-version`):
+   a task waived again by a newer plan needs a fresh approval.
 4. A denial discharges nothing — the finding stays open with no further
    move of its own, and an open finding blocks the epic verdict. The
    command's output carries `findingIdsToCarry`: every finding id this batch

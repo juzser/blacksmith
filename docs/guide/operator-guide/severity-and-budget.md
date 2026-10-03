@@ -57,7 +57,9 @@ bs waivers approve-task epic-1/task-3 --note "superseded by task-5" --session <s
 
 The note is required, and the command refuses any actor other than the
 operator spellings above. An approval event appended under another actor is
-ignored by the gate. A waived task with an approval no longer blocks the close
+ignored by the gate. An approval is tied to the plan version it was given
+under (`--plan-version`); if a later plan version waives the task again, record
+a new approval. A waived task with an approval no longer blocks the close
 and is listed under the epic's waived tasks.
 
 **Same-mistake escalation.** A finding matching an approved lesson (same

@@ -634,7 +634,8 @@ gate_event:      [schema-check-result, artifact-check-result,
                   # waiver-granted/-denied — operator waiver-batch answer,
                   #                       keyed by finding fingerprint
                   # task-waiver-approved — operator approval of one waived
-                  #                       task, keyed by task id; what the
+                  #                       task, keyed by task id and valid from
+                  #                       its plan_version on; what the
                   #                       epic gate accepts in place of a
                   #                       gate run
                   # gate-outcome        — the composed gate pipeline's

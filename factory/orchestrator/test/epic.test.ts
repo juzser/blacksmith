@@ -722,6 +722,34 @@ describe('epic.ts withGateEvidence (D-138)', () => {
       );
       expect(row?.waiverApproved).toBe(false);
     });
+
+    // The approval is the operator's answer to the waiver they were shown. A
+    // later plan version that waives the task again is a different waiver.
+    describe('plan version', () => {
+      const approvalAt = (planVersion: number): StoredEvent => {
+        const e = approval('epic-1/task-1', 'operator');
+        return { ...e, record: { ...e.record, plan_version: planVersion } };
+      };
+      const rowAt = (planVersion: number): TaskFoldRow => ({
+        ...bareRow('epic-1/task-1'),
+        planVersion,
+      });
+
+      it('honours an approval given at the version the row was waived at', () => {
+        const [row] = withGateEvidence([rowAt(2)], [approvalAt(2)], 'epic-1');
+        expect(row?.waiverApproved).toBe(true);
+      });
+
+      it('does not honour an approval older than the row that is now waived', () => {
+        const [row] = withGateEvidence([rowAt(3)], [approvalAt(2)], 'epic-1');
+        expect(row?.waiverApproved).toBe(false);
+      });
+
+      it('honours a fresh approval given at the re-waived version', () => {
+        const [row] = withGateEvidence([rowAt(3)], [approvalAt(2), approvalAt(3)], 'epic-1');
+        expect(row?.waiverApproved).toBe(true);
+      });
+    });
   });
 
   // Both registers spell ids either way (D-46/P9-29): the fold row can carry

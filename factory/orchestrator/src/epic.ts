@@ -329,8 +329,9 @@ export interface TaskGateEvidence {
 export interface EpicTaskRow extends TaskFoldRow {
   gate: TaskGateEvidence;
   /**
-   * An operator-written `task-waiver-approved` exists for this task. What a
-   * `waived` row carries in place of a gate run; absent reads as "not approved".
+   * An operator-written `task-waiver-approved` exists for this task, given at
+   * or after the plan version of this row. What a `waived` row carries in place
+   * of a gate run; absent reads as "not approved".
    */
   waiverApproved?: boolean;
 }
@@ -354,7 +355,8 @@ export function withGateEvidence(
 ): EpicTaskRow[] {
   const gated = new Set<string>();
   const recorded = new Set<string>();
-  const approved = new Set<string>();
+  // Newest plan version each task's operator approval was given under.
+  const approved = new Map<string, number>();
   for (const { record } of events) {
     if (!record.task_id) continue;
     if (record.event_type === GATE_OUTCOME_EVENT) gated.add(bareTaskId(epicId, record.task_id));
@@ -362,15 +364,21 @@ export function withGateEvidence(
       recorded.add(bareTaskId(epicId, record.task_id));
     // `event append` is open to any actor, so the approval counts only when
     // the operator wrote it.
-    else if (record.event_type === TASK_WAIVER_APPROVED_EVENT && isOperatorActor(record.actor))
-      approved.add(bareTaskId(epicId, record.task_id));
+    else if (record.event_type === TASK_WAIVER_APPROVED_EVENT && isOperatorActor(record.actor)) {
+      const bare = bareTaskId(epicId, record.task_id);
+      approved.set(bare, Math.max(approved.get(bare) ?? record.plan_version, record.plan_version));
+    }
   }
   return tasks.map((t) => {
     const bare = bareTaskId(epicId, t.taskId);
+    // An approval answers the waiver the operator was shown: a row re-cut at a
+    // later plan version needs an approval given at that version or after.
+    const approvedAt = approved.get(bare);
     return {
       ...t,
       gate: { gateOutcome: gated.has(bare), resultRecorded: recorded.has(bare) },
-      waiverApproved: approved.has(bare),
+      waiverApproved:
+        approvedAt !== undefined && (t.planVersion === null || approvedAt >= t.planVersion),
     };
   });
 }
