@@ -1922,8 +1922,9 @@ export async function closeEpic(
   // else. The question here is "does THIS session have a log", and only this
   // session's log answers it; a lineage read would be asking whether some
   // ancestor exists, which is not what the refusal below says. Nothing is lost
-  // — every DECISION this function makes comes from runEpicVerdict, and that
-  // reads the lineage.
+  // — every DECISION this function makes comes from computeEpicSummary and
+  // runEpicQuorumVerdict (or a reused quorum decision), and those read the
+  // lineage.
   const events = await readEvents(ctx.sessionId, opts);
   if (events.length === 0) {
     throw new EpicCloseError(
