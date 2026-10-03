@@ -13,10 +13,12 @@ import {
   KIND_OPTIONS,
   matchesKind,
   metaFor,
+  nodesOfItem,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
   titleFor,
+  tsForItem,
   verdictOutcome,
 } from '../src/lib/timelineDisplay.js';
 import { nth } from './helpers.js';
@@ -1140,5 +1142,35 @@ describe('lib/timelineDisplay.ts groupByDay()', () => {
 
   it('returns no groups for an empty list', () => {
     expect(groupByDay([], NOW)).toEqual([]);
+  });
+});
+
+// Item 3 wiring: the day split works on the already-folded TimelineItem list
+// (CausalTimelineList), so a run of dispatches folded into one group must
+// still report a single, correct day — the day of its NEWEST member, never
+// the oldest or the group's own synthetic id (brief item 1, repeated in item
+// 3: "a group goes under the day of its newest row").
+describe('lib/timelineDisplay.ts tsForItem() / nodesOfItem()', () => {
+  function node(ts: string, eventId: string, eventType = 'dispatch_decision'): TimelineNode {
+    return { entry: entry({ eventId, ts, eventType }), children: [] };
+  }
+
+  it('reads a plain entry row’s own timestamp and node', () => {
+    const n = node('2026-10-03T10:00:00.000', 'e1', 'user_prompt');
+    const item: TimelineItem = { kind: 'entry', node: n };
+    expect(tsForItem(item)).toBe('2026-10-03T10:00:00.000');
+    expect(nodesOfItem(item)).toEqual([n]);
+  });
+
+  it('reads a dispatch group’s NEWEST member, not its oldest or its first', () => {
+    // groupDispatches folds a run in the order it is handed; roots are
+    // newest-first, so here the newest member sits first — a naive
+    // "first wins" or "last wins" read would both happen to pass this case,
+    // so the ids are deliberately scrambled relative to their timestamps.
+    const members = [node('2026-10-03T09:00:00.000', 'mid'), node('2026-10-03T11:00:00.000', 'newest'), node('2026-10-03T08:00:00.000', 'oldest')];
+    const [grouped] = groupDispatches(members);
+    if (grouped?.kind !== 'group') throw new Error('expected a fold');
+    expect(tsForItem(grouped)).toBe('2026-10-03T11:00:00.000');
+    expect(nodesOfItem(grouped)).toBe(grouped.group.members);
   });
 });

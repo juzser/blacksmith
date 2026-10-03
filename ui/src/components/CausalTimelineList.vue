@@ -11,20 +11,42 @@
 // harness, so tree shape asserted from an SFC is untestable in this repo.
 import { computed } from 'vue';
 import type { TimelineEntry } from '../lib/api.js';
-import { buildCausalTree, type TimelineNode } from '../lib/timelineDisplay.js';
+import {
+  buildCausalTree,
+  groupByDay,
+  nodesOfItem,
+  timelineItems,
+  tsForItem,
+  type TimelineNode,
+} from '../lib/timelineDisplay.js';
 import TimelineNodeList from './TimelineNodeList.vue';
 
 const props = defineProps<{ entries: TimelineEntry[]; expanded: Set<string> }>();
 const emit = defineEmits<{ toggle: [eventId: string]; select: [taskId: string] }>();
 
 const tree = computed<TimelineNode[]>(() => buildCausalTree(props.entries));
+
+// Item 3: day headers over the already-folded top-level list (ds-review.html's
+// `.day` + `.feed` pairs). The split runs on the folded TimelineItems, not the
+// raw tree, so a dispatch group is one unit for the split — tsForItem reads
+// its newest member, and nodesOfItem hands its nodes back to TimelineNodeList
+// flat, which re-folds the identical run (same nodes, same order). Nested
+// disclosure children never get their own day header; only this top list does.
+const dayGroups = computed(() => {
+  const items = timelineItems(tree.value, true);
+  const withTs = items.map((item) => ({ ts: tsForItem(item), item }));
+  return groupByDay(withTs, new Date().toISOString());
+});
 </script>
 
 <template>
-  <TimelineNodeList
-    :nodes="tree"
-    :expanded="expanded"
-    @toggle="(id) => emit('toggle', id)"
-    @select="(id) => emit('select', id)"
-  />
+  <template v-for="(group, gi) in dayGroups" :key="gi">
+    <div class="timeline-day">{{ group.label }}</div>
+    <TimelineNodeList
+      :nodes="group.items.flatMap((g) => nodesOfItem(g.item))"
+      :expanded="expanded"
+      @toggle="(id) => emit('toggle', id)"
+      @select="(id) => emit('select', id)"
+    />
+  </template>
 </template>

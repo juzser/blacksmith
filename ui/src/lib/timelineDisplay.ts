@@ -169,6 +169,30 @@ export function timelineItems(nodes: TimelineNode[], fold: boolean): TimelineIte
   return fold ? groupDispatches(nodes) : nodes.map((node) => ({ kind: 'entry', node }));
 }
 
+/**
+ * A `TimelineItem`'s own timestamp — the entry's own `ts` for a plain row, or
+ * the NEWEST member's `ts` for a folded dispatch group. Used to bucket the
+ * already-folded top-level list into day headers (brief item 3) without
+ * splitting a group across two days: the group goes under the day of its
+ * newest row, never its oldest or whichever member happens first in the
+ * fold's own order.
+ */
+export function tsForItem(item: TimelineItem): string {
+  if (item.kind === 'entry') return item.node.entry.ts;
+  return item.group.members.reduce(
+    (latest, m) => (m.entry.ts > latest ? m.entry.ts : latest),
+    item.group.members[0]?.entry.ts ?? '',
+  );
+}
+
+/** The raw `TimelineNode`s a `TimelineItem` stands for — one for a plain row,
+ * the whole run for a folded group — so a day bucket built from `tsForItem`
+ * can hand its members back to `TimelineNodeList` as a flat node list, which
+ * re-folds them identically (same nodes, same order). */
+export function nodesOfItem(item: TimelineItem): TimelineNode[] {
+  return item.kind === 'entry' ? [item.node] : item.group.members;
+}
+
 /** One FilterChips option, carrying the event types it selects rather than
  * relying on its `value` being an event type. `Prompts` is the reason: what an
  * operator means by it is "the rows a person wrote", which is two types today

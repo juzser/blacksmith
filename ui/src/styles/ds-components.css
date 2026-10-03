@@ -1226,6 +1226,16 @@
 }
 
 /* --- Causal timeline (gap component §6.2.1) --- */
+/* Item 3: day separator above a day's rows (ds-review.html's `.day`). */
+.timeline-day {
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-subtlest);
+  margin: var(--ds-space-5) 0 var(--ds-space-2);
+}
+.timeline-day:first-child {
+  margin-top: 0;
+}
 .timeline-row {
   display: flex;
   align-items: flex-start;

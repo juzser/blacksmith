@@ -55,6 +55,7 @@ import { taskLabel } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
+import { groupByDay } from '../lib/timelineDisplay.js';
 import {
   agentStatusKitTone,
   findingStatusKitTone,
@@ -80,6 +81,11 @@ const historyLoading = ref(true);
 // error too: without one the tab fell through to "No events recorded for this
 // task." and told the operator the factory recorded nothing (D-224).
 const historyError = ref<string | null>(null);
+// Item 3: day headers over the History tab's flat event list, same rule as
+// Activity's CausalTimelineList — the list is already in the server's own
+// order (D-243 keeps this page from re-sorting under the operator), so
+// grouping only partitions it into calendar days, it never reorders it.
+const historyDayGroups = computed(() => groupByDay(history.value, new Date().toISOString()));
 
 async function load() {
   error.value = null;
@@ -372,14 +378,17 @@ const factsRowText = computed(() => {
                 {{ historyError }}
               </Banner>
               <div v-else-if="history.length > 0">
-                <TimelineRow
-                  v-for="e in history"
-                  :key="e.eventId"
-                  :entry="e"
-                  :has-children="false"
-                  :expanded="false"
-                  :selectable="false"
-                />
+                <template v-for="(group, gi) in historyDayGroups" :key="gi">
+                  <div class="timeline-day">{{ group.label }}</div>
+                  <TimelineRow
+                    v-for="e in group.items"
+                    :key="e.eventId"
+                    :entry="e"
+                    :has-children="false"
+                    :expanded="false"
+                    :selectable="false"
+                  />
+                </template>
               </div>
               <EmptyState v-else :icon="HistoryIcon" title="No events recorded." body="Events this task produces will appear here." />
             </template>
