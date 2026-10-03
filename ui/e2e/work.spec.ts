@@ -72,8 +72,9 @@ test.describe('Work switcher', () => {
     const group = page.getByRole('group', { name: 'View' });
     await expect(group).toBeVisible();
 
-    const rows = await group.getByRole('menuitemradio').all();
-    expect(rows.length).toBeGreaterThan(0);
+    const rowsLocator = group.getByRole('menuitemradio');
+    await expect.poll(() => rowsLocator.count()).toBeGreaterThan(0);
+    const rows = await rowsLocator.all();
     for (const row of rows) {
       const box = await row.boundingBox();
       if (!box) throw new Error('a View menuitemradio row has no box');
@@ -202,19 +203,23 @@ test.describe('Work switcher', () => {
     const menu = page.getByRole('menu', { name: 'More actions' });
     await expect(menu).toBeVisible();
 
-    const menuitems = await menu.getByRole('menuitem').all();
+    const menuitemsLocator = menu.getByRole('menuitem');
     // Built-ins (Pause, Switch theme, Settings) plus Kanban's display-options
     // row, now also a menuitem (DS4 S1 round 5, S3 finding 2).
-    expect(menuitems.length).toBeGreaterThanOrEqual(4);
-    const radios = await menu.getByRole('menuitemradio').all();
-    expect(radios.length).toBeGreaterThan(0);
+    await expect.poll(() => menuitemsLocator.count()).toBeGreaterThanOrEqual(4);
+    const menuitems = await menuitemsLocator.all();
+    const radiosLocator = menu.getByRole('menuitemradio');
+    await expect.poll(() => radiosLocator.count()).toBeGreaterThan(0);
+    const radios = await radiosLocator.all();
 
     // DOM order, not query order: a querySelectorAll-backed locator with a
     // grouped selector returns elements in document order, which on this
     // vertical flex column is also visual top-to-bottom order — menuitems
     // and menuitemradios interleave (the Kanban row sits below the View
     // rows).
-    const rowEls = await menu.locator('[role="menuitem"], [role="menuitemradio"]').all();
+    const rowsLocator = menu.locator('[role="menuitem"], [role="menuitemradio"]');
+    await expect.poll(() => rowsLocator.count()).toBe(menuitems.length + radios.length);
+    const rowEls = await rowsLocator.all();
     const rows: { top: number; bottom: number }[] = [];
     for (const el of rowEls) {
       const box = await el.boundingBox();
