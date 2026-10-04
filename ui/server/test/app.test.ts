@@ -775,9 +775,23 @@ describe('ui/server app.ts', () => {
 
     const unknown = await handle.app.request('/api/tasks/no-such-task/runs');
     const unknownTotals = (
-      await json<{ totals: { tokens: null; agentTimeMs: null; elapsedMs: null } }>(unknown)
+      await json<{
+        totals: {
+          tokens: null;
+          agentTimeMs: null;
+          elapsedMs: null;
+          startedAt: null;
+          endedAt: null;
+        };
+      }>(unknown)
     ).totals;
-    expect(unknownTotals).toEqual({ tokens: null, agentTimeMs: null, elapsedMs: null });
+    expect(unknownTotals).toEqual({
+      tokens: null,
+      agentTimeMs: null,
+      elapsedMs: null,
+      startedAt: null,
+      endedAt: null,
+    });
     closeApp(handle);
   });
 
