@@ -2283,14 +2283,12 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
       .all(),
   );
 
-  // One row cache for the whole call: `nearestUserPrompt`'s `causalChain`
-  // walk fetches each ancestor row at most once no matter how many of this
-  // page's rows share it, so a page costs one row fetch per distinct event in
-  // play, not one causal walk per row.
-  const eventCache = new Map<string, EventsRawRow | null>();
-  let entries = rows.map((row) =>
-    toEntry(row, nearestUserPrompt(db, row.sessionId, row.eventId, eventCache)?.eventId ?? null),
-  );
+  // `kind` is cheap (pure function of eventType/payload) and the `kinds`
+  // filter needs it, so it is computed for every fetched row up front.
+  // `nearestPromptId` is the expensive one (a causal-parent walk), so it is
+  // deferred until AFTER filtering and paging and only computed for the rows
+  // that actually survive onto the page — see `memoizedNearestPromptId`.
+  let entries = rows.map((row) => toEntry(row, null));
   entries = filterByProject(entries, filter);
   if (filter.epicId) entries = entries.filter((e) => epicOfEntry(e) === filter.epicId);
   if (filter.kinds?.length) {
@@ -2298,7 +2296,20 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
     entries = entries.filter((e) => kinds.has(e.kind));
   }
   if (filter.decisionsOnly) entries = applyDecisionsLens(entries);
-  return paginate(db, entries, filter);
+  const page = paginate(db, entries, filter);
+
+  // Row lookup for the memo walk: the fetched rows answer most ancestors for
+  // free (one query already brought them all into memory); a fallback cache
+  // handles the rare ancestor outside that set (e.g. a cross-session hop).
+  const rowByEventId = new Map(rows.map((row) => [row.eventId, row]));
+  const ancestorCache = new Map<string, EventsRawRow | null>();
+  const getRow = (eventId: string): EventsRawRow | null =>
+    rowByEventId.get(eventId) ?? fetchEventRow(db, eventId, ancestorCache);
+  const promptMemo = new Map<string, string | null>();
+  for (const entry of page) {
+    entry.nearestPromptId = memoizedNearestPromptId(entry.eventId, getRow, promptMemo);
+  }
+  return page;
 }
 
 /**
@@ -2500,6 +2511,58 @@ function prUrlsByEpic(db: SmithDb): Map<string, string> {
     const payload = JSON.parse(r.payload) as { pr_url?: string };
     if (typeof payload.pr_url === 'string') result.set(epicRef, payload.pr_url);
   }
+  return result;
+}
+
+/**
+ * Cheap nearest-user_prompt-id resolver for `timeline()`'s full-table path:
+ * the nearest prompt of X is X itself when X is a `user_prompt`, otherwise
+ * the nearest prompt of X's causal parent. `nearestUserPrompt`/`causalChain`
+ * additionally require a matching row in the `prompts` table, but
+ * `projector.ts` inserts that row for EVERY `user_prompt` event in the same
+ * transaction it inserts `events_raw` from, so that check can never miss in
+ * practice and the eventType check alone is equivalent here.
+ *
+ * Walks iteratively (no recursion — a session can chain thousands deep) and
+ * memoises every eventId it visits along the way, not just the one asked
+ * about, so a page of N rows with shared ancestors costs about one row
+ * lookup per DISTINCT event in play rather than one causal walk per row.
+ */
+function memoizedNearestPromptId(
+  startId: string,
+  getRow: (eventId: string) => EventsRawRow | null,
+  memo: Map<string, string | null>,
+): string | null {
+  const path: string[] = [];
+  const visiting = new Set<string>();
+  let current: string | null = startId;
+  let result: string | null = null;
+  while (current !== null) {
+    const cached = memo.get(current);
+    if (cached !== undefined) {
+      result = cached;
+      break;
+    }
+    if (visiting.has(current)) {
+      result = null;
+      break;
+    }
+    visiting.add(current);
+    const row = getRow(current);
+    if (!row) {
+      memo.set(current, null);
+      result = null;
+      break;
+    }
+    if (row.eventType === 'user_prompt') {
+      memo.set(current, current);
+      result = current;
+      break;
+    }
+    path.push(current);
+    current = row.causalParent as string | null;
+  }
+  for (const id of path) memo.set(id, result);
   return result;
 }
 

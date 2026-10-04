@@ -1,7 +1,7 @@
 import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
 import { eventKind, timeline } from '../../src/db/queries.js';
@@ -189,5 +189,24 @@ describe('timeline() paging (DS6)', () => {
       (e) => e.eventType === 'session-start',
     );
     expect(orphan?.nearestPromptId).toBeNull();
+  });
+
+  it('a paged call does not pay a causal walk for every row in the table (perf regression)', async () => {
+    await openMainFixture();
+    const totalRows = timeline(handle.db, { sessionId: SESSION_ID }).length;
+    expect(totalRows).toBeGreaterThan(10); // otherwise this proves nothing
+
+    const spy = vi.spyOn(handle.db, 'select');
+    const page = timeline(handle.db, { sessionId: SESSION_ID, limit: 2 });
+    const limitedSelectCalls = spy.mock.calls.length;
+    spy.mockRestore();
+
+    expect(page.length).toBe(2);
+    // One query fetches the session's rows; `nearestPromptId` for the 2 paged
+    // rows is then resolved from that same in-memory set. A call that still
+    // walks every fetched row's causal chain before paging (the pre-fix
+    // behavior) issues a `prompts`-table select per row and scales with
+    // `totalRows`, not with the 2-row page.
+    expect(limitedSelectCalls).toBeLessThan(totalRows);
   });
 });
