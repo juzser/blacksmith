@@ -2,88 +2,56 @@ import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 test.describe('Analytics', () => {
-  test('renders the stat row, charts, and a11y basics', async ({ page }) => {
+  test('renders the period switch, charts, metric cards, and a11y basics', async ({ page }) => {
     await page.goto('/analytics');
-    await expect(page.locator('h1')).toHaveText('Analytics');
+    await expect(page.locator('h1')).toHaveText('Cost & quality');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
-    await expect(page.getByText('Throughput', { exact: true })).toBeVisible();
-    await expect(page.getByText('Cost per task by model tier')).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Period' })).toBeVisible();
+    await expect(
+      page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.locator('.bs-card__title').getByText('Tokens per task', { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.locator('.bs-card__title').getByText('Second-opinion reviewers', { exact: true }),
+    ).toBeVisible();
   });
 
-  // The only layer that renders AnalyticsPage.vue at all: ui/tsconfig.json
-  // does not type-check .vue files and ui/vitest.config.ts has no component
-  // harness, so a percentage computed in the template is a number no other
-  // suite can reach. This fixture's rechecks are all still in flight, which
-  // is the case D-219 got wrong — the card used to print a bare `0` under a
-  // label promising a rate, which reads as "none of them passed" rather than
-  // "none of them has finished".
-  test('a rate with no denominator reads as absent, not as zero', async ({ page }) => {
+  // A rate with no denominator reads as "not enough data", never as a bare
+  // 0 or dash that could be misread as "none of them passed" (D-219).
+  test('a rate with no denominator reads as not-enough-data, not as zero', async ({ page }) => {
     await page.goto('/analytics');
-    const recheck = page.locator('.ds-stat', { hasText: 'Recheck pass rate' });
-    await expect(recheck).toContainText('\u2014');
-    await expect(recheck).toContainText('none settled yet');
-    await expect(recheck).not.toContainText('0');
+    const card = page.locator('.bs-card').filter({ hasText: 'Fixes that held on recheck' });
+    await expect(card).toContainText('Not enough data yet');
+    await expect(card).not.toContainText(/\b0%/);
   });
 
-  // The fixture runs one tier ("mid") on two providers, so the API's cost
-  // series — keyed by the (model_tier, provider) pair — holds two rows for it.
-  // The tier card used to chart those rows one-for-one and label each with the
-  // tier half of its key: two bars both called "mid", neither of them the
-  // tier's cost per task, and a duplicate `:key` on BarChart's v-for (D-221).
-  test('charts one bar per tier, not one per (tier, provider) pair', async ({ page }) => {
+  // The page's only surface for a provider that is not claude. Cost cannot
+  // be that surface: it is read off task-result-recorded, which only a
+  // builder writes, while every external provider in this factory judges
+  // rather than builds — so this aggregate agreement ring is the one place
+  // codex/deepseek's calibration shows up at all (D-255).
+  test('names no provider as a flat zero when it never answered', async ({ page }) => {
     await page.goto('/analytics');
-    const tierCard = page
-      .locator('.ds-card')
-      .filter({ has: page.getByText('Cost per task by model tier') });
-    const labels = tierCard.locator('.ds-bars__x');
-    await expect(labels).toHaveText(['mid']);
-    // 2000 + 1300 + 5000 + 900 + 1000 tokens over five tasks (fix round 1 #6
-    // added epic-10's two finished tasks, both mid tier, to the fixture).
-    await expect(tierCard.locator('.ds-bars__v')).toHaveText(['2040']);
+    const card = page.locator('.bs-card').filter({ hasText: 'Second-opinion reviewers' });
+    await expect(card).not.toContainText(/\b0%/);
   });
 
-  // Its sibling plotted each provider's total token spend under a title the
-  // design spec writes as "Cost per task by provider", so the busier provider
-  // always read as the more expensive one and the two cards sat side by side
-  // in different units.
   test('charts cost per task by provider, not the provider’s total spend', async ({ page }) => {
     await page.goto('/analytics');
     const providerCard = page
-      .locator('.ds-card')
-      .filter({ has: page.getByText('Cost per task by provider') });
-    await expect(providerCard.locator('.ds-bars__x')).toHaveText(['claude', 'codex']);
+      .locator('.bs-card')
+      .filter({ has: page.getByText('Cost per task by provider', { exact: true }) });
+    await expect(providerCard.locator('.bs-bars__x')).toHaveText(['claude', 'codex']);
     // claude: 2000 + 1300 + 900 over three tasks = 1400. codex: 5000 + 1000
-    // over two tasks = 3000 (fix round 1 #6 added epic-10's two finished
-    // tasks, reusing these same claude/codex mid-tier buckets).
-    await expect(providerCard.locator('.ds-bars__v')).toHaveText(['1400', '3000']);
+    // over two tasks = 3000 (same claude/codex mid-tier buckets every other
+    // suite reads off this fixture).
+    await expect(providerCard.locator('.bs-bars__v')).toHaveText(['1400', '3000']);
     await expect(providerCard.getByRole('img')).toHaveAttribute(
       'aria-label',
       /Tokens per task by provider/,
     );
-  });
-
-  // The page's only surface for a provider that is not claude. Cost cannot be
-  // that surface: it is read off `task-result-recorded`, which only a builder
-  // writes, and every external provider in this factory judges rather than
-  // builds -- so the cost cards above name claude in every real session ever
-  // logged while codex and deepseek judge in the same log. This card was
-  // hardcoded to "No quorum data wired yet" against sixteen shipped judge
-  // runs, so the Analytics page reported a single-provider factory (D-255).
-  test('names the cross-check judges, and does not read a missing rate as zero', async ({
-    page,
-  }) => {
-    await page.goto('/analytics');
-    const quorum = page.locator('.ds-card').filter({ has: page.getByText('Cross-check quorum') });
-    await expect(quorum.locator('.ds-row__title')).toHaveText(['codex', 'deepseek']);
-    // deepseek answered once out of two runs and agreed; codex never answered
-    // at all. 0% would report a provider that never got to speak as one that
-    // disagreed with every native call -- the opposite reading (D-168/D-31).
-    await expect(quorum.locator('.ds-row__trail')).toHaveText(['no verdict', '100% agree']);
-    // Anchored: "100% agree" contains "0% agree" as a substring.
-    await expect(quorum).not.toContainText(/\b0% agree/);
-    // The two failures are not the same failure, and the card says which (D-253).
-    await expect(quorum).toContainText('provider.invalid-output');
-    await expect(quorum).toContainText('provider.missing-api-key');
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
@@ -92,8 +60,11 @@ test.describe('Analytics', () => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
         await page.goto('/analytics');
-        await expect(page.locator('h1')).toHaveText('Analytics');
-        await settleForShot(page, page.getByText('Throughput', { exact: true }));
+        await expect(page.locator('h1')).toHaveText('Cost & quality');
+        await settleForShot(
+          page,
+          page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
+        );
         await shoot(page, `analytics-${vpName}-${theme}`);
       });
     }

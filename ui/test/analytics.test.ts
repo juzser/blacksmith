@@ -576,7 +576,7 @@ describe('AnalyticsPage.vue — cut blocks are gone', () => {
     expect(SFC).not.toMatch(/from '\.\.\/components\/ds\//);
   });
 
-  it('carries no PageHeader — the topbar carries the title alone', () => {
-    expect(SFC).not.toMatch(/<PageHeader|import PageHeader/);
+  it('PageHeader renders sr-only — no visible title row, title stays accessible', () => {
+    expect(SFC).toMatch(/<PageHeader title="Cost & quality" \/>/);
   });
 });

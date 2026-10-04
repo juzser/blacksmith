@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // Analytics — ds-spec.md §4.4 (DS7): cut to 4 metric cards plus a
 // period-scoped token-trend section. Operator override beats the mock: no
-// PageHeader, the topbar carries the title alone (see useBreadcrumb below);
+// visible title row, the topbar carries the title alone (see useBreadcrumb
+// below) — PageHeader is still used, sr-only, for the accessible h1
+// (WorkPage.vue precedent);
 // the daily chart's role/tier toggle never refetches — BarChart's own data
 // derivation (lib/analytics.ts) runs client-side over whatever `period`
 // already has loaded.
@@ -15,6 +17,7 @@ import Card from '../components/kit/Card.vue';
 import CompactNumber from '../components/kit/CompactNumber.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
 import IconButton from '../components/kit/IconButton.vue';
+import PageHeader from '../components/kit/PageHeader.vue';
 import PeriodSwitch from '../components/kit/PeriodSwitch.vue';
 import ProgressRing from '../components/kit/ProgressRing.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
@@ -172,6 +175,7 @@ const secondOpinionPct = computed(() =>
 
 <template>
   <div>
+    <PageHeader title="Cost & quality" />
     <div class="bs-analytics-page__toolbar">
       <PeriodSwitch :model-value="period" :options="PERIOD_OPTIONS" label="Period" @update:model-value="setPeriod" />
       <Button variant="ghost" size="sm" :icon="RefreshCw" @click="load">Refresh</Button>
