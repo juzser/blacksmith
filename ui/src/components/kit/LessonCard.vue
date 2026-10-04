@@ -16,7 +16,12 @@ import Tag from './Tag.vue';
 
 const props = defineProps<{
   lesson: LessonRecord;
-  /** One-line phone row (ds-spec.md shell table: Lessons -> "one-line lesson rows"). */
+  /**
+   * Phone row (ds-spec.md shell table: Lessons -> "one-line lesson rows").
+   * The binding mock (ds-review.html .mrow) renders it as two lines -- title
+   * + scope tag, then the muted meta below -- so a single line never has
+   * room for a title that is more than a few characters.
+   */
   compact?: boolean;
   /** Renders the card as the row's own click target (the list). */
   clickable?: boolean;

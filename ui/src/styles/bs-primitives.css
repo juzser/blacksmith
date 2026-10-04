@@ -802,30 +802,52 @@ a:hover {
   color: var(--bs-text-subtle);
 }
 .bs-lessoncard--compact {
+  /* Two-line grid (ds-review.html .mrow): title + scope tag share the first
+     row, the muted meta spans both columns underneath. A one-line flex row
+     gave the title no fixed share of the width, so a long scope tag crowded
+     it down to a few characters ("Run...", "A...", "CI r..."). */
+  /* A grid track's percentage max competes for leftover space the same way
+     an fr track does (CSS Grid "Maximize Tracks" step), so capping the tag's
+     column at minmax(0,50%) grew it to that cap even for a short tag's
+     content, stealing the width the title needed. Flexbox's max-width has
+     no such step: it resolves against the (well-defined) flex container,
+     with none of the leftover-space fight, so the title keeps the tag's
+     unused share. The meta line's flex-basis:100% forces it past what's
+     left on the title+tag line, wrapping it onto its own row below. */
   display: flex;
-  align-items: baseline;
-  gap: var(--bs-space-2);
-  padding: var(--bs-space-3) var(--bs-space-2);
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--bs-space-2);
+  row-gap: 2px;
   min-height: var(--bs-touch);
+  padding: var(--bs-space-3) var(--bs-space-2);
   border-bottom: 1px solid var(--bs-border);
 }
 .bs-lessoncard--compact .bs-lessoncard__statement {
-  /* overflow: hidden gives this flex item an automatic min-width of 0 (CSS
-     Flexbox §4.5), so without a shrinkable meta line the title always lost
-     the fight for space on a narrow phone row and rendered at 0 width. */
   flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.bs-lessoncard--compact .bs-lessoncard__meta {
+.bs-lessoncard--compact .bs-tag {
+  /* Capped so a long claim-path scope tag cannot shrink below half the row
+     and still read the title it sits beside. */
   flex: 0 1 auto;
+  max-width: 50%;
   min-width: 0;
-  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.bs-lessoncard--compact .bs-lessoncard__meta {
+  flex: 1 1 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtlest);
 }
 /* LessonsPage.vue's per-tab list: a plain <ul> wrapping one LessonCard per
    row, so the list reads as a list to assistive tech without pulling in a
@@ -837,6 +859,18 @@ a:hover {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+/* Phone rows (ds-review.html .mlist): one bordered box instead of a gap
+   between cards, since each row is now a flat line rather than a card. */
+.bs-lessoncard-list--compact {
+  gap: 0;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  overflow: hidden;
+}
+.bs-lessoncard-list--compact li:last-child .bs-lessoncard--compact {
+  border-bottom: none;
 }
 
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's

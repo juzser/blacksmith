@@ -218,19 +218,39 @@ test.describe('Lessons', () => {
     });
   }
 
-  // Phone row deviation (ds-review.html ~1491): the compact row's title used
-  // to collapse to 0 width whenever the tag + meta text didn't fit, because
-  // only the title had `overflow: hidden` (giving it an automatic min-width
-  // of 0) while the meta line never shrank. Fails without the fix.
-  test('compact phone row keeps the title visible alongside the tag and meta', async ({ page }) => {
-    await serveLessonsWithCards(page);
+  // Phone row deviation (ds-review.html .mrow): the one-line layout crowded
+  // the title down to a sliver next to the tag and meta text ("Run...",
+  // "A...", "CI r..."). The binding mock is a two-line grid: title + tag on
+  // row 1, meta spanning both columns on row 2. Fails without the fix. A
+  // short title is the case the acceptance criterion names -- a title long
+  // enough to outgrow even half the row still ellipsis-truncates by design,
+  // same as the tag beside it.
+  test('compact phone row renders a short title in full, above the meta', async ({ page }) => {
+    await page.route('**/api/lessons*', (route) =>
+      route.fulfill({
+        json: {
+          pending: [lesson({ lessonId: 'lesson-short', statement: 'Run tests at the gate.' })],
+          approved: [],
+          closed: [],
+          lastCheckedAt: FIXTURE_NOW_ISO,
+        } as LessonsResult,
+      }),
+    );
     await setTheme(page, 'light');
     await page.setViewportSize(VIEWPORTS.mobile);
     await page.goto('/lessons');
-    const title = page.getByRole('tabpanel').getByText(/Run the full test suite/);
+    const title = page.getByRole('tabpanel').getByText('Run tests at the gate.');
     await expect(title).toBeVisible();
-    const box = await title.boundingBox();
-    expect(box?.width).toBeGreaterThan(0);
+    const meta = page.getByRole('tabpanel').getByText(/csb-audit-1 on 7 Sep/);
+    await expect(meta).toBeVisible();
+
+    const [titleOverflow, titleBox, metaBox] = await Promise.all([
+      title.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })),
+      title.boundingBox(),
+      meta.boundingBox(),
+    ]);
+    expect(titleOverflow.scrollWidth).toBeLessThanOrEqual(titleOverflow.clientWidth);
+    expect(metaBox?.y).toBeGreaterThan(titleBox?.y ?? 0);
   });
 
   test('screenshot dialog mobile/light', async ({ page }) => {

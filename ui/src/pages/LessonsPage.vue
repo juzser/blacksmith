@@ -238,10 +238,13 @@ async function reject() {
 <template>
   <div class="app-page">
     <PageHeader title="Lessons">
-      <template #actions>
-        <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="load">
-          Refresh
-        </Button>
+      <!-- Phone has no Refresh button (ds-review.html's phone frame carries
+           no actions row either), so the slot itself is withheld rather than
+           passed empty -- PageHeader.vue's isEmpty check only sees whether
+           the slot exists, not whether it rendered nothing, so an always-on
+           template left the actions band's padding/gap reserved on phone. -->
+      <template v-if="!isPhoneWidth" #actions>
+        <Button variant="ghost" size="sm" :icon="RefreshCw" @click="load"> Refresh </Button>
       </template>
     </PageHeader>
 
@@ -275,7 +278,11 @@ async function reject() {
           title="No lessons here yet."
           body="Lessons appear here after a dreaming pass finds and reviews them."
         />
-        <ul v-else class="bs-lessoncard-list">
+        <ul
+          v-else
+          class="bs-lessoncard-list"
+          :class="{ 'bs-lessoncard-list--compact': isPhoneWidth }"
+        >
           <li v-for="lesson in visibleFor(tab.id)" :key="lesson.lessonId">
             <LessonCard
               :lesson="lesson"

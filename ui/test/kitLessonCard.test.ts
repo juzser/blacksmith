@@ -26,8 +26,9 @@ describe('kit/LessonCard.vue', () => {
     expect(CARD).toMatch(/preventedLabel\(/);
   });
 
-  // ds-spec.md shell table (:807): phone gets "one-line lesson rows".
-  it('has a compact one-line layout distinct from the full card', () => {
+  // ds-spec.md shell table (:807) names "one-line lesson rows"; the binding
+  // mock (ds-review.html .mrow) is the two-line grid that actually ships.
+  it('has a compact grid layout distinct from the full card', () => {
     expect(CARD).toMatch(/v-if="compact"/);
     expect(CARD).toMatch(/bs-lessoncard--compact/);
   });
