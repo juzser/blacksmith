@@ -2110,7 +2110,13 @@ describe('cli.ts (built binary)', () => {
     expect(lessonsResult.status).toBe(0);
     // Three buckets, one per bucket the taxonomy's six statuses map to: a
     // status in no bucket is a lesson no reader can reach (D-220).
-    expect(JSON.parse(lessonsResult.stdout)).toEqual({ pending: [], approved: [], closed: [] });
+    // No dream pass has run on this db, so there is no "last checked" time yet.
+    expect(JSON.parse(lessonsResult.stdout)).toEqual({
+      pending: [],
+      approved: [],
+      closed: [],
+      lastCheckedAt: null,
+    });
 
     const errorsResult = runCli(['stats', 'errors', '--db', dbPath, '--session', sessionId]);
     expect(errorsResult.status).toBe(0);
