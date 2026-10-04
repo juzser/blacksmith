@@ -217,12 +217,7 @@ export function summarize(text: string, maxChars = 90): string {
  * server and browser clocks disagree by a second or two routinely, and
  * "-1s" would read as a bug in the dashboard rather than in the clocks.
  */
-export function formatElapsed(fromIso: string, nowIso?: string): string {
-  const then = new Date(fromIso).getTime();
-  if (Number.isNaN(then)) return '';
-  const now = nowIso ? new Date(nowIso).getTime() : Date.now();
-  const totalSeconds = Math.max(0, Math.floor((now - then) / 1000));
-
+function formatDurationSeconds(totalSeconds: number): string {
   if (totalSeconds < 60) return `${totalSeconds}s`;
 
   const minutes = Math.floor(totalSeconds / 60);
@@ -237,6 +232,20 @@ export function formatElapsed(fromIso: string, nowIso?: string): string {
   const days = Math.floor(hours / 24);
   const restHours = hours % 24;
   return restHours === 0 ? `${days}d` : `${days}d ${restHours}h`;
+}
+
+export function formatElapsed(fromIso: string, nowIso?: string): string {
+  const then = new Date(fromIso).getTime();
+  if (Number.isNaN(then)) return '';
+  const now = nowIso ? new Date(nowIso).getTime() : Date.now();
+  return formatDurationSeconds(Math.max(0, Math.floor((now - then) / 1000)));
+}
+
+/** Pattern 11's totals bar (ds-spec.md §4.7): a plain millisecond duration,
+ * same bucket rendering as `formatElapsed` ("2h 13m", "3h", "2d 4h"), for
+ * sums that are not "time since" a timestamp. */
+export function formatDurationMs(ms: number): string {
+  return formatDurationSeconds(Math.max(0, Math.floor(ms / 1000)));
 }
 
 /** "1 task" / "2 tasks" — English-only, matches this app's single declared UI language (DESIGN.md). */
