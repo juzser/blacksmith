@@ -3168,6 +3168,58 @@ export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
   });
 }
 
+/** DS3 §2.4c's total bar — tokens, agent time and elapsed, summed across `taskRuns()`'s own rows. */
+export interface TaskTotals {
+  /** Sum of every run's `token_usage.total_tokens`; null when none of them measured it. */
+  tokens: number | null;
+  /** Sum of every run's `duration_ms`; null when none of them carries one (no writer stamps it today). */
+  agentTimeMs: number | null;
+  /** First run's start ts to the last `result`/`error` run's ts; null while no run has ended yet. */
+  elapsedMs: number | null;
+}
+
+/**
+ * DS3 §2.4c — the per-task totals read above `RunHistoryTimeline`, additive
+ * on `GET /api/tasks/:taskId/runs`. Scoped to the same rows `taskRuns()`
+ * reads (no new event type, no writer); "not measured" is `null`, never a
+ * bare 0 (the spec's own phrasing for this bar).
+ */
+export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
+  const rows = fetchTaskRunRows(db, taskId);
+  let tokensSum = 0;
+  let anyTokens = false;
+  let durationSum = 0;
+  let anyDuration = false;
+  let startTs: string | null = null;
+  let endTs: string | null = null;
+  for (const r of rows) {
+    const payload = JSON.parse(r.payload) as Record<string, unknown>;
+    const tokens = tokensTotalFromPayload(payload);
+    if (tokens !== null) {
+      tokensSum += tokens;
+      anyTokens = true;
+    }
+    const durationMs = durationMsFromPayload(payload);
+    if (durationMs !== null) {
+      durationSum += durationMs;
+      anyDuration = true;
+    }
+    if (startTs === null || r.ts < startTs) startTs = r.ts;
+    const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
+    if (kind === 'result' || kind === 'error') {
+      if (endTs === null || r.ts > endTs) endTs = r.ts;
+    }
+  }
+  return {
+    tokens: anyTokens ? tokensSum : null,
+    agentTimeMs: anyDuration ? durationSum : null,
+    elapsedMs:
+      startTs !== null && endTs !== null
+        ? new Date(endTs).getTime() - new Date(startTs).getTime()
+        : null,
+  };
+}
+
 /**
  * One projected artifact row by its id (`${event_id}#${index}`), for the
  * dashboard's artifact-serving route — it needs the declaring task and the

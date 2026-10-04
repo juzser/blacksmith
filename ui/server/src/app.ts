@@ -51,6 +51,7 @@ import {
   roadmapPage,
   taskDetail,
   taskRuns,
+  taskTotals,
   timeline,
 } from '../../../factory/orchestrator/dist/db/queries.js';
 import { SmithError } from '../../../factory/orchestrator/dist/errors.js';
@@ -920,7 +921,7 @@ export function createApp(opts: AppOpts): AppHandle {
   // for this task). No new event type, no writer.
   app.get('/api/tasks/:taskId/runs', (c) => {
     const taskId = c.req.param('taskId');
-    return c.json({ runs: taskRuns(handle.db, taskId) });
+    return c.json({ runs: taskRuns(handle.db, taskId), totals: taskTotals(handle.db, taskId) });
   });
 
   // Serves a task's own screenshots to the dashboard. The id comes from the
