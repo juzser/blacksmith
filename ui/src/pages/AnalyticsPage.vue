@@ -187,16 +187,21 @@ const secondOpinionPct = computed(() =>
 );
 
 // Phone-only: the by-role chart and table are both dropped at this width, so
-// their one surface becomes a role list with a % share of total tokens,
-// "Not measured" included as its own row (DS7 PR2 round 3 defect 6).
+// their one surface becomes a role list with a % share of measured tokens
+// (DS7 PR2 round 3 defect 6). Unmeasured runs are a run count, not a token
+// count — they get their own "N runs not measured" row, no bar, no %,
+// never folded into the token-share percentages (phoneRoleShare's contract).
 const phoneRoleBars = computed(() => {
-  const bars = phoneRoleShare(roleTierBuckets.value);
-  const total = bars.reduce((sum, b) => sum + b.value, 0);
-  return bars.map((b) => ({
+  const { roles } = phoneRoleShare(roleTierBuckets.value);
+  const total = roles.reduce((sum, b) => sum + b.value, 0);
+  return roles.map((b) => ({
     label: b.label,
     pct: total > 0 ? Math.round((b.value / total) * 100) : 0,
   }));
 });
+const phoneNotMeasuredCaption = computed(() =>
+  notMeasuredCaption(phoneRoleShare(roleTierBuckets.value).unmeasuredRunCount),
+);
 </script>
 
 <template>
@@ -363,7 +368,7 @@ const phoneRoleBars = computed(() => {
         </div>
 
         <div
-          v-if="phoneRoleBars.length > 0"
+          v-if="phoneRoleBars.length > 0 || phoneNotMeasuredCaption"
           class="bs-analytics-page__phone-roles"
           role="list"
           aria-label="Tokens by role, selected period"
@@ -376,6 +381,13 @@ const phoneRoleBars = computed(() => {
           >
             <span class="bs-analytics-page__phone-role-label">{{ bar.label }}</span>
             <ProgressBarMini :value="bar.pct" :label="`${bar.label} ${bar.pct}% of tokens`" />
+          </div>
+          <div
+            v-if="phoneNotMeasuredCaption"
+            role="listitem"
+            class="bs-analytics-page__phone-role"
+          >
+            <span class="bs-analytics-page__phone-role-label">{{ phoneNotMeasuredCaption }}</span>
           </div>
         </div>
       </template>

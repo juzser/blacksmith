@@ -487,26 +487,27 @@ describe('lib/analytics.ts — tokenTotalsBy', () => {
 });
 
 describe('lib/analytics.ts — phoneRoleShare', () => {
-  it('sums tokens per role, same as tokenTotalsBy', () => {
+  it('sums tokens per role, same as tokenTotalsBy, and never folds run count into it', () => {
     expect(
       phoneRoleShare([
         roleTierBucket({ role: 'coder', tokens: 100 }),
         roleTierBucket({ role: 'coder', modelTier: 'small', tokens: 50 }),
       ]),
-    ).toEqual([{ label: 'Builder', value: 150 }]);
+    ).toEqual({ roles: [{ label: 'Builder', value: 150 }], unmeasuredRunCount: 0 });
   });
 
-  it('appends a Not measured row sized by unmeasured run count when any run went unmeasured', () => {
-    expect(phoneRoleShare([roleTierBucket({ tokens: 100, unmeasuredRunCount: 3 })])).toEqual([
-      { label: 'Builder', value: 100 },
-      { label: 'Not measured', value: 3 },
-    ]);
+  it('reports unmeasured run count on its own axis, not mixed into the token roles', () => {
+    expect(phoneRoleShare([roleTierBucket({ tokens: 100, unmeasuredRunCount: 3 })])).toEqual({
+      roles: [{ label: 'Builder', value: 100 }],
+      unmeasuredRunCount: 3,
+    });
   });
 
-  it('omits the Not measured row when every run was measured', () => {
-    expect(phoneRoleShare([roleTierBucket({ tokens: 100, unmeasuredRunCount: 0 })])).toEqual([
-      { label: 'Builder', value: 100 },
-    ]);
+  it('reports zero unmeasured runs when every run was measured', () => {
+    expect(phoneRoleShare([roleTierBucket({ tokens: 100, unmeasuredRunCount: 0 })])).toEqual({
+      roles: [{ label: 'Builder', value: 100 }],
+      unmeasuredRunCount: 0,
+    });
   });
 });
 
@@ -688,5 +689,15 @@ describe('AnalyticsPage.vue — phone layout (defect 6)', () => {
     expect(SFC).toContain('bs-analytics-page__phone-metrics');
     expect(SFC).toContain('bs-analytics-page__phone-roles');
     expect(SFC).toContain('phoneRoleShare(');
+  });
+
+  it('shows unmeasured runs as their own row, never as a bar or % of tokens', () => {
+    expect(SFC).toContain('phoneNotMeasuredCaption');
+    const rolesBlock = SFC.slice(
+      SFC.indexOf('bs-analytics-page__phone-roles'),
+      SFC.indexOf('</template>', SFC.indexOf('bs-analytics-page__phone-roles')),
+    );
+    const notMeasuredRow = rolesBlock.slice(rolesBlock.indexOf('phoneNotMeasuredCaption'));
+    expect(notMeasuredRow).not.toContain('ProgressBarMini');
   });
 });

@@ -1,5 +1,5 @@
 import { expect, test } from './harness.js';
-import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
 test.describe('Analytics', () => {
   test('renders the period switch, charts, metric cards, and a11y basics', async ({ page }) => {
@@ -72,6 +72,57 @@ test.describe('Analytics', () => {
     await expect(page.getByText('No token usage recorded yet.').first()).toBeVisible();
   });
 
+  // The base fixture only exercises builder/reviewer roles. A third role
+  // (and a day with zero tokens) confirms the "Total tokens, by selected
+  // period" chart renders more than two categories and the empty-day track
+  // stays visibly empty rather than reading as a full bar (defect 2/6/8).
+  test('renders more than two role categories, and keeps a zero-token day empty', async ({
+    page,
+  }) => {
+    await page.route('**/api/analytics*', async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.tokensByRoleAndModelTier = [
+        {
+          role: 'builder',
+          modelTier: 'mid',
+          runCount: 3,
+          tokens: 4200,
+          avgTokensPerRun: 1400,
+          unmeasuredRunCount: 0,
+        },
+        {
+          role: 'reviewer',
+          modelTier: 'mid',
+          runCount: 2,
+          tokens: 1800,
+          avgTokensPerRun: 900,
+          unmeasuredRunCount: 0,
+        },
+        {
+          role: 'planner',
+          modelTier: 'high',
+          runCount: 1,
+          tokens: 600,
+          avgTokensPerRun: 600,
+          unmeasuredRunCount: 0,
+        },
+      ];
+      body.tokensByDay = [
+        ...(body.tokensByDay ?? []).slice(1),
+        { day: '2026-01-01', tokensByRole: {}, tokensByModelTier: {}, unmeasuredRunCount: 0 },
+      ];
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto('/analytics');
+    await expect(page.locator('h1')).toHaveText('Cost & quality');
+    const byRoleCard = page
+      .locator('.bs-card')
+      .filter({ has: page.getByText('Total tokens, by selected period', { exact: true }) });
+    await expect(byRoleCard.locator('.bs-bars__x')).toHaveText(['builder', 'reviewer', 'planner']);
+    await expect(page.locator('.bs-bars__track--empty').first()).toBeVisible();
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
@@ -83,7 +134,8 @@ test.describe('Analytics', () => {
           page,
           page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
         );
-        await shoot(page, `analytics-${vpName}-${theme}`, true);
+        await growToPageHeight(page);
+        await shoot(page, `analytics-${vpName}-${theme}`);
       });
     }
   }

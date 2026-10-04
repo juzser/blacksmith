@@ -353,19 +353,23 @@ export function tokenTotalsBy(
 }
 
 /**
- * The phone role list's bars: `tokenTotalsBy('role')` plus a trailing "Not
- * measured" row sized by unmeasured run count — the phone list's only
- * surface for an unmeasured run, since the chart and table it stands in for
- * on desktop are both dropped at this width (DS7 PR2 round 3 defect 6). Runs
- * on this phone-only axis, not the token one those surfaces guard, so it
- * does not conflict with "never fabricate a token total" above.
+ * The phone role list's rows — the phone list's only surface for an
+ * unmeasured run, since the chart and table it stands in for on desktop are
+ * both dropped at this width (DS7 PR2 round 3 defect 6). `roles` is
+ * `tokenTotalsBy('role')`: a percentage share is only ever computed across
+ * these token values. `unmeasuredRunCount` is a separate axis — a run
+ * count, not a token count — so it never gets folded into that percentage
+ * or rendered as a bar; the caller shows it as its own "N runs not
+ * measured" row with no bar and no %, same rule as `tokenTotalsBy` above.
  */
-export function phoneRoleShare(
-  buckets: readonly RoleModelTierBucket[],
-): { label: string; value: number }[] {
-  const bars = tokenTotalsBy(buckets, 'role');
-  const unmeasured = sumUnmeasuredRuns(buckets);
-  return unmeasured > 0 ? [...bars, { label: 'Not measured', value: unmeasured }] : bars;
+export function phoneRoleShare(buckets: readonly RoleModelTierBucket[]): {
+  roles: { label: string; value: number }[];
+  unmeasuredRunCount: number;
+} {
+  return {
+    roles: tokenTotalsBy(buckets, 'role'),
+    unmeasuredRunCount: sumUnmeasuredRuns(buckets),
+  };
 }
 
 /** "1.2K tok", or "not measured" for a pair with no average to report, never 0. */

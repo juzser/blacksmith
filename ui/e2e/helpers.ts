@@ -46,10 +46,24 @@ export async function settleForShot(page: Page, marker: Locator, settleMs = 150)
 // (D-235). `animations: 'disabled'` fast-forwards finite animations to their
 // end state and cancels infinite ones to their initial state: same pixels
 // every run.
-export async function shoot(page: Page, name: string, fullPage = false): Promise<void> {
+export async function shoot(page: Page, name: string): Promise<void> {
   await page.screenshot({
     path: path.join(SCREENSHOT_DIR, `${name}.png`),
     animations: 'disabled',
-    fullPage,
   });
+}
+
+// `fullPage: true` scrolls the outer document, but the shell's own scroll
+// container is the inner `.app-scroll` div (App.vue) — the outer document
+// never grows, so a full-page capture of a tall page was just the viewport's
+// worth of content (DS7 PR2 round 3 defect 7). Grow the viewport to
+// `.app-scroll`'s scrollHeight instead, so the whole page fits in one frame
+// and a plain (non-fullPage) screenshot captures all of it.
+export async function growToPageHeight(page: Page): Promise<void> {
+  const height = await page.evaluate(() => {
+    const el = document.querySelector('.app-scroll');
+    return el ? el.scrollHeight : document.documentElement.scrollHeight;
+  });
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: viewport?.width ?? 1280, height });
 }
