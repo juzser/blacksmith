@@ -388,6 +388,11 @@ a:hover {
   border-bottom: 1px solid var(--bs-border);
   border-left: 3px solid transparent;
 }
+/* Fix round item 5 (ds-review.html `.ev:last-child`): the last row in any
+   list never needs a divider against whatever comes after it. */
+.bs-timeline-row:last-child {
+  border-bottom: 0;
+}
 /* Item 5 (DS6 PR3 r2, ds-review.html .ev's --ev-line): a 3px kind-coloured
    left stripe per row, same --bs-event-* tokens EventKindTag already uses.
    Prompt reads lighter (its own subtle tint) in the mock; every other kind
@@ -452,6 +457,7 @@ a:hover {
     display: inline-flex;
     align-items: center;
     min-height: var(--bs-touch);
+    min-width: 0;
   }
 }
 .bs-timeline-row__ts {
@@ -526,6 +532,27 @@ a:hover {
 }
 .bs-timeline-row--rail[data-kind='error']::after {
   background: var(--bs-event-error-text);
+}
+
+/* compact variant (DS6 PR4, ds-spec.md §2.2): Home's "Recent activity" —
+   title and meta each clamp to one line with ellipsis instead of wrapping.
+   Fix round item 4: the non-link title span truncates directly, but the
+   --link button becomes `inline-flex` below 640px (see the media query
+   above) -- a flex container has no single text node to truncate, so that
+   case truncates its inner label span instead. */
+.bs-timeline-row--compact .bs-timeline-row__title,
+.bs-timeline-row--compact .bs-timeline-row__meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-timeline-row--compact .bs-timeline-row__title-label {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
@@ -2145,6 +2172,36 @@ summary.bs-inbox__group-head {
   color: var(--bs-text);
 }
 
+/* "Recent activity" (DS6 PR4, ds-spec.md §4.1 point 1b): header row with the
+   "View all activity" link, and the 8-row compact TimelineRow list -- same
+   flush-row treatment .bs-run-history gives RunHistoryTimeline. Phone shows
+   only the first 4 rows (ds-spec.md: "Phone: 4 rows"). */
+.bs-home__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+  margin-bottom: var(--bs-space-4);
+}
+/* Fix round item 6 (ds-review.html `.feedbar`): the link's own --sm padding
+   otherwise reads as extra right-edge whitespace against the rest of the
+   page's content; pull it back flush against the section edge. */
+.bs-home__section-head > .bs-btn--sm {
+  margin-right: calc(-1 * var(--bs-space-2));
+}
+.bs-home__recent-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 640px) {
+  .bs-home__recent-activity > li:nth-child(n + 5) {
+    display: none;
+  }
+}
+
 /* --- DS3 Slice B: Kanban on the kit (ds-spec.md §2.4/§2.4b/§4.2) --- */
 .bs-agent-chip {
   display: inline-flex;
@@ -2677,6 +2734,49 @@ summary.bs-inbox__group-head {
 .bs-run-history__empty {
   margin: 0;
   color: var(--bs-text-subtle);
+}
+
+/* Pattern 11 totals bar (DS6 PR4, ds-spec.md §4.7, ds-review.html .totals
+   ~402-406): tokens / agent-time / elapsed, above RunHistoryTimeline. A
+   missing field is simply absent, so the bar itself never renders with zero
+   cells (guarded in the template). Fix round (item 1): bordered sunken box,
+   3-column grid with dividers, matching the mock exactly instead of the
+   earlier flex row. */
+.bs-task-totals-bar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-sunken);
+  margin: 0 0 var(--bs-space-3) 0;
+}
+.bs-task-totals-bar__cell {
+  padding: var(--bs-space-2) var(--bs-space-3);
+  min-width: 0;
+}
+.bs-task-totals-bar__cell + .bs-task-totals-bar__cell {
+  border-left: 1px solid var(--bs-border);
+}
+.bs-task-totals-bar__key {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  font-size: 11px;
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+}
+.bs-task-totals-bar__value {
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text);
+  font-variant-numeric: tabular-nums;
+}
+/* Phone (ds-review.html .msum, the task-detail phone frame): same key/value
+   pair, lighter surface than the desktop sunken box, no rounded sunken
+   look -- same grid/divider mechanics, raised background instead. */
+@media (max-width: 640px) {
+  .bs-task-totals-bar {
+    background: var(--bs-surface-raised);
+  }
 }
 
 /* Fix round 1 #5 — the page-level stack wrapping the swimlane and

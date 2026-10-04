@@ -387,6 +387,14 @@ export interface TaskRun {
   outcome: string | null;
 }
 
+/** Pattern 11 totals bar (ds-spec.md §4.7): sums across a task's runs. A
+ * `null` field means "not measured" and is left out, never rendered as 0. */
+export interface TaskTotals {
+  tokens: number | null;
+  agentTimeMs: number | null;
+  elapsedMs: number | null;
+}
+
 export interface LessonRecord {
   lessonId: string;
   sessionId: string;
@@ -800,11 +808,12 @@ export function fetchTaskDetail(taskId: string): Promise<TaskDetail> {
   return getJson(`/api/tasks/${encodeURIComponent(taskId)}`);
 }
 
-export async function fetchTaskRuns(taskId: string): Promise<TaskRun[]> {
-  const { runs } = await getJson<{ runs: TaskRun[] }>(
+export async function fetchTaskRuns(
+  taskId: string,
+): Promise<{ runs: TaskRun[]; totals: TaskTotals }> {
+  return getJson<{ runs: TaskRun[]; totals: TaskTotals }>(
     `/api/tasks/${encodeURIComponent(taskId)}/runs`,
   );
-  return runs;
 }
 
 export function fetchLessons(session?: SessionScope): Promise<LessonsResult> {

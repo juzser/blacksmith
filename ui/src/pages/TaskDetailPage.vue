@@ -8,11 +8,13 @@
 // from the ds/ build, just re-skinned onto kit/Popover + kit/Button.
 //
 // Deviations from §4.7 (no backing data, rendered absent per the brief):
-// - The pattern-11 totals bar (tokens spent / agent-time / elapsed) is
-//   skipped — `TaskRun` carries no derivable "elapsed" or cumulative
-//   agent-time, and inventing one from event gaps is not this task's call.
 // - No per-agent summary table: `agents-registry` rows (role/provider/tier/
 //   status) stay a plain rail list, same shape as before, not a new Table.
+//
+// DS6 PR4: the pattern-11 totals bar above RunHistoryTimeline now renders
+// from `/api/tasks/:id/runs`' `totals` (queries.ts `taskTotals()`). A field
+// stays absent, never "0"/"—", when its underlying runs carry nothing
+// usable (no dispatch/result timestamps, no token_usage).
 //
 // Visual-pass items 2-4 (uiux-ds0-3-visual.md): the branch Tag sat beside
 // the status like a second subtitle, the "Spec contract" dl card put raw
@@ -21,14 +23,24 @@
 // a collapsed "Technical details" disclosure in the overview tab; the facts
 // row and the files list take the dl card's place; RunHistoryTimeline opens
 // the History tab, above the per-event TimelineRow list.
-import { Bot, History as HistoryIcon, Image as ImageIcon, RefreshCw } from '@lucide/vue';
+import {
+  Bot,
+  Clock,
+  Coins,
+  History as HistoryIcon,
+  Image as ImageIcon,
+  RefreshCw,
+  Timer,
+} from '@lucide/vue';
 import { computed, onMounted, ref } from 'vue';
 import AgentChip from '../components/AgentChip.vue';
 import Banner from '../components/kit/Banner.vue';
 import Button from '../components/kit/Button.vue';
 import Card from '../components/kit/Card.vue';
+import CompactNumber from '../components/kit/CompactNumber.vue';
 import Dialog from '../components/kit/Dialog.vue';
 import EmptyState from '../components/kit/EmptyState.vue';
+import Icon from '../components/kit/Icon.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
 import Popover from '../components/kit/Popover.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
@@ -36,6 +48,7 @@ import Table from '../components/kit/Table.vue';
 import Tabs from '../components/kit/Tabs.vue';
 import Tag from '../components/kit/Tag.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
+import Tooltip from '../components/kit/Tooltip.vue';
 import RequestQuote from '../components/RequestQuote.vue';
 import RunHistoryTimeline from '../components/RunHistoryTimeline.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
@@ -49,9 +62,10 @@ import {
   fetchTimelinePage,
   type TaskDetail,
   type TaskRun,
+  type TaskTotals,
 } from '../lib/api.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
-import { taskLabel } from '../lib/format.js';
+import { formatDurationMs, taskLabel } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
 import { specRefLabel } from '../lib/specRef.js';
@@ -75,6 +89,7 @@ const error = ref<string | null>(null);
 const loading = ref(true);
 const activeTab = ref('overview');
 const runs = ref<TaskRun[]>([]);
+const totals = ref<TaskTotals | null>(null);
 const history = ref<ActivityEntry[]>([]);
 const historyLoading = ref(true);
 // The History tab fetches separately from the task itself, so it needs its own
@@ -107,6 +122,43 @@ function historyCtxFor(entry: ActivityEntry) {
   return { promptTs };
 }
 
+/** Pattern 11 totals bar cells — a field missing from `totals` is left out
+ * of the array entirely, never rendered as "0" or "—" (ds-spec.md §4.7). */
+const totalsCells = computed(() => {
+  const t = totals.value;
+  if (!t) return [];
+  const cells: { key: string; icon: typeof Coins; label: string; value: string; exact: string }[] =
+    [];
+  if (t.tokens !== null) {
+    cells.push({
+      key: 'tokens',
+      icon: Coins,
+      label: 'Tokens',
+      value: `${t.tokens}`,
+      exact: `${t.tokens.toLocaleString()} tokens`,
+    });
+  }
+  if (t.agentTimeMs !== null) {
+    cells.push({
+      key: 'agent-time',
+      icon: Timer,
+      label: 'Agent time',
+      value: formatDurationMs(t.agentTimeMs),
+      exact: `${Math.round(t.agentTimeMs / 1000).toLocaleString()}s of agent time`,
+    });
+  }
+  if (t.elapsedMs !== null) {
+    cells.push({
+      key: 'elapsed',
+      icon: Clock,
+      label: 'Elapsed',
+      value: formatDurationMs(t.elapsedMs),
+      exact: `${Math.round(t.elapsedMs / 1000).toLocaleString()}s elapsed`,
+    });
+  }
+  return cells;
+});
+
 async function load() {
   error.value = null;
   // Only while there is nothing on screen to keep. design-spec.md §8 gives
@@ -120,7 +172,8 @@ async function load() {
   try {
     const [d, r] = await Promise.all([fetchTaskDetail(props.taskId), fetchTaskRuns(props.taskId)]);
     detail.value = d;
-    runs.value = r;
+    runs.value = r.runs;
+    totals.value = r.totals;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -390,6 +443,20 @@ const factsRowText = computed(() => {
             </template>
 
             <template #history>
+              <div v-if="totalsCells.length > 0" class="bs-task-totals-bar" role="group" aria-label="Task totals">
+                <div v-for="cell in totalsCells" :key="cell.key" class="bs-task-totals-bar__cell">
+                  <div class="bs-task-totals-bar__key">
+                    <Icon :icon="cell.icon" :size="14" />
+                    {{ cell.label }}
+                  </div>
+                  <div class="bs-task-totals-bar__value">
+                    <Tooltip mode="describe" :text="cell.exact">
+                      <CompactNumber v-if="cell.key === 'tokens'" :value="totals!.tokens!" unit="tok" />
+                      <template v-else>{{ cell.value }}</template>
+                    </Tooltip>
+                  </div>
+                </div>
+              </div>
               <RunHistoryTimeline :runs="runs" />
               <Skeleton v-if="historyLoading" :height="160" />
               <!-- Ahead of the empty state on purpose. A failed fetch has no
