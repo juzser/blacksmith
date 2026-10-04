@@ -35,6 +35,7 @@ import {
   dailySeriesKeys,
   dailyStackedBars,
   formatAvgTokensPerRun,
+  formatTokens,
   frontierMidRatio,
   hasMultipleProviders,
   horizontalTotalsBars,
@@ -49,6 +50,7 @@ import {
   secondOpinionSummary,
   secondOpinionTakeaway,
   sumUnmeasuredRuns,
+  totalsSummaryCaption,
 } from '../lib/analytics.js';
 import { type AnalyticsPeriod, type AnalyticsResult, fetchAnalytics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
@@ -133,10 +135,7 @@ const totalsTakeaway = computed(() =>
     ? 'No token usage recorded yet for this period.'
     : `Total tokens by ${stackBy.value === 'role' ? 'role' : 'model tier'} for the selected period.`,
 );
-const totalsSummary = computed(() => {
-  const top = totalsBarRows.value[0];
-  return top ? `Total tokens, highest ${top.label} at ${top.value}.` : 'Total tokens: no data.';
-});
+const totalsSummary = computed(() => totalsSummaryCaption(totalsBarRows.value));
 const totalsNotMeasuredCaption = computed(() =>
   notMeasuredRunsCaption(totalsNotMeasured.value.unmeasured, totalsNotMeasured.value.total),
 );
@@ -216,6 +215,13 @@ const phoneNotMeasured = computed(() => notMeasuredRunShare(roleTierBuckets.valu
 const phoneNotMeasuredLabel = computed(() =>
   phoneNotMeasured.value.unmeasured > 0 ? `${phoneNotMeasured.value.pct}% of runs` : '',
 );
+// Mock's phone role list has its own heading, `.ph-h` id="mh-role", with the
+// role group `aria-labelledby` it rather than carrying its own aria-label
+// (ds-review.html ~1488, DS7 PR2 round 7 item 2).
+const phoneRoleHeading = computed(() => {
+  const label = PERIOD_OPTIONS.find((o) => o.value === period.value)?.label ?? '';
+  return `Tokens by role, ${label}`;
+});
 </script>
 
 <template>
@@ -319,7 +325,7 @@ const phoneNotMeasuredLabel = computed(() =>
                 <tbody>
                   <tr v-for="row in totalsBarRows" :key="row.label">
                     <td>{{ row.label }}</td>
-                    <td>{{ row.value }}</td>
+                    <td>{{ formatTokens(row.value) }}</td>
                   </tr>
                   <tr v-if="totalsNotMeasuredCaption">
                     <td>Not measured</td>
@@ -425,29 +431,34 @@ const phoneNotMeasuredLabel = computed(() =>
 
         <div
           v-if="phoneRoleBars.length > 0 || phoneNotMeasuredLabel"
-          class="bs-analytics-page__phone-roles"
-          role="list"
-          aria-label="Tokens by role, selected period"
+          class="bs-analytics-page__phone-roles-section"
+          role="group"
+          aria-labelledby="bs-analytics-page-phone-role-heading"
         >
-          <div
-            v-for="bar in phoneRoleBars"
-            :key="bar.label"
-            role="listitem"
-            class="bs-analytics-page__phone-role"
-          >
-            <span class="bs-analytics-page__phone-role-label">{{ bar.label }}</span>
-            <ProgressBarMini :value="bar.pct" :label="`${bar.label} ${bar.pct}% of tokens`" />
-          </div>
-          <div
-            v-if="phoneNotMeasuredLabel"
-            role="listitem"
-            class="bs-analytics-page__phone-role"
-          >
-            <span class="bs-analytics-page__phone-role-label">
-              <span>Not measured</span>
-              <span class="bs-analytics-page__phone-role-unit">of runs</span>
-            </span>
-            <ProgressBarMini :value="phoneNotMeasured.pct" :label="`Not measured ${phoneNotMeasuredLabel}`" />
+          <h2 id="bs-analytics-page-phone-role-heading" class="bs-section-title">
+            {{ phoneRoleHeading }}
+          </h2>
+          <div class="bs-analytics-page__phone-roles" role="list">
+            <div
+              v-for="bar in phoneRoleBars"
+              :key="bar.label"
+              role="listitem"
+              class="bs-analytics-page__phone-role"
+            >
+              <span class="bs-analytics-page__phone-role-label">{{ bar.label }}</span>
+              <ProgressBarMini :value="bar.pct" :label="`${bar.label} ${bar.pct}% of tokens`" />
+            </div>
+            <div
+              v-if="phoneNotMeasuredLabel"
+              role="listitem"
+              class="bs-analytics-page__phone-role"
+            >
+              <span class="bs-analytics-page__phone-role-label">
+                <span>Not measured</span>
+                <span class="bs-analytics-page__phone-role-unit">of runs</span>
+              </span>
+              <ProgressBarMini :value="phoneNotMeasured.pct" :label="`Not measured ${phoneNotMeasuredLabel}`" />
+            </div>
           </div>
         </div>
       </template>

@@ -413,6 +413,18 @@ export function horizontalTotalsBars(
 }
 
 /**
+ * The by-role chart's `role="img"` aria-label: names the highest row and its
+ * token count, formatted through `formatTokens` like every other token
+ * figure on the page, never a raw integer (DS7 PR2 round 7 item 1).
+ */
+export function totalsSummaryCaption(rows: readonly HorizontalBar[]): string {
+  const top = rows[0];
+  return top
+    ? `Total tokens, highest ${top.label} at ${formatTokens(top.value)}.`
+    : 'Total tokens: no data.';
+}
+
+/**
  * Share of RUNS (not tokens) that went unmeasured over the period, across
  * every role/tier bucket — the by-role chart's and the phone list's
  * "Not measured" row (DS7 PR2 round 5 items 2/5). An unmeasured run has no

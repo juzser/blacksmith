@@ -29,6 +29,7 @@ import {
   sumUnmeasuredRuns,
   tokenTotalsBy,
   toneForKey,
+  totalsSummaryCaption,
 } from '../src/lib/analytics.js';
 import type {
   CostBucket,
@@ -594,6 +595,22 @@ describe('lib/analytics.ts — horizontalTotalsBars', () => {
       'role',
     );
     expect(rows[1]?.pct).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// DS7 PR2 round 7 item 1: the by-role chart's aria-label and sr-only table
+// render the top row's token count through formatTokens, never a raw
+// integer.
+describe('lib/analytics.ts — totalsSummaryCaption', () => {
+  it('formats the top row through formatTokens, not a raw integer', () => {
+    const rows = horizontalTotalsBars([roleTierBucket({ role: 'coder', tokens: 12345 })], 'role');
+    expect(totalsSummaryCaption(rows)).toBe(
+      `Total tokens, highest Builder at ${formatTokens(12345)}.`,
+    );
+  });
+
+  it('reports no data for an empty chart', () => {
+    expect(totalsSummaryCaption([])).toBe('Total tokens: no data.');
   });
 });
 
