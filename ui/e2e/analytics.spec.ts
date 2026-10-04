@@ -54,6 +54,24 @@ test.describe('Analytics', () => {
     );
   });
 
+  // Scoped to the base project alone, only claude ever wrote a
+  // task-result-recorded row: the provider comparison card must not render
+  // at all below two real providers (D-219's shape — no block pretending a
+  // single bar is a comparison).
+  test('hides the provider comparison block below two real providers', async ({ page }) => {
+    await page.goto('/analytics?project=black-smith');
+    await expect(page.locator('h1')).toHaveText('Cost & quality');
+    await expect(
+      page.locator('.bs-card').filter({ hasText: 'Cost per task by provider' }),
+    ).toHaveCount(0);
+  });
+
+  test('renders an empty state for a project with no analytics data', async ({ page }) => {
+    await page.goto('/analytics?project=no-such-project');
+    await expect(page.locator('h1')).toHaveText('Cost & quality');
+    await expect(page.getByText('No token usage recorded yet.').first()).toBeVisible();
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
@@ -65,7 +83,7 @@ test.describe('Analytics', () => {
           page,
           page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
         );
-        await shoot(page, `analytics-${vpName}-${theme}`);
+        await shoot(page, `analytics-${vpName}-${theme}`, true);
       });
     }
   }

@@ -46,9 +46,10 @@ export async function settleForShot(page: Page, marker: Locator, settleMs = 150)
 // (D-235). `animations: 'disabled'` fast-forwards finite animations to their
 // end state and cancels infinite ones to their initial state: same pixels
 // every run.
-export async function shoot(page: Page, name: string): Promise<void> {
+export async function shoot(page: Page, name: string, fullPage = false): Promise<void> {
   await page.screenshot({
     path: path.join(SCREENSHOT_DIR, `${name}.png`),
     animations: 'disabled',
+    fullPage,
   });
 }
