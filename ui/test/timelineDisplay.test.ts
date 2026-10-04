@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { loadTaxonomy } from '../../factory/orchestrator/src/taxonomy.js';
 import type { TimelineEntry } from '../src/lib/api.js';
 import {
+  type ActivityEntry,
   buildCausalTree,
   DISPATCH_GROUP_MIN,
   type DispatchGroup,
   EVENT_KINDS,
   groupByDay,
+  groupByRoleMinute,
   groupDispatches,
   KIND_OPTIONS,
   kindFor,
@@ -1256,5 +1258,71 @@ describe('lib/timelineDisplay.ts tsForItem() / nodesOfItem()', () => {
     if (grouped?.kind !== 'group') throw new Error('expected a fold');
     expect(tsForItem(grouped)).toBe('2026-10-03T11:00:00.000');
     expect(nodesOfItem(grouped)).toBe(grouped.group.members);
+  });
+});
+
+// DS6 PR3 scope item 3: Activity's flat feed folds consecutive same-role
+// dispatch rows landing in the same minute into one summary row, rather than
+// the causal-tree fold above (groupDispatches), which this flat feed does not
+// build. "wave" is not a field the paged timeline carries (api.ts's
+// TimelineEntry/ActivityEntry has no wave/epic-wave id), so the fold keys on
+// role + minute only — flagged as a deviation from the brief's "Builder ×4 in
+// wave 3" wording in the PR3 return report.
+describe('groupByRoleMinute', () => {
+  const base: ActivityEntry = {
+    eventId: 'e1',
+    ts: '2026-01-01T00:00:10.000Z',
+    eventType: 'dispatch_decision',
+    taskId: null,
+    agentId: null,
+    planVersion: 1,
+    causalParent: null,
+    payload: { agent_role: 'builder' },
+    project: null,
+    actor: null,
+    kind: 'Dispatched',
+  };
+
+  it('does not fold a run shorter than the minimum', () => {
+    const entries = [base, { ...base, eventId: 'e2' }];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry']);
+  });
+
+  it('folds three or more same-role same-minute dispatches into one group', () => {
+    const entries = [
+      base,
+      { ...base, eventId: 'e2', ts: '2026-01-01T00:00:20.000Z' },
+      { ...base, eventId: 'e3', ts: '2026-01-01T00:00:30.000Z' },
+    ];
+    const items = groupByRoleMinute(entries);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'group' });
+  });
+
+  it('keeps a different role out of the run', () => {
+    const entries = [
+      base,
+      { ...base, eventId: 'e2' },
+      { ...base, eventId: 'e3', payload: { agent_role: 'judge' } },
+    ];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
+  });
+
+  it('keeps a different minute out of the run', () => {
+    const entries = [
+      base,
+      { ...base, eventId: 'e2' },
+      { ...base, eventId: 'e3', ts: '2026-01-01T00:05:00.000Z' },
+    ];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
+  });
+
+  it('only folds dispatch-kind rows', () => {
+    const entries = [
+      { ...base, kind: 'Returned' as const },
+      { ...base, eventId: 'e2', kind: 'Returned' as const },
+      { ...base, eventId: 'e3', kind: 'Returned' as const },
+    ];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
   });
 });

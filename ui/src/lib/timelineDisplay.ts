@@ -939,6 +939,65 @@ function dayLabel(day: Date, nowIso: string): string {
  * `RunHistoryTimeline`'s own list are both newest-first already, and grouping
  * is the wrong place to second-guess that.
  */
+/** Minimum run length worth folding on the flat Activity feed — same
+ * threshold as DISPATCH_GROUP_MIN, kept as its own constant because this is
+ * a different fold (role + minute, not causal siblings). */
+const ROLE_MINUTE_GROUP_MIN = 3;
+
+/** A run of same-role Dispatched rows landing in the same minute, folded into
+ * one summary ("Builder ×4" — round/total tokens/longest duration are read
+ * off `group.members` by the caller, same as `groupDispatches`'s groups).
+ * Deviation from the brief's "in wave N" wording: a paged `ActivityEntry`
+ * carries no wave id (api.ts's TimelineEntry/TimelinePage shape), so the fold
+ * keys on role + minute only — see PR3's return report. */
+export interface RoleMinuteItem {
+  kind: 'entry' | 'group';
+  entry?: ActivityEntry;
+  group?: { id: string; role: string; members: ActivityEntry[] };
+}
+
+function dispatchRoleOf(entry: ActivityEntry): string {
+  return String((entry.payload as { agent_role?: string }).agent_role ?? 'agent');
+}
+
+function minuteKey(ts: string): string {
+  return ts.slice(0, 16); // YYYY-MM-DDTHH:MM
+}
+
+export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinuteItem[] {
+  const items: RoleMinuteItem[] = [];
+  let run: ActivityEntry[] = [];
+  const flush = () => {
+    if (run.length >= ROLE_MINUTE_GROUP_MIN) {
+      items.push({
+        kind: 'group',
+        group: { id: `role-minute-${run[0].eventId}`, role: dispatchRoleOf(run[0]), members: run },
+      });
+    } else {
+      for (const entry of run) items.push({ kind: 'entry', entry });
+    }
+    run = [];
+  };
+  for (const entry of entries) {
+    const foldable = kindFor(entry) === 'dispatch';
+    const last = run[run.length - 1];
+    const sameRun =
+      foldable &&
+      last !== undefined &&
+      dispatchRoleOf(entry) === dispatchRoleOf(last) &&
+      minuteKey(entry.ts) === minuteKey(last.ts);
+    if (foldable && (run.length === 0 || sameRun)) {
+      run.push(entry);
+    } else {
+      flush();
+      if (foldable) run.push(entry);
+      else items.push({ kind: 'entry', entry });
+    }
+  }
+  flush();
+  return items;
+}
+
 export function groupByDay<T extends { ts: string }>(
   items: readonly T[],
   nowIso: string,
