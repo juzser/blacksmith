@@ -39,16 +39,30 @@ function tokensItem(run: DispatchRun | undefined): string | null {
   return `${formatCompactNumber(total)} tokens`;
 }
 
+// Visual pass round 4, item 2: `duration_ms` is never stamped by any writer
+// in this codebase today (durationMsFromPayload's own doc comment, same
+// "not recorded anywhere" status ds-spec.md §4.3 gives Effort — which the
+// spec hides rather than labels "not measured"). Showing the literal string
+// on every single terminal dispatch/returned row, next to a real measured
+// token count, reads as a second broken measurement rather than the field
+// this codebase simply doesn't collect yet, so a null duration is omitted,
+// the same way Effort stays out of the row until a writer adds it.
 function durationItem(ms: number | null | undefined): string | null {
-  if (ms === undefined) return null;
-  if (ms === null) return NOT_MEASURED;
+  if (ms == null) return null;
   const minutes = Math.round(ms / 60_000);
   return minutes < 1 ? `${Math.round(ms / 1000)} s` : `${minutes} min`;
 }
 
+// Visual pass round 4, item 2: an unlinked dispatch — one whose
+// `nearestPromptId` points outside the current page/task's own loaded
+// entries (TaskDetailPage's History tab scopes the lookup to just that
+// task) — is a legitimate state, not a failed measurement: the prompt was
+// never missing, the caller just couldn't resolve its timestamp from what
+// it has in hand. Returning NOT_MEASURED here showed it stacked next to a
+// real measured token count on the same row, reading as broken data where
+// none was.
 function becauseOfItem(ctx: MetaContext): string | null {
-  if (ctx.promptTs === undefined) return null;
-  if (ctx.promptTs === null) return NOT_MEASURED;
+  if (ctx.promptTs == null) return null;
   return `because of your prompt at ${formatTime(ctx.promptTs)}`;
 }
 
@@ -822,6 +836,11 @@ function humanizeEventType(eventType: string): string {
  * field the kind IS supposed to carry but this particular row's payload
  * came back null for (D-169's own "say the absence" rule, one level down:
  * a null counts, a field that doesn't exist for this kind never did).
+ * Two exceptions, both visual pass round 4 item 2: `duration_ms` (no writer
+ * stamps it anywhere today) and an unresolved "because of" prompt link (the
+ * prompt exists, the caller just couldn't resolve it from what it has in
+ * hand) are both omitted rather than labelled — see `durationItem` and
+ * `becauseOfItem`.
  */
 export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
   const p = entry.payload as Record<string, unknown>;

@@ -1079,6 +1079,41 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     expect(metaFor(e)).toBe('round 1 · 1.5K tokens · 1 min');
   });
 
+  // Visual pass round 4, item 2: a finished dispatch whose run never had a
+  // duration stamped (no writer in this codebase sets `duration_ms` today)
+  // omits the item rather than labelling it "not measured" next to the real
+  // token count.
+  it("omits duration from a finished dispatch's meta when the run never stamped it", () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: 1000,
+      tokensOut: 500,
+      durationMs: null,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 1,
+    };
+    expect(metaFor(e)).toBe('round 1 · 1.5K tokens');
+  });
+
+  // Visual pass round 4, item 2: an unlinked "because of" prompt (the
+  // caller's lookup table couldn't resolve `nearestPromptId`'s timestamp,
+  // e.g. the History tab scoping it to one task's own entries) is a
+  // legitimate state, not a failed measurement — it is omitted, never shown
+  // as "not measured" next to the real token count.
+  it('omits "because of" from a finished dispatch\'s meta when the prompt link cannot be resolved', () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: 1000,
+      tokensOut: 500,
+      durationMs: 65_000,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 1,
+    };
+    expect(metaFor(e, { promptTs: null })).toBe('round 1 · 1.5K tokens · 1 min');
+  });
+
   // ds-review.html #p-activity's own Prompt row meta: "You · caused 2
   // dispatches". titleFor() already renders the verbatim prompt text as the
   // title (see the 'maps user_prompt to the prompt kind' test above) — the
