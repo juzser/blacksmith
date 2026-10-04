@@ -16,6 +16,7 @@ describe('HomePage.vue', () => {
   it('lays out the §4.1 sections in order, inbox first', () => {
     const order = [
       '<NeedsYouInbox',
+      '>Recent activity</h2>',
       '>Running now</h2>',
       '>What the factory decided recently</h2>',
       '>Budget</h2>',
@@ -24,8 +25,11 @@ describe('HomePage.vue', () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  it('defers Recent activity (DS6) rather than rendering half of it', () => {
-    expect(TEMPLATE).not.toContain('Recent activity');
+  it('renders Recent activity directly under the inbox (DS6 PR4, §4.1 point 1b)', () => {
+    expect(SRC).toMatch(/fetchTimelinePage\(\{[\s\S]*?limit: RECENT_ACTIVITY_SHOWN/);
+    expect(TEMPLATE).toMatch(/<TimelineRow[\s\S]*?variant="compact"/);
+    expect(TEMPLATE).not.toContain('Expand all');
+    expect(TEMPLATE).toMatch(/<RouterLink to="\/activity"[^>]*>View all activity<\/RouterLink>/);
   });
 
   it('reuses the existing endpoints with the page scope', () => {

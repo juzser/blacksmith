@@ -14,8 +14,8 @@ const TIMELINE_ROW = readFileSync(join(KIT, 'TimelineRow.vue'), 'utf8');
 const RUN_HISTORY = readFileSync(join(dirname(KIT), 'RunHistoryTimeline.vue'), 'utf8');
 
 describe('kit/TimelineRow.vue rail variant', () => {
-  it('declares an opt-in rail variant prop, no other new variant value', () => {
-    expect(TIMELINE_ROW).toMatch(/variant\?:\s*'rail';/);
+  it('declares an opt-in rail variant prop', () => {
+    expect(TIMELINE_ROW).toMatch(/variant\?:\s*'rail'\s*\|\s*'compact';/);
   });
 
   it('declares the rail-only override props (TaskRun has no eventType/payload)', () => {
@@ -32,7 +32,7 @@ describe('kit/TimelineRow.vue rail variant', () => {
   });
 
   it('binds the rail class only when variant is rail, same EventKindTag/meta/chevron markup', () => {
-    expect(TIMELINE_ROW).toMatch(/:class="\{ 'bs-timeline-row--rail': variant === 'rail' \}"/);
+    expect(TIMELINE_ROW).toMatch(/'bs-timeline-row--rail': variant === 'rail'/);
     expect(TIMELINE_ROW).toMatch(/<EventKindTag :kind="kind" \/>/);
     expect(TIMELINE_ROW).toMatch(/<Tag v-if="tag" :tone="tag\.tone" variant="subtle" size="sm">/);
   });

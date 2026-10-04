@@ -33,11 +33,13 @@ const props = withDefaults(
      * the task on screen, so a title link there would push the page the
      * operator is already standing on — a no-op vue-router discards (D-231). */
     linkable?: boolean;
-    /** ds-spec.md §2.2 `TimelineRow` variant list: `rail` is the only one this
-     * task adds (`RunHistoryTimeline`'s rows) — no stripe, a rail dot/line
-     * drawn from the §1.5 `--tl-*` geometry instead, time via `RelativeTime`
-     * (default stays `formatTime` so Activity/Home stay pixel-identical). */
-    variant?: 'rail';
+    /** ds-spec.md §2.2 `TimelineRow` variant list: `rail` (`RunHistoryTimeline`'s
+     * rows) — no stripe, a rail dot/line drawn from the §1.5 `--tl-*`
+     * geometry instead, time via `RelativeTime` (default stays `formatTime`
+     * so Activity/Home stay pixel-identical). `compact` (Home's "Recent
+     * activity", DS6 PR4) — title and meta each clamp to one line with
+     * ellipsis, otherwise the default row's markup/behaviour. */
+    variant?: 'rail' | 'compact';
     /** rail-only: `TaskRun` carries no `eventType`/`payload`, so it cannot
      * drive `titleFor`/`metaFor` — the caller (`RunHistoryTimeline`) passes
      * its own humanized label/meta text instead of this component deriving
@@ -102,7 +104,7 @@ function onBecauseOf() {
 <template>
   <li
     class="bs-timeline-row"
-    :class="{ 'bs-timeline-row--rail': variant === 'rail' }"
+    :class="{ 'bs-timeline-row--rail': variant === 'rail', 'bs-timeline-row--compact': variant === 'compact' }"
     :data-kind="kind"
     :id="`activity-row-${entry.eventId}`"
   >

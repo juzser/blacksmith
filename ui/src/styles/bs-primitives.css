@@ -528,6 +528,15 @@ a:hover {
   background: var(--bs-event-error-text);
 }
 
+/* compact variant (DS6 PR4, ds-spec.md §2.2): Home's "Recent activity" —
+   title and meta each clamp to one line with ellipsis instead of wrapping. */
+.bs-timeline-row--compact .bs-timeline-row__title,
+.bs-timeline-row--compact .bs-timeline-row__meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
 .bs-sep {
   background: var(--bs-border);
@@ -2030,6 +2039,29 @@ summary.bs-inbox__group-head {
   flex: 1;
   min-width: 0;
   color: var(--bs-text);
+}
+
+/* "Recent activity" (DS6 PR4, ds-spec.md §4.1 point 1b): header row with the
+   "View all activity" link, and the 8-row compact TimelineRow list -- same
+   flush-row treatment .bs-run-history gives RunHistoryTimeline. Phone shows
+   only the first 4 rows (ds-spec.md: "Phone: 4 rows"). */
+.bs-home__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--bs-space-2);
+}
+.bs-home__recent-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+@media (max-width: 640px) {
+  .bs-home__recent-activity > li:nth-child(n + 5) {
+    display: none;
+  }
 }
 
 /* --- DS3 Slice B: Kanban on the kit (ds-spec.md §2.4/§2.4b/§4.2) --- */

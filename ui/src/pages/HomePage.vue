@@ -7,13 +7,13 @@ const seenInFlight = new Set<string>();
 
 <script setup lang="ts">
 // Home (ds-spec.md §4.1): replaces Overview and Projects. Sections, in
-// order: what needs you, Running now (with Just finished), what the factory
-// decided recently, Budget. "Recent activity" (point 1b) is deferred to DS6
-// — see ui/docs/DESIGN.md Known Deviations. Numbers and sentences come from
-// lib/homeView.ts; this file only lays them out.
+// order: what needs you, Running now (with Just finished), "Recent
+// activity" (point 1b, DS6 PR4), what the factory decided recently, Budget.
+// Numbers and sentences come from lib/homeView.ts; this file only lays
+// them out.
 import { Activity } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import NeedsYouInbox from '../components/NeedsYouInbox.vue';
 import Banner from '../components/kit/Banner.vue';
 import Card from '../components/kit/Card.vue';
@@ -22,11 +22,21 @@ import PageHeader from '../components/kit/PageHeader.vue';
 import ProgressRing from '../components/kit/ProgressRing.vue';
 import RelativeTime from '../components/kit/RelativeTime.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
+import TimelineRow from '../components/kit/TimelineRow.vue';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
-import { type ClosedEpic, fetchInbox, fetchOverview, type InboxRow, type OverviewResult } from '../lib/api.js';
+import {
+  type ActivityEntry,
+  type ClosedEpic,
+  fetchInbox,
+  fetchOverview,
+  fetchTimelinePage,
+  type InboxRow,
+  type OverviewResult,
+} from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
+import { toggleExpanded } from '../lib/expandedRows.js';
 import { pluralize } from '../lib/format.js';
 import {
   budgetDeltaSentence,
@@ -43,15 +53,25 @@ import {
 const POLL_MS = 5000;
 /** How many decisions the section lists; the rest live on Activity. */
 const DECISIONS_SHOWN = 8;
+/** ds-spec.md §4.1 point 1b / ds-review.html: "the 8 newest TimelineRows". */
+const RECENT_ACTIVITY_SHOWN = 8;
 
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
+const router = useRouter();
 
 const overview = ref<OverviewResult | null>(null);
 const overviewFailed = ref(false);
 const inbox = ref<InboxRow[] | null>(null);
 const inboxFailed = ref(false);
 const justFinished = ref<ClosedEpic[]>([]);
+const recentActivity = ref<ActivityEntry[] | null>(null);
+const recentActivityFailed = ref(false);
+const recentActivityExpanded = ref<Set<string>>(new Set());
+
+function toggleRecentActivity(eventId: string) {
+  recentActivityExpanded.value = toggleExpanded(recentActivityExpanded.value, eventId);
+}
 
 // Each error is cleared on success, not on attempt (D-226): a server that
 // is down must not look healthy between polls.
@@ -75,8 +95,22 @@ async function loadInbox() {
   }
 }
 
+async function loadRecentActivity() {
+  try {
+    const page = await fetchTimelinePage({
+      session: sessionScope.value,
+      project: project.value,
+      limit: RECENT_ACTIVITY_SHOWN,
+    });
+    recentActivity.value = page.entries;
+    recentActivityFailed.value = false;
+  } catch {
+    recentActivityFailed.value = true;
+  }
+}
+
 async function load() {
-  await Promise.all([loadOverview(), loadInbox()]);
+  await Promise.all([loadOverview(), loadInbox(), loadRecentActivity()]);
 }
 
 onMounted(load);
@@ -84,6 +118,7 @@ onMounted(load);
 watch([project, sessionKey], () => {
   overview.value = null;
   inbox.value = null;
+  recentActivity.value = null;
   load();
 });
 usePoll(load, POLL_MS);
@@ -93,8 +128,32 @@ const decisions = computed(() => overview.value?.recentDispatches.slice(0, DECIS
 const budget = computed(() => (overview.value ? budgetSummary(overview.value.tokensByEpic) : null));
 const budgetDelta = computed(() => budgetDeltaSentence(overview.value?.budgetUsedPctPointDelta1h ?? null));
 
+// Same causal-chain walk ActivityPage.vue uses for ctxFor(), scoped to this
+// page's own 8-row list rather than the whole feed.
+const promptTsById = computed(
+  () => new Map((recentActivity.value ?? []).map((e) => [e.eventId, e.ts])),
+);
+const causedCountByPromptId = computed(() => {
+  const counts = new Map<string, number>();
+  for (const e of recentActivity.value ?? []) {
+    if (e.nearestPromptId) counts.set(e.nearestPromptId, (counts.get(e.nearestPromptId) ?? 0) + 1);
+  }
+  return counts;
+});
+function recentActivityCtx(entry: ActivityEntry) {
+  const promptTs = entry.nearestPromptId
+    ? (promptTsById.value.get(entry.nearestPromptId) ?? null)
+    : undefined;
+  const causedCount = causedCountByPromptId.value.get(entry.eventId);
+  return { promptTs, causedCount };
+}
+
 function workLink(p: string) {
   return { path: '/work/kanban', query: { project: p } };
+}
+
+function goToTask(taskId: string) {
+  router.push(`/tasks/${encodeURIComponent(taskId)}`);
 }
 </script>
 
@@ -103,6 +162,38 @@ function workLink(p: string) {
     <PageHeader title="Home" description="What needs you, what is running, and what it costs." />
 
     <NeedsYouInbox :rows="inbox" :failed="inboxFailed" :project="project" @retry="loadInbox" />
+
+    <!-- ds-spec.md §4.1 point 1b: directly under the inbox, 8 newest TimelineRows
+         (compact), no Expand-all, no filters, link to Activity. -->
+    <section class="bs-home__section" aria-labelledby="recent-activity-heading">
+      <div class="bs-home__section-head">
+        <h2 id="recent-activity-heading" class="bs-section-title">Recent activity</h2>
+        <RouterLink to="/activity" class="bs-btn bs-btn--link bs-btn--sm">View all activity</RouterLink>
+      </div>
+      <Banner v-if="recentActivityFailed" show-retry @retry="loadRecentActivity">
+        Could not load recent activity.
+      </Banner>
+      <Skeleton v-else-if="recentActivity === null" :height="96" />
+      <EmptyState
+        v-else-if="canClaimEmpty(recentActivity !== null, recentActivity?.length ?? 0)"
+        :icon="Activity"
+        title="Nothing has happened yet."
+        body="Prompts, dispatches and gate results will show up here as the factory works."
+      />
+      <ol v-else class="bs-home__recent-activity timeline-feed" role="list">
+        <TimelineRow
+          v-for="entry in recentActivity"
+          :key="entry.eventId"
+          :entry="entry"
+          variant="compact"
+          :expanded="recentActivityExpanded.has(entry.eventId)"
+          :ctx="recentActivityCtx(entry)"
+          @toggle="toggleRecentActivity"
+          @select-task="goToTask"
+          @because-of="() => {}"
+        />
+      </ol>
+    </section>
 
     <Banner v-if="overviewFailed" show-retry @retry="loadOverview">Could not load Home.</Banner>
 
