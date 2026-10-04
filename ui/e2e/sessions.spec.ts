@@ -249,6 +249,32 @@ test.describe('Sessions', () => {
     );
   });
 
+  // Fix round item 6: on phone, every agent row's badge used to land on a
+  // second line for some rows and not others, depending on the token
+  // text's length. A fixed column layout (title, then one meta line) means
+  // the badge and its RelativeTime now always share one line, whatever the
+  // token text says.
+  test('every phone agent row keeps its badge on the same line as its time', async ({ page }) => {
+    await serveSessions(page);
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions?session=run-active');
+    const rows = page.locator('.bs-agentblock__row');
+    await expect(rows.first()).toBeVisible();
+    const count = await rows.count();
+    for (let i = 0; i < count; i++) {
+      const row = rows.nth(i);
+      const [timeBox, badgeBox] = await Promise.all([
+        row.locator('time').boundingBox(),
+        row.locator('.bs-tag').boundingBox(),
+      ]);
+      expect(timeBox).not.toBeNull();
+      expect(badgeBox).not.toBeNull();
+      const timeCenter = (timeBox?.y ?? 0) + (timeBox?.height ?? 0) / 2;
+      const badgeCenter = (badgeBox?.y ?? 0) + (badgeBox?.height ?? 0) / 2;
+      expect(Math.abs(timeCenter - badgeCenter)).toBeLessThanOrEqual(4);
+    }
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
