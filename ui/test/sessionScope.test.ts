@@ -328,7 +328,7 @@ describe('every session-taking fetch sends the pair through applySessionScope', 
   );
   const sessionTaking = [...fetches].filter(([, body]) => /\bsession\b/.test(body));
 
-  it('finds the twelve fetches whose endpoint spreads sessionScope(c)', () => {
+  it('finds the thirteen fetches whose endpoint spreads sessionScope(c)', () => {
     expect(sessionTaking.map(([name]) => name).sort()).toEqual([
       'fetchAnalytics',
       'fetchErrors',
@@ -345,6 +345,8 @@ describe('every session-taking fetch sends the pair through applySessionScope', 
       // every other read, so the helper rule below binds it too.
       'fetchSessions',
       'fetchTimeline',
+      // DS6: /api/timeline's paged sibling, same endpoint, same scope rule.
+      'fetchTimelinePage',
     ]);
   });
 

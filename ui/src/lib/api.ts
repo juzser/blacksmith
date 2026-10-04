@@ -632,6 +632,49 @@ export function fetchTimeline(params: TimelineParams = {}): Promise<TimelineEntr
   return getJson(`/api/timeline${qs ? `?${qs}` : ''}`);
 }
 
+/** DS6 (ds-spec.md §4.3): the Activity feed's 9 row kinds -- a text tag. */
+export type EventKind =
+  | 'Prompt'
+  | 'Dispatched'
+  | 'Returned'
+  | 'Finding'
+  | 'Gate'
+  | 'Merge'
+  | 'Error'
+  | 'Feedback'
+  | 'System';
+
+/** `/api/timeline`'s paged-mode envelope: newest-first entries plus the "Load older" cursor. */
+export interface TimelinePage {
+  entries: (TimelineEntry & { kind: EventKind; nearestPromptId: string | null })[];
+  nextBefore: string | null;
+  newestId: string | null;
+}
+
+export interface TimelinePageParams extends TimelineParams {
+  before?: string;
+  after?: string;
+  limit?: number;
+  kinds?: EventKind[];
+}
+
+/** Paged mode (newest-first): present whenever before/after/limit is set, so always here. */
+export function fetchTimelinePage(params: TimelinePageParams = {}): Promise<TimelinePage> {
+  const q = new URLSearchParams();
+  applySessionScope(q, params.session);
+  if (params.task) q.set('task', params.task);
+  if (params.epic) q.set('epic', params.epic);
+  if (params.project) q.set('project', params.project);
+  if (params.eventTypes?.length) q.set('eventTypes', params.eventTypes.join(','));
+  if (params.decisionsOnly) q.set('decisionsOnly', 'true');
+  if (params.kinds?.length) q.set('kind', params.kinds.join(','));
+  if (params.before) q.set('before', params.before);
+  if (params.after) q.set('after', params.after);
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  return getJson(`/api/timeline${qs ? `?${qs}` : ''}`);
+}
+
 export function fetchKanban(
   epic?: string,
   session?: SessionScope,

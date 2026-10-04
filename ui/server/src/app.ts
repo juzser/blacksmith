@@ -30,10 +30,15 @@ import { streamSSE } from 'hono/streaming';
 import { resolveArtifactPath } from '../../../factory/orchestrator/dist/artifacts.js';
 import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
-import type { AnalyticsResult, Scope } from '../../../factory/orchestrator/dist/db/queries.js';
+import type {
+  AnalyticsResult,
+  EventKind,
+  Scope,
+} from '../../../factory/orchestrator/dist/db/queries.js';
 import {
   analytics,
   artifactById,
+  EVENT_KINDS,
   errorsPage,
   flowGraph,
   inboxRows,
@@ -239,7 +244,8 @@ function errorStatus(code: string): 400 | 404 | 409 | 500 {
     // P9-36: what transitionLesson() refuses about the request itself.
     code.endsWith('.illegal-transition') ||
     code.endsWith('.empty-statement') ||
-    code.endsWith('.session-mismatch')
+    code.endsWith('.session-mismatch') ||
+    code.endsWith('.unknown-cursor')
   ) {
     return 400;
   }
@@ -780,17 +786,65 @@ export function createApp(opts: AppOpts): AppHandle {
     const causalChainFor = c.req.query('causalChainFor');
     const eventTypesParam = c.req.query('eventTypes');
     const decisionsOnly = c.req.query('decisionsOnly');
-    return c.json(
-      timeline(handle.db, {
-        ...sessionScope(c),
-        ...(taskId ? { taskId } : {}),
-        ...(epicId ? { epicId } : {}),
-        ...(project ? { project } : {}),
-        ...(causalChainFor ? { causalChainFor } : {}),
-        ...(eventTypesParam ? { eventTypes: eventTypesParam.split(',').filter(Boolean) } : {}),
-        ...(decisionsOnly === 'true' ? { decisionsOnly: true } : {}),
-      }),
-    );
+    const beforeParam = c.req.query('before');
+    const afterParam = c.req.query('after');
+    const limitParam = c.req.query('limit');
+    const kindParam = c.req.query('kind');
+
+    let limit: number | undefined;
+    if (limitParam !== undefined) {
+      limit = Number(limitParam);
+      if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+        throw new BadRequestError(
+          'timeline.bad-request',
+          `"limit" must be an integer from 1 to 500, got "${limitParam}".`,
+        );
+      }
+    }
+
+    let kinds: EventKind[] | undefined;
+    if (kindParam !== undefined) {
+      kinds = kindParam.split(',').filter(Boolean) as EventKind[];
+      const unknown = kinds.find((k) => !(EVENT_KINDS as readonly string[]).includes(k));
+      if (unknown !== undefined) {
+        throw new BadRequestError('timeline.bad-request', `Unknown kind "${unknown}".`);
+      }
+    }
+
+    const paged = limit !== undefined || beforeParam !== undefined || afterParam !== undefined;
+    const entries = timeline(handle.db, {
+      ...sessionScope(c),
+      ...(taskId ? { taskId } : {}),
+      ...(epicId ? { epicId } : {}),
+      ...(project ? { project } : {}),
+      ...(causalChainFor ? { causalChainFor } : {}),
+      ...(eventTypesParam ? { eventTypes: eventTypesParam.split(',').filter(Boolean) } : {}),
+      ...(decisionsOnly === 'true' ? { decisionsOnly: true } : {}),
+      ...(kinds ? { kinds } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(beforeParam !== undefined ? { before: beforeParam } : {}),
+      ...(afterParam !== undefined ? { after: afterParam } : {}),
+    });
+
+    if (!paged) return c.json(entries);
+
+    const oldest = entries[entries.length - 1];
+    const nextBefore = oldest
+      ? timeline(handle.db, {
+          ...sessionScope(c),
+          ...(taskId ? { taskId } : {}),
+          ...(epicId ? { epicId } : {}),
+          ...(project ? { project } : {}),
+          ...(eventTypesParam ? { eventTypes: eventTypesParam.split(',').filter(Boolean) } : {}),
+          ...(decisionsOnly === 'true' ? { decisionsOnly: true } : {}),
+          ...(kinds ? { kinds } : {}),
+          before: oldest.eventId,
+          limit: 1,
+        }).length > 0
+        ? oldest.eventId
+        : null
+      : null;
+    return c.json({ entries, nextBefore, newestId: entries[0]?.eventId ?? null });
   });
 
   app.get('/api/kanban', (c) => {
