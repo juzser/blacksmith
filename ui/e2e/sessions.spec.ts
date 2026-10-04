@@ -1,436 +1,263 @@
+import type { RunningSession, SessionAgent, SessionAgentsResult } from '../src/lib/api.js';
 import { FIXTURE_NOW_ISO } from './fixtureClock.js';
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
-// Payload rows for the running-only test below, dated as offsets from the
-// browser's pinned clock (harness.ts) so every label they render is exact.
-// The lines that matter are liveness.ts's: a session is active for 15
-// minutes after its last event, an agent is working for 4h after dispatch.
+// DS8 PR3 round 2 (item 6): the Sessions page rebuilt on the kit — a
+// history list (kit SessionRow) with a finished-runs toggle, and one kit
+// AgentBlock per role for whichever run is selected. The VueFlow canvas
+// this file used to describe is gone; every claim here is against that
+// markup, stubbed deterministically through `page.route` the way
+// lessons.spec.ts stubs `/api/lessons` rather than against the real fixture
+// db, so each state (every badge, every token kind, the title fallback) is
+// reachable without hunting for a fixture run that happens to be in it.
 const minutesAgo = (minutes: number): string =>
   new Date(Date.parse(FIXTURE_NOW_ISO) - minutes * 60_000).toISOString();
-const session = (sessionId: string, lastEventAt: string, working: number, live: number) => ({
-  sessionId,
-  startedAt: minutesAgo(6 * 60),
-  lastEventAt,
-  eventCount: 3,
-  liveAgentCount: live,
-  workingAgentCount: working,
-  lastEventType: 'task-created',
-  projects: ['black-smith'],
-});
-const agent = (id: string, sessionId: string, dispatchedAt: string) => ({
-  id,
-  sessionId,
-  agentRole: 'coder',
-  provider: 'anthropic',
-  modelTier: 'sonnet',
-  taskId: `task-${id}`,
-  epicId: 'epic-1',
-  dispatchedAt,
-});
 
-// The canvas half of the Sessions page. Layout arithmetic (band order, band
-// height, which edge animates) is asserted in ui/test/sessionsFlow.test.ts,
-// which runs everywhere; this file makes the same claims against the real
-// rendered boxes, which only a browser can do.
+function session(partial: Partial<RunningSession> & { sessionId: string }): RunningSession {
+  return {
+    startedAt: minutesAgo(6 * 60),
+    lastEventAt: minutesAgo(3),
+    eventCount: 5,
+    liveAgentCount: 0,
+    workingAgentCount: 0,
+    lastEventType: 'task-created',
+    projects: ['black-smith'],
+    title: null,
+    ...partial,
+  };
+}
+
+function agent(partial: Partial<SessionAgent> & { id: string }): SessionAgent {
+  return {
+    agentRole: 'coder',
+    provider: 'anthropic',
+    modelTier: 'sonnet',
+    taskId: `task-${partial.id}`,
+    taskTitle: null,
+    epicId: 'epic-1',
+    round: 1,
+    dispatchedAt: minutesAgo(30),
+    terminalAt: null,
+    terminalType: null,
+    status: 'live',
+    tokens: { state: 'pending' },
+    lastEventType: 'task-created',
+    lastEventAt: minutesAgo(10),
+    ...partial,
+  };
+}
+
+// run-active: one of each of the 5 badge states, and 3 of the 4 token kinds
+// (measured, unmeasured, none) plus a pending one — enough to prove every
+// label and every token rendering in one AgentBlock, with liveAgentCount
+// matching the 2 `live` rows below (working + no-result).
+const AGENTS_ACTIVE: SessionAgentsResult = {
+  sessionId: 'run-active',
+  roles: [
+    {
+      agentRole: 'coder',
+      agents: [
+        agent({
+          id: 'a-working',
+          status: 'live',
+          dispatchedAt: minutesAgo(30),
+          tokens: { state: 'pending' },
+        }),
+        agent({
+          id: 'a-no-result',
+          status: 'live',
+          dispatchedAt: minutesAgo(5 * 60),
+          tokens: { state: 'unmeasured' },
+        }),
+        agent({
+          id: 'a-done',
+          status: 'done',
+          dispatchedAt: minutesAgo(90),
+          tokens: { state: 'measured', input: 1234, output: 567, total: 1801 },
+        }),
+        agent({
+          id: 'a-failed',
+          status: 'error',
+          dispatchedAt: minutesAgo(80),
+          tokens: { state: 'none' },
+        }),
+        agent({
+          id: 'a-stopped',
+          status: 'superseded',
+          dispatchedAt: minutesAgo(70),
+          tokens: { state: 'none' },
+        }),
+      ],
+    },
+  ],
+};
+
+const AGENTS_UNTITLED: SessionAgentsResult = {
+  sessionId: 'run-untitled',
+  roles: [
+    {
+      agentRole: 'reviewer',
+      agents: [
+        agent({ id: 'u-done', agentRole: 'reviewer', status: 'done', tokens: { state: 'none' } }),
+      ],
+    },
+  ],
+};
+
+const SESSIONS: RunningSession[] = [
+  session({
+    sessionId: 'run-active',
+    liveAgentCount: 2,
+    workingAgentCount: 1,
+    title: 'Fix the login retry loop',
+  }),
+  // No title at all: the row falls back to the bare session id.
+  session({
+    sessionId: 'run-untitled',
+    startedAt: minutesAgo(10 * 60),
+    lastEventAt: minutesAgo(9 * 60),
+    liveAgentCount: 0,
+    title: null,
+  }),
+  session({
+    sessionId: 'run-second-finished',
+    startedAt: minutesAgo(20 * 60),
+    lastEventAt: minutesAgo(19 * 60),
+    liveAgentCount: 0,
+    title: 'Second finished run',
+  }),
+];
+
+async function serveSessions(page: import('@playwright/test').Page) {
+  await page.route('**/api/sessions*', (route) => route.fulfill({ json: SESSIONS }));
+  await page.route('**/api/sessions/run-active/agents*', (route) =>
+    route.fulfill({ json: AGENTS_ACTIVE }),
+  );
+  await page.route('**/api/sessions/run-untitled/agents*', (route) =>
+    route.fulfill({ json: AGENTS_UNTITLED }),
+  );
+}
+
 test.describe('Sessions', () => {
-  test('renders running sessions as a canvas with an sr-only table alternative', async ({
+  test('lists running sessions and offers a count of finished ones', async ({ page }) => {
+    await serveSessions(page);
+    await page.goto('/sessions');
+    await expect(page.locator('h1')).toHaveText('Sessions');
+    // Only the one running row renders up front; the finished ones are
+    // behind the toggle, which states exactly how many. Without the
+    // running/finished split every row would render at once and this count
+    // would not exist.
+    await expect(page.getByRole('button', { name: 'Show 2 finished runs' })).toBeVisible();
+    await expect(page.getByText('run-untitled')).toHaveCount(0);
+    await expect(page.getByText('Second finished run')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Show 2 finished runs' }).click();
+    await expect(page.getByRole('button', { name: 'Hide finished runs' })).toBeVisible();
+    await expect(page.getByText('run-untitled')).toBeVisible();
+    await expect(page.getByText('Second finished run')).toBeVisible();
+  });
+
+  // The title column (SessionRow.vue): a session with a title shows it; one
+  // with none falls back to its bare sessionId. Both rows exist in the same
+  // fixture so this fails the instant either one stops being distinguished.
+  test('a run with a title shows it; a run without one falls back to its session id', async ({
     page,
   }) => {
+    await serveSessions(page);
     await page.goto('/sessions');
-    await expect(page.locator('h1')).toHaveText('Sessions');
-    await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
-    await expect(page.locator('.session-node').first()).toBeVisible();
-    // A DOM graph carries no text alternative for its order, nor for which
-    // agent hangs off which run — same pattern as Roadmap and Flow.
-    await expect(page.locator('table.sr-only')).toBeAttached();
+    await expect(page.getByText('Fix the login retry loop')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Show 2 finished runs' }).click();
+    // The untitled row's own title line reads the raw id -- not blank, not
+    // "Untitled", which is what a missing fallback would render instead.
+    await expect(
+      page.locator('.bs-sessionrow__title').getByText('run-untitled', { exact: true }),
+    ).toBeVisible();
   });
 
-  test('draws the agents a run dispatched, in their own column', async ({ page }) => {
+  // Selecting a run shows its agents and writes `?session=<id>` onto the URL
+  // -- the page's own deep-link marker (sessionsSelection.ts), round-tripped.
+  test('selecting a run loads its agents and writes the id onto the URL', async ({ page }) => {
+    await serveSessions(page);
     await page.goto('/sessions');
-    await expect(page.locator('.agent-node').first()).toBeVisible();
-    // The two columns are the whole point of the layout: a session on the
-    // left, everything it dispatched to the right of it.
-    const sessionX = await page
-      .locator('.session-node')
-      .first()
-      .evaluate((el) => el.getBoundingClientRect().x);
-    const agentX = await page
-      .locator('.agent-node')
-      .first()
-      .evaluate((el) => el.getBoundingClientRect().x);
-    expect(agentX).toBeGreaterThan(sessionX);
+    await page.getByText('Fix the login retry loop').click();
+    await expect(page.locator('.bs-agentblock')).toBeVisible();
+    await expect(page).toHaveURL(/[?&]session=run-active\b/);
   });
 
-  test('tiles the bands across the canvas it measured, not down one column', async ({ page }) => {
-    // The fixture has two sessions, which the layout correctly keeps in ONE
-    // column — two bands fit at 1.46 zoom stacked and 0.69 tiled, and tiling
-    // them would make the text smaller. So the tiling path has to be driven
-    // with a payload that needs it: eight bands stacked is 0.59 and unreadable,
-    // which is the squint this page was built to remove.
-    //
-    // Asserted in a browser rather than against sessionsFlowNodes() because the
-    // failure it guards is not arithmetic. The column count is chosen from the
-    // canvas's measured box, so the first correct layout necessarily arrives
-    // AFTER the canvas mounts — and Vue Flow syncs `:nodes` through a *pausable*
-    // watcher that drops a prop change landing in the same flush as its own
-    // initial store sync. Binding the corrected array was not enough: the store
-    // kept the pre-measurement positions and drew one tall column forever.
-    await page.route('**/api/overview*', async (route) => {
-      const payload = await (await route.fetch()).json();
-      // Dated after the pinned clock (harness.ts), which sessionActivity()
-      // clamps to "just now": every one of these bands is running, so the
-      // running-only rule hides none of them and the tiling gets its eight.
-      payload.runningSessions = Array.from({ length: 8 }, (_, i) => ({
-        sessionId: `sess-tiling-${i}`,
-        startedAt: '2026-08-13T10:00:00.000Z',
-        lastEventAt: `2026-08-13T11:${String(50 - i).padStart(2, '0')}:00.000Z`,
-        eventCount: 3,
-        liveAgentCount: 0,
-        workingAgentCount: 0,
-        lastEventType: 'task-created',
-        projects: ['black-smith'],
-      }));
-      payload.liveAgentEntries = [];
-      await route.fulfill({ json: payload });
-    });
-    await page.goto('/sessions');
-    await expect(page.locator('.session-node')).toHaveCount(8);
-    const xs = await page
-      .locator('.session-node')
-      .evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().x)));
-    expect(new Set(xs).size, `all session cards share an x: ${xs.join(', ')}`).toBeGreaterThan(1);
+  // Deep link in: `/sessions?session=<id>` selects that run on load (even a
+  // finished one, which also has to flip the toggle open for its row to be
+  // there at all) and its AgentBlocks render without a click.
+  test('a deep link selects its run and shows its agents on load', async ({ page }) => {
+    await serveSessions(page);
+    await page.goto('/sessions?session=run-untitled');
+    await expect(page.locator('.bs-agentblock')).toBeVisible();
+    await expect(page.locator('.bs-agentblock__role')).toHaveText('Code reviewer');
+    // The finished row the id points at is visible, so the toggle already
+    // reads "open" -- proof the deep link reached into the finished half of
+    // the list, not only the running one.
+    await expect(page.getByRole('button', { name: 'Hide finished runs' })).toBeVisible();
   });
 
-  test('draws the whole graph inside the canvas, with nothing to drag to', async ({ page }) => {
-    // The request behind this layout was "reduce the space you have to drag
-    // through to see it". That is one measurable claim:
-    // after fit-view-on-init, every node the canvas drew is already inside the
-    // canvas box. A layout that spends the wrong axis fails this by putting
-    // cards below the fold, which no unit test on positions can see.
-    await page.goto('/sessions');
-    await expect(page.locator('.session-node').first()).toBeVisible();
-    const canvas = await page.locator('.sessions-canvas').boundingBox();
-    if (!canvas) throw new Error('the canvas the nodes must fit inside has no box');
-    const nodes = await page.locator('.session-node, .agent-node').evaluateAll((els) =>
-      els.map((el) => {
-        const r = el.getBoundingClientRect();
-        return { x: r.x, y: r.y, right: r.right, bottom: r.bottom };
-      }),
-    );
-    expect(nodes.length).toBeGreaterThan(0);
-    for (const [i, n] of nodes.entries()) {
-      // Half a pixel of slack: Vue Flow's transform is fractional and a node
-      // flush against the edge rounds either way.
-      expect(n.x, `node ${i} starts left of the canvas`).toBeGreaterThanOrEqual(canvas.x - 0.5);
-      expect(n.y, `node ${i} starts above the canvas`).toBeGreaterThanOrEqual(canvas.y - 0.5);
-      expect(n.right, `node ${i} runs past the right edge`).toBeLessThanOrEqual(
-        canvas.x + canvas.width + 0.5,
-      );
-      expect(n.bottom, `node ${i} runs past the bottom edge`).toBeLessThanOrEqual(
-        canvas.y + canvas.height + 0.5,
-      );
+  // The 5 badge labels (ds-spec.md §4.6 pattern 13, operator Q2), each from
+  // its own agent row. A badge mapping that collapsed any two of these to
+  // the same label, or dropped the "No result after 4h" anomaly case,
+  // leaves one of these five `getByText` misses its row.
+  test('shows all 5 agent status badges', async ({ page }) => {
+    await serveSessions(page);
+    await page.goto('/sessions?session=run-active');
+    const block = page.locator('.bs-agentblock');
+    await expect(block).toBeVisible();
+    for (const label of ['Working', 'No result after 4h', 'Done', 'Failed', 'Stopped']) {
+      await expect(block.getByText(label, { exact: true }), label).toBeVisible();
     }
   });
 
-  test('re-measures the canvas when it comes back from an idle factory', async ({ page }) => {
-    // `measured` gates the flow's mount, so it has to mean "canvasSize describes
-    // the canvas that is on screen right now". The canvas unmounts whenever the
-    // last run finishes — `groups.length === 0` hands the page to EmptyState —
-    // and comes back when the next run starts. If the window changed size in
-    // between, the measurement taken before the gap is a measurement of a
-    // different box, and the flow would mount against it: Vue Flow's pausable
-    // prop watcher drops the correction that arrives a tick later, so the wrong
-    // column count is not transient, it is permanent until the next resize.
-    let sessionCount = 8;
-    await page.route('**/api/overview*', async (route) => {
-      const payload = await (await route.fetch()).json();
-      payload.runningSessions = Array.from({ length: sessionCount }, (_, i) => ({
-        sessionId: `sess-remount-${i}`,
-        startedAt: '2026-08-13T10:00:00.000Z',
-        lastEventAt: `2026-08-13T11:${String(50 - i).padStart(2, '0')}:00.000Z`,
-        eventCount: 3,
-        liveAgentCount: 0,
-        workingAgentCount: 0,
-        lastEventType: 'task-created',
-        projects: ['black-smith'],
-      }));
-      payload.liveAgentEntries = [];
-      await route.fulfill({ json: payload });
-    });
+  // Token states (lib/agentStatus.ts's tokenDisplay): measured renders both
+  // figures through CompactNumber, unmeasured says so in words and never as
+  // "0", pending says "Running" and none renders no token text at all.
+  test('renders every token state, and never a bare 0 for an unmeasured run', async ({ page }) => {
+    await serveSessions(page);
+    await page.goto('/sessions?session=run-active');
+    const rows = page.locator('.bs-agentblock__row');
+    const workingTokens = rows.filter({ hasText: 'Working' }).locator('.bs-agentblock__tokens');
+    const noResultTokens = rows
+      .filter({ hasText: 'No result after 4h' })
+      .locator('.bs-agentblock__tokens');
+    const doneTokens = rows.filter({ hasText: 'Done' }).locator('.bs-agentblock__tokens');
+    const failedTokens = rows.filter({ hasText: 'Failed' }).locator('.bs-agentblock__tokens');
 
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await page.goto('/sessions');
-    await expect(page.locator('.session-node')).toHaveCount(8);
-
-    // The factory goes idle and the canvas leaves the page entirely.
-    sessionCount = 0;
-    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(page.locator('.sessions-canvas')).toHaveCount(0);
-
-    // The operator narrows the window while there is nothing to draw, so this
-    // width is one the canvas has never been measured at.
-    await page.setViewportSize({ width: 390, height: 844 });
-
-    // A run starts again.
-    sessionCount = 8;
-    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(page.locator('.session-node')).toHaveCount(8);
-
-    // Same claim as the fit test, made after a remount: a layout chosen for the
-    // old 1280px box needs columns this one cannot show, and Vue Flow will not
-    // zoom out past 0.5 to rescue it — it crops, and the cards land outside.
-    const canvas = await page.locator('.sessions-canvas').boundingBox();
-    if (!canvas) throw new Error('the canvas the nodes must fit inside has no box');
-    const nodes = await page
-      .locator('.session-node, .agent-node')
-      .evaluateAll((els) =>
-        els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, right: r.right })),
-      );
-    for (const [i, n] of nodes.entries()) {
-      expect(
-        n.x,
-        `node ${i} was drawn left of the canvas it came back into`,
-      ).toBeGreaterThanOrEqual(canvas.x - 0.5);
-      expect(n.right, `node ${i} was drawn past the canvas it came back into`).toBeLessThanOrEqual(
-        canvas.x + canvas.width + 0.5,
-      );
-    }
+    await expect(workingTokens).toHaveText('Running');
+    await expect(noResultTokens).toHaveText('not measured');
+    await expect(noResultTokens).not.toHaveText(/^0$/);
+    await expect(doneTokens).toContainText('1.2K tokens in');
+    await expect(doneTokens).toContainText('567 tokens out');
+    await expect(failedTokens).toHaveText('');
   });
 
-  // Running-only liveness (operator directive): "remove idle sessions from
-  // the session display, keep only the ones running. Same for idle agents."
-  // The arithmetic is asserted in ui/test/sessionsFlow.test.ts; this is the
-  // page's side of it -- what the canvas draws, and that every band, agent
-  // and orphan it does not draw is counted somewhere in words. The counts
-  // are the claim, so each is asserted verbatim.
-  test('draws only running bands and working agents, and counts the rest', async ({ page }) => {
-    await page.route('**/api/overview*', async (route) => {
-      const payload = await (await route.fetch()).json();
-      payload.runningSessions = [
-        // Active on its own events: 3 minutes is inside the 15-minute line.
-        session('sess-active', minutesAgo(3), 1, 2),
-        // Quiet for 40 minutes, but its agent was dispatched 20 minutes ago:
-        // running on the agent half of the rule.
-        session('sess-quiet', minutesAgo(40), 1, 1),
-        // Quiet for 40 minutes and its only live row is 5h old: idle.
-        session('sess-idle', minutesAgo(40), 0, 1),
-        // Nothing for 5 hours and nothing live: idle.
-        session('sess-done', minutesAgo(5 * 60), 0, 0),
-      ];
-      payload.liveAgentEntries = [
-        agent('a-working', 'sess-active', minutesAgo(30)),
-        agent('a-stalled', 'sess-active', minutesAgo(5 * 60)),
-        agent('q-working', 'sess-quiet', minutesAgo(20)),
-        agent('i-stalled', 'sess-idle', minutesAgo(5 * 60)),
-        // Two rows whose session is not in the payload at all: the working
-        // one is named in the banner, the stalled one only counted.
-        agent('o-working', 'sess-gone', minutesAgo(10)),
-        agent('o-stalled', 'sess-gone', minutesAgo(5 * 60)),
-      ];
-      payload.liveAgentCount = 6;
-      payload.workingAgentCount = 3;
-      payload.stalledAgentCount = 3;
-      await route.fulfill({ json: payload });
-    });
-    await page.goto('/sessions');
-
-    // The toolbar line adds up over the whole payload: 2 + 2 sessions,
-    // 3 + 3 agents, the orphans included on the agent side.
-    await expect(page.locator('.ds-toolbar__count')).toHaveText(
-      '2 sessions running · 2 idle sessions not shown · 3 agents working · 3 stalled agents not shown',
+  // Entry points: the nav carries a Sessions item, and Home's "Running now"
+  // card links into this page for the project it is showing.
+  test('the Sessions nav entry is present and Home links to it', async ({ page }) => {
+    await page.goto('/overview');
+    await expect(
+      page.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: 'Sessions' }),
+    ).toBeVisible();
+    await expect(page.getByRole('link', { name: 'View black-smith in Sessions' })).toHaveAttribute(
+      'href',
+      /\/sessions/,
     );
-
-    // Two bands, one agent each; the idle bands and the stalled rows are not
-    // in the DOM at all.
-    await expect(page.locator('.session-node')).toHaveCount(2);
-    await expect(page.locator('.session-node__id')).toHaveText(['sess-active', 'sess-quiet']);
-    await expect(page.locator('.agent-node')).toHaveCount(2);
-    await expect(page.locator('.agent-node__task')).toHaveText([
-      'task-a-working',
-      'task-q-working',
-    ]);
-    await expect(page.getByText('sess-idle')).toHaveCount(0);
-    await expect(page.getByText('sess-done')).toHaveCount(0);
-
-    // The band with a stalled row says so on the card; the one without does
-    // not carry an empty clause.
-    const agentLines = page.locator('.session-node__agents');
-    await expect(agentLines.nth(0)).toContainText('1 agent working · 1 stalled agent not shown');
-    await expect(agentLines.nth(1)).toContainText('1 agent working');
-    await expect(agentLines.nth(1)).not.toContainText('stalled');
-
-    // A drawn band never calls itself idle: the quiet session is on the
-    // canvas because its agent vouches for it, and the band says that. "idle"
-    // is the footer's word for the runs the rule left off the canvas.
-    const quiet = page.locator('.session-node', { hasText: 'sess-quiet' });
-    await expect(quiet.locator('.session-node__head .ds-loz')).toHaveText('working');
-    await expect(quiet.locator('.session-node__meta')).toContainText(
-      'no event for over 15 minutes, 1 agent working',
-    );
-    const active = page.locator('.session-node', { hasText: 'sess-active' });
-    await expect(active.locator('.session-node__head .ds-loz')).toHaveText('active');
-
-    // Under the canvas: the running-only line alone, since nothing was capped.
-    await expect(page.locator('.sessions-canvas__more')).toHaveText(['2 idle sessions not shown']);
-
-    // The working orphan is named; the stalled one is in the summary's count
-    // and nowhere else.
-    await expect(page.locator('.ds-banner')).toHaveCount(1);
-    await expect(page.locator('.ds-banner')).toContainText(
-      '1 working agent with no session on this canvas (Builder · sess-gone)',
-    );
-
-    // The sr-only alternative describes the drawn graph, not the payload.
-    await expect(page.locator('table.sr-only caption')).toHaveText(
-      'Sessions: 2 running, most recently active first',
-    );
-    await expect(page.locator('table.sr-only tbody tr')).toHaveCount(2);
-  });
-
-  // The other end of the same rule: nothing running is an empty canvas, and
-  // the line under it says what the rule took off it -- as distinct from the
-  // API-failed state below, which claims nothing about the factory.
-  test('an idle factory is an empty canvas that says what it hides', async ({ page }) => {
-    await page.route('**/api/overview*', async (route) => {
-      const payload = await (await route.fetch()).json();
-      payload.runningSessions = [
-        session('sess-idle-1', minutesAgo(60), 0, 1),
-        session('sess-idle-2', minutesAgo(60), 0, 0),
-      ];
-      payload.liveAgentEntries = [agent('one-stalled', 'sess-idle-1', minutesAgo(5 * 60))];
-      payload.liveAgentCount = 1;
-      payload.workingAgentCount = 0;
-      payload.stalledAgentCount = 1;
-      await route.fulfill({ json: payload });
-    });
-    await page.goto('/sessions');
-    await expect(page.getByText('No sessions are running')).toBeVisible();
-    await expect(page.locator('.sessions-canvas')).toHaveCount(0);
-    await expect(page.locator('.sessions-canvas__more')).toHaveText(['2 idle sessions not shown']);
-    // No working agent, so the summary has no "working" clause to state.
-    await expect(page.locator('.ds-toolbar__count')).toHaveText(
-      '0 sessions running · 2 idle sessions not shown · 1 stalled agent not shown',
-    );
-    await expect(page.locator('.ds-banner')).toHaveCount(0);
-  });
-
-  test('never overlaps two rendered nodes', async ({ page }) => {
-    await page.goto('/sessions');
-    await expect(page.locator('.session-node').first()).toBeVisible();
-    const boxes = await page
-      .locator('.session-node, .agent-node')
-      .evaluateAll((els) =>
-        els
-          .map((el) => el.getBoundingClientRect())
-          .map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
-      );
-    for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        const [a, b] = [boxes[i], boxes[j]];
-        if (!a || !b) continue;
-        const overlaps = a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-        expect(overlaps, `node ${i} overlaps node ${j}`).toBe(false);
-      }
-    }
-  });
-
-  test('exposes the project switcher it scopes its fetch by', async ({ page }) => {
-    // The page passes useProjectContext()'s project into fetchOverview and
-    // renders a "<project> · Sessions" breadcrumb, so /sessions?project=x is a
-    // reachable state (bookmark, shared link). Without the route in App.vue's
-    // SCOPABLE_ROUTES the switcher is hidden and that filter cannot be cleared.
-    await page.goto('/sessions');
-    await expect(page.locator('h1')).toHaveText('Sessions');
-    // Exact: Vue Flow labels every edge "Edge from … to …", which a substring
-    // match on "Project" would not hit but a loose one does once ids contain it.
-    await expect(page.getByLabel('Project', { exact: true })).toBeVisible();
-  });
-
-  test('never reports an idle factory when the API is what failed', async ({ page }) => {
-    // The two states are indistinguishable from the operator's seat unless the
-    // page keeps them apart: a failed FIRST fetch leaves `data` null and
-    // `loading` false, which is the same shape as a factory with nothing
-    // running. Saying "No sessions are running" there is a claim about the
-    // factory made from evidence that never arrived.
-    await page.route('**/api/overview*', (route) => route.abort('failed'));
-    await page.goto('/sessions');
-    await expect(page.locator('h1')).toHaveText('Sessions');
-    await expect(page.locator('.ds-banner')).toBeVisible();
-    await expect(page.getByText('No sessions are running')).toHaveCount(0);
-    await expect(page.locator('.sessions-canvas')).toHaveCount(0);
-  });
-
-  // Same 5s poll as Overview, same omission, worse ending: here a cleared
-  // `error` with `data` still null leaves the banner gone, the skeleton gone
-  // (`loading` went false on the first failure), and `canClaimEmpty` refusing
-  // to draw the empty state -- so the page under an outage is blank for the
-  // length of every poll's flight and red only in the gaps between them. The
-  // sibling rule is stated inside this very `load()`: `graphNow` is "only
-  // advanced on a SUCCESSFUL fetch". The error above it was not (D-240).
-  test('a failing refresh never takes the error banner off the screen', async ({ page }) => {
-    let served = 0;
-    await page.route('**/api/overview*', async (route) => {
-      served += 1;
-      if (served === 1) {
-        await route.abort('failed');
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 12_000));
-      await route.abort('failed').catch(() => {});
-    });
-    await page.goto('/sessions');
-    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-
-    const refetch = page.waitForRequest('**/api/overview*');
-    await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await refetch;
-
-    await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
-  });
-
-  test('offers the same viewport controls as the other canvases', async ({ page }) => {
-    await page.goto('/sessions');
-    await expect(page.locator('.session-node').first()).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Fit view' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Zoom in' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Zoom out' })).toBeVisible();
-  });
-
-  // UI audit fix round 3: `<PageHeader title="Sessions" />` has nothing
-  // visible (title hidden, no description/status/actions), so ds/PageHeader
-  // must skip its `.ds-ph` wrapper the same way kit/PageHeader does — else
-  // the empty wrapper stays an in-flow item of `.app-page`'s gapped stack and
-  // leaves a band above the toolbar (same claim as work.spec.ts's toolbar
-  // test).
-  test('the toolbar sits at the page top padding, with no leftover band above it', async ({
-    page,
-  }) => {
-    await page.goto('/sessions');
-    const toolbar = page.locator('.ds-toolbar');
-    await expect(toolbar).toBeVisible();
-
-    const pagePadding = await page.evaluate(() => {
-      const el = document.querySelector('.app-page');
-      if (!el) throw new Error('.app-page not found');
-      return Number.parseFloat(getComputedStyle(el).paddingTop);
-    });
-
-    const pageBox = await page.locator('.app-page').boundingBox();
-    const toolbarBox = await toolbar.boundingBox();
-    if (!pageBox || !toolbarBox) throw new Error('the page or toolbar has no box');
-
-    expect(Math.abs(toolbarBox.y - pageBox.y - pagePadding)).toBeLessThanOrEqual(1);
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
+        await serveSessions(page);
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
-        await page.goto('/sessions');
+        await page.goto('/sessions?session=run-active');
         await expect(page.locator('h1')).toHaveText('Sessions');
-        await settleForShot(page, page.locator('.session-node').first());
+        await settleForShot(page, page.locator('.bs-agentblock').first());
         await shoot(page, `sessions-${vpName}-${theme}`);
       });
     }
