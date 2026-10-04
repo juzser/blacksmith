@@ -10,6 +10,7 @@ const PAGES: Record<string, string> = {
   overview: '/overview',
   sessions: '/sessions',
   timeline: '/timeline',
+  activity: '/activity',
   kanban: '/kanban',
   roadmap: '/roadmap',
   // DS4 S3 §4: /flow is retired (the canvas has no replacement to sweep);

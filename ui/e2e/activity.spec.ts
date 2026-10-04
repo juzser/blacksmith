@@ -276,6 +276,99 @@ test.describe('Activity', () => {
     await expect(page).toHaveURL('/sessions');
   });
 
+  // Fix round items 4, 5, 7 -- each fails without its own fix:
+  // - 4: TimelineRow always reserves the chevron's grid column, so the
+  //   time column's x-position is identical whether a row has details or
+  //   not.
+  // - 5: Tooltip.vue's two-root template dropped the class fallthrough
+  //   that hides the end-column time on phone, so it rendered beside the
+  //   title there too; fixed, the time shows exactly once, below the title.
+  // - 7: `.timeline-day--first` keeps the first day label flush against
+  //   the filter row even though a top sentinel/pill now render before it.
+  test('desktop: the time column aligns whether or not a row has details', async ({ page }) => {
+    const withDetails = synthEntry('with-details', 0, { payload: { prompt: 'Has a meta line' } });
+    const noDetails = { ...synthEntry('no-details', 1), eventType: 'session-started', payload: {} };
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({
+        json: {
+          entries: [withDetails, noDetails],
+          nextBefore: null,
+          newestId: withDetails.eventId,
+        },
+      });
+    });
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    const times = page.locator('.bs-timeline-row__ts:not(.bs-timeline-row__ts--meta)');
+    await expect(times).toHaveCount(2);
+    const rowWithChevron = await times.nth(0).boundingBox();
+    const rowNoChevron = await times.nth(1).boundingBox();
+    expect(rowWithChevron?.x).toBeCloseTo(rowNoChevron?.x ?? -1, 0);
+  });
+
+  test('phone: the time shows exactly once, below the title', async ({ page }) => {
+    const entry = synthEntry('phone-ts', 0, { payload: { prompt: 'Phone time check' } });
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries: [entry], nextBefore: null, newestId: entry.eventId } });
+    });
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity');
+    const title = page.locator('.bs-timeline-row__title').first();
+    await expect(title).toBeVisible();
+    const visibleTimes = page.locator('.bs-timeline-row__ts:visible');
+    await expect(visibleTimes).toHaveCount(1);
+    const titleBox = await title.boundingBox();
+    const timeBox = await visibleTimes.boundingBox();
+    expect(timeBox?.y ?? 0).toBeGreaterThan(titleBox?.y ?? 0);
+  });
+
+  test('the first day label sits flush against the filter row', async ({ page }) => {
+    await page.goto('/activity');
+    const firstDay = page.locator('.timeline-day').first();
+    await expect(firstDay).toBeVisible();
+    const marginTop = await firstDay.evaluate((el) => getComputedStyle(el).marginTop);
+    expect(marginTop).toBe('0px');
+  });
+
+  // Item 9: the pill and its button both clear the 44px touch floor on
+  // phone -- the generic touchTargets.spec.ts sweep never sees the pill
+  // since it only renders once a poll has buffered rows while scrolled away.
+  test('phone: the new-events pill button clears the touch target floor', async ({ page }) => {
+    const initial = Array.from({ length: 30 }, (_, i) => synthEntry(`init-${i}`, i));
+    const fresh = synthEntry('fresh-1', -1, { payload: { prompt: 'Brand new row' } });
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('after')) {
+        route.fulfill({ json: { entries: [fresh], nextBefore: null, newestId: fresh.eventId } });
+        return;
+      }
+      route.fulfill({
+        json: { entries: initial, nextBefore: null, newestId: initial[0]?.eventId ?? null },
+      });
+    });
+    // Pause/Refresh now only render in the desktop chip row (phone swaps to
+    // a tab row, see "phone layout ... hides chips and Refresh" above), so
+    // trigger the buffered poll at desktop width and resize down afterwards
+    // to measure the pill as phone renders it.
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    await page.evaluate(() => {
+      const el = document.querySelector('.app-scroll');
+      el?.scrollTo(0, el.scrollHeight);
+    });
+    await page.waitForTimeout(200);
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+    await expect(page.locator('.activity-newpill')).toBeVisible();
+    await page.setViewportSize(VIEWPORTS.mobile);
+
+    const pillButton = page.locator('.activity-newpill').getByRole('button');
+    await expect(pillButton).toBeVisible();
+    const box = await pillButton.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
