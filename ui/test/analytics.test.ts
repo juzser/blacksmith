@@ -15,8 +15,11 @@ import {
   formatTokens,
   frontierMidRatio,
   hasMultipleProviders,
+  horizontalTotalsBars,
   latestSameMistakeRate,
   notMeasuredCaption,
+  notMeasuredRunShare,
+  notMeasuredRunsCaption,
   phoneRoleShare,
   rateDisplay,
   ratioTakeaway,
@@ -25,6 +28,7 @@ import {
   secondOpinionTakeaway,
   sumUnmeasuredRuns,
   tokenTotalsBy,
+  toneForKey,
 } from '../src/lib/analytics.js';
 import type {
   CostBucket,
@@ -427,6 +431,29 @@ describe('lib/analytics.ts — dailySeriesKeys / dailyStackedBars / chartSeries'
   });
 });
 
+// DS7 PR2 round 5 item 1: a role keeps the same tone by stable key, not by
+// position — the daily chart, the by-role chart, and the legend must all
+// agree on one color per role.
+describe('lib/analytics.ts — toneForKey', () => {
+  it('assigns each mock-known role its own fixed tone', () => {
+    expect(toneForKey('Builder')).toBe('var(--bs-chart-1)');
+    expect(toneForKey('Tester')).toBe('var(--bs-chart-2)');
+    expect(toneForKey('Code reviewer')).toBe('var(--bs-chart-3)');
+    expect(toneForKey('Quality grader')).toBe('var(--bs-chart-4)');
+  });
+
+  it('keeps a role on the same tone regardless of position or the other keys present', () => {
+    expect(chartSeries(['Builder', 'Tester'])[0]?.tone).toBe(toneForKey('Builder'));
+    expect(chartSeries(['Tester', 'Builder'])[1]?.tone).toBe(toneForKey('Builder'));
+    expect(chartSeries(['Builder'])[0]?.tone).toBe(toneForKey('Builder'));
+  });
+
+  it('still gives an unknown key a deterministic tone', () => {
+    expect(toneForKey('Researcher')).toMatch(/^var\(--bs-chart-/);
+    expect(toneForKey('Researcher')).toBe(toneForKey('Researcher'));
+  });
+});
+
 describe('lib/analytics.ts — sumUnmeasuredRuns / notMeasuredCaption', () => {
   it('sums unmeasuredRunCount across the given buckets', () => {
     expect(
@@ -511,6 +538,65 @@ describe('lib/analytics.ts — phoneRoleShare', () => {
   });
 });
 
+// DS7 PR2 round 5 item 2/5: the Not-measured row's bar and % are the share
+// of RUNS not measured, never a token-sized share — unmeasured runs have no
+// token count to plot.
+describe('lib/analytics.ts — notMeasuredRunShare / notMeasuredRunsCaption', () => {
+  it('shares unmeasured runs over every run in the period, not over tokens', () => {
+    expect(
+      notMeasuredRunShare([
+        roleTierBucket({ runCount: 10, unmeasuredRunCount: 0 }),
+        roleTierBucket({ runCount: 4, unmeasuredRunCount: 2 }),
+      ]),
+    ).toEqual({ unmeasured: 2, total: 14, pct: 14 });
+  });
+
+  it('reports a zero share, never a division by zero, when there are no runs', () => {
+    expect(notMeasuredRunShare([])).toEqual({ unmeasured: 0, total: 0, pct: 0 });
+  });
+
+  it('is null (no caption) when nothing went unmeasured', () => {
+    expect(notMeasuredRunsCaption(0, 14)).toBeNull();
+  });
+
+  it('spells out the run share, in units, never a bare percentage', () => {
+    expect(notMeasuredRunsCaption(2, 14)).toBe('2 of 14 runs not measured.');
+  });
+});
+
+// DS7 PR2 round 5 item 2: the by-role chart is horizontal, sorted largest
+// first, with widths relative to the largest role and a tone per row.
+describe('lib/analytics.ts — horizontalTotalsBars', () => {
+  it('sorts rows largest-to-smallest and scales width relative to the largest', () => {
+    const rows = horizontalTotalsBars(
+      [
+        roleTierBucket({ role: 'reviewer', tokens: 1800 }),
+        roleTierBucket({ role: 'coder', tokens: 4200 }),
+      ],
+      'role',
+    );
+    expect(rows.map((r) => r.label)).toEqual(['Builder', 'Code reviewer']);
+    expect(rows[0]?.pct).toBe(100);
+    expect(rows[1]?.pct).toBeCloseTo((1800 / 4200) * 100);
+  });
+
+  it('gives each row its role tone through toneForKey', () => {
+    const rows = horizontalTotalsBars([roleTierBucket({ role: 'coder', tokens: 100 })], 'role');
+    expect(rows[0]?.tone).toBe(toneForKey('Builder'));
+  });
+
+  it('floors a near-zero bar at a visible minimum width, same rule as the kit chart', () => {
+    const rows = horizontalTotalsBars(
+      [
+        roleTierBucket({ role: 'coder', tokens: 10000 }),
+        roleTierBucket({ role: 'reviewer', tokens: 1 }),
+      ],
+      'role',
+    );
+    expect(rows[1]?.pct).toBeGreaterThanOrEqual(2);
+  });
+});
+
 describe('lib/analytics.ts — formatAvgTokensPerRun', () => {
   it('renders "not measured" for a null average, never 0', () => {
     expect(formatAvgTokensPerRun(null)).toBe('not measured');
@@ -548,6 +634,17 @@ describe('kit/PeriodSwitch.vue', () => {
   it('renders a button group with aria-pressed on the active option', () => {
     expect(PERIOD_SWITCH).toMatch(/role="group"/);
     expect(PERIOD_SWITCH).toMatch(/:aria-pressed="option\.value === modelValue"/);
+  });
+
+  it('takes an opt-in variant prop defaulting to buttons, leaving other consumers untouched', () => {
+    expect(PERIOD_SWITCH).toMatch(/variant\?:\s*'buttons'\s*\|\s*'tabs'/);
+    expect(PERIOD_SWITCH).toMatch(/variant:\s*'buttons'/);
+  });
+
+  it('the tabs variant renders an underline tab row with aria-current, no aria-pressed', () => {
+    expect(PERIOD_SWITCH).toMatch(/variant === 'tabs'/);
+    expect(PERIOD_SWITCH).toMatch(/:aria-current="option\.value === modelValue[^"]*"/);
+    expect(PERIOD_SWITCH).toContain('bs-periodswitch--tabs');
   });
 });
 
@@ -691,13 +788,30 @@ describe('AnalyticsPage.vue — phone layout (defect 6)', () => {
     expect(SFC).toContain('phoneRoleShare(');
   });
 
-  it('shows unmeasured runs as their own row, never as a bar or % of tokens', () => {
-    expect(SFC).toContain('phoneNotMeasuredCaption');
+  it('shows unmeasured runs as their own row, a mini-bar sharing runs not tokens', () => {
+    expect(SFC).toContain('notMeasuredRunShare(');
     const rolesBlock = SFC.slice(
       SFC.indexOf('bs-analytics-page__phone-roles'),
       SFC.indexOf('</template>', SFC.indexOf('bs-analytics-page__phone-roles')),
     );
-    const notMeasuredRow = rolesBlock.slice(rolesBlock.indexOf('phoneNotMeasuredCaption'));
-    expect(notMeasuredRow).not.toContain('ProgressBarMini');
+    const notMeasuredRow = rolesBlock.slice(rolesBlock.indexOf('phoneNotMeasured'));
+    expect(notMeasuredRow).toContain('ProgressBarMini');
+    expect(notMeasuredRow).toMatch(/of runs/);
+  });
+});
+
+describe('AnalyticsPage.vue — by-role totals chart is horizontal with a Not-measured row (item 2)', () => {
+  it('builds rows through horizontalTotalsBars, not the vertical kit BarChart', () => {
+    expect(SFC).toContain('horizontalTotalsBars(');
+  });
+
+  it('derives the Not-measured row from the share of runs, not tokens', () => {
+    expect(SFC).toContain('notMeasuredRunShare(');
+  });
+});
+
+describe('AnalyticsPage.vue — phone period switch is the mock tab row (item 4)', () => {
+  it('passes variant="tabs" to the period PeriodSwitch only on phone width', () => {
+    expect(SFC).toMatch(/:variant="isPhoneWidth \? 'tabs' : 'buttons'"/);
   });
 });

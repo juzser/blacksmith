@@ -287,12 +287,43 @@ export function dailySeriesKeys(
   return keys;
 }
 
-/** Pairs `dailySeriesKeys`' output with a stable chart tone, cycling the palette. */
+/**
+ * Fixed role/tier -> tone assignments, matching the mock's legend (c1
+ * Builder, c2 Tester, c3 Code reviewer, c4 Quality grader). A key outside
+ * this map still gets a tone, deterministically, from `hashedTone` below —
+ * never from its position in whatever list happened to be built first.
+ */
+const ROLE_TIER_TONES: Record<string, string> = {
+  Builder: 'var(--bs-chart-1)',
+  Tester: 'var(--bs-chart-2)',
+  'Code reviewer': 'var(--bs-chart-3)',
+  'Quality grader': 'var(--bs-chart-4)',
+};
+
+/** Deterministic fallback tone for a key with no fixed assignment above. */
+function hashedTone(key: string): string {
+  let hash = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    hash = (hash * 31 + key.charCodeAt(i)) & 0xffffffff;
+  }
+  const index = Math.abs(hash) % CHART_TONES.length;
+  return CHART_TONES[index] ?? 'var(--bs-chart-1)';
+}
+
+/**
+ * The one place a role/tier label maps to a chart tone (DS7 PR2 round 5
+ * item 1). Keyed by the label itself, not by position in any one chart's
+ * series, so the same role reads the same colour in the daily chart, the
+ * by-role chart, the phone mini-bars and every legend regardless of which
+ * other roles are present or in what order.
+ */
+export function toneForKey(key: string): string {
+  return ROLE_TIER_TONES[key] ?? hashedTone(key);
+}
+
+/** Pairs `dailySeriesKeys`' output with each key's stable tone from `toneForKey`. */
 export function chartSeries(keys: readonly string[]): { key: string; tone: string }[] {
-  return keys.map((key, i) => ({
-    key,
-    tone: CHART_TONES[i % CHART_TONES.length] ?? 'var(--bs-chart-1)',
-  }));
+  return keys.map((key) => ({ key, tone: toneForKey(key) }));
 }
 
 /**
@@ -350,6 +381,62 @@ export function tokenTotalsBy(
     totals.set(label, (totals.get(label) ?? 0) + bucket.tokens);
   }
   return [...totals].map(([label, value]) => ({ label, value }));
+}
+
+/** One row of the horizontal by-role/by-tier totals chart (DS7 PR2 round 5 item 2). */
+export interface HorizontalBar {
+  label: string;
+  value: number;
+  /** Width relative to the largest row, 0-100, as in the mock. */
+  pct: number;
+  tone: string;
+}
+
+/**
+ * `tokenTotalsBy`'s rows, sorted largest-first and widthed relative to the
+ * largest row, each carrying its `toneForKey` tone — the by-role "Total
+ * tokens" chart's rows in the mock's horizontal layout.
+ */
+export function horizontalTotalsBars(
+  buckets: readonly RoleModelTierBucket[],
+  by: 'role' | 'modelTier',
+): HorizontalBar[] {
+  const rows = tokenTotalsBy(buckets, by);
+  const max = Math.max(...rows.map((row) => row.value), 1);
+  return [...rows]
+    .sort((a, b) => b.value - a.value)
+    .map((row) => ({ ...row, pct: (row.value / max) * 100, tone: toneForKey(row.label) }));
+}
+
+/**
+ * Share of RUNS (not tokens) that went unmeasured over the period, across
+ * every role/tier bucket — the by-role chart's and the phone list's
+ * "Not measured" row (DS7 PR2 round 5 items 2/5). An unmeasured run has no
+ * token count, so its row is never sized by tokens and never reads as a
+ * token-axis 0; it is sized by its share of all runs instead.
+ */
+export function notMeasuredRunShare(buckets: readonly RoleModelTierBucket[]): {
+  unmeasured: number;
+  total: number;
+  pct: number;
+} {
+  let unmeasured = 0;
+  let total = 0;
+  for (const bucket of buckets) {
+    unmeasured += bucket.unmeasuredRunCount;
+    total += bucket.runCount;
+  }
+  return { unmeasured, total, pct: total > 0 ? Math.round((unmeasured / total) * 100) : 0 };
+}
+
+/**
+ * "2 of 14 runs not measured." under the by-role chart, or `null` to hide it
+ * when every run in range was measured — the row now carries this caption
+ * itself, so the chart no longer needs a separate one.
+ */
+export function notMeasuredRunsCaption(unmeasured: number, total: number): string | null {
+  if (unmeasured === 0) return null;
+  return `${unmeasured} of ${total} runs not measured.`;
 }
 
 /**
