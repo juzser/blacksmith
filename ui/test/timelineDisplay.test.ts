@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { loadTaxonomy } from '../../factory/orchestrator/src/taxonomy.js';
 import type { TimelineEntry } from '../src/lib/api.js';
 import {
+  type ActivityEntry,
   buildCausalTree,
   DISPATCH_GROUP_MIN,
   type DispatchGroup,
   EVENT_KINDS,
   groupByDay,
+  groupByRoleMinute,
   groupDispatches,
   KIND_OPTIONS,
   kindFor,
@@ -89,7 +91,7 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'dispatch_decision',
         payload: { ...base, reason: 'fix the bug' },
       });
-      expect(titleFor(e)).toBe('Dispatched Builder (mid/anthropic) — fix the bug');
+      expect(titleFor(e)).toBe('Dispatched Builder (mid/anthropic): fix the bug');
     });
 
     it('falls back to rationale, then note, then why', () => {
@@ -97,13 +99,13 @@ describe('lib/timelineDisplay.ts', () => {
         titleFor(
           entry({ eventType: 'dispatch_decision', payload: { ...base, rationale: 'a rationale' } }),
         ),
-      ).toBe('Dispatched Builder (mid/anthropic) — a rationale');
+      ).toBe('Dispatched Builder (mid/anthropic): a rationale');
       expect(
         titleFor(entry({ eventType: 'dispatch_decision', payload: { ...base, note: 'a note' } })),
-      ).toBe('Dispatched Builder (mid/anthropic) — a note');
+      ).toBe('Dispatched Builder (mid/anthropic): a note');
       expect(
         titleFor(entry({ eventType: 'dispatch_decision', payload: { ...base, why: 'a why' } })),
-      ).toBe('Dispatched Builder (mid/anthropic) — a why');
+      ).toBe('Dispatched Builder (mid/anthropic): a why');
     });
 
     it('trims whitespace and skips a blank string in favour of the next key', () => {
@@ -114,7 +116,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { ...base, reason: '   ', rationale: '  a rationale  ' },
           }),
         ),
-      ).toBe('Dispatched Builder (mid/anthropic) — a rationale');
+      ).toBe('Dispatched Builder (mid/anthropic): a rationale');
     });
 
     it('ignores a non-string value at a key and keeps looking', () => {
@@ -125,7 +127,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { ...base, reason: 42, note: 'a note' },
           }),
         ),
-      ).toBe('Dispatched Builder (mid/anthropic) — a note');
+      ).toBe('Dispatched Builder (mid/anthropic): a note');
     });
 
     it('names no reason at all when none of the four keys carry one', () => {
@@ -165,14 +167,14 @@ describe('lib/timelineDisplay.ts', () => {
       expect(verdictOutcome(entry({ eventType, payload: {} }))).toBeNull();
     }
     expect(titleFor(entry({ eventType: 'testgate-result', payload: {} }))).toBe(
-      'Test gate — no verdict recorded',
+      'Test gate: no verdict recorded',
     );
     expect(titleFor(entry({ eventType: 'schema-check-result', payload: {} }))).toBe(
-      'Schema check — no verdict recorded',
+      'Schema check: no verdict recorded',
     );
     expect(
       titleFor(entry({ eventType: 'deps-check-result', payload: { detail: 'no .bin' } })),
-    ).toBe('Dependency check — no verdict recorded: no .bin');
+    ).toBe('Dependency check (no verdict recorded): no .bin');
   });
 
   // A verdict field of the wrong type is not a verdict. `pass: 'false'` is
@@ -194,7 +196,7 @@ describe('lib/timelineDisplay.ts', () => {
   // branch of the same switch and the next reader should find one rule.
   it('names a missing gate outcome instead of trailing an empty dash (D-169)', () => {
     expect(titleFor(entry({ eventType: 'gate-outcome', payload: {} }))).toBe(
-      'Gate outcome — no outcome recorded',
+      'Gate outcome: no outcome recorded',
     );
   });
 
@@ -206,7 +208,7 @@ describe('lib/timelineDisplay.ts', () => {
       titleFor(
         entry({ eventType: 'deps-check-result', payload: { ok: false, detail: 'no .bin' } }),
       ),
-    ).toBe('Dependency check — failed: no .bin');
+    ).toBe('Dependency check (failed): no .bin');
   });
 
   // The other half of the fix that put seven free event types onto the
@@ -216,7 +218,7 @@ describe('lib/timelineDisplay.ts', () => {
   describe('the free event types the timeline filter used to drop', () => {
     it('titles a session start with its note', () => {
       const e = entry({ eventType: 'session-start', payload: { note: 'dogfood run 2' } });
-      expect(titleFor(e)).toBe('Session started — dogfood run 2');
+      expect(titleFor(e)).toBe('Session started: dogfood run 2');
       expect(titleFor(entry({ eventType: 'session-start', payload: {} }))).toBe('Session started');
     });
 
@@ -225,7 +227,7 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'task-result-recorded',
         payload: { run_status: 'done', agent: 'coder', diff_lines_changed: 42 },
       });
-      expect(titleFor(e)).toBe('Task result — done (coder, 42 lines changed)');
+      expect(titleFor(e)).toBe('Task result: done (coder, 42 lines changed)');
     });
 
     it('titles a judge verdict, and names a failure by its cause', () => {
@@ -236,7 +238,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { ok: true, verdict: 'refute', agent: 'verifier', provider: 'deepseek' },
           }),
         ),
-      ).toBe('Judge verdict — refute (verifier/deepseek)');
+      ).toBe('Judge verdict: refute (verifier/deepseek)');
       // ok:false leaves verdict null — "Judge verdict — " with nothing after
       // it reads as a judge that abstained, not one whose run never produced
       // an answer. D-253: which failure it was is the whole content of the
@@ -255,7 +257,7 @@ describe('lib/timelineDisplay.ts', () => {
             },
           }),
         ),
-      ).toBe('Judge verdict — failed: provider.missing-api-key (verifier/deepseek)');
+      ).toBe('Judge verdict: failed: provider.missing-api-key (verifier/deepseek)');
       expect(
         titleFor(
           entry({
@@ -269,7 +271,7 @@ describe('lib/timelineDisplay.ts', () => {
             },
           }),
         ),
-      ).toBe('Judge verdict — failed: provider.invalid-output (verifier/codex)');
+      ).toBe('Judge verdict: failed: provider.invalid-output (verifier/codex)');
       // Written before D-253 stamped the code: the row says the run failed
       // and stops there, rather than naming a cause the log never recorded.
       expect(
@@ -279,7 +281,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { ok: false, verdict: null, agent: 'verifier', provider: 'deepseek' },
           }),
         ),
-      ).toBe('Judge verdict — failed (verifier/deepseek)');
+      ).toBe('Judge verdict: failed (verifier/deepseek)');
     });
 
     it('titles a judge report with its finding count', () => {
@@ -287,7 +289,7 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'judge-reported',
         payload: { agent_role: 'reviewer', round: 2, finding_count: 3 },
       });
-      expect(titleFor(e)).toBe('reviewer reported — 3 findings (round 2)');
+      expect(titleFor(e)).toBe('reviewer reported: 3 findings (round 2)');
       expect(
         titleFor(
           entry({
@@ -295,7 +297,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { agent_role: 'reviewer', round: 1, finding_count: 1 },
           }),
         ),
-      ).toBe('reviewer reported — 1 finding (round 1)');
+      ).toBe('reviewer reported: 1 finding (round 1)');
     });
 
     it('titles an epic close with its verdict and merge count', () => {
@@ -303,7 +305,7 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'epic-closed',
         payload: { epic_id: 'dogfood-2', machine_verdict: 'pass', tasks_merged: 4 },
       });
-      expect(titleFor(e)).toBe('Epic closed — dogfood-2: pass, 4 tasks merged');
+      expect(titleFor(e)).toBe('Epic closed: dogfood-2: pass, 4 tasks merged');
     });
 
     it('titles lesson events with the statement, not the id', () => {
@@ -314,15 +316,15 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { lesson_id: 'L-9', statement: 'Pin the lockfile' },
           }),
         ),
-      ).toBe('Lesson candidate — Pin the lockfile');
+      ).toBe('Lesson candidate: Pin the lockfile');
       expect(
         titleFor(
           entry({ eventType: 'lesson-edited', payload: { lesson_id: 'L-9', statement: 'Pin it' } }),
         ),
-      ).toBe('Lesson edited — Pin it');
+      ).toBe('Lesson edited: Pin it');
       // An edit that changes only the type or scope carries no statement.
       expect(titleFor(entry({ eventType: 'lesson-edited', payload: { lesson_id: 'L-9' } }))).toBe(
-        'Lesson edited — L-9',
+        'Lesson edited: L-9',
       );
       expect(
         titleFor(
@@ -331,7 +333,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { lesson_id: 'L-9', to_status: 'active' },
           }),
         ),
-      ).toBe('Lesson L-9 — active');
+      ).toBe('Lesson L-9: active');
     });
 
     // The structural half: whatever the wording, none of these may fall
@@ -370,9 +372,7 @@ describe('lib/timelineDisplay.ts', () => {
           reasons: ['merge-threshold', 'low-confidence'],
         },
       });
-      expect(titleFor(e)).toBe(
-        'Recheck proposed — epic-9/task-3 (merge-threshold, low-confidence)',
-      );
+      expect(titleFor(e)).toBe('Recheck proposed: epic-9/task-3 (merge-threshold, low-confidence)');
     });
 
     it('counts the outdated packages and names the first few', () => {
@@ -386,10 +386,10 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'maintenance-proposed',
         payload: { kind: 'maintenance', packages },
       });
-      expect(titleFor(e)).toBe('Maintenance proposed — 4 outdated (vite, vitest, hono +1)');
+      expect(titleFor(e)).toBe('Maintenance proposed: 4 outdated (vite, vitest, hono +1)');
       expect(
         titleFor(entry({ eventType: 'maintenance-proposed', payload: { packages: [] } })),
-      ).toBe('Maintenance proposed — 0 outdated (none)');
+      ).toBe('Maintenance proposed: 0 outdated (none)');
     });
 
     it('names the error class, task and count of an unreported error', () => {
@@ -404,10 +404,10 @@ describe('lib/timelineDisplay.ts', () => {
         },
       });
       expect(titleFor(e)).toBe(
-        'Error report proposed — AssertionError in epic/task-3 (2 occurrences)',
+        'Error report proposed: AssertionError in epic/task-3 (2 occurrences)',
       );
       expect(titleFor(entry({ eventType: 'error-report-proposed', payload: {} }))).toBe(
-        'Error report proposed —  in  (0 occurrences)',
+        'Error report proposed:  in  (0 occurrences)',
       );
       expect(
         titleFor(
@@ -421,7 +421,7 @@ describe('lib/timelineDisplay.ts', () => {
             },
           }),
         ),
-      ).toBe('Error report proposed — AssertionError in epic/task-3 (1 occurrence)');
+      ).toBe('Error report proposed: AssertionError in epic/task-3 (1 occurrence)');
     });
 
     it('gives the growth review its cadence, and degrades without a last review', () => {
@@ -429,9 +429,9 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'growth-review-due',
         payload: { kind: 'growth-review', cadenceDays: 14, lastReviewAt: '2026-08-01T09:00:00Z' },
       });
-      expect(titleFor(e)).toBe('Growth review due — every 14 days, last 2026-08-01');
+      expect(titleFor(e)).toBe('Growth review due: every 14 days, last 2026-08-01');
       expect(titleFor(entry({ eventType: 'growth-review-due', payload: {} }))).toBe(
-        'Growth review due — every ? days',
+        'Growth review due: every ? days',
       );
     });
 
@@ -474,7 +474,7 @@ describe('lib/timelineDisplay.ts', () => {
 
     it('titles the row with the PR, its repo and the refs it merges', () => {
       expect(titleFor(pr)).toBe(
-        'Integration PR opened — example-org/example-app#54 (smith/example-2/integration → smith/example-1/integration)',
+        'Integration PR opened: example-org/example-app#54 (smith/example-2/integration → smith/example-1/integration)',
       );
     });
 
@@ -514,7 +514,7 @@ describe('lib/timelineDisplay.ts', () => {
         },
       });
       expect(titleFor(e)).toBe(
-        'Finding raised — criterion-1 pins no behaviour (spec · plan v1 · epic-1/task-2:criterion-1)',
+        'Finding raised: criterion-1 pins no behaviour (spec · plan v1 · epic-1/task-2:criterion-1)',
       );
     });
 
@@ -523,12 +523,12 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'finding-raised',
         payload: { summary: 'off by one', finding_scope: 'diff' },
       });
-      expect(titleFor(e)).toBe('Finding raised — off by one');
+      expect(titleFor(e)).toBe('Finding raised: off by one');
     });
 
     it('treats an absent scope as diff, the way findingScope() does', () => {
       const e = entry({ eventType: 'finding-raised', payload: { summary: 'off by one' } });
-      expect(titleFor(e)).toBe('Finding raised — off by one');
+      expect(titleFor(e)).toBe('Finding raised: off by one');
     });
   });
 
@@ -545,7 +545,7 @@ describe('lib/timelineDisplay.ts', () => {
         },
       });
       expect(titleFor(e)).toBe(
-        'Spec change proposed by coder — epic-1/task-2:criterion-1: every value is single-line (blocking, 2 sites)',
+        'Spec change proposed by coder on epic-1/task-2:criterion-1: every value is single-line (blocking, 2 sites)',
       );
     });
 
@@ -567,7 +567,7 @@ describe('lib/timelineDisplay.ts', () => {
         eventType: 'spec-change-decided',
         payload: { decision: 'approved', plan_version: 2, rationale: 'the parser is right' },
       });
-      expect(titleFor(approved)).toBe('Spec change approved — plan v2: the parser is right');
+      expect(titleFor(approved)).toBe('Spec change approved (plan v2): the parser is right');
       expect(
         titleFor(
           entry({
@@ -588,7 +588,7 @@ describe('lib/timelineDisplay.ts', () => {
           rationale: 'quoted newlines are legal',
         },
       });
-      expect(titleFor(e)).toBe('Plan v2 amends v1 — 1 finding cited: quoted newlines are legal');
+      expect(titleFor(e)).toBe('Plan v2 amends v1: 1 finding cited: quoted newlines are legal');
     });
 
     it('reads the graph rows the plan ingest writes', () => {
@@ -596,12 +596,12 @@ describe('lib/timelineDisplay.ts', () => {
         titleFor(
           entry({ eventType: 'edge-recorded', taskId: 'e/t2', payload: { depends_on: 'e/t1' } }),
         ),
-      ).toBe('Edge — e/t2 depends on e/t1');
+      ).toBe('Edge: e/t2 depends on e/t1');
       expect(
         titleFor(
           entry({ eventType: 'wave-admitted', payload: { task_ids: ['a', 'b', 'c', 'd'] } }),
         ),
-      ).toBe('Wave admitted — 4 tasks (a, b, c +1)');
+      ).toBe('Wave admitted: 4 tasks (a, b, c +1)');
       expect(
         titleFor(
           entry({
@@ -609,12 +609,12 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { task_ids: ['a'], files_changed: ['x.ts'] },
           }),
         ),
-      ).toBe('Merged a — 1 file changed');
+      ).toBe('Merged a (1 file changed)');
       expect(titleFor(entry({ eventType: 'wave-merged', payload: { task_ids: ['a'] } }))).toBe(
         'Merged a',
       );
       expect(titleFor(entry({ eventType: 'task-superseded', taskId: 'e/t9' }))).toBe(
-        'Task superseded — e/t9',
+        'Task superseded: e/t9',
       );
     });
 
@@ -683,7 +683,7 @@ describe('lib/timelineDisplay.ts', () => {
             payload: { note_kind: 'correction', note: 'correcting 179' },
           }),
         ),
-      ).toBe('correction — correcting 179');
+      ).toBe('correction: correcting 179');
     });
 
     // Tinted with user_prompt rather than with the machine events: what these
@@ -712,9 +712,7 @@ describe('lib/timelineDisplay.ts', () => {
           providers: ['codex', 'gemini'],
         },
       });
-      expect(titleFor(e)).toBe(
-        'Cross-finding — 3 independent-only, 2 corroborated (codex, gemini)',
-      );
+      expect(titleFor(e)).toBe('Cross-finding: 3 independent-only, 2 corroborated (codex, gemini)');
     });
 
     // Same numbers, no gating power. An operator reading the row has to be
@@ -729,9 +727,7 @@ describe('lib/timelineDisplay.ts', () => {
           providers: ['codex'],
         },
       });
-      expect(titleFor(e)).toBe(
-        'Cross-finding — 3 independent-only, 2 corroborated (codex, shadow)',
-      );
+      expect(titleFor(e)).toBe('Cross-finding: 3 independent-only, 2 corroborated (codex, shadow)');
     });
 
     // A run where the two readers agreed on everything is the common case and
@@ -739,7 +735,7 @@ describe('lib/timelineDisplay.ts', () => {
     // quietest, most reassuring row the one that looks broken.
     it('reads absent counts as zero rather than as NaN', () => {
       expect(titleFor(entry({ eventType: 'cross-finding-reconciled', payload: {} }))).toBe(
-        'Cross-finding — 0 independent-only, 0 corroborated ()',
+        'Cross-finding: 0 independent-only, 0 corroborated ()',
       );
     });
 
@@ -957,14 +953,14 @@ describe('lib/timelineDisplay.ts', () => {
         node('d4', 'coder'),
         node('d5', 'reviewer'),
       ]);
-      expect(groupAt(items, 0).label).toBe('5 dispatches — Builder ×3, Code reviewer ×2');
+      expect(groupAt(items, 0).label).toBe('5 dispatches (Builder ×3, Code reviewer ×2)');
     });
 
     // `×1` on four of five roles is noise, and the count is already in the
     // header. A role that appears once is named once.
     it('drops the multiplier for a role that appears once, and caps a long list', () => {
       const once = groupDispatches([node('a', 'coder'), node('b', 'coder'), node('c', 'tester')]);
-      expect(groupAt(once, 0).label).toBe('3 dispatches — Builder ×2, Tester');
+      expect(groupAt(once, 0).label).toBe('3 dispatches (Builder ×2, Tester)');
 
       const many = groupDispatches(
         ['coder', 'coder', 'reviewer', 'tester', 'planner', 'scribe'].map((r, i) =>
@@ -972,13 +968,13 @@ describe('lib/timelineDisplay.ts', () => {
         ),
       );
       expect(groupAt(many, 0).label).toBe(
-        '6 dispatches — Builder ×2, Planner, Code reviewer, +2 more',
+        '6 dispatches (Builder ×2, Planner, Code reviewer, +2 more)',
       );
     });
 
     it("falls back to the row's own word for a dispatch with no role", () => {
       const items = groupDispatches([node('a', null), node('b', null), node('c', null)]);
-      expect(groupAt(items, 0).label).toBe('3 dispatches — Agent ×3');
+      expect(groupAt(items, 0).label).toBe('3 dispatches (Agent ×3)');
     });
 
     // The id is the key the expand/collapse Set holds. Roots render newest
@@ -1035,23 +1031,140 @@ describe('lib/timelineDisplay.ts', () => {
   });
 });
 
-// Task 4 (humanized task label helper): metaFor() is the row's second line
-// ("<date> · <meta>", rendered as plain text by TimelineRow.vue — not a
-// tooltip), and it showed the bare taskId. taskLabel() humanizes the id's
-// slug; TimelineRow.vue keeps the raw id reachable in a title tooltip.
+// DS6 PR3: metaFor() is now the row's per-kind meta line (ds-spec.md §4.3's
+// table), rather than a bare "<task> · <eventType>" fallback. A merge row
+// humanizes its taskId via taskLabel(); an unmapped kind (System) renders
+// no meta at all, per the table's own "— (no meta, no chevron)" row.
 describe('lib/timelineDisplay.ts metaFor()', () => {
-  it('humanizes a taskId rather than showing the raw slug', () => {
+  it('humanizes a taskId rather than showing the raw slug (merge, no task_ids)', () => {
     const e = entry({
-      eventType: 'gate-outcome',
+      eventType: 'wave-merged',
       taskId: 'epic-9/task-29-readme-merge-trim',
       payload: {},
     });
-    expect(metaFor(e)).toBe('Readme merge trim · gate-outcome');
+    expect(metaFor(e)).toBe('Readme merge trim · not measured');
   });
 
-  it('falls back to the bare event type when there is no task', () => {
+  it('renders no meta for a System-kind row', () => {
     const e = entry({ eventType: 'session-start', taskId: null, payload: {} });
-    expect(metaFor(e)).toBe('session-start');
+    expect(metaFor(e)).toBe('');
+  });
+
+  it('prefers task_ids and reports a files-changed count when present', () => {
+    const e = entry({
+      eventType: 'wave-merged',
+      taskId: 'epic-9/task-29-readme-merge-trim',
+      payload: { task_ids: ['epic-9/task-29'], files_changed: ['a.ts', 'b.ts'] },
+    });
+    expect(metaFor(e)).toBe('epic-9/task-29 · 2 files changed');
+  });
+
+  it('shows a running dispatch as "Running for" rather than a token/duration total', () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 2 } });
+    expect(metaFor(e, { now: e.ts })).toBe('round 2 · Running for 0 s');
+    // (formatElapsed rounds up from a zero-width window to "0s"; the space
+    // before "s" is inserted to match ds-spec.md §4.3's own wording.)
+  });
+
+  it("shows a finished dispatch's tokens and duration", () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: 1000,
+      tokensOut: 500,
+      durationMs: 65_000,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 1,
+    };
+    expect(metaFor(e)).toBe('round 1 · 1.5K tokens · 1 min');
+  });
+
+  // Visual pass round 4, item 2: a finished dispatch whose run never had a
+  // duration stamped (no writer in this codebase sets `duration_ms` today)
+  // omits the item rather than labelling it "not measured" next to the real
+  // token count.
+  it("omits duration from a finished dispatch's meta when the run never stamped it", () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: 1000,
+      tokensOut: 500,
+      durationMs: null,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 1,
+    };
+    expect(metaFor(e)).toBe('round 1 · 1.5K tokens');
+  });
+
+  // Visual pass round 4, item 2: an unlinked "because of" prompt (the
+  // caller's lookup table couldn't resolve `nearestPromptId`'s timestamp,
+  // e.g. the History tab scoping it to one task's own entries) is a
+  // legitimate state, not a failed measurement — it is omitted, never shown
+  // as "not measured" next to the real token count.
+  it('omits "because of" from a finished dispatch\'s meta when the prompt link cannot be resolved', () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: 1000,
+      tokensOut: 500,
+      durationMs: 65_000,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 1,
+    };
+    expect(metaFor(e, { promptTs: null })).toBe('round 1 · 1.5K tokens · 1 min');
+  });
+
+  // ds-review.html #p-activity's own Prompt row meta: "You · caused 2
+  // dispatches". titleFor() already renders the verbatim prompt text as the
+  // title (see the 'maps user_prompt to the prompt kind' test above) — the
+  // gap was the meta line omitting "You" entirely.
+  it('marks a prompt row\'s meta as "You · caused N dispatches"', () => {
+    const e = entry({ eventType: 'user_prompt', payload: { prompt: 'hello' } });
+    expect(metaFor(e, { causedCount: 2 })).toBe('You · caused 2 dispatches');
+  });
+
+  it('still names "You" when the prompt caused nothing measured', () => {
+    const e = entry({ eventType: 'user_prompt', payload: { prompt: 'hello' } });
+    expect(metaFor(e)).toBe('You · not measured');
+  });
+
+  it("marks a judge-reported row's meta as role, round, verdict", () => {
+    // judge-reported only reaches the `finding` branch when the server's own
+    // `kind` says so (queries.ts's eventKind()) — see the kindFor() tests
+    // above for the reconciled client/server mapping.
+    const e = {
+      ...entry({
+        eventType: 'judge-reported',
+        payload: { agent_role: 'judge', round: 1, overall: 'pass' },
+      }),
+      kind: 'Finding',
+    };
+    expect(metaFor(e)).toBe('Judge · round 1 · pass');
+  });
+
+  // Fix brief item 1 (S2): metaFor() used to push 'Waiver' for every feedback
+  // event, including the four kindFor() also routes to 'feedback' that are
+  // not waivers at all. Each gets its own honest label, reusing titleFor()'s
+  // own prefix for that event type rather than inventing a second vocabulary.
+  it.each([
+    ['waiver-granted', 'Waiver granted'],
+    ['waiver-denied', 'Waiver denied'],
+    ['judge-verdict', 'Judge verdict'],
+    ['cross-finding-reconciled', 'Cross-finding reconciled'],
+    ['spec-change-proposed', 'Spec change proposed'],
+    ['spec-change-decided', 'Spec change decided'],
+  ] as const)("labels a %s row's meta as %s", (eventType, label) => {
+    const e = entry({ eventType, taskId: null, payload: {} });
+    expect(metaFor(e)).toBe(label);
+  });
+
+  it('appends the task label to a feedback meta line when there is one', () => {
+    const e = entry({
+      eventType: 'judge-verdict',
+      taskId: 'epic-9/task-29-readme-merge-trim',
+      payload: {},
+    });
+    expect(metaFor(e)).toBe('Judge verdict · Readme merge trim');
   });
 });
 
@@ -1064,7 +1177,7 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
     ['dispatch_decision', 'dispatch'],
     ['task-result-recorded', 'returned'],
     ['finding-raised', 'finding'],
-    ['waiver-granted', 'finding'],
+    ['judge-reported', 'finding'],
     ['task-waiver-approved', 'finding'],
     ['schema-check-result', 'gate'],
     ['testgate-result', 'gate'],
@@ -1076,13 +1189,25 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
     ['error-logged', 'error'],
     ['error-report-proposed', 'error'],
     ['judge-verdict', 'feedback'],
-    ['judge-reported', 'feedback'],
+    ['waiver-granted', 'feedback'],
     ['cross-finding-reconciled', 'feedback'],
     ['session-start', 'system'],
     ['task-added', 'system'],
     ['some-future-event-type', 'system'],
   ] as const)('maps %s to %s', (eventType, kind) => {
     expect(kindFor(entry({ eventType }))).toBe(kind);
+  });
+
+  it('prefers a server-supplied kind over the eventType switch', () => {
+    // waiver-granted maps to 'finding' client-side but 'Feedback' server-side
+    // (queries.ts's eventKind()) — DS6 PR3: the server wins once it is present.
+    expect(kindFor({ ...entry({ eventType: 'waiver-granted' }), kind: 'Feedback' })).toBe(
+      'feedback',
+    );
+  });
+
+  it('falls back to system for an unrecognized server kind', () => {
+    expect(kindFor({ ...entry({ eventType: 'user_prompt' }), kind: 'Nonsense' })).toBe('system');
   });
 
   it('never leaves a kind unmapped for the whole gate_event taxonomy dimension', () => {
@@ -1092,6 +1217,149 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       (eventType) => !EVENT_KINDS.includes(kindFor(entry({ eventType }))),
     );
     expect(unmapped).toEqual([]);
+  });
+
+  // ds-spec.md §4.3: "never an empty label, never '—'". Every event type in
+  // the gate_event and graph_event taxonomy dimensions, plus the handful of
+  // types titleFor() names explicitly outside those dimensions, must build a
+  // title and meta with no em dash, whatever their payload looks like.
+  it('never builds a title or meta containing an em dash, for the whole event vocabulary', () => {
+    const taxonomy = loadTaxonomy();
+    const types = new Set<string>([
+      ...(taxonomy.dimensions.gate_event ?? []),
+      ...(taxonomy.dimensions.graph_event ?? []),
+      'user_prompt',
+      'operator-note',
+      'dispatch_decision',
+      'task-result-recorded',
+      'session-start',
+      'judge-reported',
+      'judge-verdict',
+      'cross-finding-reconciled',
+      'lesson-candidate-raised',
+      'lesson-edited',
+      'lesson-status-changed',
+      'recheck-proposed',
+      'maintenance-proposed',
+      'growth-review-due',
+      'error-report-proposed',
+      'spec-change-proposed',
+      'spec-change-decided',
+    ]);
+    for (const eventType of types) {
+      const e = entry({ eventType });
+      expect(titleFor(e), `titleFor(${eventType})`).not.toMatch(/[—–]/);
+      expect(metaFor(e), `metaFor(${eventType})`).not.toMatch(/[—–]/);
+    }
+  });
+
+  // Fix brief item 2 (S3): the sweep above only checks for the absence of an
+  // em dash, which stays green even if a label goes wrong in some other way
+  // (DS6 PR3 round 5's own "Waiver" for every feedback event never tripped
+  // it). This sibling table pins the exact title and meta string an empty
+  // payload produces for every event type in that same sweep, so swapping in
+  // a wrong label fails a test rather than only a human reading the row.
+  it('builds the exact title and meta for every event type in the vocabulary sweep', () => {
+    const taxonomy = loadTaxonomy();
+    const types = new Set<string>([
+      ...(taxonomy.dimensions.gate_event ?? []),
+      ...(taxonomy.dimensions.graph_event ?? []),
+      'user_prompt',
+      'operator-note',
+      'dispatch_decision',
+      'task-result-recorded',
+      'session-start',
+      'judge-reported',
+      'judge-verdict',
+      'cross-finding-reconciled',
+      'lesson-candidate-raised',
+      'lesson-edited',
+      'lesson-status-changed',
+      'recheck-proposed',
+      'maintenance-proposed',
+      'growth-review-due',
+      'error-report-proposed',
+      'spec-change-proposed',
+      'spec-change-decided',
+    ]);
+    // [title, meta] for an entry built from entry({ eventType }) alone --
+    // empty payload, taskId null, no server-side kind/run/gateCounts.
+    const expected: Record<string, [string, string]> = {
+      'schema-check-result': ['Schema check: no verdict recorded', 'Schema check'],
+      'artifact-check-result': ['Artifact check result', 'Artifact check'],
+      'commit-check-result': ['Commit check result', 'Commit check'],
+      'deps-check-result': ['Dependency check (no verdict recorded): ', 'Dependency check'],
+      'judges-outstanding': ['Judges outstanding', 'Judges outstanding'],
+      'grader-verdict': ['Grader verdict', 'Grader verdict'],
+      'budget-check-result': ['Budget check result', 'Budget check'],
+      'testgate-result': ['Test gate: no verdict recorded', 'Unit tests'],
+      'coverage-evidence': ['Coverage evidence', 'Coverage'],
+      'integration-check': ['Integration check', 'Integration check'],
+      'spec-review-recorded': ['Spec review recorded', 'Spec review'],
+      'goal-check-recorded': ['Goal check recorded', 'Goal check'],
+      'quorum-decision': ['Quorum decision', 'Quorum decision'],
+      'finding-raised': ['Finding raised: ', ''],
+      'finding-reverified': ['Finding reverified', ''],
+      'finding-suppressed': ['Finding suppressed', ''],
+      'finding-transitioned': ['Finding transitioned: ', ''],
+      'finding-reattributed': ['Finding reattributed', ''],
+      'severity-decisions': ['Severity decisions recorded', ''],
+      'waiver-granted': ['Waiver granted', 'Waiver granted'],
+      'waiver-denied': ['Waiver denied', 'Waiver denied'],
+      'task-waiver-approved': ['Task waiver approved', ''],
+      'gate-outcome': ['Gate outcome: no outcome recorded', 'Gate outcome'],
+      'issue-reported': ['Issue reported', 'Issue reported'],
+      'plan-version-created': ['Plan v?: 0 findings cited', ''],
+      'plan-version-superseded': ['Plan v? superseded', ''],
+      'task-added': ['Task added: ', ''],
+      'task-split': ['Task split: ', ''],
+      'task-superseded': ['Task superseded: ', ''],
+      'edge-recorded': ['Edge:  depends on ', ''],
+      'wave-admitted': ['Wave admitted: 0 tasks', ''],
+      'wave-merged': ['Merged ', 'not measured'],
+      'spec-change-proposed': [
+        'Spec change proposed by worker on :  (non-blocking, 0 sites)',
+        'Spec change proposed',
+      ],
+      'spec-change-decided': ['Spec change decided', 'Spec change decided'],
+      user_prompt: ['', 'You · not measured'],
+      'operator-note': ['Operator note', 'You · not measured'],
+      dispatch_decision: ['Dispatched Agent (/)', 'Running for 0 s'],
+      'task-result-recorded': ['Task result: ', 'not measured'],
+      'session-start': ['Session started', ''],
+      'judge-reported': ['Judge reported: 0 findings (round )', ''],
+      'judge-verdict': ['Judge verdict:  (/)', 'Judge verdict'],
+      'cross-finding-reconciled': [
+        'Cross-finding: 0 independent-only, 0 corroborated ()',
+        'Cross-finding reconciled',
+      ],
+      'lesson-candidate-raised': ['Lesson candidate: ', ''],
+      'lesson-edited': ['Lesson edited: ', ''],
+      'lesson-status-changed': ['Lesson : ', ''],
+      'recheck-proposed': ['Recheck proposed: ', ''],
+      'maintenance-proposed': ['Maintenance proposed: 0 outdated (none)', ''],
+      'growth-review-due': ['Growth review due: every ? days', ''],
+      'error-report-proposed': ['Error report proposed:  in  (0 occurrences)', ''],
+    };
+    expect(new Set(Object.keys(expected))).toEqual(types);
+    for (const eventType of types) {
+      const e = entry({ eventType });
+      const pair = expected[eventType];
+      if (pair === undefined) throw new Error(`no expected title/meta for ${eventType}`);
+      const [title, meta] = pair;
+      expect(titleFor(e), `titleFor(${eventType})`).toBe(title);
+      // dispatch_decision's "Running for" text grows with real elapsed time,
+      // so it needs the same frozen `now` the dedicated dispatch tests use.
+      expect(metaFor(e, { now: e.ts }), `metaFor(${eventType})`).toBe(meta);
+    }
+  });
+
+  // Item 2 of the fix brief: a raw kebab-case type slug (e.g. one titleFor()
+  // has no dedicated case for) must still read as a sentence.
+  it('humanizes an unmapped event type instead of printing its raw slug', () => {
+    expect(titleFor(entry({ eventType: 'operator-feedback-resolved' }))).toBe(
+      'Operator feedback resolved',
+    );
   });
 });
 
@@ -1201,5 +1469,71 @@ describe('lib/timelineDisplay.ts tsForItem() / nodesOfItem()', () => {
     if (grouped?.kind !== 'group') throw new Error('expected a fold');
     expect(tsForItem(grouped)).toBe('2026-10-03T11:00:00.000');
     expect(nodesOfItem(grouped)).toBe(grouped.group.members);
+  });
+});
+
+// DS6 PR3 scope item 3: Activity's flat feed folds consecutive same-role
+// dispatch rows landing in the same minute into one summary row, rather than
+// the causal-tree fold above (groupDispatches), which this flat feed does not
+// build. "wave" is not a field the paged timeline carries (api.ts's
+// TimelineEntry/ActivityEntry has no wave/epic-wave id), so the fold keys on
+// role + minute only — flagged as a deviation from the brief's "Builder ×4 in
+// wave 3" wording in the PR3 return report.
+describe('groupByRoleMinute', () => {
+  const base: ActivityEntry = {
+    eventId: 'e1',
+    ts: '2026-01-01T00:00:10.000Z',
+    eventType: 'dispatch_decision',
+    taskId: null,
+    agentId: null,
+    planVersion: 1,
+    causalParent: null,
+    payload: { agent_role: 'builder' },
+    project: null,
+    actor: null,
+    kind: 'Dispatched',
+  };
+
+  it('does not fold a run shorter than the minimum', () => {
+    const entries = [base, { ...base, eventId: 'e2' }];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry']);
+  });
+
+  it('folds three or more same-role same-minute dispatches into one group', () => {
+    const entries = [
+      base,
+      { ...base, eventId: 'e2', ts: '2026-01-01T00:00:20.000Z' },
+      { ...base, eventId: 'e3', ts: '2026-01-01T00:00:30.000Z' },
+    ];
+    const items = groupByRoleMinute(entries);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'group' });
+  });
+
+  it('keeps a different role out of the run', () => {
+    const entries = [
+      base,
+      { ...base, eventId: 'e2' },
+      { ...base, eventId: 'e3', payload: { agent_role: 'judge' } },
+    ];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
+  });
+
+  it('keeps a different minute out of the run', () => {
+    const entries = [
+      base,
+      { ...base, eventId: 'e2' },
+      { ...base, eventId: 'e3', ts: '2026-01-01T00:05:00.000Z' },
+    ];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
+  });
+
+  it('only folds dispatch-kind rows', () => {
+    const entries = [
+      { ...base, kind: 'Returned' as const },
+      { ...base, eventId: 'e2', kind: 'Returned' as const },
+      { ...base, eventId: 'e3', kind: 'Returned' as const },
+    ];
+    expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
   });
 });

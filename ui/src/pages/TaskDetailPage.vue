@@ -35,9 +35,9 @@ import Skeleton from '../components/kit/Skeleton.vue';
 import Table from '../components/kit/Table.vue';
 import Tabs from '../components/kit/Tabs.vue';
 import Tag from '../components/kit/Tag.vue';
+import TimelineRow from '../components/kit/TimelineRow.vue';
 import RequestQuote from '../components/RequestQuote.vue';
 import RunHistoryTimeline from '../components/RunHistoryTimeline.vue';
-import TimelineRow from '../components/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useToast } from '../composables/useToast.js';
@@ -46,11 +46,11 @@ import {
   applyWaiverBatch,
   fetchTaskDetail,
   fetchTaskRuns,
-  fetchTimeline,
+  fetchTimelinePage,
   type TaskDetail,
   type TaskRun,
-  type TimelineEntry,
 } from '../lib/api.js';
+import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import { taskLabel } from '../lib/format.js';
 import { titleCase } from '../lib/kanban.js';
 import { roleLabel } from '../lib/roleLabels.js';
@@ -61,7 +61,7 @@ import {
   severityKitTone,
   taskStatusKitTone,
 } from '../lib/taxonomy.js';
-import { groupByDay } from '../lib/timelineDisplay.js';
+import { type ActivityEntry, groupByDay } from '../lib/timelineDisplay.js';
 import { isWaivable } from '../lib/waivable.js';
 import { waiverDenialNote } from '../lib/waiverDenialNote.js';
 
@@ -75,7 +75,7 @@ const error = ref<string | null>(null);
 const loading = ref(true);
 const activeTab = ref('overview');
 const runs = ref<TaskRun[]>([]);
-const history = ref<TimelineEntry[]>([]);
+const history = ref<ActivityEntry[]>([]);
 const historyLoading = ref(true);
 // The History tab fetches separately from the task itself, so it needs its own
 // error too: without one the tab fell through to "No events recorded for this
@@ -86,6 +86,26 @@ const historyError = ref<string | null>(null);
 // order (D-243 keeps this page from re-sorting under the operator), so
 // grouping only partitions it into calendar days, it never reorders it.
 const historyDayGroups = computed(() => groupByDay(history.value, new Date().toISOString()));
+
+// DS6 PR3: this tab now renders the same kit TimelineRow as Activity, so it
+// shares the same sessionStorage-scoped "Show details" persistence
+// (expandedRows.ts), keyed per task so two tasks' open rows don't collide.
+const historyExpanded = ref<Set<string>>(new Set());
+const historyStorageKey = computed(() => `task:${props.taskId}`);
+onMounted(() => {
+  historyExpanded.value = loadExpanded(sessionStorage, historyStorageKey.value);
+});
+function toggleHistoryRow(eventId: string) {
+  historyExpanded.value = toggleExpanded(historyExpanded.value, eventId);
+  saveExpanded(sessionStorage, historyStorageKey.value, historyExpanded.value);
+}
+const historyPromptTsById = computed(() => new Map(history.value.map((e) => [e.eventId, e.ts])));
+function historyCtxFor(entry: ActivityEntry) {
+  const promptTs = entry.nearestPromptId
+    ? (historyPromptTsById.value.get(entry.nearestPromptId) ?? null)
+    : undefined;
+  return { promptTs };
+}
 
 async function load() {
   error.value = null;
@@ -112,7 +132,8 @@ async function loadHistory() {
   historyLoading.value = history.value.length === 0;
   historyError.value = null;
   try {
-    history.value = await fetchTimeline({ task: props.taskId });
+    const page = await fetchTimelinePage({ task: props.taskId, limit: 200 });
+    history.value = page.entries;
   } catch (e) {
     historyError.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -382,9 +403,15 @@ const factsRowText = computed(() => {
                   <div class="timeline-day">{{ group.label }}</div>
                   <div class="timeline-feed">
                     <ol style="list-style: none; margin: 0; padding: 0">
-                      <li v-for="e in group.items" :key="e.eventId">
-                        <TimelineRow :entry="e" :has-children="false" :expanded="false" :selectable="false" />
-                      </li>
+                      <TimelineRow
+                        v-for="e in group.items"
+                        :key="e.eventId"
+                        :entry="e"
+                        :expanded="historyExpanded.has(e.eventId)"
+                        :ctx="historyCtxFor(e)"
+                        :linkable="false"
+                        @toggle="toggleHistoryRow"
+                      />
                     </ol>
                   </div>
                 </template>

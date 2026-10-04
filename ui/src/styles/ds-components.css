@@ -1207,6 +1207,39 @@
   max-width: none;
 }
 
+/* Activity toolbar (DS6 PR3 r2, items 3-4; ds-review.html's .fchip/.fchip.on):
+   the kind filter is a row of pill-shaped toggles, not bare ghost text.
+   Page-scoped classes on the Button rather than a Button variant change, so
+   no other Button consumer's look shifts. aria-pressed is already set on
+   these buttons (ActivityPage.vue). */
+.activity-kind-filter .bs-btn {
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-surface-raised);
+  color: var(--bs-text-subtle);
+}
+.activity-kind-filter .bs-btn[aria-pressed='true'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+  border-color: var(--bs-border-bold);
+  font-weight: var(--bs-font-weight-medium);
+}
+/* Item 4: "Expand all" is a desktop-only convenience (Refresh stays, same as
+   every other page's phone toolbar); and the chip row must not wrap into
+   one-chip-per-line columns fighting the button group beside it. */
+@media (max-width: 640px) {
+  .activity-toolbar {
+    flex-wrap: wrap;
+  }
+  /* .bs-btn (bs-primitives.css, loaded after this file) sets its own
+     `display: inline-flex` at the same specificity as a bare class selector
+     and wins on source order -- pairing the class with .bs-btn here matches
+     that specificity and actually hides the button. */
+  .activity-toolbar__expand-all.bs-btn {
+    display: none;
+  }
+}
+
 /* Mobile off-canvas sidebar sheet (§2 <768px, custom — Sheet reused as the
    documented mobile-sidebar case, the kit's Sheet.prompt.md). */
 .app-sheet-overlay {

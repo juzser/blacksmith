@@ -34,11 +34,12 @@ describe('D-216: the project switcher is shown exactly where the scope is read',
       'overview-global',
       'overview-project',
       'sessions',
+      // 'timeline' is /activity's route name (kept across the DS6 PR3
+      // rename); '/errors' is now a nameless redirect into it.
       'timeline',
       'work-kanban',
       'work-roadmap',
       'lessons',
-      'errors',
       'analytics',
       'task-detail',
     ]);

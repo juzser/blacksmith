@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'kit');
 const TABS = readFileSync(join(KIT, 'Tabs.vue'), 'utf8');
+const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
+const ROVING_TABS = readFileSync(join(LIB, 'rovingTabs.ts'), 'utf8');
 
 describe('kit/Tabs.vue', () => {
   it('exports a TabItem { id, label } interface', () => {
@@ -19,12 +21,16 @@ describe('kit/Tabs.vue', () => {
     expect(TABS).toMatch(/'update:modelValue':\s*\[id:\s*string\]/);
   });
 
-  it('roves tabindex and handles ArrowLeft/ArrowRight/Home/End', () => {
-    expect(TABS).toMatch(/ArrowRight/);
-    expect(TABS).toMatch(/ArrowLeft/);
-    expect(TABS).toMatch(/Home/);
-    expect(TABS).toMatch(/End/);
+  // Round 5 item 3: the Left/Right/Home/End key math now lives in
+  // lib/rovingTabs.ts, shared with ActivityPage.vue's phone kind filter,
+  // rather than duplicated in this component's own onKeydown.
+  it('roves tabindex via the shared rovingTabs helper', () => {
+    expect(TABS).toMatch(/nextRovingTabId/);
     expect(TABS).toMatch(/:tabindex="modelValue === tab\.id \? 0 : -1"/);
+    expect(ROVING_TABS).toMatch(/ArrowRight/);
+    expect(ROVING_TABS).toMatch(/ArrowLeft/);
+    expect(ROVING_TABS).toMatch(/Home/);
+    expect(ROVING_TABS).toMatch(/End/);
   });
 
   it('wires role=tablist/tab/tabpanel and aria-selected/aria-controls/aria-labelledby, panel uses v-show', () => {

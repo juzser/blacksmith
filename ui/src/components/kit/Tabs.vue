@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // Tabs (WAI-ARIA Tabs pattern) — roving tabindex, Left/Right (and Home/End)
 // move focus AND selection between tabs.
+import { nextRovingTabId } from '../../lib/rovingTabs.js';
+
 export interface TabItem {
   id: string;
   label: string;
@@ -15,17 +17,8 @@ function select(id: string) {
 
 function onKeydown(e: KeyboardEvent) {
   const ids = props.tabs.map((t) => t.id);
-  const idx = ids.indexOf(props.modelValue);
-  if (idx === -1) return;
-  let next = idx;
-  if (e.key === 'ArrowRight') next = (idx + 1) % ids.length;
-  else if (e.key === 'ArrowLeft') next = (idx - 1 + ids.length) % ids.length;
-  else if (e.key === 'Home') next = 0;
-  else if (e.key === 'End') next = ids.length - 1;
-  else return;
-  e.preventDefault();
-  const nextId = ids[next];
-  if (nextId === undefined) return;
+  const nextId = nextRovingTabId(e, ids, props.modelValue);
+  if (nextId === null) return;
   select(nextId);
   const el = document.getElementById(`tab-${nextId}`);
   el?.focus();

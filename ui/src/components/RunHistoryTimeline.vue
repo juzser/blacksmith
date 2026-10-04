@@ -2,14 +2,25 @@
 // DS3 §4.7 pattern 2 — the Task detail page's own run history: one row per
 // dispatch, judge report, result or error, fed by `GET /api/tasks/:taskId/runs`
 // (queries.ts's `taskRuns()`, a scoped read over the existing event-log
-// projection — no new event type). Distinct from the History tab's
-// `TimelineRow` list, which reads the whole-session timeline() feed instead.
+// projection — no new event type).
+//
+// DS6 PR3 r3 (ds-spec.md §2.2/§4.7): every entry renders through the shared
+// kit `TimelineRow` in its `rail` variant, so this list and the History tab's
+// event-level feed below it share one row look (ds-spec.md §4.7: "the
+// existing event-level detail ... still renders below that, now as
+// supporting detail rather than the tab's only content" — both are spec'd,
+// not a duplicate to remove). `TaskRun` carries no `eventType`/`payload`, so
+// it cannot drive `TimelineRow`'s own `titleFor`/`metaFor`; this component
+// keeps computing its own label/meta text and passes it through as an
+// override, same as it always has.
+import { ref } from 'vue';
 import type { TaskRun } from '../lib/api.js';
-import { formatDateTime } from '../lib/format.js';
+import { toggleExpanded } from '../lib/expandedRows.js';
+import { formatCompactNumber } from '../lib/format.js';
 import { roleLabel } from '../lib/roleLabels.js';
-import { runOutcomeKitTone } from '../lib/taxonomy.js';
-import { EVENT_KIND_LABEL, type EventKind } from '../lib/timelineDisplay.js';
-import Tag from './kit/Tag.vue';
+import { type KitTone, runOutcomeKitTone } from '../lib/taxonomy.js';
+import { type ActivityEntry, EVENT_KIND_LABEL, type EventKind } from '../lib/timelineDisplay.js';
+import TimelineRow from './kit/TimelineRow.vue';
 
 defineProps<{ runs: TaskRun[] }>();
 
@@ -33,43 +44,54 @@ function label(run: TaskRun): string {
   return name || run.kind;
 }
 
-function kindStyle(run: TaskRun) {
-  const kind = KIND_FOR_RUN[run.kind];
+/** `TimelineRow` reads the kind off `entry.kind` as `EVENT_KIND_LABEL`'s
+ * PascalCase string (kindFor(), timelineDisplay.ts) rather than `eventType` —
+ * `TaskRun` has neither, so this is the one field the synthetic entry needs. */
+function entryFor(run: TaskRun): ActivityEntry {
   return {
-    background: `var(--bs-event-${kind}-subtle)`,
-    color: `var(--bs-event-${kind}-text)`,
+    eventId: run.eventId,
+    ts: run.ts,
+    eventType: run.kind,
+    taskId: null,
+    agentId: null,
+    planVersion: 0,
+    causalParent: null,
+    payload: {},
+    project: null,
+    actor: null,
+    kind: EVENT_KIND_LABEL[KIND_FOR_RUN[run.kind]],
   };
 }
 
-function rowBarColor(run: TaskRun): string {
-  return `var(--bs-event-${KIND_FOR_RUN[run.kind]}-text)`;
+function tokens(run: TaskRun): string {
+  return run.tokensTotal === null ? '' : `${formatCompactNumber(run.tokensTotal)} tokens`;
 }
 
-const TOKEN_FORMAT = new Intl.NumberFormat('en-US');
-function tokens(run: TaskRun): string | null {
-  return run.tokensTotal === null ? null : `${TOKEN_FORMAT.format(run.tokensTotal)} tokens`;
+function outcomeTag(run: TaskRun): { tone: KitTone; label: string } | null {
+  if (run.outcome === null) return null;
+  return { tone: runOutcomeKitTone(run.kind, run.outcome), label: run.outcome };
+}
+
+const expanded = ref<Set<string>>(new Set());
+function onToggle(eventId: string) {
+  expanded.value = toggleExpanded(expanded.value, eventId);
 }
 </script>
 
 <template>
-  <ol v-if="runs.length > 0" class="bs-run-history timeline-feed">
-    <li v-for="run in runs" :key="run.eventId" class="timeline-row" :style="{ borderLeftColor: rowBarColor(run) }">
-      <!-- Item 3 (mock-conformance-4): a row here never has children, so it
-           takes the same leading placeholder column TimelineRow's childless
-           rows use, lining this list's text up with the Activity/History
-           TimelineRow list above it (ds-control-height-sm + the row's gap). -->
-      <span style="width: var(--ds-control-height-sm); flex-shrink: 0" aria-hidden="true" />
-      <div class="timeline-row__main">
-        <div class="timeline-row__head">
-          <span class="timeline-row__ktag" :style="kindStyle(run)">{{ EVENT_KIND_LABEL[KIND_FOR_RUN[run.kind]] }}</span>
-          <span class="bs-run-history__label">{{ label(run) }}</span>
-          <Tag v-if="run.outcome" :tone="runOutcomeKitTone(run.kind, run.outcome)" variant="subtle" size="sm">{{ run.outcome }}</Tag>
-        </div>
-        <span class="bs-run-history__meta">
-          {{ formatDateTime(run.ts) }}<template v-if="tokens(run)"> · {{ tokens(run) }}</template>
-        </span>
-      </div>
-    </li>
+  <ol v-if="runs.length > 0" class="bs-run-history timeline-feed" role="list">
+    <TimelineRow
+      v-for="run in runs"
+      :key="run.eventId"
+      :entry="entryFor(run)"
+      :expanded="expanded.has(run.eventId)"
+      :linkable="false"
+      variant="rail"
+      :title-override="label(run)"
+      :meta-override="tokens(run)"
+      :tag="outcomeTag(run)"
+      @toggle="onToggle"
+    />
   </ol>
   <p v-else class="bs-run-history__empty">No runs recorded for this task yet.</p>
 </template>

@@ -2065,32 +2065,68 @@ export const EVENT_KINDS: readonly EventKind[] = [
  * every row the same way. Unnamed types fall to `System`, the feed's
  * catch-all for rare types.
  *
- * This follows the spec table, NOT the pre-existing client-side `kindFor()`
- * in ui/src/lib/timelineDisplay.ts: that helper puts waiver-granted/-denied
- * under its `finding` kind and judge-reported under `feedback` — the reverse
- * of ds-spec.md §4.3 ("Finding (judge verdict)" -> `judge-reported`;
- * "Feedback" -> `waiver-granted` / `waiver-denied`). Flagged as a spec/code
- * mismatch rather than guessed; DS6's UI PR reconciles the two.
+ * DS6 PR3 round 2 reconciles this with `ui/src/lib/timelineDisplay.ts`'s
+ * client-side `kindFor()` fallback switch (which this function already
+ * takes precedence over whenever a paged entry carries a server `kind`):
+ * both now agree that `judge-reported` is `Finding` and
+ * `waiver-granted`/`waiver-denied` are `Feedback`, per §4.3's table
+ * ("Finding (judge verdict)" -> `judge-reported`; "Feedback" ->
+ * `waiver-granted` / `waiver-denied`). The round-1 version of this switch
+ * only matched the 8 event types the mock happens to show, so every other
+ * gate/graph event — `finding-raised`, `schema-check-result`,
+ * `cross-finding-reconciled`, `epic-closed`, and the rest of
+ * taxonomy.yml's `gate_event`/`graph_event` vocabulary — fell through to
+ * `System`, which is where the "most rows are System" visual-pass finding
+ * came from. The groupings below follow the same families `kindFor()`'s
+ * switch already used, just with the one Finding/Feedback swap applied.
  */
 export function eventKind(eventType: string, _payload: Record<string, unknown>): EventKind {
   switch (eventType) {
     case 'user_prompt':
+    case 'operator-note':
       return 'Prompt';
     case DISPATCH_EVENT_TYPE:
       return 'Dispatched';
     case TASK_RESULT_EVENT_TYPE:
       return 'Returned';
     case JUDGE_REPORT_EVENT_TYPE:
+    case 'finding-raised':
+    case 'finding-reverified':
+    case 'finding-suppressed':
+    case 'finding-transitioned':
+    case 'finding-reattributed':
+    case 'severity-decisions':
+    case 'task-waiver-approved':
       return 'Finding';
     case 'gate-outcome':
     case 'testgate-result':
+    case 'schema-check-result':
+    case 'artifact-check-result':
+    case 'commit-check-result':
+    case 'deps-check-result':
+    case 'judges-outstanding':
+    case 'grader-verdict':
+    case 'budget-check-result':
+    case 'coverage-evidence':
+    case 'integration-check':
+    case 'spec-review-recorded':
+    case 'goal-check-recorded':
+    case 'quorum-decision':
+    case 'issue-reported':
       return 'Gate';
     case 'wave-merged':
+    case 'epic-closed':
+    case 'integration-pr-opened':
       return 'Merge';
     case ERROR_EVENT_TYPE:
+    case 'error-report-proposed':
       return 'Error';
     case 'waiver-granted':
     case 'waiver-denied':
+    case 'judge-verdict':
+    case 'cross-finding-reconciled':
+    case 'spec-change-proposed':
+    case 'spec-change-decided':
       return 'Feedback';
     default:
       return 'System';

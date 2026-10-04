@@ -1,0 +1,163 @@
+<script setup lang="ts">
+// DS6 PR3 scope item 3 (ds-spec.md §4.3 row table, ds-review.html `.ev`): the
+// Activity feed's row. Flat — no causal-tree disclosure (that is the old
+// components/TimelineRow.vue, still used by TimelinePage.vue's own list) —
+// this one only discloses its own per-kind detail (`dl`), toggled by a
+// chevron whose open state is sessionStorage-persisted by the caller (see
+// expandedRows.ts), not owned here, so "Expand all" can flip every row's
+// state from one place.
+import { ChevronDown, ChevronRight } from '@lucide/vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { formatTime } from '../../lib/format.js';
+import type { KitTone } from '../../lib/taxonomy.js';
+import {
+  type ActivityEntry,
+  kindFor,
+  type MetaContext,
+  metaFor,
+  titleFor,
+} from '../../lib/timelineDisplay.js';
+import EventKindTag from './EventKindTag.vue';
+import IconButton from './IconButton.vue';
+import RelativeTime from './RelativeTime.vue';
+import Tag from './Tag.vue';
+
+const props = withDefaults(
+  defineProps<{
+    entry: ActivityEntry;
+    expanded: boolean;
+    /** Extra context metaFor needs (promptTs/causedCount) — walked once over
+     * the whole page by the caller (ActivityPage.vue), not re-derived per row. */
+    ctx?: MetaContext;
+    /** False on TaskDetailPage's History tab: every row's taskId is already
+     * the task on screen, so a title link there would push the page the
+     * operator is already standing on — a no-op vue-router discards (D-231). */
+    linkable?: boolean;
+    /** ds-spec.md §2.2 `TimelineRow` variant list: `rail` is the only one this
+     * task adds (`RunHistoryTimeline`'s rows) — no stripe, a rail dot/line
+     * drawn from the §1.5 `--tl-*` geometry instead, time via `RelativeTime`
+     * (default stays `formatTime` so Activity/Home stay pixel-identical). */
+    variant?: 'rail';
+    /** rail-only: `TaskRun` carries no `eventType`/`payload`, so it cannot
+     * drive `titleFor`/`metaFor` — the caller (`RunHistoryTimeline`) passes
+     * its own humanized label/meta text instead of this component deriving
+     * one from `entry`. */
+    titleOverride?: string;
+    metaOverride?: string;
+    /** rail-only: the outcome `Tag` next to `EventKindTag` (ds-spec.md §2.2
+     * "a humanized label ... outcome Tag"), same slot the general row table
+     * gives a gate's Passed/Failed status tag. */
+    tag?: { tone: KitTone; label: string } | null;
+  }>(),
+  { linkable: true },
+);
+const emit = defineEmits<{
+  toggle: [eventId: string];
+  selectTask: [taskId: string];
+  becauseOf: [promptId: string];
+}>();
+
+const kind = computed(() => kindFor(props.entry));
+const title = computed(() => props.titleOverride ?? titleFor(props.entry));
+
+// "Running for N s" ticks live while a Dispatched row has no run result yet
+// (ds-spec.md §4.3). Only this one row kind/state needs a clock, so the
+// interval lives here rather than hoisting `now` through the whole feed.
+const stillRunning = computed(
+  () => kind.value === 'dispatch' && props.entry.run?.runStatus == null,
+);
+const tickNow = ref(new Date().toISOString());
+let timer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  if (stillRunning.value)
+    timer = setInterval(() => (tickNow.value = new Date().toISOString()), 1000);
+});
+onBeforeUnmount(() => clearInterval(timer));
+
+const meta = computed(
+  () =>
+    props.metaOverride ??
+    metaFor(props.entry, {
+      ...props.ctx,
+      now: stillRunning.value ? tickNow.value : props.ctx?.now,
+    }),
+);
+
+const hasPromptLink = computed(
+  () =>
+    kind.value === 'dispatch' && props.ctx?.promptTs !== undefined && props.ctx?.promptTs !== null,
+);
+
+// ds-spec.md §4.3: "A kind with no useful stats (System: 'Session … started')
+// has no meta line and no chevron." metaFor() returns '' for exactly that
+// case, so an empty meta is also the signal that there is nothing to expand.
+const hasDetails = computed(() => meta.value !== '');
+
+function onBecauseOf() {
+  const promptId = props.entry.nearestPromptId;
+  if (promptId) emit('becauseOf', promptId);
+}
+</script>
+
+<template>
+  <li
+    class="bs-timeline-row"
+    :class="{ 'bs-timeline-row--rail': variant === 'rail' }"
+    :data-kind="kind"
+    :id="`activity-row-${entry.eventId}`"
+  >
+    <div class="bs-timeline-row__head">
+      <EventKindTag :kind="kind" />
+      <Tag v-if="tag" :tone="tag.tone" variant="subtle" size="sm">{{ tag.label }}</Tag>
+      <button
+        v-if="entry.taskId && linkable"
+        type="button"
+        class="bs-timeline-row__title bs-timeline-row__title--link"
+        @click="emit('selectTask', entry.taskId)"
+      >
+        {{ title }}
+      </button>
+      <span v-else class="bs-timeline-row__title">{{ title }}</span>
+      <RelativeTime v-if="variant === 'rail'" class="bs-timeline-row__ts" :iso="entry.ts" />
+      <time v-else class="bs-timeline-row__ts" :datetime="entry.ts">{{ formatTime(entry.ts) }}</time>
+    </div>
+    <div v-if="hasDetails" class="bs-timeline-row__meta">
+      <span>{{ meta }}</span>
+      <button v-if="hasPromptLink" type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
+        because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
+      </button>
+      <IconButton
+        :icon="expanded ? ChevronDown : ChevronRight"
+        label="Show details"
+        size="sm"
+        :aria-expanded="expanded"
+        :aria-controls="`activity-row-detail-${entry.eventId}`"
+        @click="emit('toggle', entry.eventId)"
+      />
+    </div>
+    <!-- v-show, not v-if: aria-controls above names this id unconditionally
+         while collapsed, so the element it names must exist unconditionally
+         too, or the IDREF dangles (D-227). Gated on hasDetails because the
+         chevron naming it is gated the same way. -->
+    <dl
+      v-if="hasDetails"
+      v-show="expanded"
+      :id="`activity-row-detail-${entry.eventId}`"
+      class="bs-timeline-row__detail"
+    >
+      <dt>Kind</dt>
+      <dd>{{ kind }}</dd>
+      <dt>Title</dt>
+      <dd>{{ title }}</dd>
+      <dt>Meta</dt>
+      <dd>{{ meta }}</dd>
+      <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
+           on TaskDetailPage): a "Task" row here would only ever read 'not
+           measured', since TaskRun carries no taskId. -->
+      <template v-if="variant !== 'rail'">
+        <dt>Task</dt>
+        <dd>{{ entry.taskId ?? 'not measured' }}</dd>
+      </template>
+    </dl>
+  </li>
+</template>

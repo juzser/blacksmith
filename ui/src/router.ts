@@ -1,6 +1,7 @@
 import type { RouteLocationNormalizedLoaded, RouteRecordRaw } from 'vue-router';
 import { createRouter, createWebHistory } from 'vue-router';
 import type { Crumb } from './composables/useBreadcrumb.js';
+import { errorsRedirect, timelineRedirect } from './lib/activityRoute.js';
 import { homeRedirect } from './lib/homeRoute.js';
 import { legacyWorkRedirect } from './lib/workView.js';
 
@@ -44,10 +45,11 @@ const routes: RouteRecordRaw[] = [
       crumb: (r) => [{ label: r.query.project ? `${r.query.project} · Sessions` : 'Sessions' }],
     },
   },
+  { path: '/timeline', redirect: timelineRedirect },
   {
-    path: '/timeline',
+    path: '/activity',
     name: 'timeline',
-    component: () => import('./pages/TimelinePage.vue'),
+    component: () => import('./pages/ActivityPage.vue'),
     meta: { crumb: () => [{ label: 'Activity' }] },
   },
   {
@@ -86,12 +88,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./pages/LessonsPage.vue'),
     meta: { crumb: () => [{ label: 'Lessons' }] },
   },
-  {
-    path: '/errors',
-    name: 'errors',
-    component: () => import('./pages/ErrorsPage.vue'),
-    meta: { crumb: () => [{ label: 'Errors' }] },
-  },
+  { path: '/errors', redirect: errorsRedirect },
   {
     path: '/analytics',
     name: 'analytics',

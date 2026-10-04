@@ -64,7 +64,10 @@ describe('every Skeleton in the app asks for a size the browser will honour', ()
   }
 
   it('finds the call sites at all, so a rename cannot make this test vacuous', () => {
-    expect(sites.length).toBeGreaterThan(10);
+    // DS6 PR3 retired TimelinePage.vue/ErrorsPage.vue (folded into
+    // ActivityPage.vue, which has no Skeleton of its own), dropping the
+    // real count from >10 to 5 — the floor moves with it, still well above 0.
+    expect(sites.length).toBeGreaterThan(3);
   });
 
   for (const { file, attr, value } of sites) {

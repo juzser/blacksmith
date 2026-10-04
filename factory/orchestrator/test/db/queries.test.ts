@@ -11,6 +11,7 @@ import {
   createQuoteMemo,
   DEFAULT_PROJECT,
   errorsPage,
+  eventKind,
   flowGraph,
   inboxRows,
   kanban,
@@ -2831,6 +2832,44 @@ describe('timeline() covers the gate/graph event vocabulary (P9-37)', () => {
       graphEvents.filter((t) => !shown.has(t)),
       'graph events the timeline silently drops',
     ).toEqual([]);
+  });
+});
+
+// DS6 PR3 round 2: eventKind()'s switch only matched the handful of event
+// types ds-review.html's mock happens to show, so the gate_event/graph_event
+// taxonomy's other ~40 types fell to `System` by default — the "most rows
+// are System" visual-pass finding. This is the standing guard that every
+// taxonomy value maps to something other than the catch-all, same shape as
+// the P9-37 guard above it for timeline()'s own allowlist.
+describe('eventKind() covers the gate/graph event vocabulary (DS6 PR3 r2)', () => {
+  it('never falls back to System for a gate_event taxonomy value', () => {
+    const gateEvents = loadTaxonomy().dimensions.gate_event as string[];
+    expect(gateEvents.length).toBeGreaterThan(0);
+    const unmapped = gateEvents.filter((eventType) => eventKind(eventType, {}) === 'System');
+    expect(unmapped, 'gate events still tagged System').toEqual([]);
+  });
+
+  it('maps the graph_event types that have their own kind off System', () => {
+    // wave-merged is Merge and the spec-change-* pair is Feedback; the rest
+    // of graph_event (task-added/-split/-superseded, edge-recorded,
+    // wave-admitted, plan-version-created/-superseded) is plan/graph
+    // bookkeeping with no dedicated kind of its own, and stays System per
+    // ds-spec.md §4.3.
+    expect(eventKind('wave-merged', {})).toBe('Merge');
+    expect(eventKind('spec-change-proposed', {})).toBe('Feedback');
+    expect(eventKind('spec-change-decided', {})).toBe('Feedback');
+  });
+
+  // ds-spec.md §4.3 + ds-review.html: a judge's verdict on a task is a
+  // Finding row; the operator's waiver response to one is Feedback.
+  it('maps judge-reported to Finding and waiver decisions to Feedback', () => {
+    expect(eventKind('judge-reported', {})).toBe('Finding');
+    expect(eventKind('waiver-granted', {})).toBe('Feedback');
+    expect(eventKind('waiver-denied', {})).toBe('Feedback');
+  });
+
+  it('still falls back to System for a type outside the taxonomy', () => {
+    expect(eventKind('some-future-event-type', {})).toBe('System');
   });
 });
 
