@@ -16,6 +16,9 @@ function lesson(lessonId: string, lessonStatus: string): LessonRecord {
     provenanceEventIds: '[]',
     evidence: null,
     timesPrevented: 0,
+    claimPath: null,
+    agentRole: null,
+    caseType: null,
   } as LessonRecord;
 }
 
@@ -23,6 +26,7 @@ const buckets: LessonsResult = {
   pending: [lesson('lesson-1', 'candidate')],
   approved: [lesson('lesson-2', 'approved')],
   closed: [lesson('lesson-3', 'invalidated'), lesson('lesson-4', 'novelty-rejected')],
+  lastCheckedAt: null,
 };
 
 describe('lib/lessonFilters.ts', () => {

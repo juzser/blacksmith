@@ -1358,6 +1358,21 @@ export async function dream(
     }
   }
 
+  // DS8 plan §2.3 -- a durable mark that a pass happened, even one that
+  // raised nothing, so the Lessons page can show when lessons were last
+  // checked rather than only when one was last raised.
+  await appendEvent(
+    {
+      session_id: ctx.sessionId,
+      actor: ctx.actor ?? 'system',
+      event_type: 'lessons-pass-completed',
+      plan_version: ctx.planVersion,
+      causal_parent: parent,
+      payload: { raised: raised.length },
+    },
+    opts,
+  );
+
   return {
     checkpointsExtracted: checkpoints.length,
     raised,

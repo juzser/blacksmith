@@ -688,6 +688,42 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  // DS8 PR1 plan F -- the session detail drawer's agent roster: grouped by
+  // role in first-dispatch order, each agent's token state and the window it
+  // was active in. A thin wrapper over sessionAgents(), scoped like every
+  // other session route.
+  it('GET /api/sessions/:sessionId/agents 200s with the roles grouped by first-dispatch order', async () => {
+    const handle = app();
+    const res = await handle.app.request(`/api/sessions/${SESSION_ID}/agents`);
+    expect(res.status).toBe(200);
+    const body = await json<{
+      sessionId: string;
+      roles: Array<{ agentRole: string; agents: Array<{ taskId: string | null }> }>;
+    }>(res);
+    expect(body.sessionId).toBe(SESSION_ID);
+    expect(body.roles.length).toBeGreaterThan(0);
+    closeApp(handle);
+  });
+
+  it('GET /api/sessions/:sessionId/agents 404s for an unknown session', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/sessions/no-such-session/agents');
+    expect(res.status).toBe(404);
+    closeApp(handle);
+  });
+
+  it('GET /api/sessions/:sessionId/agents 404s when the project does not match the session', async () => {
+    const handle = app();
+    const mine = await handle.app.request(`/api/sessions/${SESSION_ID}/agents?project=black-smith`);
+    expect(mine.status).toBe(200);
+
+    const elsewhere = await handle.app.request(
+      `/api/sessions/${SESSION_ID}/agents?project=no-such-project`,
+    );
+    expect(elsewhere.status).toBe(404);
+    closeApp(handle);
+  });
+
   it('GET /api/tasks/:taskId 200s for a known task, 404s for an unknown one', async () => {
     const handle = app();
     const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}`);

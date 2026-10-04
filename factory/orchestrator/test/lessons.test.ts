@@ -1338,6 +1338,67 @@ describe('dream', () => {
     expect(secondResult.noveltyRejected).toEqual([]);
     expect(secondResult.skippedAlreadyExtracted).toBe(1);
   });
+
+  // DS8 plan §2.3 (Q1 = A, operator signed off) -- the Lessons page's "last
+  // checked" line needs a durable mark that a pass happened, even an empty
+  // one, so a session with no checkpoints at all still proves dream() ran.
+  it('appends a lessons-pass-completed event at the end of every pass, even one that raises nothing', async () => {
+    stateDir = mkdtempSync(path.join(tmpdir(), 'smith-dream-completed-'));
+    const sessionId = 'sess-dream-completed';
+    const root = await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+
+    const emptyEvents = await readEvents(sessionId, { stateDir });
+    const emptyResult = await dream(
+      emptyEvents,
+      { sessionId, planVersion: 1, causalParent: root.event_id },
+      { stateDir },
+    );
+    expect(emptyResult.raised).toEqual([]);
+
+    const afterEmpty = await readEvents(sessionId, { stateDir });
+    const completedEvents = afterEmpty.filter(
+      (e) => e.record.event_type === 'lessons-pass-completed',
+    );
+    expect(completedEvents).toHaveLength(1);
+    expect(completedEvents[0]?.record.payload).toEqual({ raised: 0 });
+
+    const blockEvent = await appendEvent(
+      {
+        session_id: sessionId,
+        actor: 'system',
+        event_type: 'gate-outcome',
+        task_id: 'epic-1/task-1',
+        plan_version: 1,
+        causal_parent: completedEvents[0]?.event_id as string,
+        payload: { outcome: 'blocked', reason: 'tests-failed' },
+      },
+      { stateDir },
+    );
+    const secondEvents = await readEvents(sessionId, { stateDir });
+    const secondResult = await dream(
+      secondEvents,
+      { sessionId, planVersion: 1, causalParent: blockEvent.event_id },
+      { stateDir },
+    );
+    expect(secondResult.raised).toHaveLength(1);
+
+    const afterSecond = await readEvents(sessionId, { stateDir });
+    const allCompleted = afterSecond.filter(
+      (e) => e.record.event_type === 'lessons-pass-completed',
+    );
+    expect(allCompleted).toHaveLength(2);
+    expect(allCompleted[1]?.record.payload).toEqual({ raised: 1 });
+  });
 });
 
 describe('transitionLesson', () => {
