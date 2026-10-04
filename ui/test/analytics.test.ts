@@ -3,19 +3,46 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  chartSeries,
   costPerTask,
   costPerTaskBy,
+  dailySeriesKeys,
+  dailyStackedBars,
+  formatAvgTokensPerRun,
   formatRate,
+  formatSeconds,
   formatTokens,
+  frontierMidRatio,
   hasMultipleProviders,
   latestSameMistakeRate,
-  quorumRows,
+  MIN_SETTLED_FOR_RATE,
+  rateOrNotEnoughData,
+  ratioTakeaway,
   recheckPassRate,
+  secondOpinionSummary,
+  secondOpinionTakeaway,
+  tokenTotalsBy,
 } from '../src/lib/analytics.js';
-import type { CostBucket, ProviderAgreementStat } from '../src/lib/api.js';
+import type {
+  CostBucket,
+  DailyTokenBucket,
+  ProviderAgreementStat,
+  RoleModelTierBucket,
+} from '../src/lib/api.js';
 
 const SFC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'AnalyticsPage.vue'),
+  'utf8',
+);
+const PERIOD_SWITCH = readFileSync(
+  join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'src',
+    'components',
+    'kit',
+    'PeriodSwitch.vue',
+  ),
   'utf8',
 );
 
@@ -30,9 +57,6 @@ describe('lib/analytics.ts — latestSameMistakeRate', () => {
   });
 
   it('returns null on a day that decided nothing, rather than 0', () => {
-    // queries.ts's SameMistakeDay.rate docblock: a day with gate intakes but no
-    // decisions has no denominator, so it has no rate (D-31, silence is not
-    // assent). Rendering it as 0 claims a perfect day.
     expect(
       latestSameMistakeRate([
         { day: '2026-08-19', decisions: 4, sameMistake: 1, rate: 0.25 },
@@ -48,8 +72,6 @@ describe('lib/analytics.ts — latestSameMistakeRate', () => {
 
 describe('lib/analytics.ts — recheckPassRate', () => {
   it('counts a waived recheck as a pass, not only a completed one', () => {
-    // taskStatus.ts's TERMINAL_OK_TASK_STATUSES declares {completed, waived}
-    // as the pair that means the work landed.
     const r = recheckPassRate([
       { taskStatus: 'completed', count: 2 },
       { taskStatus: 'waived', count: 1 },
@@ -107,14 +129,6 @@ function bucket(
 }
 
 describe('lib/analytics.ts — costPerTaskBy', () => {
-  /**
-   * D-221. queries.ts buckets cost by the (model_tier, provider) PAIR, so a
-   * tier that ran on two providers is two rows. The page used to map those
-   * rows straight onto bars labelled with the tier alone, which put two bars
-   * called "mid" side by side under a card titled "Cost per task by model
-   * tier" — neither of them the tier's cost per task, and nothing on the
-   * chart saying which provider either belonged to.
-   */
   it('collapses one tier spread across providers into a single bar', () => {
     const series = costPerTaskBy(
       [bucket('mid', 'claude', 1, 2000), bucket('mid', 'codex', 3, 6000)],
@@ -123,27 +137,14 @@ describe('lib/analytics.ts — costPerTaskBy', () => {
     expect(series).toEqual([{ label: 'mid', value: 2000 }]);
   });
 
-  /**
-   * 8000 tokens over 4 tasks is 2000 a task. Averaging the buckets' own
-   * averages instead (2000 and 2000 -> 2000 here, but 2000 and 6000 -> 4000
-   * below) lets a provider that ran one task outvote one that ran forty.
-   */
   it('weights by task count rather than averaging the buckets’ averages', () => {
     const series = costPerTaskBy(
       [bucket('mid', 'claude', 1, 6000), bucket('mid', 'codex', 39, 39000)],
       'modelTier',
     );
-    // Mean of the two bucket averages would be (6000 + 1000) / 2 = 3500.
     expect(series).toEqual([{ label: 'mid', value: 1125 }]);
   });
 
-  /**
-   * The sibling card is titled "Cost per task by provider" in
-   * design-spec.md §5.8 too, and the StatCard above both of them reads
-   * "Cost per task". It used to plot each provider's total token spend, so
-   * the busier provider always looked the more expensive one and the two
-   * cards sat side by side in different units.
-   */
   it('reports tokens per task by provider, not the provider’s total spend', () => {
     const series = costPerTaskBy(
       [bucket('mid', 'claude', 2, 4000), bucket('small', 'claude', 2, 1000)],
@@ -185,13 +186,6 @@ describe('lib/analytics.ts — costPerTaskBy', () => {
     expect(costPerTaskBy([], 'provider')).toEqual([]);
   });
 
-  /**
-   * Issue #220 follow-up. A bucket can now hold results whose token_usage
-   * was `{ measured: false }` — `unmeasuredTaskCount` says how many.
-   * A group where EVERY task went unmeasured has a real taskCount but no
-   * denominator to divide by, so it must not plot a fabricated 0 bar
-   * (indistinguishable from "this group truly cost nothing").
-   */
   it('omits a label whose every task went unmeasured, rather than plotting a fabricated 0', () => {
     const series = costPerTaskBy([bucket('mid', 'claude', 3, 0, 3)], 'modelTier');
     expect(series).toEqual([]);
@@ -202,8 +196,6 @@ describe('lib/analytics.ts — costPerTaskBy', () => {
       [bucket('mid', 'claude', 2, 4000, 0), bucket('mid', 'codex', 1, 0, 1)],
       'modelTier',
     );
-    // 4000 tokens over the 2 MEASURED tasks, not diluted by the third task
-    // that ran but reported no usage.
     expect(series).toEqual([{ label: 'mid', value: 2000 }]);
   });
 });
@@ -215,11 +207,6 @@ describe('lib/analytics.ts — costPerTask', () => {
     );
   });
 
-  /**
-   * D-219 fixed exactly this on the recheck card next door: a card labelled
-   * with a cost must not print `0 tok` for a factory that has reported no
-   * usage, because that is a claim ("we spent nothing") rather than a blank.
-   */
   it('returns null when no task has reported usage, rather than zero', () => {
     expect(costPerTask([])).toBeNull();
     expect(costPerTask([bucket('mid', 'claude', 0, 0)])).toBeNull();
@@ -241,28 +228,6 @@ describe('lib/analytics.ts — formatTokens', () => {
   });
 });
 
-// "Cost per task by provider" is a comparison chart: with one provider on
-// the whole factory (the common case — most projects only ever run claude),
-// a single bar answers a question nobody asked and just repeats the
-// "Cost per task" StatCard next to it. Hidden entirely rather than shown
-// empty, matching D-31's rule that a card says nothing rather than a claim
-// with no denominator.
-describe('lib/analytics.ts — hasMultipleProviders', () => {
-  it('is false for zero or one provider', () => {
-    expect(hasMultipleProviders([])).toBe(false);
-    expect(hasMultipleProviders([{ label: 'claude', value: 100 }])).toBe(false);
-  });
-
-  it('is true once a second provider has data', () => {
-    expect(
-      hasMultipleProviders([
-        { label: 'claude', value: 100 },
-        { label: 'codex', value: 50 },
-      ]),
-    ).toBe(true);
-  });
-});
-
 describe('lib/analytics.ts — formatRate', () => {
   it('renders an em dash for a rate nobody measured', () => {
     expect(formatRate(null)).toBe('—');
@@ -275,65 +240,88 @@ describe('lib/analytics.ts — formatRate', () => {
   });
 });
 
-describe('AnalyticsPage.vue — §5.8 MetricGrid sources both rates from lib/analytics.ts', () => {
-  // ui/tsconfig.json does not type-check .vue and biome.json does not lint it,
-  // so the source text is the only place these two cards can be held to the
-  // helpers that know what "no denominator" means (D-216).
-  it('imports the rate helpers rather than hand-rolling them in the template', () => {
-    expect(SFC).toMatch(/from '\.\.\/lib\/analytics\.js'/);
-    expect(SFC).toContain('latestSameMistakeRate(');
-    expect(SFC).toContain('recheckPassRate(');
-    expect(SFC).toContain('formatRate(');
+// DS7 §4.4: hidden entirely below two providers with real tokens — now reads
+// the raw buckets rather than the rolled-up bars, so a 0-token stub row
+// (every task unmeasured) cannot count as a provider.
+describe('lib/analytics.ts — hasMultipleProviders', () => {
+  it('is false for zero or one provider', () => {
+    expect(hasMultipleProviders([])).toBe(false);
+    expect(hasMultipleProviders([bucket('mid', 'claude', 1, 100)])).toBe(false);
   });
 
-  it('picks no pass status out of recheckOutcomes by hand', () => {
-    expect(SFC).not.toMatch(/taskStatus === '/);
+  it('is true once a second provider has real tokens', () => {
+    expect(
+      hasMultipleProviders([bucket('mid', 'claude', 1, 100), bucket('mid', 'codex', 1, 50)]),
+    ).toBe(true);
   });
 
-  it('labels the recheck card by what it now renders', () => {
-    expect(SFC).toMatch(/label="Recheck pass rate"/);
-    expect(SFC).not.toMatch(/hint="rechecks completed"/);
+  it('does not count a provider whose every bucket is a zero-token stub', () => {
+    expect(
+      hasMultipleProviders([
+        bucket('mid', 'claude', 4, 400),
+        bucket('mid', 'codex', 0, 0),
+        bucket('small', 'deepseek', 0, 0),
+      ]),
+    ).toBe(false);
+  });
+
+  it('sums a provider across tiers before counting it', () => {
+    expect(
+      hasMultipleProviders([
+        bucket('mid', 'claude', 1, 100),
+        bucket('small', 'claude', 1, 100),
+        bucket('mid', 'codex', 1, 50),
+      ]),
+    ).toBe(true);
   });
 });
 
-describe('AnalyticsPage.vue — §5.8 cost cards source their numbers from lib/analytics.ts', () => {
-  it('rolls the (tier, provider) buckets up through costPerTaskBy', () => {
-    expect(SFC).toContain('costPerTaskBy(');
-    expect(SFC).toContain("'modelTier'");
-    expect(SFC).toContain("'provider'");
-  });
-
-  it('reduces the cost buckets nowhere in the template', () => {
-    // Both charts and the StatCard used to fold costByModelTierAndProvider
-    // inline — the one layer neither tsc nor biome reads (D-221).
-    expect(SFC).not.toMatch(/costByModelTierAndProvider\s*\?\?\s*\[\]\)\.(reduce|map)/);
-    expect(SFC).not.toContain('b.totalTokens');
-    expect(SFC).not.toContain('b.avgTokensPerTask');
-  });
-
-  it('prints the cost card through formatTokens so an unmeasured cost is blank', () => {
-    expect(SFC).toContain('costPerTask(');
-    expect(SFC).toContain('formatTokens(');
-    expect(SFC).not.toMatch(/\$\{avgCostPerTask\}/);
-  });
-
-  it('titles both cost charts by the unit they now plot', () => {
-    expect(SFC).toMatch(/title="Cost per task by model tier"/);
-    expect(SFC).toMatch(/title="Cost per task by provider"/);
-    expect(SFC).not.toMatch(/label="Total tokens by provider"/);
-  });
-
-  it('hides the by-provider card entirely under a single provider', () => {
-    expect(SFC).toContain('hasMultipleProviders(');
-    // The whole Card is gated, not just its chart — an operator on a
-    // one-provider project should never see the title either.
-    expect(SFC).toMatch(
-      /<Card v-if="hasMultipleProviders\(costByProviderData\)" title="Cost per task by provider"/,
+describe('lib/analytics.ts — rateOrNotEnoughData', () => {
+  it('prints the not-enough-data copy with the shared threshold, not an em dash', () => {
+    expect(rateOrNotEnoughData(null)).toBe(
+      `Not enough data yet (needs ${MIN_SETTLED_FOR_RATE} settled rechecks)`,
     );
   });
+
+  it('formats a real rate as a percentage', () => {
+    expect(rateOrNotEnoughData(0.5)).toBe('50%');
+  });
 });
 
-describe('lib/analytics.ts - quorumRows', () => {
+describe('lib/analytics.ts — frontierMidRatio / ratioTakeaway', () => {
+  it('divides the frontier tier bar by the mid tier bar', () => {
+    expect(
+      frontierMidRatio([
+        { label: 'frontier', value: 27000 },
+        { label: 'mid', value: 1000 },
+      ]),
+    ).toBe(27);
+  });
+
+  it('returns null when either tier has no bar', () => {
+    expect(frontierMidRatio([{ label: 'frontier', value: 27000 }])).toBeNull();
+    expect(frontierMidRatio([])).toBeNull();
+  });
+
+  it('builds the takeaway sentence from the ratio, rounded', () => {
+    expect(ratioTakeaway(27.4)).toBe(
+      'The strongest model costs about 27x the standard one per task.',
+    );
+  });
+
+  it('has no takeaway when there is no ratio', () => {
+    expect(ratioTakeaway(null)).toBeNull();
+  });
+});
+
+describe('lib/analytics.ts — formatSeconds', () => {
+  it('rounds milliseconds to the nearest second', () => {
+    expect(formatSeconds(27400)).toBe('27 s');
+    expect(formatSeconds(500)).toBe('1 s');
+  });
+});
+
+describe('lib/analytics.ts — secondOpinionSummary / secondOpinionTakeaway', () => {
   function stat(over: Partial<ProviderAgreementStat> = {}): ProviderAgreementStat {
     return {
       provider: 'codex',
@@ -349,65 +337,246 @@ describe('lib/analytics.ts - quorumRows', () => {
     };
   }
 
-  it('names every provider that judged, in the order the API sent them', () => {
+  it('weights agreement by each provider’s own verdict count', () => {
+    const summary = secondOpinionSummary([
+      stat({ provider: 'codex', verdicts: 1, agreementRate: 1 }),
+      stat({ provider: 'deepseek', verdicts: 3, agreementRate: 0 }),
+    ]);
+    expect(summary.agreementRate).toBe(0.25);
+  });
+
+  it('returns a null agreement rate when nothing has verdicts', () => {
     expect(
-      quorumRows([stat({ provider: 'codex' }), stat({ provider: 'deepseek' })]).map(
-        (r) => r.provider,
-      ),
-    ).toEqual(['codex', 'deepseek']);
+      secondOpinionSummary([stat({ verdicts: 0, agreementRate: null })]).agreementRate,
+    ).toBeNull();
+    expect(secondOpinionSummary([]).agreementRate).toBeNull();
   });
 
-  it('reads a rate that has a denominator as a percentage of the runs that answered', () => {
-    const [row] = quorumRows([stat({ runs: 4, verdicts: 2, agreementRate: 0.5 })]);
-    expect(row?.agreement).toBe('50% agree');
-    expect(row?.answered).toBe('2 of 4 answered');
-  });
-
-  it('says a provider that never answered has no verdict, rather than 0% agreement', () => {
-    // D-168/D-31: a null rate is an absent measurement. Printing it as 0%
-    // would report a provider that never got to speak as one that always
-    // disagreed -- the opposite reading, on the card an operator uses to
-    // decide whether a cross-check is worth paying for.
-    const [row] = quorumRows([
-      stat({ runs: 2, verdicts: 0, agreementRate: null, transportFailureRate: 1 }),
+  it('weights mean latency by each provider’s own sample count', () => {
+    const summary = secondOpinionSummary([
+      stat({ latencySamples: 1, meanLatencyMs: 100 }),
+      stat({ latencySamples: 3, meanLatencyMs: 300 }),
     ]);
-    expect(row?.agreement).toBe('no verdict');
-    expect(row?.agreement).not.toContain('0%');
-    expect(row?.answered).toBe('0 of 2 answered');
+    expect(summary.meanLatencyMs).toBe(250);
   });
 
-  it('lists the failure codes busiest first so the loudest one is readable in a rail card', () => {
-    const [row] = quorumRows([
-      stat({
-        runs: 4,
-        verdicts: 1,
-        failuresByCode: { 'provider.invalid-output': 1, 'provider.missing-api-key': 2 },
-      }),
-    ]);
-    expect(row?.failures).toEqual(['provider.missing-api-key ×2', 'provider.invalid-output ×1']);
+  it('takeaway converts the mean latency to seconds', () => {
+    expect(secondOpinionTakeaway({ agreementRate: 0.37, meanLatencyMs: 27000 })).toBe(
+      'agreed with the main reviewer; 27 s average.',
+    );
   });
 
-  it('carries no failure line when every run answered', () => {
-    expect(quorumRows([stat()])[0]?.failures).toEqual([]);
-  });
-
-  it('omits the latency when no run reported one', () => {
-    expect(quorumRows([stat({ latencySamples: 0, meanLatencyMs: null })])[0]?.latency).toBeNull();
-    expect(quorumRows([stat({ meanLatencyMs: 119.6 })])[0]?.latency).toBe('120 ms avg');
+  it('takeaway drops the latency clause when nothing reported one', () => {
+    expect(secondOpinionTakeaway({ agreementRate: null, meanLatencyMs: null })).toBe(
+      'agreed with the main reviewer.',
+    );
   });
 });
 
-describe('AnalyticsPage.vue - cross-check quorum card', () => {
-  it('renders the judge stats the API now sends instead of claiming none exist', () => {
-    // The card was hardcoded to an EmptyState while 16 judge runs sat in the
-    // shipped logs, so the page reported a single-provider factory (D-255).
-    expect(SFC).not.toContain('No quorum data wired yet');
-    expect(SFC).toContain('quorumRows(');
-    expect(SFC).toContain('providerAgreement');
+function dayBucket(over: Partial<DailyTokenBucket> = {}): DailyTokenBucket {
+  return {
+    day: '2026-09-01',
+    tokensByRole: {},
+    tokensByModelTier: {},
+    unmeasuredRunCount: 0,
+    ...over,
+  };
+}
+
+describe('lib/analytics.ts — dailySeriesKeys / dailyStackedBars / chartSeries', () => {
+  it('lists role series in first-seen order, labelled through roleLabel', () => {
+    const keys = dailySeriesKeys(
+      [
+        dayBucket({ tokensByRole: { coder: 100 } }),
+        dayBucket({ tokensByRole: { reviewer: 50, coder: 10 } }),
+      ],
+      'role',
+    );
+    expect(keys).toEqual(['Builder', 'Code reviewer']);
   });
 
-  it('derives the card numbers in the lib, not inline in the template', () => {
-    expect(SFC).not.toContain('agreementRate');
-    expect(SFC).not.toContain('failuresByCode');
+  it('appends a "Not measured" key only when some day had an unmeasured run', () => {
+    expect(dailySeriesKeys([dayBucket({ tokensByRole: { coder: 1 } })], 'role')).toEqual([
+      'Builder',
+    ]);
+    expect(
+      dailySeriesKeys([dayBucket({ tokensByRole: { coder: 1 }, unmeasuredRunCount: 2 })], 'role'),
+    ).toEqual(['Builder', 'Not measured']);
+  });
+
+  it('never drops the not-measured segment into a fabricated 0 bar — it is its own value', () => {
+    const bars = dailyStackedBars([dayBucket({ unmeasuredRunCount: 4 })], 'role');
+    expect(bars[0]?.values['Not measured']).toBe(4);
+  });
+
+  it('builds stacked bars keyed the same way the toggle labels its series, by tier too', () => {
+    const bars = dailyStackedBars(
+      [dayBucket({ day: '2026-09-02', tokensByModelTier: { frontier: 900, mid: 100 } })],
+      'modelTier',
+    );
+    expect(bars).toEqual([
+      { label: '2026-09-02', values: { 'flagship model': 900, 'standard model': 100 } },
+    ]);
+  });
+
+  it('gives the Not measured key a neutral tone, never one of the chart colours', () => {
+    const series = chartSeries(['Builder', 'Not measured']);
+    expect(series[0]?.tone).toMatch(/^var\(--bs-chart-/);
+    expect(series[1]).toEqual({ key: 'Not measured', tone: 'var(--bs-text-subtlest)' });
+  });
+});
+
+function roleTierBucket(over: Partial<RoleModelTierBucket> = {}): RoleModelTierBucket {
+  return {
+    role: 'coder',
+    modelTier: 'mid',
+    runCount: 1,
+    tokens: 100,
+    avgTokensPerRun: 100,
+    unmeasuredRunCount: 0,
+    ...over,
+  };
+}
+
+describe('lib/analytics.ts — tokenTotalsBy', () => {
+  it('sums tokens per role across model tiers', () => {
+    expect(
+      tokenTotalsBy(
+        [
+          roleTierBucket({ role: 'coder', tokens: 100 }),
+          roleTierBucket({ role: 'coder', modelTier: 'small', tokens: 50 }),
+        ],
+        'role',
+      ),
+    ).toEqual([{ label: 'Builder', value: 150 }]);
+  });
+
+  it('labels an attributionless row as Unattributed', () => {
+    expect(tokenTotalsBy([roleTierBucket({ role: 'unattributed' })], 'role')).toEqual([
+      { label: 'Unattributed', value: 100 },
+    ]);
+  });
+
+  it('appends a Not measured bar carrying the summed unmeasured run count', () => {
+    expect(tokenTotalsBy([roleTierBucket({ tokens: 100, unmeasuredRunCount: 3 })], 'role')).toEqual(
+      [
+        { label: 'Builder', value: 100 },
+        { label: 'Not measured', value: 3 },
+      ],
+    );
+  });
+});
+
+describe('lib/analytics.ts — formatAvgTokensPerRun', () => {
+  it('renders "not measured" for a null average, never 0', () => {
+    expect(formatAvgTokensPerRun(null)).toBe('not measured');
+  });
+
+  it('renders a real average with its unit', () => {
+    expect(formatAvgTokensPerRun(1234)).toBe('1.2K tok');
+  });
+});
+
+describe('kit/PeriodSwitch.vue', () => {
+  it('takes a modelValue/options/label prop and emits update:modelValue, no RouterLink', () => {
+    expect(PERIOD_SWITCH).toMatch(/modelValue:\s*string/);
+    expect(PERIOD_SWITCH).toMatch(/options:\s*PeriodSwitchOption\[\]/);
+    expect(PERIOD_SWITCH).toMatch(
+      /defineEmits<\{\s*'update:modelValue':\s*\[value:\s*string\];?\s*\}>/,
+    );
+    expect(PERIOD_SWITCH).not.toContain('<RouterLink');
+  });
+
+  it('renders a button group with aria-pressed on the active option', () => {
+    expect(PERIOD_SWITCH).toMatch(/role="group"/);
+    expect(PERIOD_SWITCH).toMatch(/:aria-pressed="option\.value === modelValue"/);
+  });
+});
+
+describe('AnalyticsPage.vue — period is read from and written to the URL', () => {
+  it('reads ?period= off the route and defaults to 30d', () => {
+    expect(SFC).toMatch(/route\.query\.period/);
+    expect(SFC).toContain("'30d'");
+  });
+
+  it('writes the period back through router.replace rather than router.push', () => {
+    expect(SFC).toMatch(/router\.replace\(\{\s*query:\s*\{\s*\.\.\.route\.query,\s*period/);
+  });
+
+  it('fetches analytics with the selected period', () => {
+    expect(SFC).toMatch(/fetchAnalytics\([^)]*period[^)]*\)/);
+  });
+});
+
+describe('AnalyticsPage.vue — daily stacked chart toggles role/tier with no refetch', () => {
+  it('builds the stacked bars and series from lib/analytics.ts, not inline', () => {
+    expect(SFC).toContain('dailyStackedBars(');
+    expect(SFC).toContain('dailySeriesKeys(');
+    expect(SFC).toContain('chartSeries(');
+  });
+
+  it('the toggle is a plain ref, not a second fetch call', () => {
+    expect(SFC).toMatch(/const stackBy = ref/);
+    // load() is the only fetchAnalytics call site; the toggle must not add one.
+    expect(SFC.match(/fetchAnalytics\(/g)?.length).toBe(1);
+  });
+
+  it('passes the BarChart its stacked/series/stackedBars props', () => {
+    expect(SFC).toMatch(/<BarChart[\s\S]{0,400}stacked[\s\S]{0,400}\/>/);
+  });
+});
+
+describe('AnalyticsPage.vue — provider block hides below two real providers', () => {
+  it('gates on the raw buckets through the fixed hasMultipleProviders', () => {
+    expect(SFC).toMatch(/hasMultipleProviders\(costBuckets\)/);
+  });
+});
+
+describe('AnalyticsPage.vue — not-enough-data and ratio takeaways', () => {
+  it('sources the same-mistake and recheck-pass cards through rateOrNotEnoughData', () => {
+    expect(SFC).toContain('rateOrNotEnoughData(');
+  });
+
+  it('sources the tokens-per-task ratio takeaway from the lib', () => {
+    expect(SFC).toContain('frontierMidRatio(');
+    expect(SFC).toContain('ratioTakeaway(');
+  });
+});
+
+describe('AnalyticsPage.vue — breakdown table shows "not measured" for a null average', () => {
+  it('formats the average column through formatAvgTokensPerRun', () => {
+    expect(SFC).toContain('formatAvgTokensPerRun(');
+  });
+});
+
+describe('AnalyticsPage.vue — second-opinion reviewers card', () => {
+  it('sources its ring and takeaway from secondOpinionSummary', () => {
+    expect(SFC).toContain('secondOpinionSummary(');
+    expect(SFC).toContain('secondOpinionTakeaway(');
+    expect(SFC).toContain('ProgressRing');
+  });
+
+  it('no longer renders the old cross-check quorum rail card', () => {
+    expect(SFC).not.toContain('quorumRows(');
+    expect(SFC).not.toContain('Cross-check quorum');
+  });
+});
+
+describe('AnalyticsPage.vue — cut blocks are gone', () => {
+  it('drops the old Throughput stat and trend chart', () => {
+    expect(SFC).not.toMatch(/label="Throughput"/);
+    expect(SFC).not.toContain('Throughput trend');
+  });
+
+  it('drops the old Recheck outcomes rail card', () => {
+    expect(SFC).not.toContain('Recheck outcomes');
+  });
+
+  it('uses kit components, not ds', () => {
+    expect(SFC).not.toMatch(/from '\.\.\/components\/ds\//);
+  });
+
+  it('carries no PageHeader — the topbar carries the title alone', () => {
+    expect(SFC).not.toMatch(/<PageHeader|import PageHeader/);
   });
 });
