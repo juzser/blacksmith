@@ -89,6 +89,11 @@ export interface RunningSession {
    * own — membership is derived from tasks).
    */
   projects: string[];
+  /**
+   * The session's earliest prompt, trimmed to ~80 chars, else the first
+   * dispatched agent's epic id, else null (DS8 plan §2.2).
+   */
+  title?: string | null;
 }
 export interface EpicTokenSpend {
   epicId: string;
@@ -393,12 +398,18 @@ export interface LessonRecord {
   provenanceEventIds: string; // JSON array, parsed by the caller
   evidence: string | null;
   timesPrevented: number;
+  validFrom: string;
+  claimPath: string | null;
+  agentRole: string | null;
+  caseType: string | null;
 }
 export interface LessonsResult {
   pending: LessonRecord[];
   approved: LessonRecord[];
   /** Rejected, superseded, or invalidated — closed, but still auditable (D-220). */
   closed: LessonRecord[];
+  /** The ts of the latest lessons-pass-completed event, or null if dream() has never run (DS8 plan §2.3). */
+  lastCheckedAt: string | null;
 }
 
 /** ds-spec.md §4.1 NeedsYouInbox row: mirrors queries.ts's InboxRow. */
@@ -640,6 +651,48 @@ export function fetchSessions(session?: SessionScope, project?: string): Promise
   if (project) q.set('project', project);
   const qs = q.toString();
   return getJson(`/api/sessions${qs ? `?${qs}` : ''}`);
+}
+
+/**
+ * One agent in the roster returned by `/api/sessions/:sessionId/agents`.
+ * Mirrors queries.ts's SessionAgent field-for-field (DS8 plan §2.1).
+ */
+export interface SessionAgent {
+  id: string;
+  agentRole: string;
+  provider: string | null;
+  modelTier: string | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  epicId: string | null;
+  round: number | null;
+  dispatchedAt: string;
+  terminalAt: string | null;
+  terminalType: 'result' | 'error' | 'superseded' | 'abandoned' | null;
+  status: 'live' | 'done' | 'error' | 'superseded' | 'abandoned';
+  tokens:
+    | { state: 'measured'; input: number; output: number; total: number }
+    | { state: 'unmeasured' }
+    | { state: 'pending' }
+    | { state: 'none' };
+  lastEventType: string | null;
+  lastEventAt: string | null;
+}
+export interface SessionAgentsResult {
+  sessionId: string;
+  /** Roles in first-dispatch order, each with its own agents in dispatch order. */
+  roles: { agentRole: string; agents: SessionAgent[] }[];
+}
+
+/** The session detail drawer's agent roster (DS8 plan §2.1, plan F). */
+export function fetchSessionAgents(
+  sessionId: string,
+  project?: string,
+): Promise<SessionAgentsResult> {
+  const q = new URLSearchParams();
+  if (project) q.set('project', project);
+  const qs = q.toString();
+  return getJson(`/api/sessions/${encodeURIComponent(sessionId)}/agents${qs ? `?${qs}` : ''}`);
 }
 
 export function fetchProjects(session?: SessionScope): Promise<ProjectOverviewSummary[]> {

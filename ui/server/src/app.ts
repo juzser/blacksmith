@@ -50,6 +50,7 @@ import {
   projectedLineage,
   pulse,
   roadmapPage,
+  sessionAgents,
   taskDetail,
   taskRuns,
   taskTotals,
@@ -903,6 +904,26 @@ export function createApp(opts: AppOpts): AppHandle {
       clock,
     );
     return c.json(result.runningSessions);
+  });
+
+  // DS8 PR1 plan F -- the session detail drawer's agent roster. A thin read
+  // over sessionAgents(): grouped by role in first-dispatch order already,
+  // so the route is scoping plus a 404 for a session that has no agents
+  // (unknown, or not this project's), nothing more.
+  app.get('/api/sessions/:sessionId/agents', (c) => {
+    const sessionId = c.req.param('sessionId');
+    const project = c.req.query('project');
+    if (project) {
+      const session = overview(handle.db, { sessionId }, clock).runningSessions[0];
+      if (!session || !session.projects.includes(project)) {
+        throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
+      }
+    }
+    const result = sessionAgents(handle.db, sessionId, clock);
+    if (result.roles.length === 0) {
+      throw new SmithError('session.not-found', `No session "${sessionId}".`, { sessionId });
+    }
+    return c.json(result);
   });
 
   app.get('/api/projects', (c) => {

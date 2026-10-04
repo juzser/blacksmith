@@ -9,6 +9,7 @@ import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { isOperatorActor } from '../actors.js';
 import {
   type AgentRecord,
+  type AgentStatus,
   DISPATCH_EVENT_TYPE,
   ERROR_EVENT_TYPE,
   foldAgents,
@@ -17,6 +18,7 @@ import {
   JUDGE_REPORT_EVENT_TYPE,
   REGISTRY_EVENT_TYPES,
   TASK_RESULT_EVENT_TYPE,
+  type TerminalType,
 } from '../agents-registry.js';
 import { isPlausibleTokenCount } from '../budgetAlarm.js';
 import { SmithError } from '../errors.js';
@@ -384,6 +386,12 @@ export interface RunningSession {
    * belongs to no project, and is therefore invisible under a project scope.
    */
   projects: string[];
+  /**
+   * The session's earliest prompt (first line, trimmed to about 80 chars),
+   * else the epic id of its first dispatched agent, else null — so a row
+   * never has to fall back to the bare session id alone (plan B, DS8).
+   */
+  title: string | null;
 }
 
 export interface EpicTokenSpend {
@@ -1136,6 +1144,67 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
   });
 }
 
+const SESSION_TITLE_MAX_LEN = 80;
+
+/**
+ * First non-blank line of `text`, trimmed, then cut to about
+ * `SESSION_TITLE_MAX_LEN` chars. `null` when `text` has no non-blank line at
+ * all, so the caller's epic-id fallback applies instead of an empty title.
+ */
+function trimSessionTitle(text: string): string | null {
+  const firstLine = text.split('\n').find((line) => line.trim() !== '');
+  if (firstLine === undefined) return null;
+  const trimmed = firstLine.trim();
+  return trimmed.length > SESSION_TITLE_MAX_LEN
+    ? `${trimmed.slice(0, SESSION_TITLE_MAX_LEN)}…`
+    : trimmed;
+}
+
+/**
+ * One grouped query per field, not one query per session (plan B, DS8): the
+ * earliest prompt per session, falling back to the epic id of the earliest
+ * dispatched agent for a session with no prompt at all.
+ */
+function sessionTitles(db: SmithDb, scope: Scope): Map<string, string> {
+  const titles = new Map<string, string>();
+
+  const promptCond = scopedToSessions(prompts.sessionId, scope);
+  const promptRows = promptCond
+    ? db.select().from(prompts).where(promptCond).all()
+    : db.select().from(prompts).all();
+  const promptsBySession = new Map<string, (typeof prompts.$inferSelect)[]>();
+  for (const p of promptRows) {
+    const list = promptsBySession.get(p.sessionId) ?? [];
+    list.push(p);
+    promptsBySession.set(p.sessionId, list);
+  }
+  for (const [sessionId, rows] of promptsBySession) {
+    const earliest = inLogOrder(rows)[0];
+    const title = earliest ? trimSessionTitle(earliest.prompt) : null;
+    if (title !== null) titles.set(sessionId, title);
+  }
+
+  const agentCond = scopedToSessions(agents.sessionId, scope);
+  const agentRows = agentCond
+    ? db.select().from(agents).where(agentCond).all()
+    : db.select().from(agents).all();
+  const agentsBySession = new Map<string, (typeof agents.$inferSelect)[]>();
+  for (const a of agentRows) {
+    if (titles.has(a.sessionId)) continue;
+    const list = agentsBySession.get(a.sessionId) ?? [];
+    list.push(a);
+    agentsBySession.set(a.sessionId, list);
+  }
+  for (const [sessionId, rows] of agentsBySession) {
+    const earliest = inLogOrder(
+      rows.map((a) => ({ ts: a.dispatchedAt, eventId: a.id, row: a })),
+    )[0];
+    if (earliest?.row.epicId) titles.set(sessionId, earliest.row.epicId);
+  }
+
+  return titles;
+}
+
 /**
  * Every projected session, most recently active first.
  *
@@ -1178,6 +1247,8 @@ export function runningSessions(
     projectsBySession.set(t.sessionId, set);
   }
 
+  const titles = sessionTitles(db, scope);
+
   // What each session did most recently. events_raw is not guaranteed to come
   // back in ts order, so the latest row is chosen by comparison rather than by
   // trusting scan order — and isLaterEvent settles a tie on ts the same way
@@ -1208,6 +1279,7 @@ export function runningSessions(
         workingAgentCount: workingBySession.get(s.sessionId) ?? 0,
         lastEventType: lastEvent.get(s.sessionId)?.eventType ?? null,
         projects: [...(projectsBySession.get(s.sessionId) ?? [])].sort(),
+        title: titles.get(s.sessionId) ?? null,
       }))
       // Under a project scope, a session belongs to the project only through
       // its tasks — one with none (a run that has not planned anything yet) is
@@ -3256,6 +3328,160 @@ export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
   };
 }
 
+// ---------------------------------------------------------------------------
+// sessionAgents()
+// ---------------------------------------------------------------------------
+
+/** `payload.token_usage`'s shape (result.schema.json): a plausible measured triple, or unmeasured. */
+export type AgentTokenUsage =
+  | { state: 'measured'; input: number; output: number; total: number }
+  | { state: 'unmeasured' };
+
+/** `tokensTotalFromPayload` reads `total_tokens` only; this reads the full measured triple. */
+function tokenUsageFromPayload(payload: Record<string, unknown>): AgentTokenUsage {
+  const usage = payload.token_usage as
+    | { input_tokens?: number; output_tokens?: number; total_tokens?: number }
+    | undefined;
+  const input = usage?.input_tokens;
+  const output = usage?.output_tokens;
+  const total = usage?.total_tokens;
+  if (
+    typeof input === 'number' &&
+    typeof output === 'number' &&
+    typeof total === 'number' &&
+    isPlausibleTokenCount(total)
+  ) {
+    return { state: 'measured', input, output, total };
+  }
+  return { state: 'unmeasured' };
+}
+
+/**
+ * DS8 plan F — one agent on `GET /api/sessions/:sessionId/agents`.
+ * Never a measured 0 (issue #220): a live agent is `pending`, an
+ * error/superseded/abandoned one is `none`, and only a finished result's own
+ * payload can produce `measured` or `unmeasured`.
+ */
+export interface SessionAgent {
+  id: string;
+  agentRole: string;
+  provider: string | null;
+  modelTier: string | null;
+  taskId: string | null;
+  taskTitle: string | null;
+  epicId: string | null;
+  round: number | null;
+  dispatchedAt: string;
+  terminalAt: string | null;
+  terminalType: TerminalType | null;
+  status: AgentStatus;
+  tokens: AgentTokenUsage | { state: 'pending' } | { state: 'none' };
+  lastEventType: string | null;
+  lastEventAt: string | null;
+}
+
+export interface SessionAgentsResult {
+  sessionId: string;
+  /** One entry per role, in the order its first agent was dispatched. */
+  roles: { agentRole: string; agents: SessionAgent[] }[];
+}
+
+/**
+ * Projection read only (no new writer): every agent `sessionId` has
+ * dispatched, grouped by role in first-dispatch order. An unknown session
+ * returns `{ roles: [] }` — the route turns that into its own 404, since
+ * "no agents" and "no such session" read the same from here.
+ */
+export function sessionAgents(
+  db: SmithDb,
+  sessionId: string,
+  opts: ClockOpts = {},
+): SessionAgentsResult {
+  const nowIso = opts.nowIso ?? new Date().toISOString();
+  const agentRows = inLogOrder(
+    db
+      .select()
+      .from(agents)
+      .where(eq(agents.sessionId, sessionId))
+      .all()
+      .map((a) => ({ ...a, ts: a.dispatchedAt, eventId: a.id })),
+  );
+  if (agentRows.length === 0) return { sessionId, roles: [] };
+
+  const taskIds = [...new Set(agentRows.flatMap((a) => (a.taskId ? [a.taskId] : [])))];
+  const taskTitleById = new Map(
+    taskIds.length > 0
+      ? db
+          .select({ taskId: tasks.taskId, title: tasks.title })
+          .from(tasks)
+          .where(inArray(tasks.taskId, taskIds))
+          .all()
+          .map((t) => [t.taskId, t.title] as const)
+      : [],
+  );
+
+  const eventRows = db.select().from(eventsRaw).where(eq(eventsRaw.sessionId, sessionId)).all();
+  const terminalPayloadById = new Map(eventRows.map((e) => [e.eventId, e]));
+
+  const roleOrder: string[] = [];
+  const byRole = new Map<string, SessionAgent[]>();
+  for (const a of agentRows) {
+    const tokens: SessionAgent['tokens'] =
+      a.status === 'live'
+        ? { state: 'pending' }
+        : a.status === 'done'
+          ? (() => {
+              const terminalEvent = a.terminalEventId
+                ? terminalPayloadById.get(a.terminalEventId)
+                : undefined;
+              return terminalEvent
+                ? tokenUsageFromPayload(
+                    JSON.parse(terminalEvent.payload) as Record<string, unknown>,
+                  )
+                : { state: 'unmeasured' };
+            })()
+          : { state: 'none' };
+
+    const windowEnd = a.terminalAt ?? nowIso;
+    // Scoped to this agent's own task when it has one; an epic-level dispatch
+    // (no task) has no narrower column to filter on than the session itself.
+    const windowEvents = eventRows.filter((e) => {
+      if (e.ts < a.dispatchedAt || e.ts > windowEnd) return false;
+      return a.taskId ? e.taskId === a.taskId : true;
+    });
+    const lastEvent = inLogOrder(windowEvents).at(-1) ?? null;
+
+    const entry: SessionAgent = {
+      id: a.id,
+      agentRole: a.agentRole,
+      provider: a.provider,
+      modelTier: a.modelTier,
+      taskId: a.taskId,
+      taskTitle: a.taskId ? (taskTitleById.get(a.taskId) ?? null) : null,
+      epicId: a.epicId,
+      round: a.round,
+      dispatchedAt: a.dispatchedAt,
+      terminalAt: a.terminalAt,
+      terminalType: a.terminalType as TerminalType | null,
+      status: a.status as AgentStatus,
+      tokens,
+      lastEventType: lastEvent?.eventType ?? null,
+      lastEventAt: lastEvent?.ts ?? null,
+    };
+
+    if (!byRole.has(a.agentRole)) {
+      roleOrder.push(a.agentRole);
+      byRole.set(a.agentRole, []);
+    }
+    byRole.get(a.agentRole)?.push(entry);
+  }
+
+  return {
+    sessionId,
+    roles: roleOrder.map((role) => ({ agentRole: role, agents: byRole.get(role) ?? [] })),
+  };
+}
+
 /**
  * One projected artifact row by its id (`${event_id}#${index}`), for the
  * dashboard's artifact-serving route — it needs the declaring task and the
@@ -3278,7 +3504,15 @@ export interface LessonsResult {
   approved: (typeof lessons.$inferSelect)[];
   /** Everything that has stopped moving: rejected, superseded, or invalidated. */
   closed: (typeof lessons.$inferSelect)[];
+  /**
+   * The ts of the latest `lessons-pass-completed` event (dream() appends one
+   * at the end of every pass, raised or not), or null if dream() has never
+   * run. DS8 plan §2.3 — the Lessons page's "last checked" line.
+   */
+  lastCheckedAt: string | null;
 }
+
+const LESSONS_PASS_COMPLETED_EVENT_TYPE = 'lessons-pass-completed';
 
 /**
  * Every `lesson_status` the taxonomy declares, mapped to the bucket the
@@ -3322,13 +3556,32 @@ export function lessonOwnerSession(db: SmithDb, lessonId: string): string | null
   return row ? row.sessionId : null;
 }
 
+/** The latest `lessons-pass-completed` event's ts, scoped the same way as the rest of the page. */
+function lastLessonsPassAt(db: SmithDb, scope: Scope): string | null {
+  const eventCond = eq(eventsRaw.eventType, LESSONS_PASS_COMPLETED_EVENT_TYPE);
+  const sessionCond = scopedToSessions(eventsRaw.sessionId, scope);
+  const rows = db
+    .select({ ts: eventsRaw.ts })
+    .from(eventsRaw)
+    .where(sessionCond ? and(eventCond, sessionCond) : eventCond)
+    .all();
+  const first = rows[0];
+  if (!first) return null;
+  return rows.reduce((latest, row) => (row.ts > latest ? row.ts : latest), first.ts);
+}
+
 export function lessonsPage(db: SmithDb, scope: Scope = {}): LessonsResult {
   const sessionCond = scopedToSessions(lessons.sessionId, scope);
   const rows = sessionCond
     ? db.select().from(lessons).where(sessionCond).all()
     : db.select().from(lessons).all();
 
-  const result: LessonsResult = { pending: [], approved: [], closed: [] };
+  const result: LessonsResult = {
+    pending: [],
+    approved: [],
+    closed: [],
+    lastCheckedAt: lastLessonsPassAt(db, scope),
+  };
   for (const row of rows) {
     // An unrecognised status lands in `closed` rather than nowhere: being
     // invisible is the defect this map exists to close, and a row the
