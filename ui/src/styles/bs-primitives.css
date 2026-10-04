@@ -1056,6 +1056,13 @@ a:hover {
   color: var(--bs-text);
   border-bottom-color: var(--bs-accent);
 }
+/* DS8 PR2: "Pending review (0)" / "Closed (28)" — the count rides the tab
+   label itself rather than a separate Tag, so it keeps the tab's own
+   selected/unselected colour instead of acquiring a tone of its own. */
+.bs-tabs__count {
+  margin-left: var(--bs-space-1);
+  font-weight: var(--bs-font-weight-normal);
+}
 .bs-tabs__tab:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
