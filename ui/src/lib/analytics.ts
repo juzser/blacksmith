@@ -291,7 +291,7 @@ export function dailySeriesKeys(
 export function chartSeries(keys: readonly string[]): { key: string; tone: string }[] {
   return keys.map((key, i) => ({
     key,
-    tone: CHART_TONES[i % CHART_TONES.length] ?? CHART_TONES[0],
+    tone: CHART_TONES[i % CHART_TONES.length] ?? 'var(--bs-chart-1)',
   }));
 }
 

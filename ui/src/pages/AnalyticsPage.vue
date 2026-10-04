@@ -26,21 +26,23 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import {
+  breakdownTokensText,
   chartSeries,
   costPerTask,
   costPerTaskBy,
   dailySeriesKeys,
   dailyStackedBars,
   formatAvgTokensPerRun,
-  formatTokens,
   frontierMidRatio,
   hasMultipleProviders,
   MIN_SETTLED_FOR_RATE,
+  notMeasuredCaption,
   rateOrNotEnoughData,
   ratioTakeaway,
   recheckPassRate,
   secondOpinionSummary,
   secondOpinionTakeaway,
+  sumUnmeasuredRuns,
   tokenTotalsBy,
 } from '../lib/analytics.js';
 import { type AnalyticsPeriod, type AnalyticsResult, fetchAnalytics } from '../lib/api.js';
@@ -110,6 +112,9 @@ const dailyTakeaway = computed(() =>
     ? 'No token usage recorded yet for this period.'
     : `Daily tokens by ${stackBy.value === 'role' ? 'role' : 'model tier'} over the last ${dailyBars.value.length} days.`,
 );
+const dailyNotMeasuredCaption = computed(() =>
+  notMeasuredCaption(sumUnmeasuredRuns(recentDailyBuckets.value)),
+);
 
 const roleTierBuckets = computed(() => data.value?.tokensByRoleAndModelTier ?? []);
 const totalsBars = computed(() => tokenTotalsBy(roleTierBuckets.value, stackBy.value));
@@ -118,20 +123,25 @@ const totalsTakeaway = computed(() =>
     ? 'No token usage recorded yet for this period.'
     : `Total tokens by ${stackBy.value === 'role' ? 'role' : 'model tier'} for the selected period.`,
 );
+const totalsNotMeasuredCaption = computed(() =>
+  notMeasuredCaption(sumUnmeasuredRuns(roleTierBuckets.value)),
+);
 
 const breakdownColumns = computed(() => [
   { key: 'group', label: stackBy.value === 'role' ? 'Role' : 'Model tier' },
   { key: 'runCount', label: 'Runs', numeric: true },
   { key: 'tokens', label: 'Tokens', numeric: true },
   { key: 'avg', label: 'Avg tokens/run', numeric: true },
+  { key: 'unmeasured', label: 'Unmeasured', numeric: true },
 ]);
 const breakdownRows = computed(() =>
   roleTierBuckets.value.map((b) => ({
     id: `${b.role}-${b.modelTier}`,
     group: stackBy.value === 'role' ? roleLabel(b.role) : tierLabel(b.modelTier),
     runCount: b.runCount,
-    tokens: formatTokens(b.tokens),
+    tokens: breakdownTokensText(b),
     avg: formatAvgTokensPerRun(b.avgTokensPerRun),
+    unmeasured: b.unmeasuredRunCount,
   })),
 );
 
@@ -210,12 +220,16 @@ const secondOpinionPct = computed(() =>
           <BarChart
             v-else
             stacked
+            legend
             :stacked-bars="dailyBars"
             :series="dailySeries"
             :bars="[]"
             label="Tokens per day"
             :takeaway="dailyTakeaway"
           />
+          <p v-if="dailyNotMeasuredCaption" class="bs-analytics-page__chart-caption">
+            {{ dailyNotMeasuredCaption }}
+          </p>
         </Card>
 
         <Card title="Total tokens, by selected period">
@@ -232,14 +246,15 @@ const secondOpinionPct = computed(() =>
             label="Total tokens"
             :takeaway="totalsTakeaway"
           />
-          <Table
-            v-if="breakdownRows.length > 0"
-            :columns="breakdownColumns"
-            :rows="breakdownRows"
-            compact
-          />
+          <p v-if="totalsNotMeasuredCaption" class="bs-analytics-page__chart-caption">
+            {{ totalsNotMeasuredCaption }}
+          </p>
         </Card>
       </div>
+
+      <Card v-if="breakdownRows.length > 0" title="Tokens by role and model tier">
+        <Table :columns="breakdownColumns" :rows="breakdownRows" compact />
+      </Card>
 
       <p class="bs-analytics-page__note">
         Cost is counted in tokens, never in dollars. A run whose tokens were not measured
@@ -252,7 +267,7 @@ const secondOpinionPct = computed(() =>
             <CompactNumber v-if="avgCostPerTask !== null" :value="avgCostPerTask" unit="tok" />
             <span v-else>—</span>
           </div>
-          <p v-if="ratioTakeaway(ratio)" class="bs-analytics-page__metric-takeaway">
+          <p class="bs-analytics-page__metric-takeaway">
             {{ ratioTakeaway(ratio) }}
           </p>
         </Card>

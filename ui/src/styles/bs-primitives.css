@@ -1206,6 +1206,29 @@ a:hover {
   color: var(--bs-text-subtlest);
   font-variant-numeric: tabular-nums;
 }
+/* Opt-in legend (BarChart's `legend` prop) — a stacked chart's series have no
+   other way to name themselves, so without it the chart cannot be read. */
+.bs-bars__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bs-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bs-bars__legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-bars__legend-swatch {
+  width: var(--bs-space-2);
+  height: var(--bs-space-2);
+  border-radius: var(--bs-radius-full);
+  flex-shrink: 0;
+}
 
 /* ==== App shell (ds-spec.md §3, DS1) ==== */
 
@@ -2981,6 +3004,11 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-sm);
   margin: var(--bs-space-4) 0;
+}
+.bs-analytics-page__chart-caption {
+  color: var(--bs-text-subtlest);
+  font-size: var(--bs-text-xs);
+  margin: var(--bs-space-2) 0 0;
 }
 .bs-analytics-page__metrics {
   display: grid;

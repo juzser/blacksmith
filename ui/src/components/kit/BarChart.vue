@@ -34,6 +34,8 @@ const props = withDefaults(
     stacked?: boolean;
     series?: { key: string; tone: string }[];
     stackedBars?: { label: string; values: Record<string, number> }[];
+    /** Opt-in: a swatch + name per series, below the plot. Stacked charts only. */
+    legend?: boolean;
   }>(),
   {
     height: 200,
@@ -41,6 +43,7 @@ const props = withDefaults(
     stacked: false,
     series: () => [],
     stackedBars: () => [],
+    legend: false,
   },
 );
 
@@ -103,6 +106,12 @@ function segmentBottom(entry: StackedBar, seriesIndex: number): string {
         </div>
       </div>
       <div class="bs-bars__scale"><span>0</span><span>{{ format(stackedMax) }}</span></div>
+      <ul v-if="legend" class="bs-bars__legend">
+        <li v-for="s in series" :key="s.key" class="bs-bars__legend-item">
+          <span class="bs-bars__legend-swatch" :style="{ background: s.tone }" />
+          {{ s.key }}
+        </li>
+      </ul>
     </div>
     <div v-else class="bs-bars" role="img" :aria-label="summary">
       <div class="bs-bars__plot" :style="{ height: `${height}px` }">
