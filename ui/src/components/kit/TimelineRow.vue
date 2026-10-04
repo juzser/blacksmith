@@ -134,6 +134,12 @@ function onBecauseOf() {
              instead of the dedicated time column below, which hides there. -->
         <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
       </div>
+      <!-- Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a row with no
+           meta text still needs its time to show on phone, so it gets its own
+           meta line holding only the time instead of skipping the line. -->
+      <div v-else class="bs-timeline-row__meta bs-timeline-row__meta--time-only">
+        <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
+      </div>
       <!-- v-show, not v-if: aria-controls above names this id unconditionally
            while collapsed, so the element it names must exist unconditionally
            too, or the IDREF dangles (D-227). Gated on hasDetails because the
