@@ -34,7 +34,7 @@ import {
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { pluralize } from '../lib/format.js';
-import { selectedSessionFromQuery } from '../lib/sessionsSelection.js';
+import { isStaleResponse, selectedSessionFromQuery } from '../lib/sessionsSelection.js';
 
 const router = useRouter();
 const route = useRoute();
@@ -79,16 +79,22 @@ async function loadSessions() {
   }
 }
 
+// Serves both the poll path and the click path: a response for a run the
+// user has since clicked away from (isStaleResponse) must not overwrite
+// the run now selected.
 async function loadAgents() {
   const id = selectedId.value;
   if (!id) return;
   try {
-    agents.value = await fetchSessionAgents(id, project.value);
+    const result = await fetchSessionAgents(id, project.value);
+    if (isStaleResponse(id, selectedId.value)) return;
+    agents.value = result;
     agentsError.value = null;
   } catch (e) {
+    if (isStaleResponse(id, selectedId.value)) return;
     agentsError.value = errorMessage(e);
   } finally {
-    agentsLoadedFor.value = id;
+    if (!isStaleResponse(id, selectedId.value)) agentsLoadedFor.value = id;
   }
 }
 

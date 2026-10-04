@@ -13,3 +13,11 @@ export function selectedSessionFromQuery(
   if (id && sessions.some((s) => s.sessionId === id)) return id;
   return null;
 }
+
+// SessionsPage.loadAgents() runs for both the poll path and the click path.
+// A fetch started for run A can still be in flight when the user clicks run
+// B; A's response must not overwrite B's agents once it finally lands. Both
+// callers check this before applying their result.
+export function isStaleResponse(responseId: string, currentSelectedId: string | null): boolean {
+  return responseId !== currentSelectedId;
+}

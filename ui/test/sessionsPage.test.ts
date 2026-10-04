@@ -46,4 +46,9 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/selectedSessionFromQuery/);
     expect(PAGE).toMatch(/router\.replace\(\{ query: \{ \.\.\.route\.query, session: id \} \}\)/);
   });
+
+  it('drops a stale loadAgents response instead of overwriting a later selection', () => {
+    expect(PAGE).toMatch(/from '\.\.\/lib\/sessionsSelection\.js'/);
+    expect(PAGE).toMatch(/if \(isStaleResponse\(id, selectedId\.value\)\) return;/g);
+  });
 });
