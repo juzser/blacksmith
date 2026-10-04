@@ -1,21 +1,27 @@
 <script setup lang="ts">
-// Lessons — design-spec.md §5.6. Status toggle Buttons, table, review
-// Dialog (RadioGroup in edit mode, Approve primary / Edit outline / Reject
-// destructive -> AlertDialog).
+// Lessons — ds-spec.md §4.5, rebuilt on the kit. kit Tabs (all four counted,
+// ds-spec.md §4.5's own audit item) replace the raw filter buttons; kit
+// LessonCard replaces the Table's raw lessonType/lessonScope/timesPrevented
+// cells with the three sentences the spec calls for, both in the list and
+// (read-only) inside the review Dialog. Approve/edit/reject + the
+// lessons.edit-not-novel override flow (P9-34/P9-36) are unchanged.
+import { CircleCheck, GraduationCap, RefreshCw } from '@lucide/vue';
 import { computed, onMounted, ref, watch } from 'vue';
-import AlertDialog from '../components/ds/AlertDialog.vue';
-import Banner from '../components/ds/Banner.vue';
-import Button from '../components/ds/Button.vue';
-import Dialog from '../components/ds/Dialog.vue';
-import EmptyState from '../components/ds/EmptyState.vue';
-import Lozenge from '../components/ds/Lozenge.vue';
-import PageHeader from '../components/ds/PageHeader.vue';
-import RadioGroup from '../components/ds/RadioGroup.vue';
-import Skeleton from '../components/ds/Skeleton.vue';
-import Table from '../components/ds/Table.vue';
-import Textarea from '../components/ds/Textarea.vue';
+import AlertDialog from '../components/kit/AlertDialog.vue';
+import Banner from '../components/kit/Banner.vue';
+import Button from '../components/kit/Button.vue';
+import Dialog from '../components/kit/Dialog.vue';
+import EmptyState from '../components/kit/EmptyState.vue';
+import LessonCard from '../components/kit/LessonCard.vue';
+import PageHeader from '../components/kit/PageHeader.vue';
+import RadioGroup from '../components/kit/RadioGroup.vue';
+import Skeleton from '../components/kit/Skeleton.vue';
+import type { TabItem } from '../components/kit/Tabs.vue';
+import Tabs from '../components/kit/Tabs.vue';
+import Textarea from '../components/kit/Textarea.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useToast } from '../composables/useToast.js';
+import { useViewport } from '../composables/useViewport.js';
 import {
   ApiError,
   approveLesson,
@@ -26,23 +32,26 @@ import {
   rejectLesson,
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
+import { formatRelativeVerbose } from '../lib/format.js';
 import {
   lessonActions,
   lessonActionsNote,
   type NoveltyNotice,
   noveltyNotice,
 } from '../lib/lessonActions.js';
-import { type LessonFilter, visibleLessons } from '../lib/lessonFilters.js';
-import { lessonStatusTone } from '../lib/taxonomy.js';
+import { LESSON_FILTERS, type LessonFilter, visibleLessons } from '../lib/lessonFilters.js';
 
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Lessons' }]);
 const { show: showToast } = useToast();
+const { isPhoneWidth } = useViewport();
 
 const pending = ref<LessonRecord[]>([]);
 const approved = ref<LessonRecord[]>([]);
 /** Rejected, superseded, and invalidated lessons — closed, but still shown (D-220). */
 const closed = ref<LessonRecord[]>([]);
+/** The ts of the latest lessons-pass-completed event, or null if dream() has never run. */
+const lastCheckedAt = ref<string | null>(null);
 const error = ref<string | null>(null);
 const loading = ref(true);
 const statusFilter = ref<LessonFilter>('pending');
@@ -57,15 +66,14 @@ async function load() {
   // Only while there is nothing on screen to keep. design-spec.md §8 gives
   // this page manual refresh precisely so a list does not re-sort under the
   // operator's cursor -- so a refresh that swaps the whole page for a
-  // skeleton is worse than the re-sort it was meant to avoid. TimelinePage
-  // and KanbanPage already read this way; a retry after a failed fetch still
-  // gets its skeleton, because there the page really is empty (D-243).
+  // skeleton is worse than the re-sort it was meant to avoid.
   loading.value = !loaded.value;
   try {
     const result = await fetchLessons();
     pending.value = result.pending;
     approved.value = result.approved;
     closed.value = result.closed;
+    lastCheckedAt.value = result.lastCheckedAt;
     loaded.value = true;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -75,20 +83,34 @@ async function load() {
 }
 onMounted(load);
 
-const visible = computed(() =>
-  visibleLessons(
-    { pending: pending.value, approved: approved.value, closed: closed.value },
-    statusFilter.value,
-  ),
+function visibleFor(filter: LessonFilter): LessonRecord[] {
+  return visibleLessons(
+    {
+      pending: pending.value,
+      approved: approved.value,
+      closed: closed.value,
+      lastCheckedAt: lastCheckedAt.value,
+    },
+    filter,
+  );
+}
+
+const FILTER_LABEL: Record<LessonFilter, string> = {
+  pending: 'Pending review',
+  approved: 'Approved',
+  closed: 'Closed',
+  all: 'All',
+};
+
+/** All four tabs carry a count (ds-spec.md §4.5's own audit item). */
+const tabs = computed<TabItem[]>(() =>
+  LESSON_FILTERS.map((id) => ({ id, label: FILTER_LABEL[id], count: visibleFor(id).length })),
 );
 
-const columns = [
-  { key: 'lessonType', label: 'Type' },
-  { key: 'lessonScope', label: 'Scope' },
-  { key: 'statement', label: 'Summary' },
-  { key: 'lessonStatus', label: 'Status' },
-  { key: 'timesPrevented', label: 'Times prevented', numeric: true },
-];
+/** "Nothing to review." plus when the last dreaming pass ran, or nothing when it never has. */
+const pendingEmptyBody = computed(() =>
+  lastCheckedAt.value ? `Last checked ${formatRelativeVerbose(lastCheckedAt.value)}.` : '',
+);
 
 const reviewing = ref<LessonRecord | null>(null);
 const editMode = ref(false);
@@ -108,9 +130,8 @@ const duplicateBlock = ref<string | null>(null);
 
 /**
  * Which footer buttons this lesson's status legally allows (architecture
- * §9.4). The page renders the `approved` bucket under its Approved/All
- * filters, and `approved` may only move to superseded or invalidated — so
- * Approve there could never do anything but fail.
+ * §9.4). Edit is also hidden on phone (ds-spec.md shell table: Lessons
+ * drops bulk editing there).
  */
 const actions = computed(() =>
   lessonActions(reviewing.value?.lessonStatus ?? 'unknown-lesson-status'),
@@ -220,27 +241,11 @@ async function reject() {
   <div class="app-page">
     <PageHeader title="Lessons">
       <template #actions>
-        <Button variant="ghost" size="sm" icon="refresh-cw" @click="load">Refresh</Button>
+        <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="load">
+          Refresh
+        </Button>
       </template>
     </PageHeader>
-
-    <div style="display: flex; gap: var(--ds-space-2)">
-      <Button :variant="statusFilter === 'pending' ? 'secondary' : 'outline'" size="sm" @click="statusFilter = 'pending'">
-        Pending review ({{ pending.length }})
-      </Button>
-      <Button :variant="statusFilter === 'approved' ? 'secondary' : 'outline'" size="sm" @click="statusFilter = 'approved'">
-        Approved
-      </Button>
-      <!-- Rejected/superseded/invalidated. Without this the page's own Reject
-           button made a row disappear from every filter it had, so "rejected"
-           and "lost" looked identical to the operator (D-220). -->
-      <Button :variant="statusFilter === 'closed' ? 'secondary' : 'outline'" size="sm" @click="statusFilter = 'closed'">
-        Closed ({{ closed.length }})
-      </Button>
-      <Button :variant="statusFilter === 'all' ? 'secondary' : 'outline'" size="sm" @click="statusFilter = 'all'">
-        All
-      </Button>
-    </div>
 
     <!-- What the novelty gate found on the way in. It outlives the toast on
          purpose: a near-duplicate is now injected at every dispatch, and the
@@ -256,37 +261,48 @@ async function reject() {
     </Banner>
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
-    <Skeleton v-else-if="loading" height="240" />
+    <Skeleton v-else-if="loading" :height="240" />
 
-    <EmptyState v-else-if="canClaimEmpty(loaded, visible.length) && statusFilter === 'pending'" icon="circle-check">
-      Nothing waiting. New candidates appear after the next dreaming pass.
-    </EmptyState>
-    <EmptyState v-else-if="canClaimEmpty(loaded, visible.length)" icon="graduation-cap">No lessons here yet.</EmptyState>
-
-    <Table
-      v-else
-      :columns="columns"
-      :rows="visible"
-      row-key="lessonId"
-      clickable
-      @row-click="(row) => openReview(row as never as LessonRecord)"
-    >
-      <template #cell="{ column, row }">
-        <Lozenge v-if="column.key === 'lessonType' || column.key === 'lessonScope'" variant="outline">{{ row[column.key] }}</Lozenge>
-        <Lozenge v-else-if="column.key === 'lessonStatus'" :tone="lessonStatusTone(String(row.lessonStatus))">{{ row.lessonStatus }}</Lozenge>
-        <template v-else>{{ row[column.key] }}</template>
+    <Tabs v-else v-model="statusFilter" :tabs="tabs" aria-label="Lesson status">
+      <template v-for="tab in tabs" :key="tab.id" #[tab.id]>
+        <EmptyState
+          v-if="tab.id === 'pending' && canClaimEmpty(loaded, visibleFor('pending').length)"
+          :icon="CircleCheck"
+          title="Nothing to review."
+          :body="pendingEmptyBody"
+        />
+        <EmptyState
+          v-else-if="canClaimEmpty(loaded, visibleFor(tab.id).length)"
+          :icon="GraduationCap"
+          title="No lessons here yet."
+          body="Lessons appear here after a dreaming pass finds and reviews them."
+        />
+        <ul v-else class="bs-lessoncard-list">
+          <li v-for="lesson in visibleFor(tab.id)" :key="lesson.lessonId">
+            <LessonCard
+              :lesson="lesson"
+              clickable
+              :compact="isPhoneWidth"
+              @click="openReview(lesson)"
+            />
+          </li>
+        </ul>
       </template>
-    </Table>
+    </Tabs>
 
     <Dialog :open="!!reviewing && !rejectConfirm" title="Review lesson" @close="closeReview">
       <template v-if="reviewing">
-        <div v-if="!editMode">
-          <p>{{ reviewing.statement }}</p>
-          <Lozenge variant="outline">{{ reviewing.lessonScope }}</Lozenge>
-        </div>
+        <template v-if="!editMode">
+          <LessonCard :lesson="reviewing" />
+        </template>
         <template v-else>
           <Textarea v-model="editStatement" aria-label="Lesson statement" />
-          <RadioGroup v-model="editType" :options="LESSON_TYPE_OPTIONS" name="lesson-type" aria-label="Lesson type" />
+          <RadioGroup
+            v-model="editType"
+            :options="LESSON_TYPE_OPTIONS"
+            name="lesson-type"
+            aria-label="Lesson type"
+          />
         </template>
         <Banner v-if="actionsNote" tone="info">{{ actionsNote }}</Banner>
         <!-- The gate refused this edit as a duplicate. Recoverable, so the
@@ -295,15 +311,38 @@ async function reject() {
         <Banner v-if="duplicateBlock" tone="warning">{{ duplicateBlock }}</Banner>
       </template>
       <template #footer>
-        <Button v-if="actions.reject" variant="destructive" size="sm" :disabled="saving" @click="rejectConfirm = true">Reject</Button>
-        <Button v-if="actions.edit" variant="outline" size="sm" :disabled="saving" @click="editMode = !editMode">
+        <Button
+          v-if="actions.reject"
+          variant="danger"
+          size="sm"
+          :disabled="saving"
+          @click="rejectConfirm = true"
+        >
+          Reject
+        </Button>
+        <Button
+          v-if="actions.edit && !isPhoneWidth"
+          variant="secondary"
+          size="sm"
+          :disabled="saving"
+          @click="editMode = !editMode"
+        >
           {{ editMode ? 'Cancel edit' : 'Edit' }}
         </Button>
-        <Button v-if="actions.approve && !editMode" size="sm" :disabled="saving" @click="approve()">Approve</Button>
-        <Button v-else-if="actions.approve" size="sm" :disabled="saving" @click="saveAndApprove()">Save & approve</Button>
+        <Button v-if="actions.approve && !editMode" size="sm" :disabled="saving" @click="approve()">
+          Approve
+        </Button>
+        <Button
+          v-else-if="actions.approve"
+          size="sm"
+          :disabled="saving"
+          @click="saveAndApprove()"
+        >
+          Save & approve
+        </Button>
         <Button
           v-if="duplicateBlock"
-          variant="outline"
+          variant="secondary"
           size="sm"
           :disabled="saving"
           @click="saveAndApprove(true)"
