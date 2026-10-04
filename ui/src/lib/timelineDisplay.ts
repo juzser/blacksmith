@@ -968,10 +968,11 @@ export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinute
   const items: RoleMinuteItem[] = [];
   let run: ActivityEntry[] = [];
   const flush = () => {
-    if (run.length >= ROLE_MINUTE_GROUP_MIN) {
+    const first = run[0];
+    if (first !== undefined && run.length >= ROLE_MINUTE_GROUP_MIN) {
       items.push({
         kind: 'group',
-        group: { id: `role-minute-${run[0].eventId}`, role: dispatchRoleOf(run[0]), members: run },
+        group: { id: `role-minute-${first.eventId}`, role: dispatchRoleOf(first), members: run },
       });
     } else {
       for (const entry of run) items.push({ kind: 'entry', entry });

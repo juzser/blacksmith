@@ -379,6 +379,66 @@ a:hover {
   white-space: nowrap;
 }
 
+/* TimelineRow (DS6 PR3, ds-spec.md §4.3 / ds-review.html .ev). */
+.bs-timeline-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  padding: var(--bs-space-2) 0;
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-timeline-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.bs-timeline-row__title {
+  flex: 1;
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-timeline-row__title--link {
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.bs-timeline-row__ts {
+  color: var(--bs-text-subtlest);
+  font-size: var(--bs-text-xs);
+}
+.bs-timeline-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-sm);
+  padding-left: calc(16px + var(--bs-space-2));
+}
+.bs-timeline-row__because-of {
+  background: none;
+  border: none;
+  color: var(--bs-link-text);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.bs-timeline-row__detail {
+  margin: var(--bs-space-1) 0 0 calc(16px + var(--bs-space-2));
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--bs-space-1) var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+}
+.bs-timeline-row__detail dt {
+  color: var(--bs-text-subtle);
+}
+.bs-timeline-row--highlight {
+  background: var(--bs-accent-subtle);
+}
+
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
 .bs-sep {
   background: var(--bs-border);
