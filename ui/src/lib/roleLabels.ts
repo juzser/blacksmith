@@ -26,6 +26,9 @@ const ROLE_LABELS: Record<string, string> = {
   'wave-runner': 'Batch runner',
   auditor: 'Auditor',
   operator: 'You',
+  // DS7 §4.4: a tokensByDay/tokensByRoleAndModelTier row with no agent on the
+  // run comes through under this key rather than being dropped.
+  unattributed: 'Unattributed',
 };
 
 /** "Builder" for "coder", "You" for the human operator, and so on. */

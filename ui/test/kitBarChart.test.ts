@@ -53,4 +53,20 @@ describe('kit/BarChart.vue', () => {
     expect(CHART).toMatch(/class="sr-only"/);
     expect(CHART).toMatch(/role="img"/);
   });
+
+  // DS7 PR2 round 3 defect 2: a zero-value stacked column must not render
+  // its track as a full-height filled rectangle (it read as data). Opt-in,
+  // so every other stacked caller keeps today's track background.
+  it('declares an opt-in hideEmptyTrack prop, defaulting false', () => {
+    expect(CHART).toMatch(/hideEmptyTrack\?:\s*boolean;/);
+    const match = CHART.match(
+      /withDefaults\(\s*defineProps<\{[\s\S]*?\}>\(\),\s*\{([\s\S]*?)\}\s*,?\s*\)/,
+    );
+    expect(match?.[1]).toMatch(/hideEmptyTrack:\s*false/);
+  });
+
+  it('marks a zero-total stacked column empty only when hideEmptyTrack is set', () => {
+    expect(CHART).toMatch(/bs-bars__track--empty/);
+    expect(CHART).toMatch(/hideEmptyTrack\s*&&\s*stackedTotal\(entry\)\s*===\s*0/);
+  });
 });
