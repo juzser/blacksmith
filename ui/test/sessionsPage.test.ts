@@ -3,58 +3,47 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const SFC = readFileSync(
+const PAGE = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'pages', 'SessionsPage.vue'),
   'utf8',
 );
 
-// Task 2 (friendly role labels): every place this page renders a raw
-// taxonomy role ("coder") routes through roleLabel() ("Builder") instead —
-// the orphaned-agents banner, the agent node's aria-label, its IdentityChip,
-// and the sr-only table's agent column all name a role in plain text or as a
-// chip label, so all four need the friendly word.
-describe('SessionsPage.vue — role labels', () => {
-  it('imports roleLabel', () => {
-    expect(SFC).toMatch(/from '\.\.\/lib\/roleLabels\.js'/);
+describe('SessionsPage.vue', () => {
+  it('imports no VueFlow and no retired ds/* components', () => {
+    expect(PAGE).not.toMatch(/from '@vue-flow\/core'/);
+    expect(PAGE).not.toMatch(/from ['"]\.\.\/components\/ds\//);
   });
 
-  it('labels the orphaned-working-agents banner', () => {
-    expect(SFC).toMatch(/roleLabel\(a\.agentRole\)/);
+  it('is built only on kit components', () => {
+    expect(PAGE).toMatch(/from '\.\.\/components\/kit\/AgentBlock\.vue'/);
+    expect(PAGE).toMatch(/from '\.\.\/components\/kit\/SessionRow\.vue'/);
+    expect(PAGE).toMatch(/from '\.\.\/components\/kit\/PageHeader\.vue'/);
   });
 
-  it('labels the agent node aria-label', () => {
-    expect(SFC).toMatch(/roleLabel\(node\.agent\.agentRole\)/);
+  it('keeps the project context, unscoped from useSessionContext', () => {
+    expect(PAGE).toMatch(/useProjectContext/);
+    expect(PAGE).not.toMatch(/from '\.\.\/composables\/useSessionContext\.js'/);
+    expect(PAGE).toMatch(/fetchSessions\(undefined, project\.value\)/);
   });
 
-  it('labels the agent node IdentityChip and keeps the raw role · tier as a tooltip', () => {
-    expect(SFC).toMatch(
-      /:label="`\$\{roleLabel\(node\.agent\.agentRole\)\} · \$\{node\.agent\.modelTier\}`"/,
-    );
-    expect(SFC).toMatch(
-      /<IdentityChip[^>]*:title="`\$\{node\.agent\.agentRole\} · \$\{node\.agent\.modelTier\}`"/s,
-    );
+  it('separates running and finished runs behind a toggle', () => {
+    expect(PAGE).toMatch(/showFinished/);
+    expect(PAGE).toMatch(/s\.liveAgentCount > 0/);
+    expect(PAGE).toMatch(/s\.liveAgentCount === 0/);
   });
 
-  it('labels the sr-only table agent column', () => {
-    expect(SFC).toContain('{{ roleLabel(a.agentRole) }} · {{ a.modelTier }}');
-  });
-});
-
-// Touch-target sweep: fit-to-view shrinks native-sized nodes below --bs-touch
-// on a 390px canvas. Raising minZoom to 1 at phone width (same breakpoint as
-// useViewport's isPhoneWidth) keeps fitView() from scaling nodes down; the
-// pane pans instead. Desktop keeps Vue Flow's own 0.5 default unchanged.
-describe('SessionsPage.vue — mobile minZoom floor', () => {
-  it('reads isPhoneWidth from the shared viewport composable', () => {
-    expect(SFC).toMatch(/from '\.\.\/composables\/useViewport\.js'/);
-    expect(SFC).toMatch(/const \{ isPhoneWidth \} = useViewport\(\);/);
+  it('loads one run of agents through fetchSessionAgents and renders one AgentBlock per role', () => {
+    expect(PAGE).toMatch(/fetchSessionAgents\(id, project\.value\)/);
+    expect(PAGE).toMatch(/v-for="r in agents\.roles"/);
   });
 
-  it('computes minZoom as 1 on phone, 0.5 (Vue Flow default) otherwise', () => {
-    expect(SFC).toMatch(/const minZoom = computed\(\(\) => \(isPhoneWidth\.value \? 1 : 0\.5\)\);/);
+  it('polls only while the selected run still has a live agent', () => {
+    expect(PAGE).toMatch(/function hasLiveAgents\(\)/);
+    expect(PAGE).toMatch(/if \(hasLiveAgents\(\)\) void loadAgents\(\);/);
   });
 
-  it('binds minZoom onto the VueFlow canvas', () => {
-    expect(SFC).toMatch(/<VueFlow[\s\S]{0,200}:min-zoom="minZoom"/);
+  it('resolves the deep link through the page-local selection helper, not sessionScope', () => {
+    expect(PAGE).toMatch(/selectedSessionFromQuery/);
+    expect(PAGE).toMatch(/router\.replace\(\{ query: \{ \.\.\.route\.query, session: id \} \}\)/);
   });
 });

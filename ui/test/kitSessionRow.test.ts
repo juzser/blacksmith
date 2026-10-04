@@ -26,4 +26,9 @@ describe('kit/SessionRow.vue', () => {
   it('renders as a button only when clickable, like LessonCard', () => {
     expect(ROW).toMatch(/:is="clickable \? 'button' : 'div'"/);
   });
+
+  it('hides the agent count rather than showing a false 0 for a finished run', () => {
+    expect(ROW).toMatch(/if\s*\(n\s*<=\s*0\)\s*return null/);
+    expect(ROW).toMatch(/v-if="agentCountLabel"/);
+  });
 });

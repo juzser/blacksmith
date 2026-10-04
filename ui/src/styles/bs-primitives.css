@@ -988,6 +988,26 @@ a:hover {
   color: var(--bs-text-subtle);
 }
 
+/* SessionsPage (ds-spec.md §4.6): the history list and the selected run's
+   detail section. */
+.bs-sessions__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bs-sessions__quiet {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-sessions__detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-3);
+}
+
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */
