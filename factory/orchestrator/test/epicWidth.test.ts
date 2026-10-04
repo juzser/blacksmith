@@ -8,6 +8,7 @@ import {
 } from '../src/epicWidth.js';
 import type { StoredEvent } from '../src/events.js';
 import {
+  UNLINKED_HINT,
   UNOBSERVED_HINT,
   WAVE_VERDICTS,
   type WaveVerdict,
@@ -179,6 +180,21 @@ describe('summariseEpicWidth', () => {
     expect(summary.unobserved).toEqual(['E1']);
     expect(summary.exitCode).toBe(2);
     expect(summary.hint).toBe(UNOBSERVED_HINT);
+  });
+
+  // The bug this file exists to close on the close-reading side: a wave whose
+  // work merged off the lineage the close was written from is real work, not
+  // a declaration with nothing behind it, so it must not share `unobserved`'s
+  // exit code or its "no work" framing.
+  it('surfaces a close holding a wave whose work merged off-lineage, without failing it', () => {
+    const summary = summariseEpicWidth([
+      close({ epicId: 'E1', concurrency: width({ unlinked: 1 }, { unlinked: ['s1#4'] }) }),
+    ]);
+
+    expect(summary.unlinked).toEqual(['E1']);
+    expect(summary.unobserved).toEqual([]);
+    expect(summary.exitCode).toBe(0);
+    expect(summary.hint).toBe(UNLINKED_HINT);
   });
 
   // Nothing judged is not the same answer as everything passing, and an empty

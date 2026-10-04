@@ -1,5 +1,6 @@
 import type { StoredEvent } from './events.js';
 import {
+  UNLINKED_HINT,
   UNOBSERVED_HINT,
   WAVE_VERDICTS,
   type WaveVerdict,
@@ -95,6 +96,12 @@ export interface ClosedEpicWidth {
   widest: { declared: number; observed: number };
   /** The admitted waves the log held no dispatch for, by `wave-admitted` id. */
   unobserved: string[];
+  /**
+   * The admitted waves whose work merged, or was dispatched, off the lineage
+   * the close was written from, by `wave-admitted` id. Real work, unmeasured
+   * width — never folded into {@link unobserved}, which means no work at all.
+   */
+  unlinked: string[];
   /** Why the width could not be read, or null when it could. */
   problem: string | null;
 }
@@ -110,6 +117,8 @@ export interface EpicWidthSummary {
   serialized: string[];
   /** Epics whose record holds a wave the log shows no work for. */
   unobserved: string[];
+  /** Epics whose record holds a wave whose work merged, or dispatched, off-lineage. */
+  unlinked: string[];
   /** Epics whose close carried no width, or one that could not be read. */
   unmeasured: string[];
   /** Empty when there is nothing to say; see the two hint constants. */
@@ -137,6 +146,7 @@ interface RecordedWidth {
   verdicts?: unknown;
   widest?: unknown;
   unobserved?: unknown;
+  unlinked?: unknown;
   problem?: unknown;
 }
 
@@ -155,6 +165,7 @@ function blank(verdict: 'unmeasured' | 'unreadable', problem: string | null) {
     byVerdict: zeroedCounts(WAVE_VERDICTS),
     widest: { declared: 0, observed: 0 },
     unobserved: [] as string[],
+    unlinked: [] as string[],
     problem,
   };
 }
@@ -241,6 +252,9 @@ function widthOf(payload: ClosedPayload) {
     unobserved: Array.isArray(record.unobserved)
       ? record.unobserved.filter((id): id is string => typeof id === 'string')
       : [],
+    unlinked: Array.isArray(record.unlinked)
+      ? record.unlinked.filter((id): id is string => typeof id === 'string')
+      : [],
     problem,
   };
 }
@@ -320,6 +334,9 @@ export function summariseEpicWidth(events: readonly StoredEvent[]): EpicWidthSum
   const unobserved = epics
     .filter((e) => e.byVerdict.unobserved > 0 || e.unobserved.length > 0)
     .map((e) => e.epicId);
+  const unlinked = epics
+    .filter((e) => e.byVerdict.unlinked > 0 || e.unlinked.length > 0)
+    .map((e) => e.epicId);
   const unmeasured = epics
     .filter((e) => e.verdict === 'unmeasured' || e.verdict === 'unreadable')
     .map((e) => e.epicId);
@@ -338,8 +355,19 @@ export function summariseEpicWidth(events: readonly StoredEvent[]): EpicWidthSum
     },
     serialized,
     unobserved,
+    unlinked,
     unmeasured,
-    hint: unobserved.length > 0 ? UNOBSERVED_HINT : judged ? '' : UNMEASURED_HINT,
+    // `unlinked` names real work, so it earns a hint pointing the operator at
+    // it but never the exit code `unobserved` carries -- that code is reserved
+    // for "nothing was judged", and here something plainly was.
+    hint:
+      unobserved.length > 0
+        ? UNOBSERVED_HINT
+        : unlinked.length > 0
+          ? UNLINKED_HINT
+          : judged
+            ? ''
+            : UNMEASURED_HINT,
     exitCode: serialized.length > 0 ? 1 : unobserved.length > 0 || !judged ? 2 : 0,
   };
 }

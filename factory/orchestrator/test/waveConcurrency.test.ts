@@ -42,6 +42,7 @@ function ev(
   ts: string,
   payload: Record<string, unknown>,
   taskId?: string,
+  causalParent: string | null = null,
 ): StoredEvent {
   seq += 1;
   return {
@@ -52,7 +53,7 @@ function ev(
       event_type: eventType,
       task_id: taskId,
       plan_version: 1,
-      causal_parent: null,
+      causal_parent: causalParent,
       payload,
       ts,
     },
@@ -78,6 +79,26 @@ function dispatch(ts: string, taskId: string, role = 'coder'): StoredEvent {
 
 function result(ts: string, taskId: string, role = 'coder'): StoredEvent {
   return ev('task-result-recorded', ts, { agent: role }, taskId);
+}
+
+/** A `wave-merged` for one task, as `emitWaveMerged` writes it. */
+function merged(ts: string, taskId: string): StoredEvent {
+  return ev('wave-merged', ts, { task_ids: [taskId] }, taskId);
+}
+
+/**
+ * A dispatch carrying no task id, parented directly on a `wave-admitted`
+ * event -- the shape a wave-runner's own agent takes when the epic admits a
+ * wave and dispatches an off-lineage session to run it.
+ */
+function parentedDispatch(parentEventId: string, ts: string, role = 'coder'): StoredEvent {
+  return ev(
+    'dispatch_decision',
+    ts,
+    { agent_role: role, provider: 'claude', model_tier: 'frontier', model: 'claude-opus-5' },
+    undefined,
+    parentEventId,
+  );
 }
 
 /** One task that ran from `from` to `to`, start to finish. */
@@ -277,6 +298,70 @@ describe('auditWaveConcurrency', () => {
 
     expect(waves[0]?.unobserved).toEqual(['E1-task-1']);
   });
+
+  // The bug this file exists to close: a wave-runner started with plain
+  // `session start` has `causal_parent: null` on its root, so its own
+  // dispatch_decisions never reach this fold -- but the epic's lineage still
+  // holds `wave-merged` for the tasks it ran, or a dispatch_decision parented
+  // directly on the admission. Either fact says work happened; `unobserved`
+  // would say the opposite.
+  it('classes a wave unlinked, not unobserved, when its tasks merged off-lineage', () => {
+    const waves = auditWaveConcurrency([
+      admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2']),
+      merged(at(5), 'task-1'),
+      merged(at(6), 'task-2'),
+    ]);
+
+    expect(waves[0]?.verdict).toBe('unlinked');
+    expect(waves[0]?.observed).toEqual([]);
+    expect(waves[0]?.unobserved).toEqual(['demo-epic/task-1', 'demo-epic/task-2']);
+    expect(waves[0]?.peak).toBe(0);
+  });
+
+  it('matches wave-merged evidence across bare and qualified task id spellings', () => {
+    // The merged event's task id is bare ("task-1"); the admission declared
+    // it qualified ("demo-epic/task-1") -- the exact split D-130 exists for.
+    // A second declared task with no evidence at all proves ANY match is
+    // enough -- the wave does not need every task accounted for.
+    const waves = auditWaveConcurrency([
+      admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2']),
+      merged(at(5), 'task-1'),
+    ]);
+
+    expect(waves[0]?.verdict).toBe('unlinked');
+  });
+
+  it('classes a wave unlinked when a dispatch is parented on its admission but carries no task id', () => {
+    const admission = admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2']);
+    const waves = auditWaveConcurrency([admission, parentedDispatch(admission.event_id, at(1))]);
+
+    expect(waves[0]?.verdict).toBe('unlinked');
+  });
+
+  it('scopes merge evidence to the admission whose task id it matches', () => {
+    const waves = auditWaveConcurrency([
+      admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2'], 'demo-epic'),
+      admitted(at(10), ['demo-epic-w2/task-7', 'demo-epic-w2/task-8'], 'demo-epic-w2'),
+      merged(at(5), 'task-1'),
+    ]);
+
+    // The merge names "task-1", which only matches the first admission's
+    // declared tasks -- the second has neither a merge nor a dispatch behind
+    // it, and stays unobserved rather than borrowing the first wave's proof.
+    expect(waves[0]?.verdict).toBe('unlinked');
+    expect(waves[1]?.verdict).toBe('unobserved');
+  });
+
+  it('scopes a parented dispatch to the admission event it names', () => {
+    const first = admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2'], 'demo-epic');
+    const second = admitted(at(10), ['demo-epic-w2/task-7', 'demo-epic-w2/task-8'], 'demo-epic-w2');
+    const waves = auditWaveConcurrency([first, second, parentedDispatch(second.event_id, at(11))]);
+
+    // The dispatch is parented on the SECOND admission's own event id; the
+    // first has nothing on record at all and stays unobserved.
+    expect(waves[0]?.verdict).toBe('unobserved');
+    expect(waves[1]?.verdict).toBe('unlinked');
+  });
 });
 
 describe('summariseWaveConcurrency', () => {
@@ -375,6 +460,20 @@ describe('summariseWaveConcurrency', () => {
     expect(summary.serialized).toEqual(['E1']);
     expect(summary.waves).toHaveLength(2);
   });
+
+  it('separates a wave whose work merged off-lineage from one truly unobserved', () => {
+    const summary = summariseWaveConcurrency(
+      auditWaveConcurrency([
+        admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2'], 'demo-epic'),
+        merged(at(5), 'task-1'),
+      ]),
+    );
+
+    expect(summary.unlinked).toEqual(['demo-epic']);
+    expect(summary.unobserved).toEqual([]);
+    // Work merged, so this is not the "nothing was judged" exit code.
+    expect(summary.exitCode).toBe(0);
+  });
 });
 
 describe('WAVE_VERDICTS', () => {
@@ -391,6 +490,7 @@ describe('WAVE_VERDICTS', () => {
       'partial',
       'serialized',
       'single',
+      'unlinked',
       'unobserved',
     ]);
   });

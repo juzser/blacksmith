@@ -174,6 +174,11 @@ one thing this playbook never asks you to.
    - `unobserved` — the log holds no dispatch for any task this wave
      admitted. That is a defect in the log, not in how the wave ran; record
      it the same way, as `error-logged` with error `execution.env-failure`.
+   - `unlinked` — the wave's work merged, or was dispatched, off the epic's
+     own lineage (a wave-runner session started without `--continues`).
+     Real work, not a defect in dispatch, but its width is unmeasured —
+     record it as `error-logged` with error `contract.constraint-decay` so
+     the session gets linked under `--continues` next time.
    - `parallel` or `single` — nothing further; the wave ran as wide as it
      was admitted.
 5. Dispatch **`tester`** (`.claude/agents/tester.md`) for missing unit
@@ -307,8 +312,11 @@ one thing this playbook never asks you to.
     in flight at once, `partial` when two or more overlapped but never all,
     `serialized` when work is recorded but no two tasks ever overlapped,
     `single` when the wave admitted one task (nothing to be parallel about),
-    and `unobserved` when the wave was admitted and the log shows no work for
-    any of its tasks. Exit 1 on `serialized`, exit 2 on `unobserved` — either
+    `unlinked` when the work merged or dispatched but off the epic's own
+    lineage (width unmeasured, not zero — usually a wave-runner session
+    started without `--continues`), and `unobserved` when the wave was
+    admitted and the log shows no work for any of its tasks. Exit 1 on
+    `serialized`, exit 2 on `unobserved`, exit 0 on `unlinked` — each
     is a fact for the wave-loop's hand-back, not a reason to hold the merge:
     report the verdict and keep going to admission. Then ask what the diff
     did to everyone outside the claims, and whether it

@@ -1,5 +1,6 @@
-import { type AgentRecord, foldAgents } from './agents-registry.js';
-import type { StoredEvent } from './events.js';
+import { type AgentRecord, DISPATCH_EVENT_TYPE, foldAgents } from './agents-registry.js';
+import { eventTaskId, type StoredEvent } from './events.js';
+import { taskIdsMatch } from './taskId.js';
 
 /**
  * Did the wave that was admitted N wide actually run N wide?
@@ -27,6 +28,7 @@ import type { StoredEvent } from './events.js';
  */
 
 const ADMITTED_EVENT_TYPE = 'wave-admitted';
+const MERGED_EVENT_TYPE = 'wave-merged';
 
 /**
  * What the log says a wave did.
@@ -37,12 +39,29 @@ const ADMITTED_EVENT_TYPE = 'wave-admitted';
  * - `single`     — the wave admitted one task. Nothing to be parallel about,
  *                  and scoring it against a width it never claimed would make
  *                  the failing verdicts unreadable.
+ * - `unlinked`   — this fold's intervals hold nothing, but the lineage still
+ *                  has proof the work happened: a `wave-merged` for one of
+ *                  the admitted tasks, or a `dispatch_decision` parented
+ *                  directly on the admission. A wave-runner session started
+ *                  without `--continues` has `causal_parent: null` on its
+ *                  root, so its own dispatch_decisions never reach this fold
+ *                  even though its agents genuinely ran. Width is unmeasured
+ *                  here, not zero — a different fact from `unobserved`, which
+ *                  is exactly why it is not folded into it.
  * - `unobserved` — the wave was admitted and the log records no work for any
- *                  of its tasks. Not the same fact as `serialized`, and the
+ *                  of its tasks, and nothing else on the lineage says
+ *                  otherwise. Not the same fact as `serialized`, and the
  *                  whole point of separating them: one says the factory ran
  *                  narrow, the other says nobody can tell.
  */
-export const WAVE_VERDICTS = ['parallel', 'partial', 'serialized', 'single', 'unobserved'] as const;
+export const WAVE_VERDICTS = [
+  'parallel',
+  'partial',
+  'serialized',
+  'single',
+  'unlinked',
+  'unobserved',
+] as const;
 
 /**
  * The type is derived from the roster above, not written beside it.
@@ -124,9 +143,19 @@ export interface WaveConcurrencySummary {
   partial: string[];
   /** Epics holding a wave the log shows no work for at all. */
   unobserved: string[];
+  /**
+   * Epics holding a wave whose work merged, or was dispatched directly on the
+   * admission, but off the lineage this read walked — width is unmeasured,
+   * not zero.
+   */
+  unlinked: string[];
   /** The widest wave admitted anywhere, against the widest ever observed. */
   widest: { declared: number; observed: number };
-  /** Empty unless something came back `unobserved`; see {@link UNOBSERVED_HINT}. */
+  /**
+   * Empty unless something came back `unobserved` or `unlinked`; see
+   * {@link UNOBSERVED_HINT} and {@link UNLINKED_HINT}. `unobserved` wins when
+   * both are present — it is the worse of the two unknowns.
+   */
   hint: string;
   /** 1 on a serialized wave, 2 when nothing could be judged, else 0. */
   exitCode: 0 | 1 | 2;
@@ -141,6 +170,19 @@ export const UNOBSERVED_HINT =
   'A wave admitted with no dispatch_decision under any of its tasks ran nowhere this log can ' +
   'see. Either the dispatcher never started it, or the agents ran outside the lineage that was ' +
   'read — narrow with --epic, or check that the run wrote its dispatches to this state dir.';
+
+/**
+ * Said when a wave came back `unlinked`: this fold has no dispatch interval
+ * for it, but the lineage holds a `wave-merged` for one of its tasks or a
+ * dispatch_decision parented on the admission itself, so the work is real —
+ * only its width is unmeasured. The usual cause is a wave-runner session
+ * started without `--continues`, which leaves its own dispatches outside the
+ * lineage this read walks even though they ran.
+ */
+export const UNLINKED_HINT =
+  'A wave admitted with merged work or a dispatch on record, but not inside this lineage, so ' +
+  'its width cannot be measured. Likely a wave-runner session started without --continues — ' +
+  'its dispatches are real but outside the chain this read walked.';
 
 interface Admission {
   eventId: string;
@@ -212,12 +254,63 @@ function peakOverlap(runs: readonly TaskRun[]): number {
   return peak;
 }
 
-function verdictFor(declared: number, observed: number, peak: number): WaveVerdict {
+function verdictFor(
+  declared: number,
+  observed: number,
+  peak: number,
+  offLineageEvidence: boolean,
+): WaveVerdict {
   if (declared <= 1) return 'single';
-  if (observed === 0) return 'unobserved';
+  if (observed === 0) {
+    if (offLineageEvidence) return 'unlinked';
+    return 'unobserved';
+  }
   if (peak >= declared) return 'parallel';
   if (peak <= 1) return 'serialized';
   return 'partial';
+}
+
+/**
+ * Every task id a `wave-merged` event says landed, gathered once over the
+ * whole log so each admission can ask "is my work here" without rescanning —
+ * the same shape as `admittedAtByTask` below, and for the same reason: an
+ * admission the epic filter excludes must not narrow what another admission
+ * can see.
+ *
+ * Both the envelope's `task_id` and the payload's `task_ids` are read,
+ * because `emitWaveMerged` writes the same id to both; either is enough.
+ */
+function mergedTaskIds(events: readonly StoredEvent[]): string[] {
+  const ids: string[] = [];
+  for (const event of events) {
+    if (event.record.event_type !== MERGED_EVENT_TYPE) continue;
+    const fromEnvelope = eventTaskId(event.record);
+    if (fromEnvelope) ids.push(fromEnvelope);
+    const payload = event.record.payload as { task_ids?: unknown } | undefined;
+    if (Array.isArray(payload?.task_ids)) {
+      for (const id of payload.task_ids) {
+        if (typeof id === 'string' && id.length > 0) ids.push(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * The `wave-admitted` event ids that a `dispatch_decision` names as its
+ * direct causal parent — the shape a wave-runner's own agent takes when it is
+ * dispatched straight off the admission rather than through a task. Read from
+ * raw events rather than `foldAgents`, because that fold only keeps agents
+ * with a task id, and this dispatch has none.
+ */
+function dispatchedDirectlyOn(events: readonly StoredEvent[]): Set<string> {
+  const parents = new Set<string>();
+  for (const event of events) {
+    if (event.record.event_type !== DISPATCH_EVENT_TYPE) continue;
+    const parent = event.record.causal_parent;
+    if (typeof parent === 'string' && parent.length > 0) parents.add(parent);
+  }
+  return parents;
 }
 
 /**
@@ -289,6 +382,12 @@ export function auditWaveConcurrency(
     else agentsByTask.set(agent.taskId, [agent]);
   }
 
+  // Also built from every event, unfiltered: off-lineage evidence for a wave
+  // the caller narrowed away must not leak in, but an admission's own window
+  // must see all of it regardless of which epic the caller asked for.
+  const merged = mergedTaskIds(events);
+  const directDispatchParents = dispatchedDirectlyOn(events);
+
   const waves: WaveConcurrency[] = [];
   for (const admission of admissions) {
     if (options.epicId !== undefined && admission.epicId !== options.epicId) continue;
@@ -313,6 +412,9 @@ export function auditWaveConcurrency(
     observed.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 
     const peak = peakOverlap(observed);
+    const offLineageEvidence =
+      directDispatchParents.has(admission.eventId) ||
+      admission.taskIds.some((taskId) => merged.some((id) => taskIdsMatch(taskId, id)));
     waves.push({
       eventId: admission.eventId,
       admittedAt: admission.ts,
@@ -321,7 +423,7 @@ export function auditWaveConcurrency(
       observed,
       unobserved,
       peak,
-      verdict: verdictFor(admission.taskIds.length, observed.length, peak),
+      verdict: verdictFor(admission.taskIds.length, observed.length, peak, offLineageEvidence),
     });
   }
   return waves;
@@ -361,16 +463,20 @@ export function summariseWaveConcurrency(
 ): WaveConcurrencySummary {
   const serialized = labelsWith(waves, 'serialized');
   const unobserved = labelsWith(waves, 'unobserved');
+  const unlinked = labelsWith(waves, 'unlinked');
   return {
     waves: [...waves],
     serialized,
     partial: labelsWith(waves, 'partial'),
     unobserved,
+    unlinked,
     widest: {
       declared: waves.reduce((max, wave) => Math.max(max, wave.declared.length), 0),
       observed: waves.reduce((max, wave) => Math.max(max, wave.peak), 0),
     },
-    hint: unobserved.length > 0 ? UNOBSERVED_HINT : '',
+    hint: unobserved.length > 0 ? UNOBSERVED_HINT : unlinked.length > 0 ? UNLINKED_HINT : '',
+    // `unlinked` is real work off-lineage, not a failure to judge, so it never
+    // worsens the exit code the way `unobserved` does.
     exitCode: serialized.length > 0 ? 1 : unobserved.length > 0 ? 2 : 0,
   };
 }
