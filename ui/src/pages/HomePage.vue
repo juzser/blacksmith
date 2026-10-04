@@ -49,6 +49,7 @@ import {
   trackJustFinished,
   unmeasuredSentence,
 } from '../lib/homeView.js';
+import { scrollToTimelineRow } from '../lib/scrollToRow.js';
 
 const POLL_MS = 5000;
 /** How many decisions the section lists; the rest live on Activity. */
@@ -155,6 +156,17 @@ function workLink(p: string) {
 function goToTask(taskId: string) {
   router.push(`/tasks/${encodeURIComponent(taskId)}`);
 }
+
+// Same scroll+highlight ActivityPage.vue gives its own "because of your
+// prompt" button. The referenced prompt is sometimes outside this page's 8
+// shown rows -- promptTsById above already returns undefined/null for that
+// case, which TimelineRow's own hasPromptLink already turns into "no button
+// shown" for us, so there is nothing else to gate here.
+const highlighted = ref<string | null>(null);
+function becauseOf(promptId: string) {
+  highlighted.value = promptId;
+  scrollToTimelineRow(promptId);
+}
 </script>
 
 <template>
@@ -186,11 +198,12 @@ function goToTask(taskId: string) {
           :key="entry.eventId"
           :entry="entry"
           variant="compact"
+          :class="{ 'bs-timeline-row--highlight': highlighted === entry.eventId }"
           :expanded="recentActivityExpanded.has(entry.eventId)"
           :ctx="recentActivityCtx(entry)"
           @toggle="toggleRecentActivity"
           @select-task="goToTask"
-          @because-of="() => {}"
+          @because-of="becauseOf"
         />
       </ol>
     </section>
