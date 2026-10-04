@@ -56,16 +56,18 @@ describe('taskTotals() (DS6 PR2)', () => {
   it('sums tokens and agentTimeMs, and spans elapsedMs from the first dispatch to the last result/error', async () => {
     const task = 'epic-totals/task-1';
     const handle = await buildHandle(
-      tiedLine(
-        'dispatch_decision',
-        '2029-06-01T00:00:00.000Z',
-        { task_id: task, agent_role: 'coder', provider: 'claude', model_tier: 'mid' },
-      ) +
-        tiedLine(
-          'dispatch_decision',
-          '2029-06-01T00:05:00.000Z',
-          { task_id: task, agent_role: 'coder', provider: 'claude', model_tier: 'mid' },
-        ) +
+      tiedLine('dispatch_decision', '2029-06-01T00:00:00.000Z', {
+        task_id: task,
+        agent_role: 'coder',
+        provider: 'claude',
+        model_tier: 'mid',
+      }) +
+        tiedLine('dispatch_decision', '2029-06-01T00:05:00.000Z', {
+          task_id: task,
+          agent_role: 'coder',
+          provider: 'claude',
+          model_tier: 'mid',
+        }) +
         tiedLine('task-result-recorded', '2029-06-01T00:10:00.000Z', {
           task_id: task,
           run_status: 'done',
