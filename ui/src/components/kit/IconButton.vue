@@ -43,7 +43,8 @@ const props = withDefaults(
      * Same reason as ariaExpanded: Tooltip (this component's single
      * template root) itself renders two root nodes of its own, so Vue's
      * automatic attr fallthrough has nowhere single to land and silently
-     * drops anything bound on <IconButton> that isn't an explicit prop.
+     * drops anything bound on an icon button call site that isn't an
+     * explicit prop.
      */
     ariaControls?: string;
   }>(),

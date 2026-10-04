@@ -20,6 +20,7 @@ import {
   fetchTimelinePage,
   type TimelinePage,
 } from '../lib/api.js';
+import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
 import {
   type ActivityEntry,
@@ -186,7 +187,7 @@ function becauseOf(promptId: string) {
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
 
-    <EmptyState v-else-if="!loading && entries.length === 0" icon="history">
+    <EmptyState v-else-if="canClaimEmpty(page !== null, entries.length)" icon="history">
       No activity matches these filters.
     </EmptyState>
 
@@ -196,7 +197,7 @@ function becauseOf(promptId: string) {
         <ol style="list-style: none; margin: 0; padding: 0">
           <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
             <li v-if="item.kind === 'group'" class="bs-timeline-row">
-              {{ item.group!.members.length }} dispatches — {{ item.group!.role }}
+              {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
             </li>
             <TimelineRow
               v-else
