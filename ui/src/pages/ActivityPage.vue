@@ -25,7 +25,8 @@ import {
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
 import { loadExpanded, saveExpanded, toggleExpanded } from '../lib/expandedRows.js';
-import { LiveFeedBuffer } from '../lib/liveFeed.js';
+import { FeedGeneration } from '../lib/feedGeneration.js';
+import { formatNewEventsCount, LiveFeedBuffer, NewEventsAnnouncer } from '../lib/liveFeed.js';
 import { nextRovingTabId } from '../lib/rovingTabs.js';
 import { scrollToTimelineRow } from '../lib/scrollToRow.js';
 import {
@@ -104,10 +105,13 @@ let liveFeed = new LiveFeedBuffer<ActivityEntry>();
 const pendingNewCount = ref(0);
 const polling = ref(false);
 const liveAnnouncement = ref('');
+let announcer = new NewEventsAnnouncer();
 
-function newEventsAnnouncement(count: number): string {
-  return count === 1 ? '1 new event' : `${count} new events`;
-}
+// Fix round items 1-2: one request-generation token, bumped by load() on
+// every fetch (including the first); poll/loadOlder/load each drop a
+// response whose generation is stale. Also gives poll() its own in-flight
+// guard (item 1), separate from the generation check.
+const feedGen = new FeedGeneration();
 
 const kindFilter = computed<EventKind | null>(() => {
   const raw = route.query.kind;
@@ -150,11 +154,12 @@ function onPhoneKindKeydown(event: KeyboardEvent) {
 }
 
 async function load() {
+  const gen = feedGen.bump();
   try {
     const kinds = kindFilter.value
       ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
       : undefined;
-    page.value = await fetchTimelinePage({
+    const fetched = await fetchTimelinePage({
       session: sessionScope.value,
       project: project.value,
       task: taskFilter.value,
@@ -162,14 +167,18 @@ async function load() {
       kinds,
       limit: 50,
     });
+    if (feedGen.isStale(gen)) return;
+    page.value = fetched;
     loaderGate = new LoadOlderGate(page.value.nextBefore);
     liveFeed = new LiveFeedBuffer<ActivityEntry>();
     pendingNewCount.value = 0;
+    announcer.reset();
     error.value = null;
   } catch (e) {
+    if (feedGen.isStale(gen)) return;
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
-    loading.value = false;
+    if (!feedGen.isStale(gen)) loading.value = false;
   }
 }
 
@@ -183,6 +192,8 @@ watch([project, sessionKey, kindFilter, taskFilter, epicFilter], load);
 // back. `load()` still owns the initial fetch and filter changes.
 async function poll() {
   if (!page.value) return;
+  if (!feedGen.startPoll()) return;
+  const gen = feedGen.snapshot();
   const cursor = page.value.newestId;
   polling.value = true;
   try {
@@ -198,7 +209,7 @@ async function poll() {
       limit: 50,
       after: cursor ?? undefined,
     });
-    if (!page.value) return;
+    if (!page.value || feedGen.isStale(gen)) return;
     const nextNewestId = incoming.newestId ?? cursor;
     const merged = liveFeed.receive(incoming.entries, atTop.value);
     if (merged) {
@@ -208,15 +219,19 @@ async function poll() {
         nextBefore: page.value.nextBefore,
         newestId: nextNewestId,
       };
-      liveAnnouncement.value = newEventsAnnouncement(merged.length);
+      pendingNewCount.value = 0;
+      announcer.reset();
     } else {
       page.value = { ...page.value, newestId: nextNewestId };
       pendingNewCount.value = liveFeed.pendingCount;
-      liveAnnouncement.value = newEventsAnnouncement(pendingNewCount.value);
+      const announcement = announcer.next(pendingNewCount.value);
+      if (announcement) liveAnnouncement.value = announcement;
     }
   } catch (e) {
+    if (feedGen.isStale(gen)) return;
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
+    feedGen.endPoll();
     polling.value = false;
   }
 }
@@ -229,6 +244,7 @@ function applyPendingNew() {
   if (!page.value) return;
   const flushed = liveFeed.flush();
   pendingNewCount.value = 0;
+  announcer.reset();
   if (flushed.length === 0) return;
   page.value = { ...page.value, entries: [...flushed, ...page.value.entries] };
   // The feed scrolls inside the app shell's own .app-scroll container, not
@@ -239,6 +255,7 @@ function applyPendingNew() {
 async function loadOlder() {
   if (!page.value?.nextBefore) return;
   if (!loaderGate.start()) return;
+  const gen = feedGen.snapshot();
   try {
     const older = await fetchTimelinePage({
       session: sessionScope.value,
@@ -251,6 +268,7 @@ async function loadOlder() {
       limit: 50,
       before: page.value.nextBefore,
     });
+    if (feedGen.isStale(gen)) return;
     page.value = {
       entries: [...page.value.entries, ...older.entries],
       nextBefore: older.nextBefore,
@@ -259,6 +277,7 @@ async function loadOlder() {
     loaderGate.finish(older.nextBefore);
   } catch (e) {
     loaderGate.finish(page.value?.nextBefore ?? null);
+    if (feedGen.isStale(gen)) return;
     throw e;
   }
 }
@@ -365,11 +384,11 @@ function becauseOf(promptId: string) {
       <div ref="topSentinelEl" class="activity-sentinel" aria-hidden="true"></div>
       <div v-if="pendingNewCount > 0" class="activity-newpill">
         <Button variant="primary" size="sm" :icon="ArrowUp" @click="applyPendingNew">
-          {{ newEventsAnnouncement(pendingNewCount) }}
+          {{ formatNewEventsCount(pendingNewCount) }}
         </Button>
       </div>
       <template v-for="(group, gi) in dayGroups" :key="gi">
-        <div class="timeline-day">{{ group.label }}</div>
+        <div class="timeline-day" :class="{ 'timeline-day--first': gi === 0 }">{{ group.label }}</div>
         <div class="timeline-feed">
           <ol style="list-style: none; margin: 0; padding: 0">
             <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">

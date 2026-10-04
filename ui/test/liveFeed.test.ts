@@ -3,7 +3,7 @@
 // surfaces a "N new events" pill; pure/DOM-free so it lands in the covered
 // lib/ surface (ui/vitest.config.ts excludes composables and .vue files).
 import { describe, expect, it } from 'vitest';
-import { LiveFeedBuffer } from '../src/lib/liveFeed.js';
+import { formatNewEventsCount, LiveFeedBuffer, NewEventsAnnouncer } from '../src/lib/liveFeed.js';
 
 interface FakeEntry {
   eventId: string;
@@ -60,5 +60,49 @@ describe('LiveFeedBuffer', () => {
     buf.receive([{ eventId: 'e1' }], false);
     expect(buf.receive([], false)).toBeNull();
     expect(buf.pendingCount).toBe(1);
+  });
+});
+
+describe('formatNewEventsCount', () => {
+  it('singularizes exactly one', () => {
+    expect(formatNewEventsCount(1)).toBe('1 new event');
+  });
+
+  it('pluralizes anything else', () => {
+    expect(formatNewEventsCount(3)).toBe('3 new events');
+  });
+});
+
+// Fix round item 3: an empty poll while scrolled away must never announce
+// "0 new events", and a poll that repeats an unchanged pending count must
+// not re-announce it either -- only a genuine increase gets a fresh message.
+describe('NewEventsAnnouncer', () => {
+  it('never announces when the count is zero', () => {
+    const announcer = new NewEventsAnnouncer();
+    expect(announcer.next(0)).toBeNull();
+  });
+
+  it('announces a genuine increase', () => {
+    const announcer = new NewEventsAnnouncer();
+    expect(announcer.next(2)).toBe('2 new events');
+  });
+
+  it('does not repeat the same count across polls', () => {
+    const announcer = new NewEventsAnnouncer();
+    announcer.next(2);
+    expect(announcer.next(2)).toBeNull();
+  });
+
+  it('announces again once the count grows further', () => {
+    const announcer = new NewEventsAnnouncer();
+    announcer.next(2);
+    expect(announcer.next(3)).toBe('3 new events');
+  });
+
+  it('a drop back to zero is silent, and reset() allows the next increase to announce again', () => {
+    const announcer = new NewEventsAnnouncer();
+    announcer.next(2);
+    announcer.reset();
+    expect(announcer.next(2)).toBe('2 new events');
   });
 });

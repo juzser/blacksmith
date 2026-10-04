@@ -38,3 +38,33 @@ export class LiveFeedBuffer<T extends { eventId: string }> {
     return out;
   }
 }
+
+/** The "N new events" pill's own label -- always formats, since the pill
+ * only ever renders once its caller has already checked count > 0. */
+export function formatNewEventsCount(count: number): string {
+  return count === 1 ? '1 new event' : `${count} new events`;
+}
+
+/** Fix round item 3: an empty poll while scrolled away must never announce
+ * "0 new events" to the polite live region, and a poll that repeats an
+ * unchanged pending count (another empty poll on top of an existing buffer)
+ * must not re-announce the same text either -- only a genuine increase gets
+ * a fresh announcement. */
+export class NewEventsAnnouncer {
+  private lastCount = 0;
+
+  /** Call with the buffer's current pending count after each poll. Returns
+   * the announcement text, or null to say nothing. */
+  next(count: number): string | null {
+    const grew = count > this.lastCount;
+    this.lastCount = count;
+    return grew ? formatNewEventsCount(count) : null;
+  }
+
+  /** Call whenever the pending count is cleared outside of a poll (load(),
+   * applyPendingNew(), a top-of-feed merge) so the next genuine increase
+   * still announces. */
+  reset(): void {
+    this.lastCount = 0;
+  }
+}
