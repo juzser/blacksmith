@@ -100,7 +100,14 @@ function onBecauseOf() {
         @click="emit('toggle', entry.eventId)"
       />
     </div>
-    <dl v-if="expanded" :id="`activity-row-detail-${entry.eventId}`" class="bs-timeline-row__detail">
+    <!-- v-show, not v-if: aria-controls above names this id unconditionally
+         while collapsed, so the element it names must exist unconditionally
+         too, or the IDREF dangles (D-227). -->
+    <dl
+      v-show="expanded"
+      :id="`activity-row-detail-${entry.eventId}`"
+      class="bs-timeline-row__detail"
+    >
       <dt>Kind</dt>
       <dd>{{ kind }}</dd>
       <dt>Title</dt>

@@ -39,8 +39,15 @@ const props = withDefaults(
      */
     ariaHaspopup?: 'menu';
     ariaExpanded?: boolean;
+    /**
+     * Same reason as ariaExpanded: Tooltip (this component's single
+     * template root) itself renders two root nodes of its own, so Vue's
+     * automatic attr fallthrough has nowhere single to land and silently
+     * drops anything bound on <IconButton> that isn't an explicit prop.
+     */
+    ariaControls?: string;
   }>(),
-  { size: 'md', tone: 'default', ariaExpanded: undefined },
+  { size: 'md', tone: 'default', ariaExpanded: undefined, ariaControls: undefined },
 );
 
 const emit = defineEmits<{ click: [MouseEvent] }>();
@@ -61,6 +68,7 @@ function onClick(event: MouseEvent) {
       :aria-disabled="disabled ? 'true' : undefined"
       :aria-haspopup="ariaHaspopup"
       :aria-expanded="ariaExpanded"
+      :aria-controls="ariaControls"
       @click="onClick"
     >
       <Icon :icon="icon" :size="16" />

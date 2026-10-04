@@ -12,6 +12,7 @@ import EmptyState from '../components/ds/EmptyState.vue';
 import Button from '../components/kit/Button.vue';
 import TimelineRow from '../components/kit/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
+import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import {
@@ -99,6 +100,9 @@ async function load() {
 
 onMounted(load);
 watch([project, sessionKey, kindFilter, taskFilter, epicFilter], load);
+// design-spec.md §8: Activity (Timeline's replacement) polls at the same
+// 15s cadence and answers the shared topbar Refresh, same as Kanban/Sessions.
+usePoll(load, 15000);
 
 async function loadOlder() {
   if (!page.value?.nextBefore) return;
@@ -174,7 +178,10 @@ function becauseOf(promptId: string) {
           {{ EVENT_KIND_LABEL[kind] }}
         </Button>
       </div>
-      <Button variant="ghost" size="sm" @click="expandAll">Expand all</Button>
+      <div style="display: flex; gap: var(--bs-space-1)">
+        <Button variant="ghost" size="sm" @click="expandAll">Expand all</Button>
+        <Button variant="ghost" size="sm" icon="refresh-cw" @click="load">Refresh</Button>
+      </div>
     </div>
 
     <Banner v-if="error" tone="danger" show-retry @retry="load">{{ error }}</Banner>
