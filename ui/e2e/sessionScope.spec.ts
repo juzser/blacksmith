@@ -40,18 +40,13 @@ async function firstSession(page: import('@playwright/test').Page): Promise<stri
 
 test.describe('Session scope', () => {
   test('offers the picker only on Activity and Roadmap (ds-spec.md §3)', async ({ page }) => {
-    for (const path of ['/timeline', '/work/roadmap']) {
+    // /errors now redirects into Activity (errorsRedirect, activityRoute.ts)
+    // -- the same page, so it offers the same picker.
+    for (const path of ['/timeline', '/work/roadmap', '/errors']) {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} offers the picker`).toBeVisible();
     }
-    for (const path of [
-      '/sessions',
-      '/work/kanban',
-      '/errors',
-      '/analytics',
-      '/overview',
-      '/lessons',
-    ]) {
+    for (const path of ['/sessions', '/work/kanban', '/analytics', '/overview', '/lessons']) {
       await page.goto(path);
       await expect(page.locator(PICKER), `${path} does not`).toHaveCount(0);
     }
@@ -74,7 +69,7 @@ test.describe('Session scope', () => {
     await expect(page).toHaveURL(new RegExp(`session=${session}`));
     await expect(page.locator(WIDTH)).toBeVisible();
     // Still a page, not a 400: the scoped fetch resolved and rendered.
-    await expect(page.locator('h1')).toHaveText('Timeline');
+    await expect(page.getByRole('feed', { name: 'Activity' })).toBeVisible();
     await expect(page.locator('.ds-banner')).toHaveCount(0);
   });
 
@@ -90,7 +85,7 @@ test.describe('Session scope', () => {
     await page.locator(WIDTH).selectOption('lineage');
     expect((await widened).status(), 'app.ts accepts the pair the UI emits').toBe(200);
     await expect(page).toHaveURL(/lineage=true/);
-    await expect(page.locator('h1')).toHaveText('Timeline');
+    await expect(page.getByRole('feed', { name: 'Activity' })).toBeVisible();
     await expect(page.locator('.ds-banner')).toHaveCount(0);
   });
 
@@ -116,7 +111,7 @@ test.describe('Session scope', () => {
     await page.goto(`/timeline?session=${session}&lineage=true`);
     await expect(page.locator(PICKER)).toHaveValue(session);
     await expect(page.locator(WIDTH)).toHaveValue('lineage');
-    await expect(page.locator('h1')).toHaveText('Timeline');
+    await expect(page.getByRole('feed', { name: 'Activity' })).toBeVisible();
     await expect(page.locator('.ds-banner')).toHaveCount(0);
   });
 });

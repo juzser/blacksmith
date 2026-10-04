@@ -26,10 +26,22 @@ test.describe('Disclosure ARIA', () => {
   test('timeline chevrons name a real element while collapsed, and still do once expanded', async ({
     page,
   }) => {
-    await page.goto('/timeline');
+    // Scoped to Prompt + this fixture's own session: unscoped, the feed
+    // merges the demo-hub multi-project fixture too, and its own prompts are
+    // newer -- the default feed's 50-row page is newest-first, and this
+    // fixture's prompt would otherwise be long since pushed off that page.
+    // Scoped by session, not `project=black-smith`: recordUserPrompt() never
+    // threads a project through, so every prompt (this fixture's and
+    // multiProjectFixture's alike) lands tagged with the column default
+    // ('black-smith') regardless of which project it was meant for.
+    await page.goto('/timeline?kind=prompt&session=sess-fixture');
     // Data-gated, not h1-gated: the <h1> renders before any /api/ response
-    // arrives, and a sweep over an empty page asserts nothing (D-150).
-    await expect(page.getByText('Build the widget and fix the flaky import.')).toBeVisible();
+    // arrives, and a sweep over an empty page asserts nothing (D-150). Scoped
+    // to the row title: the collapsed detail <dl> (v-show, not v-if, so its
+    // id stays resolvable -- see TimelineRow.vue) repeats the same text.
+    await expect(page.locator('.bs-timeline-row__title').first()).toHaveText(
+      'Build the widget and fix the flaky import.',
+    );
 
     const triggers = page.locator('[aria-controls]');
     // The sweep's own claim, said out loud — otherwise "no dangling IDREFs"

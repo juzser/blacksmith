@@ -131,8 +131,8 @@ test.describe('Task detail', () => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
 
-    await expect(page.locator('.timeline-row__title').first()).toBeVisible();
-    await expect(page.locator('button.timeline-row__title')).toHaveCount(0);
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    await expect(page.locator('button.bs-timeline-row__title')).toHaveCount(0);
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
