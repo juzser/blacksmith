@@ -35,15 +35,17 @@ const rows = computed(() =>
     <ul class="bs-agentblock__list">
       <li v-for="row in rows" :key="row.agent.id" class="bs-agentblock__row">
         <span class="bs-agentblock__doing">{{ row.doing }}</span>
-        <RelativeTime :iso="row.agent.dispatchedAt" :now="now" />
-        <span class="bs-agentblock__tokens">
-          <template v-if="row.tokens.kind === 'measured'">
-            <CompactNumber :value="row.tokens.input" unit="tok" /> in /
-            <CompactNumber :value="row.tokens.output" unit="tok" /> out
-          </template>
-          <template v-else-if="row.tokens.kind === 'text'">{{ row.tokens.text }}</template>
-        </span>
-        <AgentStatusBadge :agent="row.agent" :now="now" />
+        <div class="bs-agentblock__meta">
+          <RelativeTime :iso="row.agent.dispatchedAt" :now="now" />
+          <span class="bs-agentblock__tokens">
+            <template v-if="row.tokens.kind === 'measured'">
+              <CompactNumber :value="row.tokens.input" unit="tok" /> in /
+              <CompactNumber :value="row.tokens.output" unit="tok" /> out
+            </template>
+            <template v-else-if="row.tokens.kind === 'text'">{{ row.tokens.text }}</template>
+          </span>
+          <AgentStatusBadge :agent="row.agent" :now="now" />
+        </div>
       </li>
     </ul>
   </section>

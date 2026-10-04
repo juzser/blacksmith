@@ -970,11 +970,15 @@ a:hover {
   margin: 0;
   padding: 0;
 }
+/* Fixed column layout (title, then one meta line) rather than a single
+   flex-wrap row: width-dependent wrapping put the badge on a second line
+   for some rows and not others, depending on how long the token text
+   happened to be at that width. A column has only one place for each part
+   to land, at any width. */
 .bs-agentblock__row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--bs-space-2);
+  flex-direction: column;
+  gap: var(--bs-space-1);
   min-height: var(--bs-touch);
   padding: var(--bs-space-2) var(--bs-space-3);
   border: 1px solid var(--bs-border);
@@ -984,15 +988,29 @@ a:hover {
   color: var(--bs-text);
 }
 .bs-agentblock__doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-agentblock__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-width: 0;
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+/* Only the token text gives up width: time and the badge keep their own
+   size, whatever the token text's length. */
+.bs-agentblock__meta > :not(.bs-agentblock__tokens) {
+  flex-shrink: 0;
+}
+.bs-agentblock__tokens {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.bs-agentblock__tokens {
-  font-size: var(--bs-text-xs);
-  color: var(--bs-text-subtle);
 }
 
 /* SessionsPage (ds-spec.md §4.6): the history list and the selected run's
