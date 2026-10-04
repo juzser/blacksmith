@@ -176,4 +176,58 @@ describe('taskTotals() (DS6 PR2)', () => {
       handle.sqlite.close();
     }
   });
+
+  it('exposes startedAt/endedAt as the same ts pair elapsedMs is spanned from (DS6 PR4b)', async () => {
+    const task = 'epic-totals/task-6';
+    const handle = await buildHandle(
+      tiedLine('dispatch_decision', '2029-06-01T00:00:00.000Z', {
+        task_id: task,
+        agent_role: 'coder',
+        provider: 'claude',
+        model_tier: 'mid',
+      }) +
+        tiedLine('task-result-recorded', '2029-06-01T00:10:00.000Z', {
+          task_id: task,
+          run_status: 'done',
+        }),
+    );
+    try {
+      const totals = taskTotals(handle.db, task);
+      expect(totals.startedAt).toBe('2029-06-01T00:00:00.000Z');
+      expect(totals.endedAt).toBe('2029-06-01T00:10:00.000Z');
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('leaves endedAt null (but startedAt set) when no run has ended yet', async () => {
+    const task = 'epic-totals/task-7';
+    const handle = await buildHandle(
+      tiedLine('dispatch_decision', '2029-06-01T00:00:00.000Z', {
+        task_id: task,
+        agent_role: 'coder',
+        provider: 'claude',
+        model_tier: 'mid',
+      }),
+    );
+    try {
+      const totals = taskTotals(handle.db, task);
+      expect(totals.startedAt).toBe('2029-06-01T00:00:00.000Z');
+      expect(totals.endedAt).toBeNull();
+    } finally {
+      handle.sqlite.close();
+    }
+  });
+
+  it('leaves startedAt/endedAt null when the task has no runs at all', async () => {
+    const task = 'epic-totals/task-8';
+    const handle = await buildHandle('');
+    try {
+      const totals = taskTotals(handle.db, task);
+      expect(totals.startedAt).toBeNull();
+      expect(totals.endedAt).toBeNull();
+    } finally {
+      handle.sqlite.close();
+    }
+  });
 });

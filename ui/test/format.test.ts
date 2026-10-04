@@ -6,6 +6,7 @@ import {
   formatCompactValue,
   formatDurationMs,
   formatElapsed,
+  formatElapsedRange,
   formatLiveStatus,
   formatMeasuredTokens,
   formatRelative,
@@ -348,6 +349,23 @@ describe('lib/format.ts formatAbsolute()', () => {
 // short month, comma, zero-padded 24h HH:MM, no year). Scoped to
 // RequestQuote only (DS4 S5c fix round 1, fix 4) — formatDateTime() keeps
 // its numeric DD/MM/YYYY shape for the pages that already render it.
+// DS6 PR4b Elapsed tooltip (TaskDetailPage totals bar): "29 Sep 2026, 14:02 to
+// 16:12" -- the started day/date once, the ended time alone (same day in
+// every call site this feeds, since a run never spans midnight today).
+describe('lib/format.ts formatElapsedRange()', () => {
+  it('renders the day/month/year once, then both times joined by "to"', () => {
+    expect(formatElapsedRange('2026-09-29T14:02:00', '2026-09-29T16:12:00')).toBe(
+      '29 Sep 2026, 14:02 to 16:12',
+    );
+  });
+
+  it('zero-pads single-digit hours and minutes', () => {
+    expect(formatElapsedRange('2026-01-05T03:07:00', '2026-01-05T09:00:00')).toBe(
+      '5 Jan 2026, 03:07 to 09:00',
+    );
+  });
+});
+
 describe('lib/format.ts formatShortDateTime()', () => {
   it('renders day, short month, comma, zero-padded 24h time', () => {
     expect(formatShortDateTime('2026-09-12T09:14:00')).toBe('12 Sep, 09:14');

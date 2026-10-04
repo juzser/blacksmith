@@ -3282,6 +3282,10 @@ export interface TaskTotals {
   agentTimeMs: number | null;
   /** First `dispatch` run's ts to the last `result`/`error` run's ts; null while no run has ended yet. */
   elapsedMs: number | null;
+  /** First `dispatch` run's ts; null when the task has no dispatch yet (DS6 PR4b, Elapsed tooltip). */
+  startedAt: string | null;
+  /** Last `result`/`error` run's ts; null while no run has ended yet (DS6 PR4b, Elapsed tooltip). */
+  endedAt: string | null;
 }
 
 /**
@@ -3325,6 +3329,8 @@ export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
       startTs !== null && endTs !== null
         ? new Date(endTs).getTime() - new Date(startTs).getTime()
         : null,
+    startedAt: startTs,
+    endedAt: endTs,
   };
 }
 

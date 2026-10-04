@@ -393,6 +393,10 @@ export interface TaskTotals {
   tokens: number | null;
   agentTimeMs: number | null;
   elapsedMs: number | null;
+  /** DS6 PR4b: first dispatch's ts; null when the task has no dispatch yet. */
+  startedAt: string | null;
+  /** DS6 PR4b: last result/error's ts; null while no run has ended yet. */
+  endedAt: string | null;
 }
 
 export interface LessonRecord {
