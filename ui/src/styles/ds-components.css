@@ -1290,6 +1290,12 @@
 .timeline-feed > li.timeline-row:not(:last-child) {
   border-bottom: 1px solid var(--ds-border);
 }
+/* DS6 PR4b round 2 item 2: an invisible IntersectionObserver target after the
+   feed, not a visible element -- it only has to occupy a box the observer
+   can see enter the viewport. */
+.activity-sentinel {
+  height: 1px;
+}
 .timeline-row {
   display: flex;
   align-items: flex-start;

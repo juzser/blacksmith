@@ -499,6 +499,12 @@ a:hover {
     display: inline;
   }
 }
+/* Its own grid column (row rework, item 4): center it against the title
+   line rather than the row's own top edge. Touch target sizing is
+   .bs-iconbtn's, not this class's job. */
+.bs-timeline-row__chevron {
+  align-self: center;
+}
 .bs-timeline-row__meta {
   display: flex;
   align-items: center;

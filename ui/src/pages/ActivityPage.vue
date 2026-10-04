@@ -5,7 +5,7 @@
 // decision: no search box, no "Decisions" lens (decisionsOnly stays a server
 // param, just not exposed in this UI). Errors' own class cards are PR4; until
 // then `kind=errors` just filters the feed to Error rows.
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import Banner from '../components/ds/Banner.vue';
 import EmptyState from '../components/ds/EmptyState.vue';
@@ -16,6 +16,7 @@ import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
 import { useViewport } from '../composables/useViewport.js';
+import { LoadOlderGate } from '../lib/activityPaging.js';
 import {
   type EventKind as ApiEventKind,
   fetchTimelinePage,
@@ -59,6 +60,24 @@ const STORAGE_KEY = 'activity';
 onMounted(() => {
   expanded.value = loadExpanded(sessionStorage, STORAGE_KEY);
 });
+
+// DS6 PR4b round 2 item 2: one gate per feed, re-created whenever the feed
+// itself reloads (filters, project/session switch), guarding both the
+// sentinel and the fallback button against a double fetch.
+let loaderGate = new LoadOlderGate(null);
+const sentinelEl = ref<HTMLElement | null>(null);
+let sentinelObserver: IntersectionObserver | null = null;
+
+watch(sentinelEl, (el) => {
+  sentinelObserver?.disconnect();
+  if (!el) return;
+  sentinelObserver = new IntersectionObserver((entries) => {
+    if (entries.some((e) => e.isIntersecting)) loadOlder();
+  });
+  sentinelObserver.observe(el);
+});
+
+onBeforeUnmount(() => sentinelObserver?.disconnect());
 
 const kindFilter = computed<EventKind | null>(() => {
   const raw = route.query.kind;
@@ -113,6 +132,7 @@ async function load() {
       kinds,
       limit: 50,
     });
+    loaderGate = new LoadOlderGate(page.value.nextBefore);
     error.value = null;
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
@@ -129,20 +149,29 @@ usePoll(load, 15000);
 
 async function loadOlder() {
   if (!page.value?.nextBefore) return;
-  const older = await fetchTimelinePage({
-    session: sessionScope.value,
-    project: project.value,
-    task: taskFilter.value,
-    epic: epicFilter.value,
-    kinds: kindFilter.value ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[]) : undefined,
-    limit: 50,
-    before: page.value.nextBefore,
-  });
-  page.value = {
-    entries: [...page.value.entries, ...older.entries],
-    nextBefore: older.nextBefore,
-    newestId: page.value.newestId,
-  };
+  if (!loaderGate.start()) return;
+  try {
+    const older = await fetchTimelinePage({
+      session: sessionScope.value,
+      project: project.value,
+      task: taskFilter.value,
+      epic: epicFilter.value,
+      kinds: kindFilter.value
+        ? ([EVENT_KIND_LABEL[kindFilter.value]] as ApiEventKind[])
+        : undefined,
+      limit: 50,
+      before: page.value.nextBefore,
+    });
+    page.value = {
+      entries: [...page.value.entries, ...older.entries],
+      nextBefore: older.nextBefore,
+      newestId: page.value.newestId,
+    };
+    loaderGate.finish(older.nextBefore);
+  } catch (e) {
+    loaderGate.finish(page.value?.nextBefore ?? null);
+    throw e;
+  }
 }
 
 const entries = computed<ActivityEntry[]>(() => page.value?.entries ?? []);
@@ -269,6 +298,7 @@ function becauseOf(promptId: string) {
           </ol>
         </div>
       </template>
+      <div v-if="page?.nextBefore" ref="sentinelEl" class="activity-sentinel" aria-hidden="true"></div>
       <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
     </template>
   </div>
