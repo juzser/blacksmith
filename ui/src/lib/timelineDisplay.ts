@@ -179,7 +179,7 @@ function groupLabel(members: TimelineNode[]): string {
     .map(([role, n]) => (n > 1 ? `${roleLabel(role)} ×${n}` : roleLabel(role)));
   const rest = ranked.length - shown.length;
   const roles = rest > 0 ? [...shown, `+${rest} more`] : shown;
-  return `${members.length} dispatches — ${roles.join(', ')}`;
+  return `${members.length} dispatches (${roles.join(', ')})`;
 }
 
 function groupId(members: TimelineNode[]): string {
@@ -423,13 +423,13 @@ const LOWERCASE_KIND_BY_LABEL = new Map<string, EventKind>(
 
 /** Which of the nine mock kinds an event renders as. `/api/timeline`'s paged
  * entries (TimelinePage.entries, api.ts) already carry a server-computed
- * `kind` — DS6 PR3 prefers that over re-deriving one client-side, because
- * the two used to disagree (server's eventKind() in queries.ts follows
- * ds-spec.md §4.3; this file's own eventType switch below predates that and
- * swaps Finding/Feedback for waiver-granted/-denied vs. judge-reported, and
- * widens the Gate set). Entries without a server `kind` (the unpaged
- * `fetchTimeline()`/`TimelineEntry` shape, still used by the orphaned old
- * `components/TimelineRow.vue`) fall through to that same switch. Unknown
+ * `kind` — DS6 PR3 prefers that over re-deriving one client-side. DS6 PR3
+ * round 2 reconciles this switch with server's `eventKind()` in queries.ts
+ * so both follow ds-spec.md §4.3: `judge-reported` is a judge verdict, so it
+ * is `finding`; `waiver-granted`/`waiver-denied` are the operator's response
+ * to one, so they are `feedback`. Entries without a server `kind` (the
+ * unpaged `fetchTimeline()`/`TimelineEntry` shape, still used by the orphaned
+ * old `components/TimelineRow.vue`) fall through to this switch. Unknown
  * types fall back to `system` rather than throwing, the same way `titleFor`'s
  * default case prints the raw event_type instead of crashing on a taxonomy
  * the dashboard hasn't caught up with yet. */
@@ -451,9 +451,8 @@ export function kindFor(entry: TimelineEntry & { kind?: string }): EventKind {
     case 'finding-transitioned':
     case 'finding-reattributed':
     case 'severity-decisions':
-    case 'waiver-granted':
-    case 'waiver-denied':
     case 'task-waiver-approved':
+    case 'judge-reported':
       return 'finding';
     case 'schema-check-result':
     case 'artifact-check-result':
@@ -478,8 +477,9 @@ export function kindFor(entry: TimelineEntry & { kind?: string }): EventKind {
     case 'error-logged':
     case 'error-report-proposed':
       return 'error';
+    case 'waiver-granted':
+    case 'waiver-denied':
     case 'judge-verdict':
-    case 'judge-reported':
     case 'cross-finding-reconciled':
     case 'spec-change-proposed':
     case 'spec-change-decided':
@@ -605,28 +605,28 @@ export function titleFor(entry: TimelineEntry): string {
       const kind = p.note_kind ? String(p.note_kind) : '';
       const body = p.note ?? p.summary;
       if (body === undefined) return kind || 'Operator note';
-      return kind ? `${kind} — ${String(body)}` : String(body);
+      return kind ? `${kind}: ${String(body)}` : String(body);
     }
     case 'dispatch_decision': {
       const reason = dispatchReasonText(p);
-      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? ` — ${reason}` : ''}`;
+      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? `: ${reason}` : ''}`;
     }
     case 'schema-check-result':
-      return `Schema check — ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return `Schema check: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
     case 'deps-check-result':
       // The detail is the whole point of this row: "passed" alone cannot
       // distinguish an installed worktree from one with nothing to install.
-      return `Dependency check — ${GATE_VERDICT_WORD[gateVerdict(entry)]}: ${String(p.detail ?? '')}`;
+      return `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
     case 'testgate-result':
-      return `Test gate — ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return `Test gate: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
     case 'gate-outcome': {
       // The outcome value itself when there is one — `blocked`,
       // `pass-with-waivers-pending` and the rest each mean something the word
       // "failed" would flatten. Only the absence needs naming (D-169), which
       // used to print as a dangling em dash and nothing after it.
       const verdict = gateVerdict(entry);
-      if (verdict === 'unrecorded') return 'Gate outcome — no outcome recorded';
-      return `Gate outcome — ${String(p.outcome)}`;
+      if (verdict === 'unrecorded') return 'Gate outcome: no outcome recorded';
+      return `Gate outcome: ${String(p.outcome)}`;
     }
     case 'finding-raised': {
       // The payload is the finding itself (findings.ts raiseFinding), so a
@@ -641,10 +641,10 @@ export function titleFor(entry: TimelineEntry): string {
         criterionRef: typeof ref.criterion_ref === 'string' ? ref.criterion_ref : null,
       });
       const summary = String(p.summary ?? p.finding_id ?? '');
-      return label ? `Finding raised — ${summary} (${label})` : `Finding raised — ${summary}`;
+      return label ? `Finding raised: ${summary} (${label})` : `Finding raised: ${summary}`;
     }
     case 'finding-transitioned':
-      return `Finding transitioned — ${String(p.to_status ?? '')}`;
+      return `Finding transitioned: ${String(p.to_status ?? '')}`;
     case 'severity-decisions':
       return 'Severity decisions recorded';
     case 'waiver-granted':
@@ -654,14 +654,14 @@ export function titleFor(entry: TimelineEntry): string {
     case 'task-waiver-approved':
       return 'Task waiver approved';
     case 'error-logged':
-      return `Error — ${String(p.error ?? '')}`;
+      return `Error: ${String(p.error ?? '')}`;
     case 'task-added':
-      return `Task added — ${String(p.objective ?? entry.taskId ?? '')}`;
+      return `Task added: ${String(p.objective ?? entry.taskId ?? '')}`;
     // The seven that queries.ts's FREE_TIMELINE_EVENT_TYPES used to drop
     // before the renderer ever saw them, plus lesson-status-changed, which
     // reached the timeline and rendered as its own event_type.
     case 'session-start':
-      return p.note ? `Session started — ${String(p.note)}` : 'Session started';
+      return p.note ? `Session started: ${String(p.note)}` : 'Session started';
     case 'task-result-recorded': {
       const detail = [
         p.agent,
@@ -669,7 +669,7 @@ export function titleFor(entry: TimelineEntry): string {
       ]
         .filter(Boolean)
         .join(', ');
-      return `Task result — ${String(p.run_status ?? '')}${detail ? ` (${detail})` : ''}`;
+      return `Task result: ${String(p.run_status ?? '')}${detail ? ` (${detail})` : ''}`;
     }
     case 'judge-verdict':
       // ok:false leaves verdict null: this run reached no verdict at all,
@@ -679,7 +679,7 @@ export function titleFor(entry: TimelineEntry): string {
       // deepseek runs whose API key was never exported, which sent no request
       // and so produced no answer to call unparseable (D-253). Rows written
       // before D-253 carry no code and say only "failed".
-      return `Judge verdict — ${p.ok === false ? judgeFailureLabel(p.error_code) : String(p.verdict ?? '')} (${String(p.agent ?? '')}/${String(p.provider ?? '')})`;
+      return `Judge verdict: ${p.ok === false ? judgeFailureLabel(p.error_code) : String(p.verdict ?? '')} (${String(p.agent ?? '')}/${String(p.provider ?? '')})`;
     case 'cross-finding-reconciled': {
       // The counts are the row. `independent-only` is what the native reviewer
       // missed and `native-only` is what the finder did, and an operator
@@ -690,14 +690,14 @@ export function titleFor(entry: TimelineEntry): string {
       const only = Number(counts['independent-only'] ?? 0);
       const both = Number(counts.corroborated ?? 0);
       const shadow = p.mode === 'shadow' ? ', shadow' : '';
-      return `Cross-finding — ${only} independent-only, ${both} corroborated (${String(
+      return `Cross-finding: ${only} independent-only, ${both} corroborated (${String(
         (p.providers as unknown[] | undefined)?.join(', ') ?? '',
       )}${shadow})`;
     }
     case 'judge-reported':
-      return `${String(p.agent_role ?? 'Judge')} reported — ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
+      return `${String(p.agent_role ?? 'Judge')} reported: ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
     case 'epic-closed':
-      return `Epic closed — ${String(p.epic_id ?? '')}: ${String(p.machine_verdict ?? '')}, ${String(p.tasks_merged ?? 0)} tasks merged`;
+      return `Epic closed: ${String(p.epic_id ?? '')}: ${String(p.machine_verdict ?? '')}, ${String(p.tasks_merged ?? 0)} tasks merged`;
     // run.md step 17. `repo#number` is the form GitHub itself resolves, and
     // the refs matter because a stacked PR (an epic cut from another epic's
     // integration branch) does not target `main` — the operator merging in
@@ -710,14 +710,14 @@ export function titleFor(entry: TimelineEntry): string {
         p.head_ref !== undefined && p.base_ref !== undefined
           ? ` (${String(p.head_ref)} → ${String(p.base_ref)})`
           : '';
-      return ref === '' ? 'Integration PR opened' : `Integration PR opened — ${ref}${refs}`;
+      return ref === '' ? 'Integration PR opened' : `Integration PR opened: ${ref}${refs}`;
     }
     case 'lesson-candidate-raised':
-      return `Lesson candidate — ${String(p.statement ?? p.lesson_id ?? '')}`;
+      return `Lesson candidate: ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-edited':
-      return `Lesson edited — ${String(p.statement ?? p.lesson_id ?? '')}`;
+      return `Lesson edited: ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-status-changed':
-      return `Lesson ${String(p.lesson_id ?? '')} — ${String(p.to_status ?? '')}`;
+      return `Lesson ${String(p.lesson_id ?? '')}: ${String(p.to_status ?? '')}`;
     // The scheduler writes its proposal object straight through as the
     // payload, so these read camelCase keys where the rest of this file reads
     // snake_case — the shape is scheduler.ts's SchedulerProposal, not an
@@ -729,7 +729,7 @@ export function titleFor(entry: TimelineEntry): string {
     // "recheck-proposed" with no task on it asks a question nobody can answer.
     case 'recheck-proposed': {
       const reasons = Array.isArray(p.reasons) ? p.reasons.join(', ') : '';
-      return `Recheck proposed — ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
+      return `Recheck proposed: ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
     }
     case 'maintenance-proposed': {
       const packages = Array.isArray(p.packages) ? p.packages : [];
@@ -740,15 +740,15 @@ export function titleFor(entry: TimelineEntry): string {
       const rest = packages.length - names.length;
       const detail =
         names.length > 0 ? `${names.join(', ')}${rest > 0 ? ` +${rest}` : ''}` : 'none';
-      return `Maintenance proposed — ${packages.length} outdated (${detail})`;
+      return `Maintenance proposed: ${packages.length} outdated (${detail})`;
     }
     case 'growth-review-due': {
       const since = p.lastReviewAt ? `, last ${String(p.lastReviewAt).slice(0, 10)}` : '';
-      return `Growth review due — every ${String(p.cadenceDays ?? '?')} days${since}`;
+      return `Growth review due: every ${String(p.cadenceDays ?? '?')} days${since}`;
     }
     case 'error-report-proposed': {
       const count = Number(p.occurrences ?? 0);
-      return `Error report proposed — ${String(p.errorClass ?? '')} in ${String(p.taskRef ?? '')} (${count} occurrence${count === 1 ? '' : 's'})`;
+      return `Error report proposed: ${String(p.errorClass ?? '')} in ${String(p.taskRef ?? '')} (${count} occurrence${count === 1 ? '' : 's'})`;
     }
     // The plan graph, the dimension the Plan chip selects. `task-added` was
     // already here; the rest reached the timeline and rendered as their own
@@ -758,21 +758,21 @@ export function titleFor(entry: TimelineEntry): string {
       const amends = Array.isArray(p.amends) ? p.amends.length : 0;
       const from = p.previous_version == null ? '' : ` amends v${String(p.previous_version)}`;
       const why = p.rationale ? `: ${String(p.rationale)}` : '';
-      return `Plan v${String(p.version ?? '?')}${from} — ${amends} finding${amends === 1 ? '' : 's'} cited${why}`;
+      return `Plan v${String(p.version ?? '?')}${from}: ${amends} finding${amends === 1 ? '' : 's'} cited${why}`;
     }
     case 'plan-version-superseded':
       return `Plan v${String(p.version ?? '?')} superseded`;
     case 'task-split':
-      return `Task split — ${String(entry.taskId ?? '')}`;
+      return `Task split: ${String(entry.taskId ?? '')}`;
     case 'task-superseded':
-      return `Task superseded — ${String(entry.taskId ?? '')}`;
+      return `Task superseded: ${String(entry.taskId ?? '')}`;
     case 'edge-recorded':
-      return `Edge — ${String(entry.taskId ?? '')} depends on ${String(p.depends_on ?? '')}`;
+      return `Edge: ${String(entry.taskId ?? '')} depends on ${String(p.depends_on ?? '')}`;
     case 'wave-admitted': {
       const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
       const shown = ids.slice(0, 3).join(', ');
       const rest = ids.length - Math.min(ids.length, 3);
-      return `Wave admitted — ${ids.length} task${ids.length === 1 ? '' : 's'}${shown ? ` (${shown}${rest > 0 ? ` +${rest}` : ''})` : ''}`;
+      return `Wave admitted: ${ids.length} task${ids.length === 1 ? '' : 's'}${shown ? ` (${shown}${rest > 0 ? ` +${rest}` : ''})` : ''}`;
     }
     case 'wave-merged': {
       // One event per task, carrying a single-element task_ids (taskEvents.ts),
@@ -780,7 +780,7 @@ export function titleFor(entry: TimelineEntry): string {
       // reaches this event whole.
       const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
       const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
-      const detail = files === null ? '' : ` — ${files} file${files === 1 ? '' : 's'} changed`;
+      const detail = files === null ? '' : ` (${files} file${files === 1 ? '' : 's'} changed)`;
       return `Merged ${ids.join(', ') || String(entry.taskId ?? '')}${detail}`;
     }
     // The worker's own words, in the worker's own order: which criterion, what
@@ -790,19 +790,28 @@ export function titleFor(entry: TimelineEntry): string {
     case 'spec-change-proposed': {
       const sites = Array.isArray(p.sites) ? p.sites.length : 0;
       const blocking = p.blocking ? 'blocking' : 'non-blocking';
-      return `Spec change proposed by ${String(p.proposed_by ?? 'worker')} — ${String(p.criterion_ref ?? '')}: ${String(p.assumption ?? '')} (${blocking}, ${sites} site${sites === 1 ? '' : 's'})`;
+      return `Spec change proposed by ${String(p.proposed_by ?? 'worker')} on ${String(p.criterion_ref ?? '')}: ${String(p.assumption ?? '')} (${blocking}, ${sites} site${sites === 1 ? '' : 's'})`;
     }
     // A rejection carries no plan version by design — refusing a proposal cuts
     // nothing — so the version is named only when there is one, and the
     // operator's reasons ride along either way.
     case 'spec-change-decided': {
-      const version = p.plan_version == null ? '' : ` — plan v${String(p.plan_version)}`;
+      const version = p.plan_version == null ? '' : ` (plan v${String(p.plan_version)})`;
       const why = p.rationale ? `: ${String(p.rationale)}` : '';
       return `Spec change ${String(p.decision ?? 'decided')}${version}${why}`;
     }
     default:
-      return entry.eventType;
+      return humanizeEventType(entry.eventType);
   }
+}
+
+/** Fallback title for an event type `titleFor`'s switch has no case for yet:
+ * "operator-feedback-resolved" -> "Operator feedback resolved", so a raw
+ * kebab-case type slug never reaches the row as-is. */
+function humanizeEventType(eventType: string): string {
+  const words = eventType.split(/[-_]/).filter(Boolean);
+  if (words.length === 0) return eventType;
+  return [words[0].charAt(0).toUpperCase() + words[0].slice(1), ...words.slice(1)].join(' ');
 }
 
 /**
@@ -885,12 +894,12 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'system':
-      return '—';
+      return '';
     default:
       return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
   }
   const filtered = parts.filter((part): part is string => Boolean(part));
-  return filtered.length > 0 ? filtered.join(' · ') : '—';
+  return filtered.join(' · ');
 }
 
 const SHORT_MONTHS = [

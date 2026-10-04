@@ -65,6 +65,11 @@ const hasPromptLink = computed(
     kind.value === 'dispatch' && props.ctx?.promptTs !== undefined && props.ctx?.promptTs !== null,
 );
 
+// ds-spec.md §4.3: "A kind with no useful stats (System: 'Session … started')
+// has no meta line and no chevron." metaFor() returns '' for exactly that
+// case, so an empty meta is also the signal that there is nothing to expand.
+const hasDetails = computed(() => meta.value !== '');
+
 function onBecauseOf() {
   const promptId = props.entry.nearestPromptId;
   if (promptId) emit('becauseOf', promptId);
@@ -86,7 +91,7 @@ function onBecauseOf() {
       <span v-else class="bs-timeline-row__title">{{ title }}</span>
       <time class="bs-timeline-row__ts" :datetime="entry.ts">{{ formatTime(entry.ts) }}</time>
     </div>
-    <div class="bs-timeline-row__meta">
+    <div v-if="hasDetails" class="bs-timeline-row__meta">
       <span>{{ meta }}</span>
       <button v-if="hasPromptLink" type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
         because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
@@ -102,8 +107,10 @@ function onBecauseOf() {
     </div>
     <!-- v-show, not v-if: aria-controls above names this id unconditionally
          while collapsed, so the element it names must exist unconditionally
-         too, or the IDREF dangles (D-227). -->
+         too, or the IDREF dangles (D-227). Gated on hasDetails because the
+         chevron naming it is gated the same way. -->
     <dl
+      v-if="hasDetails"
       v-show="expanded"
       :id="`activity-row-detail-${entry.eventId}`"
       class="bs-timeline-row__detail"
