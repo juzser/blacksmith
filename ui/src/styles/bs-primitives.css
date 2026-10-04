@@ -384,8 +384,40 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: var(--bs-space-1);
-  padding: var(--bs-space-2) 0;
+  padding: var(--bs-space-2) var(--bs-space-3);
   border-bottom: 1px solid var(--bs-border);
+  border-left: 3px solid transparent;
+}
+/* Item 5 (DS6 PR3 r2, ds-review.html .ev's --ev-line): a 3px kind-coloured
+   left stripe per row, same --bs-event-* tokens EventKindTag already uses.
+   Prompt reads lighter (its own subtle tint) in the mock; every other kind
+   uses its own -text token for the stripe. */
+.bs-timeline-row[data-kind='prompt'] {
+  border-left-color: var(--bs-event-prompt-subtle);
+}
+.bs-timeline-row[data-kind='dispatch'] {
+  border-left-color: var(--bs-event-dispatch-text);
+}
+.bs-timeline-row[data-kind='returned'] {
+  border-left-color: var(--bs-event-returned-text);
+}
+.bs-timeline-row[data-kind='finding'] {
+  border-left-color: var(--bs-event-finding-text);
+}
+.bs-timeline-row[data-kind='gate'] {
+  border-left-color: var(--bs-event-gate-text);
+}
+.bs-timeline-row[data-kind='merge'] {
+  border-left-color: var(--bs-event-merge-text);
+}
+.bs-timeline-row[data-kind='error'] {
+  border-left-color: var(--bs-event-error-text);
+}
+.bs-timeline-row[data-kind='feedback'] {
+  border-left-color: var(--bs-event-feedback-text);
+}
+.bs-timeline-row[data-kind='system'] {
+  border-left-color: var(--bs-event-system-text);
 }
 .bs-timeline-row__head {
   display: flex;
@@ -397,12 +429,18 @@ a:hover {
   font-weight: var(--bs-font-weight-medium);
   color: var(--bs-text);
 }
+/* Item 6 (DS6 PR3 r2): a link title underlines only on hover/focus, never at
+   rest — a non-link title (plain span, no --link class) never underlines. */
 .bs-timeline-row__title--link {
   background: none;
   border: none;
   text-align: left;
   cursor: pointer;
   padding: 0;
+  text-decoration: none;
+}
+.bs-timeline-row__title--link:hover,
+.bs-timeline-row__title--link:focus-visible {
   text-decoration: underline;
 }
 .bs-timeline-row__ts {

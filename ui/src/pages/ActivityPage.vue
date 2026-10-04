@@ -166,12 +166,12 @@ function becauseOf(promptId: string) {
 
 <template>
   <div class="app-page" role="feed" aria-label="Activity">
-    <div class="bs-timeline-row__meta" style="padding-left: 0; justify-content: space-between">
-      <div style="display: flex; gap: var(--bs-space-1); flex-wrap: wrap">
+    <div class="activity-toolbar bs-timeline-row__meta" style="padding-left: 0; justify-content: space-between">
+      <div class="activity-kind-filter" style="display: flex; gap: var(--bs-space-1); flex-wrap: wrap">
         <Button
           v-for="kind in EVENT_KINDS"
           :key="kind"
-          :variant="kindFilter === kind ? 'secondary' : 'ghost'"
+          variant="ghost"
           size="sm"
           :aria-pressed="kindFilter === kind"
           @click="toggleKind(kind)"
@@ -180,7 +180,7 @@ function becauseOf(promptId: string) {
         </Button>
       </div>
       <div style="display: flex; gap: var(--bs-space-1)">
-        <Button variant="ghost" size="sm" @click="expandAll">Expand all</Button>
+        <Button class="activity-toolbar__expand-all" variant="ghost" size="sm" @click="expandAll">Expand all</Button>
         <Button variant="ghost" size="sm" icon="refresh-cw" @click="load">Refresh</Button>
       </div>
     </div>
@@ -194,23 +194,25 @@ function becauseOf(promptId: string) {
     <template v-else>
       <template v-for="(group, gi) in dayGroups" :key="gi">
         <div class="timeline-day">{{ group.label }}</div>
-        <ol style="list-style: none; margin: 0; padding: 0">
-          <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
-            <li v-if="item.kind === 'group'" class="bs-timeline-row">
-              {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
-            </li>
-            <TimelineRow
-              v-else
-              :entry="item.entry!"
-              :expanded="expanded.has(item.entry!.eventId)"
-              :ctx="ctxFor(item.entry!)"
-              :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
-              @toggle="toggleRow"
-              @select-task="goToTask"
-              @because-of="becauseOf"
-            />
-          </template>
-        </ol>
+        <div class="timeline-feed">
+          <ol style="list-style: none; margin: 0; padding: 0">
+            <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
+              <li v-if="item.kind === 'group'" class="bs-timeline-row">
+                {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
+              </li>
+              <TimelineRow
+                v-else
+                :entry="item.entry!"
+                :expanded="expanded.has(item.entry!.eventId)"
+                :ctx="ctxFor(item.entry!)"
+                :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
+                @toggle="toggleRow"
+                @select-task="goToTask"
+                @because-of="becauseOf"
+              />
+            </template>
+          </ol>
+        </div>
       </template>
       <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
     </template>
