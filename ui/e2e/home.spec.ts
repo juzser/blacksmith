@@ -70,6 +70,7 @@ test.describe('Home', () => {
     await page.goto('/overview');
     await expect(page.getByRole('heading', { level: 2 })).toHaveText([
       'Needs you',
+      'Recent activity',
       'Running now',
       'What the factory decided recently',
       'Budget',
@@ -347,6 +348,95 @@ test.describe('Home: Needs you inbox', () => {
       await page.goto('/overview');
       await expect(page.getByText('Nothing needs you right now.')).toBeVisible();
       await expect(page.locator('.bs-inbox__group')).toHaveCount(0);
+    });
+  }
+});
+
+// Recent activity (ds-spec.md §4.1 point 1b): the 8 newest compact
+// TimelineRows, directly under the inbox, "View all activity" to /activity,
+// 4 rows on phone (the rest stay in the DOM, hidden by CSS per §4.1: "the
+// meta line ends with the time" is unpaged kit behaviour, not re-tested
+// here — ui/test/kitTimelineRowCompact.test.ts owns that).
+test.describe('Home: Recent activity', () => {
+  function syntheticEntries(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      eventId: `synth-${i}`,
+      ts: minutesAgo(i),
+      eventType: 'user_prompt',
+      kind: 'prompt',
+      taskId: null,
+      agentId: null,
+      planVersion: 1,
+      causalParent: null,
+      payload: { prompt: `Synthetic activity row ${i}` },
+      project: 'black-smith',
+      actor: 'operator',
+      nearestPromptId: null,
+    }));
+  }
+
+  async function serveTimeline(
+    page: Page,
+    entries: ReturnType<typeof syntheticEntries>,
+  ): Promise<void> {
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get('limit') !== '8') {
+        route.continue();
+        return;
+      }
+      route.fulfill({
+        json: { entries, nextBefore: null, newestId: entries[0]?.eventId ?? null },
+      });
+    });
+  }
+
+  test('desktop: requests limit=8 and renders what the server returns, link to Activity', async ({
+    page,
+  }) => {
+    const entries = syntheticEntries(8);
+    await serveTimeline(page, entries);
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/overview');
+
+    const section = page.locator('section', { has: page.locator('#recent-activity-heading') });
+    await expect(section.locator('.bs-home__recent-activity > li')).toHaveCount(8);
+    await expect(section.getByText('Synthetic activity row 0')).toBeVisible();
+    await expect(section.getByRole('link', { name: 'View all activity' })).toHaveAttribute(
+      'href',
+      '/activity',
+    );
+  });
+
+  test('375px: only the first 4 rows are visible, the rest stay collapsed off-screen', async ({
+    page,
+  }) => {
+    const entries = syntheticEntries(8);
+    await serveTimeline(page, entries);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+
+    const rows = page.locator('.bs-home__recent-activity > li');
+    await expect(rows).toHaveCount(8);
+    for (let i = 0; i < 4; i++) {
+      await expect(rows.nth(i)).toBeVisible();
+    }
+    for (let i = 4; i < 8; i++) {
+      await expect(rows.nth(i)).not.toBeVisible();
+    }
+  });
+
+  for (const [vpName, viewport] of [
+    ['desktop', VIEWPORTS.desktop],
+    ['375px', PHONE],
+  ] as const) {
+    test(`${vpName}: empty recent activity says nothing has happened yet`, async ({ page }) => {
+      await serveTimeline(page, []);
+      await page.setViewportSize(viewport);
+      await page.goto('/overview');
+      const section = page.locator('section', { has: page.locator('#recent-activity-heading') });
+      await expect(section.getByText('Nothing has happened yet.')).toBeVisible();
+      await expect(section.locator('.bs-home__recent-activity')).toHaveCount(0);
     });
   }
 });

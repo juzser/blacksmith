@@ -5,6 +5,9 @@ const DEMO_HUB_WAIVABLE_TASK = 'epic-9/task-3'; // multiProjectFixture.ts's conf
 // epic-9/task-1: dispatched then completed (task-result-recorded, run_status
 // done) — the smallest fixture task with more than one run-history row.
 const DEMO_HUB_COMPLETED_TASK = 'epic-9/task-1';
+// epic-9/task-4: added but never dispatched (multiProjectFixture.ts's
+// upcoming-wave task) — no runs at all, so taskTotals() comes back all null.
+const DEMO_HUB_UNDISPATCHED_TASK = 'epic-9/task-4';
 
 test.describe('Task detail', () => {
   test('renders tabs and a11y basics', async ({ page }) => {
@@ -68,6 +71,28 @@ test.describe('Task detail', () => {
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
     await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
+  });
+
+  // Pattern 11 totals bar (ds-spec.md §4.7): task-1's result carries
+  // token_usage (1300 total across both runs) and a dispatch-to-result span,
+  // so tokens and elapsed render; agent time stays absent (no run writes a
+  // duration field today), never a bare "0".
+  test('totals bar: measured fields render, agent time stays absent', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const bar = page.locator('.bs-task-totals-bar');
+    await expect(bar).toBeVisible();
+    await expect(bar.getByText('Tokens', { exact: true })).toBeVisible();
+    await expect(bar.getByText('Elapsed', { exact: true })).toBeVisible();
+    await expect(bar.getByText('Agent time', { exact: true })).toHaveCount(0);
+  });
+
+  // A task with no runs at all (never dispatched) has nothing to sum: the
+  // bar itself must not render, not render as a row of "0"/"—" cells.
+  test('totals bar: absent entirely for a task with no runs', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_UNDISPATCHED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    await expect(page.locator('.bs-task-totals-bar')).toHaveCount(0);
   });
 
   // Item 4 — ds-spec.md §1.5: rail centre and dot centre both land on
