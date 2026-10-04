@@ -9,6 +9,9 @@
 import { ChevronDown, ChevronRight } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { formatTime } from '../../lib/format.js';
+// DS6 PR4b round 2 item 4 (ds-review.html `.ev`, spec §4.1 1b): relative time
+// replaces HH:MM everywhere this row renders (Activity, task History, Home
+// compact); RelativeTime itself carries the absolute time in its tooltip.
 import type { KitTone } from '../../lib/taxonomy.js';
 import {
   type ActivityEntry,
@@ -108,65 +111,74 @@ function onBecauseOf() {
     :data-kind="kind"
     :id="`activity-row-${entry.eventId}`"
   >
-    <div class="bs-timeline-row__head">
-      <EventKindTag :kind="kind" />
-      <Tag v-if="tag" :tone="tag.tone" variant="subtle" size="sm">{{ tag.label }}</Tag>
-      <button
-        v-if="entry.taskId && linkable"
-        type="button"
-        class="bs-timeline-row__title bs-timeline-row__title--link"
-        @click="emit('selectTask', entry.taskId)"
+    <div class="bs-timeline-row__body">
+      <div class="bs-timeline-row__head">
+        <EventKindTag :kind="kind" />
+        <Tag v-if="tag" :tone="tag.tone" variant="subtle" size="sm">{{ tag.label }}</Tag>
+        <button
+          v-if="entry.taskId && linkable"
+          type="button"
+          class="bs-timeline-row__title bs-timeline-row__title--link"
+          @click="emit('selectTask', entry.taskId)"
+        >
+          <span class="bs-timeline-row__title-label">{{ title }}</span>
+        </button>
+        <span v-else class="bs-timeline-row__title">{{ title }}</span>
+      </div>
+      <div v-if="hasDetails" class="bs-timeline-row__meta">
+        <span>{{ meta }}</span>
+        <button v-if="hasPromptLink" type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
+          because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
+        </button>
+        <!-- Phone (ds-spec.md §4.1 1b): the meta line ends with the time
+             instead of the dedicated time column below, which hides there. -->
+        <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
+      </div>
+      <!-- v-show, not v-if: aria-controls above names this id unconditionally
+           while collapsed, so the element it names must exist unconditionally
+           too, or the IDREF dangles (D-227). Gated on hasDetails because the
+           chevron naming it is gated the same way. -->
+      <dl
+        v-if="hasDetails"
+        v-show="expanded"
+        :id="`activity-row-detail-${entry.eventId}`"
+        class="bs-timeline-row__detail"
       >
-        <span class="bs-timeline-row__title-label">{{ title }}</span>
-      </button>
-      <span v-else class="bs-timeline-row__title">{{ title }}</span>
-      <RelativeTime v-if="variant === 'rail'" class="bs-timeline-row__ts" :iso="entry.ts" />
-      <time v-else class="bs-timeline-row__ts" :datetime="entry.ts">{{ formatTime(entry.ts) }}</time>
+        <dt>Kind</dt>
+        <dd>{{ kind }}</dd>
+        <dt>Title</dt>
+        <dd>{{ title }}</dd>
+        <dt>Meta</dt>
+        <dd>{{ meta }}</dd>
+        <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
+             on TaskDetailPage): a "Task" row here would only ever read 'not
+             measured', since TaskRun carries no taskId. -->
+        <template v-if="variant !== 'rail'">
+          <dt>Task</dt>
+          <dd>{{ entry.taskId ?? 'not measured' }}</dd>
+          <dt>Session</dt>
+          <dd>
+            <!-- SessionsPage has no deep-link query param to open a specific
+                 session, so this links to the plain list rather than a session
+                 it cannot actually scroll to (DS6 PR4b). -->
+            <RouterLink to="/sessions">{{ entry.sessionTitle }}</RouterLink>
+          </dd>
+        </template>
+      </dl>
     </div>
-    <div v-if="hasDetails" class="bs-timeline-row__meta">
-      <span>{{ meta }}</span>
-      <button v-if="hasPromptLink" type="button" class="bs-timeline-row__because-of" @click="onBecauseOf">
-        because of your prompt at {{ formatTime(ctx?.promptTs ?? '') }}
-      </button>
-      <IconButton
-        :icon="expanded ? ChevronDown : ChevronRight"
-        label="Show details"
-        size="sm"
-        :aria-expanded="expanded"
-        :aria-controls="`activity-row-detail-${entry.eventId}`"
-        @click="emit('toggle', entry.eventId)"
-      />
-    </div>
-    <!-- v-show, not v-if: aria-controls above names this id unconditionally
-         while collapsed, so the element it names must exist unconditionally
-         too, or the IDREF dangles (D-227). Gated on hasDetails because the
-         chevron naming it is gated the same way. -->
-    <dl
+    <!-- Row rework (DS6 PR4b round 2 item 4, mock `.ev` grid: body / time /
+         chevron): the time and chevron sit in their own end columns on the
+         row's grid, not inline with the title/meta. -->
+    <RelativeTime class="bs-timeline-row__ts" :iso="entry.ts" />
+    <IconButton
       v-if="hasDetails"
-      v-show="expanded"
-      :id="`activity-row-detail-${entry.eventId}`"
-      class="bs-timeline-row__detail"
-    >
-      <dt>Kind</dt>
-      <dd>{{ kind }}</dd>
-      <dt>Title</dt>
-      <dd>{{ title }}</dd>
-      <dt>Meta</dt>
-      <dd>{{ meta }}</dd>
-      <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
-           on TaskDetailPage): a "Task" row here would only ever read 'not
-           measured', since TaskRun carries no taskId. -->
-      <template v-if="variant !== 'rail'">
-        <dt>Task</dt>
-        <dd>{{ entry.taskId ?? 'not measured' }}</dd>
-        <dt>Session</dt>
-        <dd>
-          <!-- SessionsPage has no deep-link query param to open a specific
-               session, so this links to the plain list rather than a session
-               it cannot actually scroll to (DS6 PR4b). -->
-          <RouterLink to="/sessions">{{ entry.sessionTitle }}</RouterLink>
-        </dd>
-      </template>
-    </dl>
+      class="bs-timeline-row__chevron"
+      :icon="expanded ? ChevronDown : ChevronRight"
+      label="Show details"
+      size="sm"
+      :aria-expanded="expanded"
+      :aria-controls="`activity-row-detail-${entry.eventId}`"
+      @click="emit('toggle', entry.eventId)"
+    />
   </li>
 </template>

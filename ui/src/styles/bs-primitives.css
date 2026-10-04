@@ -380,13 +380,23 @@ a:hover {
 }
 
 /* TimelineRow (DS6 PR3, ds-spec.md §4.3 / ds-review.html .ev). */
+/* Row rework (DS6 PR4b round 2 item 4, ds-review.html `.ev`): body / time /
+   chevron as the row's own end columns instead of time inline with the
+   title and the chevron inline with the meta line. */
 .bs-timeline-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: start;
+  gap: var(--bs-space-1) var(--bs-space-2);
   padding: var(--bs-space-2) var(--bs-space-3);
   border-bottom: 1px solid var(--bs-border);
   border-left: 3px solid transparent;
+}
+.bs-timeline-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  min-width: 0;
 }
 /* DS6 PR4b item 3: the "Session: <title>" divider between adjacent rows
    whose session differs (ActivityPage.vue only; Home's compact rows never
@@ -443,7 +453,7 @@ a:hover {
 }
 .bs-timeline-row__title {
   flex: 1;
-  font-weight: var(--bs-font-weight-medium);
+  font-weight: var(--bs-font-weight-title);
   color: var(--bs-text);
 }
 /* Item 6 (DS6 PR3 r2): a link title underlines only on hover/focus, never at
@@ -475,6 +485,19 @@ a:hover {
 .bs-timeline-row__ts {
   color: var(--bs-text-subtlest);
   font-size: var(--bs-text-xs);
+}
+/* The meta-line copy of the time stays hidden until phone, where it
+   replaces the end column (DS6 PR4b round 2 item 4, spec §4.1 1b). */
+.bs-timeline-row__ts--meta {
+  display: none;
+}
+@media (max-width: 640px) {
+  .bs-timeline-row__ts {
+    display: none;
+  }
+  .bs-timeline-row__ts--meta {
+    display: inline;
+  }
 }
 .bs-timeline-row__meta {
   display: flex;
