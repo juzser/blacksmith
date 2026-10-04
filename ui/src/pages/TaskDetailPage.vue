@@ -443,18 +443,20 @@ const factsRowText = computed(() => {
             </template>
 
             <template #history>
-              <dl v-if="totalsCells.length > 0" class="bs-task-totals-bar">
-                <Tooltip v-for="cell in totalsCells" :key="cell.key" mode="describe" :text="cell.exact">
-                  <div class="bs-task-totals-bar__cell">
-                    <dt>
-                      <Icon :icon="cell.icon" :size="14" />
-                      {{ cell.label }}
-                    </dt>
-                    <dd v-if="cell.key === 'tokens'"><CompactNumber :value="totals!.tokens!" unit="tok" /></dd>
-                    <dd v-else>{{ cell.value }}</dd>
+              <div v-if="totalsCells.length > 0" class="bs-task-totals-bar" role="group" aria-label="Task totals">
+                <div v-for="cell in totalsCells" :key="cell.key" class="bs-task-totals-bar__cell">
+                  <div class="bs-task-totals-bar__key">
+                    <Icon :icon="cell.icon" :size="14" />
+                    {{ cell.label }}
                   </div>
-                </Tooltip>
-              </dl>
+                  <div class="bs-task-totals-bar__value">
+                    <Tooltip mode="describe" :text="cell.exact">
+                      <CompactNumber v-if="cell.key === 'tokens'" :value="totals!.tokens!" unit="tok" />
+                      <template v-else>{{ cell.value }}</template>
+                    </Tooltip>
+                  </div>
+                </div>
+              </div>
               <RunHistoryTimeline :runs="runs" />
               <Skeleton v-if="historyLoading" :height="160" />
               <!-- Ahead of the empty state on purpose. A failed fetch has no

@@ -2598,32 +2598,47 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
 }
 
-/* Pattern 11 totals bar (DS6 PR4, ds-spec.md §4.7): tokens / agent-time /
-   elapsed, above RunHistoryTimeline. A missing field is simply absent, so
-   the bar itself never renders with zero cells (guarded in the template). */
+/* Pattern 11 totals bar (DS6 PR4, ds-spec.md §4.7, ds-review.html .totals
+   ~402-406): tokens / agent-time / elapsed, above RunHistoryTimeline. A
+   missing field is simply absent, so the bar itself never renders with zero
+   cells (guarded in the template). Fix round (item 1): bordered sunken box,
+   3-column grid with dividers, matching the mock exactly instead of the
+   earlier flex row. */
 .bs-task-totals-bar {
-  display: flex;
-  gap: var(--bs-space-5);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-sunken);
   margin: 0 0 var(--bs-space-3) 0;
-  padding: var(--bs-space-2) 0;
-  border-bottom: 1px solid var(--bs-border);
 }
 .bs-task-totals-bar__cell {
-  display: flex;
-  flex-direction: column;
-  gap: var(--bs-space-1);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  min-width: 0;
 }
-.bs-task-totals-bar__cell dt {
+.bs-task-totals-bar__cell + .bs-task-totals-bar__cell {
+  border-left: 1px solid var(--bs-border);
+}
+.bs-task-totals-bar__key {
   display: flex;
   align-items: center;
   gap: var(--bs-space-1);
-  color: var(--bs-text-subtle);
-  font-size: var(--bs-text-sm);
-}
-.bs-task-totals-bar__cell dd {
-  margin: 0;
-  font-size: var(--bs-text-md);
+  font-size: 11px;
   font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtle);
+}
+.bs-task-totals-bar__value {
+  font-weight: var(--bs-font-weight-normal);
+  color: var(--bs-text);
+  font-variant-numeric: tabular-nums;
+}
+/* Phone (ds-review.html .msum, the task-detail phone frame): same key/value
+   pair, lighter surface than the desktop sunken box, no rounded sunken
+   look -- same grid/divider mechanics, raised background instead. */
+@media (max-width: 640px) {
+  .bs-task-totals-bar {
+    background: var(--bs-surface-raised);
+  }
 }
 
 /* Fix round 1 #5 — the page-level stack wrapping the swimlane and
