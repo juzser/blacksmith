@@ -159,6 +159,13 @@ function onBecauseOf() {
       <template v-if="variant !== 'rail'">
         <dt>Task</dt>
         <dd>{{ entry.taskId ?? 'not measured' }}</dd>
+        <dt>Session</dt>
+        <dd>
+          <!-- SessionsPage has no deep-link query param to open a specific
+               session, so this links to the plain list rather than a session
+               it cannot actually scroll to (DS6 PR4b). -->
+          <RouterLink to="/sessions">{{ entry.sessionTitle }}</RouterLink>
+        </dd>
       </template>
     </dl>
   </li>

@@ -388,6 +388,18 @@ a:hover {
   border-bottom: 1px solid var(--bs-border);
   border-left: 3px solid transparent;
 }
+/* DS6 PR4b item 3: the "Session: <title>" divider between adjacent rows
+   whose session differs (ActivityPage.vue only; Home's compact rows never
+   render one). */
+.bs-session-divider {
+  list-style: none;
+  padding: var(--bs-space-2) var(--bs-space-3);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text-subtlest);
+  background: var(--bs-surface-sunken);
+  border-bottom: 1px solid var(--bs-border);
+}
 /* Fix round item 5 (ds-review.html `.ev:last-child`): the last row in any
    list never needs a divider against whatever comes after it. */
 .bs-timeline-row:last-child {

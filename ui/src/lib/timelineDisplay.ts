@@ -1009,6 +1009,22 @@ function minuteKey(ts: string): string {
   return ts.slice(0, 16); // YYYY-MM-DDTHH:MM
 }
 
+/**
+ * True when a "Session: <title>" divider belongs before `entries[index]` —
+ * i.e. that row's session differs from the row right before it. The caller
+ * (ActivityPage.vue) renders the divider itself, using the entry's own
+ * `sessionTitle`; the compact Home variant never calls this, so it never
+ * renders dividers (brief item 3).
+ */
+export function sessionDividerBefore(entries: readonly TimelineEntry[], index: number): boolean {
+  if (index <= 0 || index >= entries.length) return false;
+  const current = entries[index];
+  const previous = entries[index - 1];
+  return (
+    current !== undefined && previous !== undefined && current.sessionId !== previous.sessionId
+  );
+}
+
 export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinuteItem[] {
   const items: RoleMinuteItem[] = [];
   let run: ActivityEntry[] = [];

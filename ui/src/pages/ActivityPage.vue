@@ -32,6 +32,7 @@ import {
   type EventKind,
   groupByDay,
   groupByRoleMinute,
+  sessionDividerBefore,
 } from '../lib/timelineDisplay.js';
 
 const route = useRoute();
@@ -156,6 +157,15 @@ const causedCountByPromptId = computed(() => {
 
 const dayGroups = computed(() => groupByDay(entries.value, new Date().toISOString()));
 
+// DS6 PR4b item 3: a "Session: <title>" divider between adjacent rows whose
+// session differs, keyed off the whole feed's order (not per day-group), so a
+// session that spans a day boundary still only breaks once per real change.
+const indexById = computed(() => new Map(entries.value.map((e, i) => [e.eventId, i])));
+function dividerBefore(entry: ActivityEntry): boolean {
+  const idx = indexById.value.get(entry.eventId);
+  return idx !== undefined && sessionDividerBefore(entries.value, idx);
+}
+
 function ctxFor(entry: ActivityEntry) {
   const promptTs = entry.nearestPromptId
     ? (promptTsById.value.get(entry.nearestPromptId) ?? null)
@@ -241,16 +251,20 @@ function becauseOf(promptId: string) {
               <li v-if="item.kind === 'group'" class="bs-timeline-row">
                 {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
               </li>
-              <TimelineRow
-                v-else
-                :entry="item.entry!"
-                :expanded="expanded.has(item.entry!.eventId)"
-                :ctx="ctxFor(item.entry!)"
-                :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
-                @toggle="toggleRow"
-                @select-task="goToTask"
-                @because-of="becauseOf"
-              />
+              <template v-else>
+                <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
+                  Session: {{ item.entry!.sessionTitle }}
+                </li>
+                <TimelineRow
+                  :entry="item.entry!"
+                  :expanded="expanded.has(item.entry!.eventId)"
+                  :ctx="ctxFor(item.entry!)"
+                  :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
+                  @toggle="toggleRow"
+                  @select-task="goToTask"
+                  @because-of="becauseOf"
+                />
+              </template>
             </template>
           </ol>
         </div>

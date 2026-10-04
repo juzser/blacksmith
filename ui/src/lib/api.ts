@@ -246,6 +246,10 @@ export interface TimelineEntry {
   payload: Record<string, unknown>;
   project: string | null;
   actor: string | null;
+  /** DS6 PR4b: the session this event belongs to. */
+  sessionId: string;
+  /** DS6 PR4b: the owning session's title, falling back to its id when untitled. */
+  sessionTitle: string;
 }
 
 export interface KanbanTag {

@@ -16,6 +16,7 @@ import {
   matchesKind,
   metaFor,
   nodesOfItem,
+  sessionDividerBefore,
   type TimelineItem,
   type TimelineNode,
   timelineItems,
@@ -37,6 +38,8 @@ function entry(overrides: Partial<TimelineEntry>): TimelineEntry {
     payload: {},
     project: null,
     actor: null,
+    sessionId: 'sess-1',
+    sessionTitle: 'sess-1',
     ...overrides,
   };
 }
@@ -1491,6 +1494,8 @@ describe('groupByRoleMinute', () => {
     payload: { agent_role: 'builder' },
     project: null,
     actor: null,
+    sessionId: 'sess-1',
+    sessionTitle: 'sess-1',
     kind: 'Dispatched',
   };
 
@@ -1535,5 +1540,23 @@ describe('groupByRoleMinute', () => {
       { ...base, eventId: 'e3', kind: 'Returned' as const },
     ];
     expect(groupByRoleMinute(entries).map((i) => i.kind)).toEqual(['entry', 'entry', 'entry']);
+  });
+});
+
+describe('lib/timelineDisplay.ts sessionDividerBefore() (DS6 PR4b)', () => {
+  const base: TimelineEntry = entry({ sessionId: 'sess-a', sessionTitle: 'alpha' });
+
+  it('marks no divider before the first row', () => {
+    expect(sessionDividerBefore([base], 0)).toBe(false);
+  });
+
+  it('marks no divider when consecutive rows share a session', () => {
+    const entries = [base, { ...base, eventId: 'e2' }];
+    expect(sessionDividerBefore(entries, 1)).toBe(false);
+  });
+
+  it('marks a divider when the session id changes', () => {
+    const entries = [base, { ...base, eventId: 'e2', sessionId: 'sess-b', sessionTitle: 'beta' }];
+    expect(sessionDividerBefore(entries, 1)).toBe(true);
   });
 });
