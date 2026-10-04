@@ -3046,6 +3046,82 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     const fallback = result.runningSessions.find((s) => s.sessionId === noPromptSession);
     expect(fallback?.title).toBe('epic-title');
   });
+
+  it('skips a leading blank line and trims indentation to title from the first non-blank line', async () => {
+    const blankLedSession = 'sess-title-blank-led';
+    const start = await appendEvent(
+      {
+        session_id: blankLedSession,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await recordUserPrompt(
+      '\n   Build the widget renderer.\nsecond line never shown',
+      { sessionId: blankLedSession, planVersion: 1, causalParent: start.event_id },
+      { stateDir },
+    );
+
+    handle = await project();
+    const result = overview(handle.db);
+    const blankLed = result.runningSessions.find((s) => s.sessionId === blankLedSession);
+    expect(blankLed?.title).toBe('Build the widget renderer.');
+  });
+
+  it('falls back to the epic id when the prompt is all whitespace', async () => {
+    const whitespaceSession = 'sess-title-whitespace';
+    const start = await appendEvent(
+      {
+        session_id: whitespaceSession,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    // Bypasses recordUserPrompt's own-input guard to cover a row already on
+    // the timeline before that guard existed — the projector still has to
+    // fall back rather than title the session with an empty string.
+    await appendEvent(
+      {
+        session_id: whitespaceSession,
+        actor: 'user',
+        event_type: 'user_prompt',
+        plan_version: 1,
+        causal_parent: start.event_id,
+        payload: { prompt: '   \n   \n  ' },
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: whitespaceSession,
+        actor: 'system',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-whitespace/task-1',
+        plan_version: 1,
+        causal_parent: start.event_id,
+        payload: {
+          agent_role: 'coder',
+          provider: 'claude',
+          model_tier: 'mid',
+          model: 'claude-sonnet',
+        },
+      },
+      { stateDir },
+    );
+
+    handle = await project();
+    const result = overview(handle.db);
+    const whitespace = result.runningSessions.find((s) => s.sessionId === whitespaceSession);
+    expect(whitespace?.title).toBe('epic-whitespace');
+  });
 });
 
 describe('lessonOwnerSession()', () => {

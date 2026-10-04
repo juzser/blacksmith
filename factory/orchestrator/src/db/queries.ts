@@ -1146,12 +1146,18 @@ function allAgentsForScope(db: SmithDb, scope: Scope): (typeof agents.$inferSele
 
 const SESSION_TITLE_MAX_LEN = 80;
 
-/** First line of `text`, trimmed to about `SESSION_TITLE_MAX_LEN` chars. */
-function trimSessionTitle(text: string): string {
-  const firstLine = text.split('\n', 1)[0] ?? '';
-  return firstLine.length > SESSION_TITLE_MAX_LEN
-    ? `${firstLine.slice(0, SESSION_TITLE_MAX_LEN)}…`
-    : firstLine;
+/**
+ * First non-blank line of `text`, trimmed, then cut to about
+ * `SESSION_TITLE_MAX_LEN` chars. `null` when `text` has no non-blank line at
+ * all, so the caller's epic-id fallback applies instead of an empty title.
+ */
+function trimSessionTitle(text: string): string | null {
+  const firstLine = text.split('\n').find((line) => line.trim() !== '');
+  if (firstLine === undefined) return null;
+  const trimmed = firstLine.trim();
+  return trimmed.length > SESSION_TITLE_MAX_LEN
+    ? `${trimmed.slice(0, SESSION_TITLE_MAX_LEN)}…`
+    : trimmed;
 }
 
 /**
@@ -1174,7 +1180,8 @@ function sessionTitles(db: SmithDb, scope: Scope): Map<string, string> {
   }
   for (const [sessionId, rows] of promptsBySession) {
     const earliest = inLogOrder(rows)[0];
-    if (earliest) titles.set(sessionId, trimSessionTitle(earliest.prompt));
+    const title = earliest ? trimSessionTitle(earliest.prompt) : null;
+    if (title !== null) titles.set(sessionId, title);
   }
 
   const agentCond = scopedToSessions(agents.sessionId, scope);
