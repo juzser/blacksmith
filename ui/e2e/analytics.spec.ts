@@ -37,16 +37,24 @@ async function withMultiRoleFixture(page: Page): Promise<void> {
         unmeasuredRunCount: 2,
       },
     ];
+    // Explicit, not derived from the base fixture's own days: the daily
+    // series must sum exactly to the by-role totals above (Builder 4200,
+    // Code reviewer 1800, Planner 600, overall 6600), with one day entirely
+    // empty so the zero-token track has something real to prove (defect 8).
     body.tokensByDay = [
-      ...(body.tokensByDay ?? []).slice(1).map((day: Record<string, unknown>, i: number) => ({
-        ...day,
-        tokensByRole: {
-          ...(day.tokensByRole as Record<string, number>),
-          reviewer: 300 + i * 50,
-          planner: 100,
-        },
-      })),
       { day: '2026-01-01', tokensByRole: {}, tokensByModelTier: {}, unmeasuredRunCount: 0 },
+      {
+        day: '2026-01-02',
+        tokensByRole: { coder: 2000, reviewer: 900, planner: 300 },
+        tokensByModelTier: { mid: 2900, high: 300 },
+        unmeasuredRunCount: 1,
+      },
+      {
+        day: '2026-01-03',
+        tokensByRole: { coder: 2200, reviewer: 900, planner: 300 },
+        tokensByModelTier: { mid: 3100, high: 300 },
+        unmeasuredRunCount: 1,
+      },
     ];
     await route.fulfill({ response, json: body });
   });
@@ -136,11 +144,13 @@ test.describe('Analytics', () => {
     const byRoleCard = page
       .locator('.bs-card')
       .filter({ has: page.getByText('Total tokens, by selected period', { exact: true }) });
-    await expect(byRoleCard.locator('.bs-bars__x')).toHaveText([
-      'Builder',
-      'Code reviewer',
-      'Planner',
-    ]);
+    // The Not-measured row shares the same label class but reads as prose
+    // ("N of M runs not measured."), not a bare role name — excluded here so
+    // this only asserts the three real role rows.
+    await expect(
+      byRoleCard.locator('.bs-analytics-page__hlabel').filter({ hasNotText: 'not measured' }),
+    ).toHaveText(['Builder', 'Code reviewer', 'Planner']);
+    await expect(byRoleCard).toContainText('runs not measured.');
     await expect(page.locator('.bs-bars__track--empty').first()).toBeVisible();
   });
 
