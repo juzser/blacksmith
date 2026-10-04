@@ -900,6 +900,94 @@ a:hover {
   border-bottom: none;
 }
 
+/* SessionRow (ds-spec.md §4.6): a history-list row, same clickable-button
+   switch as .bs-lessoncard. */
+.bs-sessionrow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  width: 100%;
+  min-height: var(--bs-touch);
+  text-align: left;
+  background: var(--bs-surface-raised);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  padding: var(--bs-space-3);
+  font: inherit;
+  color: inherit;
+}
+.bs-sessionrow--clickable {
+  cursor: pointer;
+}
+.bs-sessionrow--clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+.bs-sessionrow__title {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-sessionrow__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bs-space-2);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-sessionrow__laststep {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* AgentBlock (ds-spec.md §4.6): one block per role in the session detail
+   view, replacing the old VueFlow canvas node entirely. */
+.bs-agentblock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-agentblock__role {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+  margin: 0;
+}
+.bs-agentblock__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.bs-agentblock__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--bs-space-2);
+  min-height: var(--bs-touch);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface-raised);
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text);
+}
+.bs-agentblock__doing {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-agentblock__tokens {
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */

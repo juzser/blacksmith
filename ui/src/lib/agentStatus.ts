@@ -5,6 +5,7 @@
 // unit-tested without mounting AgentStatusBadge.vue.
 import type { SessionAgent } from './api.js';
 import { AGENT_STALE_AFTER_MS } from './liveness.js';
+import { titleFor } from './timelineDisplay.js';
 
 export type AgentStatusState = 'working' | 'no-result' | 'done' | 'failed' | 'stopped';
 export type AgentStatusTone = 'progress' | 'warning' | 'done' | 'danger' | 'neutral';
@@ -58,4 +59,32 @@ export function tokenDisplay(agent: SessionAgent): TokenDisplay {
   if (tokens.state === 'unmeasured') return { kind: 'text', text: 'not measured' };
   if (tokens.state === 'pending') return { kind: 'text', text: 'Running' };
   return { kind: 'none' };
+}
+
+/**
+ * "What it is doing" / "last step", for SessionRow and AgentBlock: both only
+ * ever carry a bare `lastEventType`, never the full event payload, so this
+ * runs the existing titleFor() (timelineDisplay.ts) with an empty payload
+ * rather than re-deriving a second title vocabulary. Most event kinds fall
+ * through titleFor's own default case (humanizeEventType) with an empty
+ * payload the same way they would with a real one that happened to carry no
+ * extra fields; the handful of kinds that read something out of the payload
+ * (dispatch_decision's reason, a gate's verdict) just print their own prefix
+ * with the detail blank, which is still a truthful "what kind of thing just
+ * happened" one-liner.
+ */
+export function lastStepLabel(lastEventType: string | null): string {
+  if (lastEventType === null) return 'No events yet';
+  return titleFor({
+    eventId: '',
+    ts: '',
+    eventType: lastEventType,
+    taskId: null,
+    agentId: null,
+    planVersion: 0,
+    causalParent: null,
+    payload: {},
+    project: null,
+    actor: null,
+  });
 }

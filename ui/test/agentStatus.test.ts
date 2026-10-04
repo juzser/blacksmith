@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { agentStatus, tokenDisplay } from '../src/lib/agentStatus.js';
+import { agentStatus, lastStepLabel, tokenDisplay } from '../src/lib/agentStatus.js';
 import type { SessionAgent } from '../src/lib/api.js';
 
 const now = '2026-08-05T12:00:00.000Z';
@@ -104,5 +104,19 @@ describe('tokenDisplay', () => {
 
   it('shows nothing when none', () => {
     expect(tokenDisplay(agent({ tokens: { state: 'none' } }))).toEqual({ kind: 'none' });
+  });
+});
+
+describe('lastStepLabel', () => {
+  it('says there are no events yet when lastEventType is null', () => {
+    expect(lastStepLabel(null)).toBe('No events yet');
+  });
+
+  it('humanizes an event type titleFor has no special case for', () => {
+    expect(lastStepLabel('operator-feedback-resolved')).toBe('Operator feedback resolved');
+  });
+
+  it('runs a known event type through titleFor, with no payload to read from', () => {
+    expect(lastStepLabel('user_prompt')).toBe('');
   });
 });
