@@ -56,4 +56,9 @@ describe('SessionsPage.vue', () => {
     const matches = PAGE.match(/:selected="selectedId === s\.sessionId"/g);
     expect(matches?.length).toBe(2);
   });
+
+  it('moves focus to the deep-linked row after scrolling it into view', () => {
+    expect(PAGE).toMatch(/row\?\.scrollIntoView\(\{ block: 'nearest' \}\);/);
+    expect(PAGE).toMatch(/row\?\.querySelector\('button'\)\?\.focus\(\{ preventScroll: true \}\);/);
+  });
 });

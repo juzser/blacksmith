@@ -127,7 +127,11 @@ onMounted(async () => {
     if (finished().some((s) => s.sessionId === deepLinked)) showFinished.value = true;
     await loadAgents();
     await nextTick();
-    rowRefs.get(deepLinked)?.scrollIntoView({ block: 'nearest' });
+    const row = rowRefs.get(deepLinked);
+    row?.scrollIntoView({ block: 'nearest' });
+    // rowRefs holds the <li>, not SessionRow's own root — its clickable
+    // button is the row's one focusable descendant.
+    row?.querySelector('button')?.focus({ preventScroll: true });
   }
 });
 
