@@ -6,7 +6,7 @@ test.describe('Lessons', () => {
     await page.goto('/lessons');
     await expect(page.locator('h1')).toHaveText('Lessons');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
-    await page.getByRole('button', { name: 'All' }).click();
+    await page.getByRole('tab', { name: /^All/ }).click();
     await expect(page.getByText(/loop bound/)).toBeVisible();
   });
 
@@ -17,7 +17,7 @@ test.describe('Lessons', () => {
   // (P9-36). Reject stays: invalidated is a legal move.
   test('row click opens the review Dialog, offering only the legal actions', async ({ page }) => {
     await page.goto('/lessons');
-    await page.getByRole('button', { name: 'All' }).click();
+    await page.getByRole('tab', { name: /^All/ }).click();
     await page.getByText(/loop bound/).click();
     const dialog = page.getByRole('dialog', { name: 'Review lesson' });
     await expect(dialog).toBeVisible();
@@ -38,11 +38,11 @@ test.describe('Lessons', () => {
     await page.goto('/lessons');
     await expect(page.getByText(/no network access/)).toHaveCount(0);
 
-    await page.getByRole('button', { name: /^Closed/ }).click();
+    await page.getByRole('tab', { name: /^Closed/ }).click();
     await expect(page.getByText(/no network access/)).toBeVisible();
     await expect(page.getByText(/loop bound/)).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'All' }).click();
+    await page.getByRole('tab', { name: /^All/ }).click();
     await expect(page.getByText(/no network access/)).toBeVisible();
     await expect(page.getByText(/loop bound/)).toBeVisible();
 
@@ -52,6 +52,28 @@ test.describe('Lessons', () => {
     await expect(dialog.getByText(/terminal status/)).toBeVisible();
   });
 
+  // The fixture seeds no pending-status lesson and no lessons-pass-completed
+  // event, so the Pending tab (the page's default) renders the new empty
+  // state with no "Last checked" line (ds-spec.md §4.5: that line reads
+  // lastCheckedAt, null here).
+  test('Pending tab shows the empty state with no Last-checked line when dream() has never run', async ({
+    page,
+  }) => {
+    await page.goto('/lessons');
+    await expect(page.getByText('Nothing to review.')).toBeVisible();
+    await expect(page.getByText(/Last checked/)).toHaveCount(0);
+  });
+
+  // ds-spec.md §4.5's own audit item: all four tabs show a count, including
+  // Approved (not just Pending/Closed).
+  test('every tab shows a count', async ({ page }) => {
+    await page.goto('/lessons');
+    await expect(page.getByRole('tab', { name: /^Pending review \d+/ })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^Approved \d+/ })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^Closed \d+/ })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^All \d+/ })).toBeVisible();
+  });
+
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
     for (const theme of ['light', 'dark'] as const) {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
@@ -59,7 +81,7 @@ test.describe('Lessons', () => {
         await page.setViewportSize(viewport);
         await page.goto('/lessons');
         await expect(page.locator('h1')).toHaveText('Lessons');
-        await settleForShot(page, page.getByText(/Nothing waiting/));
+        await settleForShot(page, page.getByText('Nothing to review.'));
         await shoot(page, `lessons-${vpName}-${theme}`);
       });
     }
