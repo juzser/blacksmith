@@ -1,5 +1,56 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from './harness.js';
 import { growToPageHeight, setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
+
+// Several roles (not just the base fixture's single "Builder"), plus an
+// unmeasured run and a zero-token day — both screenshot baselines and the
+// "more than two role categories" assertion test share this one override
+// (DS7 PR2 round 4 defect 1), so the charts, the table and the phone role
+// list all show more than one row instead of baking a one-role screenshot.
+async function withMultiRoleFixture(page: Page): Promise<void> {
+  await page.route('**/api/analytics*', async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.tokensByRoleAndModelTier = [
+      {
+        role: 'coder',
+        modelTier: 'mid',
+        runCount: 3,
+        tokens: 4200,
+        avgTokensPerRun: 1400,
+        unmeasuredRunCount: 0,
+      },
+      {
+        role: 'reviewer',
+        modelTier: 'mid',
+        runCount: 2,
+        tokens: 1800,
+        avgTokensPerRun: 900,
+        unmeasuredRunCount: 0,
+      },
+      {
+        role: 'planner',
+        modelTier: 'high',
+        runCount: 1,
+        tokens: 600,
+        avgTokensPerRun: 600,
+        unmeasuredRunCount: 2,
+      },
+    ];
+    body.tokensByDay = [
+      ...(body.tokensByDay ?? []).slice(1).map((day: Record<string, unknown>, i: number) => ({
+        ...day,
+        tokensByRole: {
+          ...(day.tokensByRole as Record<string, number>),
+          reviewer: 300 + i * 50,
+          planner: 100,
+        },
+      })),
+      { day: '2026-01-01', tokensByRole: {}, tokensByModelTier: {}, unmeasuredRunCount: 0 },
+    ];
+    await route.fulfill({ response, json: body });
+  });
+}
 
 test.describe('Analytics', () => {
   test('renders the period switch, charts, metric cards, and a11y basics', async ({ page }) => {
@@ -79,41 +130,7 @@ test.describe('Analytics', () => {
   test('renders more than two role categories, and keeps a zero-token day empty', async ({
     page,
   }) => {
-    await page.route('**/api/analytics*', async (route) => {
-      const response = await route.fetch();
-      const body = await response.json();
-      body.tokensByRoleAndModelTier = [
-        {
-          role: 'coder',
-          modelTier: 'mid',
-          runCount: 3,
-          tokens: 4200,
-          avgTokensPerRun: 1400,
-          unmeasuredRunCount: 0,
-        },
-        {
-          role: 'reviewer',
-          modelTier: 'mid',
-          runCount: 2,
-          tokens: 1800,
-          avgTokensPerRun: 900,
-          unmeasuredRunCount: 0,
-        },
-        {
-          role: 'planner',
-          modelTier: 'high',
-          runCount: 1,
-          tokens: 600,
-          avgTokensPerRun: 600,
-          unmeasuredRunCount: 0,
-        },
-      ];
-      body.tokensByDay = [
-        ...(body.tokensByDay ?? []).slice(1),
-        { day: '2026-01-01', tokensByRole: {}, tokensByModelTier: {}, unmeasuredRunCount: 0 },
-      ];
-      await route.fulfill({ response, json: body });
-    });
+    await withMultiRoleFixture(page);
     await page.goto('/analytics');
     await expect(page.locator('h1')).toHaveText('Cost & quality');
     const byRoleCard = page
@@ -132,6 +149,7 @@ test.describe('Analytics', () => {
       test(`screenshot ${vpName}/${theme}`, async ({ page }) => {
         await setTheme(page, theme);
         await page.setViewportSize(viewport);
+        await withMultiRoleFixture(page);
         await page.goto('/analytics');
         await expect(page.locator('h1')).toHaveText('Cost & quality');
         // Phone drops the charts/table (defect 6) — settle on the phone-only

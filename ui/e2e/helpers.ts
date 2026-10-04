@@ -59,10 +59,24 @@ export async function shoot(page: Page, name: string): Promise<void> {
 // worth of content (DS7 PR2 round 3 defect 7). Grow the viewport to
 // `.app-scroll`'s scrollHeight instead, so the whole page fits in one frame
 // and a plain (non-fullPage) screenshot captures all of it.
+//
+// `.app-shell` is pinned to `height: 100vh` (bs-primitives.css), so setting
+// the viewport to just `.app-scroll`'s scrollHeight still leaves the topbar
+// and any banner eating into that budget — `.app-scroll`'s own clientHeight
+// shrinks back below its scrollHeight and the bottom of the page (the last
+// card's axis, DS7 PR2 round 4 defect 2) stays clipped. Add back the
+// "overhead" — whatever `.app-shell__main` spends on siblings of
+// `.app-scroll` — so the grown viewport has room for the topbar/banner AND
+// the full content height.
 export async function growToPageHeight(page: Page): Promise<void> {
   const height = await page.evaluate(() => {
-    const el = document.querySelector('.app-scroll');
-    return el ? el.scrollHeight : document.documentElement.scrollHeight;
+    const scroll = document.querySelector('.app-scroll');
+    const main = document.querySelector('.app-shell__main');
+    if (scroll && main) {
+      const overhead = main.getBoundingClientRect().height - scroll.clientHeight;
+      return Math.ceil(overhead + scroll.scrollHeight);
+    }
+    return document.documentElement.scrollHeight;
   });
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: viewport?.width ?? 1280, height });
