@@ -2,7 +2,7 @@
 // .vue for the reason lib/lessonActions.ts spells out: ui/tsconfig.json
 // doesn't type-check .vue files and this repo has no component-test harness,
 // so logic asserted from an SFC is logic nothing can test.
-import { formatDate } from './format.js';
+import { formatShortDate } from './format.js';
 
 /**
  * The scope line under a lesson's rule. `stack-wide`/`security` have no
@@ -52,5 +52,5 @@ export function preventedLabel(timesPrevented: number): string {
  */
 export function learnedFromLabel(sessionId: string, validFrom: string | null): string {
   if (!validFrom) return `Learned from ${sessionId}`;
-  return `Learned from ${sessionId} on ${formatDate(validFrom)}`;
+  return `Learned from ${sessionId} on ${formatShortDate(validFrom)}`;
 }

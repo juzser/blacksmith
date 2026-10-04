@@ -58,7 +58,7 @@ describe('lib/lessonLabels.ts', () => {
   describe('learnedFromLabel', () => {
     it('includes the formatted date when validFrom is set', () => {
       expect(learnedFromLabel('csb-audit-1', '2026-09-07T00:00:00.000Z')).toBe(
-        'Learned from csb-audit-1 on 07/09/2026',
+        'Learned from csb-audit-1 on 7 Sep',
       );
     });
 
