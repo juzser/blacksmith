@@ -487,6 +487,46 @@ a:hover {
 .bs-timeline-row--highlight {
   background: var(--bs-accent-subtle);
 }
+/* rail variant (DS6 PR3 r3, ds-spec.md §1.5/§2.2): the rail dot replaces the
+   3px stripe. Geometry from the shared --tl-* tokens (bs-tokens.css) so the
+   rail line and the dot centres cannot drift apart — rail centre and dot
+   centre both land on --tl-rail-x, dot top centres it on the first text line. */
+.bs-timeline-row--rail {
+  border-left-color: transparent;
+  position: relative;
+  padding-left: calc(var(--tl-rail-x) + var(--tl-dot) / 2 + var(--bs-space-2));
+}
+.bs-timeline-row--rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tl-rail-x) - var(--tl-rail-w) / 2);
+  width: var(--tl-rail-w);
+  background: var(--bs-border);
+}
+.bs-timeline-row--rail::after {
+  content: '';
+  position: absolute;
+  top: calc((var(--tl-lh) - var(--tl-dot)) / 2);
+  left: calc(var(--tl-rail-x) - var(--tl-dot) / 2);
+  width: var(--tl-dot);
+  height: var(--tl-dot);
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-border-bold);
+}
+.bs-timeline-row--rail[data-kind='dispatch']::after {
+  background: var(--bs-event-dispatch-text);
+}
+.bs-timeline-row--rail[data-kind='returned']::after {
+  background: var(--bs-event-returned-text);
+}
+.bs-timeline-row--rail[data-kind='feedback']::after {
+  background: var(--bs-event-feedback-text);
+}
+.bs-timeline-row--rail[data-kind='error']::after {
+  background: var(--bs-event-error-text);
+}
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
 .bs-sep {
@@ -2489,14 +2529,6 @@ summary.bs-inbox__group-head {
   padding: 0;
   display: flex;
   flex-direction: column;
-}
-.bs-run-history__label {
-  font-size: var(--bs-text-sm);
-  font-weight: 600;
-}
-.bs-run-history__meta {
-  font-size: var(--bs-text-xs);
-  color: var(--bs-text-subtle);
 }
 .bs-run-history__empty {
   margin: 0;

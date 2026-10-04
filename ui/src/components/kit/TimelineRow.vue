@@ -9,6 +9,7 @@
 import { ChevronDown, ChevronRight } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { formatTime } from '../../lib/format.js';
+import type { KitTone } from '../../lib/taxonomy.js';
 import {
   type ActivityEntry,
   kindFor,
@@ -18,6 +19,8 @@ import {
 } from '../../lib/timelineDisplay.js';
 import EventKindTag from './EventKindTag.vue';
 import IconButton from './IconButton.vue';
+import RelativeTime from './RelativeTime.vue';
+import Tag from './Tag.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -30,6 +33,21 @@ const props = withDefaults(
      * the task on screen, so a title link there would push the page the
      * operator is already standing on — a no-op vue-router discards (D-231). */
     linkable?: boolean;
+    /** ds-spec.md §2.2 `TimelineRow` variant list: `rail` is the only one this
+     * task adds (`RunHistoryTimeline`'s rows) — no stripe, a rail dot/line
+     * drawn from the §1.5 `--tl-*` geometry instead, time via `RelativeTime`
+     * (default stays `formatTime` so Activity/Home stay pixel-identical). */
+    variant?: 'rail';
+    /** rail-only: `TaskRun` carries no `eventType`/`payload`, so it cannot
+     * drive `titleFor`/`metaFor` — the caller (`RunHistoryTimeline`) passes
+     * its own humanized label/meta text instead of this component deriving
+     * one from `entry`. */
+    titleOverride?: string;
+    metaOverride?: string;
+    /** rail-only: the outcome `Tag` next to `EventKindTag` (ds-spec.md §2.2
+     * "a humanized label ... outcome Tag"), same slot the general row table
+     * gives a gate's Passed/Failed status tag. */
+    tag?: { tone: KitTone; label: string } | null;
   }>(),
   { linkable: true },
 );
@@ -40,7 +58,7 @@ const emit = defineEmits<{
 }>();
 
 const kind = computed(() => kindFor(props.entry));
-const title = computed(() => titleFor(props.entry));
+const title = computed(() => props.titleOverride ?? titleFor(props.entry));
 
 // "Running for N s" ticks live while a Dispatched row has no run result yet
 // (ds-spec.md §4.3). Only this one row kind/state needs a clock, so the
@@ -56,8 +74,13 @@ onMounted(() => {
 });
 onBeforeUnmount(() => clearInterval(timer));
 
-const meta = computed(() =>
-  metaFor(props.entry, { ...props.ctx, now: stillRunning.value ? tickNow.value : props.ctx?.now }),
+const meta = computed(
+  () =>
+    props.metaOverride ??
+    metaFor(props.entry, {
+      ...props.ctx,
+      now: stillRunning.value ? tickNow.value : props.ctx?.now,
+    }),
 );
 
 const hasPromptLink = computed(
@@ -77,9 +100,15 @@ function onBecauseOf() {
 </script>
 
 <template>
-  <li class="bs-timeline-row" :data-kind="kind" :id="`activity-row-${entry.eventId}`">
+  <li
+    class="bs-timeline-row"
+    :class="{ 'bs-timeline-row--rail': variant === 'rail' }"
+    :data-kind="kind"
+    :id="`activity-row-${entry.eventId}`"
+  >
     <div class="bs-timeline-row__head">
       <EventKindTag :kind="kind" />
+      <Tag v-if="tag" :tone="tag.tone" variant="subtle" size="sm">{{ tag.label }}</Tag>
       <button
         v-if="entry.taskId && linkable"
         type="button"
@@ -89,7 +118,8 @@ function onBecauseOf() {
         {{ title }}
       </button>
       <span v-else class="bs-timeline-row__title">{{ title }}</span>
-      <time class="bs-timeline-row__ts" :datetime="entry.ts">{{ formatTime(entry.ts) }}</time>
+      <RelativeTime v-if="variant === 'rail'" class="bs-timeline-row__ts" :iso="entry.ts" />
+      <time v-else class="bs-timeline-row__ts" :datetime="entry.ts">{{ formatTime(entry.ts) }}</time>
     </div>
     <div v-if="hasDetails" class="bs-timeline-row__meta">
       <span>{{ meta }}</span>
@@ -121,8 +151,13 @@ function onBecauseOf() {
       <dd>{{ title }}</dd>
       <dt>Meta</dt>
       <dd>{{ meta }}</dd>
-      <dt>Task</dt>
-      <dd>{{ entry.taskId ?? 'not measured' }}</dd>
+      <!-- rail rows are already scoped to the task on screen (RunHistoryTimeline
+           on TaskDetailPage): a "Task" row here would only ever read 'not
+           measured', since TaskRun carries no taskId. -->
+      <template v-if="variant !== 'rail'">
+        <dt>Task</dt>
+        <dd>{{ entry.taskId ?? 'not measured' }}</dd>
+      </template>
     </dl>
   </li>
 </template>
