@@ -244,6 +244,110 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  it('GET /api/timeline with no paging params returns the legacy array, unchanged', async () => {
+    const handle = app();
+    const legacy = await handle.app.request(`/api/timeline?task=${encodeURIComponent(TASK_1)}`);
+    const paged = await handle.app.request(
+      `/api/timeline?task=${encodeURIComponent(TASK_1)}&limit=500`,
+    );
+    const legacyBody = await json<Array<{ eventId: string }>>(legacy);
+    const pagedBody = await json<{ entries: Array<{ eventId: string }> }>(paged);
+    expect(Array.isArray(legacyBody)).toBe(true);
+    // Paged mode is newest-first; the legacy shape is oldest-first — same set,
+    // reversed order.
+    expect(legacyBody.map((e) => e.eventId)).toEqual(
+      [...pagedBody.entries].reverse().map((e) => e.eventId),
+    );
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline?limit returns the envelope, with nextBefore null on the last page', async () => {
+    const handle = app();
+    const res = await handle.app.request(
+      `/api/timeline?task=${encodeURIComponent(TASK_1)}&limit=500`,
+    );
+    expect(res.status).toBe(200);
+    const body = await json<{
+      entries: Array<{ eventId: string }>;
+      nextBefore: string | null;
+      newestId: string | null;
+    }>(res);
+    expect(body.entries.length).toBeGreaterThan(0);
+    expect(body.nextBefore).toBeNull();
+    expect(body.newestId).toBe(body.entries[0]?.eventId);
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline?limit=1 reports a non-null nextBefore when older rows remain', async () => {
+    const handle = app();
+    const res = await handle.app.request(
+      `/api/timeline?task=${encodeURIComponent(TASK_1)}&limit=1`,
+    );
+    const body = await json<{ entries: unknown[]; nextBefore: string | null }>(res);
+    expect(body.entries.length).toBe(1);
+    expect(body.nextBefore).not.toBeNull();
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline rejects a bad limit with 400', async () => {
+    const handle = app();
+    const tooBig = await handle.app.request('/api/timeline?limit=501');
+    expect(tooBig.status).toBe(400);
+    const notAnInt = await handle.app.request('/api/timeline?limit=abc');
+    expect(notAnInt.status).toBe(400);
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline rejects an unknown kind with 400', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/timeline?kind=NotAKind');
+    expect(res.status).toBe(400);
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline rejects an unknown before cursor with 400', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/timeline?before=no-such-session%230');
+    expect(res.status).toBe(400);
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline?causalChainFor still returns the legacy array on its own (S3)', async () => {
+    const handle = app();
+    const flat = await handle.app.request(`/api/timeline?session=${SESSION_ID}`);
+    const flatBody = await json<Array<{ eventId: string }>>(flat);
+    const target = flatBody[flatBody.length - 1]!.eventId;
+
+    const res = await handle.app.request(
+      `/api/timeline?session=${SESSION_ID}&causalChainFor=${encodeURIComponent(target)}`,
+    );
+    expect(res.status).toBe(200);
+    const body = await json<Array<{ eventId: string }>>(res);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThan(0);
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline rejects causalChainFor combined with limit or kind with 400 (S3)', async () => {
+    const handle = app();
+    const flat = await handle.app.request(`/api/timeline?session=${SESSION_ID}`);
+    const flatBody = await json<Array<{ eventId: string }>>(flat);
+    const target = flatBody[flatBody.length - 1]!.eventId;
+
+    const withLimit = await handle.app.request(
+      `/api/timeline?session=${SESSION_ID}&causalChainFor=${encodeURIComponent(target)}&limit=10`,
+    );
+    expect(withLimit.status).toBe(400);
+    const withLimitBody = await json<{ error: { code: string } }>(withLimit);
+    expect(withLimitBody.error.code).toBe('timeline.bad-request');
+
+    const withKind = await handle.app.request(
+      `/api/timeline?session=${SESSION_ID}&causalChainFor=${encodeURIComponent(target)}&kind=System`,
+    );
+    expect(withKind.status).toBe(400);
+    closeApp(handle);
+  });
+
   it('GET /api/kanban supports both ?epic and an all-epics mode (Phase 6b)', async () => {
     const handle = app();
     const scoped = await handle.app.request(`/api/kanban?epic=${EPIC_ID}`);

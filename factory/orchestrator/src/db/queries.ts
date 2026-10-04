@@ -19,6 +19,7 @@ import {
   TASK_RESULT_EVENT_TYPE,
 } from '../agents-registry.js';
 import { isPlausibleTokenCount } from '../budgetAlarm.js';
+import { SmithError } from '../errors.js';
 import { compareLogOrder, isLaterEvent, parseEventId, ROOT_EVENT_TYPE } from '../events.js';
 import { OPEN_FINDING_STATUSES, WAIVABLE_STATUSES } from '../findings.js';
 import { waveLayers } from '../graph.js';
@@ -1964,6 +1965,73 @@ export function timelineEventTypes(): string[] {
   ];
 }
 
+/**
+ * DS6 (ds-spec.md §4.3): the Activity feed's 9 row kinds. A text tag, no
+ * icon — colour is never the only signal, so the string itself is what the
+ * UI renders.
+ */
+export type EventKind =
+  | 'Prompt'
+  | 'Dispatched'
+  | 'Returned'
+  | 'Finding'
+  | 'Gate'
+  | 'Merge'
+  | 'Error'
+  | 'Feedback'
+  | 'System';
+
+/** Every `EventKind`, for routes validating a `kind=` query param against the real set. */
+export const EVENT_KINDS: readonly EventKind[] = [
+  'Prompt',
+  'Dispatched',
+  'Returned',
+  'Finding',
+  'Gate',
+  'Merge',
+  'Error',
+  'Feedback',
+  'System',
+];
+
+/**
+ * Which of the 9 kinds a raw event renders as (ds-spec.md §4.3's table) —
+ * pure in `(eventType, payload)` so both `timeline()` and `causalChain()` tag
+ * every row the same way. Unnamed types fall to `System`, the feed's
+ * catch-all for rare types.
+ *
+ * This follows the spec table, NOT the pre-existing client-side `kindFor()`
+ * in ui/src/lib/timelineDisplay.ts: that helper puts waiver-granted/-denied
+ * under its `finding` kind and judge-reported under `feedback` — the reverse
+ * of ds-spec.md §4.3 ("Finding (judge verdict)" -> `judge-reported`;
+ * "Feedback" -> `waiver-granted` / `waiver-denied`). Flagged as a spec/code
+ * mismatch rather than guessed; DS6's UI PR reconciles the two.
+ */
+export function eventKind(eventType: string, _payload: Record<string, unknown>): EventKind {
+  switch (eventType) {
+    case 'user_prompt':
+      return 'Prompt';
+    case DISPATCH_EVENT_TYPE:
+      return 'Dispatched';
+    case TASK_RESULT_EVENT_TYPE:
+      return 'Returned';
+    case JUDGE_REPORT_EVENT_TYPE:
+      return 'Finding';
+    case 'gate-outcome':
+    case 'testgate-result':
+      return 'Gate';
+    case 'wave-merged':
+      return 'Merge';
+    case ERROR_EVENT_TYPE:
+      return 'Error';
+    case 'waiver-granted':
+    case 'waiver-denied':
+      return 'Feedback';
+    default:
+      return 'System';
+  }
+}
+
 export interface TimelineEntry {
   eventId: string;
   ts: string;
@@ -1975,6 +2043,16 @@ export interface TimelineEntry {
   payload: Record<string, unknown>;
   project: string | null;
   actor: string | null;
+  /** DS6 §4.3 — this row's `EventKindTag`. */
+  kind: EventKind;
+  /**
+   * DS6 §4.3 — the id of the nearest `user_prompt` ancestor (the same
+   * `causal_parent` walk `nearestUserPrompt` already does for task quotes),
+   * or null for an orphan with none. A prompt row's own `nearestPromptId` is
+   * ITSELF (documented choice, tested): `nearestUserPrompt` walks the chain
+   * including the entry asked about, so a prompt row answers its own walk.
+   */
+  nearestPromptId: string | null;
 }
 
 export interface TimelineFilter extends Scope {
@@ -1991,20 +2069,32 @@ export interface TimelineFilter extends Scope {
    * causal_parent edge) survive.
    */
   decisionsOnly?: boolean;
+  /** DS6 pattern 5 — only these kinds. Applied before `limit`, like every other filter. */
+  kinds?: EventKind[];
+  /** DS6 pattern 5 — paged mode (newest-first): rows strictly newer than this event id. With `limit`, the OLDEST `limit` of them, still newest-first. */
+  after?: string;
+  /** DS6 pattern 5 — paged mode (newest-first): rows strictly older than this event id ("Load older"). */
+  before?: string;
+  /** DS6 pattern 5 — caps the page at this many rows; any of the three present switches to paged (newest-first) mode. */
+  limit?: number;
 }
 
-function toEntry(row: {
-  eventId: string;
-  ts: string;
-  eventType: string;
-  taskId: string | null;
-  agentId: string | null;
-  planVersion: number;
-  causalParent: string | null;
-  payload: string;
-  project: string | null;
-  actor: string | null;
-}): TimelineEntry {
+function toEntry(
+  row: {
+    eventId: string;
+    ts: string;
+    eventType: string;
+    taskId: string | null;
+    agentId: string | null;
+    planVersion: number;
+    causalParent: string | null;
+    payload: string;
+    project: string | null;
+    actor: string | null;
+  },
+  nearestPromptId: string | null,
+): TimelineEntry {
+  const payload = JSON.parse(row.payload) as Record<string, unknown>;
   return {
     eventId: row.eventId,
     ts: row.ts,
@@ -2013,9 +2103,11 @@ function toEntry(row: {
     agentId: row.agentId,
     planVersion: row.planVersion,
     causalParent: row.causalParent,
-    payload: JSON.parse(row.payload) as Record<string, unknown>,
+    payload,
     project: row.project,
     actor: row.actor,
+    kind: eventKind(row.eventType, payload),
+    nearestPromptId,
   };
 }
 
@@ -2115,7 +2207,7 @@ function causalChain(
   eventId: string,
   eventCache?: Map<string, EventsRawRow | null>,
 ): TimelineEntry[] {
-  const chain: TimelineEntry[] = [];
+  const rows: EventsRawRow[] = [];
   let currentId: string | null = eventId;
   const seen = new Set<string>();
   let first = true;
@@ -2129,8 +2221,19 @@ function causalChain(
     // same as the original `and(idMatch, eq(sessionId))` constraint.
     if (first && row.sessionId !== sessionId) break;
     first = false;
-    chain.unshift(toEntry(row));
+    rows.unshift(row);
     currentId = row.causalParent as string | null;
+  }
+  // `rows` is now the whole ancestor path, oldest-first, so each row's
+  // nearest `user_prompt` is answered by a single forward pass over this
+  // same array rather than a nested call into `nearestUserPrompt` — that
+  // function calls back into `causalChain`, and feeding it one row at a
+  // time from inside this loop was mutual recursion with no base case.
+  let lastPromptId: string | null = null;
+  const chain: TimelineEntry[] = [];
+  for (const row of rows) {
+    if (row.eventType === 'user_prompt') lastPromptId = row.eventId;
+    chain.push(toEntry(row, lastPromptId));
   }
   return chain;
 }
@@ -2163,6 +2266,16 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
     if (!filter.sessionId) {
       throw new RangeError('timeline(): causalChainFor requires sessionId to be set.');
     }
+    if (
+      filter.limit !== undefined ||
+      filter.before !== undefined ||
+      filter.after !== undefined ||
+      filter.kinds !== undefined
+    ) {
+      throw new RangeError(
+        'timeline(): causalChainFor cannot be combined with limit, before, after or kinds — the causal chain is not pageable.',
+      );
+    }
     return causalChain(db, filter.sessionId, filter.causalChainFor);
   }
 
@@ -2180,11 +2293,83 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
       .all(),
   );
 
-  let entries = rows.map(toEntry);
+  // `kind` is cheap (pure function of eventType/payload) and the `kinds`
+  // filter needs it, so it is computed for every fetched row up front.
+  // `nearestPromptId` is the expensive one (a causal-parent walk), so it is
+  // deferred until AFTER filtering and paging and only computed for the rows
+  // that actually survive onto the page — see `memoizedNearestPromptId`.
+  let entries = rows.map((row) => toEntry(row, null));
   entries = filterByProject(entries, filter);
   if (filter.epicId) entries = entries.filter((e) => epicOfEntry(e) === filter.epicId);
+  if (filter.kinds?.length) {
+    const kinds = new Set(filter.kinds);
+    entries = entries.filter((e) => kinds.has(e.kind));
+  }
   if (filter.decisionsOnly) entries = applyDecisionsLens(entries);
-  return entries;
+  const page = paginate(db, entries, filter);
+
+  // Row lookup for the memo walk: the fetched rows answer most ancestors for
+  // free (one query already brought them all into memory); a fallback cache
+  // handles the rare ancestor outside that set (e.g. a cross-session hop).
+  const rowByEventId = new Map(rows.map((row) => [row.eventId, row]));
+  const ancestorCache = new Map<string, EventsRawRow | null>();
+  const getRow = (eventId: string): EventsRawRow | null =>
+    rowByEventId.get(eventId) ?? fetchEventRow(db, eventId, ancestorCache);
+  const promptMemo = new Map<string, string | null>();
+  for (const entry of page) {
+    entry.nearestPromptId = memoizedNearestPromptId(entry.eventId, getRow, promptMemo);
+  }
+  return page;
+}
+
+/**
+ * Resolves `before`/`after` to the row's own `{ts, eventId}` so paging can
+ * compare it with `compareLogOrder` — the SAME ordering the rest of the log
+ * uses, never a string compare on the id (`<session>#<index>` ids are not
+ * orderable across sessions; `#9` would sort after `#10` as text).
+ */
+function resolveCursor(db: SmithDb, eventId: string): { ts: string; eventId: string } {
+  const row = db.select().from(eventsRaw).where(eq(eventsRaw.eventId, eventId)).get();
+  if (!row) {
+    throw new SmithError('timeline.unknown-cursor', `No event "${eventId}" to page from.`, {
+      eventId,
+    });
+  }
+  return { ts: row.ts, eventId: row.eventId };
+}
+
+/**
+ * DS6 pattern 5 (paginated "Load older" + infinite scroll). A no-op unless
+ * `limit`, `before` or `after` is set — the legacy oldest-first, unbounded
+ * shape stays exactly as it was for every existing caller.
+ *
+ * Paged mode is always newest-first. `before` keeps rows strictly older than
+ * the cursor (the "Load older" page). `after` keeps rows strictly newer; with
+ * `limit` that means the OLDEST `limit` of them — the page adjacent to the
+ * cursor on the newer side, read oldest-first then flipped to the feed's
+ * newest-first order — rather than the newest `limit`, which would skip rows
+ * between the cursor and the page it returned.
+ */
+function paginate(db: SmithDb, entries: TimelineEntry[], filter: TimelineFilter): TimelineEntry[] {
+  if (filter.limit === undefined && filter.before === undefined && filter.after === undefined) {
+    return entries;
+  }
+  let page = entries; // still oldest-first here
+  if (filter.before !== undefined) {
+    const cursor = resolveCursor(db, filter.before);
+    page = page.filter((e) => compareLogOrder(e, cursor) < 0);
+  }
+  if (filter.after !== undefined) {
+    const cursor = resolveCursor(db, filter.after);
+    page = page.filter((e) => compareLogOrder(e, cursor) > 0);
+  }
+  if (filter.limit !== undefined) {
+    page =
+      filter.after !== undefined
+        ? page.slice(0, filter.limit)
+        : page.slice(Math.max(0, page.length - filter.limit));
+  }
+  return page.slice().reverse();
 }
 
 // ---------------------------------------------------------------------------
@@ -2336,6 +2521,68 @@ function prUrlsByEpic(db: SmithDb): Map<string, string> {
     const payload = JSON.parse(r.payload) as { pr_url?: string };
     if (typeof payload.pr_url === 'string') result.set(epicRef, payload.pr_url);
   }
+  return result;
+}
+
+/**
+ * Cheap nearest-user_prompt-id resolver for `timeline()`'s full-table path:
+ * the nearest prompt of X is X itself when X is a `user_prompt`, otherwise
+ * the nearest prompt of X's causal parent. `nearestUserPrompt`/`causalChain`
+ * additionally require a matching row in the `prompts` table, but
+ * `projector.ts` inserts that row for EVERY `user_prompt` event in the same
+ * transaction it inserts `events_raw` from, so that check can never miss in
+ * practice and the eventType check alone is equivalent here.
+ *
+ * `causalChain`'s first-hop session gate (the walk refuses to start outside
+ * the session it is asked for) is also moot against this function: every
+ * caller feeds it a row's own `sessionId` as the walk's session (44ed474's
+ * `nearestUserPrompt(db, row.sessionId, row.eventId, ...)`, now this
+ * function's per-row callers in `timeline()`), so the first hop always names
+ * a row inside that very session and the gate never fires either way. Later
+ * hops were never gated in `causalChain` to begin with, so a cross-session
+ * ancestor is reachable from both, identically (parity test:
+ * `timelinePaging.test.ts`'s session-boundary case).
+ *
+ * Walks iteratively (no recursion — a session can chain thousands deep) and
+ * memoises every eventId it visits along the way, not just the one asked
+ * about, so a page of N rows with shared ancestors costs about one row
+ * lookup per DISTINCT event in play rather than one causal walk per row.
+ */
+function memoizedNearestPromptId(
+  startId: string,
+  getRow: (eventId: string) => EventsRawRow | null,
+  memo: Map<string, string | null>,
+): string | null {
+  const path: string[] = [];
+  const visiting = new Set<string>();
+  let current: string | null = startId;
+  let result: string | null = null;
+  while (current !== null) {
+    const cached = memo.get(current);
+    if (cached !== undefined) {
+      result = cached;
+      break;
+    }
+    if (visiting.has(current)) {
+      result = null;
+      break;
+    }
+    visiting.add(current);
+    const row = getRow(current);
+    if (!row) {
+      memo.set(current, null);
+      result = null;
+      break;
+    }
+    if (row.eventType === 'user_prompt') {
+      memo.set(current, current);
+      result = current;
+      break;
+    }
+    path.push(current);
+    current = row.causalParent as string | null;
+  }
+  for (const id of path) memo.set(id, result);
   return result;
 }
 
