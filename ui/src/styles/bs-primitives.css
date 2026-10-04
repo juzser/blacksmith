@@ -361,6 +361,173 @@ a:hover {
   padding: 0 var(--bs-space-2);
 }
 
+/* EventKindTag (DS6 §4.3, ds-review.html `.ktag`): a text-only kind label,
+   same box metrics as .bs-tag--subtle.bs-tag--sm, colour set inline from the
+   kind's own --bs-event-* tokens. */
+.bs-event-kind-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 var(--bs-space-2);
+  border-radius: var(--bs-radius-sm);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* TimelineRow (DS6 PR3, ds-spec.md §4.3 / ds-review.html .ev). */
+.bs-timeline-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+  padding: var(--bs-space-2) var(--bs-space-3);
+  border-bottom: 1px solid var(--bs-border);
+  border-left: 3px solid transparent;
+}
+/* Item 5 (DS6 PR3 r2, ds-review.html .ev's --ev-line): a 3px kind-coloured
+   left stripe per row, same --bs-event-* tokens EventKindTag already uses.
+   Prompt reads lighter (its own subtle tint) in the mock; every other kind
+   uses its own -text token for the stripe. */
+.bs-timeline-row[data-kind='prompt']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-prompt-subtle);
+}
+.bs-timeline-row[data-kind='dispatch']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-dispatch-text);
+}
+.bs-timeline-row[data-kind='returned']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-returned-text);
+}
+.bs-timeline-row[data-kind='finding']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-finding-text);
+}
+.bs-timeline-row[data-kind='gate']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-gate-text);
+}
+.bs-timeline-row[data-kind='merge']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-merge-text);
+}
+.bs-timeline-row[data-kind='error']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-error-text);
+}
+.bs-timeline-row[data-kind='feedback']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-feedback-text);
+}
+.bs-timeline-row[data-kind='system']:not(.bs-timeline-row--rail) {
+  border-left-color: var(--bs-event-system-text);
+}
+.bs-timeline-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+}
+.bs-timeline-row__title {
+  flex: 1;
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+/* Item 6 (DS6 PR3 r2): a link title underlines only on hover/focus, never at
+   rest — a non-link title (plain span, no --link class) never underlines. */
+.bs-timeline-row__title--link {
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+}
+.bs-timeline-row__title--link:hover,
+.bs-timeline-row__title--link:focus-visible {
+  text-decoration: underline;
+}
+/* ≤640px: a one-line title button's own text settles well under --bs-touch
+   (touchTargets.spec.ts caught this on a short humanized title, e.g.
+   "Operator feedback resolved" on a single line) -- min-height floor only,
+   same pattern as .bs-input/.bs-select above. */
+@media (max-width: 640px) {
+  .bs-timeline-row__title--link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--bs-touch);
+  }
+}
+.bs-timeline-row__ts {
+  color: var(--bs-text-subtlest);
+  font-size: var(--bs-text-xs);
+}
+.bs-timeline-row__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-2);
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-sm);
+  padding-left: calc(16px + var(--bs-space-2));
+}
+.bs-timeline-row__because-of {
+  background: none;
+  border: none;
+  color: var(--bs-link-text);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+.bs-timeline-row__detail {
+  margin: var(--bs-space-1) 0 0 calc(16px + var(--bs-space-2));
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--bs-space-1) var(--bs-space-2);
+  font-size: var(--bs-text-sm);
+}
+.bs-timeline-row__detail dt {
+  color: var(--bs-text-subtle);
+}
+.bs-timeline-row--highlight {
+  background: var(--bs-accent-subtle);
+}
+/* rail variant (DS6 PR3 r3, ds-spec.md §1.5/§2.2): the rail dot replaces the
+   3px stripe. Geometry from the shared --tl-* tokens (bs-tokens.css) so the
+   rail line and the dot centres cannot drift apart — rail centre and dot
+   centre both land on --tl-rail-x, dot top centres it on the first text line. */
+.bs-timeline-row--rail {
+  border-left-color: transparent;
+  position: relative;
+  padding-left: calc(var(--tl-rail-x) + var(--tl-dot) / 2 + var(--bs-space-2));
+}
+.bs-timeline-row--rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--tl-rail-x) - var(--tl-rail-w) / 2);
+  width: var(--tl-rail-w);
+  background: var(--bs-border);
+}
+.bs-timeline-row--rail::after {
+  content: '';
+  position: absolute;
+  top: calc((var(--tl-lh) - var(--tl-dot)) / 2);
+  left: calc(var(--tl-rail-x) - var(--tl-dot) / 2);
+  width: var(--tl-dot);
+  height: var(--tl-dot);
+  border-radius: var(--bs-radius-full);
+  background: var(--bs-border-bold);
+}
+.bs-timeline-row--rail[data-kind='dispatch']::after {
+  background: var(--bs-event-dispatch-text);
+}
+.bs-timeline-row--rail[data-kind='returned']::after {
+  background: var(--bs-event-returned-text);
+}
+.bs-timeline-row--rail[data-kind='feedback']::after {
+  background: var(--bs-event-feedback-text);
+}
+.bs-timeline-row--rail[data-kind='error']::after {
+  background: var(--bs-event-error-text);
+}
+
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
 .bs-sep {
   background: var(--bs-border);
@@ -870,6 +1037,7 @@ a:hover {
   display: flex;
   gap: var(--bs-space-1);
   border-bottom: 1px solid var(--bs-border);
+  overflow-x: auto;
 }
 .bs-tabs__tab {
   padding: var(--bs-space-2) var(--bs-space-3);
@@ -881,6 +1049,8 @@ a:hover {
   border-bottom: 2px solid transparent;
   cursor: pointer;
   margin-bottom: -1px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .bs-tabs__tab[aria-selected='true'] {
   color: var(--bs-text);
@@ -2390,14 +2560,6 @@ summary.bs-inbox__group-head {
   padding: 0;
   display: flex;
   flex-direction: column;
-}
-.bs-run-history__label {
-  font-size: var(--bs-text-sm);
-  font-weight: 600;
-}
-.bs-run-history__meta {
-  font-size: var(--bs-text-xs);
-  color: var(--bs-text-subtle);
 }
 .bs-run-history__empty {
   margin: 0;

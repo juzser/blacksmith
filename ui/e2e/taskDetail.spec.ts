@@ -64,10 +64,56 @@ test.describe('Task detail', () => {
   }) => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
-    const rows = page.locator('.bs-run-history .timeline-row');
+    const rows = page.locator('.bs-run-history .bs-timeline-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
     await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
+  });
+
+  // Item 4 — ds-spec.md §1.5: rail centre and dot centre both land on
+  // --tl-rail-x (7px), dot top centres it on the first text line via
+  // (--tl-lh - --tl-dot) / 2 (6px). Read straight off the ::before/::after
+  // pseudo-elements rather than a screenshot diff, since this is exact pixel
+  // geometry, not a visual regression.
+  test('rail geometry matches the §1.5 tokens: rail/dot centred at 7px, dot top at 6px', async ({
+    page,
+  }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const row = page.locator('.bs-run-history .bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const geometry = await row.evaluate((el) => {
+      const before = getComputedStyle(el, '::before');
+      const after = getComputedStyle(el, '::after');
+      return {
+        railLeft: Number.parseFloat(before.left),
+        railWidth: Number.parseFloat(before.width),
+        dotLeft: Number.parseFloat(after.left),
+        dotWidth: Number.parseFloat(after.width),
+        dotTop: Number.parseFloat(after.top),
+      };
+    });
+    expect(geometry.railLeft + geometry.railWidth / 2).toBeCloseTo(7, 0);
+    expect(geometry.dotLeft + geometry.dotWidth / 2).toBeCloseTo(7, 0);
+    expect(geometry.dotTop).toBeCloseTo(6, 0);
+  });
+
+  // Visual pass round 4, item 1 — a kind-colour stripe rule
+  // (.bs-timeline-row[data-kind=...], specificity 0,2,0) beat the rail
+  // variant's own border-left-color reset (0,1,0), so rail rows drew both
+  // the rail line and a stripe. Rail rows must draw no stripe at all.
+  test('rail rows draw no kind-colour stripe on the left border', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const row = page.locator('.bs-run-history .bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const borderLeft = await row.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { color: style.borderLeftColor, width: style.borderLeftWidth };
+    });
+    const isTransparent =
+      borderLeft.color === 'rgba(0, 0, 0, 0)' || borderLeft.color === 'transparent';
+    expect(isTransparent || Number.parseFloat(borderLeft.width) === 0).toBe(true);
   });
 
   test('Findings tab shows the Waive Popover confirm naming the fingerprint', async ({ page }) => {
@@ -131,8 +177,8 @@ test.describe('Task detail', () => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
 
-    await expect(page.locator('.timeline-row__title').first()).toBeVisible();
-    await expect(page.locator('button.timeline-row__title')).toHaveCount(0);
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    await expect(page.locator('button.bs-timeline-row__title')).toHaveCount(0);
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
@@ -159,7 +205,7 @@ test.describe('Task detail', () => {
         await page.setViewportSize(viewport);
         await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
         await page.getByRole('tab', { name: 'History' }).click();
-        await settleForShot(page, page.locator('.bs-run-history .timeline-row').first());
+        await settleForShot(page, page.locator('.bs-run-history .bs-timeline-row').first());
         await shoot(page, `task-detail-history-${vpName}-${theme}`);
       });
     }

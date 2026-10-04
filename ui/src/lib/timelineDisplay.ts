@@ -2,10 +2,98 @@
 // left colour bar are decorative grouping by EVENT KIND only, never status —
 // actual outcome renders as a Lozenge (taxonomy.ts) alongside it, never via
 // the kind colour alone.
-import type { TimelineEntry } from './api.js';
-import { taskLabel } from './format.js';
+import type { DispatchRun, TimelineEntry } from './api.js';
+import { formatCompactNumber, formatElapsed, formatTime, taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
+
+/** The shape `/api/timeline`'s paged mode (`fetchTimelinePage`, api.ts) adds
+ * on top of a plain `TimelineEntry`: a server-computed `kind`, the nearest
+ * causal prompt's id, and (per kind) the DS6 PR2 run/gate joins. `metaFor`
+ * below only reads fields that exist on this richer shape — a bare
+ * `TimelineEntry` (the unpaged `fetchTimeline`, still used by the orphaned
+ * old `components/TimelineRow.vue`) renders every item as "not measured". */
+export interface ActivityEntry extends TimelineEntry {
+  kind?: string;
+  nearestPromptId?: string | null;
+  run?: DispatchRun;
+  gateCounts?: { passed: number; failed: number } | null;
+}
+
+/** Extra context `metaFor` needs but cannot derive from one row alone: the
+ * nearest prompt's own timestamp (for "because of your prompt at HH:MM") and
+ * how many dispatches a Prompt row caused — both walks over the whole page,
+ * done once by the caller (ActivityPage.vue / TimelineRow.vue). */
+export interface MetaContext {
+  now?: string;
+  promptTs?: string | null;
+  causedCount?: number;
+}
+
+const NOT_MEASURED = 'not measured';
+
+function tokensItem(run: DispatchRun | undefined): string | null {
+  if (!run) return null;
+  if (run.tokensIn == null && run.tokensOut == null) return NOT_MEASURED;
+  const total = (run.tokensIn ?? 0) + (run.tokensOut ?? 0);
+  return `${formatCompactNumber(total)} tokens`;
+}
+
+// Visual pass round 4, item 2: `duration_ms` is never stamped by any writer
+// in this codebase today (durationMsFromPayload's own doc comment, same
+// "not recorded anywhere" status ds-spec.md §4.3 gives Effort — which the
+// spec hides rather than labels "not measured"). Showing the literal string
+// on every single terminal dispatch/returned row, next to a real measured
+// token count, reads as a second broken measurement rather than the field
+// this codebase simply doesn't collect yet, so a null duration is omitted,
+// the same way Effort stays out of the row until a writer adds it.
+function durationItem(ms: number | null | undefined): string | null {
+  if (ms == null) return null;
+  const minutes = Math.round(ms / 60_000);
+  return minutes < 1 ? `${Math.round(ms / 1000)} s` : `${minutes} min`;
+}
+
+// Visual pass round 4, item 2: an unlinked dispatch — one whose
+// `nearestPromptId` points outside the current page/task's own loaded
+// entries (TaskDetailPage's History tab scopes the lookup to just that
+// task) — is a legitimate state, not a failed measurement: the prompt was
+// never missing, the caller just couldn't resolve its timestamp from what
+// it has in hand. Returning NOT_MEASURED here showed it stacked next to a
+// real measured token count on the same row, reading as broken data where
+// none was.
+function becauseOfItem(ctx: MetaContext): string | null {
+  if (ctx.promptTs == null) return null;
+  return `because of your prompt at ${formatTime(ctx.promptTs)}`;
+}
+
+/** Human check name for the broad set of event types `kindFor` buckets as
+ * `gate` (ds-spec.md §4.3's "check name"). */
+const GATE_CHECK_NAME: Record<string, string> = {
+  'schema-check-result': 'Schema check',
+  'artifact-check-result': 'Artifact check',
+  'commit-check-result': 'Commit check',
+  'deps-check-result': 'Dependency check',
+  'judges-outstanding': 'Judges outstanding',
+  'grader-verdict': 'Grader verdict',
+  'budget-check-result': 'Budget check',
+  'testgate-result': 'Unit tests',
+  'coverage-evidence': 'Coverage',
+  'integration-check': 'Integration check',
+  'spec-review-recorded': 'Spec review',
+  'goal-check-recorded': 'Goal check',
+  'quorum-decision': 'Quorum decision',
+  'gate-outcome': 'Gate outcome',
+  'issue-reported': 'Issue reported',
+};
+
+function gateCountsItem(counts: ActivityEntry['gateCounts']): string | null {
+  if (counts === undefined) return null;
+  if (counts === null) return NOT_MEASURED;
+  const total = counts.passed + counts.failed;
+  return counts.failed > 0
+    ? `${counts.failed} of ${total} failed`
+    : `${counts.passed} of ${total} passed`;
+}
 
 /** CausalTimelineList's pre-built causal-parent tree node (moved here, not
  * exported from a .vue SFC — see components/ds/types.ts's header comment
@@ -105,7 +193,7 @@ function groupLabel(members: TimelineNode[]): string {
     .map(([role, n]) => (n > 1 ? `${roleLabel(role)} ×${n}` : roleLabel(role)));
   const rest = ranked.length - shown.length;
   const roles = rest > 0 ? [...shown, `+${rest} more`] : shown;
-  return `${members.length} dispatches — ${roles.join(', ')}`;
+  return `${members.length} dispatches (${roles.join(', ')})`;
 }
 
 function groupId(members: TimelineNode[]): string {
@@ -341,11 +429,28 @@ export const EVENT_KIND_LABEL: Record<EventKind, string> = {
   system: 'System',
 };
 
-/** Which of the nine mock kinds an event type renders as. Unknown types fall
- * back to `system` rather than throwing, the same way `titleFor`'s default
- * case prints the raw event_type instead of crashing on a taxonomy the
- * dashboard hasn't caught up with yet. */
-export function kindFor(entry: TimelineEntry): EventKind {
+/** Reverse of EVENT_KIND_LABEL: the server's PascalCase EventKind (api.ts) to
+ * this file's lowercase one (same string values, see api.ts's EventKind). */
+const LOWERCASE_KIND_BY_LABEL = new Map<string, EventKind>(
+  EVENT_KINDS.map((kind) => [EVENT_KIND_LABEL[kind], kind]),
+);
+
+/** Which of the nine mock kinds an event renders as. `/api/timeline`'s paged
+ * entries (TimelinePage.entries, api.ts) already carry a server-computed
+ * `kind` — DS6 PR3 prefers that over re-deriving one client-side. DS6 PR3
+ * round 2 reconciles this switch with server's `eventKind()` in queries.ts
+ * so both follow ds-spec.md §4.3: `judge-reported` is a judge verdict, so it
+ * is `finding`; `waiver-granted`/`waiver-denied` are the operator's response
+ * to one, so they are `feedback`. Entries without a server `kind` (the
+ * unpaged `fetchTimeline()`/`TimelineEntry` shape, still used by the orphaned
+ * old `components/TimelineRow.vue`) fall through to this switch. Unknown
+ * types fall back to `system` rather than throwing, the same way `titleFor`'s
+ * default case prints the raw event_type instead of crashing on a taxonomy
+ * the dashboard hasn't caught up with yet. */
+export function kindFor(entry: TimelineEntry & { kind?: string }): EventKind {
+  if (entry.kind !== undefined) {
+    return LOWERCASE_KIND_BY_LABEL.get(entry.kind) ?? 'system';
+  }
   switch (entry.eventType) {
     case 'user_prompt':
     case 'operator-note':
@@ -360,9 +465,8 @@ export function kindFor(entry: TimelineEntry): EventKind {
     case 'finding-transitioned':
     case 'finding-reattributed':
     case 'severity-decisions':
-    case 'waiver-granted':
-    case 'waiver-denied':
     case 'task-waiver-approved':
+    case 'judge-reported':
       return 'finding';
     case 'schema-check-result':
     case 'artifact-check-result':
@@ -387,8 +491,9 @@ export function kindFor(entry: TimelineEntry): EventKind {
     case 'error-logged':
     case 'error-report-proposed':
       return 'error';
+    case 'waiver-granted':
+    case 'waiver-denied':
     case 'judge-verdict':
-    case 'judge-reported':
     case 'cross-finding-reconciled':
     case 'spec-change-proposed':
     case 'spec-change-decided':
@@ -514,28 +619,28 @@ export function titleFor(entry: TimelineEntry): string {
       const kind = p.note_kind ? String(p.note_kind) : '';
       const body = p.note ?? p.summary;
       if (body === undefined) return kind || 'Operator note';
-      return kind ? `${kind} — ${String(body)}` : String(body);
+      return kind ? `${kind}: ${String(body)}` : String(body);
     }
     case 'dispatch_decision': {
       const reason = dispatchReasonText(p);
-      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? ` — ${reason}` : ''}`;
+      return `Dispatched ${roleLabel(String(p.agent_role ?? 'agent'))} (${String(p.model_tier ?? '')}/${String(p.provider ?? '')})${reason ? `: ${reason}` : ''}`;
     }
     case 'schema-check-result':
-      return `Schema check — ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return `Schema check: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
     case 'deps-check-result':
       // The detail is the whole point of this row: "passed" alone cannot
       // distinguish an installed worktree from one with nothing to install.
-      return `Dependency check — ${GATE_VERDICT_WORD[gateVerdict(entry)]}: ${String(p.detail ?? '')}`;
+      return `Dependency check (${GATE_VERDICT_WORD[gateVerdict(entry)]}): ${String(p.detail ?? '')}`;
     case 'testgate-result':
-      return `Test gate — ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
+      return `Test gate: ${GATE_VERDICT_WORD[gateVerdict(entry)]}`;
     case 'gate-outcome': {
       // The outcome value itself when there is one — `blocked`,
       // `pass-with-waivers-pending` and the rest each mean something the word
       // "failed" would flatten. Only the absence needs naming (D-169), which
       // used to print as a dangling em dash and nothing after it.
       const verdict = gateVerdict(entry);
-      if (verdict === 'unrecorded') return 'Gate outcome — no outcome recorded';
-      return `Gate outcome — ${String(p.outcome)}`;
+      if (verdict === 'unrecorded') return 'Gate outcome: no outcome recorded';
+      return `Gate outcome: ${String(p.outcome)}`;
     }
     case 'finding-raised': {
       // The payload is the finding itself (findings.ts raiseFinding), so a
@@ -550,10 +655,10 @@ export function titleFor(entry: TimelineEntry): string {
         criterionRef: typeof ref.criterion_ref === 'string' ? ref.criterion_ref : null,
       });
       const summary = String(p.summary ?? p.finding_id ?? '');
-      return label ? `Finding raised — ${summary} (${label})` : `Finding raised — ${summary}`;
+      return label ? `Finding raised: ${summary} (${label})` : `Finding raised: ${summary}`;
     }
     case 'finding-transitioned':
-      return `Finding transitioned — ${String(p.to_status ?? '')}`;
+      return `Finding transitioned: ${String(p.to_status ?? '')}`;
     case 'severity-decisions':
       return 'Severity decisions recorded';
     case 'waiver-granted':
@@ -563,14 +668,14 @@ export function titleFor(entry: TimelineEntry): string {
     case 'task-waiver-approved':
       return 'Task waiver approved';
     case 'error-logged':
-      return `Error — ${String(p.error ?? '')}`;
+      return `Error: ${String(p.error ?? '')}`;
     case 'task-added':
-      return `Task added — ${String(p.objective ?? entry.taskId ?? '')}`;
+      return `Task added: ${String(p.objective ?? entry.taskId ?? '')}`;
     // The seven that queries.ts's FREE_TIMELINE_EVENT_TYPES used to drop
     // before the renderer ever saw them, plus lesson-status-changed, which
     // reached the timeline and rendered as its own event_type.
     case 'session-start':
-      return p.note ? `Session started — ${String(p.note)}` : 'Session started';
+      return p.note ? `Session started: ${String(p.note)}` : 'Session started';
     case 'task-result-recorded': {
       const detail = [
         p.agent,
@@ -578,7 +683,7 @@ export function titleFor(entry: TimelineEntry): string {
       ]
         .filter(Boolean)
         .join(', ');
-      return `Task result — ${String(p.run_status ?? '')}${detail ? ` (${detail})` : ''}`;
+      return `Task result: ${String(p.run_status ?? '')}${detail ? ` (${detail})` : ''}`;
     }
     case 'judge-verdict':
       // ok:false leaves verdict null: this run reached no verdict at all,
@@ -588,7 +693,7 @@ export function titleFor(entry: TimelineEntry): string {
       // deepseek runs whose API key was never exported, which sent no request
       // and so produced no answer to call unparseable (D-253). Rows written
       // before D-253 carry no code and say only "failed".
-      return `Judge verdict — ${p.ok === false ? judgeFailureLabel(p.error_code) : String(p.verdict ?? '')} (${String(p.agent ?? '')}/${String(p.provider ?? '')})`;
+      return `Judge verdict: ${p.ok === false ? judgeFailureLabel(p.error_code) : String(p.verdict ?? '')} (${String(p.agent ?? '')}/${String(p.provider ?? '')})`;
     case 'cross-finding-reconciled': {
       // The counts are the row. `independent-only` is what the native reviewer
       // missed and `native-only` is what the finder did, and an operator
@@ -599,14 +704,14 @@ export function titleFor(entry: TimelineEntry): string {
       const only = Number(counts['independent-only'] ?? 0);
       const both = Number(counts.corroborated ?? 0);
       const shadow = p.mode === 'shadow' ? ', shadow' : '';
-      return `Cross-finding — ${only} independent-only, ${both} corroborated (${String(
+      return `Cross-finding: ${only} independent-only, ${both} corroborated (${String(
         (p.providers as unknown[] | undefined)?.join(', ') ?? '',
       )}${shadow})`;
     }
     case 'judge-reported':
-      return `${String(p.agent_role ?? 'Judge')} reported — ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
+      return `${String(p.agent_role ?? 'Judge')} reported: ${String(p.finding_count ?? 0)} finding${p.finding_count === 1 ? '' : 's'} (round ${String(p.round ?? '')})`;
     case 'epic-closed':
-      return `Epic closed — ${String(p.epic_id ?? '')}: ${String(p.machine_verdict ?? '')}, ${String(p.tasks_merged ?? 0)} tasks merged`;
+      return `Epic closed: ${String(p.epic_id ?? '')}: ${String(p.machine_verdict ?? '')}, ${String(p.tasks_merged ?? 0)} tasks merged`;
     // run.md step 17. `repo#number` is the form GitHub itself resolves, and
     // the refs matter because a stacked PR (an epic cut from another epic's
     // integration branch) does not target `main` — the operator merging in
@@ -619,14 +724,14 @@ export function titleFor(entry: TimelineEntry): string {
         p.head_ref !== undefined && p.base_ref !== undefined
           ? ` (${String(p.head_ref)} → ${String(p.base_ref)})`
           : '';
-      return ref === '' ? 'Integration PR opened' : `Integration PR opened — ${ref}${refs}`;
+      return ref === '' ? 'Integration PR opened' : `Integration PR opened: ${ref}${refs}`;
     }
     case 'lesson-candidate-raised':
-      return `Lesson candidate — ${String(p.statement ?? p.lesson_id ?? '')}`;
+      return `Lesson candidate: ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-edited':
-      return `Lesson edited — ${String(p.statement ?? p.lesson_id ?? '')}`;
+      return `Lesson edited: ${String(p.statement ?? p.lesson_id ?? '')}`;
     case 'lesson-status-changed':
-      return `Lesson ${String(p.lesson_id ?? '')} — ${String(p.to_status ?? '')}`;
+      return `Lesson ${String(p.lesson_id ?? '')}: ${String(p.to_status ?? '')}`;
     // The scheduler writes its proposal object straight through as the
     // payload, so these read camelCase keys where the rest of this file reads
     // snake_case — the shape is scheduler.ts's SchedulerProposal, not an
@@ -638,7 +743,7 @@ export function titleFor(entry: TimelineEntry): string {
     // "recheck-proposed" with no task on it asks a question nobody can answer.
     case 'recheck-proposed': {
       const reasons = Array.isArray(p.reasons) ? p.reasons.join(', ') : '';
-      return `Recheck proposed — ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
+      return `Recheck proposed: ${String(p.taskId ?? p.epicId ?? '')}${reasons ? ` (${reasons})` : ''}`;
     }
     case 'maintenance-proposed': {
       const packages = Array.isArray(p.packages) ? p.packages : [];
@@ -649,15 +754,15 @@ export function titleFor(entry: TimelineEntry): string {
       const rest = packages.length - names.length;
       const detail =
         names.length > 0 ? `${names.join(', ')}${rest > 0 ? ` +${rest}` : ''}` : 'none';
-      return `Maintenance proposed — ${packages.length} outdated (${detail})`;
+      return `Maintenance proposed: ${packages.length} outdated (${detail})`;
     }
     case 'growth-review-due': {
       const since = p.lastReviewAt ? `, last ${String(p.lastReviewAt).slice(0, 10)}` : '';
-      return `Growth review due — every ${String(p.cadenceDays ?? '?')} days${since}`;
+      return `Growth review due: every ${String(p.cadenceDays ?? '?')} days${since}`;
     }
     case 'error-report-proposed': {
       const count = Number(p.occurrences ?? 0);
-      return `Error report proposed — ${String(p.errorClass ?? '')} in ${String(p.taskRef ?? '')} (${count} occurrence${count === 1 ? '' : 's'})`;
+      return `Error report proposed: ${String(p.errorClass ?? '')} in ${String(p.taskRef ?? '')} (${count} occurrence${count === 1 ? '' : 's'})`;
     }
     // The plan graph, the dimension the Plan chip selects. `task-added` was
     // already here; the rest reached the timeline and rendered as their own
@@ -667,21 +772,21 @@ export function titleFor(entry: TimelineEntry): string {
       const amends = Array.isArray(p.amends) ? p.amends.length : 0;
       const from = p.previous_version == null ? '' : ` amends v${String(p.previous_version)}`;
       const why = p.rationale ? `: ${String(p.rationale)}` : '';
-      return `Plan v${String(p.version ?? '?')}${from} — ${amends} finding${amends === 1 ? '' : 's'} cited${why}`;
+      return `Plan v${String(p.version ?? '?')}${from}: ${amends} finding${amends === 1 ? '' : 's'} cited${why}`;
     }
     case 'plan-version-superseded':
       return `Plan v${String(p.version ?? '?')} superseded`;
     case 'task-split':
-      return `Task split — ${String(entry.taskId ?? '')}`;
+      return `Task split: ${String(entry.taskId ?? '')}`;
     case 'task-superseded':
-      return `Task superseded — ${String(entry.taskId ?? '')}`;
+      return `Task superseded: ${String(entry.taskId ?? '')}`;
     case 'edge-recorded':
-      return `Edge — ${String(entry.taskId ?? '')} depends on ${String(p.depends_on ?? '')}`;
+      return `Edge: ${String(entry.taskId ?? '')} depends on ${String(p.depends_on ?? '')}`;
     case 'wave-admitted': {
       const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
       const shown = ids.slice(0, 3).join(', ');
       const rest = ids.length - Math.min(ids.length, 3);
-      return `Wave admitted — ${ids.length} task${ids.length === 1 ? '' : 's'}${shown ? ` (${shown}${rest > 0 ? ` +${rest}` : ''})` : ''}`;
+      return `Wave admitted: ${ids.length} task${ids.length === 1 ? '' : 's'}${shown ? ` (${shown}${rest > 0 ? ` +${rest}` : ''})` : ''}`;
     }
     case 'wave-merged': {
       // One event per task, carrying a single-element task_ids (taskEvents.ts),
@@ -689,7 +794,7 @@ export function titleFor(entry: TimelineEntry): string {
       // reaches this event whole.
       const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
       const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
-      const detail = files === null ? '' : ` — ${files} file${files === 1 ? '' : 's'} changed`;
+      const detail = files === null ? '' : ` (${files} file${files === 1 ? '' : 's'} changed)`;
       return `Merged ${ids.join(', ') || String(entry.taskId ?? '')}${detail}`;
     }
     // The worker's own words, in the worker's own order: which criterion, what
@@ -699,23 +804,134 @@ export function titleFor(entry: TimelineEntry): string {
     case 'spec-change-proposed': {
       const sites = Array.isArray(p.sites) ? p.sites.length : 0;
       const blocking = p.blocking ? 'blocking' : 'non-blocking';
-      return `Spec change proposed by ${String(p.proposed_by ?? 'worker')} — ${String(p.criterion_ref ?? '')}: ${String(p.assumption ?? '')} (${blocking}, ${sites} site${sites === 1 ? '' : 's'})`;
+      return `Spec change proposed by ${String(p.proposed_by ?? 'worker')} on ${String(p.criterion_ref ?? '')}: ${String(p.assumption ?? '')} (${blocking}, ${sites} site${sites === 1 ? '' : 's'})`;
     }
     // A rejection carries no plan version by design — refusing a proposal cuts
     // nothing — so the version is named only when there is one, and the
     // operator's reasons ride along either way.
     case 'spec-change-decided': {
-      const version = p.plan_version == null ? '' : ` — plan v${String(p.plan_version)}`;
+      const version = p.plan_version == null ? '' : ` (plan v${String(p.plan_version)})`;
       const why = p.rationale ? `: ${String(p.rationale)}` : '';
       return `Spec change ${String(p.decision ?? 'decided')}${version}${why}`;
     }
     default:
-      return entry.eventType;
+      return humanizeEventType(entry.eventType);
   }
 }
 
-export function metaFor(entry: TimelineEntry): string {
-  return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+/** Fallback title for an event type `titleFor`'s switch has no case for yet:
+ * "operator-feedback-resolved" -> "Operator feedback resolved", so a raw
+ * kebab-case type slug never reaches the row as-is. */
+function humanizeEventType(eventType: string): string {
+  const [first, ...rest] = eventType.split(/[-_]/).filter(Boolean);
+  if (first === undefined) return eventType;
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(' ');
+}
+
+/**
+ * The meta line under a TimelineRow's title (ds-spec.md §4.3's per-kind
+ * table, reproduced in each case below). A field that is simply absent from
+ * the row's own kind (e.g. `run` on anything but `dispatch`) is skipped
+ * rather than printed as "not measured" — "not measured" is reserved for a
+ * field the kind IS supposed to carry but this particular row's payload
+ * came back null for (D-169's own "say the absence" rule, one level down:
+ * a null counts, a field that doesn't exist for this kind never did).
+ * Two exceptions, both visual pass round 4 item 2: `duration_ms` (no writer
+ * stamps it anywhere today) and an unresolved "because of" prompt link (the
+ * prompt exists, the caller just couldn't resolve it from what it has in
+ * hand) are both omitted rather than labelled — see `durationItem` and
+ * `becauseOfItem`.
+ */
+/** Fix brief item 1 (S2): the `feedback` kind covers six event types, not
+ * just the two waivers, and each needs its own honest meta label rather than
+ * the single word "Waiver" every one of them used to get. Each label reuses
+ * the prefix `titleFor()` already prints for that event type. */
+const FEEDBACK_LABEL: Record<string, string> = {
+  'waiver-granted': 'Waiver granted',
+  'waiver-denied': 'Waiver denied',
+  'judge-verdict': 'Judge verdict',
+  'cross-finding-reconciled': 'Cross-finding reconciled',
+  'spec-change-proposed': 'Spec change proposed',
+  'spec-change-decided': 'Spec change decided',
+};
+
+export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
+  const p = entry.payload as Record<string, unknown>;
+  const kind = kindFor(entry);
+  const parts: (string | null)[] = [];
+  switch (kind) {
+    case 'dispatch': {
+      const round = entry.run?.round ?? (typeof p.round === 'number' ? p.round : null);
+      if (round != null) parts.push(`round ${round}`);
+      if (entry.run?.runStatus == null) {
+        // Still running: no terminal result yet, so no token/duration totals.
+        // ds-spec.md §4.3 spells the seconds case with a space ("Running for
+        // 12 s"); formatElapsed's own terse "12s" is right for every other
+        // unit, so only that one case gets split back apart.
+        const elapsed = formatElapsed(entry.ts, ctx.now).replace(/^(\d+)s$/, '$1 s');
+        parts.push(`Running for ${elapsed}`);
+      } else {
+        parts.push(tokensItem(entry.run));
+        parts.push(durationItem(entry.run.durationMs));
+      }
+      parts.push(becauseOfItem(ctx));
+      break;
+    }
+    case 'returned': {
+      parts.push(tokensItem(entry.run));
+      parts.push(durationItem(entry.run?.durationMs));
+      parts.push(entry.run?.runStatus == null ? NOT_MEASURED : String(entry.run.runStatus));
+      break;
+    }
+    case 'finding': {
+      if (p.agent_role) parts.push(roleLabel(String(p.agent_role)));
+      if (p.round != null) parts.push(`round ${String(p.round)}`);
+      if (p.overall) parts.push(String(p.overall));
+      break;
+    }
+    case 'gate': {
+      const checkName = GATE_CHECK_NAME[entry.eventType] ?? entry.eventType;
+      parts.push(checkName);
+      parts.push(gateCountsItem(entry.gateCounts));
+      if (p.round != null) parts.push(`round ${String(p.round)}`);
+      break;
+    }
+    case 'merge': {
+      const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
+      parts.push(ids.join(', ') || taskLabel(String(entry.taskId ?? '')));
+      const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
+      parts.push(files === null ? NOT_MEASURED : `${files} file${files === 1 ? '' : 's'} changed`);
+      break;
+    }
+    case 'prompt': {
+      // ds-review.html #p-activity: "You · caused 2 dispatches" — titleFor()
+      // already renders the verbatim prompt text as the title, so "You"
+      // names the speaker only here, in the meta line.
+      parts.push('You');
+      parts.push(
+        ctx.causedCount == null
+          ? NOT_MEASURED
+          : `caused ${ctx.causedCount} dispatch${ctx.causedCount === 1 ? '' : 'es'}`,
+      );
+      break;
+    }
+    case 'error': {
+      if (p.class) parts.push(String(p.class));
+      if (p.severity) parts.push(String(p.severity));
+      break;
+    }
+    case 'feedback': {
+      parts.push(FEEDBACK_LABEL[entry.eventType] ?? 'Waiver');
+      if (entry.taskId) parts.push(taskLabel(entry.taskId));
+      break;
+    }
+    case 'system':
+      return '';
+    default:
+      return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+  }
+  const filtered = parts.filter((part): part is string => Boolean(part));
+  return filtered.join(' · ');
 }
 
 const SHORT_MONTHS = [
@@ -768,6 +984,66 @@ function dayLabel(day: Date, nowIso: string): string {
  * `RunHistoryTimeline`'s own list are both newest-first already, and grouping
  * is the wrong place to second-guess that.
  */
+/** Minimum run length worth folding on the flat Activity feed — same
+ * threshold as DISPATCH_GROUP_MIN, kept as its own constant because this is
+ * a different fold (role + minute, not causal siblings). */
+const ROLE_MINUTE_GROUP_MIN = 3;
+
+/** A run of same-role Dispatched rows landing in the same minute, folded into
+ * one summary ("Builder ×4" — round/total tokens/longest duration are read
+ * off `group.members` by the caller, same as `groupDispatches`'s groups).
+ * Deviation from the brief's "in wave N" wording: a paged `ActivityEntry`
+ * carries no wave id (api.ts's TimelineEntry/TimelinePage shape), so the fold
+ * keys on role + minute only — see PR3's return report. */
+export interface RoleMinuteItem {
+  kind: 'entry' | 'group';
+  entry?: ActivityEntry;
+  group?: { id: string; role: string; members: ActivityEntry[] };
+}
+
+function dispatchRoleOf(entry: ActivityEntry): string {
+  return String((entry.payload as { agent_role?: string }).agent_role ?? 'agent');
+}
+
+function minuteKey(ts: string): string {
+  return ts.slice(0, 16); // YYYY-MM-DDTHH:MM
+}
+
+export function groupByRoleMinute(entries: readonly ActivityEntry[]): RoleMinuteItem[] {
+  const items: RoleMinuteItem[] = [];
+  let run: ActivityEntry[] = [];
+  const flush = () => {
+    const first = run[0];
+    if (first !== undefined && run.length >= ROLE_MINUTE_GROUP_MIN) {
+      items.push({
+        kind: 'group',
+        group: { id: `role-minute-${first.eventId}`, role: dispatchRoleOf(first), members: run },
+      });
+    } else {
+      for (const entry of run) items.push({ kind: 'entry', entry });
+    }
+    run = [];
+  };
+  for (const entry of entries) {
+    const foldable = kindFor(entry) === 'dispatch';
+    const last = run[run.length - 1];
+    const sameRun =
+      foldable &&
+      last !== undefined &&
+      dispatchRoleOf(entry) === dispatchRoleOf(last) &&
+      minuteKey(entry.ts) === minuteKey(last.ts);
+    if (foldable && (run.length === 0 || sameRun)) {
+      run.push(entry);
+    } else {
+      flush();
+      if (foldable) run.push(entry);
+      else items.push({ kind: 'entry', entry });
+    }
+  }
+  flush();
+  return items;
+}
+
 export function groupByDay<T extends { ts: string }>(
   items: readonly T[],
   nowIso: string,

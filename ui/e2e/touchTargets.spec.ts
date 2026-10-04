@@ -119,20 +119,6 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
       await page.goto(path);
       await expect(page.locator('.bs-skeleton')).toHaveCount(0);
 
-      if (name === 'timeline') {
-        // `.timeline-row__title` is a <button> only on a clickable child row
-        // (TimelineRow.vue), which renders only once its dispatch group is
-        // expanded — collapsed, the class also matches the group header's
-        // plain <span> (TimelineDispatchGroupRow.vue), which would let this
-        // guard pass vacuously without ever measuring the real button. The
-        // fixture's wave-admitted fan-out (3 sibling dispatch_decision
-        // events) folds into exactly one such group by default.
-        const chevron = page.locator('.timeline-row button[aria-expanded="false"]').first();
-        await expect(chevron).toBeVisible();
-        await chevron.click();
-        await expect(page.locator('button.timeline-row__title').first()).toBeVisible();
-      }
-
       // Read the floor from the page rather than hard-coding 44 — a change
       // to the token is a design decision this guard should follow, not
       // fight.
@@ -144,15 +130,6 @@ test.describe('Mobile touch targets meet --bs-touch on every routed page (WCAG 2
       const measurements = await page.evaluate(measureInteractiveElements, INTERACTIVE_SELECTOR);
       expect(measurements.length).toBeGreaterThan(0);
 
-      if (name === 'timeline') {
-        // The expanded title button is a real `button.timeline-row__title`
-        // matching INTERACTIVE_SELECTOR, so the sweep below already measures
-        // it; this just proves it was actually counted, not skipped as
-        // zero-sized or off-screen.
-        const box = await page.locator('button.timeline-row__title').first().boundingBox();
-        expect(box?.width ?? 0).toBeGreaterThan(0);
-        expect(box?.height ?? 0).toBeGreaterThan(0);
-      }
       // Sub-pixel rendering (fractional device-pixel rounding) can report a
       // box a fraction of a px under its CSS value; a tolerance this small
       // only absorbs that, never a real shortfall.

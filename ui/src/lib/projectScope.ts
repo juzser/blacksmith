@@ -15,12 +15,14 @@ export const SCOPABLE_ROUTES: ReadonlySet<string> = new Set([
   'overview-global',
   'overview-project',
   'sessions',
+  // 'timeline' is /activity's route name (kept across the DS6 PR3 rename) —
+  // /errors now redirects into it rather than naming its own route, same
+  // scope chain either way: the page passes `project` to fetchTimelinePage,
+  // /api/timeline forwards it, and timeline() filters on it.
   'timeline',
-  // Errors and Analytics ship the full scope chain — the page passes
-  // `project` to fetchErrors/fetchAnalytics, /api/errors and /api/analytics
-  // forward it, and errorsPage/analytics filter on it — and both watch
-  // `project` for a re-fetch. They were the two the switcher forgot.
-  'errors',
+  // Analytics ships the full scope chain too — the page passes `project` to
+  // fetchAnalytics, /api/analytics forwards it, and it filters on it — and
+  // watches `project` for a re-fetch. It was the other one the switcher forgot.
   'analytics',
   'work-kanban',
   'work-roadmap',

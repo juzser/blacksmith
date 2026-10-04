@@ -308,7 +308,7 @@ describe('topbar session picker visibility (ds-spec.md §3): Activity and Work -
   it('does not require every scope-reading page to also carry the picker: hidden routes still read the URL scope for deep links', () => {
     const stillReading = [
       'KanbanPage.vue',
-      'ErrorsPage.vue',
+      'ActivityPage.vue',
       'AnalyticsPage.vue',
       'SessionsPage.vue',
       'HomePage.vue',

@@ -23,7 +23,9 @@ const MANUAL_REFRESH_PAGES = [
     api: '/api/tasks/',
   },
   { name: 'Lessons', path: '/lessons', ready: null, api: '/api/lessons' },
-  { name: 'Errors', path: '/errors', ready: null, api: '/api/errors' },
+  // /errors now redirects into Activity (errorsRedirect, activityRoute.ts),
+  // which fetches the same /api/timeline the Activity page itself does.
+  { name: 'Errors', path: '/errors', ready: null, api: '/api/timeline' },
   { name: 'Analytics', path: '/analytics', ready: null, api: '/api/analytics' },
 ] as const;
 

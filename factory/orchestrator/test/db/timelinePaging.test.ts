@@ -228,7 +228,10 @@ describe('timeline() paging (DS6)', () => {
     expect(eventKind('error-logged', {})).toBe('Error');
     expect(eventKind('waiver-granted', {})).toBe('Feedback');
     expect(eventKind('waiver-denied', {})).toBe('Feedback');
-    expect(eventKind('operator-note', {})).toBe('System');
+    // DS6 PR3 r2: operator-note is a Prompt row, same as user_prompt (both
+    // are the operator's own words), not System -- fixed alongside the rest
+    // of eventKind()'s taxonomy coverage in queries.ts.
+    expect(eventKind('operator-note', {})).toBe('Prompt');
   });
 
   it('nearestPromptId resolves through several causal hops; a prompt answers itself; an orphan is null', async () => {
