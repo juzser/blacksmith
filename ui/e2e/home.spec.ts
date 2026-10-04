@@ -364,7 +364,7 @@ test.describe('Home: Recent activity', () => {
       ts: minutesAgo(i),
       eventType: 'user_prompt',
       kind: 'prompt',
-      taskId: null,
+      taskId: null as string | null,
       agentId: null,
       planVersion: 1,
       causalParent: null,
@@ -431,14 +431,17 @@ test.describe('Home: Recent activity', () => {
   // span to target instead of the button itself — a long task-linked title
   // must still end in an ellipsis, not spill out of the row.
   test('375px: a long task-linked title still ellipsizes instead of spilling', async ({ page }) => {
-    const entries = syntheticEntries(8);
-    entries[0] = {
-      ...entries[0],
-      taskId: 'epic-1/task-12-rewrite-onboarding-wizard-copy',
-      payload: {
-        prompt: 'Rewrite the onboarding wizard copy and every validation message end to end',
-      },
-    };
+    const entries = syntheticEntries(8).map((entry, i) =>
+      i === 0
+        ? {
+            ...entry,
+            taskId: 'epic-1/task-12-rewrite-onboarding-wizard-copy',
+            payload: {
+              prompt: 'Rewrite the onboarding wizard copy and every validation message end to end',
+            },
+          }
+        : entry,
+    );
     await serveTimeline(page, entries);
     await page.setViewportSize(PHONE);
     await page.goto('/overview');
