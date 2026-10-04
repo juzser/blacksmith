@@ -724,6 +724,27 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  // DS3 §2.4c's total bar — tokens, agent time and elapsed, additive on the
+  // same route; "not measured" is null, never a bare 0.
+  it('GET /api/tasks/:taskId/runs includes totals: measured tokens sum, null agentTimeMs (no writer stamps duration), elapsed from first to last run', async () => {
+    const handle = app();
+    const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}/runs`);
+    const { totals } = await json<{
+      totals: { tokens: number | null; agentTimeMs: number | null; elapsedMs: number | null };
+    }>(found);
+    expect(totals.tokens).toBe(2000);
+    expect(totals.agentTimeMs).toBeNull();
+    expect(totals.elapsedMs).not.toBeNull();
+    expect(totals.elapsedMs as number).toBeGreaterThanOrEqual(0);
+
+    const unknown = await handle.app.request('/api/tasks/no-such-task/runs');
+    const unknownTotals = (
+      await json<{ totals: { tokens: null; agentTimeMs: null; elapsedMs: null } }>(unknown)
+    ).totals;
+    expect(unknownTotals).toEqual({ tokens: null, agentTimeMs: null, elapsedMs: null });
+    closeApp(handle);
+  });
+
   describe('GET /api/artifacts/:artifactId', () => {
     let artifactsDir: string;
 
@@ -859,6 +880,17 @@ describe('ui/server app.ts', () => {
       const res = await handle.app.request(route);
       expect(res.status, route).toBe(200);
     }
+    closeApp(handle);
+  });
+
+  it('GET /api/errors keeps byClass/byDay and adds classSummary (DS6 PR2)', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/errors');
+    expect(res.status).toBe(200);
+    const body = await json<{ byClass: unknown; byDay: unknown; classSummary: unknown }>(res);
+    expect(Array.isArray(body.byClass)).toBe(true);
+    expect(Array.isArray(body.byDay)).toBe(true);
+    expect(Array.isArray(body.classSummary)).toBe(true);
     closeApp(handle);
   });
 

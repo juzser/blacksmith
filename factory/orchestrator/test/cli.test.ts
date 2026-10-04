@@ -2114,7 +2114,7 @@ describe('cli.ts (built binary)', () => {
 
     const errorsResult = runCli(['stats', 'errors', '--db', dbPath, '--session', sessionId]);
     expect(errorsResult.status).toBe(0);
-    expect(JSON.parse(errorsResult.stdout)).toEqual({ byClass: [], byDay: [] });
+    expect(JSON.parse(errorsResult.stdout)).toEqual({ byClass: [], byDay: [], classSummary: [] });
 
     const analyticsResult = runCli(['stats', 'analytics', '--db', dbPath, '--session', sessionId]);
     expect(analyticsResult.status).toBe(0);
