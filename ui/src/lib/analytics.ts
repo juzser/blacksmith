@@ -191,9 +191,13 @@ export function frontierMidRatio(
   return frontier / mid;
 }
 
-/** "The strongest model costs about 27x the standard one per task." */
-export function ratioTakeaway(ratio: number | null): string | null {
-  if (ratio === null) return null;
+/**
+ * "The strongest model costs about 27x the standard one per task." — or a
+ * fallback line when the ratio has no denominator (e.g. only one tier has
+ * run), since §4.4 requires every card to carry a takeaway, never none at all.
+ */
+export function ratioTakeaway(ratio: number | null): string {
+  if (ratio === null) return 'Needs runs on both frontier and mid tiers to compare.';
   return `The strongest model costs about ${Math.round(ratio)}x the standard one per task.`;
 }
 
@@ -244,7 +248,6 @@ export function secondOpinionTakeaway(summary: SecondOpinionSummary): string {
   return `agreed with the main reviewer; ${formatSeconds(summary.meanLatencyMs)} average.`;
 }
 
-const NOT_MEASURED_KEY = 'Not measured';
 const CHART_TONES = [
   'var(--bs-chart-1)',
   'var(--bs-chart-2)',
@@ -256,10 +259,14 @@ const CHART_TONES = [
 
 /**
  * The series keys the daily stacked chart needs for `by`, in first-seen
- * order across the window so a poll cannot reshuffle the legend, plus a
- * trailing "Not measured" key when any day in range had an unmeasured run —
- * never added when every run in range was measured, which is not the same
- * claim as "drawn at zero" (DS7 §4.4 item 2).
+ * order across the window so a poll cannot reshuffle the legend.
+ *
+ * An unmeasured run is a run COUNT, not a token total: mixed into a token
+ * series it renders as an invisible sliver next to real token totals — the
+ * same claim-from-silence the spec forbids, just drawn too small to see
+ * rather than at zero. It is surfaced instead through `sumUnmeasuredRuns` /
+ * `notMeasuredCaption` (a caption under the chart) and `breakdownTokensText`
+ * (the breakdown table), never as a bar segment here.
  */
 export function dailySeriesKeys(
   days: readonly DailyTokenBucket[],
@@ -277,28 +284,21 @@ export function dailySeriesKeys(
       }
     }
   }
-  if (days.some((day) => day.unmeasuredRunCount > 0)) keys.push(NOT_MEASURED_KEY);
   return keys;
 }
 
 /** Pairs `dailySeriesKeys`' output with a stable chart tone, cycling the palette. */
 export function chartSeries(keys: readonly string[]): { key: string; tone: string }[] {
-  let colorIndex = 0;
-  return keys.map((key) => {
-    if (key === NOT_MEASURED_KEY) return { key, tone: 'var(--bs-text-subtlest)' };
-    const tone = CHART_TONES[colorIndex % CHART_TONES.length] ?? CHART_TONES[0];
-    colorIndex += 1;
-    return { key, tone: tone as string };
-  });
+  return keys.map((key, i) => ({
+    key,
+    tone: CHART_TONES[i % CHART_TONES.length] ?? CHART_TONES[0],
+  }));
 }
 
 /**
  * One stacked bar per day, keyed the same way `dailySeriesKeys` labels its
  * series, so `kit/BarChart.vue`'s `entry.values[series[i].key]` lookup
- * matches. `unmeasuredRunCount` is a run count, not a token total — pushed
- * through verbatim as the "Not measured" segment's value rather than
- * invented as a token-equivalent estimate, since the requirement is that an
- * unmeasured run stays visible, not that every segment share a unit.
+ * matches. Never carries an unmeasured-run segment — see `dailySeriesKeys`.
  */
 export function dailyStackedBars(
   days: readonly DailyTokenBucket[],
@@ -310,34 +310,59 @@ export function dailyStackedBars(
     for (const [rawKey, tokens] of Object.entries(source)) {
       values[by === 'role' ? roleLabel(rawKey) : tierLabel(rawKey)] = tokens;
     }
-    if (day.unmeasuredRunCount > 0) values[NOT_MEASURED_KEY] = day.unmeasuredRunCount;
     return { label: day.day, values };
   });
 }
 
 /**
+ * Sums `unmeasuredRunCount` across any bucket shape that carries one — the
+ * daily buckets for the chart caption, the role/tier buckets for the
+ * breakdown-table caption.
+ */
+export function sumUnmeasuredRuns(buckets: readonly { unmeasuredRunCount: number }[]): number {
+  return buckets.reduce((sum, b) => sum + b.unmeasuredRunCount, 0);
+}
+
+/**
+ * "N run(s) not measured." under a chart, or `null` to hide the caption
+ * outright when every run in range was measured (DS7 §4.4 item 1) — the
+ * form an unmeasured run surfaces in now that it no longer rides the token
+ * axis as a bar segment.
+ */
+export function notMeasuredCaption(count: number): string | null {
+  if (count === 0) return null;
+  return `${count} ${count === 1 ? 'run' : 'runs'} not measured.`;
+}
+
+/**
  * Total tokens per role or model tier over the selected period, rolled up
- * from `tokensByRoleAndModelTier` (one row per role/model-tier pair) —
- * the horizontal chart's bars (DS7 §4.4 item 3). A trailing "Not measured"
- * bar carries the summed run count, same reasoning as `dailyStackedBars`.
+ * from `tokensByRoleAndModelTier` (one row per role/model-tier pair) — the
+ * horizontal chart's bars (DS7 §4.4 item 3). Never carries an unmeasured-run
+ * bar; see `dailySeriesKeys`.
  */
 export function tokenTotalsBy(
   buckets: readonly RoleModelTierBucket[],
   by: 'role' | 'modelTier',
 ): { label: string; value: number }[] {
   const totals = new Map<string, number>();
-  let unmeasured = 0;
   for (const bucket of buckets) {
     const label = by === 'role' ? roleLabel(bucket.role) : tierLabel(bucket.modelTier);
     totals.set(label, (totals.get(label) ?? 0) + bucket.tokens);
-    unmeasured += bucket.unmeasuredRunCount;
   }
-  const series = [...totals].map(([label, value]) => ({ label, value }));
-  if (unmeasured > 0) series.push({ label: NOT_MEASURED_KEY, value: unmeasured });
-  return series;
+  return [...totals].map(([label, value]) => ({ label, value }));
 }
 
 /** "1.2K tok", or "not measured" for a pair with no average to report, never 0. */
 export function formatAvgTokensPerRun(avg: number | null): string {
   return avg === null ? 'not measured' : `${formatCompactNumber(avg)} tok`;
+}
+
+/**
+ * The breakdown table's tokens column: the real total, or "Not measured"
+ * when every run in the pair went unmeasured — never a fabricated 0 (DS7
+ * §4.4 item 1).
+ */
+export function breakdownTokensText(bucket: RoleModelTierBucket): string {
+  if (bucket.runCount > 0 && bucket.unmeasuredRunCount === bucket.runCount) return 'Not measured';
+  return formatTokens(bucket.tokens);
 }

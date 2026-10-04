@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  breakdownTokensText,
   chartSeries,
   costPerTask,
   costPerTaskBy,
@@ -16,11 +17,13 @@ import {
   hasMultipleProviders,
   latestSameMistakeRate,
   MIN_SETTLED_FOR_RATE,
+  notMeasuredCaption,
   rateOrNotEnoughData,
   ratioTakeaway,
   recheckPassRate,
   secondOpinionSummary,
   secondOpinionTakeaway,
+  sumUnmeasuredRuns,
   tokenTotalsBy,
 } from '../src/lib/analytics.js';
 import type {
@@ -309,8 +312,8 @@ describe('lib/analytics.ts — frontierMidRatio / ratioTakeaway', () => {
     );
   });
 
-  it('has no takeaway when there is no ratio', () => {
-    expect(ratioTakeaway(null)).toBeNull();
+  it('falls back to short copy when there is no ratio to report, never no takeaway at all', () => {
+    expect(ratioTakeaway(null)).toBe('Needs runs on both frontier and mid tiers to compare.');
   });
 });
 
@@ -395,18 +398,18 @@ describe('lib/analytics.ts — dailySeriesKeys / dailyStackedBars / chartSeries'
     expect(keys).toEqual(['Builder', 'Code reviewer']);
   });
 
-  it('appends a "Not measured" key only when some day had an unmeasured run', () => {
+  it('never appends a "Not measured" key — a run count has no place on the token axis', () => {
     expect(dailySeriesKeys([dayBucket({ tokensByRole: { coder: 1 } })], 'role')).toEqual([
       'Builder',
     ]);
     expect(
       dailySeriesKeys([dayBucket({ tokensByRole: { coder: 1 }, unmeasuredRunCount: 2 })], 'role'),
-    ).toEqual(['Builder', 'Not measured']);
+    ).toEqual(['Builder']);
   });
 
-  it('never drops the not-measured segment into a fabricated 0 bar — it is its own value', () => {
+  it('never plots an unmeasured run count as a token-axis segment', () => {
     const bars = dailyStackedBars([dayBucket({ unmeasuredRunCount: 4 })], 'role');
-    expect(bars[0]?.values['Not measured']).toBe(4);
+    expect(bars[0]?.values['Not measured']).toBeUndefined();
   });
 
   it('builds stacked bars keyed the same way the toggle labels its series, by tier too', () => {
@@ -419,10 +422,31 @@ describe('lib/analytics.ts — dailySeriesKeys / dailyStackedBars / chartSeries'
     ]);
   });
 
-  it('gives the Not measured key a neutral tone, never one of the chart colours', () => {
-    const series = chartSeries(['Builder', 'Not measured']);
+  it('every chart key gets one of the cycling chart tones', () => {
+    const series = chartSeries(['Builder', 'Code reviewer']);
     expect(series[0]?.tone).toMatch(/^var\(--bs-chart-/);
-    expect(series[1]).toEqual({ key: 'Not measured', tone: 'var(--bs-text-subtlest)' });
+    expect(series[1]?.tone).toMatch(/^var\(--bs-chart-/);
+  });
+});
+
+describe('lib/analytics.ts — sumUnmeasuredRuns / notMeasuredCaption', () => {
+  it('sums unmeasuredRunCount across the given buckets', () => {
+    expect(
+      sumUnmeasuredRuns([
+        dayBucket({ unmeasuredRunCount: 2 }),
+        dayBucket({ unmeasuredRunCount: 3 }),
+      ]),
+    ).toBe(5);
+    expect(sumUnmeasuredRuns([])).toBe(0);
+  });
+
+  it('returns null (no caption) when the count is zero', () => {
+    expect(notMeasuredCaption(0)).toBeNull();
+  });
+
+  it('pluralises the caption for more than one run', () => {
+    expect(notMeasuredCaption(1)).toBe('1 run not measured.');
+    expect(notMeasuredCaption(3)).toBe('3 runs not measured.');
   });
 });
 
@@ -457,12 +481,9 @@ describe('lib/analytics.ts — tokenTotalsBy', () => {
     ]);
   });
 
-  it('appends a Not measured bar carrying the summed unmeasured run count', () => {
+  it('never appends a Not measured bar — a run count has no place on the token axis', () => {
     expect(tokenTotalsBy([roleTierBucket({ tokens: 100, unmeasuredRunCount: 3 })], 'role')).toEqual(
-      [
-        { label: 'Builder', value: 100 },
-        { label: 'Not measured', value: 3 },
-      ],
+      [{ label: 'Builder', value: 100 }],
     );
   });
 });
@@ -474,6 +495,20 @@ describe('lib/analytics.ts — formatAvgTokensPerRun', () => {
 
   it('renders a real average with its unit', () => {
     expect(formatAvgTokensPerRun(1234)).toBe('1.2K tok');
+  });
+});
+
+describe('lib/analytics.ts — breakdownTokensText', () => {
+  it('formats the real total when at least one run was measured', () => {
+    expect(
+      breakdownTokensText(roleTierBucket({ tokens: 100, runCount: 2, unmeasuredRunCount: 1 })),
+    ).toBe('100 tok');
+  });
+
+  it('reads "Not measured" when every run in the pair went unmeasured', () => {
+    expect(
+      breakdownTokensText(roleTierBucket({ tokens: 0, runCount: 2, unmeasuredRunCount: 2 })),
+    ).toBe('Not measured');
   });
 });
 
