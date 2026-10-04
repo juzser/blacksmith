@@ -20,6 +20,7 @@ import {
   overview,
   pulse,
   requestQuoteForTask,
+  sessionAgents,
   taskDetail,
   taskRuns,
   timeline,
@@ -28,6 +29,7 @@ import { eventsRaw, findings, tasks } from '../../src/db/schema.js';
 import { appendEvent, type EventOpts, readEvents } from '../../src/events.js';
 import type { EventContext } from '../../src/findings.js';
 import { LEGAL_TRANSITIONS, raiseFinding, transition } from '../../src/findings.js';
+import { recordUserPrompt } from '../../src/prompts.js';
 import { loadTaxonomy } from '../../src/taxonomy.js';
 import { WAIVABLE_SEVERITIES } from '../../src/waivers.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1, TASK_2, TASK_3, TASK_4 } from './fixtures.js';
@@ -1406,6 +1408,173 @@ describe('db/queries.ts', () => {
     });
   });
 
+  describe('sessionAgents() (DS8 plan F)', () => {
+    const session = 'sess-agents';
+    const epic = 'epic-agents';
+    const task1 = `${epic}/task-1`;
+    const task2 = `${epic}/task-2`;
+    const task3 = `${epic}/task-3`;
+    const task4 = `${epic}/task-4`;
+
+    async function build(): Promise<void> {
+      let body = tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session);
+      body += tiedLine(
+        'task-added',
+        '2029-05-31T00:00:00.000Z',
+        { task_id: task1, title: 'Fix the widget' },
+        session,
+      );
+      body += tiedLine('task-added', '2029-05-31T00:00:00.000Z', { task_id: task2 }, session);
+      body += tiedLine('task-added', '2029-05-31T00:00:00.000Z', { task_id: task3 }, session);
+      body += tiedLine('task-added', '2029-05-31T00:00:00.000Z', { task_id: task4 }, session);
+      body += tiedLine(
+        'dispatch_decision',
+        '2029-06-01T00:00:00.000Z',
+        { task_id: task1, agent_role: 'coder', provider: 'claude', model_tier: 'mid' },
+        session,
+      );
+      body += tiedLine(
+        'gate-outcome',
+        '2029-06-01T00:02:00.000Z',
+        { task_id: task1, outcome: 'blocked', reason: 'tests-failed' },
+        session,
+      );
+      body += tiedLine(
+        'dispatch_decision',
+        '2029-06-01T00:05:00.000Z',
+        { task_id: task2, agent_role: 'reviewer', provider: 'claude', model_tier: 'mid' },
+        session,
+      );
+      body += tiedLine(
+        'task-result-recorded',
+        '2029-06-01T00:06:00.000Z',
+        {
+          task_id: task2,
+          agent: 'reviewer',
+          run_status: 'done',
+          token_usage: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
+        },
+        session,
+      );
+      body += tiedLine(
+        'gate-outcome',
+        '2029-06-01T00:07:00.000Z',
+        { task_id: task2, outcome: 'merged' },
+        session,
+      );
+      body += tiedLine(
+        'dispatch_decision',
+        '2029-06-01T00:10:00.000Z',
+        { task_id: task3, agent_role: 'coder', provider: 'claude', model_tier: 'mid' },
+        session,
+      );
+      body += tiedLine(
+        'task-result-recorded',
+        '2029-06-01T00:11:00.000Z',
+        { task_id: task3, agent: 'coder', run_status: 'done', token_usage: { measured: false } },
+        session,
+      );
+      body += tiedLine(
+        'dispatch_decision',
+        '2029-06-01T00:15:00.000Z',
+        { task_id: task4, agent_role: 'grader', provider: 'claude', model_tier: 'mid' },
+        session,
+      );
+      body += tiedLine(
+        'error-logged',
+        '2029-06-01T00:16:00.000Z',
+        { task_id: task4, error: 'execution.flaky-test', agent_role: 'grader' },
+        session,
+      );
+      await appendFile(path.join(stateDir, `${session}.jsonl`), body, 'utf8');
+    }
+
+    async function rebuilt(): Promise<DbHandle> {
+      const dbPath = path.join(dbDir, 'agents.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      return openDb(dbPath);
+    }
+
+    it('groups by role in first-dispatch order, each role in dispatch order', async () => {
+      await build();
+      const agentsHandle = await rebuilt();
+      try {
+        const result = sessionAgents(agentsHandle.db, session, {
+          nowIso: '2029-06-01T01:00:00.000Z',
+        });
+        expect(result.sessionId).toBe(session);
+        expect(result.roles.map((r) => r.agentRole)).toEqual(['coder', 'reviewer', 'grader']);
+        const coder = result.roles.find((r) => r.agentRole === 'coder');
+        expect(coder?.agents.map((a) => a.taskId)).toEqual([task1, task3]);
+        expect(coder?.agents[0]).toMatchObject({ taskId: task1, taskTitle: 'Fix the widget' });
+      } finally {
+        agentsHandle.sqlite.close();
+      }
+    });
+
+    it('reports the 4 token states: measured, unmeasured, pending, none', async () => {
+      await build();
+      const agentsHandle = await rebuilt();
+      try {
+        const result = sessionAgents(agentsHandle.db, session, {
+          nowIso: '2029-06-01T01:00:00.000Z',
+        });
+        const byTask = new Map(result.roles.flatMap((r) => r.agents).map((a) => [a.taskId, a]));
+        expect(byTask.get(task1)?.tokens).toEqual({ state: 'pending' });
+        expect(byTask.get(task2)?.tokens).toEqual({
+          state: 'measured',
+          input: 100,
+          output: 50,
+          total: 150,
+        });
+        expect(byTask.get(task3)?.tokens).toEqual({ state: 'unmeasured' });
+        expect(byTask.get(task4)?.tokens).toEqual({ state: 'none' });
+        expect(byTask.get(task1)?.status).toBe('live');
+        expect(byTask.get(task2)?.status).toBe('done');
+        expect(byTask.get(task3)?.status).toBe('done');
+        expect(byTask.get(task4)?.status).toBe('error');
+      } finally {
+        agentsHandle.sqlite.close();
+      }
+    });
+
+    it('reads the latest event in [dispatchedAt, terminalAt|now], never one outside that window', async () => {
+      await build();
+      const agentsHandle = await rebuilt();
+      try {
+        const result = sessionAgents(agentsHandle.db, session, {
+          nowIso: '2029-06-01T01:00:00.000Z',
+        });
+        const byTask = new Map(result.roles.flatMap((r) => r.agents).map((a) => [a.taskId, a]));
+        // task1's agent is still live: the window runs to `now`, so the
+        // gate-outcome after its dispatch is the latest event seen.
+        expect(byTask.get(task1)).toMatchObject({
+          lastEventType: 'gate-outcome',
+          lastEventAt: '2029-06-01T00:02:00.000Z',
+        });
+        // task2's agent finished at 00:06; the later gate-outcome (00:07) is
+        // outside its window, so the terminal result event is still the latest.
+        expect(byTask.get(task2)).toMatchObject({
+          lastEventType: 'task-result-recorded',
+          lastEventAt: '2029-06-01T00:06:00.000Z',
+        });
+      } finally {
+        agentsHandle.sqlite.close();
+      }
+    });
+
+    it('returns {roles: []} for an unknown session', async () => {
+      await build();
+      const agentsHandle = await rebuilt();
+      try {
+        const result = sessionAgents(agentsHandle.db, 'no-such-session');
+        expect(result).toEqual({ sessionId: 'no-such-session', roles: [] });
+      } finally {
+        agentsHandle.sqlite.close();
+      }
+    });
+  });
+
   describe('lessonsPage()', () => {
     it('lists the approved lesson with its times-prevented counter', () => {
       const result = lessonsPage(handle.db);
@@ -2747,6 +2916,73 @@ describe('overview() — running sessions (dogfood round 2)', () => {
     const entries = overview(handle.db).liveAgentEntries;
     expect(entries.length).toBeGreaterThan(0);
     expect(entries.every((a) => a.sessionId === SESSION_ID)).toBe(true);
+  });
+
+  it('titles a session from its earliest prompt, trimmed; null with neither a prompt nor a dispatch', async () => {
+    handle = await project();
+    const result = overview(handle.db);
+    const fixture = result.runningSessions.find((s) => s.sessionId === SESSION_ID);
+    expect(fixture?.title).toBe('Build the widget and fix the flaky import.');
+    const other = result.runningSessions.find((s) => s.sessionId === OTHER);
+    expect(other?.title).toBeNull();
+  });
+
+  it('trims a long first prompt line to about 80 chars, and falls back to the epic id with no prompt at all', async () => {
+    const longLine = `${'x'.repeat(90)}\nsecond line never shown`;
+    const longSession = 'sess-title-long';
+    const longStart = await appendEvent(
+      {
+        session_id: longSession,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await recordUserPrompt(
+      longLine,
+      { sessionId: longSession, planVersion: 1, causalParent: longStart.event_id },
+      { stateDir },
+    );
+
+    const noPromptSession = 'sess-title-fallback';
+    const start = await appendEvent(
+      {
+        session_id: noPromptSession,
+        actor: 'user',
+        event_type: 'session-start',
+        plan_version: 1,
+        causal_parent: null,
+        payload: {},
+      },
+      { stateDir },
+    );
+    await appendEvent(
+      {
+        session_id: noPromptSession,
+        actor: 'system',
+        event_type: 'dispatch_decision',
+        task_id: 'epic-title/task-1',
+        plan_version: 1,
+        causal_parent: start.event_id,
+        payload: {
+          agent_role: 'coder',
+          provider: 'claude',
+          model_tier: 'mid',
+          model: 'claude-sonnet',
+        },
+      },
+      { stateDir },
+    );
+
+    handle = await project();
+    const result = overview(handle.db);
+    const long = result.runningSessions.find((s) => s.sessionId === longSession);
+    expect(long?.title).toBe(`${'x'.repeat(80)}…`);
+    const fallback = result.runningSessions.find((s) => s.sessionId === noPromptSession);
+    expect(fallback?.title).toBe('epic-title');
   });
 });
 
