@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { learnedFromLabel, lessonScopeLabel, preventedLabel } from '../src/lib/lessonLabels.js';
+import {
+  learnedFromLabel,
+  lessonScopeLabel,
+  pendingEmptyBody,
+  preventedLabel,
+} from '../src/lib/lessonLabels.js';
 
 describe('lib/lessonLabels.ts', () => {
   describe('lessonScopeLabel', () => {
@@ -64,6 +69,21 @@ describe('lib/lessonLabels.ts', () => {
 
     it('hides the date entirely when validFrom is null', () => {
       expect(learnedFromLabel('csb-audit-1', null)).toBe('Learned from csb-audit-1');
+    });
+  });
+
+  describe('pendingEmptyBody', () => {
+    it('always explains what the tab is for, even when the factory has never run', () => {
+      expect(pendingEmptyBody(null)).toBe(
+        'The factory proposes new lessons after it reviews its recent mistakes.',
+      );
+    });
+
+    it('appends "Last checked <relative time>." only when lastCheckedAt is set', () => {
+      const nowIso = '2026-09-07T00:10:00.000Z';
+      expect(pendingEmptyBody('2026-09-07T00:00:00.000Z', nowIso)).toBe(
+        'The factory proposes new lessons after it reviews its recent mistakes. Last checked 10 min ago.',
+      );
     });
   });
 });

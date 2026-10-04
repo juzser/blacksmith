@@ -2,7 +2,7 @@
 // .vue for the reason lib/lessonActions.ts spells out: ui/tsconfig.json
 // doesn't type-check .vue files and this repo has no component-test harness,
 // so logic asserted from an SFC is logic nothing can test.
-import { formatShortDate } from './format.js';
+import { formatRelativeVerbose, formatShortDate } from './format.js';
 
 /**
  * The scope line under a lesson's rule. `stack-wide`/`security` have no
@@ -53,4 +53,19 @@ export function preventedLabel(timesPrevented: number): string {
 export function learnedFromLabel(sessionId: string, validFrom: string | null): string {
   if (!validFrom) return `Learned from ${sessionId}`;
   return `Learned from ${sessionId} on ${formatShortDate(validFrom)}`;
+}
+
+/**
+ * The Pending tab's empty-state body (ds-spec.md §4.5, audit item Lessons-2).
+ * Always names what this tab is for — a sentence an operator who has never
+ * seen this page can read on its own — never the spec's own "(runs
+ * automatically)" clause, which the kit's lessons pass does not promise. The
+ * "Last checked" clause only appears once a pass has actually completed —
+ * `lastCheckedAt` null means dream() has never run, and claiming a check
+ * time for a check that never happened would be worse than omitting it.
+ */
+export function pendingEmptyBody(lastCheckedAt: string | null, nowIso?: string): string {
+  const base = 'The factory proposes new lessons after it reviews its recent mistakes.';
+  if (!lastCheckedAt) return base;
+  return `${base} Last checked ${formatRelativeVerbose(lastCheckedAt, nowIso)}.`;
 }

@@ -32,7 +32,6 @@ import {
   rejectLesson,
 } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
-import { formatRelativeVerbose } from '../lib/format.js';
 import {
   lessonActions,
   lessonActionsNote,
@@ -40,6 +39,7 @@ import {
   noveltyNotice,
 } from '../lib/lessonActions.js';
 import { LESSON_FILTERS, type LessonFilter, visibleLessons } from '../lib/lessonFilters.js';
+import { pendingEmptyBody } from '../lib/lessonLabels.js';
 
 const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Lessons' }]);
@@ -107,10 +107,8 @@ const tabs = computed<TabItem[]>(() =>
   LESSON_FILTERS.map((id) => ({ id, label: FILTER_LABEL[id], count: visibleFor(id).length })),
 );
 
-/** "Nothing to review." plus when the last dreaming pass ran, or nothing when it never has. */
-const pendingEmptyBody = computed(() =>
-  lastCheckedAt.value ? `Last checked ${formatRelativeVerbose(lastCheckedAt.value)}.` : '',
-);
+/** "Nothing to review." plus what this tab is for, plus when the last pass ran, if ever. */
+const pendingEmptyBodyText = computed(() => pendingEmptyBody(lastCheckedAt.value));
 
 const reviewing = ref<LessonRecord | null>(null);
 const editMode = ref(false);
@@ -269,7 +267,7 @@ async function reject() {
           v-if="tab.id === 'pending' && canClaimEmpty(loaded, visibleFor('pending').length)"
           :icon="CircleCheck"
           title="Nothing to review."
-          :body="pendingEmptyBody"
+          :body="pendingEmptyBodyText"
         />
         <EmptyState
           v-else-if="canClaimEmpty(loaded, visibleFor(tab.id).length)"
