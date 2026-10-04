@@ -236,6 +236,29 @@ test.describe('Sessions', () => {
     await expect(failedTokens).toHaveText('');
   });
 
+  // Fix round 2 item 2: the selected background (--bs-surface-selected) is
+  // an aria-current cue, not a focus cue -- the :focus-visible ring
+  // (bs-sessionrow--clickable:focus-visible) must stay off a mouse click and
+  // only appear for keyboard/programmatic focus (the deep-link case above).
+  test('a mouse click selects the row without showing the focus ring', async ({ page }) => {
+    await serveSessions(page);
+    await page.goto('/sessions');
+    await page.getByText('Fix the login retry loop').click();
+    const row = page.locator('.bs-sessionrow--selected');
+    await expect(row).toBeVisible();
+    const boxShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(boxShadow).toBe('none');
+  });
+
+  test('a deep-linked row shows the focus ring', async ({ page }) => {
+    await serveSessions(page);
+    await page.goto('/sessions?session=run-active');
+    const row = page.locator('.bs-sessionrow--selected');
+    await expect(row).toBeVisible();
+    const boxShadow = await row.evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(boxShadow).not.toBe('none');
+  });
+
   // Entry points: the nav carries a Sessions item, and Home's "Running now"
   // card links into this page for the project it is showing.
   test('the Sessions nav entry is present and Home links to it', async ({ page }) => {
