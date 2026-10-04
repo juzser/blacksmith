@@ -3356,7 +3356,9 @@ export function analytics(
   // With `period`: only rows whose UTC day falls in the window — this also
   // answers DS7's "per-provider totals for the period" ask (spec §4.4's
   // "providers with totalTokens > 0"), so no separate field is added for it.
-  const window = opts.period ? periodDays(opts.period, opts.nowIso ?? new Date().toISOString()) : null;
+  const window = opts.period
+    ? periodDays(opts.period, opts.nowIso ?? new Date().toISOString())
+    : null;
   const windowSet = window ? new Set(window) : null;
   const scopedResultRows = windowSet
     ? resultRows.filter((row) => windowSet.has(row.ts.slice(0, 10)))
@@ -3368,7 +3370,11 @@ export function analytics(
   >();
   const dailyBuckets = new Map<
     string,
-    { tokensByRole: Map<string, number>; tokensByModelTier: Map<string, number>; unmeasuredRunCount: number }
+    {
+      tokensByRole: Map<string, number>;
+      tokensByModelTier: Map<string, number>;
+      unmeasuredRunCount: number;
+    }
   >();
   const roleTierBuckets = new Map<
     string,
