@@ -388,6 +388,11 @@ a:hover {
   border-bottom: 1px solid var(--bs-border);
   border-left: 3px solid transparent;
 }
+/* Fix round item 5 (ds-review.html `.ev:last-child`): the last row in any
+   list never needs a divider against whatever comes after it. */
+.bs-timeline-row:last-child {
+  border-bottom: 0;
+}
 /* Item 5 (DS6 PR3 r2, ds-review.html .ev's --ev-line): a 3px kind-coloured
    left stripe per row, same --bs-event-* tokens EventKindTag already uses.
    Prompt reads lighter (its own subtle tint) in the mock; every other kind
