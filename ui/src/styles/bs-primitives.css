@@ -2993,7 +2993,6 @@ summary.bs-inbox__group-head {
   align-items: center;
   justify-content: space-between;
   gap: var(--bs-space-3);
-  margin-bottom: var(--bs-space-4);
 }
 .bs-analytics-page__charts {
   display: grid;
@@ -3008,7 +3007,6 @@ summary.bs-inbox__group-head {
 .bs-analytics-page__note {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-sm);
-  margin: var(--bs-space-4) 0;
 }
 .bs-analytics-page__chart-caption {
   color: var(--bs-text-subtlest);
@@ -3019,7 +3017,6 @@ summary.bs-inbox__group-head {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--bs-space-4);
-  margin-bottom: var(--bs-space-4);
 }
 @media (max-width: 1100px) {
   .bs-analytics-page__metrics {
@@ -3034,4 +3031,42 @@ summary.bs-inbox__group-head {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-sm);
   margin-top: var(--bs-space-2);
+}
+
+/* Phone-only (<=640px, same breakpoint as useViewport's isPhoneWidth):
+   both charts and the breakdown table are dropped, the 4 metrics become a
+   2-column grid with no takeaway sentence, and the by-role chart becomes a
+   role list with small bars and a % share of total tokens. */
+.bs-analytics-page__phone-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--bs-space-4);
+}
+.bs-analytics-page__phone-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-analytics-page__phone-stat-label {
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-xs);
+}
+.bs-analytics-page__phone-stat-value {
+  font-size: var(--bs-text-md);
+  font-weight: 600;
+}
+.bs-analytics-page__phone-roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-analytics-page__phone-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-3);
+}
+.bs-analytics-page__phone-role-label {
+  flex: 0 0 auto;
+  font-size: var(--bs-text-sm);
 }

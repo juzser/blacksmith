@@ -19,12 +19,14 @@ import EmptyState from '../components/kit/EmptyState.vue';
 import IconButton from '../components/kit/IconButton.vue';
 import PageHeader from '../components/kit/PageHeader.vue';
 import PeriodSwitch from '../components/kit/PeriodSwitch.vue';
+import ProgressBarMini from '../components/kit/ProgressBarMini.vue';
 import ProgressRing from '../components/kit/ProgressRing.vue';
 import Skeleton from '../components/kit/Skeleton.vue';
 import Table from '../components/kit/Table.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import {
   breakdownTokensText,
   chartSeries,
@@ -37,7 +39,8 @@ import {
   hasMultipleProviders,
   MIN_SETTLED_FOR_RATE,
   notMeasuredCaption,
-  rateOrNotEnoughData,
+  phoneRoleShare,
+  rateDisplay,
   ratioTakeaway,
   recheckPassRate,
   secondOpinionSummary,
@@ -55,6 +58,7 @@ const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Cost & quality' }]);
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
+const { isPhoneWidth } = useViewport();
 
 const PERIOD_OPTIONS = [
   { value: '7d', label: '7 days' },
@@ -181,10 +185,22 @@ const secondOpinionPct = computed(() =>
     ? 0
     : Math.round(secondOpinion.value.agreementRate * 100),
 );
+
+// Phone-only: the by-role chart and table are both dropped at this width, so
+// their one surface becomes a role list with a % share of total tokens,
+// "Not measured" included as its own row (DS7 PR2 round 3 defect 6).
+const phoneRoleBars = computed(() => {
+  const bars = phoneRoleShare(roleTierBuckets.value);
+  const total = bars.reduce((sum, b) => sum + b.value, 0);
+  return bars.map((b) => ({
+    label: b.label,
+    pct: total > 0 ? Math.round((b.value / total) * 100) : 0,
+  }));
+});
 </script>
 
 <template>
-  <div>
+  <div class="app-page">
     <PageHeader title="Cost & quality" />
     <div class="bs-analytics-page__toolbar">
       <PeriodSwitch :model-value="period" :options="PERIOD_OPTIONS" label="Period" @update:model-value="setPeriod" />
@@ -198,74 +214,84 @@ const secondOpinionPct = computed(() =>
     </template>
 
     <template v-else-if="data">
-      <div class="bs-analytics-page__charts">
-        <Card title="Tokens per day">
+      <template v-if="!isPhoneWidth">
+        <div class="bs-analytics-page__charts">
+          <Card title="Tokens per day">
+            <template #action>
+              <PeriodSwitch
+                :model-value="stackBy"
+                :options="[
+                  { value: 'role', label: 'By role' },
+                  { value: 'modelTier', label: 'By model tier' },
+                ]"
+                label="Stack by"
+                @update:model-value="(v) => (stackBy = v as 'role' | 'modelTier')"
+              />
+            </template>
+            <EmptyState
+              v-if="canClaimEmpty(!!data, dailyBars.length)"
+              :icon="Coins"
+              title="No token usage recorded yet."
+              body="Nothing has run in this period yet."
+            />
+            <BarChart
+              v-else
+              stacked
+              legend
+              hide-empty-track
+              :stacked-bars="dailyBars"
+              :series="dailySeries"
+              :bars="[]"
+              label="Tokens per day"
+              :takeaway="dailyTakeaway"
+            />
+            <p v-if="dailyNotMeasuredCaption" class="bs-analytics-page__chart-caption">
+              {{ dailyNotMeasuredCaption }}
+            </p>
+          </Card>
+
+          <Card title="Total tokens, by selected period">
+            <EmptyState
+              v-if="canClaimEmpty(!!data, totalsBars.length)"
+              :icon="Coins"
+              title="No token usage recorded yet."
+              body="Nothing has run in this period yet."
+            />
+            <BarChart
+              v-else
+              :bars="totalsBars"
+              :format="(v: number) => String(v)"
+              label="Total tokens"
+              :takeaway="totalsTakeaway"
+            />
+            <p v-if="totalsNotMeasuredCaption" class="bs-analytics-page__chart-caption">
+              {{ totalsNotMeasuredCaption }}
+            </p>
+          </Card>
+        </div>
+
+        <Card v-if="breakdownRows.length > 0" title="Tokens by role and model tier">
+          <Table :columns="breakdownColumns" :rows="breakdownRows" compact />
+        </Card>
+
+        <p class="bs-analytics-page__note">
+          Cost is counted in tokens, never in dollars. A run whose tokens were not measured
+          shows as its own "Not measured" share, counted, never dropped, and never shown as 0.
+        </p>
+      </template>
+
+      <div v-if="!isPhoneWidth" class="bs-analytics-page__metrics">
+        <Card title="Tokens per task">
           <template #action>
-            <PeriodSwitch
-              :model-value="stackBy"
-              :options="[
-                { value: 'role', label: 'By role' },
-                { value: 'modelTier', label: 'By model tier' },
-              ]"
-              label="Stack by"
-              @update:model-value="(v) => (stackBy = v as 'role' | 'modelTier')"
+            <IconButton
+              :icon="Info"
+              label="Median tokens one task used, all roles and attempts, over the selected period"
+              size="sm"
             />
           </template>
-          <EmptyState
-            v-if="canClaimEmpty(!!data, dailyBars.length)"
-            :icon="Coins"
-            title="No token usage recorded yet."
-            body="Nothing has run in this period yet."
-          />
-          <BarChart
-            v-else
-            stacked
-            legend
-            :stacked-bars="dailyBars"
-            :series="dailySeries"
-            :bars="[]"
-            label="Tokens per day"
-            :takeaway="dailyTakeaway"
-          />
-          <p v-if="dailyNotMeasuredCaption" class="bs-analytics-page__chart-caption">
-            {{ dailyNotMeasuredCaption }}
-          </p>
-        </Card>
-
-        <Card title="Total tokens, by selected period">
-          <EmptyState
-            v-if="canClaimEmpty(!!data, totalsBars.length)"
-            :icon="Coins"
-            title="No token usage recorded yet."
-            body="Nothing has run in this period yet."
-          />
-          <BarChart
-            v-else
-            :bars="totalsBars"
-            :format="(v: number) => String(v)"
-            label="Total tokens"
-            :takeaway="totalsTakeaway"
-          />
-          <p v-if="totalsNotMeasuredCaption" class="bs-analytics-page__chart-caption">
-            {{ totalsNotMeasuredCaption }}
-          </p>
-        </Card>
-      </div>
-
-      <Card v-if="breakdownRows.length > 0" title="Tokens by role and model tier">
-        <Table :columns="breakdownColumns" :rows="breakdownRows" compact />
-      </Card>
-
-      <p class="bs-analytics-page__note">
-        Cost is counted in tokens, never in dollars. A run whose tokens were not measured
-        shows as its own "Not measured" share, counted, never dropped, and never shown as 0.
-      </p>
-
-      <div class="bs-analytics-page__metrics">
-        <Card title="Tokens per task">
           <div class="bs-analytics-page__metric-value">
             <CompactNumber v-if="avgCostPerTask !== null" :value="avgCostPerTask" unit="tok" />
-            <span v-else>—</span>
+            <span v-else>Not enough data yet</span>
           </div>
           <p class="bs-analytics-page__metric-takeaway">
             {{ ratioTakeaway(ratio) }}
@@ -273,11 +299,17 @@ const secondOpinionPct = computed(() =>
         </Card>
 
         <Card title="Repeated mistakes after a lesson">
-          <div class="bs-analytics-page__metric-value">{{ rateOrNotEnoughData(sameMistakeDisplay) }}</div>
+          <div class="bs-analytics-page__metric-value">{{ rateDisplay(sameMistakeDisplay) }}</div>
+          <p v-if="sameMistakeDisplay === null" class="bs-analytics-page__metric-takeaway">
+            Needs more settled rechecks.
+          </p>
         </Card>
 
         <Card title="Fixes that held on recheck">
-          <div class="bs-analytics-page__metric-value">{{ rateOrNotEnoughData(recheckDisplay) }}</div>
+          <div class="bs-analytics-page__metric-value">{{ rateDisplay(recheckDisplay) }}</div>
+          <p v-if="recheckDisplay === null" class="bs-analytics-page__metric-takeaway">
+            Same rule as above.
+          </p>
         </Card>
 
         <Card title="Second-opinion reviewers">
@@ -300,7 +332,58 @@ const secondOpinionPct = computed(() =>
         </Card>
       </div>
 
-      <Card v-if="hasMultipleProviders(costBuckets)" title="Cost per task by provider">
+      <template v-else>
+        <div class="bs-analytics-page__phone-metrics">
+          <div class="bs-analytics-page__phone-stat">
+            <span class="bs-analytics-page__phone-stat-label">Tokens per task</span>
+            <span class="bs-analytics-page__phone-stat-value">
+              <CompactNumber v-if="avgCostPerTask !== null" :value="avgCostPerTask" unit="tok" />
+              <span v-else>Not enough data yet</span>
+            </span>
+          </div>
+          <div class="bs-analytics-page__phone-stat">
+            <span class="bs-analytics-page__phone-stat-label">Second-opinion agreed</span>
+            <span class="bs-analytics-page__phone-stat-value">
+              <ProgressRing
+                :value="secondOpinionPct"
+                :max="100"
+                kind="ratio"
+                :label="`${secondOpinionPct}% agreed with the main reviewer`"
+              />
+            </span>
+          </div>
+          <div class="bs-analytics-page__phone-stat">
+            <span class="bs-analytics-page__phone-stat-label">Repeated mistakes</span>
+            <span class="bs-analytics-page__phone-stat-value">{{ rateDisplay(sameMistakeDisplay) }}</span>
+          </div>
+          <div class="bs-analytics-page__phone-stat">
+            <span class="bs-analytics-page__phone-stat-label">Fixes that held</span>
+            <span class="bs-analytics-page__phone-stat-value">{{ rateDisplay(recheckDisplay) }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="phoneRoleBars.length > 0"
+          class="bs-analytics-page__phone-roles"
+          role="list"
+          aria-label="Tokens by role, selected period"
+        >
+          <div
+            v-for="bar in phoneRoleBars"
+            :key="bar.label"
+            role="listitem"
+            class="bs-analytics-page__phone-role"
+          >
+            <span class="bs-analytics-page__phone-role-label">{{ bar.label }}</span>
+            <ProgressBarMini :value="bar.pct" :label="`${bar.label} ${bar.pct}% of tokens`" />
+          </div>
+        </div>
+      </template>
+
+      <Card
+        v-if="!isPhoneWidth && hasMultipleProviders(costBuckets)"
+        title="Cost per task by provider"
+      >
         <EmptyState
           v-if="canClaimEmpty(!!data, costByProviderData.length)"
           :icon="Coins"
