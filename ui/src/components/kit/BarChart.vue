@@ -34,6 +34,15 @@ const props = withDefaults(
     stacked?: boolean;
     series?: { key: string; tone: string }[];
     stackedBars?: { label: string; values: Record<string, number> }[];
+    /** Opt-in: a swatch + name per series, below the plot. Stacked charts only. */
+    legend?: boolean;
+    /**
+     * Opt-in: a zero-total stacked column renders its track as empty
+     * (transparent) instead of the default filled-looking sunken
+     * background, so a day with no tokens does not read as a full bar of
+     * data. Defaults false so every existing stacked caller is unchanged.
+     */
+    hideEmptyTrack?: boolean;
   }>(),
   {
     height: 200,
@@ -41,6 +50,8 @@ const props = withDefaults(
     stacked: false,
     series: () => [],
     stackedBars: () => [],
+    legend: false,
+    hideEmptyTrack: false,
   },
 );
 
@@ -91,7 +102,10 @@ function segmentBottom(entry: StackedBar, seriesIndex: number): string {
     <div v-if="stacked" class="bs-bars" role="img" :aria-label="summary">
       <div class="bs-bars__plot" :style="{ height: `${height}px` }">
         <div v-for="entry in cappedStacked" :key="entry.label" class="bs-bars__col">
-          <span class="bs-bars__track">
+          <span
+            class="bs-bars__track"
+            :class="{ 'bs-bars__track--empty': hideEmptyTrack && stackedTotal(entry) === 0 }"
+          >
             <span
               v-for="(s, i) in series"
               :key="s.key"
@@ -103,6 +117,12 @@ function segmentBottom(entry: StackedBar, seriesIndex: number): string {
         </div>
       </div>
       <div class="bs-bars__scale"><span>0</span><span>{{ format(stackedMax) }}</span></div>
+      <ul v-if="legend" class="bs-bars__legend">
+        <li v-for="s in series" :key="s.key" class="bs-bars__legend-item">
+          <span class="bs-bars__legend-swatch" :style="{ background: s.tone }" />
+          {{ s.key }}
+        </li>
+      </ul>
     </div>
     <div v-else class="bs-bars" role="img" :aria-label="summary">
       <div class="bs-bars__plot" :style="{ height: `${height}px` }">

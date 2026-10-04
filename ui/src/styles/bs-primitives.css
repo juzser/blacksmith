@@ -1339,6 +1339,11 @@ a:hover {
   border-radius: var(--bs-radius-sm);
   overflow: hidden;
 }
+/* Opt-in (BarChart's hideEmptyTrack prop): a zero-total stacked column reads
+   as empty, not as a full-height filled bar of "data". */
+.bs-bars__track--empty {
+  background: transparent;
+}
 .bs-bars__bar {
   position: absolute;
   left: 0;
@@ -1375,6 +1380,29 @@ a:hover {
   font-size: var(--bs-text-xs);
   color: var(--bs-text-subtlest);
   font-variant-numeric: tabular-nums;
+}
+/* Opt-in legend (BarChart's `legend` prop) — a stacked chart's series have no
+   other way to name themselves, so without it the chart cannot be read. */
+.bs-bars__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--bs-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bs-bars__legend-item {
+  display: flex;
+  align-items: center;
+  gap: var(--bs-space-1);
+  font-size: var(--bs-text-xs);
+  color: var(--bs-text-subtle);
+}
+.bs-bars__legend-swatch {
+  width: var(--bs-space-2);
+  height: var(--bs-space-2);
+  border-radius: var(--bs-radius-full);
+  flex-shrink: 0;
 }
 
 /* ==== App shell (ds-spec.md §3, DS1) ==== */
@@ -3083,4 +3111,210 @@ summary.bs-inbox__group-head {
   flex-basis: 100%;
   margin: 0;
   font-size: var(--bs-text-xs);
+}
+
+/* DS7 PR2 — kit/PeriodSwitch.vue. Same shape as .bs-segctl above, but a
+   plain button group (value prop, not a route) — kept as its own block so a
+   change here never touches the RouterLink-only rules above. */
+.bs-periodswitch {
+  display: inline-flex;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+  height: var(--bs-touch);
+}
+.bs-periodswitch__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--bs-touch);
+  min-width: var(--bs-touch);
+  padding: 0 var(--bs-space-3);
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+.bs-periodswitch__item:hover {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+}
+.bs-periodswitch__item[aria-pressed='true'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+}
+.bs-periodswitch__item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+
+/* DS7 PR2 round 5 item 4: the mock's underline tab row (`.mtabs`), opt-in via
+   PeriodSwitch's `variant="tabs"` prop — used at phone width only. */
+.bs-periodswitch--tabs {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--bs-border);
+  background: none;
+  height: auto;
+}
+.bs-periodswitch__tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--bs-touch);
+  min-width: var(--bs-touch);
+  padding: 0 var(--bs-space-3);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.bs-periodswitch__tab[aria-current='page'] {
+  color: var(--bs-text);
+  font-weight: 600;
+  border-bottom-color: var(--bs-text);
+}
+.bs-periodswitch__tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}
+
+/* AnalyticsPage.vue (DS7 Cost & quality) */
+.bs-analytics-page__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-3);
+}
+.bs-analytics-page__charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--bs-space-4);
+}
+@media (max-width: 900px) {
+  .bs-analytics-page__charts {
+    grid-template-columns: 1fr;
+  }
+}
+.bs-analytics-page__note {
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-sm);
+}
+.bs-analytics-page__chart-caption {
+  color: var(--bs-text-subtlest);
+  font-size: var(--bs-text-xs);
+  margin: var(--bs-space-2) 0 0;
+}
+.bs-analytics-page__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--bs-space-4);
+}
+@media (max-width: 1100px) {
+  .bs-analytics-page__metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+.bs-analytics-page__metric-value {
+  font-size: var(--bs-text-xl);
+  font-weight: 600;
+}
+.bs-analytics-page__metric-takeaway {
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-sm);
+  margin-top: var(--bs-space-2);
+}
+
+/* Phone-only (<=640px, same breakpoint as useViewport's isPhoneWidth):
+   both charts and the breakdown table are dropped, the 4 metrics become a
+   2-column grid with no takeaway sentence, and the by-role chart becomes a
+   role list with small bars and a % share of total tokens. */
+.bs-analytics-page__phone-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--bs-space-4);
+}
+.bs-analytics-page__phone-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-1);
+}
+.bs-analytics-page__phone-stat-label {
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-xs);
+}
+.bs-analytics-page__phone-stat-value {
+  font-size: var(--bs-text-md);
+  font-weight: 600;
+}
+.bs-analytics-page__phone-roles-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-analytics-page__phone-roles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bs-space-2);
+}
+.bs-analytics-page__phone-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--bs-space-3);
+}
+.bs-analytics-page__phone-role-label {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  font-size: var(--bs-text-sm);
+}
+.bs-analytics-page__phone-role-unit {
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-xs);
+}
+
+/* DS7 PR2 round 5 item 2: the by-role "Total tokens" chart, horizontal rows
+   matching the mock's `.hrow`/`.htrack` grid, widths relative to the
+   largest role; the Not-measured row uses the striped tone below. */
+.bs-analytics-page__hbars {
+  display: flex;
+  flex-direction: column;
+}
+.bs-analytics-page__hrow {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--bs-space-2);
+  align-items: center;
+  margin: var(--bs-space-2) 0;
+  font-size: var(--bs-text-sm);
+}
+.bs-analytics-page__hlabel {
+  color: var(--bs-text-subtle);
+}
+.bs-analytics-page__htrack {
+  height: 12px;
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+  overflow: hidden;
+}
+.bs-analytics-page__hbar {
+  display: block;
+  height: 100%;
+}
+.bs-analytics-page__hbar--not-measured {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--bs-border-bold) 0 3px,
+    transparent 3px 6px
+  );
 }
