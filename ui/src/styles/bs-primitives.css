@@ -810,13 +810,21 @@ a:hover {
   border-bottom: 1px solid var(--bs-border);
 }
 .bs-lessoncard--compact .bs-lessoncard__statement {
-  flex: 1;
+  /* overflow: hidden gives this flex item an automatic min-width of 0 (CSS
+     Flexbox §4.5), so without a shrinkable meta line the title always lost
+     the fight for space on a narrow phone row and rendered at 0 width. */
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .bs-lessoncard--compact .bs-lessoncard__meta {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 /* LessonsPage.vue's per-tab list: a plain <ul> wrapping one LessonCard per

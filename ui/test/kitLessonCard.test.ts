@@ -37,4 +37,17 @@ describe('kit/LessonCard.vue', () => {
   it('renders as a button only when clickable', () => {
     expect(CARD).toMatch(/:is="clickable \? 'button' : 'div'"/);
   });
+
+  // ds-review.html ~1491 mobile Lessons row: title, then scope tag, then the
+  // muted meta line, in that DOM order (the compact row has no CSS `order`
+  // override, so markup order is visual order).
+  it('orders the compact row as statement, then scope tag, then meta', () => {
+    const compactBlock = CARD.slice(CARD.indexOf('v-if="compact"'), CARD.indexOf('v-else'));
+    const statementIndex = compactBlock.indexOf('bs-lessoncard__statement');
+    const tagIndex = compactBlock.indexOf('<Tag');
+    const metaIndex = compactBlock.indexOf('bs-lessoncard__meta');
+    expect(statementIndex).toBeGreaterThan(-1);
+    expect(tagIndex).toBeGreaterThan(statementIndex);
+    expect(metaIndex).toBeGreaterThan(tagIndex);
+  });
 });

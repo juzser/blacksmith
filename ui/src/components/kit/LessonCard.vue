@@ -38,6 +38,7 @@ function onClick() {
     @click="onClick"
   >
     <template v-if="compact">
+      <span class="bs-lessoncard__statement">{{ lesson.statement }}</span>
       <Tag size="sm" variant="outline">{{
         lessonScopeLabel(lesson.lessonScope, {
           agentRole: lesson.agentRole,
@@ -45,7 +46,6 @@ function onClick() {
           caseType: lesson.caseType,
         })
       }}</Tag>
-      <span class="bs-lessoncard__statement">{{ lesson.statement }}</span>
       <span class="bs-lessoncard__meta">
         {{ learnedFromLabel(lesson.sessionId, lesson.validFrom) }} · {{ preventedLabel(lesson.timesPrevented) }}
       </span>
