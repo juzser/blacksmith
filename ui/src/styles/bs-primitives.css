@@ -499,6 +499,14 @@ a:hover {
     display: inline;
   }
 }
+/* Fix round 2 item 4 (ds-review.html `.mrow`): the row's own padding/height
+   on phone must match the mock's touch-sized row, not the desktop row. */
+@media (max-width: 640px) {
+  .bs-timeline-row {
+    min-height: var(--bs-touch);
+    padding: 10px var(--bs-m-card-pad);
+  }
+}
 /* Its own grid column (row rework, item 4): center it against the title
    line rather than the row's own top edge. Touch target sizing is
    .bs-iconbtn's, not this class's job. */
