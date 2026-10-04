@@ -299,7 +299,7 @@ const phoneNotMeasuredLabel = computed(() =>
                   </span>
                 </div>
                 <div v-if="totalsNotMeasuredCaption" class="bs-analytics-page__hrow">
-                  <span class="bs-analytics-page__hlabel">{{ totalsNotMeasuredCaption }}</span>
+                  <span class="bs-analytics-page__hlabel">Not measured</span>
                   <span class="bs-analytics-page__htrack">
                     <span
                       class="bs-analytics-page__hbar bs-analytics-page__hbar--not-measured"
@@ -443,9 +443,11 @@ const phoneNotMeasuredLabel = computed(() =>
             role="listitem"
             class="bs-analytics-page__phone-role"
           >
-            <span class="bs-analytics-page__phone-role-label">Not measured</span>
+            <span class="bs-analytics-page__phone-role-label">
+              <span>Not measured</span>
+              <span class="bs-analytics-page__phone-role-unit">of runs</span>
+            </span>
             <ProgressBarMini :value="phoneNotMeasured.pct" :label="`Not measured ${phoneNotMeasuredLabel}`" />
-            <span class="bs-analytics-page__phone-role-unit">of runs</span>
           </div>
         </div>
       </template>

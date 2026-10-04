@@ -144,13 +144,16 @@ test.describe('Analytics', () => {
     const byRoleCard = page
       .locator('.bs-card')
       .filter({ has: page.getByText('Total tokens, by selected period', { exact: true }) });
-    // The Not-measured row shares the same label class but reads as prose
-    // ("N of M runs not measured."), not a bare role name — excluded here so
-    // this only asserts the three real role rows.
+    // The Not-measured row shares the same label class but reads "Not
+    // measured" (short label, no wrap) — excluded here so this only asserts
+    // the three real role rows. The run count lives in the sr-only table.
     await expect(
-      byRoleCard.locator('.bs-analytics-page__hlabel').filter({ hasNotText: 'not measured' }),
+      byRoleCard.locator('.bs-analytics-page__hlabel').filter({ hasNotText: 'Not measured' }),
     ).toHaveText(['Builder', 'Code reviewer', 'Planner']);
-    await expect(byRoleCard).toContainText('runs not measured.');
+    await expect(byRoleCard.locator('.bs-analytics-page__hlabel').last()).toHaveText(
+      'Not measured',
+    );
+    await expect(byRoleCard).toContainText('runs');
     await expect(page.locator('.bs-bars__track--empty').first()).toBeVisible();
   });
 

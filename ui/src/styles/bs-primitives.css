@@ -3106,11 +3106,12 @@ summary.bs-inbox__group-head {
   gap: var(--bs-space-3);
 }
 .bs-analytics-page__phone-role-label {
+  display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
   font-size: var(--bs-text-sm);
 }
 .bs-analytics-page__phone-role-unit {
-  flex: 0 0 auto;
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-xs);
 }
