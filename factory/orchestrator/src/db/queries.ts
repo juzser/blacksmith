@@ -3392,7 +3392,8 @@ export function analytics(
     }
     costBuckets.set(key, bucket);
 
-    if (window && p.agent) {
+    if (window) {
+      const role = p.agent ?? 'unattributed';
       const day = row.ts.slice(0, 10);
       const daily = dailyBuckets.get(day) ?? {
         tokensByRole: new Map<string, number>(),
@@ -3400,7 +3401,7 @@ export function analytics(
         unmeasuredRunCount: 0,
       };
       if (measured) {
-        daily.tokensByRole.set(p.agent, (daily.tokensByRole.get(p.agent) ?? 0) + (tokens as number));
+        daily.tokensByRole.set(role, (daily.tokensByRole.get(role) ?? 0) + (tokens as number));
         daily.tokensByModelTier.set(
           p.model_tier,
           (daily.tokensByModelTier.get(p.model_tier) ?? 0) + (tokens as number),
@@ -3410,7 +3411,7 @@ export function analytics(
       }
       dailyBuckets.set(day, daily);
 
-      const roleTierKey = `${p.agent}|${p.model_tier}`;
+      const roleTierKey = `${role}|${p.model_tier}`;
       const roleTier = roleTierBuckets.get(roleTierKey) ?? {
         runCount: 0,
         tokens: 0,

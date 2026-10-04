@@ -2073,6 +2073,106 @@ describe('db/queries.ts', () => {
       }
     });
 
+    it('routes a period-scoped row without `agent` to the "unattributed" role instead of dropping it (S3)', async () => {
+      // `--agent` is optional on the record verb, so a row with no `agent` is
+      // legal, not malformed. It must still land in tokensByDay and
+      // tokensByRoleAndModelTier (under 'unattributed'), matching the
+      // cost buckets it already reaches today.
+      const session = 'sess-period-unattributed';
+      const ts = '2029-06-10T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'unattr-epic/task-1',
+              run_status: 'done',
+              provider: 'claude',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 250 },
+            },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, 'period-unattributed.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        const result = analytics(h.db, {}, { period: '7d', nowIso: '2029-06-10T12:00:00.000Z' });
+        const day = result.tokensByDay?.find((d) => d.day === '2029-06-10');
+        expect(day?.tokensByRole).toEqual({ unattributed: 250 });
+        expect(result.tokensByRoleAndModelTier).toContainEqual({
+          role: 'unattributed',
+          modelTier: 'mid',
+          runCount: 1,
+          tokens: 250,
+          avgTokensPerRun: 250,
+          unmeasuredRunCount: 0,
+        });
+        // The per-day tier totals must agree with the period-scoped cost totals.
+        const costTotal = (result.costByModelTierAndProvider ?? []).reduce(
+          (sum, c) => sum + c.totalTokens,
+          0,
+        );
+        const dailyTierTotal = (result.tokensByDay ?? []).reduce(
+          (sum, d) => sum + (d.tokensByModelTier.mid ?? 0),
+          0,
+        );
+        expect(dailyTierTotal).toBe(costTotal);
+      } finally {
+        h.sqlite.close();
+      }
+    });
+
+    it('scopes costByModelTierAndProvider to the period window, and includes the same row without one', async () => {
+      const session = 'sess-cost-period-window';
+      const outDay = '2029-05-20T00:00:00.000Z'; // outside the 7d window ending 2029-06-10
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            outDay,
+            {
+              task_id: 'cost-window-epic/task-out',
+              run_status: 'done',
+              provider: 'openai',
+              agent: 'coder',
+              model_tier: 'frontier',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 777 },
+            },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, 'cost-period-window.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        const scoped = analytics(h.db, {}, { period: '7d', nowIso: '2029-06-10T12:00:00.000Z' });
+        expect(
+          scoped.costByModelTierAndProvider.find(
+            (c) => c.modelTier === 'frontier' && c.provider === 'openai',
+          ),
+        ).toBeUndefined();
+
+        const unscoped = analytics(h.db);
+        expect(unscoped.costByModelTierAndProvider).toContainEqual({
+          modelTier: 'frontier',
+          provider: 'openai',
+          taskCount: 1,
+          totalTokens: 777,
+          avgTokensPerTask: 777,
+          unmeasuredTaskCount: 0,
+        });
+      } finally {
+        h.sqlite.close();
+      }
+    });
+
     it('keeps the legacy response exactly when no period is given (backward compatible)', () => {
       const withoutOpts = analytics(handle.db);
       const withEmptyOpts = analytics(handle.db, {}, {});
