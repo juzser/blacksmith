@@ -171,7 +171,7 @@ const secondOpinionPct = computed(() =>
 </script>
 
 <template>
-  <div class="bs-analytics-page">
+  <div>
     <div class="bs-analytics-page__toolbar">
       <PeriodSwitch :model-value="period" :options="PERIOD_OPTIONS" label="Period" @update:model-value="setPeriod" />
       <Button variant="ghost" size="sm" :icon="RefreshCw" @click="load">Refresh</Button>
@@ -299,55 +299,3 @@ const secondOpinionPct = computed(() =>
     </template>
   </div>
 </template>
-
-<style scoped>
-.bs-analytics-page__toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--bs-space-3);
-  margin-bottom: var(--bs-space-4);
-}
-
-.bs-analytics-page__charts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--bs-space-4);
-}
-
-@media (max-width: 900px) {
-  .bs-analytics-page__charts {
-    grid-template-columns: 1fr;
-  }
-}
-
-.bs-analytics-page__note {
-  color: var(--bs-text-subtle);
-  font-size: var(--bs-text-sm);
-  margin: var(--bs-space-4) 0;
-}
-
-.bs-analytics-page__metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: var(--bs-space-4);
-  margin-bottom: var(--bs-space-4);
-}
-
-@media (max-width: 1100px) {
-  .bs-analytics-page__metrics {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.bs-analytics-page__metric-value {
-  font-size: var(--bs-text-xl);
-  font-weight: 600;
-}
-
-.bs-analytics-page__metric-takeaway {
-  color: var(--bs-text-subtle);
-  font-size: var(--bs-text-sm);
-  margin-top: var(--bs-space-2);
-}
-</style>
