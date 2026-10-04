@@ -624,6 +624,16 @@ a:hover {
   white-space: nowrap;
 }
 
+/* Fix round 2 item 2: the single wrapper around the sentinel/pill/day-group
+   body -- one plain block-flow box, so its own children's margins collapse
+   the way the mock's plain `.mock` container does, instead of each one
+   being its own flex child of `.app-page` and getting that flex gap on top
+   of its own margin. No properties of its own; the point is that it is not
+   a flex item. */
+.activity-feed {
+  display: block;
+}
+
 /* DS6 PR4b round 3 item 1 (mock ds-review.html .newpill): the "N new
    events" pill shown above the feed once the reader has scrolled away from
    the top and a poll has buffered rows. */

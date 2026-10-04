@@ -137,7 +137,7 @@ function onBecauseOf() {
       <!-- Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a row with no
            meta text still needs its time to show on phone, so it gets its own
            meta line holding only the time instead of skipping the line. -->
-      <div v-else class="bs-timeline-row__meta bs-timeline-row__meta--time-only">
+      <div v-else class="bs-timeline-row__meta">
         <RelativeTime class="bs-timeline-row__ts bs-timeline-row__ts--meta" :iso="entry.ts" />
       </div>
       <!-- v-show, not v-if: aria-controls above names this id unconditionally
