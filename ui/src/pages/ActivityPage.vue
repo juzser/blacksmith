@@ -381,40 +381,47 @@ function becauseOf(promptId: string) {
     </EmptyState>
 
     <template v-else>
-      <div ref="topSentinelEl" class="activity-sentinel" aria-hidden="true"></div>
-      <div v-if="pendingNewCount > 0" class="activity-newpill">
-        <Button variant="primary" size="sm" :icon="ArrowUp" @click="applyPendingNew">
-          {{ formatNewEventsCount(pendingNewCount) }}
-        </Button>
-      </div>
-      <template v-for="(group, gi) in dayGroups" :key="gi">
-        <div class="timeline-day" :class="{ 'timeline-day--first': gi === 0 }">{{ group.label }}</div>
-        <div class="timeline-feed">
-          <ol style="list-style: none; margin: 0; padding: 0">
-            <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
-              <li v-if="item.kind === 'group'" class="bs-timeline-row">
-                {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
-              </li>
-              <template v-else>
-                <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
-                  Session: {{ item.entry!.sessionTitle }}
-                </li>
-                <TimelineRow
-                  :entry="item.entry!"
-                  :expanded="expanded.has(item.entry!.eventId)"
-                  :ctx="ctxFor(item.entry!)"
-                  :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
-                  @toggle="toggleRow"
-                  @select-task="goToTask"
-                  @because-of="becauseOf"
-                />
-              </template>
-            </template>
-          </ol>
+      <!-- Fix round 2 item 2 (ds-review.html `.mock` block flow): one plain
+           wrapper, not a flat run of flex children of `.app-page` -- its own
+           margins collapse the way the mock's block-flow container does,
+           instead of `.app-page`'s flex `gap` stacking on top of every
+           sentinel/pill/day-group's own margin. -->
+      <div class="activity-feed">
+        <div ref="topSentinelEl" class="activity-sentinel" aria-hidden="true"></div>
+        <div v-if="pendingNewCount > 0" class="activity-newpill">
+          <Button variant="primary" size="sm" :icon="ArrowUp" @click="applyPendingNew">
+            {{ formatNewEventsCount(pendingNewCount) }}
+          </Button>
         </div>
-      </template>
-      <div v-if="page?.nextBefore" ref="sentinelEl" class="activity-sentinel" aria-hidden="true"></div>
-      <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
+        <template v-for="(group, gi) in dayGroups" :key="gi">
+          <div class="timeline-day" :class="{ 'timeline-day--first': gi === 0 }">{{ group.label }}</div>
+          <div class="timeline-feed">
+            <ol style="list-style: none; margin: 0; padding: 0">
+              <template v-for="item in groupByRoleMinute(group.items)" :key="item.kind === 'group' ? item.group!.id : item.entry!.eventId">
+                <li v-if="item.kind === 'group'" class="bs-timeline-row">
+                  {{ item.group!.members.length }} dispatches, {{ item.group!.role }}
+                </li>
+                <template v-else>
+                  <li v-if="dividerBefore(item.entry!)" class="bs-session-divider">
+                    Session: {{ item.entry!.sessionTitle }}
+                  </li>
+                  <TimelineRow
+                    :entry="item.entry!"
+                    :expanded="expanded.has(item.entry!.eventId)"
+                    :ctx="ctxFor(item.entry!)"
+                    :class="{ 'bs-timeline-row--highlight': highlighted === item.entry!.eventId }"
+                    @toggle="toggleRow"
+                    @select-task="goToTask"
+                    @because-of="becauseOf"
+                  />
+                </template>
+              </template>
+            </ol>
+          </div>
+        </template>
+        <div v-if="page?.nextBefore" ref="sentinelEl" class="activity-sentinel" aria-hidden="true"></div>
+        <Button v-if="page?.nextBefore" variant="ghost" size="sm" @click="loadOlder">Load older</Button>
+      </div>
     </template>
   </div>
 </template>
