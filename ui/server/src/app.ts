@@ -813,7 +813,10 @@ export function createApp(opts: AppOpts): AppHandle {
 
     if (
       causalChainFor &&
-      (limit !== undefined || beforeParam !== undefined || afterParam !== undefined || kinds !== undefined)
+      (limit !== undefined ||
+        beforeParam !== undefined ||
+        afterParam !== undefined ||
+        kinds !== undefined)
     ) {
       throw new BadRequestError(
         'timeline.bad-request',

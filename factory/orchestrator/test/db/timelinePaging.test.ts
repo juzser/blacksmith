@@ -134,14 +134,7 @@ describe('timeline() paging (DS6)', () => {
     await appendFile(
       path.join(stateDir, `${b}.jsonl`),
       crossSessionLine('session-start', '2030-03-01T00:02:00.000Z', {}, b, `${a}#1`) +
-        crossSessionLine(
-          'dispatch_decision',
-          '2030-03-01T00:03:00.000Z',
-          {},
-          b,
-          `${b}#0`,
-          taskId,
-        ),
+        crossSessionLine('dispatch_decision', '2030-03-01T00:03:00.000Z', {}, b, `${b}#0`, taskId),
       'utf8',
     );
     const dbPath = path.join(dbDir, 'smith.db');
@@ -256,22 +249,19 @@ describe('timeline() paging (DS6)', () => {
     expect(orphan?.nearestPromptId).toBeNull();
   });
 
-  it(
-    'memoizedNearestPromptId agrees with nearestUserPrompt across a session boundary (S3 parity)',
-    async () => {
-      const taskId = await openCrossSessionFixture();
-      const entries = timeline(handle.db, {});
-      const dispatch = entries.find((e) => e.eventType === 'dispatch_decision');
-      expect(dispatch).toBeDefined();
+  it('memoizedNearestPromptId agrees with nearestUserPrompt across a session boundary (S3 parity)', async () => {
+    const taskId = await openCrossSessionFixture();
+    const entries = timeline(handle.db, {});
+    const dispatch = entries.find((e) => e.eventType === 'dispatch_decision');
+    expect(dispatch).toBeDefined();
 
-      const quote = requestQuoteForTask(handle.db, taskId, 'parity-b');
-      expect(quote?.source).toBe('task');
-      expect(dispatch?.nearestPromptId).toBe(quote?.eventId);
+    const quote = requestQuoteForTask(handle.db, taskId, 'parity-b');
+    expect(quote?.source).toBe('task');
+    expect(dispatch?.nearestPromptId).toBe(quote?.eventId);
 
-      const prompt = entries.find((e) => e.eventType === 'user_prompt');
-      expect(dispatch?.nearestPromptId).toBe(prompt?.eventId);
-    },
-  );
+    const prompt = entries.find((e) => e.eventType === 'user_prompt');
+    expect(dispatch?.nearestPromptId).toBe(prompt?.eventId);
+  });
 
   it('a paged call does not pay a causal walk for every row in the table (perf regression)', async () => {
     await openMainFixture();
