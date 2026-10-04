@@ -84,7 +84,7 @@ test.describe('Analytics', () => {
       const body = await response.json();
       body.tokensByRoleAndModelTier = [
         {
-          role: 'builder',
+          role: 'coder',
           modelTier: 'mid',
           runCount: 3,
           tokens: 4200,
@@ -119,7 +119,11 @@ test.describe('Analytics', () => {
     const byRoleCard = page
       .locator('.bs-card')
       .filter({ has: page.getByText('Total tokens, by selected period', { exact: true }) });
-    await expect(byRoleCard.locator('.bs-bars__x')).toHaveText(['builder', 'reviewer', 'planner']);
+    await expect(byRoleCard.locator('.bs-bars__x')).toHaveText([
+      'Builder',
+      'Code reviewer',
+      'Planner',
+    ]);
     await expect(page.locator('.bs-bars__track--empty').first()).toBeVisible();
   });
 
@@ -130,10 +134,13 @@ test.describe('Analytics', () => {
         await page.setViewportSize(viewport);
         await page.goto('/analytics');
         await expect(page.locator('h1')).toHaveText('Cost & quality');
-        await settleForShot(
-          page,
-          page.locator('.bs-card__title').getByText('Tokens per day', { exact: true }),
-        );
+        // Phone drops the charts/table (defect 6) — settle on the phone-only
+        // metrics grid there instead of a desktop-only chart title.
+        const marker =
+          vpName === 'mobile'
+            ? page.locator('.bs-analytics-page__phone-metrics')
+            : page.locator('.bs-card__title').getByText('Tokens per day', { exact: true });
+        await settleForShot(page, marker);
         await growToPageHeight(page);
         await shoot(page, `analytics-${vpName}-${theme}`);
       });
