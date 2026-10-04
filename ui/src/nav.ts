@@ -8,7 +8,7 @@ import type { NavItem } from './components/kit/types.js';
 export const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', icon: House, route: '/overview' },
   { id: 'work', label: 'Work', icon: Kanban, route: '/work/kanban', matchPrefix: '/work' },
-  { id: 'activity', label: 'Activity', icon: Activity, route: '/timeline' },
+  { id: 'activity', label: 'Activity', icon: Activity, route: '/activity' },
   {
     id: 'cost-quality',
     label: 'Cost & quality',

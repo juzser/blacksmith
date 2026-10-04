@@ -78,7 +78,7 @@ onBeforeUnmount(() => observer?.disconnect());
       >
         {{ expanded ? 'Show less' : 'Show more' }}
       </button>
-      <RouterLink to="/timeline" class="bs-request-quote__link">View in timeline</RouterLink>
+      <RouterLink to="/activity" class="bs-request-quote__link">View in timeline</RouterLink>
     </template>
     <p v-else class="bs-request-quote__empty">No request recorded for this task.</p>
   </section>
