@@ -37,8 +37,11 @@ import {
   formatAvgTokensPerRun,
   frontierMidRatio,
   hasMultipleProviders,
+  horizontalTotalsBars,
   MIN_SETTLED_FOR_RATE,
   notMeasuredCaption,
+  notMeasuredRunShare,
+  notMeasuredRunsCaption,
   phoneRoleShare,
   rateDisplay,
   ratioTakeaway,
@@ -46,7 +49,6 @@ import {
   secondOpinionSummary,
   secondOpinionTakeaway,
   sumUnmeasuredRuns,
-  tokenTotalsBy,
 } from '../lib/analytics.js';
 import { type AnalyticsPeriod, type AnalyticsResult, fetchAnalytics } from '../lib/api.js';
 import { canClaimEmpty } from '../lib/emptyClaim.js';
@@ -121,14 +123,22 @@ const dailyNotMeasuredCaption = computed(() =>
 );
 
 const roleTierBuckets = computed(() => data.value?.tokensByRoleAndModelTier ?? []);
-const totalsBars = computed(() => tokenTotalsBy(roleTierBuckets.value, stackBy.value));
+// The by-role "Total tokens" chart is horizontal in the mock, one row per
+// role plus a separate "Not measured" row sized by its share of RUNS, never
+// by a fabricated token count (DS7 PR2 round 5 item 2).
+const totalsBarRows = computed(() => horizontalTotalsBars(roleTierBuckets.value, stackBy.value));
+const totalsNotMeasured = computed(() => notMeasuredRunShare(roleTierBuckets.value));
 const totalsTakeaway = computed(() =>
-  totalsBars.value.length === 0
+  totalsBarRows.value.length === 0
     ? 'No token usage recorded yet for this period.'
     : `Total tokens by ${stackBy.value === 'role' ? 'role' : 'model tier'} for the selected period.`,
 );
+const totalsSummary = computed(() => {
+  const top = totalsBarRows.value[0];
+  return top ? `Total tokens, highest ${top.label} at ${top.value}.` : 'Total tokens: no data.';
+});
 const totalsNotMeasuredCaption = computed(() =>
-  notMeasuredCaption(sumUnmeasuredRuns(roleTierBuckets.value)),
+  notMeasuredRunsCaption(totalsNotMeasured.value.unmeasured, totalsNotMeasured.value.total),
 );
 
 const breakdownColumns = computed(() => [
@@ -199,8 +209,12 @@ const phoneRoleBars = computed(() => {
     pct: total > 0 ? Math.round((b.value / total) * 100) : 0,
   }));
 });
-const phoneNotMeasuredCaption = computed(() =>
-  notMeasuredCaption(phoneRoleShare(roleTierBuckets.value).unmeasuredRunCount),
+// Same run-share rule as the desktop horizontal chart's Not-measured row:
+// the phone list's bar and % are the share of runs not measured, never a
+// token share (DS7 PR2 round 5 item 5) — role rows above stay % of tokens.
+const phoneNotMeasured = computed(() => notMeasuredRunShare(roleTierBuckets.value));
+const phoneNotMeasuredLabel = computed(() =>
+  phoneNotMeasured.value.unmeasured > 0 ? `${phoneNotMeasured.value.pct}% of runs` : '',
 );
 </script>
 
@@ -208,7 +222,13 @@ const phoneNotMeasuredCaption = computed(() =>
   <div class="app-page">
     <PageHeader title="Cost & quality" />
     <div class="bs-analytics-page__toolbar">
-      <PeriodSwitch :model-value="period" :options="PERIOD_OPTIONS" label="Period" @update:model-value="setPeriod" />
+      <PeriodSwitch
+        :model-value="period"
+        :options="PERIOD_OPTIONS"
+        label="Period"
+        :variant="isPhoneWidth ? 'tabs' : 'buttons'"
+        @update:model-value="setPeriod"
+      />
       <Button variant="ghost" size="sm" :icon="RefreshCw" @click="load">Refresh</Button>
     </div>
 
@@ -257,21 +277,57 @@ const phoneNotMeasuredCaption = computed(() =>
 
           <Card title="Total tokens, by selected period">
             <EmptyState
-              v-if="canClaimEmpty(!!data, totalsBars.length)"
+              v-if="canClaimEmpty(!!data, totalsBarRows.length)"
               :icon="Coins"
               title="No token usage recorded yet."
               body="Nothing has run in this period yet."
             />
-            <BarChart
-              v-else
-              :bars="totalsBars"
-              :format="(v: number) => String(v)"
-              label="Total tokens"
-              :takeaway="totalsTakeaway"
-            />
-            <p v-if="totalsNotMeasuredCaption" class="bs-analytics-page__chart-caption">
-              {{ totalsNotMeasuredCaption }}
-            </p>
+            <div v-else class="bs-chart">
+              <p class="bs-chart__takeaway">{{ totalsTakeaway }}</p>
+              <div class="bs-analytics-page__hbars" role="img" :aria-label="totalsSummary">
+                <div
+                  v-for="row in totalsBarRows"
+                  :key="row.label"
+                  class="bs-analytics-page__hrow"
+                >
+                  <span class="bs-analytics-page__hlabel">{{ row.label }}</span>
+                  <span class="bs-analytics-page__htrack">
+                    <span
+                      class="bs-analytics-page__hbar"
+                      :style="{ width: `${row.pct}%`, background: row.tone }"
+                    />
+                  </span>
+                </div>
+                <div v-if="totalsNotMeasuredCaption" class="bs-analytics-page__hrow">
+                  <span class="bs-analytics-page__hlabel">{{ totalsNotMeasuredCaption }}</span>
+                  <span class="bs-analytics-page__htrack">
+                    <span
+                      class="bs-analytics-page__hbar bs-analytics-page__hbar--not-measured"
+                      :style="{ width: `${totalsNotMeasured.pct}%` }"
+                    />
+                  </span>
+                </div>
+              </div>
+              <table class="sr-only">
+                <caption>Total tokens, by selected period</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Category</th>
+                    <th scope="col">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in totalsBarRows" :key="row.label">
+                    <td>{{ row.label }}</td>
+                    <td>{{ row.value }}</td>
+                  </tr>
+                  <tr v-if="totalsNotMeasuredCaption">
+                    <td>Not measured</td>
+                    <td>{{ totalsNotMeasured.unmeasured }} of {{ totalsNotMeasured.total }} runs</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </Card>
         </div>
 
@@ -368,7 +424,7 @@ const phoneNotMeasuredCaption = computed(() =>
         </div>
 
         <div
-          v-if="phoneRoleBars.length > 0 || phoneNotMeasuredCaption"
+          v-if="phoneRoleBars.length > 0 || phoneNotMeasuredLabel"
           class="bs-analytics-page__phone-roles"
           role="list"
           aria-label="Tokens by role, selected period"
@@ -383,11 +439,13 @@ const phoneNotMeasuredCaption = computed(() =>
             <ProgressBarMini :value="bar.pct" :label="`${bar.label} ${bar.pct}% of tokens`" />
           </div>
           <div
-            v-if="phoneNotMeasuredCaption"
+            v-if="phoneNotMeasuredLabel"
             role="listitem"
             class="bs-analytics-page__phone-role"
           >
-            <span class="bs-analytics-page__phone-role-label">{{ phoneNotMeasuredCaption }}</span>
+            <span class="bs-analytics-page__phone-role-label">Not measured</span>
+            <ProgressBarMini :value="phoneNotMeasured.pct" :label="`Not measured ${phoneNotMeasuredLabel}`" />
+            <span class="bs-analytics-page__phone-role-unit">of runs</span>
           </div>
         </div>
       </template>

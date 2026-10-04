@@ -405,7 +405,11 @@ export function horizontalTotalsBars(
   const max = Math.max(...rows.map((row) => row.value), 1);
   return [...rows]
     .sort((a, b) => b.value - a.value)
-    .map((row) => ({ ...row, pct: (row.value / max) * 100, tone: toneForKey(row.label) }));
+    .map((row) => ({
+      ...row,
+      pct: Math.max((row.value / max) * 100, 2),
+      tone: toneForKey(row.label),
+    }));
 }
 
 /**

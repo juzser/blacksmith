@@ -3109,3 +3109,44 @@ summary.bs-inbox__group-head {
   flex: 0 0 auto;
   font-size: var(--bs-text-sm);
 }
+.bs-analytics-page__phone-role-unit {
+  flex: 0 0 auto;
+  color: var(--bs-text-subtle);
+  font-size: var(--bs-text-xs);
+}
+
+/* DS7 PR2 round 5 item 2: the by-role "Total tokens" chart, horizontal rows
+   matching the mock's `.hrow`/`.htrack` grid, widths relative to the
+   largest role; the Not-measured row uses the striped tone below. */
+.bs-analytics-page__hbars {
+  display: flex;
+  flex-direction: column;
+}
+.bs-analytics-page__hrow {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--bs-space-2);
+  align-items: center;
+  margin: var(--bs-space-2) 0;
+  font-size: var(--bs-text-sm);
+}
+.bs-analytics-page__hlabel {
+  color: var(--bs-text-subtle);
+}
+.bs-analytics-page__htrack {
+  height: 12px;
+  background: var(--bs-surface-sunken);
+  border-radius: var(--bs-radius-sm);
+  overflow: hidden;
+}
+.bs-analytics-page__hbar {
+  display: block;
+  height: 100%;
+}
+.bs-analytics-page__hbar--not-measured {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--bs-border-bold) 0 3px,
+    transparent 3px 6px
+  );
+}
