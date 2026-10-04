@@ -117,7 +117,7 @@ function onBecauseOf() {
         class="bs-timeline-row__title bs-timeline-row__title--link"
         @click="emit('selectTask', entry.taskId)"
       >
-        {{ title }}
+        <span class="bs-timeline-row__title-label">{{ title }}</span>
       </button>
       <span v-else class="bs-timeline-row__title">{{ title }}</span>
       <RelativeTime v-if="variant === 'rail'" class="bs-timeline-row__ts" :iso="entry.ts" />

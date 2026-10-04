@@ -426,6 +426,31 @@ test.describe('Home: Recent activity', () => {
     }
   });
 
+  // Fix round item 4 (ds-review.html, bs-primitives.css ~455): below 640px
+  // the title link becomes `inline-flex`, so text-overflow needs an inner
+  // span to target instead of the button itself — a long task-linked title
+  // must still end in an ellipsis, not spill out of the row.
+  test('375px: a long task-linked title still ellipsizes instead of spilling', async ({ page }) => {
+    const entries = syntheticEntries(8);
+    entries[0] = {
+      ...entries[0],
+      taskId: 'epic-1/task-12-rewrite-onboarding-wizard-copy',
+      payload: {
+        prompt: 'Rewrite the onboarding wizard copy and every validation message end to end',
+      },
+    };
+    await serveTimeline(page, entries);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+
+    const link = page.getByRole('button', { name: /Rewrite the onboarding wizard copy/ });
+    await expect(link).toBeVisible();
+    const label = link.locator('.bs-timeline-row__title-label');
+    const overflowing = await label.evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(overflowing).toBe(true);
+    await expect(label).toHaveCSS('text-overflow', 'ellipsis');
+  });
+
   for (const [vpName, viewport] of [
     ['desktop', VIEWPORTS.desktop],
     ['375px', PHONE],

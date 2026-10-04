@@ -452,6 +452,7 @@ a:hover {
     display: inline-flex;
     align-items: center;
     min-height: var(--bs-touch);
+    min-width: 0;
   }
 }
 .bs-timeline-row__ts {
@@ -529,9 +530,21 @@ a:hover {
 }
 
 /* compact variant (DS6 PR4, ds-spec.md §2.2): Home's "Recent activity" —
-   title and meta each clamp to one line with ellipsis instead of wrapping. */
+   title and meta each clamp to one line with ellipsis instead of wrapping.
+   Fix round item 4: the non-link title span truncates directly, but the
+   --link button becomes `inline-flex` below 640px (see the media query
+   above) -- a flex container has no single text node to truncate, so that
+   case truncates its inner label span instead. */
 .bs-timeline-row--compact .bs-timeline-row__title,
 .bs-timeline-row--compact .bs-timeline-row__meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-timeline-row--compact .bs-timeline-row__title-label {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
