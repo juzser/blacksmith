@@ -312,6 +312,42 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  it('GET /api/timeline?causalChainFor still returns the legacy array on its own (S3)', async () => {
+    const handle = app();
+    const flat = await handle.app.request(`/api/timeline?session=${SESSION_ID}`);
+    const flatBody = await json<Array<{ eventId: string }>>(flat);
+    const target = flatBody[flatBody.length - 1]!.eventId;
+
+    const res = await handle.app.request(
+      `/api/timeline?session=${SESSION_ID}&causalChainFor=${encodeURIComponent(target)}`,
+    );
+    expect(res.status).toBe(200);
+    const body = await json<Array<{ eventId: string }>>(res);
+    expect(Array.isArray(body)).toBe(true);
+    expect(body.length).toBeGreaterThan(0);
+    closeApp(handle);
+  });
+
+  it('GET /api/timeline rejects causalChainFor combined with limit or kind with 400 (S3)', async () => {
+    const handle = app();
+    const flat = await handle.app.request(`/api/timeline?session=${SESSION_ID}`);
+    const flatBody = await json<Array<{ eventId: string }>>(flat);
+    const target = flatBody[flatBody.length - 1]!.eventId;
+
+    const withLimit = await handle.app.request(
+      `/api/timeline?session=${SESSION_ID}&causalChainFor=${encodeURIComponent(target)}&limit=10`,
+    );
+    expect(withLimit.status).toBe(400);
+    const withLimitBody = await json<{ error: { code: string } }>(withLimit);
+    expect(withLimitBody.error.code).toBe('timeline.bad-request');
+
+    const withKind = await handle.app.request(
+      `/api/timeline?session=${SESSION_ID}&causalChainFor=${encodeURIComponent(target)}&kind=System`,
+    );
+    expect(withKind.status).toBe(400);
+    closeApp(handle);
+  });
+
   it('GET /api/kanban supports both ?epic and an all-epics mode (Phase 6b)', async () => {
     const handle = app();
     const scoped = await handle.app.request(`/api/kanban?epic=${EPIC_ID}`);

@@ -2266,6 +2266,16 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
     if (!filter.sessionId) {
       throw new RangeError('timeline(): causalChainFor requires sessionId to be set.');
     }
+    if (
+      filter.limit !== undefined ||
+      filter.before !== undefined ||
+      filter.after !== undefined ||
+      filter.kinds !== undefined
+    ) {
+      throw new RangeError(
+        'timeline(): causalChainFor cannot be combined with limit, before, after or kinds — the causal chain is not pageable.',
+      );
+    }
     return causalChain(db, filter.sessionId, filter.causalChainFor);
   }
 
@@ -2522,6 +2532,16 @@ function prUrlsByEpic(db: SmithDb): Map<string, string> {
  * `projector.ts` inserts that row for EVERY `user_prompt` event in the same
  * transaction it inserts `events_raw` from, so that check can never miss in
  * practice and the eventType check alone is equivalent here.
+ *
+ * `causalChain`'s first-hop session gate (the walk refuses to start outside
+ * the session it is asked for) is also moot against this function: every
+ * caller feeds it a row's own `sessionId` as the walk's session (44ed474's
+ * `nearestUserPrompt(db, row.sessionId, row.eventId, ...)`, now this
+ * function's per-row callers in `timeline()`), so the first hop always names
+ * a row inside that very session and the gate never fires either way. Later
+ * hops were never gated in `causalChain` to begin with, so a cross-session
+ * ancestor is reachable from both, identically (parity test:
+ * `timelinePaging.test.ts`'s session-boundary case).
  *
  * Walks iteratively (no recursion — a session can chain thousands deep) and
  * memoises every eventId it visits along the way, not just the one asked

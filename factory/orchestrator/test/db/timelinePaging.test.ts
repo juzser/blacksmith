@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DbHandle } from '../../src/db/projector.js';
 import { openDb, rebuild } from '../../src/db/projector.js';
-import { eventKind, timeline } from '../../src/db/queries.js';
+import { eventKind, requestQuoteForTask, timeline } from '../../src/db/queries.js';
 import { buildFixture, EPIC_ID, SESSION_ID, TASK_1 } from './fixtures.js';
 
 /** A raw log line with the ts spelled out, so a tie is the test's and not the
@@ -23,6 +23,31 @@ function tiedLine(
     causal_parent: eventType === 'session-start' ? null : `${session}#0`,
     payload,
     ts,
+  })}\n`;
+}
+
+/**
+ * A raw log line with an explicit `causal_parent` and optional `task_id` —
+ * for fixtures that need to name a parent outside the line's own session
+ * (only a `session-start` may), unlike `tiedLine`'s always-local parent.
+ */
+function crossSessionLine(
+  eventType: string,
+  ts: string,
+  payload: Record<string, unknown>,
+  session: string,
+  causalParent: string | null,
+  taskId?: string,
+): string {
+  return `${JSON.stringify({
+    session_id: session,
+    actor: 'user',
+    event_type: eventType,
+    plan_version: 1,
+    causal_parent: causalParent,
+    payload,
+    ts,
+    ...(taskId ? { task_id: taskId } : {}),
   })}\n`;
 }
 
@@ -83,6 +108,46 @@ describe('timeline() paging (DS6)', () => {
     const dbPath = path.join(dbDir, 'smith.db');
     await rebuild(dbPath, 'all', { stateDir });
     handle = openDb(dbPath);
+  }
+
+  /**
+   * Session B's root continues session A (S3 parity fixture): A holds the
+   * `user_prompt`, B's `session-start` names A's prompt as its own causal
+   * parent, and a `dispatch_decision` in B sits one hop below that root.
+   */
+  async function openCrossSessionFixture(): Promise<string> {
+    const a = 'parity-a';
+    const b = 'parity-b';
+    const taskId = 'parity-epic/parity-task';
+    await appendFile(
+      path.join(stateDir, `${a}.jsonl`),
+      crossSessionLine('session-start', '2030-03-01T00:00:00.000Z', {}, a, null) +
+        crossSessionLine(
+          'user_prompt',
+          '2030-03-01T00:01:00.000Z',
+          { prompt: 'build the parity fixture' },
+          a,
+          `${a}#0`,
+        ),
+      'utf8',
+    );
+    await appendFile(
+      path.join(stateDir, `${b}.jsonl`),
+      crossSessionLine('session-start', '2030-03-01T00:02:00.000Z', {}, b, `${a}#1`) +
+        crossSessionLine(
+          'dispatch_decision',
+          '2030-03-01T00:03:00.000Z',
+          {},
+          b,
+          `${b}#0`,
+          taskId,
+        ),
+      'utf8',
+    );
+    const dbPath = path.join(dbDir, 'smith.db');
+    await rebuild(dbPath, 'all', { stateDir });
+    handle = openDb(dbPath);
+    return taskId;
   }
 
   it('limit returns the newest N rows, newest-first', async () => {
@@ -190,6 +255,23 @@ describe('timeline() paging (DS6)', () => {
     );
     expect(orphan?.nearestPromptId).toBeNull();
   });
+
+  it(
+    'memoizedNearestPromptId agrees with nearestUserPrompt across a session boundary (S3 parity)',
+    async () => {
+      const taskId = await openCrossSessionFixture();
+      const entries = timeline(handle.db, {});
+      const dispatch = entries.find((e) => e.eventType === 'dispatch_decision');
+      expect(dispatch).toBeDefined();
+
+      const quote = requestQuoteForTask(handle.db, taskId, 'parity-b');
+      expect(quote?.source).toBe('task');
+      expect(dispatch?.nearestPromptId).toBe(quote?.eventId);
+
+      const prompt = entries.find((e) => e.eventType === 'user_prompt');
+      expect(dispatch?.nearestPromptId).toBe(prompt?.eventId);
+    },
+  );
 
   it('a paged call does not pay a causal walk for every row in the table (perf regression)', async () => {
     await openMainFixture();

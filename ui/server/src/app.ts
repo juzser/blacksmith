@@ -811,6 +811,16 @@ export function createApp(opts: AppOpts): AppHandle {
       }
     }
 
+    if (
+      causalChainFor &&
+      (limit !== undefined || beforeParam !== undefined || afterParam !== undefined || kinds !== undefined)
+    ) {
+      throw new BadRequestError(
+        'timeline.bad-request',
+        'The causal chain for "causalChainFor" is not pageable; drop "limit", "before", "after" and "kind".',
+      );
+    }
+
     const paged = limit !== undefined || beforeParam !== undefined || afterParam !== undefined;
     const entries = timeline(handle.db, {
       ...sessionScope(c),
