@@ -3325,12 +3325,48 @@ export interface ErrorDayCount {
   count: number;
 }
 
+/**
+ * DS6 PR2 (§4.3 Errors chip, audit Errors-5) — one row per error CLASS
+ * (`${errorGroup}.${errorClass}`), merged across every session, project and
+ * severity that class occurred under. D-214 is about `byClass`'s per-triple
+ * rows losing their identity; this is a deliberately coarser, additive view
+ * for the class-level summary alone — `byClass`'s own rows keep the triple
+ * key D-214 gave them.
+ */
+export interface ErrorClassSummary {
+  /** `${errorGroup}.${errorClass}` — this row's own key. */
+  id: string;
+  errorGroup: string;
+  errorClass: string;
+  /** Total rows of this class, across every severity/session/project. */
+  count: number;
+  /** Count per severity, e.g. `{"S2-major": 2, "S3-minor": 1}`. */
+  severityMix: Record<string, number>;
+  /** The most recent row's `ts`. */
+  lastSeen: string;
+  /** Distinct projects this class occurred in. */
+  projects: string[];
+  /** 7 UTC daily counts, oldest-first, ending "today" (ClockOpts.nowIso, or the wall clock). */
+  trend7d: number[];
+}
+
 export interface ErrorsResult {
   byClass: ErrorGroupCount[];
   byDay: ErrorDayCount[];
+  classSummary: ErrorClassSummary[];
 }
 
-export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
+const TREND_WINDOW_DAYS = 7;
+
+/** The UTC calendar day (`YYYY-MM-DD`) `daysAgo` days before `nowIso`'s own day. */
+function utcDayOffset(nowIso: string, daysAgo: number): string {
+  const d = new Date(nowIso);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
+export function errorsPage(db: SmithDb, scope: Scope = {}, opts: ClockOpts = {}): ErrorsResult {
   const sessionCond = scopedToSessions(errors.sessionId, scope);
   const allRows = sessionCond
     ? db.select().from(errors).where(sessionCond).all()
@@ -3339,6 +3375,23 @@ export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
 
   const byClass = new Map<string, ErrorGroupCount>();
   const byDay = new Map<string, number>();
+  const nowIso = opts.nowIso ?? new Date().toISOString();
+  const trendDays = Array.from({ length: TREND_WINDOW_DAYS }, (_, i) =>
+    utcDayOffset(nowIso, TREND_WINDOW_DAYS - 1 - i),
+  );
+  const trendDayIndex = new Map(trendDays.map((day, i) => [day, i]));
+
+  interface ClassAccumulator {
+    errorGroup: string;
+    errorClass: string;
+    count: number;
+    severityMix: Record<string, number>;
+    lastSeen: string;
+    projects: Set<string>;
+    trend7d: number[];
+  }
+  const classSummaries = new Map<string, ClassAccumulator>();
+
   for (const row of rows) {
     const key = `${row.errorGroup}.${row.errorClass}|${row.severity}`;
     const existing = byClass.get(key);
@@ -3354,6 +3407,27 @@ export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
     }
     const day = row.ts.slice(0, 10);
     byDay.set(day, (byDay.get(day) ?? 0) + 1);
+
+    const classKey = `${row.errorGroup}.${row.errorClass}`;
+    let summary = classSummaries.get(classKey);
+    if (!summary) {
+      summary = {
+        errorGroup: row.errorGroup,
+        errorClass: row.errorClass,
+        count: 0,
+        severityMix: {},
+        lastSeen: row.ts,
+        projects: new Set<string>(),
+        trend7d: new Array(TREND_WINDOW_DAYS).fill(0),
+      };
+      classSummaries.set(classKey, summary);
+    }
+    summary.count += 1;
+    summary.severityMix[row.severity] = (summary.severityMix[row.severity] ?? 0) + 1;
+    if (row.ts > summary.lastSeen) summary.lastSeen = row.ts;
+    if (row.project) summary.projects.add(row.project);
+    const dayIndex = trendDayIndex.get(day);
+    if (dayIndex !== undefined) summary.trend7d[dayIndex] = (summary.trend7d[dayIndex] ?? 0) + 1;
   }
 
   return {
@@ -3361,6 +3435,18 @@ export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
     byDay: [...byDay.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([day, count]) => ({ day, count })),
+    classSummary: [...classSummaries.entries()]
+      .map(([id, s]) => ({
+        id,
+        errorGroup: s.errorGroup,
+        errorClass: s.errorClass,
+        count: s.count,
+        severityMix: s.severityMix,
+        lastSeen: s.lastSeen,
+        projects: [...s.projects],
+        trend7d: s.trend7d,
+      }))
+      .sort((a, b) => b.count - a.count),
   };
 }
 

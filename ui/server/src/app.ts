@@ -966,7 +966,9 @@ export function createApp(opts: AppOpts): AppHandle {
 
   app.get('/api/errors', (c) => {
     const project = c.req.query('project');
-    return c.json(errorsPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
+    return c.json(
+      errorsPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }, clock),
+    );
   });
 
   app.get('/api/analytics', (c) => {

@@ -883,6 +883,17 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  it('GET /api/errors keeps byClass/byDay and adds classSummary (DS6 PR2)', async () => {
+    const handle = app();
+    const res = await handle.app.request('/api/errors');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.byClass)).toBe(true);
+    expect(Array.isArray(body.byDay)).toBe(true);
+    expect(Array.isArray(body.classSummary)).toBe(true);
+    closeApp(handle);
+  });
+
   it("GET /api/roadmap passes through each milestone's startedAt/finishedAt and per-epic dates (DS4 S5a)", async () => {
     const handle = app();
     const res = await handle.app.request('/api/roadmap');

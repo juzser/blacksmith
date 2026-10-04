@@ -467,9 +467,22 @@ export interface ErrorDayCount {
   day: string;
   count: number;
 }
+/** DS6 PR2 (§4.3 Errors chip, audit Errors-5) — one row per error class, merged
+ *  across session/project/severity. Additive; `byClass`/`byDay` are unchanged. */
+export interface ErrorClassSummary {
+  id: string;
+  errorGroup: string;
+  errorClass: string;
+  count: number;
+  severityMix: Record<string, number>;
+  lastSeen: string;
+  projects: string[];
+  trend7d: number[];
+}
 export interface ErrorsResult {
   byClass: ErrorGroupCount[];
   byDay: ErrorDayCount[];
+  classSummary: ErrorClassSummary[];
 }
 
 export interface ThroughputDay {
