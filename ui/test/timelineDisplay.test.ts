@@ -1035,23 +1035,66 @@ describe('lib/timelineDisplay.ts', () => {
   });
 });
 
-// Task 4 (humanized task label helper): metaFor() is the row's second line
-// ("<date> · <meta>", rendered as plain text by TimelineRow.vue — not a
-// tooltip), and it showed the bare taskId. taskLabel() humanizes the id's
-// slug; TimelineRow.vue keeps the raw id reachable in a title tooltip.
+// DS6 PR3: metaFor() is now the row's per-kind meta line (ds-spec.md §4.3's
+// table), rather than a bare "<task> · <eventType>" fallback. A merge row
+// humanizes its taskId via taskLabel(); an unmapped kind (System) renders
+// no meta at all, per the table's own "— (no meta, no chevron)" row.
 describe('lib/timelineDisplay.ts metaFor()', () => {
-  it('humanizes a taskId rather than showing the raw slug', () => {
+  it('humanizes a taskId rather than showing the raw slug (merge, no task_ids)', () => {
     const e = entry({
-      eventType: 'gate-outcome',
+      eventType: 'wave-merged',
       taskId: 'epic-9/task-29-readme-merge-trim',
       payload: {},
     });
-    expect(metaFor(e)).toBe('Readme merge trim · gate-outcome');
+    expect(metaFor(e)).toBe('Readme merge trim · not measured');
   });
 
-  it('falls back to the bare event type when there is no task', () => {
+  it('renders no meta for a System-kind row', () => {
     const e = entry({ eventType: 'session-start', taskId: null, payload: {} });
-    expect(metaFor(e)).toBe('session-start');
+    expect(metaFor(e)).toBe('—');
+  });
+
+  it('prefers task_ids and reports a files-changed count when present', () => {
+    const e = entry({
+      eventType: 'wave-merged',
+      taskId: 'epic-9/task-29-readme-merge-trim',
+      payload: { task_ids: ['epic-9/task-29'], files_changed: ['a.ts', 'b.ts'] },
+    });
+    expect(metaFor(e)).toBe('epic-9/task-29 · 2 files changed');
+  });
+
+  it('shows a running dispatch as "Running for" rather than a token/duration total', () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 2 } });
+    expect(metaFor(e, { now: e.ts })).toBe('round 2 · Running for 0 s');
+    // (formatElapsed rounds up from a zero-width window to "0s"; the space
+    // before "s" is inserted to match ds-spec.md §4.3's own wording.)
+  });
+
+  it("shows a finished dispatch's tokens and duration", () => {
+    const e = entry({ eventType: 'dispatch_decision', payload: { round: 1 } });
+    (e as unknown as { run: unknown }).run = {
+      tokensIn: 1000,
+      tokensOut: 500,
+      durationMs: 65_000,
+      runStatus: 'done',
+      dispatchedAt: e.ts,
+      round: 1,
+    };
+    expect(metaFor(e)).toBe('round 1 · 1.5K tokens · 1 min');
+  });
+
+  it("marks a judge-reported row's meta as role, round, verdict", () => {
+    // judge-reported only reaches the `finding` branch when the server's own
+    // `kind` says so (queries.ts's eventKind()) — see the kindFor() tests
+    // above for the reconciled client/server mapping.
+    const e = {
+      ...entry({
+        eventType: 'judge-reported',
+        payload: { agent_role: 'judge', round: 1, overall: 'pass' },
+      }),
+      kind: 'Finding',
+    };
+    expect(metaFor(e)).toBe('Judge · round 1 · pass');
   });
 });
 
@@ -1083,6 +1126,18 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
     ['some-future-event-type', 'system'],
   ] as const)('maps %s to %s', (eventType, kind) => {
     expect(kindFor(entry({ eventType }))).toBe(kind);
+  });
+
+  it('prefers a server-supplied kind over the eventType switch', () => {
+    // waiver-granted maps to 'finding' client-side but 'Feedback' server-side
+    // (queries.ts's eventKind()) — DS6 PR3: the server wins once it is present.
+    expect(kindFor({ ...entry({ eventType: 'waiver-granted' }), kind: 'Feedback' })).toBe(
+      'feedback',
+    );
+  });
+
+  it('falls back to system for an unrecognized server kind', () => {
+    expect(kindFor({ ...entry({ eventType: 'user_prompt' }), kind: 'Nonsense' })).toBe('system');
   });
 
   it('never leaves a kind unmapped for the whole gate_event taxonomy dimension', () => {

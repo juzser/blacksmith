@@ -361,6 +361,24 @@ a:hover {
   padding: 0 var(--bs-space-2);
 }
 
+/* EventKindTag (DS6 §4.3, ds-review.html `.ktag`): a text-only kind label,
+   same box metrics as .bs-tag--subtle.bs-tag--sm, colour set inline from the
+   kind's own --bs-event-* tokens. */
+.bs-event-kind-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 var(--bs-space-2);
+  border-radius: var(--bs-radius-sm);
+  font-size: var(--bs-text-xs);
+  font-weight: var(--bs-font-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+}
+
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */
 .bs-sep {
   background: var(--bs-border);

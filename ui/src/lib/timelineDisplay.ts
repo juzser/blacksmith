@@ -2,10 +2,84 @@
 // left colour bar are decorative grouping by EVENT KIND only, never status —
 // actual outcome renders as a Lozenge (taxonomy.ts) alongside it, never via
 // the kind colour alone.
-import type { TimelineEntry } from './api.js';
-import { taskLabel } from './format.js';
+import type { DispatchRun, TimelineEntry } from './api.js';
+import { formatCompactNumber, formatElapsed, formatTime, taskLabel } from './format.js';
 import { roleLabel } from './roleLabels.js';
 import { specRefLabel } from './specRef.js';
+
+/** The shape `/api/timeline`'s paged mode (`fetchTimelinePage`, api.ts) adds
+ * on top of a plain `TimelineEntry`: a server-computed `kind`, the nearest
+ * causal prompt's id, and (per kind) the DS6 PR2 run/gate joins. `metaFor`
+ * below only reads fields that exist on this richer shape — a bare
+ * `TimelineEntry` (the unpaged `fetchTimeline`, still used by the orphaned
+ * old `components/TimelineRow.vue`) renders every item as "not measured". */
+export interface ActivityEntry extends TimelineEntry {
+  kind?: string;
+  nearestPromptId?: string | null;
+  run?: DispatchRun;
+  gateCounts?: { passed: number; failed: number } | null;
+}
+
+/** Extra context `metaFor` needs but cannot derive from one row alone: the
+ * nearest prompt's own timestamp (for "because of your prompt at HH:MM") and
+ * how many dispatches a Prompt row caused — both walks over the whole page,
+ * done once by the caller (ActivityPage.vue / TimelineRow.vue). */
+export interface MetaContext {
+  now?: string;
+  promptTs?: string | null;
+  causedCount?: number;
+}
+
+const NOT_MEASURED = 'not measured';
+
+function tokensItem(run: DispatchRun | undefined): string | null {
+  if (!run) return null;
+  if (run.tokensIn == null && run.tokensOut == null) return NOT_MEASURED;
+  const total = (run.tokensIn ?? 0) + (run.tokensOut ?? 0);
+  return `${formatCompactNumber(total)} tokens`;
+}
+
+function durationItem(ms: number | null | undefined): string | null {
+  if (ms === undefined) return null;
+  if (ms === null) return NOT_MEASURED;
+  const minutes = Math.round(ms / 60_000);
+  return minutes < 1 ? `${Math.round(ms / 1000)} s` : `${minutes} min`;
+}
+
+function becauseOfItem(ctx: MetaContext): string | null {
+  if (ctx.promptTs === undefined) return null;
+  if (ctx.promptTs === null) return NOT_MEASURED;
+  return `because of your prompt at ${formatTime(ctx.promptTs)}`;
+}
+
+/** Human check name for the broad set of event types `kindFor` buckets as
+ * `gate` (ds-spec.md §4.3's "check name"). */
+const GATE_CHECK_NAME: Record<string, string> = {
+  'schema-check-result': 'Schema check',
+  'artifact-check-result': 'Artifact check',
+  'commit-check-result': 'Commit check',
+  'deps-check-result': 'Dependency check',
+  'judges-outstanding': 'Judges outstanding',
+  'grader-verdict': 'Grader verdict',
+  'budget-check-result': 'Budget check',
+  'testgate-result': 'Unit tests',
+  'coverage-evidence': 'Coverage',
+  'integration-check': 'Integration check',
+  'spec-review-recorded': 'Spec review',
+  'goal-check-recorded': 'Goal check',
+  'quorum-decision': 'Quorum decision',
+  'gate-outcome': 'Gate outcome',
+  'issue-reported': 'Issue reported',
+};
+
+function gateCountsItem(counts: ActivityEntry['gateCounts']): string | null {
+  if (counts === undefined) return null;
+  if (counts === null) return NOT_MEASURED;
+  const total = counts.passed + counts.failed;
+  return counts.failed > 0
+    ? `${counts.failed} of ${total} failed`
+    : `${counts.passed} of ${total} passed`;
+}
 
 /** CausalTimelineList's pre-built causal-parent tree node (moved here, not
  * exported from a .vue SFC — see components/ds/types.ts's header comment
@@ -341,11 +415,28 @@ export const EVENT_KIND_LABEL: Record<EventKind, string> = {
   system: 'System',
 };
 
-/** Which of the nine mock kinds an event type renders as. Unknown types fall
- * back to `system` rather than throwing, the same way `titleFor`'s default
- * case prints the raw event_type instead of crashing on a taxonomy the
- * dashboard hasn't caught up with yet. */
-export function kindFor(entry: TimelineEntry): EventKind {
+/** Reverse of EVENT_KIND_LABEL: the server's PascalCase EventKind (api.ts) to
+ * this file's lowercase one (same string values, see api.ts's EventKind). */
+const LOWERCASE_KIND_BY_LABEL = new Map<string, EventKind>(
+  EVENT_KINDS.map((kind) => [EVENT_KIND_LABEL[kind], kind]),
+);
+
+/** Which of the nine mock kinds an event renders as. `/api/timeline`'s paged
+ * entries (TimelinePage.entries, api.ts) already carry a server-computed
+ * `kind` — DS6 PR3 prefers that over re-deriving one client-side, because
+ * the two used to disagree (server's eventKind() in queries.ts follows
+ * ds-spec.md §4.3; this file's own eventType switch below predates that and
+ * swaps Finding/Feedback for waiver-granted/-denied vs. judge-reported, and
+ * widens the Gate set). Entries without a server `kind` (the unpaged
+ * `fetchTimeline()`/`TimelineEntry` shape, still used by the orphaned old
+ * `components/TimelineRow.vue`) fall through to that same switch. Unknown
+ * types fall back to `system` rather than throwing, the same way `titleFor`'s
+ * default case prints the raw event_type instead of crashing on a taxonomy
+ * the dashboard hasn't caught up with yet. */
+export function kindFor(entry: TimelineEntry & { kind?: string }): EventKind {
+  if (entry.kind !== undefined) {
+    return LOWERCASE_KIND_BY_LABEL.get(entry.kind) ?? 'system';
+  }
   switch (entry.eventType) {
     case 'user_prompt':
     case 'operator-note':
@@ -714,8 +805,88 @@ export function titleFor(entry: TimelineEntry): string {
   }
 }
 
-export function metaFor(entry: TimelineEntry): string {
-  return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+/**
+ * The meta line under a TimelineRow's title (ds-spec.md §4.3's per-kind
+ * table, reproduced in each case below). A field that is simply absent from
+ * the row's own kind (e.g. `run` on anything but `dispatch`) is skipped
+ * rather than printed as "not measured" — "not measured" is reserved for a
+ * field the kind IS supposed to carry but this particular row's payload
+ * came back null for (D-169's own "say the absence" rule, one level down:
+ * a null counts, a field that doesn't exist for this kind never did).
+ */
+export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
+  const p = entry.payload as Record<string, unknown>;
+  const kind = kindFor(entry);
+  const parts: (string | null)[] = [];
+  switch (kind) {
+    case 'dispatch': {
+      const round = entry.run?.round ?? (typeof p.round === 'number' ? p.round : null);
+      if (round != null) parts.push(`round ${round}`);
+      if (entry.run?.runStatus == null) {
+        // Still running: no terminal result yet, so no token/duration totals.
+        // ds-spec.md §4.3 spells the seconds case with a space ("Running for
+        // 12 s"); formatElapsed's own terse "12s" is right for every other
+        // unit, so only that one case gets split back apart.
+        const elapsed = formatElapsed(entry.ts, ctx.now).replace(/^(\d+)s$/, '$1 s');
+        parts.push(`Running for ${elapsed}`);
+      } else {
+        parts.push(tokensItem(entry.run));
+        parts.push(durationItem(entry.run.durationMs));
+      }
+      parts.push(becauseOfItem(ctx));
+      break;
+    }
+    case 'returned': {
+      parts.push(tokensItem(entry.run));
+      parts.push(durationItem(entry.run?.durationMs));
+      parts.push(entry.run?.runStatus == null ? NOT_MEASURED : String(entry.run.runStatus));
+      break;
+    }
+    case 'finding': {
+      if (p.agent_role) parts.push(roleLabel(String(p.agent_role)));
+      if (p.round != null) parts.push(`round ${String(p.round)}`);
+      if (p.overall) parts.push(String(p.overall));
+      break;
+    }
+    case 'gate': {
+      const checkName = GATE_CHECK_NAME[entry.eventType] ?? entry.eventType;
+      parts.push(checkName);
+      parts.push(gateCountsItem(entry.gateCounts));
+      if (p.round != null) parts.push(`round ${String(p.round)}`);
+      break;
+    }
+    case 'merge': {
+      const ids = Array.isArray(p.task_ids) ? p.task_ids.map(String) : [];
+      parts.push(ids.join(', ') || taskLabel(String(entry.taskId ?? '')));
+      const files = Array.isArray(p.files_changed) ? p.files_changed.length : null;
+      parts.push(files === null ? NOT_MEASURED : `${files} file${files === 1 ? '' : 's'} changed`);
+      break;
+    }
+    case 'prompt': {
+      parts.push(
+        ctx.causedCount == null
+          ? NOT_MEASURED
+          : `Caused ${ctx.causedCount} dispatch${ctx.causedCount === 1 ? '' : 'es'}`,
+      );
+      break;
+    }
+    case 'error': {
+      if (p.class) parts.push(String(p.class));
+      if (p.severity) parts.push(String(p.severity));
+      break;
+    }
+    case 'feedback': {
+      parts.push(entry.eventType === 'waiver-denied' ? 'Waiver denied' : 'Waiver');
+      if (entry.taskId) parts.push(taskLabel(entry.taskId));
+      break;
+    }
+    case 'system':
+      return '—';
+    default:
+      return entry.taskId ? `${taskLabel(entry.taskId)} · ${entry.eventType}` : entry.eventType;
+  }
+  const filtered = parts.filter((part): part is string => Boolean(part));
+  return filtered.length > 0 ? filtered.join(' · ') : '—';
 }
 
 const SHORT_MONTHS = [
