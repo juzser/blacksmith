@@ -809,9 +809,9 @@ export function titleFor(entry: TimelineEntry): string {
  * "operator-feedback-resolved" -> "Operator feedback resolved", so a raw
  * kebab-case type slug never reaches the row as-is. */
 function humanizeEventType(eventType: string): string {
-  const words = eventType.split(/[-_]/).filter(Boolean);
-  if (words.length === 0) return eventType;
-  return [words[0].charAt(0).toUpperCase() + words[0].slice(1), ...words.slice(1)].join(' ');
+  const [first, ...rest] = eventType.split(/[-_]/).filter(Boolean);
+  if (first === undefined) return eventType;
+  return [first.charAt(0).toUpperCase() + first.slice(1), ...rest].join(' ');
 }
 
 /**
