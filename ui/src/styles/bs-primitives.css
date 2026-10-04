@@ -767,6 +767,59 @@ a:hover {
   padding: 0 var(--bs-space-5) var(--bs-space-5);
 }
 
+/* LessonCard (ds-spec.md §4.5): the full card (desktop/tablet list and the
+   review Dialog body) sits on top of .bs-card; the compact variant (phone
+   shell table: "one-line lesson rows") is a flat row instead, so it carries
+   its own layout rather than Card's header/body/footer padding. */
+.bs-lessoncard {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+.bs-lessoncard--clickable {
+  cursor: pointer;
+}
+.bs-lessoncard--clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+  border-radius: var(--bs-radius-lg);
+}
+.bs-lessoncard .bs-card {
+  gap: var(--bs-space-2);
+}
+.bs-lessoncard__statement {
+  font-size: var(--bs-text-sm);
+  font-weight: var(--bs-font-weight-medium);
+  color: var(--bs-text);
+}
+.bs-lessoncard__meta {
+  font-size: var(--bs-text-sm);
+  color: var(--bs-text-subtle);
+}
+.bs-lessoncard--compact {
+  display: flex;
+  align-items: baseline;
+  gap: var(--bs-space-2);
+  padding: var(--bs-space-3) var(--bs-space-2);
+  min-height: var(--bs-touch);
+  border-bottom: 1px solid var(--bs-border);
+}
+.bs-lessoncard--compact .bs-lessoncard__statement {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bs-lessoncard--compact .bs-lessoncard__meta {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 /* Input / Textarea / Select (§2.1) — native-element wrappers, ds-spec.md's
    "unchanged contract from the old kit"; only the look changes: bs- tokens,
    the same focus-visible ring as .bs-btn. */

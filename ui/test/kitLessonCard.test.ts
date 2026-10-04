@@ -1,0 +1,40 @@
+// Static source-text check, same style as kitTabs.test.ts — the SFC itself
+// carries no logic beyond calling the already-tested lessonLabels helpers,
+// so this asserts the wiring: every sentence ds-spec.md §4.5 calls for
+// comes from one of those helpers, and compact/clickable toggle the markup
+// the shell table (ds-spec.md:807) and the list each need.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const KIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'components', 'kit');
+const CARD = readFileSync(join(KIT, 'LessonCard.vue'), 'utf8');
+
+describe('kit/LessonCard.vue', () => {
+  it('declares lesson/compact/clickable props and a click emit', () => {
+    expect(CARD).toMatch(/lesson:\s*LessonRecord/);
+    expect(CARD).toMatch(/compact\?:\s*boolean/);
+    expect(CARD).toMatch(/clickable\?:\s*boolean/);
+    expect(CARD).toMatch(/click:\s*\[\]/);
+  });
+
+  it('renders the rule, the scope label, the learned-from line, and the prevented line', () => {
+    expect(CARD).toMatch(/lesson\.statement/);
+    expect(CARD).toMatch(/lessonScopeLabel\(/);
+    expect(CARD).toMatch(/learnedFromLabel\(/);
+    expect(CARD).toMatch(/preventedLabel\(/);
+  });
+
+  // ds-spec.md shell table (:807): phone gets "one-line lesson rows".
+  it('has a compact one-line layout distinct from the full card', () => {
+    expect(CARD).toMatch(/v-if="compact"/);
+    expect(CARD).toMatch(/bs-lessoncard--compact/);
+  });
+
+  // clickable switches the root element rather than wrapping a second time,
+  // so the same markup serves both the list row and the Dialog's read-only body.
+  it('renders as a button only when clickable', () => {
+    expect(CARD).toMatch(/:is="clickable \? 'button' : 'div'"/);
+  });
+});
