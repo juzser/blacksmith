@@ -197,7 +197,7 @@ function becauseOf(promptId: string) {
     <div
       v-if="isPhoneWidth"
       role="tablist"
-      class="bs-tabs__list activity-kind-tabs"
+      class="bs-tabs__list"
       aria-label="Filter"
       @keydown="onPhoneKindKeydown"
     >
