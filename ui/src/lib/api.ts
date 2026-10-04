@@ -523,6 +523,27 @@ export interface ProviderAgreementStat {
   failuresByCode: Record<string, number>;
 }
 
+/** DS7 §4.4 — mirrors db/queries.ts's `AnalyticsPeriod`. */
+export type AnalyticsPeriod = '7d' | '30d' | '90d';
+
+/** DS7 §4.4 — mirrors db/queries.ts's `DailyTokenBucket`. */
+export interface DailyTokenBucket {
+  day: string;
+  tokensByRole: Record<string, number>;
+  tokensByModelTier: Record<string, number>;
+  unmeasuredRunCount: number;
+}
+
+/** DS7 §4.4 — mirrors db/queries.ts's `RoleModelTierBucket`. */
+export interface RoleModelTierBucket {
+  role: string;
+  modelTier: string;
+  runCount: number;
+  tokens: number;
+  avgTokensPerRun: number | null;
+  unmeasuredRunCount: number;
+}
+
 export interface AnalyticsResult {
   throughput: ThroughputDay[];
   costByModelTierAndProvider: CostBucket[];
@@ -535,6 +556,10 @@ export interface AnalyticsResult {
    * claude alone in every session ever logged (D-255).
    */
   providerAgreement: ProviderAgreementStat[];
+  /** Present only when `period` was requested. */
+  tokensByDay?: DailyTokenBucket[];
+  /** Present only when `period` was requested. */
+  tokensByRoleAndModelTier?: RoleModelTierBucket[];
 }
 
 export function fetchOverview(session?: SessionScope, project?: string): Promise<OverviewResult> {
@@ -721,10 +746,15 @@ export function fetchErrors(session?: SessionScope, project?: string): Promise<E
   return getJson(`/api/errors${qs ? `?${qs}` : ''}`);
 }
 
-export function fetchAnalytics(session?: SessionScope, project?: string): Promise<AnalyticsResult> {
+export function fetchAnalytics(
+  session?: SessionScope,
+  project?: string,
+  period?: AnalyticsPeriod,
+): Promise<AnalyticsResult> {
   const q = new URLSearchParams();
   applySessionScope(q, session);
   if (project) q.set('project', project);
+  if (period) q.set('period', period);
   const qs = q.toString();
   return getJson(`/api/analytics${qs ? `?${qs}` : ''}`);
 }

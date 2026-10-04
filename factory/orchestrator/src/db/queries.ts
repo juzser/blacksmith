@@ -3252,12 +3252,54 @@ export interface AnalyticsResult {
    * log (D-255).
    */
   providerAgreement: ProviderAgreementStat[];
+  /**
+   * DS7 §4.4 — one entry per UTC calendar day in `opts.period`'s window,
+   * oldest-first, with no gaps (a zero-run day still gets a row). Present
+   * only when `opts.period` is given; its absence is the backward-compat
+   * signal the pre-DS7 AnalyticsPage relies on.
+   */
+  tokensByDay?: DailyTokenBucket[];
+  /**
+   * DS7 §4.4 — the breakdown `Table`: one row per (role, modelTier) pair for
+   * `opts.period`'s window. Present only when `opts.period` is given.
+   */
+  tokensByRoleAndModelTier?: RoleModelTierBucket[];
+}
+
+/** DS7 §4.4's `PeriodSwitch` values — 7/30/90 calendar days ending today, inclusive. */
+export type AnalyticsPeriod = '7d' | '30d' | '90d';
+
+export interface AnalyticsOpts extends ClockOpts {
+  period?: AnalyticsPeriod;
+}
+
+export interface DailyTokenBucket {
+  /** UTC calendar day, `YYYY-MM-DD`. */
+  day: string;
+  /** Measured tokens this day, keyed by `agent` (the dispatch role). */
+  tokensByRole: Record<string, number>;
+  /** Measured tokens this day, keyed by model tier. */
+  tokensByModelTier: Record<string, number>;
+  /** Runs this day whose `token_usage` could not be measured — counted, never added as 0 tokens. */
+  unmeasuredRunCount: number;
+}
+
+export interface RoleModelTierBucket {
+  role: string;
+  modelTier: string;
+  runCount: number;
+  /** Measured runs only. */
+  tokens: number;
+  /** `tokens / (runCount - unmeasuredRunCount)`; null when every run in the pair is unmeasured. */
+  avgTokensPerRun: number | null;
+  unmeasuredRunCount: number;
 }
 
 interface ResultPayloadForCost {
   task_id?: string;
   provider?: string;
   model_tier?: string;
+  agent?: string;
   token_usage?: { total_tokens?: number };
 }
 
@@ -3265,7 +3307,25 @@ interface SeverityDecisionsPayloadForAnalytics {
   decisions?: Array<{ same_mistake?: boolean }>;
 }
 
-export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
+const PERIOD_DAYS: Record<AnalyticsPeriod, number> = { '7d': 7, '30d': 30, '90d': 90 };
+
+/** The UTC calendar days in `period`'s window ending on `nowIso`'s UTC date, inclusive, oldest-first. */
+function periodDays(period: AnalyticsPeriod, nowIso: string): string[] {
+  const now = new Date(nowIso);
+  const endUtcMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const days = PERIOD_DAYS[period];
+  const out: string[] = [];
+  for (let i = days - 1; i >= 0; i -= 1) {
+    out.push(new Date(endUtcMs - i * 86_400_000).toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+export function analytics(
+  db: SmithDb,
+  scope: Scope = {},
+  opts: AnalyticsOpts = {},
+): AnalyticsResult {
   const taskRows = allTasksForScope(db, scope);
   const inScope = taskInScope(db, scope);
 
@@ -3282,21 +3342,39 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
   const eventSessionCond = scopedToSessions(eventsRaw.sessionId, scope);
   const resultRows = eventSessionCond
     ? db
-        .select({ taskId: eventsRaw.taskId, payload: eventsRaw.payload })
+        .select({ taskId: eventsRaw.taskId, payload: eventsRaw.payload, ts: eventsRaw.ts })
         .from(eventsRaw)
         .where(and(eq(eventsRaw.eventType, 'task-result-recorded'), eventSessionCond))
         .all()
     : db
-        .select({ taskId: eventsRaw.taskId, payload: eventsRaw.payload })
+        .select({ taskId: eventsRaw.taskId, payload: eventsRaw.payload, ts: eventsRaw.ts })
         .from(eventsRaw)
         .where(eq(eventsRaw.eventType, 'task-result-recorded'))
         .all();
+
+  // No `period`: every row, exactly the pre-DS7 behaviour (backward compat).
+  // With `period`: only rows whose UTC day falls in the window — this also
+  // answers DS7's "per-provider totals for the period" ask (spec §4.4's
+  // "providers with totalTokens > 0"), so no separate field is added for it.
+  const window = opts.period ? periodDays(opts.period, opts.nowIso ?? new Date().toISOString()) : null;
+  const windowSet = window ? new Set(window) : null;
+  const scopedResultRows = windowSet
+    ? resultRows.filter((row) => windowSet.has(row.ts.slice(0, 10)))
+    : resultRows;
 
   const costBuckets = new Map<
     string,
     { taskCount: number; totalTokens: number; unmeasuredTaskCount: number }
   >();
-  for (const row of resultRows) {
+  const dailyBuckets = new Map<
+    string,
+    { tokensByRole: Map<string, number>; tokensByModelTier: Map<string, number>; unmeasuredRunCount: number }
+  >();
+  const roleTierBuckets = new Map<
+    string,
+    { runCount: number; tokens: number; unmeasuredRunCount: number }
+  >();
+  for (const row of scopedResultRows) {
     const p = JSON.parse(row.payload) as ResultPayloadForCost;
     // Column first, payload second: both spellings occur, and one real row
     // omits `payload.task_id` while the column carries it.
@@ -3306,12 +3384,46 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
     const bucket = costBuckets.get(key) ?? { taskCount: 0, totalTokens: 0, unmeasuredTaskCount: 0 };
     bucket.taskCount += 1;
     const tokens = p.token_usage?.total_tokens;
-    if (typeof tokens === 'number' && isPlausibleTokenCount(tokens)) {
-      bucket.totalTokens += tokens;
+    const measured = typeof tokens === 'number' && isPlausibleTokenCount(tokens);
+    if (measured) {
+      bucket.totalTokens += tokens as number;
     } else {
       bucket.unmeasuredTaskCount += 1;
     }
     costBuckets.set(key, bucket);
+
+    if (window && p.agent) {
+      const day = row.ts.slice(0, 10);
+      const daily = dailyBuckets.get(day) ?? {
+        tokensByRole: new Map<string, number>(),
+        tokensByModelTier: new Map<string, number>(),
+        unmeasuredRunCount: 0,
+      };
+      if (measured) {
+        daily.tokensByRole.set(p.agent, (daily.tokensByRole.get(p.agent) ?? 0) + (tokens as number));
+        daily.tokensByModelTier.set(
+          p.model_tier,
+          (daily.tokensByModelTier.get(p.model_tier) ?? 0) + (tokens as number),
+        );
+      } else {
+        daily.unmeasuredRunCount += 1;
+      }
+      dailyBuckets.set(day, daily);
+
+      const roleTierKey = `${p.agent}|${p.model_tier}`;
+      const roleTier = roleTierBuckets.get(roleTierKey) ?? {
+        runCount: 0,
+        tokens: 0,
+        unmeasuredRunCount: 0,
+      };
+      roleTier.runCount += 1;
+      if (measured) {
+        roleTier.tokens += tokens as number;
+      } else {
+        roleTier.unmeasuredRunCount += 1;
+      }
+      roleTierBuckets.set(roleTierKey, roleTier);
+    }
   }
   const costByModelTierAndProvider: CostBucket[] = [...costBuckets.entries()].map(([key, v]) => {
     const [modelTier, provider] = key.split('|') as [string, string];
@@ -3325,6 +3437,33 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
       unmeasuredTaskCount: v.unmeasuredTaskCount,
     };
   });
+
+  const tokensByDay: DailyTokenBucket[] | undefined = window
+    ? window.map((day) => {
+        const daily = dailyBuckets.get(day);
+        return {
+          day,
+          tokensByRole: daily ? Object.fromEntries(daily.tokensByRole) : {},
+          tokensByModelTier: daily ? Object.fromEntries(daily.tokensByModelTier) : {},
+          unmeasuredRunCount: daily?.unmeasuredRunCount ?? 0,
+        };
+      })
+    : undefined;
+
+  const tokensByRoleAndModelTier: RoleModelTierBucket[] | undefined = window
+    ? [...roleTierBuckets.entries()].map(([key, v]) => {
+        const [role, modelTier] = key.split('|') as [string, string];
+        const measuredRunCount = v.runCount - v.unmeasuredRunCount;
+        return {
+          role,
+          modelTier,
+          runCount: v.runCount,
+          tokens: v.tokens,
+          avgTokensPerRun: measuredRunCount > 0 ? v.tokens / measuredRunCount : null,
+          unmeasuredRunCount: v.unmeasuredRunCount,
+        };
+      })
+    : undefined;
 
   const decisionRows = eventSessionCond
     ? db
@@ -3377,6 +3516,8 @@ export function analytics(db: SmithDb, scope: Scope = {}): AnalyticsResult {
     // Same db, same scope: a project-scoped page gets project-scoped judge
     // stats, and no second round trip is needed to render the card.
     providerAgreement: providerAgreement(db, scope),
+    ...(tokensByDay ? { tokensByDay } : {}),
+    ...(tokensByRoleAndModelTier ? { tokensByRoleAndModelTier } : {}),
   };
 }
 

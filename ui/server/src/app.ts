@@ -31,6 +31,7 @@ import { resolveArtifactPath } from '../../../factory/orchestrator/dist/artifact
 import type { DbHandle, DbOpts, SmithDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import { apply as applyDb, openDb } from '../../../factory/orchestrator/dist/db/projector.js';
 import type {
+  AnalyticsPeriod,
   AnalyticsResult,
   EventKind,
   Scope,
@@ -968,12 +969,23 @@ export function createApp(opts: AppOpts): AppHandle {
     return c.json(errorsPage(handle.db, { ...sessionScope(c), ...(project ? { project } : {}) }));
   });
 
+  const ANALYTICS_PERIODS: readonly AnalyticsPeriod[] = ['7d', '30d', '90d'];
+
   app.get('/api/analytics', (c) => {
     const project = c.req.query('project');
-    const result: AnalyticsResult = analytics(handle.db, {
-      ...sessionScope(c),
-      ...(project ? { project } : {}),
-    });
+    const periodParam = c.req.query('period');
+    if (periodParam !== undefined && !ANALYTICS_PERIODS.includes(periodParam as AnalyticsPeriod)) {
+      throw new BadRequestError(
+        'analytics.bad-request',
+        `"period" must be one of ${ANALYTICS_PERIODS.join(', ')}, got "${periodParam}".`,
+      );
+    }
+    const period = periodParam as AnalyticsPeriod | undefined;
+    const result: AnalyticsResult = analytics(
+      handle.db,
+      { ...sessionScope(c), ...(project ? { project } : {}) },
+      { ...clock, ...(period ? { period } : {}) },
+    );
     return c.json(result);
   });
 

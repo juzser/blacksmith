@@ -1844,6 +1844,242 @@ describe('db/queries.ts', () => {
         silentHandle.sqlite.close();
       }
     });
+
+    // DS7 — period, daily token series, role/modelTier breakdown.
+    it('scopes the token day window to UTC calendar days ending today, inclusive (period=7d)', async () => {
+      const session = 'sess-period-window';
+      const inDay = '2029-06-04T00:00:00.000Z'; // oldest day still inside a 7d window ending 2029-06-10
+      const outDay = '2029-06-03T23:59:59.999Z'; // one ms before the window
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            inDay,
+            {
+              task_id: 'period-epic/task-in',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 100 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            outDay,
+            {
+              task_id: 'period-epic/task-out',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 999 },
+            },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, 'period-window.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        const result = analytics(h.db, {}, { period: '7d', nowIso: '2029-06-10T12:00:00.000Z' });
+        const inWindowDay = result.tokensByDay?.find((d) => d.day === '2029-06-04');
+        expect(inWindowDay?.tokensByModelTier.mid).toBe(100);
+        expect(result.tokensByDay?.some((d) => d.day === '2029-06-03')).toBe(false);
+        const total = (result.tokensByDay ?? []).reduce(
+          (sum, d) => sum + (d.tokensByModelTier.mid ?? 0),
+          0,
+        );
+        expect(total).toBe(100); // the day-before row never enters the window
+      } finally {
+        h.sqlite.close();
+      }
+    });
+
+    it('produces a gapless, oldest-first daily token series whose length matches the period', async () => {
+      const session = 'sess-period-gaps';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            '2029-06-10T00:00:00.000Z',
+            {
+              task_id: 'gap-epic/task-1',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 10 },
+            },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, 'period-gaps.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        for (const [period, length] of [
+          ['7d', 7],
+          ['30d', 30],
+          ['90d', 90],
+        ] as const) {
+          const result = analytics(h.db, {}, { period, nowIso: '2029-06-10T12:00:00.000Z' });
+          expect(result.tokensByDay).toHaveLength(length);
+          const days = (result.tokensByDay ?? []).map((d) => d.day);
+          expect(days).toEqual([...days].sort()); // oldest-first
+          expect(days[days.length - 1]).toBe('2029-06-10');
+        }
+      } finally {
+        h.sqlite.close();
+      }
+    });
+
+    it('keys daily totals by role and by model tier separately, and routes an unmeasured run to unmeasuredRunCount only', async () => {
+      const session = 'sess-period-roles';
+      const ts = '2029-06-10T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'role-epic/task-coder',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 300 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'role-epic/task-reviewer',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'spec-reviewer',
+              model_tier: 'frontier',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 500 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'role-epic/task-unmeasured',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { measured: false },
+            },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, 'period-roles.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        const result = analytics(h.db, {}, { period: '7d', nowIso: '2029-06-10T12:00:00.000Z' });
+        const day = result.tokensByDay?.find((d) => d.day === '2029-06-10');
+        expect(day?.tokensByRole).toEqual({ coder: 300, 'spec-reviewer': 500 });
+        expect(day?.tokensByModelTier).toEqual({ mid: 300, frontier: 500 });
+        expect(day?.unmeasuredRunCount).toBe(1);
+      } finally {
+        h.sqlite.close();
+      }
+    });
+
+    it('breaks down per role/model-tier pair for the period: counts, tokens, average, null average when every run is unmeasured', async () => {
+      const session = 'sess-period-breakdown';
+      const ts = '2029-06-10T00:00:00.000Z';
+      await appendFile(
+        path.join(stateDir, `${session}.jsonl`),
+        tiedLine('session-start', '2029-01-01T00:00:00.000Z', {}, session) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'bd-epic/task-1',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 100 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'bd-epic/task-2',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'coder',
+              model_tier: 'mid',
+              token_usage: { input_tokens: 0, output_tokens: 0, total_tokens: 300 },
+            },
+            session,
+          ) +
+          tiedLine(
+            'task-result-recorded',
+            ts,
+            {
+              task_id: 'bd-epic/task-3',
+              run_status: 'done',
+              provider: 'claude',
+              agent: 'spec-reviewer',
+              model_tier: 'frontier',
+              token_usage: { measured: false },
+            },
+            session,
+          ),
+        'utf8',
+      );
+      const dbPath = path.join(dbDir, 'period-breakdown.db');
+      await rebuild(dbPath, 'all', { stateDir });
+      const h = openDb(dbPath);
+      try {
+        const result = analytics(h.db, {}, { period: '7d', nowIso: '2029-06-10T12:00:00.000Z' });
+        expect(result.tokensByRoleAndModelTier).toContainEqual({
+          role: 'coder',
+          modelTier: 'mid',
+          runCount: 2,
+          tokens: 400,
+          avgTokensPerRun: 200,
+          unmeasuredRunCount: 0,
+        });
+        expect(result.tokensByRoleAndModelTier).toContainEqual({
+          role: 'spec-reviewer',
+          modelTier: 'frontier',
+          runCount: 1,
+          tokens: 0,
+          avgTokensPerRun: null,
+          unmeasuredRunCount: 1,
+        });
+      } finally {
+        h.sqlite.close();
+      }
+    });
+
+    it('keeps the legacy response exactly when no period is given (backward compatible)', () => {
+      const withoutOpts = analytics(handle.db);
+      const withEmptyOpts = analytics(handle.db, {}, {});
+      expect(withEmptyOpts).toEqual(withoutOpts);
+      expect(withoutOpts).not.toHaveProperty('tokensByDay');
+      expect(withoutOpts).not.toHaveProperty('tokensByRoleAndModelTier');
+    });
   });
 });
 
