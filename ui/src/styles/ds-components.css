@@ -1296,6 +1296,14 @@
 .activity-sentinel {
   height: 1px;
 }
+/* DS6 PR4b round 3 item 1 (mock ds-review.html .newpill): the "N new
+   events" pill shown above the feed once the reader has scrolled away from
+   the top and a poll has buffered rows. */
+.activity-newpill {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 var(--ds-space-3);
+}
 .timeline-row {
   display: flex;
   align-items: flex-start;
