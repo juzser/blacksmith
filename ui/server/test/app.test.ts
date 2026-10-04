@@ -887,7 +887,7 @@ describe('ui/server app.ts', () => {
     const handle = app();
     const res = await handle.app.request('/api/errors');
     expect(res.status).toBe(200);
-    const body = await res.json();
+    const body = await json<{ byClass: unknown; byDay: unknown; classSummary: unknown }>(res);
     expect(Array.isArray(body.byClass)).toBe(true);
     expect(Array.isArray(body.byDay)).toBe(true);
     expect(Array.isArray(body.classSummary)).toBe(true);
