@@ -50,8 +50,11 @@ test.describe('Activity', () => {
     await chip.click();
     await expect(page).toHaveURL(/kind=prompt/);
     await expect(chip).toHaveAttribute('aria-pressed', 'true');
+    // The fixture's operator-note (kind Prompt, same as user_prompt -- D-153)
+    // is the newer of the two Prompt rows, so it -- not the user_prompt --
+    // is first on this newest-first page.
     await expect(page.locator('.bs-timeline-row__title').first()).toHaveText(
-      'Build the widget and fix the flaky import.',
+      'scope-check: the flaky import is in the same module, so one task covers it',
     );
 
     // Clicking the same chip again clears the filter.

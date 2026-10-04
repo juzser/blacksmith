@@ -1231,7 +1231,11 @@
   .activity-toolbar {
     flex-wrap: wrap;
   }
-  .activity-toolbar__expand-all {
+  /* .bs-btn (bs-primitives.css, loaded after this file) sets its own
+     `display: inline-flex` at the same specificity as a bare class selector
+     and wins on source order -- pairing the class with .bs-btn here matches
+     that specificity and actually hides the button. */
+  .activity-toolbar__expand-all.bs-btn {
     display: none;
   }
 }

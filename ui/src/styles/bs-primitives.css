@@ -443,6 +443,17 @@ a:hover {
 .bs-timeline-row__title--link:focus-visible {
   text-decoration: underline;
 }
+/* ≤640px: a one-line title button's own text settles well under --bs-touch
+   (touchTargets.spec.ts caught this on a short humanized title, e.g.
+   "Operator feedback resolved" on a single line) -- min-height floor only,
+   same pattern as .bs-input/.bs-select above. */
+@media (max-width: 640px) {
+  .bs-timeline-row__title--link {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--bs-touch);
+  }
+}
 .bs-timeline-row__ts {
   color: var(--bs-text-subtlest);
   font-size: var(--bs-text-xs);

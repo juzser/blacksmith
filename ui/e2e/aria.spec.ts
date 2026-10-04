@@ -39,8 +39,11 @@ test.describe('Disclosure ARIA', () => {
     // arrives, and a sweep over an empty page asserts nothing (D-150). Scoped
     // to the row title: the collapsed detail <dl> (v-show, not v-if, so its
     // id stays resolvable -- see TimelineRow.vue) repeats the same text.
+    // The fixture's operator-note (kind Prompt, same as user_prompt -- D-153)
+    // is the newer of the two Prompt rows, so it -- not the user_prompt --
+    // is first on this newest-first page.
     await expect(page.locator('.bs-timeline-row__title').first()).toHaveText(
-      'Build the widget and fix the flaky import.',
+      'scope-check: the flaky import is in the same module, so one task covers it',
     );
 
     const triggers = page.locator('[aria-controls]');
