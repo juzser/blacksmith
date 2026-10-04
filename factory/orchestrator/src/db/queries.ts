@@ -2053,6 +2053,31 @@ export interface TimelineEntry {
    * including the entry asked about, so a prompt row answers its own walk.
    */
   nearestPromptId: string | null;
+  /**
+   * DS6 PR2 (§4.3 table) — a Dispatched row's run result, joined
+   * server-side through `agents.terminalEventId` to the `task_run_result`
+   * payload. Present only on `Dispatched` rows; `undefined` on every other
+   * kind. Fields the run did not measure are `null`, never 0 — including
+   * `durationMs`, which no writer in this codebase stamps yet (same "not
+   * recorded anywhere" status the spec table already gives `effort`).
+   */
+  run?: DispatchRun;
+  /**
+   * DS6 PR2 (§4.3 table) — a Gate row's normalised pass/fail counts, from
+   * `testgate-result.results` (or `gate-outcome.results`, if present).
+   * Present only on `Gate` rows; `null` when the counts cannot be derived.
+   */
+  gateCounts?: { passed: number; failed: number } | null;
+}
+
+/** DS6 PR2 — a Dispatched row's run result (§4.3 table). */
+export interface DispatchRun {
+  tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number | null;
+  runStatus: string | null;
+  dispatchedAt: string;
+  round: number;
 }
 
 export interface TimelineFilter extends Scope {
@@ -2319,7 +2344,97 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   for (const entry of page) {
     entry.nearestPromptId = memoizedNearestPromptId(entry.eventId, getRow, promptMemo);
   }
+  joinDispatchRuns(db, page);
+  joinGateCounts(page);
   return page;
+}
+
+/**
+ * DS6 PR2 (§4.3 table) — fills `run` on every `Dispatched` entry in `page`,
+ * batched for the page only (same cost discipline as `nearestPromptId`
+ * above): one `agents` query keyed on the page's own dispatch event ids,
+ * then one `eventsRaw` query for the terminal `task_run_result` rows those
+ * `agents` rows name, rather than one query per row.
+ */
+function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
+  const dispatchIds = page
+    .filter((e) => e.kind === 'Dispatched')
+    .map((e) => e.eventId);
+  if (dispatchIds.length === 0) return;
+
+  const agentRows = db.select().from(agents).where(inArray(agents.id, dispatchIds)).all();
+  const agentByDispatchId = new Map(agentRows.map((a) => [a.id, a]));
+
+  const terminalEventIds = agentRows
+    .map((a) => a.terminalEventId)
+    .filter((id): id is string => id !== null);
+  const resultRows =
+    terminalEventIds.length === 0
+      ? []
+      : db
+          .select({ eventId: eventsRaw.eventId, payload: eventsRaw.payload })
+          .from(eventsRaw)
+          .where(
+            and(
+              inArray(eventsRaw.eventId, terminalEventIds),
+              eq(eventsRaw.eventType, TASK_RESULT_EVENT_TYPE),
+            ),
+          )
+          .all();
+  const resultPayloadByEventId = new Map(
+    resultRows.map((r) => [r.eventId, JSON.parse(r.payload) as Record<string, unknown>]),
+  );
+
+  for (const entry of page) {
+    if (entry.kind !== 'Dispatched') continue;
+    const agent = agentByDispatchId.get(entry.eventId);
+    if (!agent) continue;
+    const resultPayload = agent.terminalEventId
+      ? resultPayloadByEventId.get(agent.terminalEventId)
+      : undefined;
+    const usage = resultPayload?.token_usage as
+      | { input_tokens?: number; output_tokens?: number }
+      | undefined;
+    entry.run = {
+      tokensIn: typeof usage?.input_tokens === 'number' ? usage.input_tokens : null,
+      tokensOut: typeof usage?.output_tokens === 'number' ? usage.output_tokens : null,
+      durationMs: durationMsFromPayload(resultPayload ?? {}),
+      runStatus:
+        typeof resultPayload?.run_status === 'string' ? (resultPayload.run_status as string) : null,
+      dispatchedAt: agent.dispatchedAt,
+      round: agent.round,
+    };
+  }
+}
+
+/**
+ * DS6 PR2 (§4.3 table) — normalised `{passed, failed}` counts for every
+ * `Gate` entry in `page`, from `testgate-result.results` (or
+ * `gate-outcome.results`, if a future writer adds one); `null` when the
+ * payload carries no derivable `results` array. Pure over already-fetched
+ * payloads, so no extra query is needed.
+ */
+function joinGateCounts(page: TimelineEntry[]): void {
+  for (const entry of page) {
+    if (entry.kind !== 'Gate') continue;
+    const results = entry.payload.results;
+    if (!Array.isArray(results)) {
+      entry.gateCounts = null;
+      continue;
+    }
+    let passed = 0;
+    let failed = 0;
+    for (const r of results as Array<{ pass?: unknown }>) {
+      if (r && typeof r === 'object' && r.pass === true) passed += 1;
+      else if (r && typeof r === 'object' && r.pass === false) failed += 1;
+    }
+    entry.gateCounts = { passed, failed };
+  }
+}
+
+/** DS6 PR2 — a run's `duration_ms`, or null when the payload carries none (no writer stamps it today). */
+function durationMsFromPayload(payload: Record<string, unknown>): number | null {
+  return typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
 }
 
 /**
@@ -3022,14 +3137,18 @@ export interface TaskRun {
   outcome: string | null;
 }
 
-export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
-  const rows = inLogOrder(
+function fetchTaskRunRows(db: SmithDb, taskId: string): EventsRawRow[] {
+  return inLogOrder(
     db
       .select()
       .from(eventsRaw)
       .where(and(eq(eventsRaw.taskId, taskId), inArray(eventsRaw.eventType, [...RUN_EVENT_TYPES])))
       .all(),
   );
+}
+
+export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
+  const rows = fetchTaskRunRows(db, taskId);
   return rows.flatMap((r) => {
     const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
     if (!kind) return [];

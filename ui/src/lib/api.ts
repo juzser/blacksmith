@@ -644,9 +644,26 @@ export type EventKind =
   | 'Feedback'
   | 'System';
 
+/** DS6 PR2 (§4.3 table) — a Dispatched row's run result. */
+export interface DispatchRun {
+  tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number | null;
+  runStatus: string | null;
+  dispatchedAt: string;
+  round: number;
+}
+
 /** `/api/timeline`'s paged-mode envelope: newest-first entries plus the "Load older" cursor. */
 export interface TimelinePage {
-  entries: (TimelineEntry & { kind: EventKind; nearestPromptId: string | null })[];
+  entries: (TimelineEntry & {
+    kind: EventKind;
+    nearestPromptId: string | null;
+    /** Present only on `Dispatched` rows. */
+    run?: DispatchRun;
+    /** Present only on `Gate` rows; null when the counts cannot be derived. */
+    gateCounts?: { passed: number; failed: number } | null;
+  })[];
   nextBefore: string | null;
   newestId: string | null;
 }
