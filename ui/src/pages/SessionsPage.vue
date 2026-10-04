@@ -177,7 +177,12 @@ function refresh() {
     <template v-else>
       <ul class="bs-sessions__list" role="list">
         <li v-for="s in running()" :key="s.sessionId" :ref="(el) => setRowRef(s.sessionId, el as Element | null)">
-          <SessionRow :session="s" clickable @click="selectSession(s.sessionId)" />
+          <SessionRow
+            :session="s"
+            clickable
+            :selected="selectedId === s.sessionId"
+            @click="selectSession(s.sessionId)"
+          />
         </li>
       </ul>
       <p v-if="running().length === 0" class="bs-sessions__quiet">
@@ -199,7 +204,12 @@ function refresh() {
           :key="s.sessionId"
           :ref="(el) => setRowRef(s.sessionId, el as Element | null)"
         >
-          <SessionRow :session="s" clickable @click="selectSession(s.sessionId)" />
+          <SessionRow
+            :session="s"
+            clickable
+            :selected="selectedId === s.sessionId"
+            @click="selectSession(s.sessionId)"
+          />
         </li>
       </ul>
 

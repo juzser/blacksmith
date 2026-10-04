@@ -923,6 +923,13 @@ a:hover {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
 }
+/* Same non-accent selected cue as SegmentedControl's aria-current='page'
+   (§1.9 accent budget): --bs-surface-selected, no accent fill. aria-current
+   here is the boolean "true" form, not "page" — this is a list of buttons
+   that open a detail section below, not a set of page links. */
+.bs-sessionrow--selected {
+  background: var(--bs-surface-selected);
+}
 .bs-sessionrow__title {
   font-size: var(--bs-text-sm);
   font-weight: var(--bs-font-weight-medium);

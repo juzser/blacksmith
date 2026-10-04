@@ -51,4 +51,9 @@ describe('SessionsPage.vue', () => {
     expect(PAGE).toMatch(/from '\.\.\/lib\/sessionsSelection\.js'/);
     expect(PAGE).toMatch(/if \(isStaleResponse\(id, selectedId\.value\)\) return;/g);
   });
+
+  it('marks the open run selected in both the running and finished lists', () => {
+    const matches = PAGE.match(/:selected="selectedId === s\.sessionId"/g);
+    expect(matches?.length).toBe(2);
+  });
 });

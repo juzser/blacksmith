@@ -13,6 +13,8 @@ const props = defineProps<{
   session: RunningSession;
   /** Renders the row as the list item's own click target. */
   clickable?: boolean;
+  /** The run currently open in the detail section below the list. */
+  selected?: boolean;
   /** Test seam for RelativeTime's clock, same as elsewhere in the kit. */
   now?: string;
 }>();
@@ -58,7 +60,8 @@ const lastStep = computed(() => lastStepLabel(props.session.lastEventType));
     :is="clickable ? 'button' : 'div'"
     :type="clickable ? 'button' : undefined"
     class="bs-sessionrow"
-    :class="{ 'bs-sessionrow--clickable': clickable }"
+    :class="{ 'bs-sessionrow--clickable': clickable, 'bs-sessionrow--selected': selected }"
+    :aria-current="selected ? 'true' : undefined"
     @click="onClick"
   >
     <div class="bs-sessionrow__title">{{ title }}</div>
