@@ -166,15 +166,15 @@ export function hasMultipleProviders(buckets: readonly CostBucket[]): boolean {
 export const MIN_SETTLED_FOR_RATE = 5;
 
 /**
- * "75%", or "Not enough data yet (needs N settled rechecks)" in place of the
- * bare em dash `formatRate` prints on its own — the em dash reads as "we
- * have nothing to say", while this card's whole point is to tell the
- * operator why.
+ * The metric value line for the same-mistake/recheck-pass cards — "75%", or
+ * the mock's short "Not enough data yet" rather than the bare em dash
+ * `formatRate` prints on its own. The reason sits on each card's own
+ * takeaway sentence in the template (mock copy differs per card), so this
+ * stays the value alone (DS7 PR2 round 3 defect 4 — the value previously
+ * crammed the parenthetical in).
  */
-export function rateOrNotEnoughData(rate: number | null): string {
-  return rate === null
-    ? `Not enough data yet (needs ${MIN_SETTLED_FOR_RATE} settled rechecks)`
-    : formatRate(rate);
+export function rateDisplay(rate: number | null): string {
+  return rate === null ? 'Not enough data yet' : formatRate(rate);
 }
 
 /**
@@ -350,6 +350,22 @@ export function tokenTotalsBy(
     totals.set(label, (totals.get(label) ?? 0) + bucket.tokens);
   }
   return [...totals].map(([label, value]) => ({ label, value }));
+}
+
+/**
+ * The phone role list's bars: `tokenTotalsBy('role')` plus a trailing "Not
+ * measured" row sized by unmeasured run count — the phone list's only
+ * surface for an unmeasured run, since the chart and table it stands in for
+ * on desktop are both dropped at this width (DS7 PR2 round 3 defect 6). Runs
+ * on this phone-only axis, not the token one those surfaces guard, so it
+ * does not conflict with "never fabricate a token total" above.
+ */
+export function phoneRoleShare(
+  buckets: readonly RoleModelTierBucket[],
+): { label: string; value: number }[] {
+  const bars = tokenTotalsBy(buckets, 'role');
+  const unmeasured = sumUnmeasuredRuns(buckets);
+  return unmeasured > 0 ? [...bars, { label: 'Not measured', value: unmeasured }] : bars;
 }
 
 /** "1.2K tok", or "not measured" for a pair with no average to report, never 0. */

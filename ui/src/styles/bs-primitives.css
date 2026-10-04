@@ -1169,6 +1169,11 @@ a:hover {
   border-radius: var(--bs-radius-sm);
   overflow: hidden;
 }
+/* Opt-in (BarChart's hideEmptyTrack prop): a zero-total stacked column reads
+   as empty, not as a full-height filled bar of "data". */
+.bs-bars__track--empty {
+  background: transparent;
+}
 .bs-bars__bar {
   position: absolute;
   left: 0;

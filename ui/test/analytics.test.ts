@@ -16,9 +16,9 @@ import {
   frontierMidRatio,
   hasMultipleProviders,
   latestSameMistakeRate,
-  MIN_SETTLED_FOR_RATE,
   notMeasuredCaption,
-  rateOrNotEnoughData,
+  phoneRoleShare,
+  rateDisplay,
   ratioTakeaway,
   recheckPassRate,
   secondOpinionSummary,
@@ -279,15 +279,13 @@ describe('lib/analytics.ts — hasMultipleProviders', () => {
   });
 });
 
-describe('lib/analytics.ts — rateOrNotEnoughData', () => {
-  it('prints the not-enough-data copy with the shared threshold, not an em dash', () => {
-    expect(rateOrNotEnoughData(null)).toBe(
-      `Not enough data yet (needs ${MIN_SETTLED_FOR_RATE} settled rechecks)`,
-    );
+describe('lib/analytics.ts — rateDisplay', () => {
+  it('shows the short not-enough-data copy as the value, not an em dash', () => {
+    expect(rateDisplay(null)).toBe('Not enough data yet');
   });
 
   it('formats a real rate as a percentage', () => {
-    expect(rateOrNotEnoughData(0.5)).toBe('50%');
+    expect(rateDisplay(0.5)).toBe('50%');
   });
 });
 
@@ -488,6 +486,30 @@ describe('lib/analytics.ts — tokenTotalsBy', () => {
   });
 });
 
+describe('lib/analytics.ts — phoneRoleShare', () => {
+  it('sums tokens per role, same as tokenTotalsBy', () => {
+    expect(
+      phoneRoleShare([
+        roleTierBucket({ role: 'coder', tokens: 100 }),
+        roleTierBucket({ role: 'coder', modelTier: 'small', tokens: 50 }),
+      ]),
+    ).toEqual([{ label: 'Builder', value: 150 }]);
+  });
+
+  it('appends a Not measured row sized by unmeasured run count when any run went unmeasured', () => {
+    expect(phoneRoleShare([roleTierBucket({ tokens: 100, unmeasuredRunCount: 3 })])).toEqual([
+      { label: 'Builder', value: 100 },
+      { label: 'Not measured', value: 3 },
+    ]);
+  });
+
+  it('omits the Not measured row when every run was measured', () => {
+    expect(phoneRoleShare([roleTierBucket({ tokens: 100, unmeasuredRunCount: 0 })])).toEqual([
+      { label: 'Builder', value: 100 },
+    ]);
+  });
+});
+
 describe('lib/analytics.ts — formatAvgTokensPerRun', () => {
   it('renders "not measured" for a null average, never 0', () => {
     expect(formatAvgTokensPerRun(null)).toBe('not measured');
@@ -568,8 +590,8 @@ describe('AnalyticsPage.vue — provider block hides below two real providers', 
 });
 
 describe('AnalyticsPage.vue — not-enough-data and ratio takeaways', () => {
-  it('sources the same-mistake and recheck-pass cards through rateOrNotEnoughData', () => {
-    expect(SFC).toContain('rateOrNotEnoughData(');
+  it('sources the same-mistake and recheck-pass cards through rateDisplay', () => {
+    expect(SFC).toContain('rateDisplay(');
   });
 
   it('sources the tokens-per-task ratio takeaway from the lib', () => {
@@ -613,5 +635,58 @@ describe('AnalyticsPage.vue — cut blocks are gone', () => {
 
   it('PageHeader renders sr-only — no visible title row, title stays accessible', () => {
     expect(SFC).toMatch(/<PageHeader title="Cost & quality" \/>/);
+  });
+});
+
+// DS7 PR2 round 3: match the mock's layout and phone behavior.
+describe('AnalyticsPage.vue — page gutter (defect 1)', () => {
+  it('uses the shared app-page container, the same gutter every other page uses', () => {
+    expect(SFC).toMatch(/<div class="app-page">/);
+  });
+});
+
+describe('AnalyticsPage.vue — no em-dash placeholder (defect 3)', () => {
+  it('never renders a bare em dash for a missing tokens-per-task value', () => {
+    expect(SFC).not.toContain('<span v-else>—</span>');
+  });
+});
+
+describe('AnalyticsPage.vue — metric card takeaways and tooltip (defect 4)', () => {
+  it("splits the not-enough-data reason onto each card's own takeaway line", () => {
+    expect(SFC).toContain('Needs more settled rechecks.');
+    expect(SFC).toContain('Same rule as above.');
+  });
+
+  it('adds an Info tooltip to Tokens per task, like Second-opinion reviewers already has', () => {
+    const tokensPerTaskCard = SFC.slice(
+      SFC.indexOf('title="Tokens per task"'),
+      SFC.indexOf('title="Repeated mistakes'),
+    );
+    expect(tokensPerTaskCard).toContain('IconButton');
+    expect(tokensPerTaskCard).toContain(':icon="Info"');
+  });
+});
+
+describe('AnalyticsPage.vue — cost note styled inside the gutter (defect 5)', () => {
+  it('keeps the note between the charts/table and the metric cards', () => {
+    const tableIdx = SFC.indexOf('Tokens by role and model tier');
+    const noteIdx = SFC.indexOf('bs-analytics-page__note');
+    const metricsIdx = SFC.indexOf('bs-analytics-page__metrics');
+    expect(tableIdx).toBeGreaterThan(-1);
+    expect(noteIdx).toBeGreaterThan(tableIdx);
+    expect(metricsIdx).toBeGreaterThan(noteIdx);
+  });
+});
+
+describe('AnalyticsPage.vue — phone layout (defect 6)', () => {
+  it('branches on the shared isPhoneWidth composable, not a new breakpoint', () => {
+    expect(SFC).toContain('useViewport');
+    expect(SFC).toContain('isPhoneWidth');
+  });
+
+  it('renders a phone-only 2-column metrics grid and role list', () => {
+    expect(SFC).toContain('bs-analytics-page__phone-metrics');
+    expect(SFC).toContain('bs-analytics-page__phone-roles');
+    expect(SFC).toContain('phoneRoleShare(');
   });
 });
