@@ -467,9 +467,22 @@ export interface ErrorDayCount {
   day: string;
   count: number;
 }
+/** DS6 PR2 (§4.3 Errors chip, audit Errors-5) — one row per error class, merged
+ *  across session/project/severity. Additive; `byClass`/`byDay` are unchanged. */
+export interface ErrorClassSummary {
+  id: string;
+  errorGroup: string;
+  errorClass: string;
+  count: number;
+  severityMix: Record<string, number>;
+  lastSeen: string;
+  projects: string[];
+  trend7d: number[];
+}
 export interface ErrorsResult {
   byClass: ErrorGroupCount[];
   byDay: ErrorDayCount[];
+  classSummary: ErrorClassSummary[];
 }
 
 export interface ThroughputDay {
@@ -669,9 +682,26 @@ export type EventKind =
   | 'Feedback'
   | 'System';
 
+/** DS6 PR2 (§4.3 table) — a Dispatched row's run result. */
+export interface DispatchRun {
+  tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number | null;
+  runStatus: string | null;
+  dispatchedAt: string;
+  round: number;
+}
+
 /** `/api/timeline`'s paged-mode envelope: newest-first entries plus the "Load older" cursor. */
 export interface TimelinePage {
-  entries: (TimelineEntry & { kind: EventKind; nearestPromptId: string | null })[];
+  entries: (TimelineEntry & {
+    kind: EventKind;
+    nearestPromptId: string | null;
+    /** Present only on `Dispatched` rows. */
+    run?: DispatchRun;
+    /** Present only on `Gate` rows; null when the counts cannot be derived. */
+    gateCounts?: { passed: number; failed: number } | null;
+  })[];
   nextBefore: string | null;
   newestId: string | null;
 }

@@ -10288,6 +10288,15 @@ map fell through a `?? 'neutral'` fallback and nothing threw; the lesson that
 the UI's least-defended files need their invariants pulled down into `.ts` was
 available then and is what this fix finally applies.
 
+**Addendum 2026-10-04 (audit Errors-5):** `errorsPage()` gained a second,
+additive aggregation, `classSummary`, that buckets by `${errorGroup}.${errorClass}`
+alone — deliberately coarser than the per-triple key this finding fixed,
+because a class-level rollup (severity mix, last-seen, projects, 7-day trend)
+is a different question than the per-row listing `byClass` answers. The two
+do not collide: `classSummary` returns its own `id` (the class key) for
+whatever keys it, `byClass` keeps the triple `id` this finding gave it, and
+neither aggregation drops the key it buckets on. The row identity this
+finding fixed is otherwise untouched.
 
 ## D-215 — the one taxonomy record type nobody checked at write time
 

@@ -2053,6 +2053,31 @@ export interface TimelineEntry {
    * including the entry asked about, so a prompt row answers its own walk.
    */
   nearestPromptId: string | null;
+  /**
+   * DS6 PR2 (§4.3 table) — a Dispatched row's run result, joined
+   * server-side through `agents.terminalEventId` to the `task_run_result`
+   * payload. Present only on `Dispatched` rows; `undefined` on every other
+   * kind. Fields the run did not measure are `null`, never 0 — including
+   * `durationMs`, which no writer in this codebase stamps yet (same "not
+   * recorded anywhere" status the spec table already gives `effort`).
+   */
+  run?: DispatchRun;
+  /**
+   * DS6 PR2 (§4.3 table) — a Gate row's normalised pass/fail counts, from
+   * `testgate-result.results` (or `gate-outcome.results`, if present).
+   * Present only on `Gate` rows; `null` when the counts cannot be derived.
+   */
+  gateCounts?: { passed: number; failed: number } | null;
+}
+
+/** DS6 PR2 — a Dispatched row's run result (§4.3 table). */
+export interface DispatchRun {
+  tokensIn: number | null;
+  tokensOut: number | null;
+  durationMs: number | null;
+  runStatus: string | null;
+  dispatchedAt: string;
+  round: number;
 }
 
 export interface TimelineFilter extends Scope {
@@ -2319,7 +2344,95 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
   for (const entry of page) {
     entry.nearestPromptId = memoizedNearestPromptId(entry.eventId, getRow, promptMemo);
   }
+  joinDispatchRuns(db, page);
+  joinGateCounts(page);
   return page;
+}
+
+/**
+ * DS6 PR2 (§4.3 table) — fills `run` on every `Dispatched` entry in `page`,
+ * batched for the page only (same cost discipline as `nearestPromptId`
+ * above): one `agents` query keyed on the page's own dispatch event ids,
+ * then one `eventsRaw` query for the terminal `task_run_result` rows those
+ * `agents` rows name, rather than one query per row.
+ */
+function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
+  const dispatchIds = page.filter((e) => e.kind === 'Dispatched').map((e) => e.eventId);
+  if (dispatchIds.length === 0) return;
+
+  const agentRows = db.select().from(agents).where(inArray(agents.id, dispatchIds)).all();
+  const agentByDispatchId = new Map(agentRows.map((a) => [a.id, a]));
+
+  const terminalEventIds = agentRows
+    .map((a) => a.terminalEventId)
+    .filter((id): id is string => id !== null);
+  const resultRows =
+    terminalEventIds.length === 0
+      ? []
+      : db
+          .select({ eventId: eventsRaw.eventId, payload: eventsRaw.payload })
+          .from(eventsRaw)
+          .where(
+            and(
+              inArray(eventsRaw.eventId, terminalEventIds),
+              eq(eventsRaw.eventType, TASK_RESULT_EVENT_TYPE),
+            ),
+          )
+          .all();
+  const resultPayloadByEventId = new Map(
+    resultRows.map((r) => [r.eventId, JSON.parse(r.payload) as Record<string, unknown>]),
+  );
+
+  for (const entry of page) {
+    if (entry.kind !== 'Dispatched') continue;
+    const agent = agentByDispatchId.get(entry.eventId);
+    if (!agent) continue;
+    const resultPayload = agent.terminalEventId
+      ? resultPayloadByEventId.get(agent.terminalEventId)
+      : undefined;
+    const usage = resultPayload?.token_usage as
+      | { input_tokens?: number; output_tokens?: number }
+      | undefined;
+    entry.run = {
+      tokensIn: typeof usage?.input_tokens === 'number' ? usage.input_tokens : null,
+      tokensOut: typeof usage?.output_tokens === 'number' ? usage.output_tokens : null,
+      durationMs: durationMsFromPayload(resultPayload ?? {}),
+      runStatus:
+        typeof resultPayload?.run_status === 'string' ? (resultPayload.run_status as string) : null,
+      dispatchedAt: agent.dispatchedAt,
+      round: agent.round,
+    };
+  }
+}
+
+/**
+ * DS6 PR2 (§4.3 table) — normalised `{passed, failed}` counts for every
+ * `Gate` entry in `page`, from `testgate-result.results` (or
+ * `gate-outcome.results`, if a future writer adds one); `null` when the
+ * payload carries no derivable `results` array. Pure over already-fetched
+ * payloads, so no extra query is needed.
+ */
+function joinGateCounts(page: TimelineEntry[]): void {
+  for (const entry of page) {
+    if (entry.kind !== 'Gate') continue;
+    const results = entry.payload.results;
+    if (!Array.isArray(results)) {
+      entry.gateCounts = null;
+      continue;
+    }
+    let passed = 0;
+    let failed = 0;
+    for (const r of results as Array<{ pass?: unknown }>) {
+      if (r && typeof r === 'object' && r.pass === true) passed += 1;
+      else if (r && typeof r === 'object' && r.pass === false) failed += 1;
+    }
+    entry.gateCounts = { passed, failed };
+  }
+}
+
+/** DS6 PR2 — a run's `duration_ms`, or null when the payload carries none (no writer stamps it today). */
+function durationMsFromPayload(payload: Record<string, unknown>): number | null {
+  return typeof payload.duration_ms === 'number' ? payload.duration_ms : null;
 }
 
 /**
@@ -3022,14 +3135,18 @@ export interface TaskRun {
   outcome: string | null;
 }
 
-export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
-  const rows = inLogOrder(
+function fetchTaskRunRows(db: SmithDb, taskId: string): EventsRawRow[] {
+  return inLogOrder(
     db
       .select()
       .from(eventsRaw)
       .where(and(eq(eventsRaw.taskId, taskId), inArray(eventsRaw.eventType, [...RUN_EVENT_TYPES])))
       .all(),
   );
+}
+
+export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
+  const rows = fetchTaskRunRows(db, taskId);
   return rows.flatMap((r) => {
     const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
     if (!kind) return [];
@@ -3047,6 +3164,60 @@ export function taskRuns(db: SmithDb, taskId: string): TaskRun[] {
       },
     ];
   });
+}
+
+/** DS3 §2.4c's total bar — tokens, agent time and elapsed, summed across `taskRuns()`'s own rows. */
+export interface TaskTotals {
+  /** Sum of every run's `token_usage.total_tokens`; null when none of them measured it. */
+  tokens: number | null;
+  /** Sum of every run's `duration_ms`; null when none of them carries one (no writer stamps it today). */
+  agentTimeMs: number | null;
+  /** First `dispatch` run's ts to the last `result`/`error` run's ts; null while no run has ended yet. */
+  elapsedMs: number | null;
+}
+
+/**
+ * DS3 §2.4c — the per-task totals read above `RunHistoryTimeline`, additive
+ * on `GET /api/tasks/:taskId/runs`. Scoped to the same rows `taskRuns()`
+ * reads (no new event type, no writer); "not measured" is `null`, never a
+ * bare 0 (the spec's own phrasing for this bar).
+ */
+export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
+  const rows = fetchTaskRunRows(db, taskId);
+  let tokensSum = 0;
+  let anyTokens = false;
+  let durationSum = 0;
+  let anyDuration = false;
+  let startTs: string | null = null;
+  let endTs: string | null = null;
+  for (const r of rows) {
+    const payload = JSON.parse(r.payload) as Record<string, unknown>;
+    const tokens = tokensTotalFromPayload(payload);
+    if (tokens !== null) {
+      tokensSum += tokens;
+      anyTokens = true;
+    }
+    const durationMs = durationMsFromPayload(payload);
+    if (durationMs !== null) {
+      durationSum += durationMs;
+      anyDuration = true;
+    }
+    const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
+    if (kind === 'dispatch') {
+      if (startTs === null || r.ts < startTs) startTs = r.ts;
+    }
+    if (kind === 'result' || kind === 'error') {
+      if (endTs === null || r.ts > endTs) endTs = r.ts;
+    }
+  }
+  return {
+    tokens: anyTokens ? tokensSum : null,
+    agentTimeMs: anyDuration ? durationSum : null,
+    elapsedMs:
+      startTs !== null && endTs !== null
+        ? new Date(endTs).getTime() - new Date(startTs).getTime()
+        : null,
+  };
 }
 
 /**
@@ -3154,12 +3325,48 @@ export interface ErrorDayCount {
   count: number;
 }
 
+/**
+ * DS6 PR2 (§4.3 Errors chip, audit Errors-5) — one row per error CLASS
+ * (`${errorGroup}.${errorClass}`), merged across every session, project and
+ * severity that class occurred under. D-214 is about `byClass`'s per-triple
+ * rows losing their identity; this is a deliberately coarser, additive view
+ * for the class-level summary alone — `byClass`'s own rows keep the triple
+ * key D-214 gave them.
+ */
+export interface ErrorClassSummary {
+  /** `${errorGroup}.${errorClass}` — this row's own key. */
+  id: string;
+  errorGroup: string;
+  errorClass: string;
+  /** Total rows of this class, across every severity/session/project. */
+  count: number;
+  /** Count per severity, e.g. `{"S2-major": 2, "S3-minor": 1}`. */
+  severityMix: Record<string, number>;
+  /** The most recent row's `ts`. */
+  lastSeen: string;
+  /** Distinct projects this class occurred in. */
+  projects: string[];
+  /** 7 UTC daily counts, oldest-first, ending "today" (ClockOpts.nowIso, or the wall clock). */
+  trend7d: number[];
+}
+
 export interface ErrorsResult {
   byClass: ErrorGroupCount[];
   byDay: ErrorDayCount[];
+  classSummary: ErrorClassSummary[];
 }
 
-export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
+const TREND_WINDOW_DAYS = 7;
+
+/** The UTC calendar day (`YYYY-MM-DD`) `daysAgo` days before `nowIso`'s own day. */
+function utcDayOffset(nowIso: string, daysAgo: number): string {
+  const d = new Date(nowIso);
+  d.setUTCHours(0, 0, 0, 0);
+  d.setUTCDate(d.getUTCDate() - daysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
+export function errorsPage(db: SmithDb, scope: Scope = {}, opts: ClockOpts = {}): ErrorsResult {
   const sessionCond = scopedToSessions(errors.sessionId, scope);
   const allRows = sessionCond
     ? db.select().from(errors).where(sessionCond).all()
@@ -3168,6 +3375,23 @@ export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
 
   const byClass = new Map<string, ErrorGroupCount>();
   const byDay = new Map<string, number>();
+  const nowIso = opts.nowIso ?? new Date().toISOString();
+  const trendDays = Array.from({ length: TREND_WINDOW_DAYS }, (_, i) =>
+    utcDayOffset(nowIso, TREND_WINDOW_DAYS - 1 - i),
+  );
+  const trendDayIndex = new Map(trendDays.map((day, i) => [day, i]));
+
+  interface ClassAccumulator {
+    errorGroup: string;
+    errorClass: string;
+    count: number;
+    severityMix: Record<string, number>;
+    lastSeen: string;
+    projects: Set<string>;
+    trend7d: number[];
+  }
+  const classSummaries = new Map<string, ClassAccumulator>();
+
   for (const row of rows) {
     const key = `${row.errorGroup}.${row.errorClass}|${row.severity}`;
     const existing = byClass.get(key);
@@ -3183,6 +3407,27 @@ export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
     }
     const day = row.ts.slice(0, 10);
     byDay.set(day, (byDay.get(day) ?? 0) + 1);
+
+    const classKey = `${row.errorGroup}.${row.errorClass}`;
+    let summary = classSummaries.get(classKey);
+    if (!summary) {
+      summary = {
+        errorGroup: row.errorGroup,
+        errorClass: row.errorClass,
+        count: 0,
+        severityMix: {},
+        lastSeen: row.ts,
+        projects: new Set<string>(),
+        trend7d: new Array(TREND_WINDOW_DAYS).fill(0),
+      };
+      classSummaries.set(classKey, summary);
+    }
+    summary.count += 1;
+    summary.severityMix[row.severity] = (summary.severityMix[row.severity] ?? 0) + 1;
+    if (row.ts > summary.lastSeen) summary.lastSeen = row.ts;
+    if (row.project) summary.projects.add(row.project);
+    const dayIndex = trendDayIndex.get(day);
+    if (dayIndex !== undefined) summary.trend7d[dayIndex] = (summary.trend7d[dayIndex] ?? 0) + 1;
   }
 
   return {
@@ -3190,6 +3435,18 @@ export function errorsPage(db: SmithDb, scope: Scope = {}): ErrorsResult {
     byDay: [...byDay.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([day, count]) => ({ day, count })),
+    classSummary: [...classSummaries.entries()]
+      .map(([id, s]) => ({
+        id,
+        errorGroup: s.errorGroup,
+        errorClass: s.errorClass,
+        count: s.count,
+        severityMix: s.severityMix,
+        lastSeen: s.lastSeen,
+        projects: [...s.projects],
+        trend7d: s.trend7d,
+      }))
+      .sort((a, b) => b.count - a.count),
   };
 }
 
