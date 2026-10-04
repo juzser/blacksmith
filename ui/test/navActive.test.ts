@@ -15,6 +15,18 @@ describe('nav.ts Work item', () => {
   });
 });
 
+describe('nav.ts Sessions item (DS8 PR3 item 5)', () => {
+  it('points at /sessions', () => {
+    const match = NAV_SRC.match(/\{ id: 'sessions',[^}]*\}/);
+    expect(match?.[0]).toMatch(/route: '\/sessions'/);
+  });
+
+  it('sits after Activity, the other run-facing entry', () => {
+    const ids = [...NAV_SRC.matchAll(/id: '([a-z-]+)'/g)].map((m) => m[1]);
+    expect(ids.indexOf('sessions')).toBe(ids.indexOf('activity') + 1);
+  });
+});
+
 describe('App.vue activeId (nav highlighting)', () => {
   it('highlights work for task-detail, which has no route of its own in NAV_ITEMS', () => {
     expect(APP_SRC).toMatch(/route\.name === 'task-detail'\) return 'work'/);
