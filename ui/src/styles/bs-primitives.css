@@ -2922,3 +2922,39 @@ summary.bs-inbox__group-head {
   margin: 0;
   font-size: var(--bs-text-xs);
 }
+
+/* DS7 PR2 — kit/PeriodSwitch.vue. Same shape as .bs-segctl above, but a
+   plain button group (value prop, not a route) — kept as its own block so a
+   change here never touches the RouterLink-only rules above. */
+.bs-periodswitch {
+  display: inline-flex;
+  border: 1px solid var(--bs-border);
+  border-radius: var(--bs-radius-md);
+  background: var(--bs-surface);
+  height: var(--bs-touch);
+}
+.bs-periodswitch__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--bs-touch);
+  min-width: var(--bs-touch);
+  padding: 0 var(--bs-space-3);
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--bs-text-subtle);
+  cursor: pointer;
+}
+.bs-periodswitch__item:hover {
+  background: var(--bs-surface-sunken);
+  color: var(--bs-text);
+}
+.bs-periodswitch__item[aria-pressed='true'] {
+  background: var(--bs-surface-selected);
+  color: var(--bs-text);
+}
+.bs-periodswitch__item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--bs-focus-ring) 50%, transparent);
+}

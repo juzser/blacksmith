@@ -6,8 +6,16 @@
 // The page must not re-derive any of them inline: .vue files are checked by
 // neither tsc nor biome here, so this module is the only place these numbers
 // can be tested.
-import type { CostBucket, ProviderAgreementStat, RecheckOutcome, SameMistakeDay } from './api.js';
+import type {
+  CostBucket,
+  DailyTokenBucket,
+  ProviderAgreementStat,
+  RecheckOutcome,
+  RoleModelTierBucket,
+  SameMistakeDay,
+} from './api.js';
 import { formatCompactNumber } from './format.js';
+import { roleLabel, tierLabel } from './roleLabels.js';
 import { taskOutcome } from './taxonomy.js';
 
 /**
@@ -132,54 +140,204 @@ export function formatTokens(tokens: number | null): string {
  * question nobody asked and just repeats the "Cost per task" StatCard next
  * to it — the card is hidden entirely below two providers rather than drawn
  * with one bar (D-31: no claim with nothing to contrast it against).
+ *
+ * DS7 §4.4: operates on the raw buckets, not the rolled-up bars —
+ * `costPerTaskBy` can push a `{ label, value: 0 }` stub for a provider whose
+ * every task went unmeasured (so the bar list length alone over-counts); the
+ * gate is "providers with totalTokens > 0", summed across every tier.
  */
-export function hasMultipleProviders(
-  costByProviderData: readonly { label: string; value: number }[],
-): boolean {
-  return costByProviderData.length >= 2;
-}
-
-/** One rendered line of the Analytics rail's "Cross-check quorum" card. */
-export interface QuorumRow {
-  provider: string;
-  /** "2 of 4 answered" — the denominator the rate is a fraction of. */
-  answered: string;
-  /** "50% agree", or "no verdict" when nothing answered. */
-  agreement: string;
-  /** "120 ms avg", or `null` when no run reported a latency to average. */
-  latency: string | null;
-  /** "provider.missing-api-key ×2" per code, busiest first; empty when all answered. */
-  failures: string[];
+export function hasMultipleProviders(buckets: readonly CostBucket[]): boolean {
+  const totals = new Map<string, number>();
+  for (const bucket of buckets) {
+    totals.set(bucket.provider, (totals.get(bucket.provider) ?? 0) + bucket.totalTokens);
+  }
+  let withTokens = 0;
+  for (const tokens of totals.values()) {
+    if (tokens > 0) withTokens += 1;
+  }
+  return withTokens >= 2;
 }
 
 /**
- * The Analytics rail's cross-check quorum lines (design-spec §5.8), one per
- * judge provider, in the order the API sent them (already provider-sorted).
- *
- * This card is the page's only surface for a non-claude provider, and the
- * reason it has to exist: the cost charts are built from
- * `task-result-recorded`, which only a builder writes, and every external
- * provider in this factory judges rather than builds — so cost names claude
- * in every session ever logged while codex and deepseek judge in the same log
- * (D-255).
- *
- * A provider that never returned a schema-valid verdict reads "no verdict",
- * never "0% agree": the rate has no denominator, and 0% would report a
- * provider that never got to speak as one that disagreed with every native
- * call — the opposite reading, on the card an operator uses to decide whether
- * a cross-check is worth paying for (D-168/D-31).
+ * DS7 §4.4 items 2/3: same not-enough-data rule for both the same-mistake
+ * rate and the recheck pass rate. The spec names the copy but not a
+ * threshold; this one shared constant is the single place that number lives.
  */
-export function quorumRows(stats: readonly ProviderAgreementStat[]): QuorumRow[] {
-  return stats.map((stat) => ({
-    provider: stat.provider,
-    answered: `${stat.verdicts} of ${stat.runs} answered`,
-    agreement:
-      stat.agreementRate === null ? 'no verdict' : `${formatRate(stat.agreementRate)} agree`,
-    latency: stat.meanLatencyMs === null ? null : `${Math.round(stat.meanLatencyMs)} ms avg`,
-    // Busiest code first: the rail card is one column wide, so the failure an
-    // operator most needs to see has to be the one that survives truncation.
-    failures: Object.entries(stat.failuresByCode)
-      .sort(([codeA, a], [codeB, b]) => b - a || codeA.localeCompare(codeB))
-      .map(([code, n]) => `${code} ×${n}`),
-  }));
+export const MIN_SETTLED_FOR_RATE = 5;
+
+/**
+ * "75%", or "Not enough data yet (needs N settled rechecks)" in place of the
+ * bare em dash `formatRate` prints on its own — the em dash reads as "we
+ * have nothing to say", while this card's whole point is to tell the
+ * operator why.
+ */
+export function rateOrNotEnoughData(rate: number | null): string {
+  return rate === null
+    ? `Not enough data yet (needs ${MIN_SETTLED_FOR_RATE} settled rechecks)`
+    : formatRate(rate);
+}
+
+/**
+ * Tokens-per-task ratio of the flagship tier over the standard tier — the
+ * "Tokens per task" card's takeaway line (DS7 §4.4 item 1). `null` when
+ * either tier has no cost-per-task bar to divide (no denominator).
+ */
+export function frontierMidRatio(
+  costByTierData: readonly { label: string; value: number }[],
+): number | null {
+  const frontier = costByTierData.find((b) => b.label === 'frontier')?.value;
+  const mid = costByTierData.find((b) => b.label === 'mid')?.value;
+  if (!frontier || !mid) return null;
+  return frontier / mid;
+}
+
+/** "The strongest model costs about 27x the standard one per task." */
+export function ratioTakeaway(ratio: number | null): string | null {
+  if (ratio === null) return null;
+  return `The strongest model costs about ${Math.round(ratio)}x the standard one per task.`;
+}
+
+/** "27 s" — ms rounded to the nearest second, per DS7 §4.4's phone copy. */
+export function formatSeconds(ms: number): string {
+  return `${Math.round(ms / 1000)} s`;
+}
+
+/** The "Second-opinion reviewers" card's two aggregate numbers (DS7 §4.4 item 4). */
+export interface SecondOpinionSummary {
+  /** Verdicts-weighted agreement rate, or `null` when nothing answered. */
+  agreementRate: number | null;
+  /** Latency-samples-weighted mean, or `null` when no run reported one. */
+  meanLatencyMs: number | null;
+}
+
+/**
+ * Rolls every judge provider's calibration (per-provider in
+ * `ProviderAgreementStat`) into the single ring this card now shows, in
+ * place of the old one-row-per-provider rail list. Each average is weighted
+ * by its own denominator so a provider with one run cannot outweigh one with
+ * forty (same reasoning as `costPerTaskBy`'s task-count weighting).
+ */
+export function secondOpinionSummary(
+  stats: readonly ProviderAgreementStat[],
+): SecondOpinionSummary {
+  let verdicts = 0;
+  let agreements = 0;
+  let latencySamples = 0;
+  let latencyTotal = 0;
+  for (const stat of stats) {
+    verdicts += stat.verdicts;
+    if (stat.agreementRate !== null) agreements += stat.agreementRate * stat.verdicts;
+    if (stat.meanLatencyMs !== null) {
+      latencyTotal += stat.meanLatencyMs * stat.latencySamples;
+      latencySamples += stat.latencySamples;
+    }
+  }
+  return {
+    agreementRate: verdicts > 0 ? agreements / verdicts : null,
+    meanLatencyMs: latencySamples > 0 ? latencyTotal / latencySamples : null,
+  };
+}
+
+/** "agreed with the main reviewer; 27 s average." */
+export function secondOpinionTakeaway(summary: SecondOpinionSummary): string {
+  if (summary.meanLatencyMs === null) return 'agreed with the main reviewer.';
+  return `agreed with the main reviewer; ${formatSeconds(summary.meanLatencyMs)} average.`;
+}
+
+const NOT_MEASURED_KEY = 'Not measured';
+const CHART_TONES = [
+  'var(--bs-chart-1)',
+  'var(--bs-chart-2)',
+  'var(--bs-chart-3)',
+  'var(--bs-chart-4)',
+  'var(--bs-chart-5)',
+  'var(--bs-chart-6)',
+];
+
+/**
+ * The series keys the daily stacked chart needs for `by`, in first-seen
+ * order across the window so a poll cannot reshuffle the legend, plus a
+ * trailing "Not measured" key when any day in range had an unmeasured run —
+ * never added when every run in range was measured, which is not the same
+ * claim as "drawn at zero" (DS7 §4.4 item 2).
+ */
+export function dailySeriesKeys(
+  days: readonly DailyTokenBucket[],
+  by: 'role' | 'modelTier',
+): string[] {
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const day of days) {
+    const source = by === 'role' ? day.tokensByRole : day.tokensByModelTier;
+    for (const rawKey of Object.keys(source)) {
+      const label = by === 'role' ? roleLabel(rawKey) : tierLabel(rawKey);
+      if (!seen.has(label)) {
+        seen.add(label);
+        keys.push(label);
+      }
+    }
+  }
+  if (days.some((day) => day.unmeasuredRunCount > 0)) keys.push(NOT_MEASURED_KEY);
+  return keys;
+}
+
+/** Pairs `dailySeriesKeys`' output with a stable chart tone, cycling the palette. */
+export function chartSeries(keys: readonly string[]): { key: string; tone: string }[] {
+  let colorIndex = 0;
+  return keys.map((key) => {
+    if (key === NOT_MEASURED_KEY) return { key, tone: 'var(--bs-text-subtlest)' };
+    const tone = CHART_TONES[colorIndex % CHART_TONES.length] ?? CHART_TONES[0];
+    colorIndex += 1;
+    return { key, tone: tone as string };
+  });
+}
+
+/**
+ * One stacked bar per day, keyed the same way `dailySeriesKeys` labels its
+ * series, so `kit/BarChart.vue`'s `entry.values[series[i].key]` lookup
+ * matches. `unmeasuredRunCount` is a run count, not a token total — pushed
+ * through verbatim as the "Not measured" segment's value rather than
+ * invented as a token-equivalent estimate, since the requirement is that an
+ * unmeasured run stays visible, not that every segment share a unit.
+ */
+export function dailyStackedBars(
+  days: readonly DailyTokenBucket[],
+  by: 'role' | 'modelTier',
+): { label: string; values: Record<string, number> }[] {
+  return days.map((day) => {
+    const source = by === 'role' ? day.tokensByRole : day.tokensByModelTier;
+    const values: Record<string, number> = {};
+    for (const [rawKey, tokens] of Object.entries(source)) {
+      values[by === 'role' ? roleLabel(rawKey) : tierLabel(rawKey)] = tokens;
+    }
+    if (day.unmeasuredRunCount > 0) values[NOT_MEASURED_KEY] = day.unmeasuredRunCount;
+    return { label: day.day, values };
+  });
+}
+
+/**
+ * Total tokens per role or model tier over the selected period, rolled up
+ * from `tokensByRoleAndModelTier` (one row per role/model-tier pair) —
+ * the horizontal chart's bars (DS7 §4.4 item 3). A trailing "Not measured"
+ * bar carries the summed run count, same reasoning as `dailyStackedBars`.
+ */
+export function tokenTotalsBy(
+  buckets: readonly RoleModelTierBucket[],
+  by: 'role' | 'modelTier',
+): { label: string; value: number }[] {
+  const totals = new Map<string, number>();
+  let unmeasured = 0;
+  for (const bucket of buckets) {
+    const label = by === 'role' ? roleLabel(bucket.role) : tierLabel(bucket.modelTier);
+    totals.set(label, (totals.get(label) ?? 0) + bucket.tokens);
+    unmeasured += bucket.unmeasuredRunCount;
+  }
+  const series = [...totals].map(([label, value]) => ({ label, value }));
+  if (unmeasured > 0) series.push({ label: NOT_MEASURED_KEY, value: unmeasured });
+  return series;
+}
+
+/** "1.2K tok", or "not measured" for a pair with no average to report, never 0. */
+export function formatAvgTokensPerRun(avg: number | null): string {
+  return avg === null ? 'not measured' : `${formatCompactNumber(avg)} tok`;
 }
