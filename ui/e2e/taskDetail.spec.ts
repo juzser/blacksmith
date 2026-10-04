@@ -64,10 +64,38 @@ test.describe('Task detail', () => {
   }) => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
     await page.getByRole('tab', { name: 'History' }).click();
-    const rows = page.locator('.bs-run-history .timeline-row');
+    const rows = page.locator('.bs-run-history .bs-timeline-row');
     await expect(rows.first()).toBeVisible();
     await expect(rows).toHaveCount(2);
     await expect(page.locator('.bs-run-history').getByText('done', { exact: true })).toBeVisible();
+  });
+
+  // Item 4 — ds-spec.md §1.5: rail centre and dot centre both land on
+  // --tl-rail-x (7px), dot top centres it on the first text line via
+  // (--tl-lh - --tl-dot) / 2 (6px). Read straight off the ::before/::after
+  // pseudo-elements rather than a screenshot diff, since this is exact pixel
+  // geometry, not a visual regression.
+  test('rail geometry matches the §1.5 tokens: rail/dot centred at 7px, dot top at 6px', async ({
+    page,
+  }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const row = page.locator('.bs-run-history .bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const geometry = await row.evaluate((el) => {
+      const before = getComputedStyle(el, '::before');
+      const after = getComputedStyle(el, '::after');
+      return {
+        railLeft: Number.parseFloat(before.left),
+        railWidth: Number.parseFloat(before.width),
+        dotLeft: Number.parseFloat(after.left),
+        dotWidth: Number.parseFloat(after.width),
+        dotTop: Number.parseFloat(after.top),
+      };
+    });
+    expect(geometry.railLeft + geometry.railWidth / 2).toBeCloseTo(7, 0);
+    expect(geometry.dotLeft + geometry.dotWidth / 2).toBeCloseTo(7, 0);
+    expect(geometry.dotTop).toBeCloseTo(6, 0);
   });
 
   test('Findings tab shows the Waive Popover confirm naming the fingerprint', async ({ page }) => {
@@ -159,7 +187,7 @@ test.describe('Task detail', () => {
         await page.setViewportSize(viewport);
         await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
         await page.getByRole('tab', { name: 'History' }).click();
-        await settleForShot(page, page.locator('.bs-run-history .timeline-row').first());
+        await settleForShot(page, page.locator('.bs-run-history .bs-timeline-row').first());
         await shoot(page, `task-detail-history-${vpName}-${theme}`);
       });
     }
