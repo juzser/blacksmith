@@ -87,6 +87,23 @@ test.describe('Task detail', () => {
     await expect(bar.getByText('Agent time', { exact: true })).toHaveCount(0);
   });
 
+  // DS6 PR4b round 3 item 5: the Elapsed cell's Tooltip (mode="describe")
+  // names the exact start-end range (format.ts's formatElapsedRange), not
+  // just the rounded duration the cell itself shows.
+  test('totals bar: Elapsed cell tooltip names the exact start-end range', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const bar = page.locator('.bs-task-totals-bar');
+    const elapsedCell = bar.locator('.bs-task-totals-bar__cell', { hasText: 'Elapsed' });
+    // Programmatic .focus() never matches :focus-visible (Tooltip.vue's own
+    // comment) -- hover is what a real pointer user does, past the 300ms
+    // HOVER_DELAY_MS (useTooltip.ts).
+    await elapsedCell.locator('.bs-tooltip-trigger').hover();
+    const tooltip = page.getByRole('tooltip');
+    await expect(tooltip).toBeVisible();
+    await expect(tooltip).toHaveText(/^\d{1,2} \w{3} \d{4}, \d{2}:\d{2} to \d{2}:\d{2}$/);
+  });
+
   // A task with no runs at all (never dispatched) has nothing to sum: the
   // bar itself must not render, not render as a row of "0"/"—" cells.
   test('totals bar: absent entirely for a task with no runs', async ({ page }) => {

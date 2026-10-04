@@ -231,7 +231,9 @@ function applyPendingNew() {
   pendingNewCount.value = 0;
   if (flushed.length === 0) return;
   page.value = { ...page.value, entries: [...flushed, ...page.value.entries] };
-  window.scrollTo({ top: 0 });
+  // The feed scrolls inside the app shell's own .app-scroll container, not
+  // the window -- window.scrollTo is a no-op here.
+  document.querySelector('.app-scroll')?.scrollTo({ top: 0 });
 }
 
 async function loadOlder() {

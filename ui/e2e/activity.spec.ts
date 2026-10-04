@@ -1,6 +1,34 @@
 import { expect, test } from './harness.js';
 import { setTheme, settleForShot, shoot, VIEWPORTS } from './helpers.js';
 
+// DS6 PR4b round 3: fixture builder for the live-updates / session-divider
+// e2e tests below. Shape matches TimelineEntry (api.ts) — sessionId/Title are
+// mandatory there since DS6 PR4b, unlike home.spec.ts's older synthetic rows.
+function synthEntry(
+  id: string,
+  minsAgo: number,
+  overrides: Partial<{
+    sessionId: string;
+    sessionTitle: string;
+    payload: Record<string, unknown>;
+  }> = {},
+) {
+  return {
+    eventId: id,
+    ts: new Date(Date.now() - minsAgo * 60_000).toISOString(),
+    eventType: 'user_prompt',
+    taskId: null as string | null,
+    agentId: null,
+    planVersion: 1,
+    causalParent: null,
+    payload: overrides.payload ?? { prompt: `Synthetic row ${id}` },
+    project: 'black-smith',
+    actor: 'operator',
+    sessionId: overrides.sessionId ?? 'sess-synth',
+    sessionTitle: overrides.sessionTitle ?? 'Synthetic session',
+  };
+}
+
 // DS6 PR3 (ds-spec.md §4.3 / ds-review.html #p-activity): Timeline and
 // Errors fold into one flat, day-grouped feed. Replaces timeline.spec.ts and
 // errors.spec.ts — the search box, "Decisions" lens, causal dispatch-group
@@ -125,6 +153,127 @@ test.describe('Activity', () => {
     await page.goto('/activity');
     await expect(page.getByRole('button', { name: 'Retry' })).toBeVisible();
     await expect(page.getByText('No activity matches these filters.')).toHaveCount(0);
+  });
+
+  // DS6 PR4b round 3 item 1 (ds-spec.md §4.3 "Live"): spec-local route
+  // overrides, per the brief, so these don't touch the shared fixture or its
+  // screenshot baselines above.
+  test('a new-events pill appears while scrolled away, and clicking it prepends and scrolls to top', async ({
+    page,
+  }) => {
+    const initial = Array.from({ length: 30 }, (_, i) => synthEntry(`init-${i}`, i));
+    const fresh = synthEntry('fresh-1', -1, { payload: { prompt: 'Brand new row' } });
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('after')) {
+        route.fulfill({ json: { entries: [fresh], nextBefore: null, newestId: fresh.eventId } });
+        return;
+      }
+      route.fulfill({
+        json: { entries: initial, nextBefore: null, newestId: initial[0]?.eventId ?? null },
+      });
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+
+    // Scroll away from the top so the pill buffers instead of merging live.
+    // The feed scrolls inside .app-scroll (the app shell's own container),
+    // not the window/body -- window.scrollTo is a no-op here.
+    await page.evaluate(() => {
+      const el = document.querySelector('.app-scroll');
+      el?.scrollTo(0, el.scrollHeight);
+    });
+    await page.waitForTimeout(200);
+
+    // Refresh now is aria-disabled while live (ds-spec.md §2.2) -- pause
+    // first, same as shell.spec.ts. Its signal still fires poll() regardless
+    // of the paused state (usePoll.ts), no real 15s wait needed.
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await page.getByRole('button', { name: 'Refresh now' }).click();
+
+    const pill = page.locator('.activity-newpill');
+    await expect(pill).toBeVisible();
+    await expect(pill).toHaveText('1 new event');
+    // Not merged into the list while scrolled away: a reader paged back
+    // never has rows re-sort under them.
+    await expect(page.getByText('Brand new row')).toHaveCount(0);
+
+    await pill.getByRole('button').click();
+    await expect(pill).toHaveCount(0);
+    await expect(page.locator('.bs-timeline-row__title').first()).toHaveText('Brand new row');
+    await expect
+      .poll(() => page.evaluate(() => document.querySelector('.app-scroll')?.scrollTop))
+      .toBe(0);
+  });
+
+  test('Pause live updates stops the incremental poll from firing', async ({ page }) => {
+    test.setTimeout(45_000);
+    let afterRequests = 0;
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('after')) {
+        afterRequests += 1;
+        route.fulfill({ json: { entries: [], nextBefore: null, newestId: null } });
+        return;
+      }
+      route.continue();
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Pause updates' }).click();
+    await expect(page.getByRole('button', { name: 'Resume updates' })).toBeVisible();
+
+    // Activity's poll cadence is 15s (design-spec.md §8); a window
+    // comfortably longer than one tick with zero after= requests proves
+    // Pause stands the new incremental poll() down, not just usePoll's
+    // pre-existing full-reload callers.
+    await page.waitForTimeout(17_000);
+    expect(afterRequests).toBe(0);
+  });
+
+  test('the bottom sentinel loads older rows without touching the newer page', async ({ page }) => {
+    const first = Array.from({ length: 50 }, (_, i) => synthEntry(`first-${i}`, i));
+    const older = [synthEntry('older-1', 100, { payload: { prompt: 'Much older row' } })];
+    await page.route('**/api/timeline?*', (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.has('before')) {
+        route.fulfill({ json: { entries: older, nextBefore: null, newestId: null } });
+        return;
+      }
+      route.fulfill({
+        json: { entries: first, nextBefore: 'cursor-1', newestId: first[0]?.eventId ?? null },
+      });
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-timeline-row__title').first()).toBeVisible();
+    // .bs-timeline-row__title only: the collapsed detail <dd> repeats the
+    // same text (v-show, not v-if, D-227), so an unscoped getByText matches
+    // both and trips strict mode.
+    const olderTitle = page.locator('.bs-timeline-row__title', { hasText: 'Much older row' });
+    await expect(olderTitle).toHaveCount(0);
+    await page.locator('.activity-sentinel').last().scrollIntoViewIfNeeded();
+    await expect(olderTitle).toBeVisible();
+  });
+
+  test('a session divider separates adjacent rows from different sessions, and its details link to Sessions', async ({
+    page,
+  }) => {
+    const entries = [
+      synthEntry('div-a', 0, { sessionId: 'sess-a', sessionTitle: 'Session A' }),
+      synthEntry('div-b', 1, { sessionId: 'sess-b', sessionTitle: 'Session B' }),
+    ];
+    await page.route('**/api/timeline?*', (route) => {
+      route.fulfill({ json: { entries, nextBefore: null, newestId: entries[0]?.eventId ?? null } });
+    });
+    await page.goto('/activity');
+    await expect(page.locator('.bs-session-divider')).toHaveText('Session: Session B');
+
+    await page.getByRole('button', { name: 'Expand all' }).click();
+    const detail = page.locator('.bs-timeline-row__detail').nth(1);
+    await expect(detail).toBeVisible();
+    const link = detail.getByRole('link', { name: 'Session B' });
+    await link.click();
+    await expect(page).toHaveURL('/sessions');
   });
 
   for (const [vpName, viewport] of Object.entries(VIEWPORTS)) {
