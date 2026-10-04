@@ -19,13 +19,20 @@ import {
 import EventKindTag from './EventKindTag.vue';
 import IconButton from './IconButton.vue';
 
-const props = defineProps<{
-  entry: ActivityEntry;
-  expanded: boolean;
-  /** Extra context metaFor needs (promptTs/causedCount) — walked once over
-   * the whole page by the caller (ActivityPage.vue), not re-derived per row. */
-  ctx?: MetaContext;
-}>();
+const props = withDefaults(
+  defineProps<{
+    entry: ActivityEntry;
+    expanded: boolean;
+    /** Extra context metaFor needs (promptTs/causedCount) — walked once over
+     * the whole page by the caller (ActivityPage.vue), not re-derived per row. */
+    ctx?: MetaContext;
+    /** False on TaskDetailPage's History tab: every row's taskId is already
+     * the task on screen, so a title link there would push the page the
+     * operator is already standing on — a no-op vue-router discards (D-231). */
+    linkable?: boolean;
+  }>(),
+  { linkable: true },
+);
 const emit = defineEmits<{
   toggle: [eventId: string];
   selectTask: [taskId: string];
@@ -69,7 +76,7 @@ function onBecauseOf() {
     <div class="bs-timeline-row__head">
       <EventKindTag :kind="kind" />
       <button
-        v-if="entry.taskId"
+        v-if="entry.taskId && linkable"
         type="button"
         class="bs-timeline-row__title bs-timeline-row__title--link"
         @click="emit('selectTask', entry.taskId)"

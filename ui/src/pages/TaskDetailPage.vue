@@ -35,9 +35,9 @@ import Skeleton from '../components/kit/Skeleton.vue';
 import Table from '../components/kit/Table.vue';
 import Tabs from '../components/kit/Tabs.vue';
 import Tag from '../components/kit/Tag.vue';
+import TimelineRow from '../components/kit/TimelineRow.vue';
 import RequestQuote from '../components/RequestQuote.vue';
 import RunHistoryTimeline from '../components/RunHistoryTimeline.vue';
-import TimelineRow from '../components/kit/TimelineRow.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useToast } from '../composables/useToast.js';
@@ -409,6 +409,7 @@ const factsRowText = computed(() => {
                         :entry="e"
                         :expanded="historyExpanded.has(e.eventId)"
                         :ctx="historyCtxFor(e)"
+                        :linkable="false"
                         @toggle="toggleHistoryRow"
                       />
                     </ol>

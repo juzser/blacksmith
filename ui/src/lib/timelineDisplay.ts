@@ -863,10 +863,14 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'prompt': {
+      // ds-review.html #p-activity: "You · caused 2 dispatches" — titleFor()
+      // already renders the verbatim prompt text as the title, so "You"
+      // names the speaker only here, in the meta line.
+      parts.push('You');
       parts.push(
         ctx.causedCount == null
           ? NOT_MEASURED
-          : `Caused ${ctx.causedCount} dispatch${ctx.causedCount === 1 ? '' : 'es'}`,
+          : `caused ${ctx.causedCount} dispatch${ctx.causedCount === 1 ? '' : 'es'}`,
       );
       break;
     }

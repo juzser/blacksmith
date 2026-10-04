@@ -1085,6 +1085,20 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     expect(metaFor(e)).toBe('round 1 · 1.5K tokens · 1 min');
   });
 
+  // ds-review.html #p-activity's own Prompt row meta: "You · caused 2
+  // dispatches". titleFor() already renders the verbatim prompt text as the
+  // title (see the 'maps user_prompt to the prompt kind' test above) — the
+  // gap was the meta line omitting "You" entirely.
+  it('marks a prompt row\'s meta as "You · caused N dispatches"', () => {
+    const e = entry({ eventType: 'user_prompt', payload: { prompt: 'hello' } });
+    expect(metaFor(e, { causedCount: 2 })).toBe('You · caused 2 dispatches');
+  });
+
+  it('still names "You" when the prompt caused nothing measured', () => {
+    const e = entry({ eventType: 'user_prompt', payload: { prompt: 'hello' } });
+    expect(metaFor(e)).toBe('You · not measured');
+  });
+
   it("marks a judge-reported row's meta as role, round, verdict", () => {
     // judge-reported only reaches the `finding` branch when the server's own
     // `kind` says so (queries.ts's eventKind()) — see the kindFor() tests
