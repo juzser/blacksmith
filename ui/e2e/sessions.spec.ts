@@ -249,6 +249,19 @@ test.describe('Sessions', () => {
     );
   });
 
+  // Fix round 2 item 1: the mock drops Refresh on phone (ds-review.html:951),
+  // matching every other polling page's `v-if="!isPhoneWidth"` pattern.
+  test('Refresh is hidden on phone and visible on desktop', async ({ page }) => {
+    await serveSessions(page);
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/sessions?session=run-active');
+    await expect(page.locator('h1')).toHaveText('Sessions');
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
+
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
+  });
+
   // Fix round item 6: on phone, every agent row's badge used to land on a
   // second line for some rows and not others, depending on the token
   // text's length. A fixed column layout (title, then one meta line) means

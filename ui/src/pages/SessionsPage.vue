@@ -26,6 +26,7 @@ import Skeleton from '../components/kit/Skeleton.vue';
 import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import {
   fetchSessionAgents,
   fetchSessions,
@@ -40,6 +41,7 @@ const router = useRouter();
 const route = useRoute();
 const { setBreadcrumb } = useBreadcrumb();
 const { project } = useProjectContext();
+const { isPhoneWidth } = useViewport();
 
 // Same cadence as every other polling page (design-spec.md §8).
 const POLL_MS = 5000;
@@ -160,7 +162,7 @@ function refresh() {
   <div class="app-page">
     <PageHeader title="Sessions">
       <template #actions>
-        <Button variant="secondary" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
+        <Button v-if="!isPhoneWidth" variant="ghost" size="sm" :icon="RefreshCw" @click="refresh">Refresh</Button>
       </template>
     </PageHeader>
 
