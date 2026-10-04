@@ -1037,6 +1037,7 @@ a:hover {
   display: flex;
   gap: var(--bs-space-1);
   border-bottom: 1px solid var(--bs-border);
+  overflow-x: auto;
 }
 .bs-tabs__tab {
   padding: var(--bs-space-2) var(--bs-space-3);
@@ -1048,6 +1049,8 @@ a:hover {
   border-bottom: 2px solid transparent;
   cursor: pointer;
   margin-bottom: -1px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .bs-tabs__tab[aria-selected='true'] {
   color: var(--bs-text);

@@ -63,6 +63,43 @@ test.describe('Activity', () => {
     await expect(chip).toHaveAttribute('aria-pressed', 'false');
   });
 
+  // Visual pass round 4, item 3 — ds-spec.md §3.1 shell table: phone shows
+  // the kind filter as an underline tab row (mock's `.mtabs`), not the
+  // desktop chip row, and hides Refresh/the chip row there.
+  test('phone layout shows the kind filter as a tab row, hides chips and Refresh', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.mobile);
+    await page.goto('/activity?session=sess-fixture');
+    const tablist = page.getByRole('tablist', { name: 'Filter' });
+    await expect(tablist).toBeVisible();
+    await expect(page.locator('.activity-kind-filter')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toHaveCount(0);
+
+    const allTab = tablist.getByRole('tab', { name: 'All' });
+    await expect(allTab).toHaveAttribute('aria-selected', 'true');
+    const promptTab = tablist.getByRole('tab', { name: 'Prompt', exact: true });
+    await expect(promptTab).toHaveAttribute('aria-selected', 'false');
+    const box = await promptTab.boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+    await promptTab.click();
+    await expect(page).toHaveURL(/kind=prompt/);
+    await expect(promptTab).toHaveAttribute('aria-selected', 'true');
+    await expect(allTab).toHaveAttribute('aria-selected', 'false');
+
+    await allTab.click();
+    await expect(page).not.toHaveURL(/kind=/);
+  });
+
+  test('desktop layout keeps the chip row and Refresh, no tablist', async ({ page }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
+    await page.goto('/activity?session=sess-fixture');
+    await expect(page.locator('.activity-kind-filter')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
+    await expect(page.getByRole('tablist', { name: 'Filter' })).toHaveCount(0);
+  });
+
   test("Expand all opens every row's detail", async ({ page }) => {
     await page.goto('/activity?kind=prompt');
     // v-show, not v-if (TimelineRow.vue, D-227): the detail <dl> exists while

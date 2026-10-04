@@ -15,6 +15,7 @@ import { useBreadcrumb } from '../composables/useBreadcrumb.js';
 import { usePoll } from '../composables/usePoll.js';
 import { useProjectContext } from '../composables/useProjectContext.js';
 import { useSessionContext } from '../composables/useSessionContext.js';
+import { useViewport } from '../composables/useViewport.js';
 import {
   type EventKind as ApiEventKind,
   fetchTimelinePage,
@@ -37,6 +38,7 @@ const { setBreadcrumb } = useBreadcrumb();
 setBreadcrumb([{ label: 'Activity' }]);
 const { project } = useProjectContext();
 const { sessionScope, sessionKey } = useSessionContext();
+const { isPhoneWidth } = useViewport();
 
 // The brief's own `/errors` -> `/activity?kind=errors` wording (plural,
 // activityRoute.ts) doesn't match EVENT_KINDS' singular 'error' id — kept as
@@ -76,6 +78,32 @@ function setQuery(patch: Record<string, string | undefined>) {
 
 function toggleKind(kind: EventKind) {
   setQuery({ kind: kindFilter.value === kind ? undefined : kind });
+}
+
+// Phone kind filter (ds-spec.md §3.1 shell table): an underline tab row
+// replaces the desktop chip row, with 'All' as its own tab — selecting a
+// kind sets it, selecting 'All' clears it (never a toggle-off, unlike the
+// desktop chips, since a tab row always has exactly one tab selected).
+const PHONE_KIND_TABS = ['all', ...EVENT_KINDS] as const;
+function selectPhoneKind(kind: (typeof PHONE_KIND_TABS)[number]) {
+  setQuery({ kind: kind === 'all' ? undefined : kind });
+}
+function onPhoneKindKeydown(event: KeyboardEvent) {
+  const ids = [...PHONE_KIND_TABS];
+  const current = kindFilter.value ?? 'all';
+  const idx = ids.indexOf(current);
+  if (idx === -1) return;
+  let next = idx;
+  if (event.key === 'ArrowRight') next = (idx + 1) % ids.length;
+  else if (event.key === 'ArrowLeft') next = (idx - 1 + ids.length) % ids.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = ids.length - 1;
+  else return;
+  event.preventDefault();
+  const nextId = ids[next];
+  if (nextId === undefined) return;
+  selectPhoneKind(nextId);
+  document.getElementById(`activity-kind-tab-${nextId}`)?.focus();
 }
 
 async function load() {
@@ -166,7 +194,28 @@ function becauseOf(promptId: string) {
 
 <template>
   <div class="app-page" role="feed" aria-label="Activity">
-    <div class="activity-toolbar bs-timeline-row__meta" style="padding-left: 0; justify-content: space-between">
+    <div
+      v-if="isPhoneWidth"
+      role="tablist"
+      class="bs-tabs__list activity-kind-tabs"
+      aria-label="Filter"
+      @keydown="onPhoneKindKeydown"
+    >
+      <button
+        v-for="kind in PHONE_KIND_TABS"
+        :id="`activity-kind-tab-${kind}`"
+        :key="kind"
+        type="button"
+        role="tab"
+        class="bs-tabs__tab"
+        :aria-selected="(kindFilter ?? 'all') === kind"
+        :tabindex="(kindFilter ?? 'all') === kind ? 0 : -1"
+        @click="selectPhoneKind(kind)"
+      >
+        {{ kind === 'all' ? 'All' : EVENT_KIND_LABEL[kind] }}
+      </button>
+    </div>
+    <div v-else class="activity-toolbar bs-timeline-row__meta" style="padding-left: 0; justify-content: space-between">
       <div class="activity-kind-filter" style="display: flex; gap: var(--bs-space-1); flex-wrap: wrap">
         <Button
           v-for="kind in EVENT_KINDS"
