@@ -883,6 +883,30 @@ describe('ui/server app.ts', () => {
     closeApp(handle);
   });
 
+  it('GET /api/analytics?period=7d returns the daily series and breakdown; no period stays legacy; an unknown period 400s (DS7)', async () => {
+    const handle = app();
+
+    const legacy = await handle.app.request('/api/analytics');
+    expect(legacy.status).toBe(200);
+    const legacyBody = await json<Record<string, unknown>>(legacy);
+    expect(legacyBody).not.toHaveProperty('tokensByDay');
+    expect(legacyBody).not.toHaveProperty('tokensByRoleAndModelTier');
+
+    const scoped = await handle.app.request('/api/analytics?period=7d');
+    expect(scoped.status).toBe(200);
+    const scopedBody = await json<{ tokensByDay: unknown[]; tokensByRoleAndModelTier: unknown[] }>(
+      scoped,
+    );
+    expect(scopedBody.tokensByDay).toHaveLength(7);
+    expect(Array.isArray(scopedBody.tokensByRoleAndModelTier)).toBe(true);
+
+    const bogus = await handle.app.request('/api/analytics?period=bogus');
+    expect(bogus.status).toBe(400);
+    const bogusBody = await json<{ error: { code: string } }>(bogus);
+    expect(bogusBody.error.code).toBe('analytics.bad-request');
+    closeApp(handle);
+  });
+
   it('GET /api/errors keeps byClass/byDay and adds classSummary (DS6 PR2)', async () => {
     const handle = app();
     const res = await handle.app.request('/api/errors');
