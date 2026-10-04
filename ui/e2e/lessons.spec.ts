@@ -7,7 +7,11 @@ test.describe('Lessons', () => {
     await expect(page.locator('h1')).toHaveText('Lessons');
     await expect(page.locator('a.skip-link')).toHaveText('Skip to content');
     await page.getByRole('tab', { name: /^All/ }).click();
-    await expect(page.getByText(/loop bound/)).toBeVisible();
+    // Each tab's panel stays in the DOM (v-show), so an unscoped text query
+    // can hit the same lesson row twice across panels; the accessibility
+    // tree only exposes the one currently visible (display:none drops the
+    // rest), so scoping through role=tabpanel disambiguates it.
+    await expect(page.getByRole('tabpanel').getByText(/loop bound/)).toBeVisible();
   });
 
   // The fixture's only lesson is already `approved`, and architecture §9.4
@@ -18,7 +22,10 @@ test.describe('Lessons', () => {
   test('row click opens the review Dialog, offering only the legal actions', async ({ page }) => {
     await page.goto('/lessons');
     await page.getByRole('tab', { name: /^All/ }).click();
-    await page.getByText(/loop bound/).click();
+    await page
+      .getByRole('tabpanel')
+      .getByText(/loop bound/)
+      .click();
     const dialog = page.getByRole('dialog', { name: 'Review lesson' });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Reject' })).toBeVisible();
@@ -36,18 +43,19 @@ test.describe('Lessons', () => {
    */
   test('shows a rejected lesson under Closed and under All', async ({ page }) => {
     await page.goto('/lessons');
-    await expect(page.getByText(/no network access/)).toHaveCount(0);
+    const panel = page.getByRole('tabpanel');
+    await expect(panel.getByText(/no network access/)).toHaveCount(0);
 
     await page.getByRole('tab', { name: /^Closed/ }).click();
-    await expect(page.getByText(/no network access/)).toBeVisible();
-    await expect(page.getByText(/loop bound/)).toHaveCount(0);
+    await expect(panel.getByText(/no network access/)).toBeVisible();
+    await expect(panel.getByText(/loop bound/)).toHaveCount(0);
 
     await page.getByRole('tab', { name: /^All/ }).click();
-    await expect(page.getByText(/no network access/)).toBeVisible();
-    await expect(page.getByText(/loop bound/)).toBeVisible();
+    await expect(panel.getByText(/no network access/)).toBeVisible();
+    await expect(panel.getByText(/loop bound/)).toBeVisible();
 
     // And it says why the footer has no buttons, rather than looking broken.
-    await page.getByText(/no network access/).click();
+    await panel.getByText(/no network access/).click();
     const dialog = page.getByRole('dialog', { name: 'Review lesson' });
     await expect(dialog.getByText(/terminal status/)).toBeVisible();
   });
