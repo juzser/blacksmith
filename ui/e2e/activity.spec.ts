@@ -306,28 +306,69 @@ test.describe('Activity', () => {
     expect(rowWithChevron?.x).toBeCloseTo(rowNoChevron?.x ?? -1, 0);
   });
 
-  test('phone: the time shows exactly once, below the title', async ({ page }) => {
-    const entry = synthEntry('phone-ts', 0, { payload: { prompt: 'Phone time check' } });
+  // Fix round 2 item 1: a row with no meta text used to render no meta
+  // line at all on phone, so it showed no time. Both a row that already has
+  // details (the old coverage) and one that has none must each show their
+  // time exactly once.
+  test('phone: every row shows its time exactly once, below the title', async ({ page }) => {
+    const withDetails = synthEntry('phone-with-details', 0, {
+      payload: { prompt: 'Phone time check' },
+    });
+    const noDetails = {
+      ...synthEntry('phone-no-details', 1),
+      eventType: 'session-started',
+      payload: {},
+    };
     await page.route('**/api/timeline?*', (route) => {
-      route.fulfill({ json: { entries: [entry], nextBefore: null, newestId: entry.eventId } });
+      route.fulfill({
+        json: {
+          entries: [withDetails, noDetails],
+          nextBefore: null,
+          newestId: withDetails.eventId,
+        },
+      });
     });
     await page.setViewportSize(VIEWPORTS.mobile);
     await page.goto('/activity');
-    const title = page.locator('.bs-timeline-row__title').first();
-    await expect(title).toBeVisible();
-    const visibleTimes = page.locator('.bs-timeline-row__ts:visible');
-    await expect(visibleTimes).toHaveCount(1);
-    const titleBox = await title.boundingBox();
-    const timeBox = await visibleTimes.boundingBox();
-    expect(timeBox?.y ?? 0).toBeGreaterThan(titleBox?.y ?? 0);
+    const rows = page.locator('.bs-timeline-row');
+    await expect(rows).toHaveCount(2);
+    for (let i = 0; i < 2; i++) {
+      const row = rows.nth(i);
+      const title = row.locator('.bs-timeline-row__title').first();
+      await expect(title).toBeVisible();
+      const visibleTimes = row.locator('.bs-timeline-row__ts:visible');
+      await expect(visibleTimes).toHaveCount(1);
+      const titleBox = await title.boundingBox();
+      const timeBox = await visibleTimes.boundingBox();
+      expect(timeBox?.y ?? 0).toBeGreaterThan(titleBox?.y ?? 0);
+    }
   });
 
-  test('the first day label sits flush against the filter row', async ({ page }) => {
+  // Fix round 2 item 2: app-page's flex gap used to stack on top of every
+  // sentinel/pill/day-group's own margin, leaving ~55px above "Today" and
+  // ~40px more above the first row where the mock's .day margin (24px top,
+  // 8px bottom; ds-review.html:493) collapses against the toolbar's own
+  // margin-bottom instead.
+  test('the first day label sits flush against the filter row, spacing matches the mock', async ({
+    page,
+  }) => {
+    await page.setViewportSize(VIEWPORTS.desktop);
     await page.goto('/activity');
+    const toolbar = page.locator('.activity-toolbar');
     const firstDay = page.locator('.timeline-day').first();
+    const feed = page.locator('.timeline-feed').first();
     await expect(firstDay).toBeVisible();
     const marginTop = await firstDay.evaluate((el) => getComputedStyle(el).marginTop);
     expect(marginTop).toBe('0px');
+    const toolbarBox = await toolbar.boundingBox();
+    const dayBox = await firstDay.boundingBox();
+    const feedBox = await feed.boundingBox();
+    const gapAboveDay = (dayBox?.y ?? 0) - ((toolbarBox?.y ?? 0) + (toolbarBox?.height ?? 0));
+    const gapAboveFeed = (feedBox?.y ?? 0) - ((dayBox?.y ?? 0) + (dayBox?.height ?? 0));
+    expect(gapAboveDay).toBeGreaterThanOrEqual(16);
+    expect(gapAboveDay).toBeLessThanOrEqual(28);
+    expect(gapAboveFeed).toBeGreaterThanOrEqual(4);
+    expect(gapAboveFeed).toBeLessThanOrEqual(12);
   });
 
   // Item 9: the pill and its button both clear the 44px touch floor on

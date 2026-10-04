@@ -454,6 +454,29 @@ test.describe('Home: Recent activity', () => {
     await expect(label).toHaveCSS('text-overflow', 'ellipsis');
   });
 
+  // Fix round 2 item 1 (ds-review.html `.mrow.tlrow .mm`): a row with no
+  // meta text (session-started has none) used to render no meta line at
+  // all on phone, so it showed no time. Every visible row must show one.
+  test('375px: every visible row shows its time exactly once, even with no details', async ({
+    page,
+  }) => {
+    const entries = syntheticEntries(4).map((entry, i) =>
+      i === 0
+        ? { ...entry, eventType: 'session-started', kind: 'system', payload: { prompt: '' } }
+        : entry,
+    );
+    await serveTimeline(page, entries);
+    await page.setViewportSize(PHONE);
+    await page.goto('/overview');
+
+    const rows = page.locator('.bs-home__recent-activity .bs-timeline-row');
+    for (let i = 0; i < 4; i++) {
+      const row = rows.nth(i);
+      await expect(row).toBeVisible();
+      await expect(row.locator('.bs-timeline-row__ts:visible')).toHaveCount(1);
+    }
+  });
+
   for (const [vpName, viewport] of [
     ['desktop', VIEWPORTS.desktop],
     ['375px', PHONE],
