@@ -352,6 +352,47 @@ describe('auditWaveConcurrency', () => {
     expect(waves[1]?.verdict).toBe('unobserved');
   });
 
+  it('does not let a bare merge under one epic credit another epic admitted in between', () => {
+    // A/task-1 is admitted first; epic B is admitted later with a bare
+    // "task-1" of its own and is the one that actually merges it. A has
+    // nothing else on record, so it must stay unobserved rather than
+    // borrowing B's merge through the bare-id fallback. Two declared tasks
+    // each, so the wave is scored on evidence rather than on `single`.
+    const waves = auditWaveConcurrency([
+      admitted(at(0), ['A/task-1', 'A/task-2'], 'A'),
+      admitted(at(3), ['task-1', 'task-9'], 'B'),
+      merged(at(5), 'task-1'),
+    ]);
+
+    expect(waves[0]?.epicId).toBe('A');
+    expect(waves[0]?.verdict).toBe('unobserved');
+    expect(waves[1]?.epicId).toBe('B');
+    expect(waves[1]?.verdict).toBe('unlinked');
+  });
+
+  it('does not credit a merge timestamped before the admission it would otherwise match', () => {
+    const waves = auditWaveConcurrency([
+      merged(at(5), 'task-1'),
+      admitted(at(10), ['A/task-1', 'A/task-2'], 'A'),
+    ]);
+
+    expect(waves[0]?.verdict).toBe('unobserved');
+  });
+
+  it("sends a re-admitted task's merge to the latest preceding admission only", () => {
+    const waves = auditWaveConcurrency([
+      admitted(at(0), ['E1/task-1', 'E1/task-2'], 'E1'),
+      admitted(at(10), ['E1/task-1', 'E1/task-2'], 'E1'),
+      merged(at(15), 'task-1'),
+    ]);
+
+    expect(waves).toHaveLength(2);
+    expect(waves[0]?.admittedAt).toBe(at(0));
+    expect(waves[0]?.verdict).toBe('unobserved');
+    expect(waves[1]?.admittedAt).toBe(at(10));
+    expect(waves[1]?.verdict).toBe('unlinked');
+  });
+
   it('scopes a parented dispatch to the admission event it names', () => {
     const first = admitted(at(0), ['demo-epic/task-1', 'demo-epic/task-2'], 'demo-epic');
     const second = admitted(at(10), ['demo-epic-w2/task-7', 'demo-epic-w2/task-8'], 'demo-epic-w2');

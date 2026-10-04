@@ -1,6 +1,6 @@
 import { type AgentRecord, DISPATCH_EVENT_TYPE, foldAgents } from './agents-registry.js';
 import { eventTaskId, type StoredEvent } from './events.js';
-import { taskIdsMatch } from './taskId.js';
+import { epicOfTaskId, isQualifiedTaskId, taskIdsMatch } from './taskId.js';
 
 /**
  * Did the wave that was admitted N wide actually run N wide?
@@ -271,19 +271,62 @@ function verdictFor(
 }
 
 /**
- * Every task id a `wave-merged` event says landed, gathered once over the
- * whole log so each admission can ask "is my work here" without rescanning —
- * the same shape as `admittedAtByTask` below, and for the same reason: an
- * admission the epic filter excludes must not narrow what another admission
- * can see.
+ * Whether `admission` is the one a `wave-merged` id names.
+ *
+ * A qualified id ("A/task-1") must match the admission's epic exactly — no
+ * falling back to the bare half, because that fallback is exactly how a bare
+ * merge under one epic used to mark an unrelated epic's qualified admission
+ * as having merge evidence. A bare id ("task-1") carries no epic of its own,
+ * so it may match any admission's declared task by its bare half; which
+ * admission it actually belongs to is for {@link latestMatchingAdmission} to
+ * decide, not this predicate.
+ */
+function admissionClaims(admission: Admission, mergedId: string): boolean {
+  if (isQualifiedTaskId(mergedId) && epicOfTaskId(mergedId) !== admission.epicId) return false;
+  return admission.taskIds.some((taskId) => taskIdsMatch(taskId, mergedId));
+}
+
+/**
+ * The one admission a `wave-merged` id belongs to: the latest whose `ts` is
+ * at or before the merge's `ts` and whose declared tasks match it — the same
+ * "nearest preceding admission" rule `admittedAtByTask` uses to close a
+ * task's window, reused here rather than re-derived, so a task re-admitted in
+ * a later wave sends its merge to that wave and not the one before it. A
+ * merge timestamped before every candidate admission belongs to none of them;
+ * returning null rather than the earliest is what keeps that merge from
+ * counting at all.
+ */
+function latestMatchingAdmission(
+  mergedId: string,
+  mergeTs: string,
+  admissions: readonly Admission[],
+): Admission | null {
+  let best: Admission | null = null;
+  for (const admission of admissions) {
+    if (admission.ts > mergeTs) continue;
+    if (!admissionClaims(admission, mergedId)) continue;
+    if (best === null || admission.ts > best.ts) best = admission;
+  }
+  return best;
+}
+
+/**
+ * The `wave-admitted` event ids that own at least one `wave-merged` id,
+ * attributed one merge at a time over the whole log so each admission can ask
+ * "is my work here" without rescanning — and so an admission the epic filter
+ * excludes must not narrow what another admission can see.
  *
  * Both the envelope's `task_id` and the payload's `task_ids` are read,
  * because `emitWaveMerged` writes the same id to both; either is enough.
  */
-function mergedTaskIds(events: readonly StoredEvent[]): string[] {
-  const ids: string[] = [];
+function admissionsWithMergeEvidence(
+  events: readonly StoredEvent[],
+  admissions: readonly Admission[],
+): Set<string> {
+  const credited = new Set<string>();
   for (const event of events) {
     if (event.record.event_type !== MERGED_EVENT_TYPE) continue;
+    const ids: string[] = [];
     const fromEnvelope = eventTaskId(event.record);
     if (fromEnvelope) ids.push(fromEnvelope);
     const payload = event.record.payload as { task_ids?: unknown } | undefined;
@@ -292,8 +335,12 @@ function mergedTaskIds(events: readonly StoredEvent[]): string[] {
         if (typeof id === 'string' && id.length > 0) ids.push(id);
       }
     }
+    for (const id of ids) {
+      const owner = latestMatchingAdmission(id, event.record.ts, admissions);
+      if (owner) credited.add(owner.eventId);
+    }
   }
-  return ids;
+  return credited;
 }
 
 /**
@@ -384,8 +431,11 @@ export function auditWaveConcurrency(
 
   // Also built from every event, unfiltered: off-lineage evidence for a wave
   // the caller narrowed away must not leak in, but an admission's own window
-  // must see all of it regardless of which epic the caller asked for.
-  const merged = mergedTaskIds(events);
+  // must see all of it regardless of which epic the caller asked for. Merge
+  // attribution needs every admission as a candidate, not just the ones the
+  // caller's epic filter kept — the same reason `admissions` above is built
+  // before that filter is applied.
+  const mergeCredited = admissionsWithMergeEvidence(events, admissions);
   const directDispatchParents = dispatchedDirectlyOn(events);
 
   const waves: WaveConcurrency[] = [];
@@ -413,8 +463,7 @@ export function auditWaveConcurrency(
 
     const peak = peakOverlap(observed);
     const offLineageEvidence =
-      directDispatchParents.has(admission.eventId) ||
-      admission.taskIds.some((taskId) => merged.some((id) => taskIdsMatch(taskId, id)));
+      directDispatchParents.has(admission.eventId) || mergeCredited.has(admission.eventId);
     waves.push({
       eventId: admission.eventId,
       admittedAt: admission.ts,
