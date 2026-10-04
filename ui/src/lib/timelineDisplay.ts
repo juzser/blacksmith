@@ -842,6 +842,19 @@ function humanizeEventType(eventType: string): string {
  * hand) are both omitted rather than labelled — see `durationItem` and
  * `becauseOfItem`.
  */
+/** Fix brief item 1 (S2): the `feedback` kind covers six event types, not
+ * just the two waivers, and each needs its own honest meta label rather than
+ * the single word "Waiver" every one of them used to get. Each label reuses
+ * the prefix `titleFor()` already prints for that event type. */
+const FEEDBACK_LABEL: Record<string, string> = {
+  'waiver-granted': 'Waiver granted',
+  'waiver-denied': 'Waiver denied',
+  'judge-verdict': 'Judge verdict',
+  'cross-finding-reconciled': 'Cross-finding reconciled',
+  'spec-change-proposed': 'Spec change proposed',
+  'spec-change-decided': 'Spec change decided',
+};
+
 export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
   const p = entry.payload as Record<string, unknown>;
   const kind = kindFor(entry);
@@ -908,7 +921,7 @@ export function metaFor(entry: ActivityEntry, ctx: MetaContext = {}): string {
       break;
     }
     case 'feedback': {
-      parts.push(entry.eventType === 'waiver-denied' ? 'Waiver denied' : 'Waiver');
+      parts.push(FEEDBACK_LABEL[entry.eventType] ?? 'Waiver');
       if (entry.taskId) parts.push(taskLabel(entry.taskId));
       break;
     }

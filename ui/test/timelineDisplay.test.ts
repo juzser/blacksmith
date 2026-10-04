@@ -1141,6 +1141,31 @@ describe('lib/timelineDisplay.ts metaFor()', () => {
     };
     expect(metaFor(e)).toBe('Judge · round 1 · pass');
   });
+
+  // Fix brief item 1 (S2): metaFor() used to push 'Waiver' for every feedback
+  // event, including the four kindFor() also routes to 'feedback' that are
+  // not waivers at all. Each gets its own honest label, reusing titleFor()'s
+  // own prefix for that event type rather than inventing a second vocabulary.
+  it.each([
+    ['waiver-granted', 'Waiver granted'],
+    ['waiver-denied', 'Waiver denied'],
+    ['judge-verdict', 'Judge verdict'],
+    ['cross-finding-reconciled', 'Cross-finding reconciled'],
+    ['spec-change-proposed', 'Spec change proposed'],
+    ['spec-change-decided', 'Spec change decided'],
+  ] as const)("labels a %s row's meta as %s", (eventType, label) => {
+    const e = entry({ eventType, taskId: null, payload: {} });
+    expect(metaFor(e)).toBe(label);
+  });
+
+  it('appends the task label to a feedback meta line when there is one', () => {
+    const e = entry({
+      eventType: 'judge-verdict',
+      taskId: 'epic-9/task-29-readme-merge-trim',
+      payload: {},
+    });
+    expect(metaFor(e)).toBe('Judge verdict · Readme merge trim');
+  });
 });
 
 // Item 1 of the mock-conformance brief: every row wears one of the mock's
@@ -1225,6 +1250,105 @@ describe('lib/timelineDisplay.ts kindFor()', () => {
       const e = entry({ eventType });
       expect(titleFor(e), `titleFor(${eventType})`).not.toMatch(/[—–]/);
       expect(metaFor(e), `metaFor(${eventType})`).not.toMatch(/[—–]/);
+    }
+  });
+
+  // Fix brief item 2 (S3): the sweep above only checks for the absence of an
+  // em dash, which stays green even if a label goes wrong in some other way
+  // (DS6 PR3 round 5's own "Waiver" for every feedback event never tripped
+  // it). This sibling table pins the exact title and meta string an empty
+  // payload produces for every event type in that same sweep, so swapping in
+  // a wrong label fails a test rather than only a human reading the row.
+  it('builds the exact title and meta for every event type in the vocabulary sweep', () => {
+    const taxonomy = loadTaxonomy();
+    const types = new Set<string>([
+      ...(taxonomy.dimensions.gate_event ?? []),
+      ...(taxonomy.dimensions.graph_event ?? []),
+      'user_prompt',
+      'operator-note',
+      'dispatch_decision',
+      'task-result-recorded',
+      'session-start',
+      'judge-reported',
+      'judge-verdict',
+      'cross-finding-reconciled',
+      'lesson-candidate-raised',
+      'lesson-edited',
+      'lesson-status-changed',
+      'recheck-proposed',
+      'maintenance-proposed',
+      'growth-review-due',
+      'error-report-proposed',
+      'spec-change-proposed',
+      'spec-change-decided',
+    ]);
+    // [title, meta] for an entry built from entry({ eventType }) alone --
+    // empty payload, taskId null, no server-side kind/run/gateCounts.
+    const expected: Record<string, [string, string]> = {
+      'schema-check-result': ['Schema check: no verdict recorded', 'Schema check'],
+      'artifact-check-result': ['Artifact check result', 'Artifact check'],
+      'commit-check-result': ['Commit check result', 'Commit check'],
+      'deps-check-result': ['Dependency check (no verdict recorded): ', 'Dependency check'],
+      'judges-outstanding': ['Judges outstanding', 'Judges outstanding'],
+      'grader-verdict': ['Grader verdict', 'Grader verdict'],
+      'budget-check-result': ['Budget check result', 'Budget check'],
+      'testgate-result': ['Test gate: no verdict recorded', 'Unit tests'],
+      'coverage-evidence': ['Coverage evidence', 'Coverage'],
+      'integration-check': ['Integration check', 'Integration check'],
+      'spec-review-recorded': ['Spec review recorded', 'Spec review'],
+      'goal-check-recorded': ['Goal check recorded', 'Goal check'],
+      'quorum-decision': ['Quorum decision', 'Quorum decision'],
+      'finding-raised': ['Finding raised: ', ''],
+      'finding-reverified': ['Finding reverified', ''],
+      'finding-suppressed': ['Finding suppressed', ''],
+      'finding-transitioned': ['Finding transitioned: ', ''],
+      'finding-reattributed': ['Finding reattributed', ''],
+      'severity-decisions': ['Severity decisions recorded', ''],
+      'waiver-granted': ['Waiver granted', 'Waiver granted'],
+      'waiver-denied': ['Waiver denied', 'Waiver denied'],
+      'task-waiver-approved': ['Task waiver approved', ''],
+      'gate-outcome': ['Gate outcome: no outcome recorded', 'Gate outcome'],
+      'issue-reported': ['Issue reported', 'Issue reported'],
+      'plan-version-created': ['Plan v?: 0 findings cited', ''],
+      'plan-version-superseded': ['Plan v? superseded', ''],
+      'task-added': ['Task added: ', ''],
+      'task-split': ['Task split: ', ''],
+      'task-superseded': ['Task superseded: ', ''],
+      'edge-recorded': ['Edge:  depends on ', ''],
+      'wave-admitted': ['Wave admitted: 0 tasks', ''],
+      'wave-merged': ['Merged ', 'not measured'],
+      'spec-change-proposed': [
+        'Spec change proposed by worker on :  (non-blocking, 0 sites)',
+        'Spec change proposed',
+      ],
+      'spec-change-decided': ['Spec change decided', 'Spec change decided'],
+      user_prompt: ['', 'You · not measured'],
+      'operator-note': ['Operator note', 'You · not measured'],
+      dispatch_decision: ['Dispatched Agent (/)', 'Running for 0 s'],
+      'task-result-recorded': ['Task result: ', 'not measured'],
+      'session-start': ['Session started', ''],
+      'judge-reported': ['Judge reported: 0 findings (round )', ''],
+      'judge-verdict': ['Judge verdict:  (/)', 'Judge verdict'],
+      'cross-finding-reconciled': [
+        'Cross-finding: 0 independent-only, 0 corroborated ()',
+        'Cross-finding reconciled',
+      ],
+      'lesson-candidate-raised': ['Lesson candidate: ', ''],
+      'lesson-edited': ['Lesson edited: ', ''],
+      'lesson-status-changed': ['Lesson : ', ''],
+      'recheck-proposed': ['Recheck proposed: ', ''],
+      'maintenance-proposed': ['Maintenance proposed: 0 outdated (none)', ''],
+      'growth-review-due': ['Growth review due: every ? days', ''],
+      'error-report-proposed': ['Error report proposed:  in  (0 occurrences)', ''],
+    };
+    expect(new Set(Object.keys(expected))).toEqual(types);
+    for (const eventType of types) {
+      const e = entry({ eventType });
+      const [title, meta] = expected[eventType];
+      expect(titleFor(e), `titleFor(${eventType})`).toBe(title);
+      // dispatch_decision's "Running for" text grows with real elapsed time,
+      // so it needs the same frozen `now` the dedicated dispatch tests use.
+      expect(metaFor(e, { now: e.ts }), `metaFor(${eventType})`).toBe(meta);
     }
   });
 
