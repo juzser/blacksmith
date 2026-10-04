@@ -180,5 +180,9 @@ function onBecauseOf() {
       :aria-controls="`activity-row-detail-${entry.eventId}`"
       @click="emit('toggle', entry.eventId)"
     />
+    <!-- Fix round item 4 (mock `.ev` grid: always 3 columns): a row with no
+         details still reserves the chevron's track, or its time column
+         drifts out of alignment with rows that do have one. -->
+    <span v-else class="bs-timeline-row__chevron-placeholder" aria-hidden="true"></span>
   </li>
 </template>

@@ -505,6 +505,14 @@ a:hover {
 .bs-timeline-row__chevron {
   align-self: center;
 }
+/* Fix round item 4: a row with no details renders no chevron, but its
+   third grid column must still hold the same width or the time column
+   above/below it drifts out of alignment with rows that do have one. */
+.bs-timeline-row__chevron-placeholder {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+}
 .bs-timeline-row__meta {
   display: flex;
   align-items: center;
@@ -512,6 +520,18 @@ a:hover {
   color: var(--bs-text-subtle);
   font-size: var(--bs-text-sm);
   padding-left: calc(16px + var(--bs-space-2));
+}
+/* Fix round item 6 (ds-review.html `.mrow .mm`): on phone, any row's meta
+   line (not just --compact's) fits one line with ellipsis, same reason as
+   item 5 -- long meta text (e.g. an error's message) must not wrap into
+   three or four lines. */
+@media (max-width: 640px) {
+  .bs-timeline-row__meta > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 .bs-timeline-row__because-of {
   background: none;
@@ -603,6 +623,24 @@ a:hover {
   display: flex;
   justify-content: center;
   margin: 0 0 var(--bs-space-3);
+}
+
+/* DS6 PR4b round 2 item 2: an invisible IntersectionObserver target (top or
+   bottom sentinel) -- not a visible element, it only has to occupy a box
+   the observer can see enter the viewport. Migrated from ds-components.css
+   (fix round item 8: ds-components.css is deleted in DS9). */
+.activity-sentinel {
+  height: 1px;
+}
+
+/* Fix round item 7 (ds-components.css's `.timeline-day`): replaces
+   `.timeline-day:first-child { margin-top: 0 }`, which stopped matching
+   once ActivityPage.vue started rendering a top sentinel and the
+   new-events pill before the first `.timeline-day` -- a class set by the
+   caller on the actual first day group is independent of DOM position.
+   Migrated here per item 8 since this PR depends on it. */
+.timeline-day--first {
+  margin-top: 0;
 }
 
 /* Separator — direct port of the old kit's .ds-sep, bs-* names only. */

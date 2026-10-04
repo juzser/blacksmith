@@ -127,8 +127,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- Fix round item 5: this template has two root nodes (the trigger span
+       and the teleported bubble), so Vue's automatic attrs/class fallthrough
+       never applies here -- any class a caller passes through a wrapping
+       single-root component (RelativeTime, IconButton) was silently dropped
+       before it reached any real DOM element. v-bind="$attrs" on the trigger
+       restores it explicitly. -->
   <span
     ref="triggerRef"
+    v-bind="$attrs"
     class="bs-tooltip-trigger"
     :tabindex="wrapperTabindex"
     @mouseenter="scheduleShow"
