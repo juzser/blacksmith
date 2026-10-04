@@ -98,6 +98,24 @@ test.describe('Task detail', () => {
     expect(geometry.dotTop).toBeCloseTo(6, 0);
   });
 
+  // Visual pass round 4, item 1 — a kind-colour stripe rule
+  // (.bs-timeline-row[data-kind=...], specificity 0,2,0) beat the rail
+  // variant's own border-left-color reset (0,1,0), so rail rows drew both
+  // the rail line and a stripe. Rail rows must draw no stripe at all.
+  test('rail rows draw no kind-colour stripe on the left border', async ({ page }) => {
+    await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_COMPLETED_TASK)}`);
+    await page.getByRole('tab', { name: 'History' }).click();
+    const row = page.locator('.bs-run-history .bs-timeline-row').first();
+    await expect(row).toBeVisible();
+    const borderLeft = await row.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { color: style.borderLeftColor, width: style.borderLeftWidth };
+    });
+    const isTransparent =
+      borderLeft.color === 'rgba(0, 0, 0, 0)' || borderLeft.color === 'transparent';
+    expect(isTransparent || Number.parseFloat(borderLeft.width) === 0).toBe(true);
+  });
+
   test('Findings tab shows the Waive Popover confirm naming the fingerprint', async ({ page }) => {
     await page.goto(`/tasks/${encodeURIComponent(DEMO_HUB_WAIVABLE_TASK)}`);
     await page.getByRole('tab', { name: 'Findings' }).click();

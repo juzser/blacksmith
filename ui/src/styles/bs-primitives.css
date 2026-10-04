@@ -392,31 +392,31 @@ a:hover {
    left stripe per row, same --bs-event-* tokens EventKindTag already uses.
    Prompt reads lighter (its own subtle tint) in the mock; every other kind
    uses its own -text token for the stripe. */
-.bs-timeline-row[data-kind='prompt'] {
+.bs-timeline-row[data-kind='prompt']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-prompt-subtle);
 }
-.bs-timeline-row[data-kind='dispatch'] {
+.bs-timeline-row[data-kind='dispatch']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-dispatch-text);
 }
-.bs-timeline-row[data-kind='returned'] {
+.bs-timeline-row[data-kind='returned']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-returned-text);
 }
-.bs-timeline-row[data-kind='finding'] {
+.bs-timeline-row[data-kind='finding']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-finding-text);
 }
-.bs-timeline-row[data-kind='gate'] {
+.bs-timeline-row[data-kind='gate']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-gate-text);
 }
-.bs-timeline-row[data-kind='merge'] {
+.bs-timeline-row[data-kind='merge']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-merge-text);
 }
-.bs-timeline-row[data-kind='error'] {
+.bs-timeline-row[data-kind='error']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-error-text);
 }
-.bs-timeline-row[data-kind='feedback'] {
+.bs-timeline-row[data-kind='feedback']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-feedback-text);
 }
-.bs-timeline-row[data-kind='system'] {
+.bs-timeline-row[data-kind='system']:not(.bs-timeline-row--rail) {
   border-left-color: var(--bs-event-system-text);
 }
 .bs-timeline-row__head {
