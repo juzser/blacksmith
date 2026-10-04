@@ -2357,9 +2357,7 @@ export function timeline(db: SmithDb, filter: TimelineFilter = {}): TimelineEntr
  * `agents` rows name, rather than one query per row.
  */
 function joinDispatchRuns(db: SmithDb, page: TimelineEntry[]): void {
-  const dispatchIds = page
-    .filter((e) => e.kind === 'Dispatched')
-    .map((e) => e.eventId);
+  const dispatchIds = page.filter((e) => e.kind === 'Dispatched').map((e) => e.eventId);
   if (dispatchIds.length === 0) return;
 
   const agentRows = db.select().from(agents).where(inArray(agents.id, dispatchIds)).all();

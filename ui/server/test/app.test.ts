@@ -726,7 +726,7 @@ describe('ui/server app.ts', () => {
 
   // DS3 §2.4c's total bar — tokens, agent time and elapsed, additive on the
   // same route; "not measured" is null, never a bare 0.
-  it("GET /api/tasks/:taskId/runs includes totals: measured tokens sum, null agentTimeMs (no writer stamps duration), elapsed from first to last run", async () => {
+  it('GET /api/tasks/:taskId/runs includes totals: measured tokens sum, null agentTimeMs (no writer stamps duration), elapsed from first to last run', async () => {
     const handle = app();
     const found = await handle.app.request(`/api/tasks/${encodeURIComponent(TASK_1)}/runs`);
     const { totals } = await json<{
@@ -738,9 +738,9 @@ describe('ui/server app.ts', () => {
     expect(totals.elapsedMs as number).toBeGreaterThanOrEqual(0);
 
     const unknown = await handle.app.request('/api/tasks/no-such-task/runs');
-    const unknownTotals = (await json<{ totals: { tokens: null; agentTimeMs: null; elapsedMs: null } }>(
-      unknown,
-    )).totals;
+    const unknownTotals = (
+      await json<{ totals: { tokens: null; agentTimeMs: null; elapsedMs: null } }>(unknown)
+    ).totals;
     expect(unknownTotals).toEqual({ tokens: null, agentTimeMs: null, elapsedMs: null });
     closeApp(handle);
   });
