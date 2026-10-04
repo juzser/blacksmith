@@ -17,8 +17,13 @@ import { expect, test } from '@playwright/test';
 test.describe('Destructive confirm', () => {
   test('is an alertdialog whose consequence sentence is its description', async ({ page }) => {
     await page.goto('/lessons');
-    await page.getByRole('button', { name: 'All' }).click();
-    await page.getByText(/loop bound/).click();
+    // The kit Tabs are role=tab, and every panel stays mounted (v-show), so
+    // the row is found through the visible tabpanel.
+    await page.getByRole('tab', { name: /^All/ }).click();
+    await page
+      .getByRole('tabpanel')
+      .getByText(/loop bound/)
+      .click();
     await page
       .getByRole('dialog', { name: 'Review lesson' })
       .getByRole('button', { name: 'Reject' })
