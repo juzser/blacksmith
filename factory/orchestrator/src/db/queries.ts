@@ -3172,7 +3172,7 @@ export interface TaskTotals {
   tokens: number | null;
   /** Sum of every run's `duration_ms`; null when none of them carries one (no writer stamps it today). */
   agentTimeMs: number | null;
-  /** First run's start ts to the last `result`/`error` run's ts; null while no run has ended yet. */
+  /** First `dispatch` run's ts to the last `result`/`error` run's ts; null while no run has ended yet. */
   elapsedMs: number | null;
 }
 
@@ -3202,8 +3202,10 @@ export function taskTotals(db: SmithDb, taskId: string): TaskTotals {
       durationSum += durationMs;
       anyDuration = true;
     }
-    if (startTs === null || r.ts < startTs) startTs = r.ts;
     const kind = RUN_KIND_BY_EVENT_TYPE[r.eventType];
+    if (kind === 'dispatch') {
+      if (startTs === null || r.ts < startTs) startTs = r.ts;
+    }
     if (kind === 'result' || kind === 'error') {
       if (endTs === null || r.ts > endTs) endTs = r.ts;
     }
